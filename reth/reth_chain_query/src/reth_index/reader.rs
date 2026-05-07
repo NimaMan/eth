@@ -1,7 +1,7 @@
 use crate::reth_index::{
     database::RethIndexDB,
     models::{AddressMetrics, PoolData, TokenMetadata, TradeData},
-    tables::address_index::Txumber,
+    tables::address_blocks::IndexedBlockNumber,
 };
 /// Reader interface for RethIndex
 ///
@@ -20,24 +20,28 @@ impl RethIndexReader {
         Self { db }
     }
 
-    /// Get all transactions for an address
-    pub fn get_transactions(&self, address: Address) -> Result<Vec<Txumber>> {
-        self.db.get_transactions(address)
+    /// Get all indexed block numbers for an address.
+    pub fn get_blocks(&self, address: Address) -> Result<Vec<IndexedBlockNumber>> {
+        self.db.get_blocks(address)
     }
 
-    /// Get transaction count for an address
-    pub fn get_transaction_count(&self, address: Address) -> Result<usize> {
-        self.get_transactions(address).map(|txs| txs.len())
+    /// Get indexed block count for an address.
+    pub fn get_block_count(&self, address: Address) -> Result<usize> {
+        self.get_blocks(address).map(|blocks| blocks.len())
     }
 
-    /// Get latest N transactions for an address
-    pub fn get_latest_transactions(&self, address: Address, count: usize) -> Result<Vec<Txumber>> {
-        let mut txs = self.get_transactions(address)?;
-        if count >= txs.len() {
-            return Ok(txs);
+    /// Get latest N indexed blocks for an address.
+    pub fn get_latest_blocks(
+        &self,
+        address: Address,
+        count: usize,
+    ) -> Result<Vec<IndexedBlockNumber>> {
+        let mut blocks = self.get_blocks(address)?;
+        if count >= blocks.len() {
+            return Ok(blocks);
         }
-        let start = txs.len() - count;
-        Ok(txs.split_off(start))
+        let start = blocks.len() - count;
+        Ok(blocks.split_off(start))
     }
 
     /// Get trade data for an address-token pair

@@ -4,13 +4,11 @@ use std::sync::Arc;
 
 use alloy_primitives::Address;
 use pyo3::prelude::*;
-use tokio::runtime::Runtime;
 
-use reth_chain_query::reth_index::{AddressParticipation, AddressTxWriter, RethIndexDB};
+use reth_chain_query::reth_index::{AddressBlockWriter, AddressParticipation, RethIndexDB};
 use reth_chain_query::RethQueryProvider;
 
 use crate::chain_query::chain_query::shared_reth_index_db;
-use crate::chain_query::PyAddressTransactionRef;
 use crate::pyreth_instance::get_or_create_singleton;
 
 const DEFAULT_DATADIR: &str = "/home/nima/.local/share/reth/mainnet";
@@ -28,23 +26,21 @@ fn resolve_index_dir(datadir: &str, index_path: Option<String>) -> PathBuf {
     Path::new(datadir).join("reth_index")
 }
 
-#[pyclass(name = "AddressTxIndexer")]
-pub struct PyAddressTxIndexer {
+#[pyclass(name = "AddressBlockIndexer")]
+pub struct PyAddressBlockIndexer {
     _db: Arc<RethIndexDB>,
-    writer: Option<AddressTxWriter>,
+    writer: Option<AddressBlockWriter>,
     provider: Arc<RethQueryProvider>,
-    runtime: Arc<Runtime>,
     #[allow(dead_code)]
     datadir: String,
     read_only: bool,
 }
 
-impl PyAddressTxIndexer {
+impl PyAddressBlockIndexer {
     fn new_internal(
         index_db: Arc<RethIndexDB>,
-        writer: Option<AddressTxWriter>,
+        writer: Option<AddressBlockWriter>,
         provider: Arc<RethQueryProvider>,
-        runtime: Arc<Runtime>,
         datadir: String,
         read_only: bool,
     ) -> Self {
@@ -52,16 +48,15 @@ impl PyAddressTxIndexer {
             _db: index_db,
             writer,
             provider,
-            runtime,
             datadir,
             read_only,
         }
     }
 
-    fn writer_ref(&self) -> PyResult<&AddressTxWriter> {
+    fn writer_ref(&self) -> PyResult<&AddressBlockWriter> {
         self.writer.as_ref().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressTxIndexer writer unavailable (read-only mode)",
+                "AddressBlockIndexer writer unavailable (read-only mode)",
             )
         })
     }
@@ -115,7 +110,7 @@ impl PyAddressTxIndexer {
 }
 
 #[pymethods]
-impl PyAddressTxIndexer {
+impl PyAddressBlockIndexer {
     #[new]
     #[pyo3(signature = (datadir=None, index_path=None, read_only=None))]
     pub fn new(
@@ -172,30 +167,23 @@ impl PyAddressTxIndexer {
         let writer = if read_only {
             None
         } else {
-            Some(AddressTxWriter::new(index_db.clone(), provider.clone()))
+            Some(AddressBlockWriter::new(index_db.clone()))
         };
 
-        let runtime = Arc::new(Runtime::new().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to create tokio runtime: {}",
-                e
-            ))
-        })?);
-
         Ok(Self::new_internal(
-            index_db, writer, provider, runtime, datadir, read_only,
+            index_db, writer, provider, datadir, read_only,
         ))
     }
 
     #[pyo3(signature = (block_number, transactions))]
-    pub fn write_transactions(
+    pub fn write_block(
         &self,
         block_number: u64,
         transactions: Vec<(u64, Vec<String>)>,
     ) -> PyResult<u64> {
         if self.read_only {
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressTxIndexer is read-only; writing is disabled",
+                "AddressBlockIndexer is read-only; writing is disabled",
             ));
         }
 
@@ -216,13 +204,13 @@ impl PyAddressTxIndexer {
     }
 
     #[pyo3(signature = (blocks))]
-    pub fn write_transactions_batch(
+    pub fn write_blocks_batch(
         &self,
         blocks: Vec<(u64, Vec<(u64, Vec<String>)>)>,
     ) -> PyResult<Vec<u64>> {
         if self.read_only {
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressTxIndexer is read-only; writing is disabled",
+                "AddressBlockIndexer is read-only; writing is disabled",
             ));
         }
 
@@ -242,7 +230,7 @@ impl PyAddressTxIndexer {
         Ok(inserted.into_iter().map(|value| value as u64).collect())
     }
 
-    pub fn address_transactions(&self, address: &str) -> PyResult<Vec<PyAddressTransactionRef>> {
+    pub fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let normalized = address.trim();
         let parsed = Address::from_str(normalized)
             .or_else(|_| {
@@ -258,16 +246,9 @@ impl PyAddressTxIndexer {
                 ))
             })?;
 
-        let provider = self.provider.clone();
-        let refs = self
-            .runtime
-            .block_on(async move { provider.transactions_for_address(parsed).await })
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-
-        Ok(refs
-            .into_iter()
-            .map(PyAddressTransactionRef::from)
-            .collect())
+        self.provider
+            .blocks_for_address(parsed)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     pub fn block_has_indices(&self, block_number: u64) -> PyResult<bool> {
@@ -275,16 +256,15 @@ impl PyAddressTxIndexer {
     }
 }
 
-/// Read-only accessor for the address transaction index.
-#[pyclass(name = "AddressTxIndexFetcher")]
-pub struct PyAddressTxIndexFetcher {
+/// Read-only accessor for the address block index.
+#[pyclass(name = "AddressBlockIndexFetcher")]
+pub struct PyAddressBlockIndexFetcher {
     provider: Arc<RethQueryProvider>,
-    runtime: Arc<Runtime>,
     #[allow(dead_code)]
     datadir: String,
 }
 
-impl PyAddressTxIndexFetcher {
+impl PyAddressBlockIndexFetcher {
     fn parse_address(address: &str) -> PyResult<Address> {
         let normalized = address.trim();
         Address::from_str(normalized)
@@ -304,7 +284,7 @@ impl PyAddressTxIndexFetcher {
 }
 
 #[pymethods]
-impl PyAddressTxIndexFetcher {
+impl PyAddressBlockIndexFetcher {
     #[new]
     #[pyo3(signature = (datadir=None, index_path=None))]
     pub fn new(datadir: Option<String>, index_path: Option<String>) -> PyResult<Self> {
@@ -336,32 +316,14 @@ impl PyAddressTxIndexFetcher {
 
         let provider = Arc::new(provider.with_reth_index_db(index_db.clone()));
 
-        let runtime = Arc::new(Runtime::new().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to create tokio runtime: {}",
-                e
-            ))
-        })?);
-
-        Ok(Self {
-            provider,
-            runtime,
-            datadir,
-        })
+        Ok(Self { provider, datadir })
     }
 
-    pub fn address_transactions(&self, address: &str) -> PyResult<Vec<PyAddressTransactionRef>> {
+    pub fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let parsed = Self::parse_address(address)?;
-        let provider = self.provider.clone();
-        let refs = self
-            .runtime
-            .block_on(async move { provider.transactions_for_address(parsed).await })
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-
-        Ok(refs
-            .into_iter()
-            .map(PyAddressTransactionRef::from)
-            .collect())
+        self.provider
+            .blocks_for_address(parsed)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     pub fn block_has_indices(&self, block_number: u64) -> PyResult<bool> {

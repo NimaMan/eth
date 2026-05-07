@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::reth_index::tables::{
-    address_index::{AddressIndex, Txumber},
+    address_blocks::{AddressBlockIndex, IndexedBlockNumber},
     mempool_tx_arrivals::MempoolTxArrivalTable,
 };
 
@@ -23,7 +23,7 @@ pub struct RethIndexDB {
     path: PathBuf,
     env: Arc<Environment>,
     tx_arrival_dbi: Database,
-    address_index_dbi: Database,
+    address_blocks_dbi: Database,
 }
 
 impl RethIndexDB {
@@ -63,13 +63,13 @@ impl RethIndexDB {
         if read_only {
             let tx: Transaction<RO> = env.begin_ro_txn()?;
             let tx_arrival_dbi = tx.open_db(Some(MempoolTxArrivalTable::TABLE_NAME))?;
-            let address_index_dbi = tx.open_db(Some(AddressIndex::TABLE_NAME))?;
+            let address_blocks_dbi = tx.open_db(Some(AddressBlockIndex::TABLE_NAME))?;
 
             Ok(Self {
                 path: path.to_path_buf(),
                 env: Arc::new(env),
                 tx_arrival_dbi,
-                address_index_dbi,
+                address_blocks_dbi,
             })
         } else {
             let rwtx = env.begin_rw_txn()?;
@@ -77,14 +77,14 @@ impl RethIndexDB {
                 Some(MempoolTxArrivalTable::TABLE_NAME),
                 DatabaseFlags::INTEGER_KEY,
             )?;
-            let address_index_dbi = match rwtx.create_db(
-                Some(AddressIndex::TABLE_NAME),
+            let address_blocks_dbi = match rwtx.create_db(
+                Some(AddressBlockIndex::TABLE_NAME),
                 DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
             ) {
                 Ok(dbi) => dbi,
                 Err(MdbxError::Incompatible) => {
                     return Err(eyre!(
-                        "AddressTx index table exists with a legacy layout. Delete {} and rebuild the index.",
+                        "Address block index table exists with a legacy layout. Delete {} and rebuild the index.",
                         path.display()
                     ));
                 }
@@ -96,7 +96,7 @@ impl RethIndexDB {
                 path: path.to_path_buf(),
                 env: Arc::new(env),
                 tx_arrival_dbi,
-                address_index_dbi,
+                address_blocks_dbi,
             })
         }
     }
@@ -159,54 +159,54 @@ impl RethIndexDB {
         &self.env
     }
 
-    /// Fetch all transaction numbers associated with `address`.
-    pub fn get_transactions(&self, address: Address) -> Result<Vec<Txumber>> {
+    /// Fetch all block numbers associated with `address`.
+    pub fn get_blocks(&self, address: Address) -> Result<Vec<IndexedBlockNumber>> {
         let tx: Transaction<RO> = self.env.begin_ro_txn()?;
-        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
 
-        let mut txs = Vec::new();
-        let key = AddressIndex::encode_key(address);
+        let mut blocks = Vec::new();
+        let key = AddressBlockIndex::encode_key(address);
 
         if let Some((_, value)) = cursor.set_key::<Vec<u8>, Vec<u8>>(key.as_slice())? {
-            txs.push(AddressIndex::decode_value(&value)?);
+            blocks.push(AddressBlockIndex::decode_value(&value)?);
             while let Some((_, value)) = cursor.next_dup::<Vec<u8>, Vec<u8>>()? {
-                txs.push(AddressIndex::decode_value(&value)?);
+                blocks.push(AddressBlockIndex::decode_value(&value)?);
             }
         }
 
-        Ok(txs)
+        Ok(blocks)
     }
 
-    /// Append transactions for multiple addresses in a single write transaction.
+    /// Append block numbers for multiple addresses in a single write transaction.
     ///
-    /// Each vector must be sorted ascending and contain only new (greater-than-last)
-    /// entries for that address.
-    pub fn append_address_transactions_batch(
+    /// Duplicate `(address, block_number)` values are skipped so block replay is
+    /// idempotent.
+    pub fn append_address_blocks_batch(
         &self,
-        entries: &[(Address, Vec<Txumber>)],
+        entries: &[(Address, Vec<IndexedBlockNumber>)],
     ) -> Result<usize> {
         if entries.is_empty() {
             return Ok(0);
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
         let total = self.append_entries_with_cursor(&mut cursor, entries)?;
         tx.commit()?;
         Ok(total)
     }
 
-    /// Append transactions for multiple blocks inside a single MDBX transaction.
+    /// Append address block entries for multiple processed blocks inside a single MDBX transaction.
     pub fn append_block_entry_slices(
         &self,
-        blocks: &[&[(Address, Vec<Txumber>)]],
+        blocks: &[&[(Address, Vec<IndexedBlockNumber>)]],
     ) -> Result<Vec<usize>> {
         if blocks.is_empty() {
             return Ok(Vec::new());
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
         let mut per_block = Vec::with_capacity(blocks.len());
 
         for entries in blocks {
@@ -220,14 +220,14 @@ impl RethIndexDB {
     fn append_entries_with_cursor(
         &self,
         cursor: &mut reth_libmdbx::Cursor<RW>,
-        entries: &[(Address, Vec<Txumber>)],
+        entries: &[(Address, Vec<IndexedBlockNumber>)],
     ) -> Result<usize> {
         let mut inserted = 0usize;
-        for (address, txs) in entries {
-            if txs.is_empty() {
+        for (address, blocks) in entries {
+            if blocks.is_empty() {
                 continue;
             }
-            inserted += self.append_for_address(cursor, *address, txs)?;
+            inserted += self.append_for_address(cursor, *address, blocks)?;
         }
         Ok(inserted)
     }
@@ -236,17 +236,17 @@ impl RethIndexDB {
         &self,
         cursor: &mut reth_libmdbx::Cursor<RW>,
         address: Address,
-        txs: &Vec<Txumber>,
+        block_numbers: &[IndexedBlockNumber],
     ) -> Result<usize> {
-        if txs.is_empty() {
+        if block_numbers.is_empty() {
             return Ok(0);
         }
 
-        let key = AddressIndex::encode_key(address);
+        let key = AddressBlockIndex::encode_key(address);
         let mut inserted = 0usize;
 
-        for tx_number in txs.iter().copied() {
-            let value = AddressIndex::encode_value(tx_number);
+        for block_number in block_numbers.iter().copied() {
+            let value = AddressBlockIndex::encode_value(block_number);
             match cursor.put(key.as_slice(), &value, WriteFlags::NO_DUP_DATA) {
                 Ok(_) => {
                     inserted += 1;

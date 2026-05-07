@@ -164,18 +164,19 @@ Despite having all blockchain data, reth's indexing structure cannot answer:
 
 ### How Our Analytics Tables Fill the Gaps
 
-#### address_to_txs: The Missing Reverse Index
+#### address_to_blocks: The Candidate Block Reverse Index
 ```
 Reth Flow (Impossible):
-Address X → ??? → [transactions]  ❌
+Address X → ??? → [processed blocks]  ❌
 
 Our Flow (O(1) lookup):
-Address X → [tx_num1, tx_num2, ...] → Query reth for details ✅
+Address X → [block1, block2, ...] → load/replay candidate blocks ✅
 ```
 
 **Integration Pattern**:
-1. Get txumbers from our index: `analytics_db[address] = [1000, 1001, 1005]`
-2. Fetch details from reth: `reth_db.Transactions[1000], reth_db.Transactions[1001]...`
+1. Get candidate block numbers from our index: `analytics_db[address] = [25029968, 25029969, 25030001]`
+2. Load processed blocks from cache, or replay the blocks from Reth if cache is missing
+3. Filter the processed transactions inside those blocks for the exact address/pool/token condition
 
 #### trades: Aggregated Trading Data
 ```
@@ -218,14 +219,13 @@ Token address → {name: "USDC", symbol: "USDC", decimals: 6} ✅
 
 ```
 1. Address Query (Analytics):
-   analytics_db.address_to_txs[0x742d...] = [1000, 1001, 1005, 2000]
+   analytics_db.address_to_blocks[0x742d...] = [25029968, 25029969, 25030001, 25030120]
 
 2. Recent Filter (Analytics):
-   latest(10) = [1001, 1005, 2000]
+   latest(10) = [25029969, 25030001, 25030120]
 
-3. Transaction Details (Reth):
-   reth_db.Transactions[1001] = {from: 0x742d..., to: Uniswap, ...}
-   reth_db.Transactions[1005] = {from: 0x742d..., to: SushiSwap, ...}
+3. Processed Block Details:
+   load/replay blocks, then filter ProcessedTransactions whose participants include 0x742d...
 
 4. Trade Data (Analytics):
    analytics_db.trades[(0x742d, WETH)] = {total_spent: 5.2 ETH, profit: +$200}
@@ -241,32 +241,29 @@ Token address → {name: "USDC", symbol: "USDC", decimals: 6} ✅
    Find all keys in trades table matching (*,PEPE,*) where total_volume > $10K
 
 3. Address Details (Combined):
-   For each address: get metrics from address_metrics + recent txs from address_to_txs
+   For each address: get metrics from address_metrics + candidate blocks from address_to_blocks
 ```
 
 #### Example 3: "Block range query: transactions 20M-20.1M for address X"
 
 ```
-1. Block to txumber Range (Reth):
-   reth_db.BlockBodyIndices[20000000] = {first_tx_num: 500000000, tx_count: 200}
-   reth_db.BlockBodyIndices[20100000] = {first_tx_num: 502000000, tx_count: 150}
-   Range: 500000000..502000150
+1. Range Filter (Analytics):
+   query address_to_blocks[address] and keep values in 20000000..20100000
 
-2. Address Transactions (Analytics):
-   analytics_db.address_to_txs[0x742d...] = [499999000, 500050000, 501000000, 502500000]
+2. Candidate Blocks (Analytics):
+   analytics_db.address_to_blocks[0x742d...] = [19999900, 20005000, 20070000, 20125000]
 
 3. Range Filter (In-memory):
-   Filter list to [500050000, 501000000]  // Only txs in block range
+   Filter list to [20005000, 20070000]  // Only candidate blocks in block range
 
-4. Transaction Details (Reth):
-   reth_db.Transactions[500050000] = {...}
-   reth_db.Transactions[501000000] = {...}
+4. Transaction Details:
+   load/replay the candidate blocks and filter matching ProcessedTransactions
 ```
 
 ### Key Architectural Insights
 
 1. **Complementary Design**: Reth provides raw data, we provide indexes and aggregations
-2. **No Data Duplication**: We store only txumbers (8 bytes) not full transactions (200+ bytes)  
+2. **No Data Duplication**: We store only block numbers (8 bytes) not full transactions (200+ bytes)  
 3. **Hybrid Queries**: Most queries touch both databases for complete picture
 4. **Write-Once, Read-Many**: Our tables are append-only during sync, read-heavy in production
 5. **Atomic Consistency**: Both databases updated in same block processing loop
@@ -278,15 +275,15 @@ New Block Processing:
 1. Reth processes block → Updates all reth tables
 2. Our processor reads ProcessedTransactions
 3. For each ProcessedTransaction:
-   a. Calculate txumber = BlockBodyIndices[block_num].first_tx_num + tx_index
-   b. Update address_to_txs[addr] += tx_number
+   a. Add transaction participants to the current block's per-block address set
+   b. Update address_to_blocks[addr] += block_number once per address per block
    c. If swap: Update trades aggregation
    d. Update address_metrics counters
    e. Cache new tokens/pools discovered
 4. Commit analytics transaction
 
-Optimization: No need to query TransactionHashNumbers!
-We calculate txumber directly from block data + tx index.
+Optimization: No need to query TransactionHashNumbers for the address index.
+When a caller needs exact transactions, it replays the indexed candidate blocks.
 ```
 
 This design ensures our analytics database is always a few milliseconds behind reth but provides 10-100x faster queries for address-centric and aggregated data.
@@ -306,23 +303,23 @@ Single MDBX environment with multiple named databases (tables), each serving a s
 
 ## Tables and Their Purposes
 
-### 1. Address Transaction Index (`address_to_txs`)
+### 1. Address Block Index (`address_to_blocks`)
 
-**Purpose**: Enable fast lookup of all transactions involving a specific address
+**Purpose**: Enable fast lookup of all processed blocks involving a specific address
 
 **Schema**:
 - **Key**: `Address` (20 bytes)
-- **Value**: `Vec<txumber>` (list of u64, sorted by block order)
+- **Value**: duplicate `block_number` values (u64, big-endian, sorted by MDBX dupsort)
 
 **Queries Enabled**:
-- "Get all transactions for address X" → O(1) lookup
-- "Get transaction count for address X" → O(1) lookup
-- "Get transactions in block range for address X" → O(1) lookup + filter
+- "Get all candidate processed blocks for address X" → O(1) lookup
+- "Get indexed block count for address X" → O(1) lookup
+- "Get candidate blocks in range for address X" → O(1) lookup + filter
 
 **Size Estimate**: ~70GB
-- 87M addresses × average 100 transactions × 8 bytes per txumber
+- 87M addresses × average candidate blocks × 8 bytes per block number
 
-**Update Pattern**: Append-only (new transactions always added to end)
+**Update Pattern**: Append-only (new block numbers always added to end)
 
 ### 2. Trades Table (`trades`)
 
@@ -490,7 +487,7 @@ reth_index.on_tx_included(tx_hash, block_timestamp) -> {
 
 ### Why These Specific Tables?
 
-1. **address_to_txs**: Essential reverse index that reth cannot provide efficiently
+1. **address_to_blocks**: Candidate-block reverse index that Reth cannot provide for processed transaction participation
 2. **trades**: Aggregated data that would require scanning all transactions otherwise
 3. **address_metrics**: Pre-computed values for instant dashboard queries
 4. **tokens**: Frequently accessed metadata, avoid repeated RPC calls
@@ -530,12 +527,13 @@ Considered using sequential IDs (u32/u64) instead of addresses (20 bytes):
    ↓
 3. AnalyticsWriter opens write transaction
    ↓
-4. For each ProcessedTransaction:
-   a. Extract unique_addresses
-   b. Update address_to_txs for each address
-   c. If swap: update trades table
-   d. Update address_metrics
-   e. Add new tokens/pools if discovered
+4. For each processed block:
+   a. Extract unique_addresses from every transaction
+   b. Deduplicate by address for the block
+   c. Update address_to_blocks for each address once
+   d. If swap: update trades table
+   e. Update address_metrics
+   f. Add new tokens/pools if discovered
    ↓
 5. Commit transaction atomically
 ```

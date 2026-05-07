@@ -107,15 +107,16 @@ sudo systemctl daemon-reload
 sudo systemctl start eth-live-block-processor.service
 ```
 
-## Address To Transaction Index
+## Address To Block Index
 
-The old Python live processor had an optional persistent address participation writer:
+The old Python live processor had an optional persistent address participation writer.
+The Rust-side design now stores candidate block numbers instead of tx numbers:
 
 - Python flag: `index_address_txs`
 - Writer: `eth_data.database.writers.transaction_writer.TransactionAddresstoTxIndexer`
-- Backend: Pyreth `AddressTxIndexer`
-- Table: `reth_index/address_to_txs`
-- Meaning: for each processed transaction, write every `unique_addresses` entry to an address -> tx-number reverse index.
+- Backend: Pyreth `AddressBlockIndexer`
+- Table: `reth_index/address_to_blocks`
+- Meaning: for each processed block, write every address seen in the block's processed transaction participations to an address -> block-number reverse index once.
 
 This is not the same as the token manager's in-memory per-block address index. The token manager still needs its local per-block index for same-block replay, for example hydrating token metadata after earlier same-sender setup transactions. That in-memory index is temporary and should not be replaced by archive history.
 
@@ -129,7 +130,7 @@ The archive Reth node now has `IndexAccountHistory` and `IndexStorageHistory`, a
 RethQueryProvider::get_address_account_history_blocks(address, start_block, end_block)
 ```
 
-That is useful for finding blocks where an address' own account state changed. It is not a full replacement for `address_to_txs`, because processed transaction participation is broader than account state changes:
+That is useful for finding blocks where an address' own account state changed. It is not a full replacement for `address_to_blocks`, because processed transaction participation is broader than account state changes:
 
 - ERC20 transfer recipients usually do not mutate their own account entry.
 - Approval owners/spenders/operators can appear only in logs.
@@ -140,5 +141,5 @@ Recommendation:
 
 - Keep the Rust live processor focused on fast block processing, Redis snapshot writes, and Pub/Sub notification.
 - Use archive Reth account/storage history and logs for on-demand historical investigations.
-- Reintroduce `address_to_txs` only if we need low-latency, repeated generic address -> processed tx lookups.
-- If we reintroduce it, implement it as a separate async worker that consumes Redis block snapshots after publication and writes `reth_index/address_to_txs`, so MDBX reverse-index writes cannot delay live block publishing.
+- Use `address_to_blocks` only if we need low-latency, repeated generic address -> candidate block lookups.
+- If we wire it into live processing, implement it as a separate async worker that consumes Redis block snapshots after publication and writes `reth_index/address_to_blocks`, so MDBX reverse-index writes cannot delay live block publishing.

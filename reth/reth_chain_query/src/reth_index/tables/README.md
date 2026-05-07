@@ -3,7 +3,7 @@ RethIndex Tables — Design Guide
 Purpose
 - Document two separate concerns and how we store/query them efficiently:
   1) Mempool arrival timestamp for mined transactions (minimal, per-tx number)
-  2) Fast lookup for “all tx related to X” (address/contract/token) — optional and scoped
+  2) Fast lookup for “which processed blocks mention X” (address/contract/token) — optional and scoped
 
 Scope and Philosophy
 - Keep disk usage minimal and leverage the archive Reth node for heavy, indexed queries where possible.
@@ -23,7 +23,7 @@ Scope and Philosophy
 - Why txumber:
   - Matches Reth’s primary sequencing and composes with other tables (e.g., block mapping via `TransactionBlocks`, position via `BlockBodyIndices`).
 
-2) “All TX related to X” — Address/Token Lookup
+2) “All Blocks related to X” — Address/Token Lookup
 
 Prefer Archive‑Node Queries When Possible
 - Token‑centric (ERC20) queries:
@@ -36,13 +36,13 @@ Prefer Archive‑Node Queries When Possible
   - If needed frequently at low latency, maintain a compact reverse index in MDBX (below).
 
 Optional Reverse Index (Enable Only If Needed)
-- Table: `address_to_txs` — maps address → list of txumbers using MDBX dupsort.
+- Table: `address_to_blocks` — maps address → list of processed block numbers using MDBX dupsort.
   - Key: 20‑byte `address`
-  - Value: 8‑byte `tx_number` (u64, big‑endian)
+  - Value: 8‑byte `block_number` (u64, big‑endian)
   - DB flags: `DUPSORT | DUPFIXED` (compact, append‑friendly, easy pagination)
-- Write path: upon inclusion of a tx, append each `(address, tx_number)` for `unique_addresses` in that tx.
-- Benefits: tiny on disk, fast range iteration per address, no large blobs.
-- When to use: only if you need fast, repeated generic address→tx queries.
+- Write path: for each processed block, union the `unique_addresses` across its transactions and append one `(address, block_number)` per address.
+- Benefits: tiny on disk, fast range iteration per address, no large blobs, and it matches how we actually recover full processed transactions: load/replay the full candidate block and filter.
+- When to use: only if you need fast, repeated generic address→candidate-block queries.
 
 Preserving Ordering
 - Within a block: ordering is by `transactionIndex` or by txumber, where `tx_number = first_tx_num(block) + tx_index` using `BlockBodyIndices`.
@@ -52,8 +52,8 @@ Minimal Table Set (Recommended Now)
 - `tx_arrival_by_txum` (required):
   - Key: BE u64 (txumber)
   - Value: u64 (first_seen_ns)
-- `address_to_txs` (optional):
-  - Key: 20‑byte address; Value: BE u64 txumber, dupsort+dupfixed
+- `address_to_blocks` (optional):
+  - Key: 20‑byte address; Value: BE u64 block number, dupsort+dupfixed
 - Existing curated tables (optional depending on usage):
   - `tokens`, `pools`, `trades`, `address_metrics` — keep lean; prefer computing dynamic views via Reth + tx_processor.
 
@@ -63,7 +63,7 @@ Query Patterns
 - By token → blocks → processed txs:
   - Logs on token (+pool addresses) → union block numbers → fetch full blocks → run `tx_processor` → filter by token/pool/participants.
 - By generic address (EOA/contract):
-  - If MDBX reverse index enabled: iterate `address_to_txs[address]` dupset for direct txumbers.
+  - If MDBX reverse index enabled: iterate `address_to_blocks[address]` dupset for candidate block numbers, then load/replay those blocks and filter transactions.
   - Else: on‑demand logs/receipts/traces to collect candidate blocks, then full block processing as needed.
 
 Postgres De‑scoping
@@ -79,4 +79,3 @@ Reth Tables We Rely On
 Future Enhancements
 - Optional pre‑inclusion persistence (e.g., `tx_arrivals_by_hash` with TTL) if you later want to recover arrivals after restarts.
 - Batch append APIs for dupsort tables to reduce write amplification on hot addresses.
-

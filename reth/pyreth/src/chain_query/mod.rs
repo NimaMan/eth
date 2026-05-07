@@ -9,10 +9,10 @@ pub mod tokens;
 pub mod utils;
 
 // Re-export primary types for convenient importing from crate::python::chain_query
-pub use address_indexer::{PyAddressTxIndexFetcher, PyAddressTxIndexer};
+pub use address_indexer::{PyAddressBlockIndexFetcher, PyAddressBlockIndexer};
 pub use amm::PyPoolLiquidityInfo;
 pub use chain_query::{
-    PyAccount, PyAddressTransactionRef, PyBalanceChange, PyBalanceChanges, PyChainQuery,
-    PyCompleteBalances, PyPortfolio, PyTransactionData,
+    PyAccount, PyBalanceChange, PyBalanceChanges, PyChainQuery, PyCompleteBalances, PyPortfolio,
+    PyTransactionData,
 };
 pub use tokens::PyTokenMetadata;

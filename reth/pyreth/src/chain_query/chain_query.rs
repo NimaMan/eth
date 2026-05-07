@@ -23,9 +23,7 @@ use crate::tx_processor::processed_tx_bridge::processed_transaction_hashes_from_
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
 use reth_chain_query::dex::find_uniswap_v4_pools_for_pair;
-use reth_chain_query::provider::{
-    AddressTransactionRef, BalanceDiff, TransactionData as RustTransactionData,
-};
+use reth_chain_query::provider::{BalanceDiff, TransactionData as RustTransactionData};
 use reth_chain_query::reth_index::RethIndexDB;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::BlockTimeConverter;
@@ -167,20 +165,6 @@ impl PyCompleteBalances {
     }
 }
 
-/// Python wrapper for address transaction references returned by the address index.
-#[pyclass(name = "AddressTransactionRef")]
-#[derive(Clone)]
-pub struct PyAddressTransactionRef {
-    #[pyo3(get)]
-    pub tx_number: u64,
-    #[pyo3(get)]
-    pub tx_hash: String,
-    #[pyo3(get)]
-    pub block_number: u64,
-    #[pyo3(get)]
-    pub tx_index: u64,
-}
-
 #[pyclass(name = "TransactionData")]
 #[derive(Clone)]
 pub struct PyTransactionData {
@@ -227,17 +211,6 @@ impl From<RustTransactionData> for PyTransactionData {
             gas_limit: data.gas_limit,
             nonce: data.nonce,
             transaction_type: data.transaction_type,
-        }
-    }
-}
-
-impl From<AddressTransactionRef> for PyAddressTransactionRef {
-    fn from(value: AddressTransactionRef) -> Self {
-        Self {
-            tx_number: value.tx_number,
-            tx_hash: format!("0x{}", hex::encode(value.tx_hash.as_slice())),
-            block_number: value.block_number,
-            tx_index: value.tx_index,
         }
     }
 }
@@ -354,21 +327,12 @@ impl PyChainQuery {
         Ok(balance.to_string())
     }
 
-    /// Get all indexed transactions that involve the given address.
-    ///
-    /// Returns ordered \[tx_number, tx_hash, block_number, tx_index]. Requires the
-    /// optional address index to be configured on the underlying provider.
-    fn address_transactions(&self, address: &str) -> PyResult<Vec<PyAddressTransactionRef>> {
+    /// Get all indexed processed blocks that involve the given address.
+    fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let addr = super::utils::parse_address(address)?;
-        let provider = self.provider.clone();
-        let refs = self
-            .runtime
-            .block_on(async move { provider.transactions_for_address(addr).await })
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-        Ok(refs
-            .into_iter()
-            .map(PyAddressTransactionRef::from)
-            .collect())
+        self.provider
+            .blocks_for_address(addr)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Fetch complete transaction metadata by global sequential number (Txumber).
