@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 /// Live-first transaction simulator for latency-sensitive trading paths.
 ///
-/// `TxSimulator` remains the general-purpose engine. This wrapper makes the
-/// block-selection policy explicit: use the latest Redis chain-state overlay
-/// when available, and fall back to the latest persisted MDBX block otherwise.
+/// `TxSimulator` remains the general-purpose historical/direct-DB engine. This
+/// wrapper makes live block-selection explicit: use the latest Redis
+/// chain-state overlay when available, and fall back to the latest persisted
+/// MDBX block otherwise.
 #[derive(Clone)]
 pub struct LiveTxSimulator {
     simulator: Arc<TxSimulator>,
@@ -29,9 +30,9 @@ impl LiveTxSimulator {
 
     /// Latest block for which we have an exact state source.
     ///
-    /// Redis chain-state overlays are preferred because they represent the
-    /// live blocks written by the live block processor. MDBX is used as the
-    /// fallback when no overlay has been published yet.
+    /// Redis chain-state overlays are preferred because they represent the live
+    /// blocks written by the live block processor. MDBX is used as the fallback
+    /// when no overlay has been published yet.
     pub async fn latest_state_block_number(&self) -> Result<u64> {
         if let Some(cache) = self.simulator.live_chain_cache() {
             if let Some(block_number) = cache.latest_chain_state_block_number().await? {

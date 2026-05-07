@@ -5,21 +5,20 @@
 /// each transaction depends on the results of previous ones (e.g., buy → approve → sell).
 ///
 /// The chain maintains a forked state that persists between `step()` calls, allowing
-/// complex multi-transaction workflows to be simulated accurately with inspector fusing
-/// for optimal performance.
+/// complex multi-transaction workflows to be simulated accurately. The default
+/// `step` path avoids tracing overhead; use `step_with_trace` when call traces
+/// or struct logs are required.
 use crate::{
-    simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     tx_chain::sequential::ForkedState,
-    types::{FullSimulationResult, RevertContext, SimulationResult, ViewFunctionResult},
+    types::{FullSimulationResult, SimulationResult, ViewFunctionResult},
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use reth_primitives_traits::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -46,8 +45,6 @@ pub struct UnsignedTxChainSimulation {
     results: Vec<SimulationResult>,
     /// Total gas used
     total_gas_used: u64,
-    /// Fused inspector that persists across transactions
-    inspector: Option<TracingInspector>,
 }
 
 impl UnsignedTxChainSimulation {
@@ -58,18 +55,17 @@ impl UnsignedTxChainSimulation {
             forked_state,
             results: Vec::new(),
             total_gas_used: 0,
-            inspector: None,
         }
     }
 
     /// Execute a single transaction and advance the chain state
     ///
     /// This simulates the transaction on the current state and commits the changes,
-    /// making them visible to subsequent transactions. Uses inspector fusing for
-    /// optimal performance across multiple transactions.
+    /// making them visible to subsequent transactions. This uses the plain EVM
+    /// path and avoids inspector allocation.
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// let mut chain = simulator.start_simulation_chain(None).await?;
     /// let result = chain.step(buy_unsigned_tx).await?;
     /// // State now includes the effects of buy_unsigned_tx
@@ -78,8 +74,10 @@ impl UnsignedTxChainSimulation {
         let mut unsigned_tx = unsigned_tx;
         self.populate_missing_nonce(&mut unsigned_tx)?;
 
-        let result = self.execute_with_fused_inspector(unsigned_tx.clone())?;
-        self.record_simulation_result(unsigned_tx.from, &result);
+        let result = self
+            .simulator
+            .simulate_on_fork_without_trace(&mut self.forked_state, unsigned_tx.clone())?;
+        self.record_simulation_result(&unsigned_tx, &result);
         Ok(result)
     }
 
@@ -145,13 +143,17 @@ impl UnsignedTxChainSimulation {
         Ok(())
     }
 
-    fn record_simulation_result(&mut self, from: Option<Address>, result: &SimulationResult) {
-        if result.success {
-            self.total_gas_used += result.gas_used;
+    fn record_simulation_result(&mut self, tx: &UnsignedTransaction, result: &SimulationResult) {
+        self.total_gas_used += result.gas_used;
 
-            if let Some(from) = from {
+        if let Some(from) = tx.from {
+            if let Some(nonce) = tx.nonce {
+                self.forked_state
+                    .nonces
+                    .insert(from, nonce.saturating_add(1));
+            } else {
                 let current = self.forked_state.nonces.entry(from).or_insert(0);
-                *current += 1;
+                *current = current.saturating_add(1);
             }
         }
 
@@ -213,85 +215,6 @@ impl UnsignedTxChainSimulation {
         })
     }
 
-    /// Internal method to execute transaction with fused inspector
-    fn execute_with_fused_inspector(
-        &mut self,
-        unsigned_tx: UnsignedTransaction,
-    ) -> Result<SimulationResult> {
-        use reth_evm::{ConfigureEvm, Evm};
-        use reth_revm::DatabaseCommit;
-
-        let block_header = self.forked_state.block_header.clone();
-
-        // Setup EVM environment
-        let evm_env = self
-            .simulator
-            .evm_config
-            .evm_env(&block_header)
-            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
-        let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
-
-        let initial_context = if let Some(target) = unsigned_tx.to {
-            let has_code = self.account_has_code(target)?;
-            Some(RevertContext {
-                target,
-                has_code,
-                calldata_len: unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            })
-        } else {
-            None
-        };
-
-        // Create transaction environment
-        let tx_env = self.simulator.create_tx_env_from_unsigned_tx(
-            &unsigned_tx,
-            evm_env.block_env.gas_limit as u128,
-            base_fee,
-            &mut self.forked_state.db,
-        )?;
-
-        // Execute transaction with inspector
-        let res = {
-            let inspector = self.inspector.get_or_insert_with(|| {
-                let config = TracingInspectorConfig::default_geth();
-                TracingInspector::new(config)
-            });
-
-            let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(
-                &mut self.forked_state.db,
-                evm_env,
-                inspector,
-            );
-            evm.transact(tx_env)?
-        };
-
-        // Commit state changes
-        self.forked_state.db.commit(res.state);
-
-        // Fuse the inspector for next transaction (clear tx-specific data, keep internal buffers)
-        self.inspector = self.inspector.take().map(|insp| insp.fused());
-
-        let success = res.result.is_success();
-        let gas_used = res.result.tx_gas_used();
-        let revert_data = res.result.output().cloned();
-        let mut revert_reason = if success {
-            None
-        } else {
-            decode_revert_reason(revert_data.as_ref(), initial_context.as_ref())
-        };
-        if !success && revert_reason.is_none() {
-            revert_reason = Some("Empty revert payload from transaction execution".to_string());
-        }
-        let revert_context = if success { None } else { initial_context };
-
-        Ok(SimulationResult {
-            success,
-            gas_used,
-            revert_reason,
-            revert_context,
-        })
-    }
-
     /// Execute a single transaction with full trace information
     ///
     /// Similar to `step()` but returns comprehensive trace data including
@@ -318,7 +241,7 @@ impl UnsignedTxChainSimulation {
             revert_reason: result.revert_reason.clone(),
             revert_context: result.revert_context.clone(),
         };
-        self.record_simulation_result(unsigned_tx.from, &summary);
+        self.record_simulation_result(&unsigned_tx, &summary);
 
         Ok(result)
     }
@@ -331,7 +254,7 @@ impl TxSimulator {
     /// builds on the state changes from previous ones.
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// let simulator = TxSimulator::new("/path/to/db")?;
     /// let mut chain = simulator.start_simulation_chain(None).await?;
     ///

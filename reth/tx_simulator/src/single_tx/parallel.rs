@@ -145,17 +145,18 @@ impl TxSimulator {
         })
     }
 
-    /// Simulate a batch of unsigned transactions
+    /// Simulate a batch of independent unsigned transactions.
     ///
-    /// Automatically adapts nonce if "nonce too low" errors are encountered.
-    /// This is ideal for simulating mempool transactions where nonces might be outdated.
+    /// Each transaction is executed against the same selected block context. Use
+    /// `simulate_unsigned_tx_sequence` or `LiveTxSimulator::simulate_sequence`
+    /// when transactions must see state or nonce changes from earlier items.
     ///
     /// # Arguments
     /// * `requests` - Vector of (identifier, UnsignedTransaction) pairs
     /// * `options` - Batch simulation options (concurrency, timeout, block)
     ///
     /// # Returns
-    /// Results with nonce adaptation applied where needed
+    /// Independent per-transaction results.
     pub async fn simulate_unsigned_tx_list_parallel(
         &self,
         requests: Vec<(String, UnsignedTransaction)>,
@@ -188,7 +189,7 @@ impl TxSimulator {
                     }
                 };
 
-                // Simulate with optional timeout at the chosen block and nonce fixing
+                // Simulate with optional timeout at the chosen block.
                 let result = match timeout_duration {
                     Some(duration) => {
                         match tokio::time::timeout(

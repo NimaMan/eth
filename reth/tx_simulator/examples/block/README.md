@@ -13,17 +13,17 @@ These examples are for **SIMULATION** - re-executing transactions to generate tr
 
 ### trace_block_transactions.rs
 
-Simulates all transactions in a block, equivalent to RPC's `debug_traceBlockByNumber`.
+Replays all transactions in a persisted block, equivalent to RPC's
+`debug_traceBlockByNumber` with `"tracer": "callTracer"`.
 
 **What it does:**
-- Re-executes each transaction in the block in sequence
-- Generates full CallFrame traces showing all internal calls
+- Re-executes each transaction in the block in sequence from parent state
+- Generates callTracer `CallFrame` traces showing internal calls
 - Provides gas usage and success/failure status for each transaction
 
 **Performance:**
-- 20-400x faster than RPC
-- Processes ~200 transactions in under 1 second
 - Direct database access eliminates network overhead
+- Use `examples/replay/profile` to benchmark local hardware and block shapes
 
 **Usage:**
 ```bash
@@ -34,7 +34,7 @@ cargo run --example trace_block_transactions
 - Transaction hashes with success/failure status
 - Full call traces with subcalls
 - Gas usage per transaction
-- Performance comparison with RPC
+- Local replay timing
 
 ## Key Concepts
 
@@ -67,10 +67,8 @@ Direct database access provides massive speedups:
 - Memory-mapped database files
 - Efficient B+ tree lookups
 
-Typical performance:
-- Single transaction: 2-10ms
-- Full block (200 txs): 0.5-1.5 seconds
-- RPC equivalent: 20-40 seconds
+Performance depends on block shape, storage locality, tracing mode, and cache
+warmth. Use the replay profiling examples for reproducible measurements.
 
 ### verify_block_trace_rpc_equivalence.rs
 

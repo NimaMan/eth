@@ -40,7 +40,9 @@ impl<'a> BlockTracer<'a> {
         block_number: u64,
         opts: Option<GethDebugTracingOptions>,
     ) -> Result<Vec<TraceResult>> {
-        self.trace_block_by_number_with_engine(block_number, opts, BlockTraceEngine::default())
+        let opts = opts.unwrap_or_else(execution::call_tracer_options);
+        let engine = BlockTraceEngine::recommended_for_options(&opts);
+        self.trace_block_by_number_with_engine(block_number, Some(opts), engine)
             .await
     }
 
@@ -51,7 +53,13 @@ impl<'a> BlockTracer<'a> {
         opts: Option<GethDebugTracingOptions>,
         engine: BlockTraceEngine,
     ) -> Result<Vec<TraceResult>> {
-        let opts = opts.unwrap_or_default();
+        let opts = opts.unwrap_or_else(|| match engine {
+            BlockTraceEngine::FreshInspector | BlockTraceEngine::RethFusedCallTracer => {
+                execution::call_tracer_options()
+            }
+            BlockTraceEngine::RethDebug => GethDebugTracingOptions::default(),
+        });
+        execution::ensure_engine_supports_options(engine, &opts)?;
 
         let provider = self.simulator.provider_factory.provider()?;
         let block_hash = provider
@@ -135,7 +143,8 @@ impl<'a> BlockTracer<'a> {
         block_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>> {
-        self.trace_block_by_hash_with_engine(block_hash, opts, BlockTraceEngine::default())
+        let engine = BlockTraceEngine::recommended_for_options(&opts);
+        self.trace_block_by_hash_with_engine(block_hash, opts, engine)
             .await
     }
 
@@ -146,6 +155,7 @@ impl<'a> BlockTracer<'a> {
         opts: GethDebugTracingOptions,
         engine: BlockTraceEngine,
     ) -> Result<Vec<TraceResult>> {
+        execution::ensure_engine_supports_options(engine, &opts)?;
         let simulator = self.simulator.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -161,6 +171,7 @@ impl<'a> BlockTracer<'a> {
         target_tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<TraceResult> {
+        execution::ensure_engine_supports_options(BlockTraceEngine::RethFusedCallTracer, &opts)?;
         let simulator = self.simulator.clone();
         tokio::task::spawn_blocking(move || {
             Self::trace_transaction_in_block_sync(&simulator, block_hash, target_tx_hash, opts)
@@ -174,7 +185,7 @@ impl<'a> BlockTracer<'a> {
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> Result<TraceResult> {
-        let opts = opts.unwrap_or_default();
+        let opts = opts.unwrap_or_else(execution::call_tracer_options);
         let provider = self.simulator.provider_factory.provider()?;
         let (_, meta) = provider
             .transaction_by_hash_with_meta(tx_hash)?

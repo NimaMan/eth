@@ -21,6 +21,7 @@ use crate::TxSimulator;
 
 use super::engine::BlockTraceEngine;
 use super::execution::create_inspector;
+use super::execution::ensure_engine_supports_options;
 use super::instrumented_db::{
     prewarm_profiled_cache_db, InstrumentedStateProviderDatabase, ProfiledCacheDb,
 };
@@ -44,6 +45,7 @@ impl<'a> BlockTracer<'a> {
             block_hash,
             ..Default::default()
         };
+        ensure_engine_supports_options(engine, &opts)?;
 
         let provider = simulator.provider_factory.provider()?;
 
@@ -283,7 +285,7 @@ impl<'a> BlockTracer<'a> {
             profile.tx_env_ms += tx_profile.tx_env_ms;
 
             let inspector_started = Instant::now();
-            let mut inspector = create_inspector(opts);
+            let mut inspector = create_inspector(opts)?;
             tx_profile.inspector_build_ms = ms(inspector_started.elapsed());
             profile.inspector_build_ms += tx_profile.inspector_build_ms;
 
@@ -339,7 +341,7 @@ impl<'a> BlockTracer<'a> {
         profile.evm_env_ms = ms(env_started.elapsed());
 
         let inspector_started = Instant::now();
-        let mut inspector = create_inspector(opts);
+        let mut inspector = create_inspector(opts)?;
         profile.inspector_build_ms = ms(inspector_started.elapsed());
 
         let mut results = Vec::with_capacity(transactions.len());

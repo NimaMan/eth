@@ -56,24 +56,8 @@ impl TxSimulator {
         unsigned_tx.max_fee_per_gas = Some(base_fee);
         unsigned_tx.max_priority_fee_per_gas = Some(0);
 
-        // We need to use the trace version to get the actual output data
-        let result = self
-            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block))
-            .await?;
-
-        // Extract the output from the call trace
-        let output = if result.success {
-            // Get the output from the top-level call frame
-            result.call_trace.output.clone().unwrap_or_default()
-        } else {
-            Bytes::new()
-        };
-
-        Ok(ViewFunctionResult {
-            success: result.success,
-            output,
-            gas_used: result.gas_used,
-        })
+        self.simulate_unsigned_transaction_for_output_at_block(unsigned_tx, block)
+            .await
     }
 
     /// Convenience wrapper for simulate_contract_read_only_call_with_options

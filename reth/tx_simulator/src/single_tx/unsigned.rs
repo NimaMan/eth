@@ -10,7 +10,7 @@ use crate::{
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
     tx_fee_parameters::{GasInputs, TxFeeContext},
-    types::{FullSimulationResult, RevertContext, SimulationResult},
+    types::{FullSimulationResult, RevertContext, SimulationResult, ViewFunctionResult},
 };
 use eyre::Result;
 use tokio::task;
@@ -28,7 +28,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
-use reth_revm::DatabaseCommit;
+use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,7 @@ struct UnsignedExecutionResult {
     call_trace: Option<CallFrame>,
     struct_logs: Option<Vec<StructLog>>,
     logs: Vec<alloy_primitives::Log>,
+    output: Bytes,
 }
 
 impl UnsignedExecutionResult {
@@ -56,6 +57,7 @@ impl UnsignedExecutionResult {
             call_trace,
             struct_logs,
             logs,
+            ..
         } = self;
 
         FullSimulationResult {
@@ -109,6 +111,27 @@ impl TxSimulator {
         self.execute_with_block_context(unsigned_tx, context, UnsignedTraceMode::None)
             .await
             .map(UnsignedExecutionResult::into_simulation)
+    }
+
+    pub(crate) async fn simulate_unsigned_transaction_for_output_at_block(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: u64,
+    ) -> Result<ViewFunctionResult> {
+        let context = self.prepare_block_context(block_number).await?;
+        let result = self
+            .execute_with_block_context(unsigned_tx, context, UnsignedTraceMode::None)
+            .await?;
+
+        Ok(ViewFunctionResult {
+            success: result.simulation.success,
+            output: if result.simulation.success {
+                result.output
+            } else {
+                Bytes::new()
+            },
+            gas_used: result.simulation.gas_used,
+        })
     }
 
     /// Simulate an unsigned transaction using a pre-fetched header and state snapshot.
@@ -205,8 +228,9 @@ impl TxSimulator {
                 self.execute_on_state_provider(unsigned_tx, context.header, state, trace_mode)
                     .await
             }
-            BlockStateProvider::LiveFork(mut fork_state) => {
-                self.execute_on_live_fork(unsigned_tx, &mut fork_state, trace_mode)
+            BlockStateProvider::LiveFork(fork_state) => {
+                self.execute_on_live_fork(unsigned_tx, fork_state, trace_mode)
+                    .await
             }
         }
     }
@@ -219,15 +243,10 @@ impl TxSimulator {
         trace_mode: UnsignedTraceMode,
     ) -> Result<UnsignedExecutionResult> {
         match trace_mode {
-            UnsignedTraceMode::None => self
-                .execute_unsigned_transaction(unsigned_tx, block_header, state)
-                .await
-                .map(|simulation| UnsignedExecutionResult {
-                    simulation,
-                    call_trace: None,
-                    struct_logs: None,
-                    logs: Vec::new(),
-                }),
+            UnsignedTraceMode::None => {
+                self.execute_unsigned_transaction_without_trace(unsigned_tx, block_header, state)
+                    .await
+            }
             UnsignedTraceMode::Call { .. } => self
                 .execute_unsigned_transaction_with_trace(unsigned_tx, block_header, state)
                 .await
@@ -239,40 +258,39 @@ impl TxSimulator {
         }
     }
 
-    fn execute_on_live_fork(
+    async fn execute_on_live_fork(
         &self,
         unsigned_tx: UnsignedTransaction,
-        forked_state: &mut ForkedState,
+        mut forked_state: ForkedState,
         trace_mode: UnsignedTraceMode,
     ) -> Result<UnsignedExecutionResult> {
-        match trace_mode {
+        let simulator = self.clone();
+        task::spawn_blocking(move || match trace_mode {
             UnsignedTraceMode::None => {
-                let simulation = self.simulate_on_fork_without_trace(forked_state, unsigned_tx)?;
-                Ok(UnsignedExecutionResult {
-                    simulation,
-                    call_trace: None,
-                    struct_logs: None,
-                    logs: Vec::new(),
-                })
+                simulator.simulate_on_fork_plain_execution(&mut forked_state, unsigned_tx)
             }
             UnsignedTraceMode::Call { .. } => {
-                let mut full = self.simulate_on_fork_with_trace(
-                    forked_state,
+                let block_number = forked_state.block_number;
+                let mut full = simulator.simulate_on_fork_with_trace(
+                    &mut forked_state,
                     unsigned_tx,
-                    forked_state.block_number,
+                    block_number,
                 )?;
                 full.struct_logs = None;
                 Ok(Self::execution_from_full_result(full, false))
             }
             UnsignedTraceMode::Full { .. } => {
-                let full = self.simulate_on_fork_with_trace(
-                    forked_state,
+                let block_number = forked_state.block_number;
+                let full = simulator.simulate_on_fork_with_trace(
+                    &mut forked_state,
                     unsigned_tx,
-                    forked_state.block_number,
+                    block_number,
                 )?;
                 Ok(Self::execution_from_full_result(full, true))
             }
-        }
+        })
+        .await
+        .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
     }
 
     async fn prepare_block_context(&self, block_number: u64) -> Result<BlockContext> {
@@ -287,9 +305,20 @@ impl TxSimulator {
         block_header: SealedHeader,
         state: StateProviderBox,
     ) -> Result<SimulationResult> {
+        self.execute_unsigned_transaction_without_trace(unsigned_tx, block_header, state)
+            .await
+            .map(UnsignedExecutionResult::into_simulation)
+    }
+
+    async fn execute_unsigned_transaction_without_trace(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_header: SealedHeader,
+        state: StateProviderBox,
+    ) -> Result<UnsignedExecutionResult> {
         let simulator = self.clone();
         task::spawn_blocking(move || {
-            Self::run_unsigned_transaction(simulator, unsigned_tx, block_header, state)
+            Self::run_unsigned_execution_without_trace(simulator, unsigned_tx, block_header, state)
         })
         .await
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
@@ -344,23 +373,6 @@ impl TxSimulator {
         })
         .await
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
-    }
-
-    fn run_unsigned_transaction(
-        simulator: TxSimulator,
-        unsigned_tx: UnsignedTransaction,
-        block_header: SealedHeader,
-        state: StateProviderBox,
-    ) -> Result<SimulationResult> {
-        Self::run_unsigned_execution(
-            simulator,
-            unsigned_tx,
-            block_header,
-            state,
-            TracingInspectorConfig::default_parity(),
-            UnsignedTraceMode::None,
-        )
-        .map(UnsignedExecutionResult::into_simulation)
     }
 
     fn run_unsigned_transaction_with_trace(
@@ -463,6 +475,58 @@ impl TxSimulator {
             call_trace,
             struct_logs,
             logs: emitted_logs,
+            output: raw_output.unwrap_or_default(),
+        })
+    }
+
+    fn run_unsigned_execution_without_trace(
+        simulator: TxSimulator,
+        unsigned_tx: UnsignedTransaction,
+        block_header: SealedHeader,
+        state: StateProviderBox,
+    ) -> Result<UnsignedExecutionResult> {
+        let header = block_header.into_header();
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        let initial_context = Self::unsigned_initial_context(&mut db, &unsigned_tx)?;
+
+        let evm_env = simulator
+            .evm_config
+            .evm_env(&header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        let tx_env = simulator.create_tx_env(
+            &unsigned_tx,
+            evm_env.block_env.gas_limit as u128,
+            base_fee,
+            &mut db,
+        )?;
+
+        let mut evm = simulator.evm_config.evm_with_env(&mut db, evm_env);
+        let res = evm.transact(tx_env)?;
+        db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
+
+        let success = res.result.is_success();
+        let gas_used = res.result.tx_gas_used();
+        let raw_output = res.result.output().cloned();
+        let revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(raw_output.as_ref(), initial_context.as_ref())
+        };
+        let revert_context = if success { None } else { initial_context };
+
+        Ok(UnsignedExecutionResult {
+            simulation: SimulationResult {
+                success,
+                gas_used,
+                revert_reason,
+                revert_context,
+            },
+            call_trace: None,
+            struct_logs: None,
+            logs: emitted_logs,
+            output: raw_output.unwrap_or_default(),
         })
     }
 
@@ -487,24 +551,90 @@ impl TxSimulator {
             call_trace: Some(full.call_trace),
             struct_logs,
             logs: full.logs,
+            output: Bytes::new(),
         }
     }
 
-    fn simulate_on_fork_without_trace(
+    pub(crate) fn simulate_on_fork_without_trace(
         &self,
         forked_state: &mut ForkedState,
         unsigned_tx: UnsignedTransaction,
     ) -> Result<SimulationResult> {
-        let mut inspector = None;
-        let result =
-            self.simulate_on_fork_with_inspector(forked_state, unsigned_tx, &mut inspector)?;
+        self.simulate_on_fork_plain_execution(forked_state, unsigned_tx)
+            .map(UnsignedExecutionResult::into_simulation)
+    }
 
-        Ok(SimulationResult {
-            success: result.success,
-            gas_used: result.gas_used,
-            revert_reason: result.revert_reason,
-            revert_context: result.revert_context,
+    fn simulate_on_fork_plain_execution(
+        &self,
+        forked_state: &mut ForkedState,
+        unsigned_tx: UnsignedTransaction,
+    ) -> Result<UnsignedExecutionResult> {
+        let block_header = forked_state.block_header.clone();
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+        let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
+
+        let initial_context = Self::unsigned_fork_context(forked_state, &unsigned_tx)?;
+        let tx_env = self.create_tx_env_from_unsigned_tx(
+            &unsigned_tx,
+            evm_env.block_env.gas_limit as u128,
+            base_fee,
+            &mut forked_state.db,
+        )?;
+
+        let mut evm = self.evm_config.evm_with_env(&mut forked_state.db, evm_env);
+        let res = evm.transact(tx_env)?;
+        forked_state.db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
+
+        let success = res.result.is_success();
+        let gas_used = res.result.tx_gas_used();
+        let raw_output = res.result.output().cloned();
+        let revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(raw_output.as_ref(), initial_context.as_ref())
+        };
+        let revert_context = if success { None } else { initial_context };
+
+        Ok(UnsignedExecutionResult {
+            simulation: SimulationResult {
+                success,
+                gas_used,
+                revert_reason,
+                revert_context,
+            },
+            call_trace: None,
+            struct_logs: None,
+            logs: emitted_logs,
+            output: raw_output.unwrap_or_default(),
         })
+    }
+
+    fn unsigned_fork_context(
+        forked_state: &mut ForkedState,
+        tx: &UnsignedTransaction,
+    ) -> Result<Option<RevertContext>> {
+        if let Some(target) = tx.to {
+            let info = forked_state.db.basic(target)?;
+            let has_code = info
+                .map(|acc| {
+                    acc.code
+                        .as_ref()
+                        .map(|code| !code.is_empty())
+                        .unwrap_or_else(|| acc.code_hash != reth_revm::primitives::KECCAK_EMPTY)
+                })
+                .unwrap_or(false);
+            Ok(Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn unsigned_initial_context(

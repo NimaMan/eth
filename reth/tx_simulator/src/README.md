@@ -9,10 +9,12 @@ What This Module Provides
 - Deterministic EVM setup: Derives `BlockEnv` and chain spec from canonical headers at a chosen block number.
 - Unsigned and signed simulation: Single‑call helpers, plus stateful chain simulators that persist changes between steps.
 - Geth‑compatible traces: Uses `TracingInspector::default_geth()` (with logs for trace variants) and exports geth `CallFrame`s.
-- Inspector fusing: Reuses a single tracing inspector and fuses it between steps for Reth‑equivalent performance and behavior.
+- Fast no-trace execution: Plain simulation paths avoid inspector allocation when traces are not requested.
+- Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
+- Live overlays: `live::LiveTxSimulator` prefers Redis chain-state overlays written by the live block processor when MDBX is behind the live head.
 
 How This Compares To Reth
-- Reth debug RPC (trace) constructs an EVM env from canonical headers, executes with `TracingInspector`, and fuses the inspector across sequential transactions for block/bundle tracing.
+- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and fuses inspectors across block tracing.
 - We do the same locally via Reth crates, bypassing only the RPC layer.
 
 Relevant Reth Source (for parity)
@@ -27,18 +29,20 @@ Key Building Blocks Here
 - Unsigned single‑call: rust/tx_simulator/src/single_tx/unsigned.rs:1
 - Signed single‑call: rust/tx_simulator/src/single_tx/signed.rs:1
 - Stateful unsigned chain: rust/tx_simulator/src/tx_chain/unsigned.rs:1
-  - Persists state and nonces; fuses inspector between steps for performance and parity.
+  - Persists state and nonces; uses the plain EVM path unless a trace is requested.
 - Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
   - Recovers signer, persists state; fuses inspector between steps.
 - Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1
-  - Creates a fork, reuses a single inspector across the bundle, and fuses between txs.
+  - Creates a fork and uses the plain EVM path for fast no-trace execution.
+- Live simulator: rust/tx_simulator/src/live/simulator.rs:1
+  - Selects the latest exact Redis state overlay first, then falls back to persisted MDBX.
 - Trace decoding helpers: rust/tx_simulator/src/simulation_revert_decoder.rs:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
 - Fees and gas: For signed txs we use tx‑provided gas and fees; for unsigned we allow EIP‑1559 or legacy fee fields and can derive safe defaults with base fee when needed.
 - Trace format: Exported via geth builders; shape is intended to match `debug_*` RPC traces (including `withLog` when enabled).
-- Inspector fusing: Chain and bundle simulators explicitly fuse the inspector after each tx, matching Reth’s block/bundle tracing behavior.
+- Live state: For blocks ahead of persisted MDBX, live APIs require an exact Redis chain-state overlay from the live block processor.
 
 Typical Uses
 - Replace `debug_traceCall`/`debug_traceBlockByNumber` with local, zero‑RPC equivalents.
@@ -49,7 +53,7 @@ Quick Checks
 - Verify database/setup: rust/tx_simulator/examples/general/verify_database_setup.rs:1
 - Compare vs RPC: rust/tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs:1
 - Contract reads: rust/tx_simulator/examples/general/contract_method_simulation.rs:1
-- Signed chain demo: rust/tx_simulator/examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs:1
+- Signed chain demo: rust/tx_simulator/examples/tx_builders/signed_bundle_simulation.rs:1
 
 Setup Notes
 - Reth DB default: resolved from `RETH_DATADIR`, then `RETH_DB_PATH`, then `../../config.env` (`/home/nima/storage/samsung8tb/ethereum/reth` by default). Ensure it is synced and canonicalized to the block heights you simulate.

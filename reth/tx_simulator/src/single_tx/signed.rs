@@ -6,6 +6,7 @@ use crate::{
     block_context::BlockStateProvider,
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
+    tx_chain::sequential::ForkedState,
     types::{FullSimulationResult, SimulationResult},
 };
 use eyre::Result;
@@ -21,6 +22,7 @@ use alloy_rpc_types_trace::geth::{CallConfig, CallFrame};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::Recovered;
+use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -171,18 +173,55 @@ impl TxSimulator {
         trace_mode: SignedTraceMode,
     ) -> Result<SignedExecutionResult> {
         let context = simulator.load_block_context_blocking(block_number, None)?;
-        let state = match context.state {
-            BlockStateProvider::Historical(state) => state,
-            BlockStateProvider::LiveFork(_) => {
-                return Err(eyre::eyre!(
-                    "Signed transaction simulation requires persisted state for block {}",
-                    block_number
-                ));
-            }
-        };
         let block_header = context.header;
 
-        let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        match context.state {
+            BlockStateProvider::Historical(state) => {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                Self::run_signed_execution_on_db(
+                    simulator,
+                    tx,
+                    block_header,
+                    &mut db,
+                    inspector_config,
+                    trace_mode,
+                )
+            }
+            BlockStateProvider::LiveFork(mut fork) => Self::run_signed_execution_on_fork(
+                simulator,
+                tx,
+                &mut fork,
+                inspector_config,
+                trace_mode,
+            ),
+        }
+    }
+
+    fn run_signed_execution_on_fork(
+        simulator: TxSimulator,
+        tx: TransactionSigned,
+        fork: &mut ForkedState,
+        inspector_config: TracingInspectorConfig,
+        trace_mode: SignedTraceMode,
+    ) -> Result<SignedExecutionResult> {
+        Self::run_signed_execution_on_db(
+            simulator,
+            tx,
+            fork.block_header.clone(),
+            &mut fork.db,
+            inspector_config,
+            trace_mode,
+        )
+    }
+
+    fn run_signed_execution_on_db(
+        simulator: TxSimulator,
+        tx: TransactionSigned,
+        block_header: reth_primitives_traits::SealedHeader,
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        inspector_config: TracingInspectorConfig,
+        trace_mode: SignedTraceMode,
+    ) -> Result<SignedExecutionResult> {
         let mut inspector = TracingInspector::new(inspector_config);
 
         let evm_env = simulator
@@ -197,7 +236,7 @@ impl TxSimulator {
         let mut evm =
             simulator
                 .evm_config
-                .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
+                .evm_with_env_and_inspector(&mut *db, evm_env, &mut inspector);
 
         let res = evm.transact(tx_env)?;
         db.commit(res.state);

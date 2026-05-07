@@ -1,112 +1,86 @@
 use alloy_primitives::{Address, U256};
 use eyre::Result;
-/// Auto Nonce Management Example
-///
-/// This example demonstrates how the reth_tx_simulator automatically adapts nonces
-/// when encountering "nonce too low" errors. This is common when simulating mempool
-/// transactions or accounts with pending transactions.
-///
-/// WHAT IT DEMONSTRATES:
-/// 1. Default behavior: automatic nonce adaptation when error occurs
-/// 2. Explicit control: turning adaptation on/off
-/// 3. Best practice: omitting nonce to auto-detect from state
-///
-/// KEY FEATURES:
-/// - Automatic nonce extraction from error messages
-/// - Transparent retry with correct nonce
-/// - No special functions needed - it just works
-///
-/// INPUT:
-/// Creates transactions with deliberately wrong nonces to trigger adaptation.
-///
-/// OUTPUT:
-/// Shows the error, extracted nonce, and successful retry with correct nonce.
-use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_simulator::{SequentialSimulationOptions, TxSimulator, UnsignedTransaction};
 
+/// Auto nonce detection and sequence increment example.
+///
+/// The simulator does not rewrite explicitly wrong nonces. The safe default is
+/// to omit `nonce` so the simulator reads it from the selected state, then lets
+/// stateful sequence APIs advance the tracked nonce after each executed tx.
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("\n🔧 Auto Nonce Management Example");
-    println!("==================================\n");
+    println!("Auto Nonce Management Example");
+    println!("=============================");
 
-    // Initialize simulator
     let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_datadir)?;
-    println!("✅ Simulator initialized");
 
-    // Use a real address that likely has transactions
     let from_address = "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5".parse::<Address>()?;
+    let to_address = "0x388C818CA8B9251b393131C08a736A67ccB19297".parse::<Address>()?;
 
-    println!("\n1️⃣  Testing with deliberately wrong nonce...");
-
-    // Create transaction with nonce 0 (likely wrong for this active address)
     let mut request = UnsignedTransaction {
         from: Some(from_address),
-        to: Some("0x388C818CA8B9251b393131C08a736A67ccB19297".parse()?),
-        value: Some(U256::from(1_000_000_000_000_000u64)), // 0.001 ETH
-        gas: Some(21000),
-        gas_price: Some(20_000_000_000), // 20 gwei
-        data: None,
-        nonce: Some(0), // Deliberately wrong nonce
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
+        to: Some(to_address),
+        value: Some(U256::from(1u64)),
+        gas: Some(21_000),
+        gas_price: Some(20_000_000_000),
+        nonce: Some(0),
         ..Default::default()
     };
 
-    // First attempt - the simulator will automatically adapt the nonce
-    println!("\n   Attempting simulation with wrong nonce 0...");
+    println!();
+    println!("1. Explicit wrong nonce");
     match simulator
         .simulate_unsigned_transaction(request.clone())
         .await
     {
         Ok(result) => {
-            println!("   ✅ Simulation succeeded (nonce was automatically adapted!)");
-            println!("   Gas used: {}", result.gas_used);
-            println!("   Success: {}", result.success);
-        }
-        Err(e) => {
-            println!("   ❌ Simulation failed: {}", e);
-        }
-    }
-
-    println!("\n2️⃣  Testing with adaptation disabled...");
-
-    // Now test with adaptation explicitly disabled
-    // Note: We no longer have a way to disable nonce adaptation
-    match simulator
-        .simulate_unsigned_transaction(request.clone())
-        .await
-    {
-        Ok(_) => {
-            println!("   ✅ Simulation succeeded");
-        }
-        Err(e) => {
-            println!("   ❌ Expected error (adaptation disabled): {}", e);
-            if e.to_string().contains("expected") {
-                println!("   📝 Without adaptation, nonce errors are not automatically handled");
+            println!("   Simulation executed. success={}", result.success);
+            if let Some(reason) = result.revert_reason {
+                println!("   Revert reason: {}", reason);
             }
         }
+        Err(err) => {
+            println!("   Expected nonce/state validation error: {}", err);
+        }
     }
 
-    println!("\n3️⃣  Testing without providing nonce (auto-detection)...");
-
-    // Remove nonce to let the simulator detect it
+    println!();
+    println!("2. Omitted nonce");
     request.nonce = None;
-
-    match simulator.simulate_unsigned_transaction(request).await {
+    match simulator
+        .simulate_unsigned_transaction(request.clone())
+        .await
+    {
         Ok(result) => {
-            println!("   ✅ Simulation succeeded with auto-detected nonce!");
-            println!("   Gas used: {}", result.gas_used);
+            println!("   Simulation executed with state-derived nonce.");
+            println!(
+                "   success={}, gas_used={}",
+                result.success, result.gas_used
+            );
         }
-        Err(e) => {
-            println!("   ❌ Simulation failed: {}", e);
+        Err(err) => {
+            println!("   Simulation failed: {}", err);
         }
     }
 
-    println!("\n📊 SUMMARY:");
-    println!("   - Nonce adaptation is enabled by default (transparent retry)");
-    println!("   - Note: Nonce adaptation is always enabled in the current implementation");
-    println!("   - Best practice: omit nonce field for auto-detection from state");
-    println!("   - Signed transactions cannot adapt nonce (would break signature)");
+    println!();
+    println!("3. Stateful sequence");
+    let options = SequentialSimulationOptions {
+        stop_on_failure: false,
+        auto_increment_nonces: true,
+        ..Default::default()
+    };
+    let sequence = simulator
+        .simulate_unsigned_tx_sequence(vec![request.clone(), request], options)
+        .await?;
+
+    for tx in &sequence.results {
+        println!(
+            "   tx {}: success={}, gas_used={}, tracked_nonces={:?}",
+            tx.transaction_index, tx.success, tx.gas_used, tx.updated_nonces
+        );
+    }
 
     Ok(())
 }

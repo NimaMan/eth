@@ -2,18 +2,19 @@
 
 The `tx_chain` module extends the single-transaction helpers with stateful execution paths.
 It lets you simulate multi-step workflows (buy → approve → sell, MEV bundles, protocol
-setups) against a forked view of the canonical chain while reusing inspectors and database
-overlays for speed.
+setups) against a forked view of the canonical or live-overlay chain while keeping all writes
+in an in-memory database overlay.
 
 ### Execution Pipeline
 
 1. **Resolve fork context** – reuse a caller-supplied `SealedHeader`/state snapshot when
    available or let the simulator fetch canonical header/state (including live replay when
    MDBX lags). Headers are only required when callers inject their own fork material.
-2. **Maintain forked state** – every call reads base state from Reth’s MDBX and writes into an
-   in-memory `CacheDB`. Successful transactions persist their changes for subsequent steps.
-3. **Reuse inspectors** – interactive chains keep a fused `TracingInspector` alive across steps
-   so bundles cost roughly one `debug_traceBlock` instead of N independent traces.
+2. **Maintain forked state** – every call reads base state from Reth’s MDBX or a Redis live
+   overlay and writes into an in-memory `CacheDB`. Executed transactions persist their changes
+   for subsequent steps, including reverting transactions that still consume nonce and gas.
+3. **Avoid tracing by default** – lightweight sequence paths use plain EVM execution. Trace
+   helpers allocate inspectors only when call traces or struct logs are requested.
 
 ### Public Entry Points
 
@@ -26,7 +27,7 @@ overlays for speed.
 | `SignedTxChainSimulation::step(tx)` | `SimulationResult` | Executes and commits a signed transaction. | Deterministic replays without tracing overhead. |
 | `SignedTxChainSimulation::step_with_trace(tx)` | `FullSimulationResult` | Signed analogue with geth-style call trace (no step logs). | When you need decoded internal calls for signed bundles. |
 | `SignedTxChainSimulation::view_call_on_fork*` | `ViewFunctionResult` | Read-only helpers that reuse the forked state. | Fetch balances/allowances between steps. |
-| `TxSimulator::simulate_unsigned_tx_sequence(txs, options)` | `SequentialSimulationResult` | One-shot batch execution with fused inspector. Resolves block context internally (MDBX or live replay) based on `SequentialSimulationOptions::at_block`. | MEV bundles, regression suites, or any “all-at-once” replay. |
+| `TxSimulator::simulate_unsigned_tx_sequence(txs, options)` | `SequentialSimulationResult` | One-shot batch execution on the no-trace path. Resolves block context internally (MDBX or live replay) based on `SequentialSimulationOptions::at_block`. | MEV bundles, regression suites, or any “all-at-once” replay. |
 
 ### Return Types
 
@@ -45,14 +46,14 @@ overlays for speed.
 * **Interactive signed chain** – mirrors the unsigned chain but keeps signatures intact. Useful
   for replaying real bundles exactly as mined while still observing state changes.
 * **Batch (simulate_unsigned_tx_sequence)** – maximizes throughput when you already know the
-  full sequence upfront. Automatic block context resolution avoids redundant canonical lookups, and the fused
-  inspector keeps tracing overhead low.
+  full sequence upfront. Automatic block context resolution avoids redundant canonical lookups,
+  and the no-trace path avoids inspector overhead.
 
 ### Inspector & State Notes
 
 * Forked state writes never touch the canonical MDBX; they live entirely in the in-memory cache.
-* Inspectors are “fused” after each transaction so they shed per-tx buffers but retain internal
-  allocations. This is the same strategy Reth uses for block tracing.
+* Block tracing still uses inspector fusing for callTracer replay. Plain sequence simulation does
+  not allocate inspectors.
 * `SequentialSimulationOptions` exposes knobs for stop-on-failure, custom gas limits, automatic
   nonce increments, avoiding redundant DB work even when simulating ahead of the last persisted block.
 

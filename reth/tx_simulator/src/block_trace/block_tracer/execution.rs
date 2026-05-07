@@ -17,6 +17,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use crate::block_trace::types::ReplayProfileConfig;
 use crate::TxSimulator;
 
+use super::engine::is_call_tracer_options;
 use super::engine::BlockTraceEngine;
 use super::BlockTracer;
 
@@ -27,6 +28,7 @@ impl<'a> BlockTracer<'a> {
         opts: GethDebugTracingOptions,
         engine: BlockTraceEngine,
     ) -> Result<Vec<TraceResult>> {
+        ensure_engine_supports_options(engine, &opts)?;
         match engine {
             BlockTraceEngine::FreshInspector => {
                 Self::trace_block_sync_fresh_inspector(simulator, block_hash, opts)
@@ -66,6 +68,7 @@ impl<'a> BlockTracer<'a> {
             .history_by_block_hash(parent_hash)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
         let mut results = Vec::with_capacity(transactions.len());
+        let call_config = call_config_from_options(&opts)?;
 
         for (index, tx) in transactions.iter().enumerate() {
             let tx_hash = *tx.tx_hash();
@@ -80,6 +83,7 @@ impl<'a> BlockTracer<'a> {
                 &mut db,
                 &sealed_header,
                 &opts,
+                call_config,
                 Some(tx_hash),
                 index,
             )?;
@@ -114,8 +118,8 @@ impl<'a> BlockTracer<'a> {
             .evm_config
             .evm_env(&sealed_header)
             .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
-        let call_config = CallConfig::default();
-        let mut inspector = create_inspector(&opts);
+        let call_config = call_config_from_options(&opts)?;
+        let mut inspector = create_inspector(&opts)?;
         let mut results = Vec::with_capacity(transactions.len());
 
         for (index, tx) in transactions.iter().enumerate() {
@@ -189,6 +193,7 @@ impl<'a> BlockTracer<'a> {
                     &mut db,
                     &sealed_header,
                     &opts,
+                    call_config_from_options(&opts)?,
                     Some(tx_hash),
                     index,
                 );
@@ -218,6 +223,7 @@ impl<'a> BlockTracer<'a> {
         db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         block_header: &SealedHeader,
         opts: &GethDebugTracingOptions,
+        call_config: CallConfig,
         tx_hash: Option<B256>,
         tx_index: usize,
     ) -> Result<TraceResult> {
@@ -227,7 +233,7 @@ impl<'a> BlockTracer<'a> {
             .evm_env(block_header)
             .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let tx_env = simulator.evm_config.tx_env(&recovered);
-        let mut inspector = create_inspector(opts);
+        let mut inspector = create_inspector(opts)?;
 
         let mut evm =
             simulator
@@ -248,7 +254,7 @@ impl<'a> BlockTracer<'a> {
         inspector.set_transaction_caller(sender);
         let call_frame = inspector
             .into_geth_builder()
-            .geth_call_traces(CallConfig::default(), res.result.tx_gas_used());
+            .geth_call_traces(call_config, res.result.tx_gas_used());
 
         let trace = GethTrace::CallTracer(call_frame);
         let trace_result = match trace {
@@ -317,29 +323,55 @@ impl<'a> BlockTracer<'a> {
 }
 
 /// Create an inspector based on the tracing options.
-pub(super) fn create_inspector(opts: &GethDebugTracingOptions) -> TracingInspector {
+pub(super) fn create_inspector(opts: &GethDebugTracingOptions) -> Result<TracingInspector> {
     match opts.tracer.as_ref() {
         Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
             GethDebugBuiltInTracerType::CallTracer => {
-                let config = TracingInspectorConfig::from_geth_call_config(&CallConfig::default());
-                TracingInspector::new(config)
+                let call_config = call_config_from_options(opts)?;
+                let config = TracingInspectorConfig::from_geth_call_config(&call_config);
+                Ok(TracingInspector::new(config))
             }
             GethDebugBuiltInTracerType::PreStateTracer => {
                 let config =
                     TracingInspectorConfig::from_geth_prestate_config(&PreStateConfig::default());
-                TracingInspector::new(config)
+                Ok(TracingInspector::new(config))
             }
-            _ => TracingInspector::new(TracingInspectorConfig::default_geth()),
+            _ => Ok(TracingInspector::new(TracingInspectorConfig::default_geth())),
         },
-        _ => TracingInspector::new(TracingInspectorConfig::default_geth()),
+        _ => Ok(TracingInspector::new(TracingInspectorConfig::default_geth())),
     }
 }
 
 pub(super) fn call_tracer_options() -> GethDebugTracingOptions {
-    GethDebugTracingOptions {
-        tracer: Some(GethDebugTracerType::BuiltInTracer(
-            GethDebugBuiltInTracerType::CallTracer,
-        )),
-        ..Default::default()
+    GethDebugTracingOptions::call_tracer(CallConfig::default().with_log())
+}
+
+pub(super) fn ensure_engine_supports_options(
+    engine: BlockTraceEngine,
+    opts: &GethDebugTracingOptions,
+) -> Result<()> {
+    if engine.supports_options(opts) {
+        return Ok(());
     }
+
+    Err(eyre::eyre!(
+        "{} only supports callTracer options; use {} for {:?}",
+        engine.as_str(),
+        BlockTraceEngine::RethDebug.as_str(),
+        opts.tracer
+    ))
+}
+
+fn call_config_from_options(opts: &GethDebugTracingOptions) -> Result<CallConfig> {
+    if !is_call_tracer_options(opts) {
+        return Err(eyre::eyre!(
+            "call tracer config requested for non-callTracer options: {:?}",
+            opts.tracer
+        ));
+    }
+
+    opts.tracer_config
+        .clone()
+        .into_call_config()
+        .map_err(|err| eyre::eyre!("invalid callTracer config: {}", err))
 }

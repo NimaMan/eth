@@ -1,178 +1,123 @@
+use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::Result;
 use reth_provider::{BlockReader, HeaderProvider};
 use std::time::Instant;
-use tx_simulator::CallFrame;
-/// Block Transaction Tracer - Simulates All Transactions in a Block
-///
-/// This example demonstrates how to simulate/trace all transactions in a block,
-/// providing functionality equivalent to RPC's debug_traceBlockByNumber but with
-/// direct database access for massive performance improvements.
-///
-/// Key Features:
-/// - Simulates each transaction in sequence within the block
-/// - Returns full CallFrame traces showing all internal calls
-/// - 20-400x faster than RPC due to direct database access
-///
-/// Note: This is SIMULATION - we're re-executing transactions to generate traces,
-/// not just fetching existing data.
-use tx_simulator::TxSimulator;
+use tx_simulator::block_trace::block_tracer::{BlockTraceEngine, BlockTracer};
+use tx_simulator::{CallFrame, TxSimulator};
 
+/// Block transaction tracer.
+///
+/// This example replays all transactions in a persisted block sequentially from
+/// the parent state and returns callTracer results, matching the semantics of
+/// `debug_traceBlockByNumber` with `"tracer": "callTracer"`.
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🔍 Unified Block Tracer - debug_traceBlockByNumber Equivalent");
-    println!("=============================================================\n");
+    println!("Block tracer - debug_traceBlockByNumber callTracer equivalent");
+    println!("===========================================================");
 
-    // Initialize simulator
     let reth_db_path = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_db_path)?;
-    println!("✅ Simulator initialized");
 
-    // Get latest block or use a specific one
     let latest_block = simulator.get_latest_block()?;
-    let block_to_trace = latest_block; // Or use a specific block like 20_000_000
+    let block_to_trace = latest_block;
 
-    println!("📊 Tracing block: {}", block_to_trace);
-
-    // Get block details
     let provider = simulator.provider_factory().provider()?;
     let block = provider
         .block_by_number(block_to_trace)?
-        .ok_or_else(|| eyre::eyre!("Block {} not found", block_to_trace))?;
-
-    let tx_count = block.body.transactions.len();
-    println!("📝 Transactions in block: {}", tx_count);
-
-    // Get block header
+        .ok_or_else(|| eyre::eyre!("block {} not found", block_to_trace))?;
     let header = provider
         .header_by_number(block_to_trace)?
-        .ok_or_else(|| eyre::eyre!("Header not found"))?;
+        .ok_or_else(|| eyre::eyre!("header {} not found", block_to_trace))?;
 
-    println!("⛽ Block gas used: {}", header.gas_used);
+    println!("Block: {}", block_to_trace);
+    println!("Transactions: {}", block.body.transactions.len());
+    println!("Gas used: {}", header.gas_used);
     if let Some(base_fee) = header.base_fee_per_gas {
-        println!("💰 Base fee: {} gwei", base_fee as f64 / 1e9);
+        println!("Base fee: {:.3} gwei", base_fee as f64 / 1e9);
     }
 
-    println!("\n{}", "=".repeat(60));
-    println!("TRACING ALL TRANSACTIONS");
-    println!("{}", "=".repeat(60));
+    let opts = GethDebugTracingOptions::call_tracer(CallConfig::default().with_log());
+    let tracer = BlockTracer::new(&simulator);
 
-    let start_time = Instant::now();
-    let mut trace_results: Vec<(alloy_primitives::B256, Result<CallFrame, String>)> = Vec::new();
-    let mut successful_traces = 0;
-    let mut failed_traces = 0;
+    let started = Instant::now();
+    let traces = tracer
+        .trace_block_by_number_with_engine(
+            block_to_trace,
+            Some(opts),
+            BlockTraceEngine::RethFusedCallTracer,
+        )
+        .await?;
+    let elapsed = started.elapsed();
 
-    // Process each transaction and build traces
-    for (idx, tx_signed) in block.body.transactions.iter().enumerate() {
-        // Show progress for large blocks
-        if idx % 50 == 0 && idx > 0 {
-            println!("  Progress: {}/{} transactions traced...", idx, tx_count);
-        }
+    let successes = traces
+        .iter()
+        .filter(|trace| matches!(trace, TraceResult::Success { .. }))
+        .count();
+    let errors = traces.len().saturating_sub(successes);
 
-        // Get transaction hash
-        let tx_hash = tx_signed.tx_hash();
-
-        // Simulate the transaction with full trace at the previous block
-        // (transactions execute in the context of the previous block's state)
-        match simulator
-            .simulate_signed_transaction_with_trace_at_block(
-                tx_signed,
-                block_to_trace.saturating_sub(1),
-            )
-            .await
-        {
-            Ok(full_result) => {
-                trace_results.push((*tx_hash, Ok(full_result.call_trace)));
-                successful_traces += 1;
-            }
-            Err(e) => {
-                trace_results.push((*tx_hash, Err(format!("Simulation failed: {}", e))));
-                failed_traces += 1;
-            }
-        }
+    println!();
+    println!("Trace complete");
+    println!("Successful traces: {}", successes);
+    println!("Failed traces: {}", errors);
+    println!("Total time: {:.2}s", elapsed.as_secs_f64());
+    if !traces.is_empty() {
+        println!(
+            "Average per tx: {:.2}ms",
+            elapsed.as_millis() as f64 / traces.len() as f64
+        );
     }
 
-    let total_time = start_time.elapsed();
-
-    println!("\n{}", "=".repeat(60));
-    println!("TRACE RESULTS SAMPLE");
-    println!("{}", "=".repeat(60));
-
-    // Show first 3 traces as examples
-    for (i, (tx_hash, trace_result)) in trace_results.iter().take(3).enumerate() {
-        println!("\n[Transaction {}]", i);
-        println!("  Hash: 0x{:x}", tx_hash);
-
-        match trace_result {
-            Ok(call_frame) => {
-                println!("  ✅ Success");
-                print_call_frame(call_frame, 2);
-            }
-            Err(error) => {
-                println!("  ❌ Error: {}", error);
-            }
-        }
+    println!();
+    println!("Sample traces");
+    for (idx, trace) in traces.iter().take(3).enumerate() {
+        print_trace(idx, trace);
     }
-
-    println!("\n{}", "=".repeat(60));
-    println!("PERFORMANCE SUMMARY");
-    println!("{}", "=".repeat(60));
-
-    println!("📊 Block {} Trace Complete:", block_to_trace);
-    println!("  • Total transactions: {}", tx_count);
-    println!("  • Successful traces: {}", successful_traces);
-    println!("  • Failed traces: {}", failed_traces);
-    println!("  • Total time: {:.2}s", total_time.as_secs_f64());
-    println!(
-        "  • Average per tx: {:.2}ms",
-        total_time.as_millis() as f64 / tx_count as f64
-    );
-
-    println!("\n🎯 Comparison with RPC debug_traceBlockByNumber:");
-    let rpc_estimate = tx_count as f64 * 0.1; // 100ms per tx via RPC
-    println!("  • RPC estimate: ~{:.1}s", rpc_estimate);
-    println!("  • Direct DB: {:.2}s", total_time.as_secs_f64());
-    println!(
-        "  • Speedup: {:.1}x faster",
-        rpc_estimate / total_time.as_secs_f64()
-    );
-
-    println!("\n✅ Result Format:");
-    println!("  • Returns Vec<(TxHash, Result<CallFrame, Error>)>");
-    println!("  • Each trace contains full CallFrame tree");
-    println!("  • Equivalent to debug_traceBlockByNumber output");
-    println!("  • Can be converted to RPC format if needed");
 
     Ok(())
 }
 
-// Helper function to print call frames recursively
+fn print_trace(index: usize, trace: &TraceResult) {
+    match trace {
+        TraceResult::Success {
+            result: GethTrace::CallTracer(frame),
+            tx_hash,
+        } => {
+            println!();
+            println!("[{}] {:?}", index, tx_hash);
+            print_call_frame(frame, 2);
+        }
+        TraceResult::Success { result, tx_hash } => {
+            println!();
+            println!(
+                "[{}] {:?}: unexpected trace type {:?}",
+                index, tx_hash, result
+            );
+        }
+        TraceResult::Error { error, tx_hash } => {
+            println!();
+            println!("[{}] {:?}: {}", index, tx_hash, error);
+        }
+    }
+}
+
 fn print_call_frame(frame: &CallFrame, indent: usize) {
     let prefix = " ".repeat(indent);
-    println!("{}CallFrame:", prefix);
-    println!("{}  Type: {:?}", prefix, frame.typ);
-    println!("{}  From: {:?}", prefix, frame.from);
-    println!("{}  To: {:?}", prefix, frame.to);
-    println!("{}  Gas: {}", prefix, frame.gas);
-    println!("{}  Gas Used: {}", prefix, frame.gas_used);
+    println!("{}type: {:?}", prefix, frame.typ);
+    println!("{}from: {:?}", prefix, frame.from);
+    println!("{}to: {:?}", prefix, frame.to);
+    println!("{}gas: {}", prefix, frame.gas);
+    println!("{}gas used: {}", prefix, frame.gas_used);
 
     if let Some(value) = &frame.value {
-        println!("{}  Value: {} wei", prefix, value);
+        println!("{}value: {} wei", prefix, value);
     }
-
-    if let Some(output) = &frame.output {
-        println!("{}  Output: {} bytes", prefix, output.len());
-    }
-
     if let Some(error) = &frame.error {
-        println!("{}  Error: {}", prefix, error);
+        println!("{}error: {}", prefix, error);
     }
-
-    // Print subcalls (calls is a Vec, not Option<Vec>)
     if !frame.calls.is_empty() {
-        println!("{}  Subcalls: {}", prefix, frame.calls.len());
-        for (i, subcall) in frame.calls.iter().take(2).enumerate() {
-            println!("{}    [Subcall {}]", prefix, i);
-            print_call_frame(subcall, indent + 4);
+        println!("{}subcalls: {}", prefix, frame.calls.len());
+        for subcall in frame.calls.iter().take(2) {
+            print_call_frame(subcall, indent + 2);
         }
     }
 }

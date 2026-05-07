@@ -9,12 +9,12 @@ This directory showcases how to use `tx_simulator` across common scenarios. This
 - general/contract_method_simulation_weth_total_supply.rs: Simple totalSupply() read example
 - general/trace_extraction_example.rs: Extract geth-compatible call traces
 - general/timeout_handling_example.rs: Per-tx timeout patterns
-- general/revert_reason_decoder_example.rs: Human-readable revert decoding
+- revert/revert_reason_decoder_example.rs: Human-readable revert decoding
 
 ## Sequential (Stateful)
 - sequential/sequential_eth_transfers_with_state_persistence.rs: ETH transfers with persisted state
 - sequential/auto_nonce_management_example.rs: Automatic nonce detection and increment
-- sequential/mev_sandwich_bundle_example.rs: Frontrun/victim/backrun demo as a bundle
+- revert/mev_sandwich_bundle_example.rs: Frontrun/victim/backrun demo as a bundle
 
 Token workflows (unsigned chains):
 - sequential/specific_tokens/buy_approve_then_sell_floki.rs
@@ -22,11 +22,11 @@ Token workflows (unsigned chains):
 - sequential/specific_tokens/buy_approve_then_sell_usdc.rs
 
 Signed chain:
-- sequential/buy_approve_sell_signed_chain_uniswap_v2.rs
+- tx_builders/signed_bundle_simulation.rs
 
 ## Performance
 - performance/rpc_vs_direct_simulation_benchmark.rs: RPC vs direct DB comparison
-- performance/inspector_fusing_test.rs: Inspector reuse benchmark
+- performance/inspector_fusing_test.rs: No-trace sequence and warm-cache benchmark
 
 ## Replay Research
 - replay/profile/: Replay-only profiling plan for faster local block tracing

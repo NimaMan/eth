@@ -1,18 +1,17 @@
 use alloy_primitives::{address, U256};
-/// Inspector Fusing Performance Test
+/// Sequential No-Trace Performance Test
 ///
-/// This example demonstrates the performance benefits of inspector fusing
-/// in sequential transaction simulation. We compare:
-/// 1. Creating a new inspector for each transaction (old approach)
-/// 2. Reusing the same inspector across transactions (fused approach)
+/// This example exercises the fast sequential simulation path. Plain sequence
+/// execution does not allocate tracing inspectors; tracing-specific benchmarks
+/// live under `examples/replay/profile`.
 use eyre::Result;
 use std::time::Instant;
 use tx_simulator::{SequentialSimulationOptions, TxSimulator, UnsignedTransaction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🚀 Inspector Fusing Performance Test");
-    println!("=====================================\n");
+    println!("Sequential No-Trace Performance Test");
+    println!("====================================\n");
 
     // Initialize simulator
     let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
@@ -37,7 +36,7 @@ async fn main() -> Result<()> {
         transactions.len()
     );
 
-    // Test with inspector fusing (current implementation)
+    // Test the no-trace execution path.
     let start = Instant::now();
 
     let options = SequentialSimulationOptions {
@@ -51,21 +50,21 @@ async fn main() -> Result<()> {
         .simulate_unsigned_tx_sequence(transactions.clone(), options.clone())
         .await?;
 
-    let fused_duration = start.elapsed();
+    let cold_duration = start.elapsed();
 
-    println!("✅ With Inspector Fusing:");
+    println!("No-trace sequence:");
     println!("   - Total transactions: {}", result.total_transactions);
     println!("   - Successful: {}", result.successful_transactions);
     println!("   - Failed: {}", result.failed_transactions);
     println!("   - Total gas: {}", result.total_gas_used);
-    println!("   - Time taken: {:?}", fused_duration);
+    println!("   - Time taken: {:?}", cold_duration);
     println!(
         "   - Avg per tx: {:?}",
-        fused_duration / result.total_transactions as u32
+        cold_duration / result.total_transactions as u32
     );
 
     // Run again to test warm cache
-    println!("\n🔄 Second run (warm cache):");
+    println!("\nSecond run (warm cache):");
     let start = Instant::now();
 
     let result2 = simulator
@@ -80,13 +79,12 @@ async fn main() -> Result<()> {
         warm_duration / result2.total_transactions as u32
     );
 
-    println!("\n📊 Performance Analysis:");
-    println!("   - Inspector fusing avoids creating new inspectors for each transaction");
-    println!("   - This reduces memory allocations and improves performance");
+    println!("\nPerformance Analysis:");
+    println!("   - Plain sequence execution avoids inspector allocation");
     println!("   - Warm cache run shows additional speedup from database caching");
 
-    if warm_duration < fused_duration {
-        let speedup = fused_duration.as_secs_f64() / warm_duration.as_secs_f64();
+    if warm_duration < cold_duration {
+        let speedup = cold_duration.as_secs_f64() / warm_duration.as_secs_f64();
         println!("   - Warm cache speedup: {:.2}x faster", speedup);
     }
 
