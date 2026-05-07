@@ -8,7 +8,7 @@ This crate analyzes pending transactions and emits speculative risk signals. It 
 
 - Poll or subscribe to mempool transactions.
 - Classify transactions relevant to tracked tokens, pools, creators, owners, and tax setters.
-- Use `tx_simulator` / `LiveTxSimulator` against the latest Redis chain-state overlay.
+- Use `tx_simulator` / `LiveTxSimulator` against the latest tracked live state.
 - Detect pending liquidity removals, tax changes, honeypot behavior, trading-status changes, and other threats.
 - Emit `RiskEvent`s or `MempoolSignal`s.
 

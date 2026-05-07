@@ -68,7 +68,7 @@ eth_alpha_engine -> eth_live_state
 
 ## Lessons From Current Code
 
-`LiveTxSimulator` already prefers Redis chain-state overlays and falls back to MDBX. That is a good design. The improvement is to move shared key/schema ownership out of `tx_simulator` so every crate uses one protocol.
+`LiveTxSimulator` already uses MDBX when it is caught up and otherwise uses tracked live state. The improvement is to move shared key/schema ownership out of `tx_simulator` so every crate uses one protocol.
 
 Python also publishes token snapshots through `LiveDataPublisher`. The Rust contract keeps the same keys and preserves the token snapshot index so tracked-token discovery is explicit instead of being hidden inside a process-local cache.
 

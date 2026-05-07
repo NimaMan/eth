@@ -2,7 +2,7 @@
 
 The `tx_chain` module extends the single-transaction helpers with stateful execution paths.
 It lets you simulate multi-step workflows (buy → approve → sell, MEV bundles, protocol
-setups) against a forked view of the canonical or live-overlay chain while keeping all writes
+setups) against a forked view of the canonical chain or tracked live state while keeping all writes
 in an in-memory database overlay.
 
 For new mixed signed/unsigned workflows, prefer `TxSimulator::simulation_session*`. The older
@@ -12,10 +12,10 @@ the same fork loading behavior behind one API.
 ### Execution Pipeline
 
 1. **Resolve fork context** – reuse a caller-supplied `SealedHeader`/state snapshot when
-   available or let the simulator fetch canonical header/state (including live replay when
+   available or let the simulator fetch canonical header/state (including tracked live state when
    MDBX lags). Headers are only required when callers inject their own fork material.
-2. **Maintain forked state** – every call reads base state from Reth’s MDBX or a Redis live
-   overlay and writes into an in-memory `CacheDB`. Executed transactions persist their changes
+2. **Maintain forked state** – every call reads base state from Reth’s MDBX or tracked live
+   state and writes into an in-memory `CacheDB`. Executed transactions persist their changes
    for subsequent steps, including reverting transactions that still consume nonce and gas.
 3. **Avoid tracing by default** – lightweight sequence paths use plain EVM execution. Trace
    helpers allocate inspectors only when call traces or struct logs are requested.
@@ -24,7 +24,7 @@ the same fork loading behavior behind one API.
 
 | Helper | Returns | Description | Typical Usage |
 | --- | --- | --- | --- |
-| `TxSimulator::simulation_session*` | `SimulationSession` | Mixed signed/unsigned session pinned to a canonical or live-overlay fork. | Any arbitrary tx sequence with one warm state. |
+| `TxSimulator::simulation_session*` | `SimulationSession` | Mixed signed/unsigned session pinned to a canonical fork or tracked live state. | Any arbitrary tx sequence with one warm state. |
 | `TxSimulator::start_simulation_chain(at_block?)` | `UnsignedTxChainSimulation` | Interactive unsigned chain pinned to an optional block with automatic header/state loading. | Build stateful scenarios step-by-step (buy → approve → sell). |
 | `UnsignedTxChainSimulation::step(unsigned)` | `SimulationResult` | Executes an unsigned tx, persists state, auto-manages nonces. | Iterative workflows where you inspect each result. |
 | `UnsignedTxChainSimulation::step_with_trace(unsigned)` | `FullSimulationResult` | Same as `step` but returns call tree + `struct_logs`. | Debugging multi-step flows or feeding tx_processor. |

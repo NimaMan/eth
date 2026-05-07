@@ -13,7 +13,7 @@ What This Module Provides
 - Mixed simulation sessions: `SimulationSession` keeps one warm fork for arbitrary signed/unsigned sequences, balance/nonce overrides, and read-only calls.
 - Block replay sessions: `BlockReplaySession` pins replay options for trace, profile, and execute-only lower-bound runs.
 - Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
-- Live overlays: `live::LiveTxSimulator` prefers Redis chain-state overlays written by the live block processor when MDBX is behind the live head.
+- Live state: `live::LiveTxSimulator` uses MDBX when it is caught up, otherwise the state tracked by the live block processor.
 
 How This Compares To Reth
 - Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and fuses inspectors across block tracing.
@@ -39,14 +39,14 @@ Key Building Blocks Here
 - Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
 - Live simulator: rust/tx_simulator/src/live/simulator.rs:1
-  - Selects the latest exact Redis state overlay first, then falls back to persisted MDBX.
+  - Selects persisted MDBX when caught up, otherwise tracked live state.
 - Trace decoding helpers: rust/tx_simulator/src/simulation_revert_decoder.rs:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
 - Fees and gas: For signed txs we use tx‑provided gas and fees; for unsigned we allow EIP‑1559 or legacy fee fields and can derive safe defaults with base fee when needed.
 - Trace format: Exported via geth builders; shape is intended to match `debug_*` RPC traces (including `withLog` when enabled).
-- Live state: For blocks ahead of persisted MDBX, live APIs require an exact Redis chain-state overlay from the live block processor.
+- Live state: For blocks ahead of persisted MDBX, live APIs require tracked live state from the live block processor.
 
 Typical Uses
 - Replace `debug_traceCall`/`debug_traceBlockByNumber` with local, zero‑RPC equivalents.
