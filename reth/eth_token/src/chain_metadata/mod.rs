@@ -4,7 +4,7 @@ mod reth;
 mod static_provider;
 mod types;
 
-pub use reth::{HistoricalRethChainMetadataProvider, LiveRethChainMetadataProvider};
+pub use reth::{LiveRethChainMetadataProvider, RethChainMetadataProvider};
 pub use static_provider::{
     NoopUniswapV2PoolMetadataProvider, StaticTokenMetadataProvider,
     StaticUniswapV2PoolMetadataProvider,

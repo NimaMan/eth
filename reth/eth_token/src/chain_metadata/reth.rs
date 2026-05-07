@@ -14,50 +14,50 @@ use super::types::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RethMetadataMode {
-    Historical,
+    Regular,
     Live,
 }
 
 impl RethMetadataMode {
     fn token_metadata_block(self, lookup: &TokenMetadataLookup) -> u64 {
         match self {
-            // Historical indexing reads the post-block state for same-block
+            // Regular indexing reads the post-block state for same-block
             // deployments, avoiding live Redis pending replay entirely.
-            Self::Historical => lookup.block_number,
+            Self::Regular => lookup.block_number,
             Self::Live => lookup.metadata_block_number,
         }
     }
 
     fn pending_tx_hashes(self, lookup: &TokenMetadataLookup) -> Option<Vec<B256>> {
         match self {
-            Self::Historical => None,
+            Self::Regular => None,
             Self::Live => Some(lookup.pending_tx_hashes.clone()),
         }
     }
 }
 
-pub struct HistoricalRethChainMetadataProvider<'a> {
+pub struct RethChainMetadataProvider<'a> {
     provider: &'a RethQueryProvider,
 }
 
-impl<'a> HistoricalRethChainMetadataProvider<'a> {
+impl<'a> RethChainMetadataProvider<'a> {
     pub fn new(provider: &'a RethQueryProvider) -> Self {
         Self { provider }
     }
 }
 
-impl TokenMetadataProvider for HistoricalRethChainMetadataProvider<'_> {
+impl TokenMetadataProvider for RethChainMetadataProvider<'_> {
     fn token_metadata<'a>(
         &'a self,
         lookup: &'a TokenMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<ERC20TokenMetadata>>> + 'a>> {
         Box::pin(async move {
-            token_metadata_with_mode(self.provider, lookup, RethMetadataMode::Historical).await
+            token_metadata_with_mode(self.provider, lookup, RethMetadataMode::Regular).await
         })
     }
 }
 
-impl UniswapV2PoolMetadataProvider for HistoricalRethChainMetadataProvider<'_> {
+impl UniswapV2PoolMetadataProvider for RethChainMetadataProvider<'_> {
     fn uniswap_v2_pool_metadata<'a>(
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,
@@ -171,17 +171,14 @@ mod tests {
     }
 
     #[test]
-    fn historical_mode_uses_post_block_state_without_pending_replay() {
+    fn regular_mode_uses_post_block_state_without_pending_replay() {
         let lookup = lookup();
 
         assert_eq!(
-            RethMetadataMode::Historical.token_metadata_block(&lookup),
+            RethMetadataMode::Regular.token_metadata_block(&lookup),
             lookup.block_number
         );
-        assert_eq!(
-            RethMetadataMode::Historical.pending_tx_hashes(&lookup),
-            None
-        );
+        assert_eq!(RethMetadataMode::Regular.pending_tx_hashes(&lookup), None);
     }
 
     #[test]

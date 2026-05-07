@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use eth_token::chain_metadata::HistoricalRethChainMetadataProvider;
+use eth_token::chain_metadata::RethChainMetadataProvider;
 use eth_token::manager::BlockTokenProcessor;
 use eth_token_server::processed_block_cache::{
     TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore,
@@ -16,7 +16,7 @@ async fn main() -> eyre::Result<()> {
     let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
     let processor = BlockProcessor::new(provider.clone());
     let store = TokenProcessedBlockCacheStore::open(&args.cache_dir)?;
-    let discovery_provider = HistoricalRethChainMetadataProvider::new(provider.as_ref());
+    let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut full_token_processor = BlockTokenProcessor::new(args.history_limit);
     let mut cached_token_processor = BlockTokenProcessor::new(args.history_limit);
