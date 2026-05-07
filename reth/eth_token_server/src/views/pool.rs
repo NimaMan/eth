@@ -15,6 +15,21 @@ pub struct PoolListResponse {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct PriceRatioPoint {
+    pub block_number: u64,
+    pub price: f64,
+    pub ratio: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LiquidityPoint {
+    pub block_number: u64,
+    pub liquidity: f64,
+    pub denom_reserve: f64,
+    pub token_reserve: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct PoolView {
     pub token_address: String,
     pub token_symbol: String,
@@ -28,6 +43,8 @@ pub struct PoolView {
     pub price: f64,
     pub initial_price: Option<f64>,
     pub price_ratio_to_initial: Option<f64>,
+    pub price_ratio_history: Vec<PriceRatioPoint>,
+    pub liquidity_history: Vec<LiquidityPoint>,
     pub total_liquidity: f64,
     pub token_total_supply_scaled: Option<f64>,
     pub fully_diluted_value_denom: Option<f64>,
@@ -75,6 +92,8 @@ impl PoolView {
             total_supply.and_then(|supply| pool.base.pooled_token_supply_ratio(supply));
         let liquidity_to_fdv_ratio =
             total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply));
+        let price_ratio_history = price_ratio_history(&pool.base.price_history);
+        let liquidity_history = liquidity_history(pool);
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -88,6 +107,8 @@ impl PoolView {
             price: pool.base.price(),
             initial_price: pool.base.initial_price(),
             price_ratio_to_initial: pool.base.price_ratio_to_initial(),
+            price_ratio_history,
+            liquidity_history,
             total_liquidity: pool.base.state.total_liquidity,
             token_total_supply_scaled: total_supply,
             fully_diluted_value_denom,
@@ -119,6 +140,57 @@ impl PoolView {
             lp_approval_count: pool.lp_tracker.approval_events.len(),
         }
     }
+}
+
+fn liquidity_history(pool: &UniswapV2Pool) -> Vec<LiquidityPoint> {
+    pool.base
+        .reserve_tracker
+        .reserve_history
+        .iter()
+        .filter_map(|snapshot| {
+            if !snapshot.denom_reserve.is_finite() || !snapshot.token_reserve.is_finite() {
+                return None;
+            }
+            let liquidity = if snapshot.denom_reserve >= pool.base.config.denom_threshold {
+                snapshot.denom_reserve
+            } else {
+                0.0
+            };
+            Some(LiquidityPoint {
+                block_number: snapshot.block_number,
+                liquidity,
+                denom_reserve: snapshot.denom_reserve,
+                token_reserve: snapshot.token_reserve,
+            })
+        })
+        .collect()
+}
+
+fn price_ratio_history(history: &[(u64, f64)]) -> Vec<PriceRatioPoint> {
+    let Some((_, initial_price)) = history
+        .iter()
+        .find(|(_, price)| price.is_finite() && *price > 0.0)
+    else {
+        return Vec::new();
+    };
+
+    history
+        .iter()
+        .filter_map(|(block_number, price)| {
+            if !price.is_finite() || *price <= 0.0 {
+                return None;
+            }
+            let ratio = price / initial_price;
+            if !ratio.is_finite() {
+                return None;
+            }
+            Some(PriceRatioPoint {
+                block_number: *block_number,
+                price: *price,
+                ratio,
+            })
+        })
+        .collect()
 }
 
 fn ratio_percent(value: Option<f64>) -> Option<f64> {
