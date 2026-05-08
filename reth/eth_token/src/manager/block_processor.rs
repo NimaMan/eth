@@ -11,13 +11,16 @@ use crate::chain_metadata::{
     TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider,
     UniswapV2PoolMetadataProvider,
 };
+use crate::network::{
+    graph::RawTokenNetworkGraph, ingest::extract_token_network_updates, model::TokenNetworkId,
+};
 
 use super::replay_context::BlockReplayContext;
 use super::update_router::V2TradingSimulation;
 use super::ProcessedTokenUpdateRouter;
 use super::{
     address_string, hash_string, normalize_address, LiveTokenRetentionPolicy, TokenRegistry,
-    TokenStateUpdateReport, TrackedTokenIndex, TrackedTokenStatus,
+    TokenStateUpdateReport, TrackedTokenIndex, TrackedTokenIndexUpdate, TrackedTokenStatus,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
@@ -52,6 +55,8 @@ pub struct BlockTokenProcessor {
     pub registry: TokenRegistry,
     pub update_router: ProcessedTokenUpdateRouter,
     pub token_index: TrackedTokenIndex,
+    #[serde(default)]
+    pub network_graphs: BTreeMap<String, RawTokenNetworkGraph>,
     pub processed_blocks: BTreeMap<u64, bool>,
     pub latest_processed_block: Option<u64>,
     pub start_block: Option<u64>,
@@ -77,6 +82,7 @@ impl BlockTokenProcessor {
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
             token_index: token_index_with_limit(token_index_limit),
+            network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
@@ -101,6 +107,7 @@ impl BlockTokenProcessor {
             registry,
             update_router,
             token_index,
+            network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
@@ -217,11 +224,18 @@ impl BlockTokenProcessor {
             {
                 Ok(reports) => {
                     processed_transaction_count += 1;
+                    let mut transaction_token_addresses = BTreeSet::new();
                     for report in reports {
-                        updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address, block_number);
+                        let token_address = report.token_address.clone();
+                        transaction_token_addresses.insert(token_address.clone());
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
                         token_updates.push(report);
                     }
+                    self.apply_network_updates_for_transaction(
+                        &tx.processed,
+                        transaction_token_addresses,
+                    );
                 }
                 Err(error) => {
                     self.last_block_failure_count += 1;
@@ -401,11 +415,18 @@ impl BlockTokenProcessor {
             {
                 Ok(reports) => {
                     processed_transaction_count += 1;
+                    let mut transaction_token_addresses = BTreeSet::new();
                     for report in reports {
-                        updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address, block_number);
+                        let token_address = report.token_address.clone();
+                        transaction_token_addresses.insert(token_address.clone());
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
                         token_updates.push(report);
                     }
+                    self.apply_network_updates_for_transaction(
+                        &tx.processed,
+                        transaction_token_addresses,
+                    );
                 }
                 Err(error) => {
                     self.last_block_failure_count += 1;
@@ -643,11 +664,18 @@ impl BlockTokenProcessor {
             {
                 Ok(reports) => {
                     processed_transaction_count += 1;
+                    let mut transaction_token_addresses = BTreeSet::new();
                     for report in reports {
-                        updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address, block_number);
+                        let token_address = report.token_address.clone();
+                        transaction_token_addresses.insert(token_address.clone());
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
                         token_updates.push(report);
                     }
+                    self.apply_network_updates_for_transaction(
+                        &tx.processed,
+                        transaction_token_addresses,
+                    );
                 }
                 Err(error) => {
                     self.last_block_failure_count += 1;
@@ -762,8 +790,7 @@ impl BlockTokenProcessor {
                     tx.nonce,
                 );
             }
-            self.token_index.index_registry_token(
-                &mut self.registry,
+            self.index_registry_token(
                 &token_address,
                 TrackedTokenStatus::Creation,
                 tx.block_number,
@@ -784,14 +811,99 @@ impl BlockTokenProcessor {
                 TrackedTokenStatus::Creation
             }
         }) else {
+            self.network_graphs
+                .remove(&normalize_address(token_address));
             return;
         };
-        self.token_index.index_registry_token(
+        self.index_registry_token(token_address, status, current_block);
+    }
+
+    fn index_registry_token(
+        &mut self,
+        token_address: &str,
+        status: TrackedTokenStatus,
+        current_block: u64,
+    ) -> TrackedTokenIndexUpdate {
+        let update = self.token_index.index_registry_token(
             &mut self.registry,
             token_address,
             status,
             current_block,
         );
+        self.cleanup_network_graphs_for_index_update(&update);
+        update
+    }
+
+    fn apply_network_updates_for_transaction(
+        &mut self,
+        tx: &ProcessedTransaction,
+        token_addresses: BTreeSet<String>,
+    ) {
+        for token_address in token_addresses {
+            let Some((token_address, decimals)) = self
+                .registry
+                .token(&token_address)
+                .map(|token| (normalize_address(&token.contract_address), token.decimals))
+            else {
+                self.network_graphs
+                    .remove(&normalize_address(&token_address));
+                continue;
+            };
+
+            let batch = extract_token_network_updates(tx, &token_address, decimals);
+            if batch.is_empty() {
+                continue;
+            }
+            self.network_graph_mut(&token_address).apply_batch(batch);
+        }
+    }
+
+    fn network_graph_mut(&mut self, token_address: &str) -> &mut RawTokenNetworkGraph {
+        let address = normalize_address(token_address);
+        self.network_graphs
+            .entry(address.clone())
+            .or_insert_with(|| {
+                RawTokenNetworkGraph::new(TokenNetworkId::new(None, address.as_str()))
+            })
+    }
+
+    fn cleanup_network_graphs_for_index_update(&mut self, update: &TrackedTokenIndexUpdate) {
+        if update.removed_by_retention {
+            self.network_graphs
+                .remove(&normalize_address(&update.token_address));
+        }
+        if let Some(evicted_token_address) = &update.evicted_token_address {
+            self.network_graphs
+                .remove(&normalize_address(evicted_token_address));
+        }
+    }
+
+    pub fn apply_retention_policy(
+        &mut self,
+        policy: &LiveTokenRetentionPolicy,
+        current_block: u64,
+    ) -> super::LiveTokenRetentionReport {
+        let report =
+            self.token_index
+                .apply_retention_policy(&mut self.registry, policy, current_block);
+        self.cleanup_network_graphs_to_registry();
+        report
+    }
+
+    pub fn apply_index_retention_policy(
+        &mut self,
+        current_block: u64,
+    ) -> Option<super::LiveTokenRetentionReport> {
+        let report = self
+            .token_index
+            .apply_live_retention_policy(&mut self.registry, current_block)?;
+        self.cleanup_network_graphs_to_registry();
+        Some(report)
+    }
+
+    fn cleanup_network_graphs_to_registry(&mut self) {
+        self.network_graphs
+            .retain(|token_address, _| self.registry.token(token_address).is_some());
     }
 
     fn live_mode_historical_simulator_report(
@@ -868,8 +980,14 @@ fn pending_metadata_tx_hashes(
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::b256;
+    use alloy_primitives::{address, b256, U256};
     use reth_chain_query::provider::BlockHeader;
+    use tx_processor::tx_processor::data_models::ERC20TransferEvent;
+    use tx_processor::ProcessedTransaction;
+
+    use crate::erc20::ERC20TokenMetadata;
+    use crate::manager::TrackedTokenStatus;
+    use crate::network::{graph::RawTokenNetworkGraph, model::TokenNetworkId};
 
     use super::{BlockTokenProcessor, ProcessedBlock};
 
@@ -897,6 +1015,35 @@ mod tests {
         }
     }
 
+    fn token_metadata(address: &str) -> ERC20TokenMetadata {
+        ERC20TokenMetadata::new(address, "Test", "TST", 6, "1000000000000")
+    }
+
+    fn transfer_tx() -> ProcessedTransaction {
+        let token = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let mut tx = ProcessedTransaction::new(
+            b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            100,
+            1_700,
+            3,
+            address!("1111111111111111111111111111111111111111"),
+            None,
+            U256::ZERO,
+            true,
+            7,
+            2,
+            Vec::new(),
+        );
+        tx.erc20_transfers.push(ERC20TransferEvent {
+            token_address: token,
+            from_address: address!("1111111111111111111111111111111111111111"),
+            to_address: address!("2222222222222222222222222222222222222222"),
+            amount: U256::from(1_500_000_u64),
+            log_index: 9,
+        });
+        tx
+    }
+
     #[test]
     fn live_mode_historical_simulator_report_fails_fast() {
         let mut processor = BlockTokenProcessor::new(100);
@@ -912,5 +1059,47 @@ mod tests {
         assert!(report.transaction_errors[0]
             .message
             .contains("use LiveBlockTokenProcessor with LivePoolBuySellSimulator"));
+    }
+
+    #[test]
+    fn network_updates_persist_for_updated_token_transaction() {
+        let token_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut processor = BlockTokenProcessor::new(100);
+        processor.registry.add_token(token_metadata(token_address));
+
+        let mut token_addresses = std::collections::BTreeSet::new();
+        token_addresses.insert(token_address.to_string());
+        processor.apply_network_updates_for_transaction(&transfer_tx(), token_addresses);
+
+        let graph = processor
+            .network_graphs
+            .get(token_address)
+            .expect("graph is stored");
+        assert_eq!(graph.applied_batches, 1);
+        assert_eq!(graph.address_activity.len(), 2);
+        assert!(graph
+            .edges
+            .values()
+            .any(|edge| { edge.kind == crate::network::model::NetworkEdgeKind::TokenTransfer }));
+    }
+
+    #[test]
+    fn token_index_eviction_removes_network_graph() {
+        let first = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let second = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut processor = BlockTokenProcessor::new_with_token_index_limit(100, Some(1));
+        processor.registry.add_token(token_metadata(first));
+        processor.registry.add_token(token_metadata(second));
+        processor.network_graphs.insert(
+            first.to_string(),
+            RawTokenNetworkGraph::new(TokenNetworkId::new(None, first)),
+        );
+
+        processor.index_registry_token(first, TrackedTokenStatus::Creation, 100);
+        processor.index_registry_token(second, TrackedTokenStatus::Creation, 101);
+
+        assert!(!processor.network_graphs.contains_key(first));
+        assert!(processor.registry.token(first).is_none());
+        assert!(processor.registry.token(second).is_some());
     }
 }

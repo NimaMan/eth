@@ -3,8 +3,8 @@ use eth_token::manager::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, Tra
 use serde::Serialize;
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
-use crate::views::pool::PoolView;
 use crate::views::token::TokenView;
+use crate::views::{network::TokenNetworkView, pool::PoolView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LiveStatusResponse {
@@ -26,6 +26,7 @@ pub struct LiveTokenDetailResponse {
     pub summary: TokenSummary,
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
+    pub network: TokenNetworkView,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,6 +83,14 @@ pub async fn token_detail(
     let address = normalize_address(token_address);
     let token = state.processor.registry().tokens.get(&address)?;
     let index_status = index_status(&state, &address);
+    let network = TokenNetworkView::from_graph(
+        token,
+        state
+            .processor
+            .block_processor()
+            .network_graphs
+            .get(&address),
+    );
     let mut pools = token
         .v2_pools
         .values()
@@ -95,6 +104,7 @@ pub async fn token_detail(
         summary: token.get_token_summary(),
         index_status,
         pools,
+        network,
     })
 }
 

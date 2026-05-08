@@ -55,11 +55,8 @@ impl LiveBlockTokenProcessor {
         policy: &LiveTokenRetentionPolicy,
         current_block: u64,
     ) -> LiveTokenRetentionReport {
-        self.block_processor.token_index.apply_retention_policy(
-            &mut self.block_processor.registry,
-            policy,
-            current_block,
-        )
+        self.block_processor
+            .apply_retention_policy(policy, current_block)
     }
 
     pub fn apply_index_retention_policy(
@@ -67,8 +64,7 @@ impl LiveBlockTokenProcessor {
         current_block: u64,
     ) -> Option<LiveTokenRetentionReport> {
         self.block_processor
-            .token_index
-            .apply_live_retention_policy(&mut self.block_processor.registry, current_block)
+            .apply_index_retention_policy(current_block)
     }
 
     pub async fn process_block_live(

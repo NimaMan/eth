@@ -3,7 +3,7 @@ use eth_token::manager::TrackedTokenStatus;
 use serde::Serialize;
 
 use crate::range_indexer::{RangeIndexJob, RangeIndexState};
-use crate::views::pool::PoolView;
+use crate::views::{network::TokenNetworkView, pool::PoolView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenListResponse {
@@ -45,6 +45,7 @@ pub struct TokenDetailResponse {
     pub summary: TokenSummary,
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
+    pub network: TokenNetworkView,
 }
 
 impl TokenView {
@@ -105,6 +106,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let address = normalize_address(token_address);
     let token = state.processor.registry.tokens.get(&address)?;
     let index_status = index_status(&state, &address);
+    let network = TokenNetworkView::from_graph(token, state.processor.network_graphs.get(&address));
     let mut pools = token
         .v2_pools
         .values()
@@ -118,6 +120,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
         summary: token.get_token_summary(),
         index_status,
         pools,
+        network,
     })
 }
 
