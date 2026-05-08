@@ -356,9 +356,6 @@ impl ERC20Token {
     }
 
     pub fn trading_enabled(&self) -> bool {
-        if self.status_manager.trading_enabled {
-            return true;
-        }
         self.v2_pools
             .values()
             .any(|pool| pool.base.trading_enabled())
@@ -432,11 +429,23 @@ impl ERC20Token {
     }
 
     pub fn trading_enabled_block(&self) -> Option<u64> {
-        self.status_manager.trading_enabled_block
+        self.v2_pools
+            .values()
+            .filter_map(|pool| pool.base.can_buy_block)
+            .min()
     }
 
     pub fn trading_enabled_tx(&self) -> Option<String> {
-        self.status_manager.trading_enabled_tx.clone()
+        self.v2_pools
+            .values()
+            .filter_map(|pool| {
+                pool.base
+                    .can_buy_block
+                    .zip(pool.base.can_buy_tx.as_ref())
+                    .map(|(block, tx)| (block, tx))
+            })
+            .min_by_key(|(block, _)| *block)
+            .map(|(_, tx)| tx.clone())
     }
 
     pub fn all_pool_reserves(&self) -> HashMap<String, Value> {
@@ -690,6 +699,45 @@ mod tests {
         assert_eq!(
             token.get_token_summary().protocols,
             vec![UNISWAP_V2_PROTOCOL]
+        );
+    }
+
+    #[test]
+    fn token_trading_enabled_is_pool_derived() {
+        let mut token = token();
+        token.status_manager.trading_enabled = true;
+        token.status_manager.trading_enabled_block = Some(100);
+        token.refresh_lifecycle_status();
+
+        assert!(!token.trading_enabled());
+        assert_eq!(token.trading_enabled_block(), None);
+        assert_eq!(token.trading_enabled_tx(), None);
+        assert_ne!(
+            token.token_life_cycle_status,
+            Some(TokenLifecycleState::TradingEnabled)
+        );
+
+        {
+            let pool = token.create_uniswap_v2_pool(
+                "0x0000000000000000000000000000000000000002",
+                "0x0000000000000000000000000000000000000003",
+                BasePoolConfig {
+                    denom_decimals: Some(18),
+                    token1_is_denom: Some(true),
+                    ..BasePoolConfig::new(18)
+                },
+                std::iter::empty::<&str>(),
+            );
+            pool.base.mark_can_buy_from_event(200, "0xBUY", 1_700);
+        }
+        token.refresh_lifecycle_status();
+
+        assert!(token.trading_enabled());
+        assert_eq!(token.trading_enabled_block(), Some(200));
+        assert_eq!(token.trading_enabled_tx(), Some("0xBUY".to_string()));
+        assert_eq!(
+            token.token_life_cycle_status,
+            Some(TokenLifecycleState::TradingEnabled)
         );
     }
 
