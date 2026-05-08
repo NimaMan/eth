@@ -10,7 +10,8 @@ pub struct TransactionFees {
     pub tx_fee: U256, // Total fee in wei
 
     // EIP-1559 fields
-    pub protocol_type: String,          // "legacy", "eip1559", "eip2930"
+    #[serde(default)]
+    pub protocol_type: String, // "legacy", "eip1559", "eip2930"
     pub max_fee_per_gas: Option<U256>,  // User's max willingness
     pub max_priority_fee: Option<U256>, // User's max tip
     pub max_fee_per_blob_gas: Option<U256>,

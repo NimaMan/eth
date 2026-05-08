@@ -14,7 +14,7 @@ use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
-    load_processed_block, BlockProcessor, LivePoolBuySellSimulator,
+    load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
     LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockDiskCacheStore,
     ProcessedBlockProviderRetry,
 };
@@ -305,6 +305,28 @@ impl LiveTokenRuntime {
                 return;
             }
         };
+        let live_processed_block_provider = match LiveProcessedBlockProvider::new(
+            &self.inner.config.redis_url,
+            tx_processor.clone(),
+            self.inner.provider.clone(),
+            self.inner.processed_block_disk_cache.clone(),
+            ProcessedBlockProviderRetry {
+                attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
+                delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
+            },
+        ) {
+            Ok(provider) => provider,
+            Err(error) => {
+                self.mark_failed(LiveTokenError {
+                    block_number: None,
+                    tx_index: None,
+                    tx_hash: None,
+                    message: error.to_string(),
+                })
+                .await;
+                return;
+            }
+        };
 
         let mut last_stream_id = "$".to_string();
         loop {
@@ -316,7 +338,7 @@ impl LiveTokenRuntime {
             if let Err(error) = self
                 .catch_up_to_latest(
                     &stream,
-                    &tx_processor,
+                    &live_processed_block_provider,
                     &live_discovery_provider,
                     &pool_simulator,
                 )
@@ -359,7 +381,7 @@ impl LiveTokenRuntime {
             if let Err(error) = self
                 .catch_up_to_latest(
                     &stream,
-                    &tx_processor,
+                    &live_processed_block_provider,
                     &live_discovery_provider,
                     &pool_simulator,
                 )
@@ -380,7 +402,7 @@ impl LiveTokenRuntime {
     async fn catch_up_to_latest(
         &self,
         stream: &RedisBlockStream,
-        tx_processor: &BlockProcessor,
+        live_processed_block_provider: &LiveProcessedBlockProvider,
         discovery_provider: &LiveRethChainMetadataProvider<'_>,
         pool_simulator: &LivePoolBuySellSimulator,
     ) -> Result<()> {
@@ -401,11 +423,7 @@ impl LiveTokenRuntime {
             let applied = self
                 .apply_live_tail_block(
                     block_number,
-                    ProcessedBlockProviderRetry {
-                        attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
-                        delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
-                    },
-                    tx_processor,
+                    live_processed_block_provider,
                     discovery_provider,
                     pool_simulator,
                 )
@@ -424,19 +442,20 @@ impl LiveTokenRuntime {
     async fn apply_live_tail_block<P>(
         &self,
         block_number: u64,
-        retry: ProcessedBlockProviderRetry,
-        tx_processor: &BlockProcessor,
+        live_processed_block_provider: &LiveProcessedBlockProvider,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
     ) -> Result<bool>
     where
         P: TokenDiscoveryProvider,
     {
-        self.apply_block(
+        let loaded = live_processed_block_provider
+            .load_block(block_number)
+            .await?;
+        self.apply_loaded_block(
             block_number,
             true,
-            retry,
-            tx_processor,
+            loaded,
             discovery_provider,
             pool_simulator,
         )

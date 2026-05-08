@@ -37,12 +37,13 @@ pub use live::{
 pub use processed_block_provider::{
     load_cached_processed_block_with_retry, load_processed_block, load_processed_block_range,
     prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
-    CompactProcessedTransaction, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
-    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
-    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
-    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
-    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics,
-    ProcessedBlockProviderRetry, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    CompactProcessedTransaction, LiveProcessedBlockProvider, LoadedProcessedBlock,
+    LoadedProcessedBlockWithMetrics, ProcessedBlockDiskCacheBlockRange,
+    ProcessedBlockDiskCacheChainCoverage, ProcessedBlockDiskCacheCoverage,
+    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
+    ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
+    ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
+    DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use processed_tx_provider::{
     processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,

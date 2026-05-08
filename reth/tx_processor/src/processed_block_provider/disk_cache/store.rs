@@ -5,11 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     processed_block_provider::CompactProcessedTransaction, processed_block_trace_config_hash,
-    ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction,
+    ProcessedBlock, ProcessedBlockTransactions,
 };
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::B256;
 use eyre::{bail, Result};
-use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
+use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 
 use super::reader::ProcessedBlockDiskCacheReader;
@@ -523,53 +523,7 @@ fn decode_cache_entry(bytes: &[u8]) -> Result<ProcessedBlockDiskCacheEntry> {
 
 impl ProcessedBlockDiskCacheTransaction {
     fn into_block_transaction(self) -> ProcessedBlockTransactions {
-        let processed = self.processed.into_processed();
-        let metadata = metadata_from_processed_transaction(&processed);
-        let receipt = receipt_from_processed_transaction(&processed);
-        ProcessedBlockTransactions {
-            metadata,
-            receipt,
-            processed,
-            trace: None,
-            processing_error: self.processing_error,
-        }
-    }
-}
-
-fn metadata_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionData {
-    TransactionData {
-        hash: tx.hash,
-        block_number: tx.block_number,
-        block_timestamp: tx.block_timestamp,
-        tx_index: tx.tx_index,
-        tx_number: 0,
-        from: tx.from_address,
-        to: tx.to_address,
-        value: tx.value,
-        input: Bytes::from(tx.input.clone()),
-        gas_price: U256::ZERO,
-        gas_limit: tx.fees.gas_limit,
-        nonce: tx.nonce,
-        transaction_type: tx.raw_tx_type,
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-        access_list: Vec::new(),
-        blob_versioned_hashes: Vec::new(),
-        max_fee_per_blob_gas: None,
-        signed_authorizations: Vec::new(),
-    }
-}
-
-fn receipt_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionReceipt {
-    TransactionReceipt {
-        tx_hash: tx.hash,
-        status: tx.status,
-        gas_used: 0,
-        logs: Vec::new(),
-        cumulative_gas_used: 0,
-        effective_gas_price: U256::ZERO,
-        contract_address: tx.contract_address,
-        blob_gas_used: None,
+        self.processed.into_block_transaction(self.processing_error)
     }
 }
 
@@ -583,9 +537,10 @@ fn monotonic_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Address;
+    use alloy_primitives::{Address, U256};
 
     use crate::tx_processor::data_models::{ProcessedAccessListItem, TransactionFees};
+    use crate::ProcessedTransaction;
 
     #[test]
     fn round_trips_replay_fields() {
@@ -639,13 +594,9 @@ mod tests {
                 block_access_list_hash: None,
                 slot_number: None,
             },
-            transactions: vec![ProcessedBlockTransactions {
-                metadata: metadata_from_processed_transaction(&tx),
-                receipt: receipt_from_processed_transaction(&tx),
-                processed: tx,
-                trace: None,
-                processing_error: None,
-            }],
+            transactions: vec![
+                CompactProcessedTransaction::from_processed(&tx).into_block_transaction(None)
+            ],
         };
 
         let write = store

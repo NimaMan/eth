@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
+use alloy_primitives::Bytes;
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
+
+use reth_chain_query::provider::{TransactionData, TransactionReceipt};
 
 use crate::tx_processor::data_models::{
     AccessControlRoleGrantedEvent, AccessControlRoleRevokedEvent, ContractCreationEvent,
@@ -11,6 +14,7 @@ use crate::tx_processor::data_models::{
     UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent, UniswapV2SwapEvent,
     UniswapV2SyncEvent,
 };
+use crate::ProcessedBlockTransactions;
 
 /// Compact processed-transaction representation for block provider storage.
 ///
@@ -140,6 +144,28 @@ impl CompactProcessedTransaction {
 
         tx
     }
+
+    pub(crate) fn into_block_transaction(
+        self,
+        processing_error: Option<String>,
+    ) -> ProcessedBlockTransactions {
+        block_transaction_from_processed(self.into_processed(), processing_error)
+    }
+}
+
+pub(crate) fn block_transaction_from_processed(
+    processed: ProcessedTransaction,
+    processing_error: Option<String>,
+) -> ProcessedBlockTransactions {
+    let metadata = metadata_from_processed_transaction(&processed);
+    let receipt = receipt_from_processed_transaction(&processed);
+    ProcessedBlockTransactions {
+        metadata,
+        receipt,
+        processed,
+        trace: None,
+        processing_error,
+    }
 }
 
 fn option_vec<T: Clone>(items: &[T]) -> Option<Vec<T>> {
@@ -168,5 +194,42 @@ fn option_nonzero_u256(value: U256) -> Option<U256> {
         None
     } else {
         Some(value)
+    }
+}
+
+fn metadata_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionData {
+    TransactionData {
+        hash: tx.hash,
+        block_number: tx.block_number,
+        block_timestamp: tx.block_timestamp,
+        tx_index: tx.tx_index,
+        tx_number: 0,
+        from: tx.from_address,
+        to: tx.to_address,
+        value: tx.value,
+        input: Bytes::from(tx.input.clone()),
+        gas_price: U256::ZERO,
+        gas_limit: tx.fees.gas_limit,
+        nonce: tx.nonce,
+        transaction_type: tx.raw_tx_type,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        access_list: Vec::new(),
+        blob_versioned_hashes: Vec::new(),
+        max_fee_per_blob_gas: None,
+        signed_authorizations: Vec::new(),
+    }
+}
+
+fn receipt_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionReceipt {
+    TransactionReceipt {
+        tx_hash: tx.hash,
+        status: tx.status,
+        gas_used: 0,
+        logs: Vec::new(),
+        cumulative_gas_used: 0,
+        effective_gas_price: U256::ZERO,
+        contract_address: tx.contract_address,
+        blob_gas_used: None,
     }
 }
