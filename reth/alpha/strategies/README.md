@@ -29,13 +29,45 @@ The Python module had these useful starting points:
 - `WalletTrackerStrategy`: wallet-specific limits and active-position tracking.
 - `BuyScamStrategy`: useful as a risk/behavior experiment, but should be treated carefully.
 
-In Rust, each should return intent instead of mutating position state:
+## Python Strategy Audit
+
+The legacy Python strategies lived in the removed Python portfolio manager's `strategy/` package.
+They all implemented `BaseStrategy.analyze_token(token, position)` and returned a `TradeSignal`.
+The Python engine then mutated `TokenPosition` state from that signal.
+
+That shape is useful for migration, but it should not be copied directly:
+
+| Python strategy | Entry rule | Exit rule | Rust port target |
+| --- | --- | --- | --- |
+| `MarketTracker` | buy when token lifecycle becomes `TRADING_ENABLED` | never sell; hold for analytics | benchmark strategy that submits small paper buys and keeps positions open |
+| `BuyAll` | buy every trading-enabled token | sell when ROI reaches `profit_target_x`, default `7.0` | simple lifecycle strategy for engine/backtest validation |
+| `BuyScamStrategy` | buy when `latest_token_assessment.is_scam` is true | sell when ROI reaches `profit_target_x`, default `7.0` | controlled research strategy only; never enable for live execution without explicit risk policy |
+| `WalletTrackerStrategy` | buy healthy trading-enabled tokens while below `max_positions` and not already active | sell on profit target, stop loss, or token scam flag | wallet-scoped strategy using engine portfolio state, not process-local booleans |
+
+Python state handlers were:
+
+```text
+INIT
+  -> SUBMIT_BUY
+BUY_SUBMITTED
+  -> CONFIRM_BUY on the next token update
+BUY_CONFIRMED
+  -> SUBMIT_SELL when strategy exit rule is true
+SELL_SUBMITTED
+  -> CONFIRM_SELL on the next token update
+```
+
+Rust should not model `CONFIRM_BUY` or `CONFIRM_SELL` as strategy decisions. A strategy only says what it wants. The engine and execution adapter produce the report that changes position state:
 
 ```text
 Hold
-SubmitBuy(OrderIntent)
-SubmitSell(OrderIntent)
-Cancel(OrderId)
+SubmitOrder(OrderIntent)
+CancelOrders { ... }
+
+OrderIntent
+  -> ExecutionAdapter
+  -> ExecutionReport
+  -> position/order transition
 ```
 
 ## Strategy Contract
@@ -50,3 +82,35 @@ StrategyDecision
 ```
 
 This avoids the Python problem where strategy, position manager, and signal publisher were tightly coupled.
+
+## Block-Level Decision Semantics
+
+The token runtime operates at block granularity. For a given processed block:
+
+1. Token and pool state are updated from that block.
+2. The strategy sees a market snapshot for that block.
+3. The strategy returns `Hold` or an actionable `StrategyDecision`.
+4. The engine turns an approved decision into an `OrderIntent`.
+5. Backtest or live execution decides the fill and emits `ExecutionReport`.
+
+Strategies must not assume they can observe intra-block ordering unless the market event explicitly provides it. A strategy decision made from block `N` is a decision after observing the block-level state for `N`, not a guaranteed transaction position inside that block.
+
+## Backtest Fill Contract
+
+Backtests should be pessimistic by default. When a strategy decides after a token update for a block, the simulated order should use the worst executable price the strategy could plausibly receive in the eligible block-level fill window:
+
+- For buys, use the most adverse buy price/output available in that block-level model.
+- For sells, use the most adverse sell price/output available in that block-level model.
+- Include the configured gas, fee, slippage, latency, and failed-transaction assumptions in the backtest report.
+- If the replay only has one pool snapshot for the block, mark the fill as block-snapshot based and do not claim exact intra-block execution.
+
+This keeps historical results conservative. It also avoids the old Python behavior where submit and confirm were often inferred from consecutive token updates rather than from an execution report.
+
+## Rust Migration Rules
+
+- Strategy implementations own parameters and lightweight memory only.
+- Portfolio exposure, max-position checks, and wallet balances come from `StrategyContext` and engine state.
+- Token health, scam labels, LP risk, and mempool risk come from `MarketSnapshotRef` and `RiskEvent`.
+- Position state transitions are owned by `eth_alpha_core::position` and applied from `ExecutionReport`.
+- Live and backtest strategy behavior must use the same `Strategy` trait.
+- Research strategies such as `BuyScamStrategy` must be gated so they cannot accidentally route to live execution.
