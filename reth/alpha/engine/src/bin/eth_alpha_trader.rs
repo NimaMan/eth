@@ -187,7 +187,7 @@ async fn main() -> Result<()> {
     info!(
         token_server_url = %args.token_server_url,
         replay_current = args.replay_current,
-        "starting alpha paper trader"
+        "starting alpha trader"
     );
 
     loop {
@@ -263,7 +263,7 @@ async fn main() -> Result<()> {
             info!(
                 pools = seen_pool_blocks.len(),
                 signals = seen_signal_ids.len(),
-                "primed paper trader watermarks"
+                "primed alpha trader watermarks"
             );
         }
         primed = true;
@@ -283,7 +283,7 @@ async fn main() -> Result<()> {
             risk_events,
             reports,
             positions = engine.portfolio().active_position_count(),
-            "paper trader tick"
+            "alpha trader tick"
         );
 
         if args.once {

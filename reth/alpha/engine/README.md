@@ -119,9 +119,9 @@ Backtest and live execution use the same sequence. Backtest swaps in a simulated
 - `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
 - `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
 
-## Paper Trader Binary
+## Trader Binary
 
-`eth_alpha_paper_trader` is the first runnable paper mode inside this crate. It polls the Rust token server, consumes:
+`eth_alpha_trader` is the first runnable alpha runtime inside this crate. It currently runs in paper mode, polls the Rust token server, and consumes:
 
 - `/live/pools` as confirmed market updates.
 - `/mempool/signals?since_days=14` as speculative risk events.
@@ -129,7 +129,7 @@ Backtest and live execution use the same sequence. Backtest swaps in a simulated
 Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:
 
 ```bash
-cargo run -p eth_alpha_engine --bin eth_alpha_paper_trader -- --once
+cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
 ```
 
 Use `--replay-current` for a local smoke test that replays the current token-server snapshot through paper execution.
