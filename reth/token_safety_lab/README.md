@@ -21,6 +21,19 @@ Before deep case work, run a triage pass over the active range-builder output
 and simulator logs. The first artifact should be a candidate ledger, not a fix.
 Use the candidate ledger in `cases/README.md` for the working list.
 
+Use the agent-native range triage tool to turn a completed range run into
+structured candidates:
+
+```text
+token_safety_lab/tools/detectors/range_triage.py \
+  --api http://127.0.0.1:8765 \
+  --run active \
+  --format markdown
+```
+
+The tool is read-only. It inspects the token server run cache and emits
+candidate issues for review; it does not create cases or change token state.
+
 Each candidate row should capture:
 
 - token address and symbol

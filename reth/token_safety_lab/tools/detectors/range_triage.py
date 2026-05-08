@@ -1,0 +1,1196 @@
+#!/usr/bin/env python3
+"""Triage a completed token range run for investigation candidates.
+
+This is intentionally a lab tool, not a production risk engine. It reads the
+token server's in-memory range-run cache through the API and emits structured
+candidate issues for the next investigation step.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import sys
+import textwrap
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field
+from typing import Any, Iterable, Mapping, Sequence
+
+
+DEFAULT_API_BASE = "http://127.0.0.1:8765"
+
+SEVERITY_RANK = {
+    "critical": 5,
+    "high": 4,
+    "medium": 3,
+    "low": 2,
+    "info": 1,
+}
+
+WETH_LIQUIDITY_LOW = 1.0
+WETH_LIQUIDITY_DUST = 0.01
+STABLE_LIQUIDITY_LOW = 1_000.0
+STABLE_LIQUIDITY_DUST = 10.0
+EXTREME_PRICE_RATIO = 1_000.0
+VERY_EXTREME_PRICE_RATIO = 100_000.0
+TINY_SUPPLY_PERCENT = 0.01
+LP_APPROVAL_HIGH_PERCENT = 20.0
+LP_APPROVAL_MEDIUM_PERCENT = 5.0
+LP_HOLDER_CONCENTRATION_HIGH_PERCENT = 90.0
+LP_HOLDER_CONCENTRATION_MEDIUM_PERCENT = 50.0
+
+
+class ApiError(RuntimeError):
+    pass
+
+
+class ApiClient:
+    def __init__(self, base_url: str, timeout_secs: float = 30.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_secs = timeout_secs
+
+    def get(self, path: str) -> dict[str, Any]:
+        url = self.base_url + "/" + path.lstrip("/")
+        request = urllib.request.Request(url, headers={"accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_secs) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            raise ApiError(f"GET {url} failed with HTTP {error.code}: {body}") from error
+        except urllib.error.URLError as error:
+            raise ApiError(f"GET {url} failed: {error}") from error
+
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as error:
+            preview = raw[:240].decode("utf-8", errors="replace")
+            raise ApiError(f"GET {url} returned invalid JSON: {preview}") from error
+
+
+@dataclass
+class IssueCandidate:
+    kind: str
+    severity: str
+    status: str = "new"
+    token_address: str | None = None
+    pool_address: str | None = None
+    protocol: str | None = None
+    symbol: str | None = None
+    range_start: int | None = None
+    range_end: int | None = None
+    block: int | None = None
+    tx_hash: str | None = None
+    evidence: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    suggested_next_step: str = ""
+
+    def sort_key(self) -> tuple[int, str, str, str]:
+        return (
+            -SEVERITY_RANK.get(self.severity, 0),
+            self.kind,
+            self.symbol or "",
+            self.pool_address or self.token_address or "",
+        )
+
+    def as_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RangeRunSnapshot:
+    api_base: str
+    run_id: str
+    progress: dict[str, Any]
+    tokens: list[dict[str, Any]]
+    pools: list[dict[str, Any]]
+    errors: list[dict[str, Any]]
+
+    @property
+    def start_block(self) -> int | None:
+        return as_int(self.progress.get("start_block"))
+
+    @property
+    def end_block(self) -> int | None:
+        return as_int(self.progress.get("end_block"))
+
+    @property
+    def token_by_address(self) -> dict[str, dict[str, Any]]:
+        return {
+            normalize_address(token.get("contract_address")): token
+            for token in self.tokens
+            if token.get("contract_address")
+        }
+
+    @classmethod
+    def load(
+        cls,
+        client: ApiClient,
+        run_selector: str,
+        stderr: Any = sys.stderr,
+    ) -> "RangeRunSnapshot":
+        run_id, progress = resolve_run(client, run_selector)
+        if stderr:
+            print(f"loading run {run_id} from {client.base_url}", file=stderr)
+
+        tokens_response = client.get(f"/runs/{url_quote(run_id)}/tokens")
+        pools_response = client.get(f"/runs/{url_quote(run_id)}/pools")
+        errors_response = client.get(f"/runs/{url_quote(run_id)}/errors")
+
+        return cls(
+            api_base=client.base_url,
+            run_id=run_id,
+            progress=progress,
+            tokens=list(tokens_response.get("tokens") or []),
+            pools=list(pools_response.get("pools") or []),
+            errors=list(errors_response.get("errors") or []),
+        )
+
+
+def resolve_run(client: ApiClient, run_selector: str) -> tuple[str, dict[str, Any]]:
+    selector = run_selector.strip()
+    if selector == "active":
+        progress = client.get("/runs/active")
+        run_id = progress.get("id")
+        if not run_id:
+            raise ApiError("/runs/active did not include an id")
+        return str(run_id), progress
+
+    if selector == "latest":
+        runs_response = client.get("/runs")
+        runs = list(runs_response.get("runs") or [])
+        if not runs:
+            raise ApiError("/runs returned no runs")
+        runs.sort(
+            key=lambda run: (
+                as_int(run.get("updated_at_unix_secs")) or 0,
+                as_int(run.get("started_at_unix_secs")) or 0,
+                str(run.get("id") or ""),
+            ),
+            reverse=True,
+        )
+        run_id = str(runs[0].get("id") or "")
+        if not run_id:
+            raise ApiError("latest run did not include an id")
+        return run_id, client.get(f"/runs/{url_quote(run_id)}/progress")
+
+    progress = client.get(f"/runs/{url_quote(selector)}/progress")
+    run_id = progress.get("id") or selector
+    return str(run_id), progress
+
+
+class IssueDetector:
+    name = "issue"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        raise NotImplementedError
+
+
+class ServerIndexerErrorDetector(IssueDetector):
+    name = "server_indexer_errors"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for error in snapshot.errors:
+            message = str(error.get("message") or "unknown error")
+            groups[collapse_message(message)].append(error)
+
+        candidates = []
+        for message, errors in groups.items():
+            count = len(errors)
+            blocks = sorted(
+                {
+                    block
+                    for block in (as_int(error.get("block_number")) for error in errors)
+                    if block is not None
+                }
+            )
+            tx_hashes = [
+                str(error.get("tx_hash"))
+                for error in errors
+                if error.get("tx_hash")
+            ][:5]
+            severity = "high" if count >= 10 or looks_like_timeout(message) else "medium"
+            candidates.append(
+                issue(
+                    snapshot,
+                    kind="server_indexer.error_cluster",
+                    severity=severity,
+                    evidence=[
+                        f"count={count}",
+                        f"message={message}",
+                        sample_range("blocks", blocks),
+                        sample_values("txs", tx_hashes),
+                    ],
+                    metrics={
+                        "count": count,
+                        "sample_blocks": blocks[:10],
+                        "sample_tx_hashes": tx_hashes,
+                    },
+                    suggested_next_step=(
+                        "separate infrastructure/indexer failures from token behavior before "
+                        "creating token-level cases"
+                    ),
+                )
+            )
+        return candidates
+
+
+class LifecycleConsistencyDetector(IssueDetector):
+    name = "lifecycle_consistency"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for token in snapshot.tokens:
+            has_pools = bool(token.get("has_pools")) or (as_int(token.get("pool_count")) or 0) > 0
+            trading_enabled = bool(token.get("trading_enabled"))
+            lifecycle = str(token.get("lifecycle_status") or "").upper()
+            if not has_pools and (trading_enabled or "TRADING" in lifecycle):
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="lifecycle.token_without_pool_has_trading_state",
+                        severity="high",
+                        token=token,
+                        evidence=[
+                            "has_pools=false",
+                            f"pool_count={token.get('pool_count')}",
+                            f"trading_enabled={trading_enabled}",
+                            f"lifecycle_status={token.get('lifecycle_status')}",
+                        ],
+                        metrics={
+                            "pool_count": token.get("pool_count"),
+                            "trading_enabled": trading_enabled,
+                            "lifecycle_status": token.get("lifecycle_status"),
+                        },
+                        suggested_next_step=(
+                            "remove or correct token-level pool-derived state; trading viability "
+                            "must come from pool simulation"
+                        ),
+                    )
+                )
+        return candidates
+
+
+class SimulatorParityDetector(IssueDetector):
+    name = "simulator_parity"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            can_buy = bool(pool.get("can_buy"))
+            can_sell = bool(pool.get("can_sell"))
+            if not can_buy or can_sell:
+                continue
+
+            reason = opt_str(pool.get("last_trading_failure_reason"))
+            failure_class = opt_str(pool.get("last_trading_failure_class"))
+            severity = "high" if is_meaningfully_liquid(pool) else "medium"
+            runtime_state = pool.get("runtime_state") or {}
+            observed_sell_volume = finite_number(runtime_state.get("token_volume_in")) or 0.0
+            observed_sell_denom_out = finite_number(runtime_state.get("denom_volume_out")) or 0.0
+            observed_sell = observed_sell_volume > 0.0 and observed_sell_denom_out > 0.0
+            if observed_sell and is_meaningfully_liquid(pool):
+                severity = "critical"
+
+            evidence = [
+                "can_buy=true",
+                "can_sell=false",
+                f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
+            ]
+            if failure_class:
+                evidence.append(f"failure_class={failure_class}")
+            if reason:
+                evidence.append(f"failure_reason={compact_text(reason, 140)}")
+            else:
+                evidence.append("failure_reason=missing")
+            if observed_sell:
+                evidence.append("observed_sell_volume_present=true")
+
+            kind = "simulator_parity.cannot_sell"
+            if observed_sell:
+                kind = "simulator_parity.observed_sell_but_sim_cannot_sell"
+            elif not failure_class and not reason:
+                kind = "simulator_parity.missing_failure_reason"
+
+            candidates.append(
+                issue(
+                    snapshot,
+                    kind=kind,
+                    severity=severity,
+                    pool=pool,
+                    evidence=evidence,
+                    metrics=pool_metrics(pool)
+                    | {
+                        "last_trading_failure_class": failure_class,
+                        "last_trading_failure_reason": reason,
+                        "observed_token_sell_volume": observed_sell_volume,
+                        "observed_denom_out_volume": observed_sell_denom_out,
+                    },
+                    suggested_next_step=(
+                        "check observed buys/sells and replay the actual route before treating "
+                        "this as a honeypot"
+                    ),
+                )
+            )
+        return candidates
+
+
+class RouteMismatchDetector(IssueDetector):
+    name = "route_mismatch"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            if not (bool(pool.get("can_buy")) and not bool(pool.get("can_sell"))):
+                continue
+
+            runtime_state = pool.get("runtime_state") or {}
+            observed_sell = (finite_number(runtime_state.get("token_volume_in")) or 0.0) > 0.0
+            failure_class = str(pool.get("last_trading_failure_class") or "")
+            reason = str(pool.get("last_trading_failure_reason") or "")
+            transfer_failed = (
+                "transfer_from_failed" in failure_class.lower()
+                or "TRANSFER_FROM_FAILED" in reason
+            )
+            if observed_sell and transfer_failed:
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="route_mismatch.observed_sell_with_transfer_from_failed_sim",
+                        severity="critical" if is_meaningfully_liquid(pool) else "medium",
+                        pool=pool,
+                        evidence=[
+                            "observed token sell volume exists",
+                            "classic simulator failed with transfer-from failure",
+                            f"protocol={pool.get('protocol')}",
+                        ],
+                        metrics=pool_metrics(pool)
+                        | {
+                            "observed_token_sell_volume": runtime_state.get("token_volume_in"),
+                            "observed_denom_out_volume": runtime_state.get("denom_volume_out"),
+                        },
+                        suggested_next_step=(
+                            "extract the mined sell route; classify whether this is Universal "
+                            "Router, Permit2, aggregator, or whitelist behavior"
+                        ),
+                    )
+                )
+        return candidates
+
+
+class AmountDustParityDetector(IssueDetector):
+    name = "amount_dust_parity"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            reason = str(pool.get("last_trading_failure_reason") or "")
+            failure_class = str(pool.get("last_trading_failure_class") or "")
+            insufficient_input = "INSUFFICIENT_INPUT_AMOUNT" in reason
+            zero_output = "buy_received_zero_tokens" in failure_class.lower()
+            tiny_supply = (finite_number(pool.get("pooled_token_supply_percent")) or 0.0) <= TINY_SUPPLY_PERCENT
+            dust_liquidity = str(pool.get("liquidity_level") or "").lower() in {"dust", "drained"}
+
+            if not (insufficient_input or zero_output or (bool(pool.get("can_buy")) and not bool(pool.get("can_sell")) and tiny_supply)):
+                continue
+
+            kind = "amount_dust_parity.suspicious_sell_input"
+            if insufficient_input:
+                kind = "amount_dust_parity.insufficient_input_amount"
+            elif zero_output:
+                kind = "amount_dust_parity.zero_buy_output"
+
+            candidates.append(
+                issue(
+                    snapshot,
+                    kind=kind,
+                    severity="high" if insufficient_input or zero_output else "medium",
+                    pool=pool,
+                    evidence=[
+                        f"failure_class={failure_class or 'missing'}",
+                        f"failure_reason={compact_text(reason, 140) or 'missing'}",
+                        f"supply_in_pool_percent={metric_number(pool.get('pooled_token_supply_percent'))}",
+                        f"liquidity_level={pool.get('liquidity_level')}",
+                        f"dust_liquidity={dust_liquidity}",
+                    ],
+                    metrics=pool_metrics(pool),
+                    suggested_next_step=(
+                        "verify simulated buy output and sell input amount; distinguish dust, "
+                        "transfer-tax shrinkage, and amount extraction bugs"
+                    ),
+                )
+            )
+        return candidates
+
+
+class PriceAndSupplyDetector(IssueDetector):
+    name = "price_and_supply"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            raw_ratio = finite_number(pool.get("raw_price_ratio_to_initial"))
+            displayed_ratio = finite_number(pool.get("price_ratio_to_initial"))
+            ratio = raw_ratio if raw_ratio is not None else displayed_ratio
+            supply_status = str(pool.get("supply_ratio_status") or "")
+            supply_label = opt_str(pool.get("supply_ratio_label"))
+            supply_percent = finite_number(pool.get("pooled_token_supply_percent"))
+
+            if ratio is not None and ratio >= EXTREME_PRICE_RATIO:
+                severity = "critical" if ratio >= VERY_EXTREME_PRICE_RATIO else "high"
+                if is_low_liquidity(pool) or (supply_percent is not None and supply_percent <= TINY_SUPPLY_PERCENT):
+                    candidates.append(
+                        issue(
+                            snapshot,
+                            kind="numerical.extreme_price_ratio_low_quality_liquidity",
+                            severity=severity,
+                            pool=pool,
+                            evidence=[
+                                f"raw_price_ratio_to_initial={metric_number(raw_ratio)}",
+                                f"display_price_ratio_to_initial={metric_number(displayed_ratio)}",
+                                f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
+                                f"supply_in_pool_percent={metric_number(supply_percent)}",
+                            ],
+                            metrics=pool_metrics(pool),
+                            suggested_next_step=(
+                                "treat the ratio as suspect until reserves and supply share prove "
+                                "the price is not dust-driven"
+                            ),
+                        )
+                    )
+
+            if supply_status and supply_status != "ok":
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="supply.pool_reserve_exceeds_total_supply",
+                        severity="critical" if supply_label else "high",
+                        pool=pool,
+                        evidence=[
+                            f"supply_ratio_status={supply_status}",
+                            f"supply_ratio_label={supply_label or 'missing'}",
+                            f"supply_in_pool_percent={metric_number(supply_percent)}",
+                        ],
+                        metrics=pool_metrics(pool),
+                        suggested_next_step=(
+                            "check hidden mint, decimals, or reserve parsing before using FDV or "
+                            "pool supply ratios"
+                        ),
+                    )
+                )
+            elif supply_percent is not None and supply_percent > 100.0001:
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="supply.pool_supply_share_over_100_percent",
+                        severity="critical",
+                        pool=pool,
+                        evidence=[f"supply_in_pool_percent={metric_number(supply_percent)}"],
+                        metrics=pool_metrics(pool),
+                        suggested_next_step=(
+                            "verify total supply, token decimals, and reserve extraction"
+                        ),
+                    )
+                )
+        return candidates
+
+
+class LiquidityHealthDetector(IssueDetector):
+    name = "liquidity_health"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            level = str(pool.get("liquidity_level") or "").lower()
+            history = list(pool.get("liquidity_history") or [])
+            current_liquidity = finite_number(pool.get("denom_reserve")) or 0.0
+            max_liquidity = max(
+                [finite_number(point.get("denom_reserve")) or 0.0 for point in history] + [current_liquidity]
+            )
+
+            if level in {"dust", "drained"} and (bool(pool.get("can_buy")) or bool(pool.get("trading_enabled"))):
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind=f"liquidity.{level}_pool_marked_tradable",
+                        severity="high" if level == "drained" else "medium",
+                        pool=pool,
+                        evidence=[
+                            f"liquidity_level={level}",
+                            f"can_buy={pool.get('can_buy')}",
+                            f"trading_enabled={pool.get('trading_enabled')}",
+                            f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
+                        ],
+                        metrics=pool_metrics(pool) | {"max_liquidity": max_liquidity},
+                        suggested_next_step=(
+                            "separate drained/dust pools from active pools and verify whether "
+                            "trading viability is still meaningful"
+                        ),
+                    )
+                )
+
+            if looks_like_liquidity_drain(pool, current_liquidity, max_liquidity):
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="liquidity.possible_drain",
+                        severity="high",
+                        pool=pool,
+                        evidence=[
+                            f"max_liquidity={metric_number(max_liquidity)} {pool.get('currency') or ''}".strip(),
+                            f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
+                            f"liquidity_level={pool.get('liquidity_level')}",
+                        ],
+                        metrics=pool_metrics(pool) | {"max_liquidity": max_liquidity},
+                        suggested_next_step=(
+                            "inspect reserve history and burn/sync events to confirm whether "
+                            "liquidity was drained"
+                        ),
+                    )
+                )
+
+            lp_supply = finite_number(pool.get("lp_total_supply")) or 0.0
+            if lp_supply <= 0.0 and current_liquidity > meaningful_liquidity_threshold(pool):
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="lp.zero_supply_with_reserves",
+                        severity="high",
+                        pool=pool,
+                        evidence=[
+                            f"lp_total_supply={metric_number(lp_supply)}",
+                            f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
+                        ],
+                        metrics=pool_metrics(pool) | {"lp_total_supply": lp_supply},
+                        suggested_next_step=(
+                            "verify LP supply accounting and whether protocol-specific liquidity "
+                            "representation is being treated as V2 LP tokens"
+                        ),
+                    )
+                )
+        return candidates
+
+
+class LpControlDetector(IssueDetector):
+    name = "lp_control"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            approved = finite_number(pool.get("lp_approved_percentage"))
+            if approved is not None and approved >= LP_APPROVAL_MEDIUM_PERCENT:
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="lp.approved_liquidity_exposure",
+                        severity="high" if approved >= LP_APPROVAL_HIGH_PERCENT else "medium",
+                        pool=pool,
+                        evidence=[
+                            f"lp_approved_percentage={metric_number(approved)}",
+                            f"lp_approval_count={pool.get('lp_approval_count')}",
+                            f"lp_holders_with_approvals={len(pool.get('lp_holders_with_approvals') or [])}",
+                        ],
+                        metrics=pool_metrics(pool)
+                        | {
+                            "lp_approved_percentage": approved,
+                            "lp_approval_count": pool.get("lp_approval_count"),
+                            "lp_holders_with_approvals": pool.get("lp_holders_with_approvals"),
+                        },
+                        suggested_next_step=(
+                            "inspect LP approval owners and spenders; high approved LP can allow "
+                            "rapid liquidity removal"
+                        ),
+                    )
+                )
+
+            for holder in pool.get("lp_holders") or []:
+                share = finite_number(holder.get("share"))
+                address = normalize_address(holder.get("address"))
+                if share is None or is_burn_address(address):
+                    continue
+                if share > 100.0001:
+                    candidates.append(
+                        issue(
+                            snapshot,
+                            kind="lp.holder_share_over_100_percent",
+                            severity="critical",
+                            pool=pool,
+                            evidence=[
+                                f"holder={address}",
+                                f"lp_share={metric_number(share)}",
+                            ],
+                            metrics=pool_metrics(pool) | {"holder": address, "lp_share": share},
+                            suggested_next_step=(
+                                "verify LP total supply and holder balance accounting"
+                            ),
+                        )
+                    )
+                elif share >= LP_HOLDER_CONCENTRATION_MEDIUM_PERCENT:
+                    candidates.append(
+                        issue(
+                            snapshot,
+                            kind="lp.concentrated_holder",
+                            severity=(
+                                "high"
+                                if share >= LP_HOLDER_CONCENTRATION_HIGH_PERCENT
+                                else "medium"
+                            ),
+                            pool=pool,
+                            evidence=[
+                                f"holder={address}",
+                                f"lp_share={metric_number(share)}",
+                                f"approvals={len(holder.get('approvals') or {})}",
+                            ],
+                            metrics=pool_metrics(pool)
+                            | {
+                                "holder": address,
+                                "lp_share": share,
+                                "approvals": holder.get("approvals") or {},
+                            },
+                            suggested_next_step=(
+                                "check whether the holder is deployer/owner/locker and whether "
+                                "the LP can be moved or approved"
+                            ),
+                        )
+                    )
+        return candidates
+
+
+class TaxSafetyDetector(IssueDetector):
+    name = "tax_safety"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            bucket = str(pool.get("tax_bucket") or "unknown").lower()
+            if bucket not in {"moderate_tax", "high_tax", "extreme_tax"}:
+                continue
+            severity = {
+                "moderate_tax": "medium",
+                "high_tax": "high",
+                "extreme_tax": "critical",
+            }[bucket]
+            candidates.append(
+                issue(
+                    snapshot,
+                    kind=f"tax.{bucket}",
+                    severity=severity,
+                    pool=pool,
+                    evidence=[
+                        f"buy_tax={metric_number(pool.get('buy_tax'))}",
+                        f"sell_tax={metric_number(pool.get('sell_tax'))}",
+                        f"buy_tax_bucket={pool.get('buy_tax_bucket')}",
+                        f"sell_tax_bucket={pool.get('sell_tax_bucket')}",
+                    ],
+                    metrics=pool_metrics(pool),
+                    suggested_next_step=(
+                        "verify tax through simulator parity and decide whether this should be a "
+                        "trading guardrail"
+                    ),
+                )
+            )
+        return candidates
+
+
+class ProtocolCoverageDetector(IssueDetector):
+    name = "protocol_coverage"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for pool in snapshot.pools:
+            protocol = str(pool.get("protocol") or "").upper()
+            if protocol in {"", "UNISWAP-V2"}:
+                continue
+
+            missing = []
+            if protocol in {"UNISWAP-V3", "UNISWAP-V4"}:
+                for field_name in ("current_tick", "sqrt_price_x96", "active_liquidity", "virtual_reserves"):
+                    if pool.get(field_name) in (None, "", []):
+                        missing.append(field_name)
+            if protocol == "UNISWAP-V4":
+                for field_name in ("pool_id", "pool_manager_address", "hooks"):
+                    if pool.get(field_name) in (None, "", []):
+                        missing.append(field_name)
+
+            if missing:
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind="protocol_coverage.missing_protocol_metrics",
+                        severity="medium",
+                        pool=pool,
+                        evidence=[
+                            f"protocol={protocol}",
+                            f"missing={','.join(missing)}",
+                        ],
+                        metrics=pool_metrics(pool) | {"missing_fields": missing},
+                        suggested_next_step=(
+                            "verify whether this is expected for the protocol or a missing "
+                            "indexer/view field before comparing it to V2 pools"
+                        ),
+                    )
+                )
+        return candidates
+
+
+ALL_DETECTORS: list[IssueDetector] = [
+    ServerIndexerErrorDetector(),
+    LifecycleConsistencyDetector(),
+    SimulatorParityDetector(),
+    RouteMismatchDetector(),
+    AmountDustParityDetector(),
+    PriceAndSupplyDetector(),
+    LiquidityHealthDetector(),
+    LpControlDetector(),
+    TaxSafetyDetector(),
+    ProtocolCoverageDetector(),
+]
+
+
+class RangeTriageRunner:
+    def __init__(self, detectors: Sequence[IssueDetector] = ALL_DETECTORS) -> None:
+        self.detectors = list(detectors)
+
+    def run(
+        self,
+        snapshot: RangeRunSnapshot,
+        detector_names: set[str] | None = None,
+    ) -> list[IssueCandidate]:
+        candidates: list[IssueCandidate] = []
+        for detector in self.detectors:
+            if detector_names and detector.name not in detector_names:
+                continue
+            candidates.extend(detector.detect(snapshot))
+        candidates.sort(key=lambda candidate: candidate.sort_key())
+        return candidates
+
+
+def issue(
+    snapshot: RangeRunSnapshot,
+    *,
+    kind: str,
+    severity: str,
+    token: Mapping[str, Any] | None = None,
+    pool: Mapping[str, Any] | None = None,
+    evidence: list[str],
+    metrics: dict[str, Any],
+    suggested_next_step: str,
+) -> IssueCandidate:
+    token = token or {}
+    pool = pool or {}
+    token_address = opt_str(pool.get("token_address")) or opt_str(token.get("contract_address"))
+    return IssueCandidate(
+        kind=kind,
+        severity=severity,
+        token_address=token_address,
+        pool_address=opt_str(pool.get("pool_address")),
+        protocol=opt_str(pool.get("protocol")),
+        symbol=opt_str(pool.get("token_symbol")) or opt_str(token.get("symbol")),
+        range_start=snapshot.start_block,
+        range_end=snapshot.end_block,
+        block=as_int(pool.get("latest_block_number"))
+        or as_int(pool.get("creation_block"))
+        or as_int(token.get("latest_block"))
+        or as_int(token.get("creation_block")),
+        tx_hash=None,
+        evidence=[value for value in evidence if value and not value.endswith("=None")],
+        metrics=clean_json(metrics),
+        suggested_next_step=suggested_next_step,
+    )
+
+
+def run_detectors(
+    snapshot: RangeRunSnapshot,
+    detector_names: set[str] | None = None,
+) -> list[IssueCandidate]:
+    return RangeTriageRunner().run(snapshot, detector_names)
+
+
+def pool_metrics(pool: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "currency": pool.get("currency"),
+        "liquidity_level": pool.get("liquidity_level"),
+        "denom_reserve": finite_number(pool.get("denom_reserve")),
+        "token_reserve": finite_number(pool.get("token_reserve")),
+        "total_liquidity": finite_number(pool.get("total_liquidity")),
+        "raw_price_ratio_to_initial": finite_number(pool.get("raw_price_ratio_to_initial")),
+        "price_ratio_to_initial": finite_number(pool.get("price_ratio_to_initial")),
+        "pooled_token_supply_percent": finite_number(pool.get("pooled_token_supply_percent")),
+        "liquidity_to_fdv_percent": finite_number(pool.get("liquidity_to_fdv_percent")),
+        "buy_tax": finite_number(pool.get("buy_tax")),
+        "sell_tax": finite_number(pool.get("sell_tax")),
+        "tax_bucket": pool.get("tax_bucket"),
+        "can_buy": pool.get("can_buy"),
+        "can_sell": pool.get("can_sell"),
+        "risk_level": pool.get("risk_level"),
+        "risk_label": pool.get("risk_label"),
+        "stage": pool.get("stage"),
+    }
+
+
+def is_meaningfully_liquid(pool: Mapping[str, Any]) -> bool:
+    value = finite_number(pool.get("denom_reserve")) or 0.0
+    return value >= meaningful_liquidity_threshold(pool)
+
+
+def is_low_liquidity(pool: Mapping[str, Any]) -> bool:
+    value = finite_number(pool.get("denom_reserve")) or 0.0
+    return value <= low_liquidity_threshold(pool)
+
+
+def looks_like_liquidity_drain(
+    pool: Mapping[str, Any],
+    current_liquidity: float,
+    max_liquidity: float,
+) -> bool:
+    low_threshold = low_liquidity_threshold(pool)
+    if max_liquidity <= low_threshold:
+        return False
+    if current_liquidity <= meaningful_liquidity_threshold(pool):
+        return True
+    if max_liquidity <= 0.0:
+        return False
+    return current_liquidity / max_liquidity <= 0.05
+
+
+def meaningful_liquidity_threshold(pool: Mapping[str, Any]) -> float:
+    currency = str(pool.get("currency") or "").upper()
+    if currency in {"USDC", "USDT", "DAI"}:
+        return STABLE_LIQUIDITY_DUST
+    return WETH_LIQUIDITY_DUST
+
+
+def low_liquidity_threshold(pool: Mapping[str, Any]) -> float:
+    currency = str(pool.get("currency") or "").upper()
+    if currency in {"USDC", "USDT", "DAI"}:
+        return STABLE_LIQUIDITY_LOW
+    return WETH_LIQUIDITY_LOW
+
+
+def finite_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def as_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_address(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def is_burn_address(value: str) -> bool:
+    value = normalize_address(value)
+    return value in {
+        "",
+        "0x0000000000000000000000000000000000000000",
+        "0x000000000000000000000000000000000000dead",
+    } or value.endswith("dead")
+
+
+def opt_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def metric_number(value: Any) -> str:
+    number = finite_number(value)
+    if number is None:
+        return "-"
+    if abs(number) >= 1_000_000 or (0 < abs(number) < 0.0001):
+        return f"{number:.4e}"
+    return f"{number:.4f}"
+
+
+def compact_text(value: str, max_len: int = 120) -> str:
+    value = " ".join(str(value).split())
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
+
+
+def collapse_message(message: str) -> str:
+    message = compact_text(message, 220)
+    for marker in (" at block ", " block "):
+        if marker in message:
+            prefix, _, suffix = message.partition(marker)
+            return f"{prefix}{marker}<block>{suffix[suffix.find(' '):] if ' ' in suffix else ''}".strip()
+    return message
+
+
+def looks_like_timeout(message: str) -> bool:
+    lowered = message.lower()
+    return "timed out" in lowered or "timeout" in lowered
+
+
+def sample_range(label: str, values: Sequence[int]) -> str:
+    if not values:
+        return f"{label}=none"
+    if len(values) == 1:
+        return f"{label}={values[0]}"
+    return f"{label}={values[0]}..{values[-1]} ({len(values)} unique)"
+
+
+def sample_values(label: str, values: Sequence[str]) -> str:
+    if not values:
+        return f"{label}=none"
+    return f"{label}={', '.join(short_hash(value) for value in values[:5])}"
+
+
+def short_hash(value: str | None) -> str:
+    if not value:
+        return "-"
+    value = str(value)
+    if len(value) <= 12:
+        return value
+    return value[:6] + ".." + value[-6:]
+
+
+def url_quote(value: str) -> str:
+    return urllib.parse.quote(value, safe="")
+
+
+def clean_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: clean_json(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [clean_json(item) for item in value]
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+    return value
+
+
+def format_json(snapshot: RangeRunSnapshot, candidates: list[IssueCandidate]) -> str:
+    payload = {
+        "run_id": snapshot.run_id,
+        "api_base": snapshot.api_base,
+        "progress": snapshot.progress,
+        "counts": counts(candidates),
+        "candidate_count": len(candidates),
+        "candidates": [candidate.as_json() for candidate in candidates],
+    }
+    return json.dumps(clean_json(payload), indent=2, sort_keys=True)
+
+
+def format_jsonl(candidates: list[IssueCandidate]) -> str:
+    return "\n".join(
+        json.dumps(clean_json(candidate.as_json()), sort_keys=True) for candidate in candidates
+    )
+
+
+def format_markdown(snapshot: RangeRunSnapshot, candidates: list[IssueCandidate]) -> str:
+    severity_counts = Counter(candidate.severity for candidate in candidates)
+    kind_counts = Counter(candidate.kind for candidate in candidates)
+    lines = [
+        f"# Range Triage: `{snapshot.run_id}`",
+        "",
+        f"- API: `{snapshot.api_base}`",
+        f"- Range: `{snapshot.start_block}` through `{snapshot.end_block}`",
+        f"- Status: `{snapshot.progress.get('status')}`",
+        f"- Tokens: `{len(snapshot.tokens)}`",
+        f"- Pools: `{len(snapshot.pools)}`",
+        f"- Candidates: `{len(candidates)}`",
+        "",
+        "## Severity Counts",
+        "",
+    ]
+    if severity_counts:
+        for severity, count in sorted(
+            severity_counts.items(), key=lambda item: -SEVERITY_RANK.get(item[0], 0)
+        ):
+            lines.append(f"- `{severity}`: {count}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Top Issue Kinds", ""])
+    for kind, count in kind_counts.most_common(20):
+        lines.append(f"- `{kind}`: {count}")
+    if not kind_counts:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Candidates",
+            "",
+            "| Severity | Kind | Token | Pool | Protocol | Evidence | Next Step |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for candidate in candidates:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    md(candidate.severity),
+                    md(candidate.kind),
+                    md(display_token(candidate)),
+                    md(short_hash(candidate.pool_address)),
+                    md(candidate.protocol or "-"),
+                    md("; ".join(candidate.evidence[:5])),
+                    md(candidate.suggested_next_step),
+                ]
+            )
+            + " |"
+        )
+    return "\n".join(lines)
+
+
+def format_table(candidates: list[IssueCandidate]) -> str:
+    rows = [
+        (
+            candidate.severity,
+            candidate.kind,
+            display_token(candidate),
+            short_hash(candidate.pool_address),
+            "; ".join(candidate.evidence[:3]),
+        )
+        for candidate in candidates
+    ]
+    widths = (9, 46, 20, 13, 72)
+    header = ("severity", "kind", "token", "pool", "evidence")
+    lines = [format_row(header, widths), format_row(tuple("-" * width for width in widths), widths)]
+    lines.extend(format_row(row, widths) for row in rows)
+    return "\n".join(lines)
+
+
+def format_row(values: Sequence[str], widths: Sequence[int]) -> str:
+    return "  ".join(str(value)[:width].ljust(width) for value, width in zip(values, widths))
+
+
+def display_token(candidate: IssueCandidate) -> str:
+    symbol = candidate.symbol or "-"
+    address = short_hash(candidate.token_address)
+    return f"{symbol} {address}".strip()
+
+
+def md(value: Any) -> str:
+    text = str(value if value is not None else "-")
+    text = text.replace("|", "\\|")
+    return textwrap.shorten(text, width=220, placeholder="...")
+
+
+def counts(candidates: Iterable[IssueCandidate]) -> dict[str, Any]:
+    candidates = list(candidates)
+    return {
+        "by_severity": dict(Counter(candidate.severity for candidate in candidates)),
+        "by_kind": dict(Counter(candidate.kind for candidate in candidates)),
+    }
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Find token-safety investigation candidates in an existing range run.",
+    )
+    parser.add_argument(
+        "--api",
+        default=os.environ.get("ETH_TOKEN_API", DEFAULT_API_BASE),
+        help=f"token server API base URL (default: {DEFAULT_API_BASE})",
+    )
+    parser.add_argument(
+        "--run",
+        default="active",
+        help="run id to inspect, or 'active', or 'latest' (default: active)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("json", "jsonl", "markdown", "table"),
+        default="table",
+        help="output format (default: table)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="maximum candidates to print; 0 means no limit (default: 200)",
+    )
+    parser.add_argument(
+        "--min-severity",
+        choices=("info", "low", "medium", "high", "critical"),
+        default="low",
+        help="minimum severity to print (default: low)",
+    )
+    parser.add_argument(
+        "--detector",
+        action="append",
+        choices=[detector.name for detector in ALL_DETECTORS],
+        help="run only this detector; can be repeated",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="do not print loading progress to stderr",
+    )
+    return parser.parse_args(argv)
+
+
+def filter_candidates(
+    candidates: list[IssueCandidate],
+    min_severity: str,
+    limit: int,
+) -> list[IssueCandidate]:
+    min_rank = SEVERITY_RANK[min_severity]
+    filtered = [
+        candidate
+        for candidate in candidates
+        if SEVERITY_RANK.get(candidate.severity, 0) >= min_rank
+    ]
+    if limit > 0:
+        return filtered[:limit]
+    return filtered
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    try:
+        client = ApiClient(args.api)
+        snapshot = RangeRunSnapshot.load(
+            client,
+            args.run,
+            stderr=None if args.quiet else sys.stderr,
+        )
+        candidates = run_detectors(snapshot, set(args.detector or []) or None)
+        candidates = filter_candidates(candidates, args.min_severity, args.limit)
+
+        if args.format == "json":
+            output = format_json(snapshot, candidates)
+        elif args.format == "jsonl":
+            output = format_jsonl(candidates)
+        elif args.format == "markdown":
+            output = format_markdown(snapshot, candidates)
+        else:
+            output = format_table(candidates)
+
+        print(output)
+        return 0
+    except ApiError as error:
+        print(f"range_triage: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
