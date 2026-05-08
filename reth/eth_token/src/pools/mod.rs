@@ -15,4 +15,5 @@ pub use uniswap::{
     LPTokenTracker, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TradingSimulationConfig,
     UniswapV2TradingSimulationOutcome, UniswapV2TransactionEvents, UniswapV2TxContext,
+    UniswapV3Pool, UniswapV4Pool, UniswapV4PoolKey,
 };

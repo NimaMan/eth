@@ -1,7 +1,8 @@
 use alloy_primitives::Address;
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
-    LPHolderSnapshot, PoolLifecycle, PoolRuntimeState, TaxBucket, TradingStatus, UniswapV2Pool,
+    BasePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState, TaxBucket, TradingStatus,
+    UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
 };
 use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
@@ -62,6 +63,17 @@ pub struct PoolView {
     pub token_symbol: String,
     pub pool_address: String,
     pub protocol: String,
+    pub pool_id: Option<String>,
+    pub pool_manager_address: Option<String>,
+    pub currency0: Option<String>,
+    pub currency1: Option<String>,
+    pub fee_tier: Option<u32>,
+    pub tick_spacing: Option<i32>,
+    pub hooks: Option<String>,
+    pub current_tick: Option<i32>,
+    pub sqrt_price_x96: Option<String>,
+    pub active_liquidity: Option<String>,
+    pub virtual_reserves: Option<VirtualReserveView>,
     pub denom_address: String,
     pub denom_symbol: Option<String>,
     pub currency: String,
@@ -117,85 +129,52 @@ pub struct PoolView {
     pub lp_approval_count: usize,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct VirtualReserveView {
+    pub token_reserve: f64,
+    pub denom_reserve: f64,
+    pub token0_reserve: f64,
+    pub token1_reserve: f64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ConcentratedPoolViewFields {
+    pool_id: Option<String>,
+    pool_manager_address: Option<String>,
+    currency0: Option<String>,
+    currency1: Option<String>,
+    fee_tier: Option<u32>,
+    tick_spacing: Option<i32>,
+    hooks: Option<String>,
+    current_tick: Option<i32>,
+    sqrt_price_x96: Option<String>,
+    active_liquidity: Option<String>,
+    virtual_reserves: Option<VirtualReserveView>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LpPoolViewFields {
+    lp_total_supply: f64,
+    lp_holder_count: usize,
+    lp_holders: Vec<LPHolderSnapshot>,
+    lp_total_approved_to_routers: f64,
+    lp_approved_percentage: f64,
+    lp_last_approval_block: Option<u64>,
+    lp_last_approval: Option<Value>,
+    lp_holders_with_approvals: Vec<String>,
+    lp_transfer_count: usize,
+    lp_approval_count: usize,
+}
+
 impl PoolView {
     pub fn from_pool(token: &ERC20Token, pool: &UniswapV2Pool) -> Self {
-        let trading_status = pool.base.trading_status();
+        Self::from_v2_pool(token, pool)
+    }
+
+    pub fn from_v2_pool(token: &ERC20Token, pool: &UniswapV2Pool) -> Self {
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
-        let total_supply = token.total_supply_scaled();
-        let denom_symbol = denom_symbol(&pool.base.identity.denom_address);
-        let currency = denom_symbol
-            .clone()
-            .unwrap_or_else(|| pool.base.identity.denom_address.clone());
-        let fully_diluted_value_denom =
-            total_supply.and_then(|supply| pool.base.fully_diluted_value_denom(supply));
-        let liquidity_history = liquidity_history(pool);
-        let liquidity_level = pool_liquidity_level(pool.base.state.total_liquidity, &currency);
-        let raw_price_ratio_to_initial = pool.base.price_ratio_to_initial();
-        let price_ratio_to_initial =
-            display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
-        let price_ratio_history =
-            display_price_ratio_history(&pool.base.price_history, liquidity_level);
-        let raw_pooled_token_supply_ratio =
-            total_supply.and_then(|supply| pool.base.pooled_token_supply_ratio(supply));
-        let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
-        let liquidity_to_fdv_ratio = supply_ratio
-            .pooled_token_supply_ratio
-            .and_then(|_| total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply)));
-        let buy_tax = display_tax(pool.base.buy_tax);
-        let sell_tax = display_tax(pool.base.sell_tax);
-        let buy_tax_bucket = TaxBucket::from_percent(buy_tax);
-        let sell_tax_bucket = TaxBucket::from_percent(sell_tax);
-        let tax_bucket = TaxBucket::combined(buy_tax, sell_tax);
-        let risk = pool_risk(pool);
-        Self {
-            token_address: token.contract_address.clone(),
-            token_symbol: token.symbol.clone(),
-            pool_address: pool.base.identity.pool_address.clone(),
-            protocol: pool.base.identity.protocol.clone(),
-            denom_address: pool.base.identity.denom_address.clone(),
-            denom_symbol,
-            currency,
-            token_reserve: pool.base.token_reserve(),
-            denom_reserve: pool.base.denom_reserve(),
-            price: pool.base.price(),
-            initial_price: pool.base.initial_price(),
-            raw_price_ratio_to_initial,
-            price_ratio_to_initial,
-            price_ratio_history,
-            liquidity_history,
-            total_liquidity: pool.base.state.total_liquidity,
-            liquidity_level,
-            liquidity_label: liquidity_level_label(liquidity_level).to_string(),
-            token_total_supply_scaled: total_supply,
-            fully_diluted_value_denom,
-            pooled_token_supply_ratio: supply_ratio.pooled_token_supply_ratio,
-            pooled_token_supply_percent: ratio_percent(supply_ratio.pooled_token_supply_ratio),
-            liquidity_to_fdv_ratio,
-            liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
-            supply_ratio_status: supply_ratio.status.to_string(),
-            supply_ratio_label: supply_ratio.label,
-            can_buy: pool.base.state.can_buy,
-            can_sell: pool.base.state.can_sell,
-            trading_enabled: pool.base.trading_enabled(),
-            stage: pool.base.state.lifecycle,
-            buy_tax,
-            sell_tax,
-            buy_tax_bucket,
-            sell_tax_bucket,
-            tax_bucket,
-            last_trading_failure_reason: pool.base.last_trading_failure_reason.clone(),
-            last_trading_failure_class: pool.base.last_trading_failure_class.clone(),
-            is_scam: risk.level != PoolRiskLevel::Clear,
-            scam_label: risk.label.clone(),
-            risk_level: risk.level,
-            risk_label: risk.label,
-            creation_block: pool.base.creation_block,
-            creation_timestamp: pool.base.creation_timestamp,
-            can_buy_block: pool.base.can_buy_block,
-            latest_block_number: latest_pool_block_number(pool),
-            trading_status,
-            runtime_state: pool.base.state.clone(),
+        let lp_fields = LpPoolViewFields {
             lp_total_supply: pool.lp_tracker.total_supply,
             lp_holder_count,
             lp_holders,
@@ -206,6 +185,194 @@ impl PoolView {
             lp_holders_with_approvals: pool.holders_with_approvals(),
             lp_transfer_count: pool.lp_tracker.transfers.len(),
             lp_approval_count: pool.lp_tracker.approval_events.len(),
+        };
+        Self::from_base(
+            token,
+            &pool.base,
+            lp_fields,
+            ConcentratedPoolViewFields::default(),
+        )
+    }
+
+    pub fn from_v3_pool(token: &ERC20Token, pool: &UniswapV3Pool) -> Self {
+        Self::from_base(
+            token,
+            &pool.base,
+            LpPoolViewFields::default(),
+            ConcentratedPoolViewFields {
+                currency0: Some(pool.token0.clone()),
+                currency1: Some(pool.token1.clone()),
+                fee_tier: Some(pool.fee_tier),
+                tick_spacing: Some(pool.tick_spacing),
+                current_tick: pool.current_tick,
+                sqrt_price_x96: pool.sqrt_price_x96.clone(),
+                active_liquidity: Some(pool.active_liquidity.to_string()),
+                virtual_reserves: pool
+                    .last_virtual_reserves
+                    .map(|reserves| VirtualReserveView {
+                        token_reserve: reserves.token_reserve,
+                        denom_reserve: reserves.denom_reserve,
+                        token0_reserve: reserves.token0_reserve,
+                        token1_reserve: reserves.token1_reserve,
+                    }),
+                ..ConcentratedPoolViewFields::default()
+            },
+        )
+    }
+
+    pub fn from_v4_pool(token: &ERC20Token, pool: &UniswapV4Pool) -> Self {
+        Self::from_base(
+            token,
+            &pool.base,
+            LpPoolViewFields::default(),
+            ConcentratedPoolViewFields {
+                pool_id: Some(pool.pool_id.clone()),
+                pool_manager_address: Some(pool.pool_manager_address.clone()),
+                currency0: Some(pool.pool_key.currency0.clone()),
+                currency1: Some(pool.pool_key.currency1.clone()),
+                fee_tier: Some(pool.pool_key.fee),
+                tick_spacing: Some(pool.pool_key.tick_spacing),
+                hooks: Some(pool.pool_key.hooks.clone()),
+                current_tick: pool.current_tick,
+                sqrt_price_x96: pool.sqrt_price_x96.clone(),
+                active_liquidity: Some(pool.active_liquidity.to_string()),
+                virtual_reserves: pool
+                    .last_virtual_reserves
+                    .map(|reserves| VirtualReserveView {
+                        token_reserve: reserves.token_reserve,
+                        denom_reserve: reserves.denom_reserve,
+                        token0_reserve: reserves.token0_reserve,
+                        token1_reserve: reserves.token1_reserve,
+                    }),
+            },
+        )
+    }
+
+    pub fn from_token_pools(token: &ERC20Token) -> Vec<Self> {
+        let mut pools = Vec::with_capacity(token.pool_count());
+        pools.extend(
+            token
+                .v2_pools
+                .values()
+                .map(|pool| Self::from_v2_pool(token, pool)),
+        );
+        pools.extend(
+            token
+                .v3_pools
+                .values()
+                .map(|pool| Self::from_v3_pool(token, pool)),
+        );
+        pools.extend(
+            token
+                .v4_pools
+                .values()
+                .map(|pool| Self::from_v4_pool(token, pool)),
+        );
+        pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
+        pools
+    }
+
+    fn from_base(
+        token: &ERC20Token,
+        base: &BasePool,
+        lp_fields: LpPoolViewFields,
+        concentrated: ConcentratedPoolViewFields,
+    ) -> Self {
+        let trading_status = base.trading_status();
+        let total_supply = token.total_supply_scaled();
+        let denom_symbol = denom_symbol(&base.identity.denom_address);
+        let currency = denom_symbol
+            .clone()
+            .unwrap_or_else(|| base.identity.denom_address.clone());
+        let fully_diluted_value_denom =
+            total_supply.and_then(|supply| base.fully_diluted_value_denom(supply));
+        let liquidity_history = liquidity_history(base);
+        let liquidity_level = pool_liquidity_level(base.denom_reserve(), &currency);
+        let raw_price_ratio_to_initial = base.price_ratio_to_initial();
+        let price_ratio_to_initial =
+            display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
+        let price_ratio_history = display_price_ratio_history(&base.price_history, liquidity_level);
+        let raw_pooled_token_supply_ratio =
+            total_supply.and_then(|supply| base.pooled_token_supply_ratio(supply));
+        let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
+        let liquidity_to_fdv_ratio = supply_ratio
+            .pooled_token_supply_ratio
+            .and_then(|_| total_supply.and_then(|supply| base.liquidity_to_fdv_ratio(supply)));
+        let buy_tax = display_tax(base.buy_tax);
+        let sell_tax = display_tax(base.sell_tax);
+        let buy_tax_bucket = TaxBucket::from_percent(buy_tax);
+        let sell_tax_bucket = TaxBucket::from_percent(sell_tax);
+        let tax_bucket = TaxBucket::combined(buy_tax, sell_tax);
+        let risk = pool_risk(base);
+        Self {
+            token_address: token.contract_address.clone(),
+            token_symbol: token.symbol.clone(),
+            pool_address: base.identity.pool_address.clone(),
+            protocol: base.identity.protocol.clone(),
+            pool_id: concentrated.pool_id,
+            pool_manager_address: concentrated.pool_manager_address,
+            currency0: concentrated.currency0,
+            currency1: concentrated.currency1,
+            fee_tier: concentrated.fee_tier,
+            tick_spacing: concentrated.tick_spacing,
+            hooks: concentrated.hooks,
+            current_tick: concentrated.current_tick,
+            sqrt_price_x96: concentrated.sqrt_price_x96,
+            active_liquidity: concentrated.active_liquidity,
+            virtual_reserves: concentrated.virtual_reserves,
+            denom_address: base.identity.denom_address.clone(),
+            denom_symbol,
+            currency,
+            token_reserve: base.token_reserve(),
+            denom_reserve: base.denom_reserve(),
+            price: base.price(),
+            initial_price: base.initial_price(),
+            raw_price_ratio_to_initial,
+            price_ratio_to_initial,
+            price_ratio_history,
+            liquidity_history,
+            total_liquidity: base.state.total_liquidity,
+            liquidity_level,
+            liquidity_label: liquidity_level_label(liquidity_level).to_string(),
+            token_total_supply_scaled: total_supply,
+            fully_diluted_value_denom,
+            pooled_token_supply_ratio: supply_ratio.pooled_token_supply_ratio,
+            pooled_token_supply_percent: ratio_percent(supply_ratio.pooled_token_supply_ratio),
+            liquidity_to_fdv_ratio,
+            liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
+            supply_ratio_status: supply_ratio.status.to_string(),
+            supply_ratio_label: supply_ratio.label,
+            can_buy: base.state.can_buy,
+            can_sell: base.state.can_sell,
+            trading_enabled: base.trading_enabled(),
+            stage: base.state.lifecycle,
+            buy_tax,
+            sell_tax,
+            buy_tax_bucket,
+            sell_tax_bucket,
+            tax_bucket,
+            last_trading_failure_reason: base.last_trading_failure_reason.clone(),
+            last_trading_failure_class: base.last_trading_failure_class.clone(),
+            is_scam: risk.level != PoolRiskLevel::Clear,
+            scam_label: risk.label.clone(),
+            risk_level: risk.level,
+            risk_label: risk.label,
+            creation_block: base.creation_block,
+            creation_timestamp: base.creation_timestamp,
+            can_buy_block: base.can_buy_block,
+            latest_block_number: latest_pool_block_number(base),
+            trading_status,
+            runtime_state: base.state.clone(),
+            lp_total_supply: lp_fields.lp_total_supply,
+            lp_holder_count: lp_fields.lp_holder_count,
+            lp_holders: lp_fields.lp_holders,
+            lp_total_approved_to_routers: lp_fields.lp_total_approved_to_routers,
+            lp_approved_percentage: lp_fields.lp_approved_percentage,
+            lp_last_approval_block: lp_fields.lp_last_approval_block,
+            lp_last_approval: lp_fields.lp_last_approval,
+            lp_holders_with_approvals: lp_fields.lp_holders_with_approvals,
+            lp_transfer_count: lp_fields.lp_transfer_count,
+            lp_approval_count: lp_fields.lp_approval_count,
         }
     }
 }
@@ -223,29 +390,22 @@ struct DisplaySupplyRatio {
     label: Option<String>,
 }
 
-fn pool_risk(pool: &UniswapV2Pool) -> PoolRiskView {
-    if pool.base.is_scam() {
+fn pool_risk(base: &BasePool) -> PoolRiskView {
+    if base.is_scam() {
         return PoolRiskView {
             level: PoolRiskLevel::Scam,
-            label: pool
-                .base
-                .scam_label
-                .clone()
-                .or_else(|| Some("scam".to_string())),
+            label: base.scam_label.clone().or_else(|| Some("scam".to_string())),
         };
     }
 
-    if pool.base.state.can_buy && !pool.base.state.can_sell {
+    if base.state.can_buy && !base.state.can_sell {
         return PoolRiskView {
             level: PoolRiskLevel::Honeypot,
             label: Some("cannot_sell".to_string()),
         };
     }
 
-    match TaxBucket::combined(
-        display_tax(pool.base.buy_tax),
-        display_tax(pool.base.sell_tax),
-    ) {
+    match TaxBucket::combined(display_tax(base.buy_tax), display_tax(base.sell_tax)) {
         TaxBucket::ExtremeTax => {
             return PoolRiskView {
                 level: PoolRiskLevel::ExtremeTax,
@@ -362,23 +522,17 @@ fn is_stable_currency(currency: &str) -> bool {
     )
 }
 
-fn liquidity_history(pool: &UniswapV2Pool) -> Vec<LiquidityPoint> {
-    pool.base
-        .reserve_tracker
+fn liquidity_history(base: &BasePool) -> Vec<LiquidityPoint> {
+    base.reserve_tracker
         .reserve_history
         .iter()
         .filter_map(|snapshot| {
             if !snapshot.denom_reserve.is_finite() || !snapshot.token_reserve.is_finite() {
                 return None;
             }
-            let liquidity = if snapshot.denom_reserve >= pool.base.config.denom_threshold {
-                snapshot.denom_reserve
-            } else {
-                0.0
-            };
             Some(LiquidityPoint {
                 block_number: snapshot.block_number,
-                liquidity,
+                liquidity: snapshot.denom_reserve.max(0.0),
                 denom_reserve: snapshot.denom_reserve,
                 token_reserve: snapshot.token_reserve,
             })
@@ -427,13 +581,12 @@ fn denom_symbol(address: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn latest_pool_block_number(pool: &UniswapV2Pool) -> Option<u64> {
-    pool.base
-        .latest_block_number
-        .or_else(|| nonzero_block(pool.base.state.last_update_block))
-        .or_else(|| nonzero_block(pool.base.state.last_sync_block))
-        .or(pool.base.can_buy_block)
-        .or(pool.base.creation_block)
+fn latest_pool_block_number(base: &BasePool) -> Option<u64> {
+    base.latest_block_number
+        .or_else(|| nonzero_block(base.state.last_update_block))
+        .or_else(|| nonzero_block(base.state.last_sync_block))
+        .or(base.can_buy_block)
+        .or(base.creation_block)
 }
 
 fn nonzero_block(block: u64) -> Option<u64> {
@@ -445,9 +598,7 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let mut pools = Vec::new();
 
     for token in state.processor.registry.tokens.values() {
-        for pool in token.v2_pools.values() {
-            pools.push(PoolView::from_pool(token, pool));
-        }
+        pools.extend(PoolView::from_token_pools(token));
     }
 
     pools.sort_by(|left, right| {
@@ -525,9 +676,9 @@ mod tests {
         );
         pool.base.state.last_update_block = 123;
 
-        assert_eq!(latest_pool_block_number(&pool), Some(123));
+        assert_eq!(latest_pool_block_number(&pool.base), Some(123));
 
         pool.base.latest_block_number = Some(456);
-        assert_eq!(latest_pool_block_number(&pool), Some(456));
+        assert_eq!(latest_pool_block_number(&pool.base), Some(456));
     }
 }

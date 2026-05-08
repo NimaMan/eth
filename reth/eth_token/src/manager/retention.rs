@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
-use crate::pools::UniswapV2Pool;
+use crate::pools::BasePool;
 
 pub const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 pub const USDC_ADDRESS: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -55,11 +55,11 @@ impl LiveTokenRetentionPolicy {
         }
     }
 
-    pub fn evaluate_pool(&self, pool: &UniswapV2Pool) -> LivePoolRetentionDecision {
-        let pool_address = pool.base.identity.pool_address.clone();
-        let denom_address = pool.base.identity.denom_address.clone();
+    pub fn evaluate_pool(&self, pool: &BasePool) -> LivePoolRetentionDecision {
+        let pool_address = pool.identity.pool_address.clone();
+        let denom_address = pool.identity.denom_address.clone();
         let denom_class = self.denom_class(&denom_address);
-        let denom_reserve = pool.base.denom_reserve();
+        let denom_reserve = pool.denom_reserve();
         let threshold = self.denom_threshold(&denom_address);
         let retain = threshold <= 0.0 || denom_reserve >= threshold;
         let reason = if retain {
@@ -89,8 +89,8 @@ impl LiveTokenRetentionPolicy {
         current_block: u64,
     ) -> LiveTokenRetentionDecision {
         let mut pool_decisions: Vec<_> = token
-            .v2_pools
-            .values()
+            .all_pool_bases()
+            .into_iter()
             .map(|pool| self.evaluate_pool(pool))
             .collect();
         pool_decisions.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
@@ -107,7 +107,7 @@ impl LiveTokenRetentionPolicy {
 
         let reason = if !retained_v2_pools.is_empty() {
             None
-        } else if token.v2_pools.is_empty() {
+        } else if !token.has_pool() {
             self.pending_token_drop_reason(
                 token_reference_block(token),
                 current_block,
@@ -140,6 +140,8 @@ impl LiveTokenRetentionPolicy {
         let decision = self.evaluate_token(token, current_block);
         for pool in &decision.dropped_v2_pools {
             token.v2_pools.remove(&pool.pool_address);
+            token.v3_pools.remove(&pool.pool_address);
+            token.v4_pools.remove(&pool.pool_address);
         }
         decision
     }
@@ -249,19 +251,19 @@ fn token_reference_block(token: &ERC20Token) -> Option<u64> {
 
 fn latest_pool_reference_block(token: &ERC20Token) -> Option<u64> {
     token
-        .v2_pools
-        .values()
+        .all_pool_bases()
+        .into_iter()
         .filter_map(pool_reference_block)
         .max()
         .or_else(|| token_reference_block(token))
 }
 
-fn pool_reference_block(pool: &UniswapV2Pool) -> Option<u64> {
+fn pool_reference_block(pool: &BasePool) -> Option<u64> {
     [
-        pool.base.latest_block_number,
-        pool.base.can_buy_block,
-        pool.base.creation_block,
-        pool.base.price_history.last().map(|(block, _)| *block),
+        pool.latest_block_number,
+        pool.can_buy_block,
+        pool.creation_block,
+        pool.price_history.last().map(|(block, _)| *block),
     ]
     .into_iter()
     .flatten()
@@ -320,7 +322,7 @@ mod tests {
         let policy = LiveTokenRetentionPolicy::default();
         let pool = v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.099);
 
-        let decision = policy.evaluate_pool(&pool);
+        let decision = policy.evaluate_pool(&pool.base);
 
         assert!(!decision.retain);
         assert_eq!(decision.denom_class, LivePoolDenomClass::Weth);
@@ -332,7 +334,7 @@ mod tests {
         let policy = LiveTokenRetentionPolicy::default();
         let pool = v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.1);
 
-        let decision = policy.evaluate_pool(&pool);
+        let decision = policy.evaluate_pool(&pool.base);
 
         assert!(decision.retain);
         assert_eq!(decision.reason, None);
@@ -343,7 +345,7 @@ mod tests {
         let policy = LiveTokenRetentionPolicy::default();
         let pool = v2_pool(POOL_ADDRESS, USDC_ADDRESS, 499.9);
 
-        let decision = policy.evaluate_pool(&pool);
+        let decision = policy.evaluate_pool(&pool.base);
 
         assert!(!decision.retain);
         assert_eq!(decision.denom_class, LivePoolDenomClass::Stablecoin);
@@ -359,7 +361,7 @@ mod tests {
             0.0,
         );
 
-        let decision = policy.evaluate_pool(&pool);
+        let decision = policy.evaluate_pool(&pool.base);
 
         assert!(decision.retain);
         assert_eq!(decision.denom_class, LivePoolDenomClass::Other);

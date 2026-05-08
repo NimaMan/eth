@@ -91,12 +91,7 @@ pub async fn token_detail(
             .network_graphs
             .get(&address),
     );
-    let mut pools = token
-        .v2_pools
-        .values()
-        .map(|pool| PoolView::from_pool(token, pool))
-        .collect::<Vec<_>>();
-    pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
+    let pools = PoolView::from_token_pools(token);
 
     Some(LiveTokenDetailResponse {
         progress: state.progress.clone(),
@@ -113,9 +108,7 @@ pub async fn pool_list(tracker: &LiveTracker) -> LivePoolListResponse {
     let mut pools = Vec::new();
 
     for token in state.processor.registry().tokens.values() {
-        for pool in token.v2_pools.values() {
-            pools.push(PoolView::from_pool(token, pool));
-        }
+        pools.extend(PoolView::from_token_pools(token));
     }
 
     pools.sort_by(|left, right| {

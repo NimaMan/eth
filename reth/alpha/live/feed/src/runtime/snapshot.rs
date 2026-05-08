@@ -1,5 +1,5 @@
 use eth_token::erc20::ERC20Token;
-use eth_token::pools::{PoolLifecycle, UniswapV2Pool};
+use eth_token::pools::{BasePool, PoolLifecycle, UniswapV2Pool};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,11 +54,19 @@ pub struct LiveTokenPoolSnapshot {
 
 impl LiveTokenSnapshot {
     pub fn from_token(token: &ERC20Token) -> Self {
-        let mut pools = token
-            .v2_pools
-            .values()
-            .map(|pool| LiveTokenPoolSnapshot::from_pool(&token.contract_address, pool))
-            .collect::<Vec<_>>();
+        let mut pools = Vec::with_capacity(token.pool_count());
+        pools.extend(
+            token
+                .v2_pools
+                .values()
+                .map(|pool| LiveTokenPoolSnapshot::from_pool(&token.contract_address, pool)),
+        );
+        pools.extend(token.v3_pools.values().map(|pool| {
+            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+        }));
+        pools.extend(token.v4_pools.values().map(|pool| {
+            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+        }));
         pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
 
         let buy_tax = pools.iter().find_map(|pool| pool.buy_tax);
@@ -90,30 +98,42 @@ impl LiveTokenSnapshot {
 
 impl LiveTokenPoolSnapshot {
     pub fn from_pool(token_address: &str, pool: &UniswapV2Pool) -> Self {
+        Self::from_base(
+            token_address,
+            &pool.base,
+            Some(pool.lp_approved_percentage()),
+        )
+    }
+
+    pub fn from_base(
+        token_address: &str,
+        pool: &BasePool,
+        lp_tokens_approved_percentage: Option<f64>,
+    ) -> Self {
         Self {
-            pool_address: pool.base.identity.pool_address.clone(),
+            pool_address: pool.identity.pool_address.clone(),
             token_address: token_address.to_string(),
-            protocol: pool.base.identity.protocol.clone(),
-            denom_address: pool.base.identity.denom_address.clone(),
-            denom_symbol: pool.base.identity.denom_address.clone(),
-            token_reserve: pool.base.token_reserve(),
-            denom_reserve: pool.base.denom_reserve(),
-            price: pool.base.price(),
-            total_liquidity: pool.base.state.total_liquidity,
-            can_buy: pool.base.state.can_buy,
-            can_sell: pool.base.state.can_sell,
-            trading_enabled: pool.base.trading_enabled(),
-            trading_enabled_block: pool.base.can_buy_block,
-            trading_enabled_tx: pool.base.can_buy_tx.clone(),
-            buy_tax: pool.base.buy_tax,
-            sell_tax: pool.base.sell_tax,
-            is_scam: pool.base.is_scam(),
-            scam_label: pool.base.scam_label.clone(),
-            creation_block: pool.base.creation_block,
-            latest_block_number: pool.base.latest_block_number,
-            lifecycle: lifecycle_label(pool.base.state.lifecycle),
-            control_addresses: sorted_strings(pool.base.token_control_addresses.iter().cloned()),
-            lp_tokens_approved_percentage: Some(pool.lp_approved_percentage()),
+            protocol: pool.identity.protocol.clone(),
+            denom_address: pool.identity.denom_address.clone(),
+            denom_symbol: pool.identity.denom_address.clone(),
+            token_reserve: pool.token_reserve(),
+            denom_reserve: pool.denom_reserve(),
+            price: pool.price(),
+            total_liquidity: pool.state.total_liquidity,
+            can_buy: pool.state.can_buy,
+            can_sell: pool.state.can_sell,
+            trading_enabled: pool.trading_enabled(),
+            trading_enabled_block: pool.can_buy_block,
+            trading_enabled_tx: pool.can_buy_tx.clone(),
+            buy_tax: pool.buy_tax,
+            sell_tax: pool.sell_tax,
+            is_scam: pool.is_scam(),
+            scam_label: pool.scam_label.clone(),
+            creation_block: pool.creation_block,
+            latest_block_number: pool.latest_block_number,
+            lifecycle: lifecycle_label(pool.state.lifecycle),
+            control_addresses: sorted_strings(pool.token_control_addresses.iter().cloned()),
+            lp_tokens_approved_percentage,
         }
     }
 }
@@ -129,6 +149,10 @@ fn lifecycle_label(lifecycle: PoolLifecycle) -> String {
     match lifecycle {
         PoolLifecycle::Discovered => "DISCOVERED",
         PoolLifecycle::LiquidityDeposited => "LIQUIDITY_DEPOSITED",
+        PoolLifecycle::Trading => "TRADING",
+        PoolLifecycle::CannotSell => "CANNOT_SELL",
+        PoolLifecycle::Dust => "DUST",
+        PoolLifecycle::Drained => "DRAINED",
         PoolLifecycle::Active => "ACTIVE",
         PoolLifecycle::Scam => "SCAM",
         PoolLifecycle::Evicted => "EVICTED",

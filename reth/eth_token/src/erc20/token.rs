@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
 
-use crate::pools::base::BasePoolConfig;
+use crate::pools::base::{BasePool, BasePoolConfig};
 use crate::pools::uniswap::v2::{
     LPApprovalEvent, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
 };
+use crate::pools::uniswap::{UniswapV3Pool, UniswapV4Pool};
 use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
 use crate::utils::scale_raw_units;
 
@@ -69,22 +70,40 @@ pub struct PoolStateSnapshot {
     pub scam_label: Option<String>,
 }
 
+impl PoolStateSnapshot {
+    pub fn from_base(base: &BasePool) -> Self {
+        Self {
+            pool_address: base.identity.pool_address.clone(),
+            protocol: base.identity.protocol.clone(),
+            denom_address: base.identity.denom_address.clone(),
+            token_reserve: base.token_reserve(),
+            denom_reserve: base.denom_reserve(),
+            price: base.price(),
+            total_liquidity: base.state.total_liquidity,
+            can_buy: base.state.can_buy,
+            can_sell: base.state.can_sell,
+            trading_enabled: base.trading_enabled(),
+            is_scam: base.is_scam(),
+            scam_label: base.scam_label.clone(),
+        }
+    }
+}
+
 impl From<&UniswapV2Pool> for PoolStateSnapshot {
     fn from(pool: &UniswapV2Pool) -> Self {
-        Self {
-            pool_address: pool.base.identity.pool_address.clone(),
-            protocol: pool.base.identity.protocol.clone(),
-            denom_address: pool.base.identity.denom_address.clone(),
-            token_reserve: pool.base.token_reserve(),
-            denom_reserve: pool.base.denom_reserve(),
-            price: pool.base.price(),
-            total_liquidity: pool.base.state.total_liquidity,
-            can_buy: pool.base.state.can_buy,
-            can_sell: pool.base.state.can_sell,
-            trading_enabled: pool.base.trading_enabled(),
-            is_scam: pool.base.is_scam(),
-            scam_label: pool.base.scam_label.clone(),
-        }
+        Self::from_base(&pool.base)
+    }
+}
+
+impl From<&UniswapV3Pool> for PoolStateSnapshot {
+    fn from(pool: &UniswapV3Pool) -> Self {
+        Self::from_base(&pool.base)
+    }
+}
+
+impl From<&UniswapV4Pool> for PoolStateSnapshot {
+    fn from(pool: &UniswapV4Pool) -> Self {
+        Self::from_base(&pool.base)
     }
 }
 
@@ -134,7 +153,12 @@ pub struct ERC20Token {
     pub transfer_tracker: TokenTransferTracker,
     pub authority_tracker: TokenAuthorityTracker,
     pub status_manager: TokenStatusManager,
+    #[serde(default)]
     pub v2_pools: HashMap<String, UniswapV2Pool>,
+    #[serde(default)]
+    pub v3_pools: HashMap<String, UniswapV3Pool>,
+    #[serde(default)]
+    pub v4_pools: HashMap<String, UniswapV4Pool>,
 }
 
 impl ERC20Token {
@@ -173,6 +197,8 @@ impl ERC20Token {
             authority_tracker: TokenAuthorityTracker::new(DEFAULT_TOKEN_HISTORY_LIMIT),
             status_manager: TokenStatusManager::new(total_supply),
             v2_pools: HashMap::new(),
+            v3_pools: HashMap::new(),
+            v4_pools: HashMap::new(),
         }
     }
 
@@ -278,6 +304,125 @@ impl ERC20Token {
         Ok(())
     }
 
+    pub fn create_uniswap_v3_pool(
+        &mut self,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        token0: impl Into<String>,
+        token1: impl Into<String>,
+        fee_tier: u32,
+        tick_spacing: i32,
+        mut config: BasePoolConfig,
+    ) -> &mut UniswapV3Pool {
+        config.token_decimals = self.decimals;
+        let pool = UniswapV3Pool::new(
+            pool_address,
+            self.contract_address.clone(),
+            denom_address,
+            token0,
+            token1,
+            fee_tier,
+            tick_spacing,
+            config,
+        );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_uniswap_v3_pool(pool);
+        self.v3_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
+    }
+
+    pub fn add_uniswap_v3_pool(&mut self, pool: UniswapV3Pool) -> Option<UniswapV3Pool> {
+        let mut pool = pool;
+        pool.base
+            .register_token_control_addresses(&self.token_control_addresses);
+        let pool_address = pool.base.identity.pool_address.clone();
+        let previous = self.v3_pools.insert(pool_address, pool);
+        self.refresh_lifecycle_status();
+        previous
+    }
+
+    pub fn uniswap_v3_pool(&self, pool_address: impl AsRef<str>) -> Option<&UniswapV3Pool> {
+        self.v3_pools.get(&normalize_address(pool_address))
+    }
+
+    pub fn uniswap_v3_pool_mut(
+        &mut self,
+        pool_address: impl AsRef<str>,
+    ) -> Option<&mut UniswapV3Pool> {
+        self.v3_pools.get_mut(&normalize_address(pool_address))
+    }
+
+    pub fn update_uniswap_v3_pool_from_processed_transaction(
+        &mut self,
+        pool_address: impl AsRef<str>,
+        transaction: &ProcessedTransaction,
+    ) -> Result<()> {
+        let pool_address = normalize_address(pool_address);
+        let tx_context = UniswapV2TxContext {
+            block_number: transaction.block_number,
+            block_timestamp: transaction.block_timestamp,
+            tx_hash: hash_string(&transaction.hash),
+            from_address: Some(address_string(&transaction.from_address)),
+        };
+        self.record_transaction_metadata(
+            &tx_context.tx_hash,
+            tx_context.from_address.as_deref(),
+            tx_context.block_number,
+            tx_context.block_timestamp,
+        );
+        let pool = self
+            .uniswap_v3_pool_mut(&pool_address)
+            .ok_or_else(|| eyre!("unknown Uniswap V3 pool {pool_address}"))?;
+        pool.update_from_processed_transaction(transaction, &tx_context)?;
+        self.refresh_lifecycle_status();
+        Ok(())
+    }
+
+    pub fn add_uniswap_v4_pool(&mut self, pool: UniswapV4Pool) -> Option<UniswapV4Pool> {
+        let mut pool = pool;
+        pool.base
+            .register_token_control_addresses(&self.token_control_addresses);
+        let pool_key = pool.base.identity.pool_address.clone();
+        let previous = self.v4_pools.insert(pool_key, pool);
+        self.refresh_lifecycle_status();
+        previous
+    }
+
+    pub fn uniswap_v4_pool(&self, pool_key: impl AsRef<str>) -> Option<&UniswapV4Pool> {
+        self.v4_pools.get(&normalize_address(pool_key))
+    }
+
+    pub fn uniswap_v4_pool_mut(&mut self, pool_key: impl AsRef<str>) -> Option<&mut UniswapV4Pool> {
+        self.v4_pools.get_mut(&normalize_address(pool_key))
+    }
+
+    pub fn update_uniswap_v4_pool_from_processed_transaction(
+        &mut self,
+        pool_key: impl AsRef<str>,
+        transaction: &ProcessedTransaction,
+    ) -> Result<()> {
+        let pool_key = normalize_address(pool_key);
+        let tx_context = UniswapV2TxContext {
+            block_number: transaction.block_number,
+            block_timestamp: transaction.block_timestamp,
+            tx_hash: hash_string(&transaction.hash),
+            from_address: Some(address_string(&transaction.from_address)),
+        };
+        self.record_transaction_metadata(
+            &tx_context.tx_hash,
+            tx_context.from_address.as_deref(),
+            tx_context.block_number,
+            tx_context.block_timestamp,
+        );
+        let pool = self
+            .uniswap_v4_pool_mut(&pool_key)
+            .ok_or_else(|| eyre!("unknown Uniswap V4 pool {pool_key}"))?;
+        pool.update_from_processed_transaction(transaction, &tx_context)?;
+        self.refresh_lifecycle_status();
+        Ok(())
+    }
+
     pub fn update_token_state_from_processed_transaction(
         &mut self,
         transaction: &ProcessedTransaction,
@@ -346,39 +491,71 @@ impl ERC20Token {
     }
 
     pub fn pool_addresses(&self) -> Vec<String> {
+        let mut addresses = self.uniswap_v2_pool_addresses();
+        addresses.extend(self.uniswap_v3_pool_addresses());
+        addresses.extend(self.uniswap_v4_pool_keys());
+        addresses.sort();
+        addresses.dedup();
+        addresses
+    }
+
+    pub fn uniswap_v2_pool_addresses(&self) -> Vec<String> {
         let mut addresses: Vec<_> = self.v2_pools.keys().cloned().collect();
         addresses.sort();
         addresses
     }
 
+    pub fn uniswap_v3_pool_addresses(&self) -> Vec<String> {
+        let mut addresses: Vec<_> = self.v3_pools.keys().cloned().collect();
+        addresses.sort();
+        addresses
+    }
+
+    pub fn uniswap_v4_pool_keys(&self) -> Vec<String> {
+        let mut addresses: Vec<_> = self.v4_pools.keys().cloned().collect();
+        addresses.sort();
+        addresses
+    }
+
+    pub fn pool_count(&self) -> usize {
+        self.v2_pools.len() + self.v3_pools.len() + self.v4_pools.len()
+    }
+
     pub fn has_pool(&self) -> bool {
-        !self.v2_pools.is_empty()
+        self.pool_count() > 0
     }
 
     pub fn trading_enabled(&self) -> bool {
-        self.v2_pools
-            .values()
-            .any(|pool| pool.base.trading_enabled())
+        self.all_pool_bases()
+            .iter()
+            .any(|pool| pool.trading_enabled())
     }
 
     pub fn is_scam(&self) -> bool {
-        self.status_manager.is_scam || self.v2_pools.values().any(|pool| pool.base.is_scam())
+        self.status_manager.is_scam || self.all_pool_bases().iter().any(|pool| pool.is_scam())
     }
 
     pub fn scam_label(&self) -> Option<String> {
         if let Some(label) = self.status_manager.scam_label.clone() {
             return Some(label);
         }
-        self.v2_pools
-            .values()
-            .find_map(|pool| pool.base.scam_label.clone())
+        self.all_pool_bases()
+            .into_iter()
+            .find_map(|pool| pool.scam_label.clone())
     }
 
     pub fn current_prices(&self) -> HashMap<String, PoolStateSnapshot> {
-        self.v2_pools
-            .iter()
-            .map(|(address, pool)| (address.clone(), PoolStateSnapshot::from(pool)))
-            .collect()
+        let mut prices = HashMap::new();
+        for (address, pool) in &self.v2_pools {
+            prices.insert(address.clone(), PoolStateSnapshot::from(pool));
+        }
+        for (address, pool) in &self.v3_pools {
+            prices.insert(address.clone(), PoolStateSnapshot::from(pool));
+        }
+        for (address, pool) in &self.v4_pools {
+            prices.insert(address.clone(), PoolStateSnapshot::from(pool));
+        }
+        prices
     }
 
     pub fn get_pool_info(&self) -> HashMap<String, PoolStateSnapshot> {
@@ -387,10 +564,10 @@ impl ERC20Token {
 
     pub fn total_liquidity_by_denom(&self) -> HashMap<String, f64> {
         let mut liquidity = HashMap::new();
-        for pool in self.v2_pools.values() {
+        for pool in self.all_pool_bases() {
             *liquidity
-                .entry(pool.base.identity.denom_address.clone())
-                .or_insert(0.0) += pool.base.state.total_liquidity;
+                .entry(pool.identity.denom_address.clone())
+                .or_insert(0.0) += pool.state.total_liquidity;
         }
         liquidity
     }
@@ -429,19 +606,18 @@ impl ERC20Token {
     }
 
     pub fn trading_enabled_block(&self) -> Option<u64> {
-        self.v2_pools
-            .values()
-            .filter_map(|pool| pool.base.can_buy_block)
+        self.all_pool_bases()
+            .into_iter()
+            .filter_map(|pool| pool.can_buy_block)
             .min()
     }
 
     pub fn trading_enabled_tx(&self) -> Option<String> {
-        self.v2_pools
-            .values()
+        self.all_pool_bases()
+            .into_iter()
             .filter_map(|pool| {
-                pool.base
-                    .can_buy_block
-                    .zip(pool.base.can_buy_tx.as_ref())
+                pool.can_buy_block
+                    .zip(pool.can_buy_tx.as_ref())
                     .map(|(block, tx)| (block, tx))
             })
             .min_by_key(|(block, _)| *block)
@@ -449,16 +625,17 @@ impl ERC20Token {
     }
 
     pub fn all_pool_reserves(&self) -> HashMap<String, Value> {
-        self.v2_pools
-            .iter()
-            .map(|(address, pool)| {
+        self.all_pool_bases()
+            .into_iter()
+            .map(|pool| {
+                let address = pool.identity.pool_address.clone();
                 (
-                    address.clone(),
+                    address,
                     json!({
-                        "token_reserve": pool.base.token_reserve(),
-                        "denom_reserve": pool.base.denom_reserve(),
-                        "denom_address": pool.base.identity.denom_address.clone(),
-                        "protocol": pool.base.identity.protocol.clone(),
+                        "token_reserve": pool.token_reserve(),
+                        "denom_reserve": pool.denom_reserve(),
+                        "denom_address": pool.identity.denom_address.clone(),
+                        "protocol": pool.identity.protocol.clone(),
                     }),
                 )
             })
@@ -467,9 +644,9 @@ impl ERC20Token {
 
     pub fn get_token_summary(&self) -> TokenSummary {
         let mut protocols: Vec<_> = self
-            .v2_pools
-            .values()
-            .map(|pool| pool.base.identity.protocol.clone())
+            .all_pool_bases()
+            .into_iter()
+            .map(|pool| pool.identity.protocol.clone())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
@@ -487,7 +664,7 @@ impl ERC20Token {
             creation_block: self.creation_block,
             creator_address: self.creator_address.clone(),
             has_pools: self.has_pool(),
-            pool_count: self.v2_pools.len(),
+            pool_count: self.pool_count(),
             protocols,
             total_transactions: self.tx_hashes_to_makers.len(),
             latest_block: self.latest_block_number,
@@ -527,6 +704,29 @@ impl ERC20Token {
         for pool in self.v2_pools.values_mut() {
             pool.base.register_token_control_addresses(&addresses);
         }
+        for pool in self.v3_pools.values_mut() {
+            pool.base.register_token_control_addresses(&addresses);
+        }
+        for pool in self.v4_pools.values_mut() {
+            pool.base.register_token_control_addresses(&addresses);
+        }
+    }
+
+    pub fn pool_base(&self, pool_key: impl AsRef<str>) -> Option<&BasePool> {
+        let pool_key = normalize_address(pool_key);
+        self.v2_pools
+            .get(&pool_key)
+            .map(|pool| &pool.base)
+            .or_else(|| self.v3_pools.get(&pool_key).map(|pool| &pool.base))
+            .or_else(|| self.v4_pools.get(&pool_key).map(|pool| &pool.base))
+    }
+
+    pub fn all_pool_bases(&self) -> Vec<&BasePool> {
+        let mut pools = Vec::with_capacity(self.pool_count());
+        pools.extend(self.v2_pools.values().map(|pool| &pool.base));
+        pools.extend(self.v3_pools.values().map(|pool| &pool.base));
+        pools.extend(self.v4_pools.values().map(|pool| &pool.base));
+        pools
     }
 }
 

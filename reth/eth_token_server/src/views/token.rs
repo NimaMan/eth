@@ -64,7 +64,7 @@ impl TokenView {
             creator_address: token.creator_address.clone(),
             latest_block: token.latest_block_number,
             latest_timestamp: token.latest_block_timestamp,
-            pool_count: token.v2_pools.len(),
+            pool_count: token.pool_count(),
             has_pools: token.has_pool(),
             is_scam: token.is_scam(),
             scam_label: token.scam_label(),
@@ -107,12 +107,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let token = state.processor.registry.tokens.get(&address)?;
     let index_status = index_status(&state, &address);
     let network = TokenNetworkView::from_graph(token, state.processor.network_graphs.get(&address));
-    let mut pools = token
-        .v2_pools
-        .values()
-        .map(|pool| PoolView::from_pool(token, pool))
-        .collect::<Vec<_>>();
-    pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
+    let pools = PoolView::from_token_pools(token);
 
     Some(TokenDetailResponse {
         run_id: run.id.clone(),

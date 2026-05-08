@@ -71,6 +71,10 @@ pub struct RangeIndexState {
     pub updated_tokens: BTreeSet<String>,
     pub discovered_v2_pools: BTreeSet<String>,
     pub updated_v2_pools: BTreeSet<String>,
+    pub discovered_v3_pools: BTreeSet<String>,
+    pub updated_v3_pools: BTreeSet<String>,
+    pub discovered_v4_pools: BTreeSet<String>,
+    pub updated_v4_pools: BTreeSet<String>,
 }
 
 #[derive(Debug)]
@@ -100,6 +104,10 @@ impl RangeIndexJob {
                 updated_tokens: BTreeSet::new(),
                 discovered_v2_pools: BTreeSet::new(),
                 updated_v2_pools: BTreeSet::new(),
+                discovered_v3_pools: BTreeSet::new(),
+                updated_v3_pools: BTreeSet::new(),
+                discovered_v4_pools: BTreeSet::new(),
+                updated_v4_pools: BTreeSet::new(),
             }),
             stop_requested: AtomicBool::new(false),
         }

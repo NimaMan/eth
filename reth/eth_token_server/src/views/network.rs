@@ -199,11 +199,11 @@ impl TokenNetworkEdgeView {
 
 fn latest_token_price(token: &ERC20Token) -> Option<f64> {
     token
-        .v2_pools
-        .values()
+        .all_pool_bases()
+        .into_iter()
         .filter_map(|pool| {
-            let price = pool.base.price();
-            let liquidity = pool.base.state.total_liquidity;
+            let price = pool.price();
+            let liquidity = pool.state.total_liquidity;
             if price.is_finite() && price > 0.0 && liquidity.is_finite() && liquidity >= 0.0 {
                 Some((liquidity, price))
             } else {

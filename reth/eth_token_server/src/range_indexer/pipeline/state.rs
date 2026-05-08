@@ -104,6 +104,18 @@ pub(super) fn apply_report(
         state
             .updated_v2_pools
             .extend(update.updated_uniswap_v2_pools);
+        state
+            .discovered_v3_pools
+            .extend(update.discovered_uniswap_v3_pools);
+        state
+            .updated_v3_pools
+            .extend(update.updated_uniswap_v3_pools);
+        state
+            .discovered_v4_pools
+            .extend(update.discovered_uniswap_v4_pools);
+        state
+            .updated_v4_pools
+            .extend(update.updated_uniswap_v4_pools);
     }
 
     for error in report.transaction_errors {
@@ -119,9 +131,27 @@ pub(super) fn apply_report(
     state.progress.updated_tokens_unique = state.updated_tokens.len();
     state.progress.discovered_v2_pools_unique = state.discovered_v2_pools.len();
     state.progress.updated_v2_pools_unique = state.updated_v2_pools.len();
+    state.progress.discovered_v3_pools_unique = state.discovered_v3_pools.len();
+    state.progress.updated_v3_pools_unique = state.updated_v3_pools.len();
+    state.progress.discovered_v4_pools_unique = state.discovered_v4_pools.len();
+    state.progress.updated_v4_pools_unique = state.updated_v4_pools.len();
     state.progress.tracked_tokens = state.processor.registry.tokens.len();
     state.progress.indexed_tokens = state.processor.token_index.entries.len();
-    state.progress.indexed_v2_pools = state.processor.token_index.pool_to_token.len();
+    state.progress.indexed_pools = state.processor.token_index.pool_to_token.len();
+    state.progress.tracked_pools = state
+        .processor
+        .registry
+        .tokens
+        .values()
+        .map(|token| token.pool_count())
+        .sum();
+    state.progress.indexed_v2_pools = state
+        .processor
+        .registry
+        .tokens
+        .values()
+        .map(|token| token.v2_pools.len())
+        .sum();
     state.progress.tracked_v2_pools = state
         .processor
         .registry
@@ -129,6 +159,22 @@ pub(super) fn apply_report(
         .values()
         .map(|token| token.v2_pools.len())
         .sum();
+    state.progress.indexed_v3_pools = state
+        .processor
+        .registry
+        .tokens
+        .values()
+        .map(|token| token.v3_pools.len())
+        .sum();
+    state.progress.tracked_v3_pools = state.progress.indexed_v3_pools;
+    state.progress.indexed_v4_pools = state
+        .processor
+        .registry
+        .tokens
+        .values()
+        .map(|token| token.v4_pools.len())
+        .sum();
+    state.progress.tracked_v4_pools = state.progress.indexed_v4_pools;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -153,17 +199,25 @@ fn simulation_summary(
     };
 
     for update in &report.token_updates {
-        summary.attempted += update.simulated_uniswap_v2_pools.len();
-        summary.succeeded += update.simulated_uniswap_v2_pools.len();
+        let simulated_pool_count = update.simulated_uniswap_v2_pools.len()
+            + update.simulated_uniswap_v3_pools.len()
+            + update.simulated_uniswap_v4_pools.len();
+        summary.attempted += simulated_pool_count;
+        summary.succeeded += simulated_pool_count;
 
         let Some(token) = state.processor.registry.token(&update.token_address) else {
             continue;
         };
-        for pool_address in &update.simulated_uniswap_v2_pools {
-            let Some(pool) = token.uniswap_v2_pool(pool_address) else {
+        for pool_address in update
+            .simulated_uniswap_v2_pools
+            .iter()
+            .chain(update.simulated_uniswap_v3_pools.iter())
+            .chain(update.simulated_uniswap_v4_pools.iter())
+        {
+            let Some(pool) = token.pool_base(pool_address) else {
                 continue;
             };
-            if pool.base.state.can_buy && !pool.base.state.can_sell {
+            if pool.state.can_buy && !pool.state.can_sell {
                 summary.cannot_sell += 1;
             }
         }

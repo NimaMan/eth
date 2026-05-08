@@ -4,6 +4,7 @@ use tx_processor::ProcessedTransaction;
 
 use crate::erc20::ERC20Token;
 use crate::manager::{address_string, normalize_address, same_address_str, TokenRegistry};
+use crate::pools::uniswap::v4_event_display_key;
 
 pub(crate) fn token_prior_lookup_addresses(
     registry: &TokenRegistry,
@@ -91,6 +92,27 @@ pub(crate) fn pool_state_prior_addresses(tx: &ProcessedTransaction) -> Vec<Strin
     }
     for event in &tx.uniswap_v2_burns {
         addresses.insert(address_string(&event.pair_address));
+    }
+    for event in &tx.uniswap_v3_pools {
+        addresses.insert(address_string(&event.pool));
+    }
+    for event in &tx.uniswap_v3_mints {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_burns {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v4_initializes {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
+    }
+    for event in &tx.uniswap_v4_modifies {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
     }
 
     addresses.into_iter().collect()
@@ -180,6 +202,54 @@ fn pool_lookup_addresses_from_tx(tx: &ProcessedTransaction) -> BTreeSet<String> 
     }
     for event in &tx.uniswap_v2_pair_created_events {
         addresses.insert(address_string(&event.pair_address));
+    }
+    for event in &tx.uniswap_v3_pools {
+        addresses.insert(address_string(&event.pool));
+    }
+    for event in &tx.uniswap_v3_initializations {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_swaps {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_mints {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_burns {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_positions {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_increases {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v3_decreases {
+        addresses.insert(address_string(&event.pool_address));
+    }
+    for event in &tx.uniswap_v4_initializes {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
+    }
+    for event in &tx.uniswap_v4_modifies {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
+    }
+    for event in &tx.uniswap_v4_swaps {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
+    }
+    for event in &tx.uniswap_v4_donates {
+        addresses.insert(v4_event_display_key(
+            event.pool_manager_address,
+            event.event_id,
+        ));
     }
 
     addresses

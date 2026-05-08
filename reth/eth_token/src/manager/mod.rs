@@ -29,13 +29,28 @@ pub use retention::{
 pub use token_builder::TokenStateBuilder;
 pub use update_router::ProcessedTokenUpdateRouter;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenStateUpdateReport {
     pub token_address: String,
     pub token_state_updated: bool,
+    #[serde(default)]
     pub discovered_uniswap_v2_pools: Vec<String>,
+    #[serde(default)]
     pub updated_uniswap_v2_pools: Vec<String>,
+    #[serde(default)]
     pub simulated_uniswap_v2_pools: Vec<String>,
+    #[serde(default)]
+    pub discovered_uniswap_v3_pools: Vec<String>,
+    #[serde(default)]
+    pub updated_uniswap_v3_pools: Vec<String>,
+    #[serde(default)]
+    pub simulated_uniswap_v3_pools: Vec<String>,
+    #[serde(default)]
+    pub discovered_uniswap_v4_pools: Vec<String>,
+    #[serde(default)]
+    pub updated_uniswap_v4_pools: Vec<String>,
+    #[serde(default)]
+    pub simulated_uniswap_v4_pools: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -119,7 +134,8 @@ mod tests {
     use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
     use tx_processor::tx_processor::data_models::{
         ContractCreationEvent, ERC20TransferEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent,
-        UniswapV2SwapEvent, UniswapV2SyncEvent,
+        UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV3InitializeEvent, UniswapV3MintEvent,
+        UniswapV3PoolCreatedEvent, UniswapV4InitializeEvent, UniswapV4SwapEvent,
     };
     use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
@@ -281,6 +297,129 @@ mod tests {
             .unwrap();
         assert_eq!(pool.base.token_reserve(), 100.0);
         assert_eq!(pool.base.denom_reserve(), 2.0);
+    }
+
+    #[test]
+    fn discovers_and_updates_uniswap_v3_pool_for_tracked_token() {
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
+        let mut tx = tx();
+        let sqrt = U256::from(1u128) << 96;
+        tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+            token0: address!("1111111111111111111111111111111111111111"),
+            token1: address!("2222222222222222222222222222222222222222"),
+            fee: 3000,
+            tick_spacing: 60,
+            pool: address!("3333333333333333333333333333333333333333"),
+            log_index: 1,
+        });
+        tx.uniswap_v3_initializations
+            .push(UniswapV3InitializeEvent {
+                pool_address: address!("3333333333333333333333333333333333333333"),
+                sqrt_price_x96: sqrt,
+                tick: 0,
+                log_index: 2,
+            });
+        tx.uniswap_v3_mints.push(UniswapV3MintEvent {
+            pool_address: address!("3333333333333333333333333333333333333333"),
+            sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            owner: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            tick_lower: -60,
+            tick_upper: 60,
+            amount: U256::from(1_000_000_000_000_000_000u128),
+            amount0: U256::ZERO,
+            amount1: U256::ZERO,
+            log_index: 3,
+        });
+
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
+            .unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].discovered_uniswap_v3_pools.len(), 1);
+        assert_eq!(reports[0].updated_uniswap_v3_pools.len(), 1);
+        let token = registry
+            .token("0x1111111111111111111111111111111111111111")
+            .unwrap();
+        let pool = token
+            .uniswap_v3_pool("0x3333333333333333333333333333333333333333")
+            .unwrap();
+        assert_eq!(pool.fee_tier, 3000);
+        assert_eq!(pool.base.price(), 1.0);
+        assert_eq!(pool.active_liquidity, 1_000_000_000_000_000_000u128);
+    }
+
+    #[test]
+    fn discovers_v4_only_from_initialize_and_ignores_unknown_pool_id() {
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
+        let mut init_tx = tx();
+        let sqrt = U256::from(1u128) << 96;
+        init_tx
+            .uniswap_v4_initializes
+            .push(UniswapV4InitializeEvent {
+                pool_manager_address: address!("000000000004444c5dc75cb358380d2e3de08a90"),
+                event_id: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
+                currency0: address!("0000000000000000000000000000000000000000"),
+                currency1: address!("1111111111111111111111111111111111111111"),
+                fee: 3000,
+                tick_spacing: 60,
+                hooks: address!("0000000000000000000000000000000000000000"),
+                sqrt_price_x96: sqrt,
+                tick: 0,
+                log_index: 1,
+            });
+
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &init_tx)
+            .unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].discovered_uniswap_v4_pools.len(), 1);
+        assert_eq!(reports[0].updated_uniswap_v4_pools.len(), 1);
+        let token = registry
+            .token("0x1111111111111111111111111111111111111111")
+            .unwrap();
+        assert_eq!(token.v4_pools.len(), 1);
+        let pool_key = token.v4_pools.keys().next().cloned().unwrap();
+        let pool = token.uniswap_v4_pool(&pool_key).unwrap();
+        assert_eq!(
+            pool.pool_key.currency0,
+            "0x0000000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            pool.base.identity.denom_address,
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        );
+
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+        let mut unknown = tx();
+        unknown.uniswap_v4_swaps.push(UniswapV4SwapEvent {
+            pool_manager_address: address!("000000000004444c5dc75cb358380d2e3de08a90"),
+            event_id: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
+            sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            amount0: -1,
+            amount1: 1,
+            sqrt_price_x96: sqrt,
+            liquidity: 1_000_000_000_000_000_000u128,
+            tick: 0,
+            fee: 3000,
+            log_index: 1,
+        });
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &unknown)
+            .unwrap();
+
+        assert!(reports.is_empty());
+        let token = registry
+            .token("0x1111111111111111111111111111111111111111")
+            .unwrap();
+        assert_eq!(token.v4_pools.len(), 1);
     }
 
     #[tokio::test]
