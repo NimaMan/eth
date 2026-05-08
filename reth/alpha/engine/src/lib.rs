@@ -7,6 +7,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
@@ -256,14 +257,22 @@ where
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PaperExecutionAdapter {
+    order_prefix: Arc<str>,
     next_order_id: Arc<AtomicU64>,
 }
 
 impl PaperExecutionAdapter {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_order_prefix(unique_paper_order_prefix())
+    }
+
+    pub fn with_order_prefix(prefix: impl Into<String>) -> Self {
+        Self {
+            order_prefix: Arc::<str>::from(prefix.into()),
+            next_order_id: Arc::new(AtomicU64::new(0)),
+        }
     }
 }
 
@@ -272,7 +281,7 @@ impl EngineExecutionAdapter for PaperExecutionAdapter {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         Ok(ExecutionReport {
-            order_id: OrderId(format!("paper-{order_seq}")),
+            order_id: OrderId(format!("{}-{order_seq}", self.order_prefix)),
             status: ExecutionStatus::Confirmed,
             tx_hash: None,
             block_number: None,
@@ -281,6 +290,14 @@ impl EngineExecutionAdapter for PaperExecutionAdapter {
             error: None,
         })
     }
+}
+
+fn unique_paper_order_prefix() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    format!("paper-{}-{millis}", std::process::id())
 }
 
 #[derive(Clone, Debug, Default)]

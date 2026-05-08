@@ -82,6 +82,20 @@ impl SnipeAllStrategy {
                     .unwrap_or(true)
         })
     }
+
+    fn has_active_position(
+        ctx: &StrategyContext<'_>,
+        strategy_name: &StrategyName,
+        token_address: TokenAddress,
+        pool_address: PoolAddress,
+    ) -> bool {
+        ctx.portfolio.positions.values().any(|position| {
+            position.key.strategy_name == *strategy_name
+                && position.key.token_address == token_address
+                && position.key.pool_address == pool_address
+                && !position.state.is_terminal()
+        })
+    }
 }
 
 impl Strategy for SnipeAllStrategy {
@@ -98,6 +112,11 @@ impl Strategy for SnipeAllStrategy {
             return Ok(StrategyDecision::Hold);
         };
         if Self::has_blocking_entry_risk(ctx, pool.token_address, pool.address) {
+            return Ok(StrategyDecision::Hold);
+        }
+        let strategy_name = self.name();
+        if Self::has_active_position(ctx, &strategy_name, pool.token_address, pool.address) {
+            self.state.mark_bought(pool.address);
             return Ok(StrategyDecision::Hold);
         }
 
@@ -194,6 +213,38 @@ mod tests {
         }
     }
 
+    fn confirmed_position(strategy: &SnipeAllStrategy, pool: &PoolSnapshot) -> Position {
+        let mut position = Position::new(
+            PositionId("position-1".to_string()),
+            PositionKey {
+                portfolio_id: strategy.config.portfolio_id.clone(),
+                wallet_id: strategy.config.wallet_id.clone(),
+                strategy_name: strategy.name(),
+                token_address: pool.token_address,
+                pool_address: pool.address,
+            },
+        );
+        position.mark_intent_created(OrderSide::Buy).unwrap();
+        position
+            .mark_order_submitted(OrderId("buy-1".to_string()), OrderSide::Buy)
+            .unwrap();
+        position
+            .apply_execution_report(&ExecutionReport {
+                order_id: OrderId("buy-1".to_string()),
+                status: ExecutionStatus::Confirmed,
+                tx_hash: None,
+                block_number: Some(1),
+                filled_amount: Some(Amount {
+                    raw: Default::default(),
+                    decimals: 18,
+                }),
+                gas_used: Some(0),
+                error: None,
+            })
+            .unwrap();
+        position
+    }
+
     #[test]
     fn buys_every_eligible_pool_once() {
         let pool = pool();
@@ -241,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn sells_open_position_on_liquidity_removal() {
+    fn restored_open_position_prevents_duplicate_buy() {
         let pool = pool();
         let market = MarketSnapshotRef {
             block_number: 1,
@@ -251,37 +302,36 @@ mod tests {
             pool: Some(pool.clone()),
         };
         let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
-        strategy.state.mark_bought(pool.address);
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
 
-        let mut position = Position::new(
-            PositionId("position-1".to_string()),
-            PositionKey {
-                portfolio_id: strategy.config.portfolio_id.clone(),
-                wallet_id: strategy.config.wallet_id.clone(),
-                strategy_name: strategy.name(),
-                token_address: pool.token_address,
-                pool_address: pool.address,
-            },
-        );
-        position.mark_intent_created(OrderSide::Buy).unwrap();
-        position
-            .mark_order_submitted(OrderId("buy-1".to_string()), OrderSide::Buy)
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 2,
+                    pool,
+                },
+            )
             .unwrap();
-        position
-            .apply_execution_report(&ExecutionReport {
-                order_id: OrderId("buy-1".to_string()),
-                status: ExecutionStatus::Confirmed,
-                tx_hash: None,
-                block_number: Some(1),
-                filled_amount: Some(Amount {
-                    raw: Default::default(),
-                    decimals: 18,
-                }),
-                gas_used: Some(0),
-                error: None,
-            })
-            .unwrap();
+        assert_eq!(decision, StrategyDecision::Hold);
+    }
 
+    #[test]
+    fn sells_restored_open_position_on_liquidity_removal() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+        let position = confirmed_position(&strategy, &pool);
         let mut portfolio = PortfolioState::default();
         portfolio.positions.insert(position.id.clone(), position);
         let risks = Vec::new();

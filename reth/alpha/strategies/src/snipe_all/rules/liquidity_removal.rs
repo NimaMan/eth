@@ -25,7 +25,9 @@ pub fn evaluate(
     let Some(pool_address) = event.pool_address.or(ctx.market.pool_address) else {
         return RuleDecision::hold(RULE_NAME, "liquidity-removal event has no pool");
     };
-    if !state.has_bought(pool_address) {
+    if !state.has_bought(pool_address)
+        && !has_open_matching_position(ctx, strategy_name, pool_address)
+    {
         return RuleDecision::hold(RULE_NAME, "pool was not bought by strategy");
     }
     if state.is_exiting(pool_address) {

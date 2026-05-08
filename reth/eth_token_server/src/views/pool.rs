@@ -189,7 +189,7 @@ impl PoolView {
             creation_block: pool.base.creation_block,
             creation_timestamp: pool.base.creation_timestamp,
             can_buy_block: pool.base.can_buy_block,
-            latest_block_number: pool.base.latest_block_number,
+            latest_block_number: latest_pool_block_number(pool),
             trading_status,
             runtime_state: pool.base.state.clone(),
             lp_total_supply: pool.lp_tracker.total_supply,
@@ -423,6 +423,19 @@ fn denom_symbol(address: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn latest_pool_block_number(pool: &UniswapV2Pool) -> Option<u64> {
+    pool.base
+        .latest_block_number
+        .or_else(|| nonzero_block(pool.base.state.last_update_block))
+        .or_else(|| nonzero_block(pool.base.state.last_sync_block))
+        .or(pool.base.can_buy_block)
+        .or(pool.base.creation_block)
+}
+
+fn nonzero_block(block: u64) -> Option<u64> {
+    (block > 0).then_some(block)
+}
+
 pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let state = run.state.read().await;
     let mut pools = Vec::new();
@@ -448,6 +461,8 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
 
 #[cfg(test)]
 mod tests {
+    use eth_token::pools::BasePoolConfig;
+
     use super::*;
 
     #[test]
@@ -493,5 +508,22 @@ mod tests {
             ratio.label,
             Some("pool_reserve_exceeds_total_supply".to_string())
         );
+    }
+
+    #[test]
+    fn latest_pool_block_uses_runtime_update_when_control_block_is_empty() {
+        let mut pool = UniswapV2Pool::new(
+            "0xpool",
+            "0xtoken",
+            "0xdenom",
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.state.last_update_block = 123;
+
+        assert_eq!(latest_pool_block_number(&pool), Some(123));
+
+        pool.base.latest_block_number = Some(456);
+        assert_eq!(latest_pool_block_number(&pool), Some(456));
     }
 }

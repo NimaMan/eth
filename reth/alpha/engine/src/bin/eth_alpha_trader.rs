@@ -106,9 +106,16 @@ struct PoolWire {
     token_reserve: f64,
     price: f64,
     latest_block_number: Option<u64>,
+    runtime_state: Option<PoolRuntimeStateWire>,
     can_buy: bool,
     can_sell: bool,
     is_scam: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PoolRuntimeStateWire {
+    last_update_block: Option<u64>,
+    last_sync_block: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -591,7 +598,7 @@ async fn record_pool_observation(
         .record_strategy_observation(StrategyObservationRecord {
             strategy_name: STRATEGY_NAME.to_string(),
             event_source: POOL_UPDATE_SOURCE.to_string(),
-            event_key: pool.address.to_string(),
+            event_key: format!("{}:{}", pool.address, pool.latest_block),
             token_address: Some(pool.token_address.to_string()),
             pool_address: Some(pool.address.to_string()),
             block_number: Some(pool.latest_block),
@@ -662,7 +669,24 @@ impl PoolWire {
     fn to_pool_snapshot(&self) -> Result<PoolSnapshot> {
         let address = parse_address(&self.pool_address)?;
         let token_address = parse_address(&self.token_address)?;
-        let latest_block = self.latest_block_number.unwrap_or_default();
+        let Some(latest_block) =
+            self.latest_block_number
+                .filter(|block| *block > 0)
+                .or_else(|| {
+                    self.runtime_state.as_ref().and_then(|state| {
+                        state
+                            .last_update_block
+                            .filter(|block| *block > 0)
+                            .or_else(|| state.last_sync_block.filter(|block| *block > 0))
+                    })
+                })
+        else {
+            return Err(eyre!(
+                "pool {} for token {} has no latest block",
+                self.pool_address,
+                self.token_address
+            ));
+        };
         Ok(PoolSnapshot {
             address,
             token_address,
