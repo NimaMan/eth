@@ -1,8 +1,12 @@
 # Strategies
 
-Planned crate: `eth_alpha_strategies`
+Crate: `eth_strategies`
 
 This crate contains built-in strategies. Strategies are decision logic only.
+
+## Current Implementations
+
+- `MarketTrackerStrategy`: submits one paper buy per tradable pool or `TradingEnabled` risk event, then suppresses repeat buys for that pool. It blocks itself when a matching critical risk is active.
 
 ## Responsibilities
 

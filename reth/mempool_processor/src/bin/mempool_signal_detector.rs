@@ -482,9 +482,11 @@ async fn main() -> Result<()> {
                 .provider_factory()
                 .clone();
             let writer = std::sync::Arc::new(
-                reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
+                reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new_with_fallbacks(
                     db.clone(),
                     std::sync::Arc::new(provider_factory),
+                    cfg_reth_db_path.clone(),
+                    mempool_processor::config::eth_rpc_url_from_env(),
                 ),
             );
             let cfg = ArrivalRecorderConfig {

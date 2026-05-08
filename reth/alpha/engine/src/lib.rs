@@ -16,8 +16,8 @@ use eth_alpha_core::{
     market::{MarketEvent, MarketSnapshotRef},
     order::OrderIntent,
     portfolio::PortfolioState,
-    position::{Position, PositionSnapshot},
-    risk::{RiskDecision, RiskEvent, RiskPolicy},
+    position::{Position, PositionKey, PositionSnapshot},
+    risk::{RiskDecision, RiskEvent, RiskKind, RiskPolicy, RiskSeverity},
     store::TradingStore,
     strategy::{Strategy, StrategyContext, StrategyDecision},
 };
@@ -156,13 +156,23 @@ where
     }
 
     async fn run_risk_strategies(&mut self, event: &RiskEvent) -> Result<Vec<ExecutionReport>> {
-        let market = self.market.clone().unwrap_or_else(|| MarketSnapshotRef {
-            block_number: event.observed_block.unwrap_or_default(),
-            token_address: event.token_address,
-            pool_address: event.pool_address,
-            token: None,
-            pool: None,
-        });
+        let market = self
+            .market
+            .clone()
+            .filter(|market| {
+                market.token_address == event.token_address
+                    && event
+                        .pool_address
+                        .map(|pool| Some(pool) == market.pool_address)
+                        .unwrap_or(true)
+            })
+            .unwrap_or_else(|| MarketSnapshotRef {
+                block_number: event.observed_block.unwrap_or_default(),
+                token_address: event.token_address,
+                pool_address: event.pool_address,
+                token: None,
+                pool: None,
+            });
         let portfolio = self.portfolio.clone();
         let active_risks = self.active_risks.clone();
         let ctx = StrategyContext {
@@ -198,17 +208,50 @@ where
         self.store.record_order_intent(&intent).await?;
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
-                let report = self.execution.execute(intent).await?;
+                let mut position = self.position_for_intent(&intent);
+                position.mark_intent_created(intent.side)?;
+                let report = self.execution.execute(intent.clone()).await?;
+                position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+                position.apply_execution_report(&report)?;
+                self.store.upsert_position(&position).await?;
                 self.store.record_execution_report(&report).await?;
+                self.portfolio
+                    .positions
+                    .insert(position.id.clone(), position);
                 Ok(vec![report])
             }
             RiskDecision::ForceExit { intent, .. } => {
-                let report = self.execution.execute(*intent).await?;
+                let intent = *intent;
+                let mut position = self.position_for_intent(&intent);
+                position.mark_intent_created(intent.side)?;
+                let report = self.execution.execute(intent.clone()).await?;
+                position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+                position.apply_execution_report(&report)?;
+                self.store.upsert_position(&position).await?;
                 self.store.record_execution_report(&report).await?;
+                self.portfolio
+                    .positions
+                    .insert(position.id.clone(), position);
                 Ok(vec![report])
             }
             RiskDecision::Reject { .. } | RiskDecision::CancelOpenOrders { .. } => Ok(Vec::new()),
         }
+    }
+
+    fn position_for_intent(&self, intent: &OrderIntent) -> Position {
+        let key = PositionKey {
+            portfolio_id: intent.portfolio_id.clone(),
+            wallet_id: intent.wallet_id.clone(),
+            strategy_name: intent.strategy_name.clone(),
+            token_address: intent.token_address,
+            pool_address: intent.pool_address,
+        };
+        let id = position_id_for_key(&key);
+        self.portfolio
+            .positions
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| Position::new(id, key))
     }
 }
 
@@ -248,6 +291,39 @@ impl RiskPolicy for AllowAllRiskPolicy {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BlockCriticalRiskPolicy;
+
+impl RiskPolicy for BlockCriticalRiskPolicy {
+    fn evaluate_order(&self, intent: &OrderIntent, active_risks: &[RiskEvent]) -> RiskDecision {
+        if let Some(risk) = active_risks.iter().rev().find(|risk| {
+            risk.severity == RiskSeverity::Critical
+                && risk.kind != RiskKind::TradingEnabled
+                && risk.token_address == intent.token_address
+                && risk
+                    .pool_address
+                    .map(|pool| pool == intent.pool_address)
+                    .unwrap_or(true)
+        }) {
+            return RiskDecision::Reject {
+                reason: format!("critical active risk for order: {}", risk.message),
+            };
+        }
+        RiskDecision::Allow
+    }
+}
+
+fn position_id_for_key(key: &PositionKey) -> eth_alpha_core::ids::PositionId {
+    eth_alpha_core::ids::PositionId(format!(
+        "{}:{}:{}:{}:{}",
+        key.portfolio_id.0,
+        key.wallet_id.0,
+        key.strategy_name.0,
+        key.token_address,
+        key.pool_address
+    ))
+}
+
 #[derive(Clone, Default)]
 pub struct MemoryTradingStore {
     positions: Arc<Mutex<Vec<Position>>>,
@@ -257,6 +333,10 @@ pub struct MemoryTradingStore {
 }
 
 impl MemoryTradingStore {
+    pub fn positions(&self) -> Vec<Position> {
+        self.positions.lock().expect("store lock").clone()
+    }
+
     pub fn order_intents(&self) -> Vec<OrderIntent> {
         self.order_intents.lock().expect("store lock").clone()
     }
@@ -381,6 +461,8 @@ mod tests {
         assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
         assert_eq!(store.order_intents().len(), 1);
         assert_eq!(store.execution_reports().len(), 1);
+        assert_eq!(store.positions().len(), 1);
+        assert_eq!(engine.portfolio().active_position_count(), 1);
     }
 
     #[tokio::test]
@@ -409,5 +491,55 @@ mod tests {
         assert!(reports.is_empty());
         assert_eq!(engine.active_risks().len(), 1);
         assert!(store.order_intents().is_empty());
+    }
+
+    #[tokio::test]
+    async fn critical_risk_policy_rejects_matching_order() {
+        let store = MemoryTradingStore::default();
+        let mut engine = AlphaEngine::new(
+            BlockCriticalRiskPolicy,
+            store.clone(),
+            PaperExecutionAdapter::new(),
+        );
+        engine.add_strategy(Box::new(BuyOnMarketStrategy));
+
+        let token = Address::repeat_byte(0x11);
+        let pool = Address::repeat_byte(0x22);
+        engine
+            .handle_event(EngineEvent::Risk(RiskEvent {
+                kind: RiskKind::LiquidityRemoval,
+                severity: RiskSeverity::Critical,
+                token_address: token,
+                pool_address: Some(pool),
+                pending_tx_hash: None,
+                observed_block: Some(1),
+                message: "liquidity removal".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: PoolSnapshot {
+                    address: pool,
+                    token_address: token,
+                    protocol: PoolProtocol::UniswapV2,
+                    denom_reserve: Default::default(),
+                    token_reserve: Default::default(),
+                    price_denom_per_token: None,
+                    latest_block: 1,
+                    can_buy: true,
+                    can_sell: true,
+                    is_scam: false,
+                },
+            }))
+            .await
+            .unwrap();
+
+        assert!(reports.is_empty());
+        assert_eq!(store.order_intents().len(), 1);
+        assert!(store.execution_reports().is_empty());
+        assert!(store.positions().is_empty());
     }
 }

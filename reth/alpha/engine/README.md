@@ -116,7 +116,23 @@ Backtest and live execution use the same sequence. Backtest swaps in a simulated
 - `EngineEvent::{Market, Risk, Execution}` is the top-level input.
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
 - `PaperExecutionAdapter` returns synthetic confirmed `ExecutionReport`s and never talks to `tx_executor`.
-- `MemoryTradingStore` and `AllowAllRiskPolicy` are test/runtime placeholders, not the final persistent store or risk model.
+- `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
+- `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
+
+## Paper Trader Binary
+
+`eth_alpha_paper_trader` is the first runnable paper mode inside this crate. It polls the Rust token server, consumes:
+
+- `/live/pools` as confirmed market updates.
+- `/mempool/signals?since_days=14` as speculative risk events.
+
+Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:
+
+```bash
+cargo run -p eth_alpha_engine --bin eth_alpha_paper_trader -- --once
+```
+
+Use `--replay-current` for a local smoke test that replays the current token-server snapshot through paper execution.
 
 ## Lessons From Python
 

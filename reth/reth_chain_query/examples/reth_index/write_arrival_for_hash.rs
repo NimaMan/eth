@@ -32,12 +32,21 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| format!("{}/reth_index", reth_datadir));
     let hash_hex = args
         .next()
-        .expect("usage: write_arrival_for_hash <reth_datadir> <index_dir> <tx_hash>");
+        .expect("usage: write_arrival_for_hash <reth_datadir> <index_dir> <tx_hash> [rpc_url]");
+    let rpc_url = args.next();
 
     let sim = TxSimulator::new(&reth_datadir)?;
     let provider_factory = Arc::new(sim.provider_factory().clone());
     let db = Arc::new(RethIndexDB::open(&index_dir)?);
-    let writer = Arc::new(MempoolArrivalWriter::new(db.clone(), provider_factory));
+    let writer = Arc::new(match rpc_url {
+        Some(rpc_url) => MempoolArrivalWriter::new_with_fallbacks(
+            db.clone(),
+            provider_factory,
+            reth_datadir.clone(),
+            rpc_url,
+        ),
+        None => MempoolArrivalWriter::new(db.clone(), provider_factory),
+    });
 
     let hash = parse_hash(&hash_hex);
     let ts_ms = now_ms();
