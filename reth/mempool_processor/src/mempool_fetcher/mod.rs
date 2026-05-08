@@ -14,5 +14,7 @@ pub mod types;
 pub mod mempool_fetcher_ipc_client;
 
 // Re-export main types for convenience
-pub use mempool_fetcher_ipc_client::MempoolFetcherIPCClient;
+pub use mempool_fetcher_ipc_client::{
+    IngressStatsSnapshot, MempoolFetcherIPCClient, MempoolIngressObserver,
+};
 pub use types::*;

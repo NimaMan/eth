@@ -1,4 +1,5 @@
 use alloy_primitives::U256;
+use chrono::Utc;
 use eyre::{eyre, Result};
 use hex;
 use serde_json::{json, Value};
@@ -18,19 +19,43 @@ pub struct MempoolFetcherIPCClient {
     tx_receiver: Arc<Mutex<mpsc::Receiver<MempoolTransaction>>>,
     stats: Arc<RwLock<Stats>>,
     queue_size: Arc<AtomicUsize>,
+    observer: Option<Arc<dyn MempoolIngressObserver>>,
 }
 
 #[derive(Default, Clone)]
 pub struct Stats {
     pub total: u64,
+    pub total_dropped: u64,
     pub sub_1ms: u64,
     pub sub_100us: u64,
     pub sub_10us: u64,
     pub queue_size: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct IngressStatsSnapshot {
+    pub queue_depth: usize,
+    pub total_received: u64,
+    pub total_dropped: u64,
+}
+
+pub trait MempoolIngressObserver: Send + Sync + 'static {
+    fn tx_received(&self, hash: &str, first_seen_ms: u64, stats: IngressStatsSnapshot);
+
+    fn tx_dropped_queue_full(&self, hash: &str, first_seen_ms: u64, stats: IngressStatsSnapshot);
+
+    fn queue_depth_updated(&self, stats: IngressStatsSnapshot);
+}
+
 impl MempoolFetcherIPCClient {
     pub fn new(socket_path: Option<&str>) -> Result<Self> {
+        Self::new_with_observer(socket_path, None)
+    }
+
+    pub fn new_with_observer(
+        socket_path: Option<&str>,
+        observer: Option<Arc<dyn MempoolIngressObserver>>,
+    ) -> Result<Self> {
         let socket_path = socket_path
             .map(str::to_string)
             .unwrap_or_else(crate::config::reth_ipc_path_from_env);
@@ -42,6 +67,7 @@ impl MempoolFetcherIPCClient {
             tx_receiver: Arc::new(Mutex::new(tx_receiver)),
             stats: Arc::new(RwLock::new(Stats::default())),
             queue_size: Arc::new(AtomicUsize::new(0)),
+            observer,
         })
     }
 
@@ -109,9 +135,12 @@ impl MempoolFetcherIPCClient {
         let tx_sender = self.tx_sender.clone();
         let stats = self.stats.clone();
         let queue_size = self.queue_size.clone();
+        let observer = self.observer.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = Self::monitor_nonblocking(stream, tx_sender, stats, queue_size).await {
+            if let Err(e) =
+                Self::monitor_nonblocking(stream, tx_sender, stats, queue_size, observer).await
+            {
                 error!("Monitor error: {}", e);
             }
         });
@@ -124,6 +153,7 @@ impl MempoolFetcherIPCClient {
         tx_sender: mpsc::Sender<MempoolTransaction>,
         stats: Arc<RwLock<Stats>>,
         queue_size: Arc<AtomicUsize>,
+        observer: Option<Arc<dyn MempoolIngressObserver>>,
     ) -> Result<()> {
         let mut buffer = vec![0u8; 65536]; // 64KB
         let mut pending = Vec::with_capacity(1024 * 1024); // 1MB
@@ -181,6 +211,25 @@ impl MempoolFetcherIPCClient {
                                                 }
                                             }
 
+                                            let first_seen_ms =
+                                                Utc::now().timestamp_millis() as u64;
+                                            let (total_received, total_dropped) = {
+                                                let stats = stats.read().await;
+                                                (stats.total, stats.total_dropped)
+                                            };
+                                            let ingress_stats = IngressStatsSnapshot {
+                                                queue_depth: queue_size.load(Ordering::Relaxed),
+                                                total_received,
+                                                total_dropped,
+                                            };
+                                            if let Some(observer) = observer.as_ref() {
+                                                observer.tx_received(
+                                                    &hash,
+                                                    first_seen_ms,
+                                                    ingress_stats,
+                                                );
+                                            }
+
                                             // Pre-parse transaction fields
                                             let from = result
                                                 .get("from")
@@ -230,7 +279,7 @@ impl MempoolFetcherIPCClient {
 
                                             let detection_time = Instant::now();
                                             let tx = MempoolTransaction {
-                                                hash,
+                                                hash: hash.clone(),
                                                 data: result.clone(),
                                                 detection_ns,
                                                 detection_time,
@@ -246,11 +295,45 @@ impl MempoolFetcherIPCClient {
 
                                             match tx_sender.try_send(tx) {
                                                 Ok(_) => {
-                                                    queue_size.fetch_add(1, Ordering::Relaxed);
+                                                    let depth = queue_size
+                                                        .fetch_add(1, Ordering::Relaxed)
+                                                        + 1;
+                                                    let mut stats = stats.write().await;
+                                                    stats.queue_size = depth;
+                                                    let snapshot = IngressStatsSnapshot {
+                                                        queue_depth: depth,
+                                                        total_received: stats.total,
+                                                        total_dropped: stats.total_dropped,
+                                                    };
+                                                    drop(stats);
+                                                    if let Some(observer) = observer.as_ref() {
+                                                        observer.queue_depth_updated(snapshot);
+                                                    }
                                                 }
                                                 Err(e) => {
+                                                    let mut stats = stats.write().await;
+                                                    stats.total_dropped += 1;
+                                                    stats.queue_size =
+                                                        queue_size.load(Ordering::Relaxed);
+                                                    let snapshot = IngressStatsSnapshot {
+                                                        queue_depth: stats.queue_size,
+                                                        total_received: stats.total,
+                                                        total_dropped: stats.total_dropped,
+                                                    };
+                                                    drop(stats);
+                                                    if let Some(observer) = observer.as_ref() {
+                                                        observer.tx_dropped_queue_full(
+                                                            &hash,
+                                                            first_seen_ms,
+                                                            snapshot,
+                                                        );
+                                                    }
                                                     warn!(
-                                                        "Channel full, dropping transaction: {}",
+                                                        "IPC ingress queue full, dropping transaction hash={} depth={} received={} dropped={} error={}",
+                                                        hash,
+                                                        snapshot.queue_depth,
+                                                        snapshot.total_received,
+                                                        snapshot.total_dropped,
                                                         e
                                                     );
                                                 }

@@ -14,6 +14,8 @@ pub enum RiskKind {
     TaxChange,
     Honeypot,
     TradingDisabled,
+    TradingEnabled,
+    LpApproval,
     ScamConfirmed,
     Custom(String),
 }

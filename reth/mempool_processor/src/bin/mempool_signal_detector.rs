@@ -2,6 +2,7 @@ use alloy_primitives::B256;
 use clap::Parser;
 use eyre::Result;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -24,7 +25,7 @@ use std::sync::Arc;
 /// - End-to-end: <100ms for critical signals
 use std::time::{Duration, Instant};
 use tokio::signal;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::Layer;
@@ -55,10 +56,12 @@ use mempool_processor::{
     config::MempoolProcessorConfig,
     function_detector::CreatorFunctionType,
     function_detector::FunctionDetector,
-    mempool_fetcher::MempoolFetcherIPCClient,
+    mempool_fetcher::{IngressStatsSnapshot, MempoolFetcherIPCClient, MempoolIngressObserver},
     signal_detector::SignalManagerConfig,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
-    simulator::{MempoolSimulator, SimulationManager, SimulationType, TxSimulationJob},
+    simulator::{
+        MempoolSimulator, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
+    },
     token_tracking::{
         hydrate_cache_from_live_token_server, start_live_token_server_cache_sync,
         TokenTrackingSubscriber,
@@ -66,6 +69,32 @@ use mempool_processor::{
     tx_router::{SimulationPriority, TransactionCategory, TransactionRouter},
 };
 use tx_simulator::LiveChainCache;
+
+struct ArrivalRecordingIngressObserver {
+    arrival_recorder: Option<Arc<MempoolArrivalRecorder>>,
+}
+
+impl ArrivalRecordingIngressObserver {
+    fn new(arrival_recorder: Option<Arc<MempoolArrivalRecorder>>) -> Self {
+        Self { arrival_recorder }
+    }
+}
+
+impl MempoolIngressObserver for ArrivalRecordingIngressObserver {
+    fn tx_received(&self, hash: &str, first_seen_ms: u64, _stats: IngressStatsSnapshot) {
+        if let Some(recorder) = self.arrival_recorder.as_ref() {
+            recorder.record_hash_hex_ms_at(hash, first_seen_ms);
+        }
+    }
+
+    fn tx_dropped_queue_full(&self, hash: &str, first_seen_ms: u64, _stats: IngressStatsSnapshot) {
+        if let Some(recorder) = self.arrival_recorder.as_ref() {
+            recorder.record_hash_hex_ms_at(hash, first_seen_ms);
+        }
+    }
+
+    fn queue_depth_updated(&self, _stats: IngressStatsSnapshot) {}
+}
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -94,6 +123,10 @@ struct Args {
         default_value_t = mempool_processor::config::DEFAULT_SIM_WORKERS
     )]
     sim_workers: usize,
+
+    /// Maximum wall-clock time for one pending tx simulation
+    #[arg(long, default_value = "5000")]
+    simulation_timeout_ms: u64,
 
     /// Enable verbose logging
     #[arg(short, long)]
@@ -312,6 +345,7 @@ async fn main() -> Result<()> {
     info!("  Log Directory: {}", cfg_log_dir);
     info!("  Batch Size: {}", args.batch_size);
     info!("  Simulation Workers: {}", sim_workers);
+    info!("  Simulation Timeout: {}ms", args.simulation_timeout_ms);
 
     info!("  Report Interval: {}s", cfg_report_interval);
     let live_chain_cache = match LiveChainCache::new(&base_config.simulation.live_data_redis_url) {
@@ -408,12 +442,6 @@ async fn main() -> Result<()> {
         initial_cache_stats.total_creators
     );
 
-    // 2. IPC client
-    info!("\n🔌 Connecting to Reth IPC...");
-    let ipc_client = MempoolFetcherIPCClient::new(Some(&cfg_ipc_path))?;
-    ipc_client.start().await?;
-    info!("✅ IPC client connected");
-
     // Trading signal writer is now integrated into SignalPublisher
     // Database writing happens automatically when signals are published
 
@@ -442,7 +470,7 @@ async fn main() -> Result<()> {
     // Initialize arrival recorder only after simulator (to reuse provider).
     // This index is useful for first-seen latency analytics, but the live
     // mempool signal path should still run if the sidecar index is absent.
-    let arrival_recorder = {
+    let arrival_recorder: Option<Arc<MempoolArrivalRecorder>> = {
         let index_dir = Path::new(&cfg_reth_db_path).join("reth_index");
         let recorder_result = (|| -> Result<MempoolArrivalRecorder> {
             std::fs::create_dir_all(&index_dir)?;
@@ -473,7 +501,7 @@ async fn main() -> Result<()> {
                     "✅ Arrival recorder initialized at {} (ms precision)",
                     index_dir.display()
                 );
-                Some(recorder)
+                Some(Arc::new(recorder))
             }
             Err(err) => {
                 warn!(
@@ -527,11 +555,60 @@ async fn main() -> Result<()> {
         sim_workers
     );
 
+    let simulation_timeout = Duration::from_millis(args.simulation_timeout_ms.max(1));
+    let worker_count = sim_workers.max(1);
+    let (simulation_result_tx, mut simulation_result_rx) =
+        mpsc::channel::<SimulationResult>(worker_count * 256);
+    let mut simulation_worker_handles = Vec::with_capacity(worker_count);
+    for worker_id in 0..worker_count {
+        let manager = simulation_manager.clone();
+        let result_tx = simulation_result_tx.clone();
+        let shutdown_flag = shutdown.clone();
+        simulation_worker_handles.push(tokio::spawn(async move {
+            loop {
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                match manager.next_request().await {
+                    Some(request) => {
+                        let result = manager
+                            .simulate_with_timeout(request, simulation_timeout)
+                            .await;
+                        if result_tx.send(result).await.is_err() {
+                            warn!("Simulation worker {} result channel closed", worker_id);
+                            break;
+                        }
+                    }
+                    None => time::sleep(Duration::from_millis(2)).await,
+                }
+            }
+            info!("Simulation worker {} stopped", worker_id);
+        }));
+    }
+    drop(simulation_result_tx);
+    info!(
+        "✅ Started {} background simulation workers with {}ms timeout",
+        worker_count,
+        simulation_timeout.as_millis()
+    );
+
+    // Start IPC after simulator, arrival recorder, signal publisher, and
+    // simulation workers are ready so ingress timestamps are captured and the
+    // detector can drain immediately.
+    info!("\n🔌 Connecting to Reth IPC...");
+    let ingress_observer: Arc<dyn MempoolIngressObserver> = Arc::new(
+        ArrivalRecordingIngressObserver::new(arrival_recorder.clone()),
+    );
+    let ipc_client =
+        MempoolFetcherIPCClient::new_with_observer(Some(&cfg_ipc_path), Some(ingress_observer))?;
+    ipc_client.start().await?;
+    info!("✅ IPC client connected");
+
     info!("\n🏃 Starting main processing loop...\n");
     info!("📁 Run directory: {}", run_dir.display());
 
     // Create simulation log path for direct simulation result logging
-    use std::io::Write;
     let simulation_log_path = Arc::new(run_dir.join("simulation_results.log"));
     let simulation_error_log_path = Arc::new(run_dir.join("simulation_errors.log"));
     OpenOptions::new()
@@ -550,225 +627,119 @@ async fn main() -> Result<()> {
 
     // Main processing loop
     loop {
-        // Check for shutdown signal
         if shutdown.load(Ordering::Relaxed) {
             info!("🛑 Shutdown signal received, stopping gracefully...");
             break;
         }
 
-        // Get new transactions
+        drain_simulation_results(
+            &mut simulation_result_rx,
+            metrics.as_ref(),
+            mempool_simulator.as_ref(),
+            simulation_log_path.as_ref(),
+            simulation_error_log_path.as_ref(),
+        )
+        .await;
+
         let new_txs = ipc_client.get_transactions_instant(args.batch_size).await;
+        let mut idle_sleep = None;
 
         if new_txs.is_empty() {
             consecutive_empty += 1;
-
-            // Adaptive backoff
-            let sleep_time = match consecutive_empty {
+            idle_sleep = Some(match consecutive_empty {
                 1..=10 => Duration::from_micros(100),
                 11..=100 => Duration::from_millis(1),
                 _ => Duration::from_millis(10),
-            };
-            time::sleep(sleep_time).await;
-            continue;
-        }
+            });
+        } else {
+            consecutive_empty = 0;
+            let transactions_with_functions = function_detector.detect_batch(new_txs);
 
-        consecutive_empty = 0;
-
-        // Record mempool arrival timestamps in ms when first seen
-        if let Some(ref recorder) = arrival_recorder {
-            for tx in &new_txs {
-                recorder.record_hash_hex_ms(&tx.hash);
-            }
-        }
-
-        // Step 1: Function detection
-        let transactions_with_functions = function_detector.detect_batch(new_txs);
-
-        // Step 2: Process each transaction
-        for tx in transactions_with_functions {
-            // Record earliest arrival if not already recorded
-            if let Some(ref recorder) = arrival_recorder {
-                recorder.record_hash_hex_ms(&tx.hash);
-            }
-            metrics.total_processed.fetch_add(1, Ordering::Relaxed);
-
-            // Record detection latency
-            let detection_latency_ns = tx.detection_ns;
-            metrics
-                .add_detection_latency(Duration::from_nanos(detection_latency_ns as u64))
-                .await;
-
-            // Transaction routing
-            let classification = tx_router.classify(&tx).await;
-
-            // Skip regular transactions we don't care about
-            match &classification.category {
-                TransactionCategory::ContractCreation { .. }
-                | TransactionCategory::CreatorTransaction { .. } => {
-                    // Process these transactions
-                }
-                _ => {
-                    continue; // Skip non-relevant transactions
-                }
-            }
-
-            // Handle non-simulated transactions (like LP approvals)
-            if !classification.requires_simulation {
-                // Check if this is an LP approval that needs direct signal detection
-                if let TransactionCategory::CreatorTransaction {
-                    function_type: CreatorFunctionType::LiquidityPoolApproval,
-                    ..
-                } = &classification.category
-                {
-                    // Route LP approval through simulation manager (no simulation, just detection)
-                    simulation_manager
-                        .detect_lp_approval(&tx, &classification.category)
-                        .await;
-
-                    // Schedule a follow-up buy/sell check once liquidity lands on-chain.
-                    let followup_job = TxSimulationJob {
-                        tx: tx.clone(),
-                        category: classification.category.clone(),
-                        priority: SimulationPriority::High,
-                        simulation_type: SimulationType::BuySellOnly,
-                        tx_hash: parse_tx_hash_or_zero(&tx.hash),
-                    };
-                    simulation_manager.schedule_buy_sell_follow_up(followup_job);
-                }
-                continue;
-            }
-
-            // Create simulation request
-            let sim_request = TxSimulationJob {
-                tx: tx.clone(),
-                category: classification.category.clone(),
-                priority: classification.priority,
-                simulation_type: match &classification.category {
-                    TransactionCategory::ContractCreation { .. } => {
-                        SimulationType::TransactionWithBuySell
-                    }
-                    TransactionCategory::CreatorTransaction { .. } => {
-                        SimulationType::TransactionWithBuySell
-                    }
-                    _ => SimulationType::TransactionOnly,
-                },
-                tx_hash: parse_tx_hash_or_zero(&tx.hash),
-            };
-
-            // Submit for simulation (signal detection happens internally)
-            metrics
-                .simulations_submitted
-                .fetch_add(1, Ordering::Relaxed);
-
-            let sim_start = Instant::now();
-            match simulation_manager.submit(sim_request).await {
-                Ok(()) => {
-                    metrics
-                        .simulations_completed
-                        .fetch_add(1, Ordering::Relaxed);
-                    let sim_time = sim_start.elapsed();
-                    metrics.add_simulation_time(sim_time).await;
-                }
-                Err(e) => {
-                    metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                    warn!("Simulation submission error for {}: {}", tx.hash, e);
-                }
-            }
-        }
-
-        // Process simulation queue
-        let simulation_results = simulation_manager.process_queue().await;
-        for result in simulation_results {
-            let tx_hash = format!("{:?}", result.request.tx_hash);
-            let category = match &result.request.category {
-                TransactionCategory::ContractCreation { .. } => "ContractCreation",
-                TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
-                _ => "Other",
-            };
-
-            // Log simulation result to dedicated file
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(false)
-                .append(true)
-                .open(simulation_log_path.as_ref())
-            {
-                let timestamp = chrono::Local::now();
-
-                if let Some(ref error) = result.error {
-                    writeln!(
-                        file,
-                        "[{}] ERROR | {} | {} | {}",
-                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        tx_hash,
-                        category,
-                        error
-                    )
-                    .ok();
-                } else {
-                    // Log successful simulation with key results
-                    let buy_sell_info = if let Some(ref pool_result) = result.pool_viability_result
-                    {
-                        format!(
-                            "CanBuy: {}, CanSell: {}, BuyTax: {:.2}%, SellTax: {:.2}%",
-                            pool_result.can_buy,
-                            pool_result.can_sell,
-                            pool_result.buy_tax_percent,
-                            pool_result.sell_tax_percent
-                        )
-                    } else {
-                        "No buy/sell data".to_string()
-                    };
-
-                    writeln!(
-                        file,
-                        "[{}] SUCCESS | {} | {} | SimTime: {:.1}ms | {}",
-                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        tx_hash,
-                        category,
-                        result.simulation_time_ms,
-                        buy_sell_info
-                    )
-                    .ok();
-                }
-            }
-
-            if let Some(ref error) = result.error {
-                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                if !error.contains("No pools found for token") {
-                    let block_str = match mempool_simulator.latest_simulation_block().await {
-                        Ok(b) => b.to_string(),
-                        Err(_) => "unknown".to_string(),
-                    };
-                    if let Ok(mut file) = OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(simulation_error_log_path.as_ref())
-                    {
-                        let timestamp = chrono::Local::now();
-                        writeln!(
-                            file,
-                            "[{}] ERROR | block={} | {} | {} | {}",
-                            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                            block_str,
-                            tx_hash,
-                            category,
-                            error
-                        )
-                        .ok();
-                    }
-                }
-            } else {
+            for tx in transactions_with_functions {
+                metrics.total_processed.fetch_add(1, Ordering::Relaxed);
                 metrics
-                    .simulations_completed
-                    .fetch_add(1, Ordering::Relaxed);
-                if result.simulation_time_ms > 0.0 {
-                    let sim_duration = Duration::from_secs_f64(result.simulation_time_ms / 1000.0);
-                    metrics.add_simulation_time(sim_duration).await;
+                    .add_detection_latency(Duration::from_nanos(tx.detection_ns))
+                    .await;
+
+                let classification = tx_router.classify(&tx).await;
+                match &classification.category {
+                    TransactionCategory::ContractCreation { .. }
+                    | TransactionCategory::CreatorTransaction { .. } => {}
+                    _ => continue,
+                }
+
+                if !classification.requires_simulation {
+                    if let TransactionCategory::CreatorTransaction {
+                        function_type: CreatorFunctionType::LiquidityPoolApproval,
+                        ..
+                    } = &classification.category
+                    {
+                        simulation_manager
+                            .detect_lp_approval(&tx, &classification.category)
+                            .await;
+
+                        let followup_job = TxSimulationJob {
+                            tx: tx.clone(),
+                            category: classification.category.clone(),
+                            priority: SimulationPriority::High,
+                            simulation_type: SimulationType::BuySellOnly,
+                            tx_hash: parse_tx_hash_or_zero(&tx.hash),
+                        };
+                        match simulation_manager.submit(followup_job).await {
+                            Ok(()) => {
+                                metrics
+                                    .simulations_submitted
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) => {
+                                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+                                warn!(
+                                    "Follow-up simulation submission error for {}: {}",
+                                    tx.hash, e
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                let sim_request = TxSimulationJob {
+                    tx: tx.clone(),
+                    category: classification.category.clone(),
+                    priority: classification.priority,
+                    simulation_type: match &classification.category {
+                        TransactionCategory::ContractCreation { .. }
+                        | TransactionCategory::CreatorTransaction { .. } => {
+                            SimulationType::TransactionWithBuySell
+                        }
+                        _ => SimulationType::TransactionOnly,
+                    },
+                    tx_hash: parse_tx_hash_or_zero(&tx.hash),
+                };
+
+                match simulation_manager.submit(sim_request).await {
+                    Ok(()) => {
+                        metrics
+                            .simulations_submitted
+                            .fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+                        warn!("Simulation submission error for {}: {}", tx.hash, e);
+                    }
                 }
             }
         }
 
-        // Periodic reporting
+        drain_simulation_results(
+            &mut simulation_result_rx,
+            metrics.as_ref(),
+            mempool_simulator.as_ref(),
+            simulation_log_path.as_ref(),
+            simulation_error_log_path.as_ref(),
+        )
+        .await;
+
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
             let interval_secs = last_report.elapsed().as_secs_f64().max(0.001);
             let total = metrics.total_processed.load(Ordering::Relaxed);
@@ -780,11 +751,15 @@ async fn main() -> Result<()> {
                 let publisher = signal_publisher.lock().await;
                 publisher.get_stats()
             };
+            let ipc_stats = ipc_client.get_stats().await;
+            let manager_stats = simulation_manager.stats().await;
+
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims ok/err: {}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/ok/err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
                 total,
                 delta,
                 rate,
+                metrics.simulations_submitted.load(Ordering::Relaxed),
                 sims,
                 sim_errs,
                 publisher_stats.trading_enabled,
@@ -797,6 +772,29 @@ async fn main() -> Result<()> {
                 publisher_stats.db_written,
                 publisher_stats.errors
             );
+            info!(
+                "📊 Mempool ingress: received={} dropped={} ipc_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
+                ipc_stats.total,
+                ipc_stats.total_dropped,
+                ipc_stats.queue_size,
+                manager_stats.queue_current_size,
+                manager_stats.queue_total_enqueued,
+                manager_stats.queue_total_processed,
+                manager_stats.queue_total_dropped
+            );
+            if let Some(ref recorder) = arrival_recorder {
+                let arrival_stats = recorder.stats();
+                info!(
+                    "📊 Arrival recorder: seen={} pending={} resolved={} written={} unresolved={} expired={} flush_errors={}",
+                    arrival_stats.seen,
+                    arrival_stats.pending,
+                    arrival_stats.resolved,
+                    arrival_stats.written,
+                    arrival_stats.unresolved,
+                    arrival_stats.expired,
+                    arrival_stats.flush_errors
+                );
+            }
             let cache_stats = token_cache.stats().await;
             info!(
                 "📊 Token cache stats: {} tokens, {} pools, {} creators",
@@ -823,13 +821,18 @@ async fn main() -> Result<()> {
             }
             last_report = Instant::now();
         }
+
+        if let Some(sleep_time) = idle_sleep {
+            time::sleep(sleep_time).await;
+        }
     }
 
-    // Graceful shutdown
     let total_runtime = start_time.elapsed();
     info!("\n🛑 Shutting down Mempool Signal Detection Service...");
+    for handle in simulation_worker_handles {
+        handle.abort();
+    }
 
-    // Final statistics
     let final_report = metrics.report(total_runtime).await;
     info!("{}", final_report);
     let publisher_stats = {
@@ -859,7 +862,6 @@ async fn main() -> Result<()> {
         metrics.total_processed.load(Ordering::Relaxed) as f64 / total_runtime.as_secs_f64()
     );
 
-    // Shutdown components
     drop(signal_publisher);
     drop(simulation_manager);
     if let Some(handle) = live_token_server_sync_handle {
@@ -869,6 +871,104 @@ async fn main() -> Result<()> {
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())
+}
+
+async fn drain_simulation_results(
+    receiver: &mut mpsc::Receiver<SimulationResult>,
+    metrics: &ServiceMetrics,
+    mempool_simulator: &MempoolSimulator,
+    simulation_log_path: &Path,
+    simulation_error_log_path: &Path,
+) -> usize {
+    let mut drained = 0usize;
+    while let Ok(result) = receiver.try_recv() {
+        drained += 1;
+        let tx_hash = format!("{:?}", result.request.tx_hash);
+        let category = match &result.request.category {
+            TransactionCategory::ContractCreation { .. } => "ContractCreation",
+            TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
+            _ => "Other",
+        };
+
+        if let Ok(mut file) = OpenOptions::new()
+            .create(false)
+            .append(true)
+            .open(simulation_log_path)
+        {
+            let timestamp = chrono::Local::now();
+
+            if let Some(ref error) = result.error {
+                writeln!(
+                    file,
+                    "[{}] ERROR | {} | {} | {}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    tx_hash,
+                    category,
+                    error
+                )
+                .ok();
+            } else {
+                let buy_sell_info = if let Some(ref pool_result) = result.pool_viability_result {
+                    format!(
+                        "CanBuy: {}, CanSell: {}, BuyTax: {:.2}%, SellTax: {:.2}%",
+                        pool_result.can_buy,
+                        pool_result.can_sell,
+                        pool_result.buy_tax_percent,
+                        pool_result.sell_tax_percent
+                    )
+                } else {
+                    "No buy/sell data".to_string()
+                };
+
+                writeln!(
+                    file,
+                    "[{}] SUCCESS | {} | {} | SimTime: {:.1}ms | {}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    tx_hash,
+                    category,
+                    result.simulation_time_ms,
+                    buy_sell_info
+                )
+                .ok();
+            }
+        }
+
+        if let Some(ref error) = result.error {
+            metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+            if !error.contains("No pools found for token") {
+                let block_str = match mempool_simulator.latest_simulation_block().await {
+                    Ok(b) => b.to_string(),
+                    Err(_) => "unknown".to_string(),
+                };
+                if let Ok(mut file) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(simulation_error_log_path)
+                {
+                    let timestamp = chrono::Local::now();
+                    writeln!(
+                        file,
+                        "[{}] ERROR | block={} | {} | {} | {}",
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        block_str,
+                        tx_hash,
+                        category,
+                        error
+                    )
+                    .ok();
+                }
+            }
+        } else {
+            metrics
+                .simulations_completed
+                .fetch_add(1, Ordering::Relaxed);
+            if result.simulation_time_ms > 0.0 {
+                let sim_duration = Duration::from_secs_f64(result.simulation_time_ms / 1000.0);
+                metrics.add_simulation_time(sim_duration).await;
+            }
+        }
+    }
+    drained
 }
 
 /// Sets up signal handlers for graceful shutdown

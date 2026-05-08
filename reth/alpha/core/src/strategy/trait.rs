@@ -2,6 +2,7 @@ use crate::{
     error::Result,
     ids::StrategyName,
     market::MarketEvent,
+    risk::RiskEvent,
     strategy::{StrategyContext, StrategyDecision},
 };
 
@@ -13,4 +14,12 @@ pub trait Strategy: Send {
         ctx: &StrategyContext<'_>,
         event: &MarketEvent,
     ) -> Result<StrategyDecision>;
+
+    fn on_risk_event(
+        &mut self,
+        _ctx: &StrategyContext<'_>,
+        _event: &RiskEvent,
+    ) -> Result<StrategyDecision> {
+        Ok(StrategyDecision::Hold)
+    }
 }

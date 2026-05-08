@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use super::{
     types::{SimulationResult, TxSimulationJob},
-    SimulationQueue,
+    QueueStats, SimulationQueue,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -16,6 +16,10 @@ pub struct ManagerStats {
     pub buy_sell_tests: u64,
     pub avg_simulation_time_ms: f64,
     pub max_simulation_time_ms: f64,
+    pub queue_current_size: usize,
+    pub queue_total_enqueued: u64,
+    pub queue_total_processed: u64,
+    pub queue_total_dropped: u64,
 }
 
 #[derive(Clone)]
@@ -64,15 +68,35 @@ impl RequestQueue {
         }
 
         let batch_results = join_all(futures).await;
-        self.update_stats(&batch_results).await;
+        self.record_results(&batch_results).await;
         batch_results
     }
 
-    pub async fn stats(&self) -> ManagerStats {
-        self.stats.lock().await.clone()
+    pub async fn pop_one(&self) -> Option<TxSimulationJob> {
+        let mut queue = self.queue.lock().await;
+        queue.pop_one()
     }
 
-    async fn update_stats(&self, batch_results: &[SimulationResult]) {
+    pub async fn queue_stats(&self) -> QueueStats {
+        let queue = self.queue.lock().await;
+        queue.get_stats()
+    }
+
+    pub async fn stats(&self) -> ManagerStats {
+        let queue_stats = self.queue_stats().await;
+        let mut stats = self.stats.lock().await.clone();
+        stats.queue_current_size = queue_stats.current_size;
+        stats.queue_total_enqueued = queue_stats.total_enqueued;
+        stats.queue_total_processed = queue_stats.total_processed;
+        stats.queue_total_dropped = queue_stats.total_dropped;
+        stats
+    }
+
+    pub async fn record_result(&self, result: &SimulationResult) {
+        self.record_results(std::slice::from_ref(result)).await;
+    }
+
+    async fn record_results(&self, batch_results: &[SimulationResult]) {
         let mut stats = self.stats.lock().await;
         for result in batch_results {
             if result.error.is_none() {

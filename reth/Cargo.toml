@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "alpha/core",
+    "alpha/engine",
     "alpha/live/state",
     "alpha/live/feed",
     "tx_simulator",

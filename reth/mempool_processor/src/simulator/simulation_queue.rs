@@ -114,6 +114,15 @@ impl SimulationQueue {
         batch
     }
 
+    /// Pop a single request from the queue.
+    pub fn pop_one(&mut self) -> Option<TxSimulationJob> {
+        let request = self.queue.pop().map(|prioritized| prioritized.request);
+        if request.is_some() {
+            self.total_processed += 1;
+        }
+        request
+    }
+
     /// Drop the lowest priority item
     fn drop_lowest_priority(&mut self) {
         // This is inefficient but simple - for production, use a different data structure

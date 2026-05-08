@@ -338,18 +338,21 @@ async fn collect_creator_transactions(
 ) -> Result<Vec<B256>> {
     let creator_address = AlloyAddress::from_str(creator)
         .with_context(|| format!("invalid creator address {}", creator))?;
-    let tx_numbers = provider
-        .get_address_transactions(creator_address)
-        .context("failed to fetch creator transaction ids (ensure reth_index is present)")?;
+    let blocks = provider
+        .get_address_participation_blocks(creator_address)
+        .context("failed to fetch creator participation blocks (ensure reth_index is present)")?;
 
     let mut relevant: Vec<(u64, B256)> = Vec::new();
-    for tx_number in tx_numbers {
-        let tx = provider
-            .get_transaction_by_number(tx_number)
+    for block_number in blocks.into_iter().filter(|block| *block <= upto_block) {
+        let block = provider
+            .get_block_transactions(block_number)
             .await
-            .with_context(|| format!("failed to load transaction number {}", tx_number))?;
-        if tx.block_number <= upto_block && tx.from == creator_address {
-            relevant.push((tx.nonce, tx.hash));
+            .with_context(|| format!("failed to load block {}", block_number))?;
+        for tx in block.transactions {
+            let tx = tx.tx_metadata;
+            if tx.from == creator_address {
+                relevant.push((tx.nonce, tx.hash));
+            }
         }
     }
 

@@ -8,7 +8,7 @@ Key properties:
 - Integrated: SimulationManager dispatches a SimulationResult per pool to SignalManager, which runs all detectors and publishes immediately.
 
 ## Published Signals
-Signals are defined in `signal_detector/types.rs` and serialized to JSON for publishing.
+Signals are semantic trading/risk events defined in `signal_detector/types.rs` and serialized to JSON for publishing. Function-detector matches are classification/debug output; they are only promoted to signals after routing, simulation, and detector checks.
 
 1) TradingEnabled (topic: `trading_enabled`)
 - Trigger: buy/sell both succeed for the pool AND taxes are within threshold (≤ 25% by default) AND the cache does not already mark the pool as trading.
@@ -69,7 +69,7 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
   - Topics: `trading_enabled`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`
   - Format: JSON serialized signal structs
 
-- Logs (files under the run’s `signals/` directory)
+- Semantic signal logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
   - `tax_signals.log`
   - `liquidity_removals.log` (also contains ScamDetection entries)

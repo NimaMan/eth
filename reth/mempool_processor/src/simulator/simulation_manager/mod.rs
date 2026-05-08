@@ -12,7 +12,7 @@ mod types;
 
 pub(crate) use super::{
     mempool_simulator::mempool_tx_to_unsigned_tx, LiquidityRemovalSimulator, MempoolSimulator,
-    SimulationQueue,
+    QueueStats, SimulationQueue,
 };
 pub use manager::SimulationManager;
 pub use request_queue::ManagerStats;

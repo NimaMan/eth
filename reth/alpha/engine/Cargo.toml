@@ -1,0 +1,13 @@
+[package]
+name = "eth_alpha_engine"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+
+[dependencies]
+async-trait = "0.1"
+eth_alpha_core = { path = "../core" }
+
+[dev-dependencies]
+alloy-primitives = "1.5.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -29,13 +29,15 @@ use eyre::Result as EyreResult;
 ///    - Send to signal manager
 ///    - Generate unique signal for (token, pool) pair
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::time;
 use tracing::{error, warn};
 use tx_processor::ProcessedTransaction;
 
 /// Manager for transaction simulations
+#[derive(Clone)]
 pub struct SimulationManager {
     pub(super) mempool_simulator: Arc<MempoolSimulator>,
     pub(super) liquidity_removal_simulator: Arc<LiquidityRemovalSimulator>,
@@ -118,6 +120,37 @@ impl SimulationManager {
         self.request_queue
             .process(|req| self.simulate_request(req))
             .await
+    }
+
+    pub async fn next_request(&self) -> Option<TxSimulationJob> {
+        self.request_queue.pop_one().await
+    }
+
+    pub async fn simulate_with_timeout(
+        &self,
+        request: TxSimulationJob,
+        timeout: Duration,
+    ) -> SimulationResult {
+        let start = Instant::now();
+        let result = match time::timeout(timeout, self.simulate_request(request.clone())).await {
+            Ok(result) => result,
+            Err(_) => SimulationResult {
+                request,
+                pool_viability_result: None,
+                error: Some(format!(
+                    "simulation timed out after {}ms",
+                    timeout.as_millis()
+                )),
+                simulation_time_ms: start.elapsed().as_secs_f64() * 1000.0,
+                token_address: None,
+                pool_address: None,
+                pool_type: None,
+                debug_info: None,
+                liquidity_removal_result: None,
+            },
+        };
+        self.request_queue.record_result(&result).await;
+        result
     }
 
     pub async fn stats(&self) -> ManagerStats {

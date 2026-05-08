@@ -172,7 +172,7 @@ The main processing loop implements an asynchronous queue-based design that sepa
 **Queue-Based Processing Flow**:
 - Main loop receives transactions from IPC and routes them
 - Contract Creation and Creator Actions are queued for simulation
-- Separate async task processes the simulation queue by priority
+- Background simulation workers process the simulation queue by priority
 - Main loop continues without blocking on simulation
 - Signals are detected and published after simulation completes
 
@@ -187,7 +187,7 @@ The system currently processes only Contract Creation and Creator Action transac
 
 ### 5. Signal Processing Coordination
 
-The `SimulationManager` now handles the entire flow internally:
+The `SimulationManager` now handles semantic signal detection internally. Function-detector matches are classification/debug output, not published trading signals by themselves:
 
 ```rust
 impl SimulationManager {
@@ -481,7 +481,7 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 
 **Message Format**: `[topic, json_payload]` where topic is signal type
 
-#### 7.2 Log Files (under the run directory's `signals/` folder)
+#### 7.2 Semantic Signal Logs (under the run directory's `signals/` folder)
 - `trading_enabled.log`: Token becomes tradeable with reasonable taxes
 - `tax_signals.log`: High tax, honeypot, or suspicious tax patterns (consolidated)
 - `liquidity_removals.log`: LP removal operations (also includes ScamDetection entries)
@@ -673,10 +673,10 @@ The service creates a timestamped run directory with the following structure:
 mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
 ├── signal_detector.log          # Main service + lifecycle logs
 ├── simulation_results.log       # One line per simulation outcome (success/error)
-├── function_detector/           # Function detector diagnostics
+├── function_detector/           # Classification/debug diagnostics
 │   ├── liquidity_removals.log   # Fast path for removal function matches
 │   └── trading_enabled.log      # Creator-side trading enablement detections
-└── signals/                     # Per-signal outputs (one file per signal type)
+└── signals/                     # Semantic signal outputs (one file per signal type)
     ├── trading_enabled.log      # TradingEnabled signals
     ├── tax_signals.log          # High tax / honeypot signals
     ├── liquidity_removals.log   # LiquidityRemoval + ScamDetection signals

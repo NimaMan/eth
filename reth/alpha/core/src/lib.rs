@@ -28,6 +28,6 @@ pub use market::{MarketEvent, PoolSnapshot, TokenSnapshot};
 pub use order::{OrderIntent, OrderSide, OrderStatus};
 pub use portfolio::{PortfolioLimits, PortfolioState};
 pub use position::{Position, PositionKey, PositionSnapshot, PositionState};
-pub use risk::{RiskDecision, RiskEvent, RiskPolicy};
+pub use risk::{RiskDecision, RiskEvent, RiskKind, RiskPolicy, RiskSeverity};
 pub use store::TradingStore;
 pub use strategy::{Strategy, StrategyContext, StrategyDecision};
