@@ -147,6 +147,8 @@ pub struct UniswapV2PairCreatedEvent {
     pub pair_address: Address,
     pub token0: Address,
     pub token1: Address,
+    #[serde(default)]
+    pub factory_address: Address,
     pub log_index: u64,
 }
 

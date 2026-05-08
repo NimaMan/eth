@@ -142,6 +142,8 @@ impl LiveTokenRetentionPolicy {
             token.v2_pools.remove(&pool.pool_address);
             token.v3_pools.remove(&pool.pool_address);
             token.v4_pools.remove(&pool.pool_address);
+            token.curve_pools.remove(&pool.pool_address);
+            token.balancer_pools.remove(&pool.pool_address);
         }
         decision
     }

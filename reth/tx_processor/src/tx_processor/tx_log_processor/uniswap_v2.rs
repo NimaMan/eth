@@ -213,6 +213,7 @@ impl LogDecoder {
                 pair_address,
                 token0,
                 token1,
+                factory_address: log.address,
                 log_index,
             },
         )))

@@ -400,6 +400,24 @@ impl UniswapV2Pool {
         pool_address: impl Into<String>,
         token_address: impl Into<String>,
         denom_address: impl Into<String>,
+        config: BasePoolConfig,
+        known_routers: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Self {
+        Self::new_with_protocol(
+            pool_address,
+            token_address,
+            denom_address,
+            UNISWAP_V2_PROTOCOL,
+            config,
+            known_routers,
+        )
+    }
+
+    pub fn new_with_protocol(
+        pool_address: impl Into<String>,
+        token_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        protocol: impl Into<String>,
         mut config: BasePoolConfig,
         known_routers: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Self {
@@ -408,12 +426,7 @@ impl UniswapV2Pool {
             config.history_limit = 1000;
         }
 
-        let identity = PoolIdentity::new(
-            pool_address,
-            token_address,
-            denom_address,
-            UNISWAP_V2_PROTOCOL,
-        );
+        let identity = PoolIdentity::new(pool_address, token_address, denom_address, protocol);
         let mut lp_tracker = LPTokenTracker::new(18, known_routers, config.history_limit);
         lp_tracker.token_address = Some(identity.token_address.clone());
         lp_tracker.pool_address = Some(identity.pool_address.clone());

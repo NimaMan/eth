@@ -36,7 +36,7 @@ pub fn extract_token_network_updates(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, U256};
+    use alloy_primitives::{address, b256, Address, U256};
     use tx_processor::tx_processor::data_models::{
         ERC20TransferEvent, OwnershipTransferredEvent, UniswapV2PairCreatedEvent,
     };
@@ -80,6 +80,7 @@ mod tests {
                 pair_address: address!("9999999999999999999999999999999999999999"),
                 token0: token,
                 token1: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                factory_address: Address::ZERO,
                 log_index: 3,
             });
 

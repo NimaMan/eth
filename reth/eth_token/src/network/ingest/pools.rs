@@ -457,6 +457,7 @@ mod tests {
                 pair_address: address!("9999999999999999999999999999999999999999"),
                 token0: token,
                 token1: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                factory_address: Address::ZERO,
                 log_index: 4,
             });
 

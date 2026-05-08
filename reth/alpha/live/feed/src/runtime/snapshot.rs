@@ -67,6 +67,12 @@ impl LiveTokenSnapshot {
         pools.extend(token.v4_pools.values().map(|pool| {
             LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
         }));
+        pools.extend(token.curve_pools.values().map(|pool| {
+            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+        }));
+        pools.extend(token.balancer_pools.values().map(|pool| {
+            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+        }));
         pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
 
         let buy_tax = pools.iter().find_map(|pool| pool.buy_tax);

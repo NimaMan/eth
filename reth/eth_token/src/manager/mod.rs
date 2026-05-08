@@ -144,6 +144,7 @@ mod tests {
         TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
         UniswapV2PoolMetadataProvider,
     };
+    use crate::pools::SUSHISWAP_V2_PROTOCOL;
 
     fn metadata() -> ERC20TokenMetadata {
         ERC20TokenMetadata::new(
@@ -271,6 +272,7 @@ mod tests {
                 pair_address: address!("3333333333333333333333333333333333333333"),
                 token0: address!("1111111111111111111111111111111111111111"),
                 token1: address!("2222222222222222222222222222222222222222"),
+                factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
                 log_index: 1,
             });
         tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
@@ -295,6 +297,46 @@ mod tests {
         let pool = token
             .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
             .unwrap();
+        assert_eq!(pool.base.token_reserve(), 100.0);
+        assert_eq!(pool.base.denom_reserve(), 2.0);
+    }
+
+    #[test]
+    fn discovers_and_updates_sushiswap_v2_pool_for_tracked_token() {
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
+        let mut tx = tx();
+        tx.uniswap_v2_pair_created_events
+            .push(UniswapV2PairCreatedEvent {
+                pair_address: address!("3333333333333333333333333333333333333333"),
+                token0: address!("1111111111111111111111111111111111111111"),
+                token1: address!("2222222222222222222222222222222222222222"),
+                factory_address: address!("c0aee478e3658e2610c5f7a4a2e1777ce9e4f2ac"),
+                log_index: 1,
+            });
+        tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+            pair_address: address!("3333333333333333333333333333333333333333"),
+            reserve0: U256::from(100_000_000_000_000_000_000_u128),
+            reserve1: U256::from(2_000_000_000_000_000_000_u128),
+            log_index: 2,
+        });
+
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
+            .unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
+        assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+        let token = registry
+            .token("0x1111111111111111111111111111111111111111")
+            .unwrap();
+        let pool = token
+            .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+            .unwrap();
+        assert_eq!(pool.base.identity.protocol, SUSHISWAP_V2_PROTOCOL);
         assert_eq!(pool.base.token_reserve(), 100.0);
         assert_eq!(pool.base.denom_reserve(), 2.0);
     }
@@ -524,6 +566,7 @@ mod tests {
                 pair_address: address!("3333333333333333333333333333333333333333"),
                 token0: address!("1111111111111111111111111111111111111111"),
                 token1: address!("2222222222222222222222222222222222222222"),
+                factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
                 log_index: 1,
             });
 
@@ -754,6 +797,7 @@ mod tests {
                 pair_address: address!("3333333333333333333333333333333333333333"),
                 token0: address!("1111111111111111111111111111111111111111"),
                 token1: address!("2222222222222222222222222222222222222222"),
+                factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
                 log_index: 1,
             });
         let token_index = TrackedTokenIndex::from_registry(&registry, 100);
@@ -788,6 +832,7 @@ mod tests {
                 pair_address: address!("3333333333333333333333333333333333333333"),
                 token0: address!("1111111111111111111111111111111111111111"),
                 token1: address!("2222222222222222222222222222222222222222"),
+                factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
                 log_index: 1,
             });
 

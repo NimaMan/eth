@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
 
+use crate::pools::balancer::{BalancerPool, BalancerPoolToken};
 use crate::pools::base::{BasePool, BasePoolConfig};
+use crate::pools::curve::{CurvePool, CurvePoolToken};
+use crate::pools::sushiswap::new_sushiswap_v2_pool;
 use crate::pools::uniswap::v2::{
     LPApprovalEvent, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
@@ -159,6 +162,10 @@ pub struct ERC20Token {
     pub v3_pools: HashMap<String, UniswapV3Pool>,
     #[serde(default)]
     pub v4_pools: HashMap<String, UniswapV4Pool>,
+    #[serde(default)]
+    pub curve_pools: HashMap<String, CurvePool>,
+    #[serde(default)]
+    pub balancer_pools: HashMap<String, BalancerPool>,
 }
 
 impl ERC20Token {
@@ -199,6 +206,8 @@ impl ERC20Token {
             v2_pools: HashMap::new(),
             v3_pools: HashMap::new(),
             v4_pools: HashMap::new(),
+            curve_pools: HashMap::new(),
+            balancer_pools: HashMap::new(),
         }
     }
 
@@ -302,6 +311,28 @@ impl ERC20Token {
         }
         self.refresh_lifecycle_status();
         Ok(())
+    }
+
+    pub fn create_sushiswap_v2_pool(
+        &mut self,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        mut config: BasePoolConfig,
+        known_routers: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> &mut UniswapV2Pool {
+        config.token_decimals = self.decimals;
+        let pool = new_sushiswap_v2_pool(
+            pool_address,
+            self.contract_address.clone(),
+            denom_address,
+            config,
+            known_routers,
+        );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_uniswap_v2_pool(pool);
+        self.v2_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
     }
 
     pub fn create_uniswap_v3_pool(
@@ -423,6 +454,84 @@ impl ERC20Token {
         Ok(())
     }
 
+    pub fn create_curve_pool(
+        &mut self,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        mut config: BasePoolConfig,
+        name: Option<String>,
+        lp_token_address: Option<String>,
+        base_token_index: usize,
+        quote_token_index: usize,
+        tokens: Vec<CurvePoolToken>,
+    ) -> &mut CurvePool {
+        config.token_decimals = self.decimals;
+        let pool = CurvePool::new(
+            pool_address,
+            self.contract_address.clone(),
+            denom_address,
+            config,
+            name,
+            lp_token_address,
+            base_token_index,
+            quote_token_index,
+            tokens,
+        );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_curve_pool(pool);
+        self.curve_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
+    }
+
+    pub fn add_curve_pool(&mut self, pool: CurvePool) -> Option<CurvePool> {
+        let mut pool = pool;
+        pool.base
+            .register_token_control_addresses(&self.token_control_addresses);
+        let pool_address = pool.base.identity.pool_address.clone();
+        let previous = self.curve_pools.insert(pool_address, pool);
+        self.refresh_lifecycle_status();
+        previous
+    }
+
+    pub fn create_balancer_pool(
+        &mut self,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        mut config: BasePoolConfig,
+        pool_id: impl Into<String>,
+        vault_address: impl Into<String>,
+        swap_fee_bps: Option<u32>,
+        tokens: Vec<BalancerPoolToken>,
+    ) -> &mut BalancerPool {
+        config.token_decimals = self.decimals;
+        let pool = BalancerPool::new(
+            pool_address,
+            self.contract_address.clone(),
+            denom_address,
+            config,
+            pool_id,
+            vault_address,
+            swap_fee_bps,
+            tokens,
+        );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_balancer_pool(pool);
+        self.balancer_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
+    }
+
+    pub fn add_balancer_pool(&mut self, pool: BalancerPool) -> Option<BalancerPool> {
+        let mut pool = pool;
+        pool.base
+            .register_token_control_addresses(&self.token_control_addresses);
+        let pool_address = pool.base.identity.pool_address.clone();
+        let previous = self.balancer_pools.insert(pool_address, pool);
+        self.refresh_lifecycle_status();
+        previous
+    }
+
     pub fn update_token_state_from_processed_transaction(
         &mut self,
         transaction: &ProcessedTransaction,
@@ -494,6 +603,8 @@ impl ERC20Token {
         let mut addresses = self.uniswap_v2_pool_addresses();
         addresses.extend(self.uniswap_v3_pool_addresses());
         addresses.extend(self.uniswap_v4_pool_keys());
+        addresses.extend(self.curve_pools.keys().cloned());
+        addresses.extend(self.balancer_pools.keys().cloned());
         addresses.sort();
         addresses.dedup();
         addresses
@@ -518,7 +629,11 @@ impl ERC20Token {
     }
 
     pub fn pool_count(&self) -> usize {
-        self.v2_pools.len() + self.v3_pools.len() + self.v4_pools.len()
+        self.v2_pools.len()
+            + self.v3_pools.len()
+            + self.v4_pools.len()
+            + self.curve_pools.len()
+            + self.balancer_pools.len()
     }
 
     pub fn has_pool(&self) -> bool {
@@ -554,6 +669,12 @@ impl ERC20Token {
         }
         for (address, pool) in &self.v4_pools {
             prices.insert(address.clone(), PoolStateSnapshot::from(pool));
+        }
+        for (address, pool) in &self.curve_pools {
+            prices.insert(address.clone(), PoolStateSnapshot::from_base(&pool.base));
+        }
+        for (address, pool) in &self.balancer_pools {
+            prices.insert(address.clone(), PoolStateSnapshot::from_base(&pool.base));
         }
         prices
     }
@@ -710,6 +831,12 @@ impl ERC20Token {
         for pool in self.v4_pools.values_mut() {
             pool.base.register_token_control_addresses(&addresses);
         }
+        for pool in self.curve_pools.values_mut() {
+            pool.base.register_token_control_addresses(&addresses);
+        }
+        for pool in self.balancer_pools.values_mut() {
+            pool.base.register_token_control_addresses(&addresses);
+        }
     }
 
     pub fn pool_base(&self, pool_key: impl AsRef<str>) -> Option<&BasePool> {
@@ -719,6 +846,8 @@ impl ERC20Token {
             .map(|pool| &pool.base)
             .or_else(|| self.v3_pools.get(&pool_key).map(|pool| &pool.base))
             .or_else(|| self.v4_pools.get(&pool_key).map(|pool| &pool.base))
+            .or_else(|| self.curve_pools.get(&pool_key).map(|pool| &pool.base))
+            .or_else(|| self.balancer_pools.get(&pool_key).map(|pool| &pool.base))
     }
 
     pub fn all_pool_bases(&self) -> Vec<&BasePool> {
@@ -726,6 +855,8 @@ impl ERC20Token {
         pools.extend(self.v2_pools.values().map(|pool| &pool.base));
         pools.extend(self.v3_pools.values().map(|pool| &pool.base));
         pools.extend(self.v4_pools.values().map(|pool| &pool.base));
+        pools.extend(self.curve_pools.values().map(|pool| &pool.base));
+        pools.extend(self.balancer_pools.values().map(|pool| &pool.base));
         pools
     }
 }
@@ -851,6 +982,10 @@ mod tests {
     use crate::pools::uniswap::v2::{
         UniswapV2SyncEvent, UniswapV2TransactionEvents, UNISWAP_V2_PROTOCOL,
     };
+    use crate::pools::{
+        BalancerPoolToken, CurvePoolToken, BALANCER_V2_PROTOCOL, CURVE_V1_PROTOCOL,
+        SUSHISWAP_V2_PROTOCOL,
+    };
 
     fn token() -> ERC20Token {
         ERC20Token::new(ERC20TokenMetadata::new(
@@ -900,6 +1035,70 @@ mod tests {
             token.get_token_summary().protocols,
             vec![UNISWAP_V2_PROTOCOL]
         );
+    }
+
+    #[test]
+    fn token_reports_non_uniswap_pool_protocols() {
+        let mut token = token();
+        token.create_sushiswap_v2_pool(
+            "0x0000000000000000000000000000000000000002",
+            "0x0000000000000000000000000000000000000003",
+            BasePoolConfig {
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                ..BasePoolConfig::new(18)
+            },
+            std::iter::empty::<&str>(),
+        );
+        token.create_curve_pool(
+            "0x0000000000000000000000000000000000000004",
+            "0x0000000000000000000000000000000000000003",
+            BasePoolConfig {
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                ..BasePoolConfig::new(18)
+            },
+            Some("curve-test".to_string()),
+            Some("0x0000000000000000000000000000000000000005".to_string()),
+            0,
+            1,
+            vec![CurvePoolToken {
+                symbol: Some("TKN".to_string()),
+                address: token.contract_address.clone(),
+                decimals: token.decimals,
+                index: 0,
+            }],
+        );
+        token.create_balancer_pool(
+            "0x0000000000000000000000000000000000000006",
+            "0x0000000000000000000000000000000000000003",
+            BasePoolConfig {
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                ..BasePoolConfig::new(18)
+            },
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "0x0000000000000000000000000000000000000007",
+            Some(30),
+            vec![BalancerPoolToken {
+                symbol: Some("TKN".to_string()),
+                address: token.contract_address.clone(),
+                decimals: token.decimals,
+                index: 0,
+                weight: Some("80".to_string()),
+            }],
+        );
+
+        let summary = token.get_token_summary();
+
+        assert_eq!(summary.pool_count, 3);
+        assert!(summary
+            .protocols
+            .contains(&SUSHISWAP_V2_PROTOCOL.to_string()));
+        assert!(summary.protocols.contains(&CURVE_V1_PROTOCOL.to_string()));
+        assert!(summary
+            .protocols
+            .contains(&BALANCER_V2_PROTOCOL.to_string()));
     }
 
     #[test]

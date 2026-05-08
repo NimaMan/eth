@@ -1,8 +1,8 @@
 use alloy_primitives::Address;
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
-    BasePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState, TaxBucket, TradingStatus,
-    UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
+    BalancerPool, BasePool, CurvePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState,
+    TaxBucket, TradingStatus, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
 };
 use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
@@ -74,6 +74,12 @@ pub struct PoolView {
     pub sqrt_price_x96: Option<String>,
     pub active_liquidity: Option<String>,
     pub virtual_reserves: Option<VirtualReserveView>,
+    pub vault_address: Option<String>,
+    pub lp_token_address: Option<String>,
+    pub swap_fee_bps: Option<u32>,
+    pub base_token_index: Option<usize>,
+    pub quote_token_index: Option<usize>,
+    pub pool_tokens: Vec<PoolComponentView>,
     pub denom_address: String,
     pub denom_symbol: Option<String>,
     pub currency: String,
@@ -137,6 +143,15 @@ pub struct VirtualReserveView {
     pub token1_reserve: f64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct PoolComponentView {
+    pub symbol: Option<String>,
+    pub address: String,
+    pub decimals: u8,
+    pub index: usize,
+    pub weight: Option<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 struct ConcentratedPoolViewFields {
     pool_id: Option<String>,
@@ -150,6 +165,12 @@ struct ConcentratedPoolViewFields {
     sqrt_price_x96: Option<String>,
     active_liquidity: Option<String>,
     virtual_reserves: Option<VirtualReserveView>,
+    vault_address: Option<String>,
+    lp_token_address: Option<String>,
+    swap_fee_bps: Option<u32>,
+    base_token_index: Option<usize>,
+    quote_token_index: Option<usize>,
+    pool_tokens: Vec<PoolComponentView>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -244,6 +265,57 @@ impl PoolView {
                         token0_reserve: reserves.token0_reserve,
                         token1_reserve: reserves.token1_reserve,
                     }),
+                ..ConcentratedPoolViewFields::default()
+            },
+        )
+    }
+
+    pub fn from_curve_pool(token: &ERC20Token, pool: &CurvePool) -> Self {
+        Self::from_base(
+            token,
+            &pool.base,
+            LpPoolViewFields::default(),
+            ConcentratedPoolViewFields {
+                lp_token_address: pool.lp_token_address.clone(),
+                base_token_index: Some(pool.base_token_index),
+                quote_token_index: Some(pool.quote_token_index),
+                pool_tokens: pool
+                    .tokens
+                    .iter()
+                    .map(|token| PoolComponentView {
+                        symbol: token.symbol.clone(),
+                        address: token.address.clone(),
+                        decimals: token.decimals,
+                        index: token.index,
+                        weight: None,
+                    })
+                    .collect(),
+                ..ConcentratedPoolViewFields::default()
+            },
+        )
+    }
+
+    pub fn from_balancer_pool(token: &ERC20Token, pool: &BalancerPool) -> Self {
+        Self::from_base(
+            token,
+            &pool.base,
+            LpPoolViewFields::default(),
+            ConcentratedPoolViewFields {
+                pool_id: Some(pool.pool_id.clone()),
+                vault_address: Some(pool.vault_address.clone()),
+                swap_fee_bps: pool.swap_fee_bps,
+                pool_tokens: pool
+                    .tokens
+                    .iter()
+                    .map(|token| PoolComponentView {
+                        symbol: token.symbol.clone(),
+                        address: token.address.clone(),
+                        decimals: token.decimals,
+                        index: token.index,
+                        weight: token.weight.clone(),
+                    })
+                    .collect(),
+                ..ConcentratedPoolViewFields::default()
             },
         )
     }
@@ -267,6 +339,18 @@ impl PoolView {
                 .v4_pools
                 .values()
                 .map(|pool| Self::from_v4_pool(token, pool)),
+        );
+        pools.extend(
+            token
+                .curve_pools
+                .values()
+                .map(|pool| Self::from_curve_pool(token, pool)),
+        );
+        pools.extend(
+            token
+                .balancer_pools
+                .values()
+                .map(|pool| Self::from_balancer_pool(token, pool)),
         );
         pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
         pools
@@ -320,6 +404,12 @@ impl PoolView {
             sqrt_price_x96: concentrated.sqrt_price_x96,
             active_liquidity: concentrated.active_liquidity,
             virtual_reserves: concentrated.virtual_reserves,
+            vault_address: concentrated.vault_address,
+            lp_token_address: concentrated.lp_token_address,
+            swap_fee_bps: concentrated.swap_fee_bps,
+            base_token_index: concentrated.base_token_index,
+            quote_token_index: concentrated.quote_token_index,
+            pool_tokens: concentrated.pool_tokens,
             denom_address: base.identity.denom_address.clone(),
             denom_symbol,
             currency,

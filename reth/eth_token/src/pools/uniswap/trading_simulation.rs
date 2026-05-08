@@ -10,6 +10,7 @@ use tx_processor::{
 };
 
 use crate::pools::base::DEFAULT_TEST_BUY_ETH;
+use crate::pools::sushiswap::SUSHISWAP_V2_PROTOCOL;
 
 use super::v2::{UniswapV2Pool, UniswapV2TxContext};
 use super::v3::UniswapV3Pool;
@@ -84,13 +85,17 @@ impl UniswapV2Pool {
             .test_amount
             .unwrap_or(scaled_decimal_amount(denom_amount, denom_decimals)?);
 
-        let mut params =
-            PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
-                .with_test_amount(test_amount)
-                .with_denom_address(denom_address)
-                .with_denom_decimals(denom_decimals)
-                .with_token_decimals(self.base.config.token_decimals)
-                .with_prior_transactions(config.prior_txs.clone());
+        let pool_type = if self.base.identity.protocol == SUSHISWAP_V2_PROTOCOL {
+            PoolType::SushiSwap
+        } else {
+            PoolType::UniswapV2
+        };
+        let mut params = PoolBuySellParameters::new(token_address, pool_address, pool_type)
+            .with_test_amount(test_amount)
+            .with_denom_address(denom_address)
+            .with_denom_decimals(denom_decimals)
+            .with_token_decimals(self.base.config.token_decimals)
+            .with_prior_transactions(config.prior_txs.clone());
 
         if let Some(block_number) = config.block_number {
             params = params.with_block(block_number);

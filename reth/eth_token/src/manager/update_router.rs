@@ -16,6 +16,7 @@ use crate::pools::uniswap::{
     display_denom_for_v4_currency, v4_event_display_key, PoolTradingSimulationConfig,
     UniswapV2TxContext,
 };
+use crate::pools::SUSHISWAP_V2_FACTORY;
 use crate::pools::{BasePoolConfig, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool};
 
 use super::replay_context::triggers::tx_is_token_control_replay_candidate;
@@ -47,6 +48,7 @@ impl V2TradingSimulation<'_> {
 
 const LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS: u64 = 2_500;
 const LIVE_POOL_SIMULATION_TIMEOUT_MS: u64 = 2_500;
+const UNISWAP_V2_FACTORY: &str = "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f";
 
 impl ProcessedTokenUpdateRouter {
     pub fn new(history_limit: usize) -> Self {
@@ -88,7 +90,8 @@ impl ProcessedTokenUpdateRouter {
                 token.update_token_state_from_processed_transaction(tx)?;
             }
 
-            let discovered_v2 = self.discover_uniswap_v2_pools_for_token(token, tx);
+            let mut discovered_v2 = self.discover_uniswap_v2_pools_for_token(token, tx);
+            discovered_v2.extend(self.discover_sushiswap_v2_pools_for_token(token, tx));
             let discovered_v3 = self.discover_uniswap_v3_pools_for_token(token, tx);
             let discovered_v4 = self.discover_uniswap_v4_pools_for_token(token, tx);
             let updated_v2 = update_touched_v2_pools(token, tx)?;
@@ -182,7 +185,8 @@ impl ProcessedTokenUpdateRouter {
                 token.update_token_state_from_processed_transaction(tx)?;
             }
 
-            let discovered_v2 = self.discover_uniswap_v2_pools_for_token(token, tx);
+            let mut discovered_v2 = self.discover_uniswap_v2_pools_for_token(token, tx);
+            discovered_v2.extend(self.discover_sushiswap_v2_pools_for_token(token, tx));
             let discovered_v3 = self.discover_uniswap_v3_pools_for_token(token, tx);
             let discovered_v4 = self.discover_uniswap_v4_pools_for_token(token, tx);
             let updated_v2 = update_touched_v2_pools(token, tx)?;
@@ -337,6 +341,7 @@ impl ProcessedTokenUpdateRouter {
                 )
                 .await?,
             );
+            discovered_v2.extend(self.discover_sushiswap_v2_pools_for_token(token, tx));
             let discovered_v3 = self.discover_uniswap_v3_pools_for_token(token, tx);
             let discovered_v4 = self.discover_uniswap_v4_pools_for_token(token, tx);
 
@@ -480,6 +485,7 @@ impl ProcessedTokenUpdateRouter {
                 )
                 .await?,
             );
+            discovered_v2.extend(self.discover_sushiswap_v2_pools_for_token(token, tx));
             let discovered_v3 = self.discover_uniswap_v3_pools_for_token(token, tx);
             let discovered_v4 = self.discover_uniswap_v4_pools_for_token(token, tx);
 
@@ -599,6 +605,9 @@ impl ProcessedTokenUpdateRouter {
         let mut discovered = Vec::new();
 
         for event in &tx.uniswap_v2_pair_created_events {
+            if !is_uniswap_v2_pair_created_event(event) {
+                continue;
+            }
             let token_is_token0 = same_address_str(event.token0, &token_address);
             let token_is_token1 = same_address_str(event.token1, &token_address);
             if !token_is_token0 && !token_is_token1 {
@@ -616,6 +625,57 @@ impl ProcessedTokenUpdateRouter {
                 event.token0
             };
             let pool = token.create_uniswap_v2_pool(
+                pool_address.clone(),
+                address_string(&denom_address),
+                BasePoolConfig {
+                    token_decimals: token.decimals,
+                    denom_decimals: None,
+                    token1_is_denom: Some(token_is_token0),
+                    history_limit: self.history_limit,
+                    denom_threshold: 0.0,
+                    threshold_unit: None,
+                    test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
+                },
+                &self.known_routers,
+            );
+            pool.base.creation_block = Some(tx.block_number);
+            pool.base.creation_tx = Some(hash_string(&tx.hash));
+            pool.base.creation_timestamp = Some(tx.block_timestamp);
+            discovered.push(pool_address);
+        }
+
+        discovered
+    }
+
+    fn discover_sushiswap_v2_pools_for_token(
+        &self,
+        token: &mut ERC20Token,
+        tx: &ProcessedTransaction,
+    ) -> Vec<String> {
+        let token_address = token.contract_address.clone();
+        let mut discovered = Vec::new();
+
+        for event in &tx.uniswap_v2_pair_created_events {
+            if !is_sushiswap_v2_pair_created_event(event) {
+                continue;
+            }
+            let token_is_token0 = same_address_str(event.token0, &token_address);
+            let token_is_token1 = same_address_str(event.token1, &token_address);
+            if !token_is_token0 && !token_is_token1 {
+                continue;
+            }
+
+            let pool_address = address_string(&event.pair_address);
+            if token.uniswap_v2_pool(&pool_address).is_some() {
+                continue;
+            }
+
+            let denom_address = if token_is_token0 {
+                event.token1
+            } else {
+                event.token0
+            };
+            let pool = token.create_sushiswap_v2_pool(
                 pool_address.clone(),
                 address_string(&denom_address),
                 BasePoolConfig {
@@ -752,6 +812,9 @@ impl ProcessedTokenUpdateRouter {
         let mut discovered = Vec::new();
 
         for event in &tx.uniswap_v2_pair_created_events {
+            if !is_uniswap_v2_pair_created_event(event) {
+                continue;
+            }
             let token_is_token0 = same_address_str(event.token0, &token_address);
             let token_is_token1 = same_address_str(event.token1, &token_address);
             if !token_is_token0 && !token_is_token1 {
@@ -1020,6 +1083,18 @@ fn is_not_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
         || message.contains("missing live block header")
 }
 
+fn is_uniswap_v2_pair_created_event(
+    event: &tx_processor::tx_processor::data_models::UniswapV2PairCreatedEvent,
+) -> bool {
+    event.factory_address.is_zero() || same_address_str(event.factory_address, UNISWAP_V2_FACTORY)
+}
+
+fn is_sushiswap_v2_pair_created_event(
+    event: &tx_processor::tx_processor::data_models::UniswapV2PairCreatedEvent,
+) -> bool {
+    same_address_str(event.factory_address, SUSHISWAP_V2_FACTORY)
+}
+
 fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
     let mut addresses = BTreeSet::new();
 
@@ -1064,6 +1139,9 @@ fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
         addresses.insert(event.pair_address);
         addresses.insert(event.token0);
         addresses.insert(event.token1);
+        if !event.factory_address.is_zero() {
+            addresses.insert(event.factory_address);
+        }
     }
     addresses.extend(v2_pool_event_addresses(tx));
     for event in &tx.uniswap_v3_pools {
