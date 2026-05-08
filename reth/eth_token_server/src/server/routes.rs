@@ -8,7 +8,7 @@ use warp::{Filter, Reply};
 use crate::error::ApiError;
 use crate::live::StartLiveTrackerRequest;
 use crate::mempool_signals::{MempoolSignalKind, MempoolSignalQuery};
-use crate::range_indexer::StartRangeIndexRequest;
+use crate::range_indexer::{StartRangeIndexError, StartRangeIndexRequest};
 use crate::server::sse;
 use crate::server::ServerState;
 use crate::views;
@@ -40,6 +40,16 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(start_run);
+
+    let active_run = warp::path!("runs" / "active")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(active_run);
+
+    let stop_active_run = warp::path!("runs" / "active" / "stop")
+        .and(warp::post())
+        .and(with_state(state.clone()))
+        .and_then(stop_active_run);
 
     let processed_block_disk_cache_coverage = warp::path!("cache" / "coverage")
         .and(warp::get())
@@ -132,6 +142,8 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     health
         .or(list_runs)
         .or(start_run)
+        .or(active_run)
+        .or(stop_active_run)
         .or(processed_block_disk_cache_coverage)
         .or(live_status)
         .or(live_start)
@@ -292,7 +304,39 @@ async fn start_run(
             let progress = views::run::progress(&run).await;
             Ok(json_response(&progress, StatusCode::CREATED))
         }
-        Err(error) => Ok(error_response(error.to_string(), StatusCode::BAD_REQUEST)),
+        Err(StartRangeIndexError::ActiveRunConflict { active_run_id }) => Ok(error_response(
+            format!("active run already exists: {active_run_id}"),
+            StatusCode::CONFLICT,
+        )),
+        Err(StartRangeIndexError::InvalidRequest(error)) => {
+            Ok(error_response(error.to_string(), StatusCode::BAD_REQUEST))
+        }
+    }
+}
+
+async fn active_run(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match state.range_indexer.active_run().await {
+        Some(run) => Ok(json_response(
+            &views::run::progress(&run).await,
+            StatusCode::OK,
+        )),
+        None => Ok(error_response(
+            "active run not found",
+            StatusCode::NOT_FOUND,
+        )),
+    }
+}
+
+async fn stop_active_run(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match state.range_indexer.stop_active_run().await {
+        Some(run) => Ok(json_response(
+            &views::run::progress(&run).await,
+            StatusCode::OK,
+        )),
+        None => Ok(error_response(
+            "active run not found",
+            StatusCode::NOT_FOUND,
+        )),
     }
 }
 

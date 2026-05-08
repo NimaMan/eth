@@ -19,6 +19,8 @@ pub struct StartRangeIndexRequest {
     pub history_limit: Option<usize>,
     #[serde(default)]
     pub retention_mode: RangeIndexRetentionMode,
+    #[serde(default)]
+    pub replace_active: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -133,6 +135,21 @@ mod tests {
         let request: StartRangeIndexRequest = serde_json::from_str("{}").unwrap();
 
         assert_eq!(request.retention_mode, RangeIndexRetentionMode::KeepAll);
+    }
+
+    #[test]
+    fn start_range_request_defaults_to_not_replacing_active_run() {
+        let request: StartRangeIndexRequest = serde_json::from_str("{}").unwrap();
+
+        assert!(!request.replace_active);
+    }
+
+    #[test]
+    fn start_range_request_accepts_replace_active() {
+        let request: StartRangeIndexRequest =
+            serde_json::from_str(r#"{"replace_active":true}"#).unwrap();
+
+        assert!(request.replace_active);
     }
 
     #[test]

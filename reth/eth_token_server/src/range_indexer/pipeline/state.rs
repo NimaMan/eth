@@ -57,12 +57,25 @@ pub(super) async fn mark_failed(run: &RangeIndexJob, error: RangeIndexError) {
 }
 
 pub(super) fn apply_report(
+    run_id: &str,
     state: &mut RangeIndexState,
     report: TokenBlockUpdateReport,
     upstream_ms: u128,
     token_apply_ms: u128,
     disk_cache_metrics: &ProcessedBlockDiskCacheMetrics,
 ) {
+    let simulation_summary = simulation_summary(state, &report);
+    tracing::info!(
+        run_id = %run_id,
+        block_number = report.block_number,
+        simulations_attempted = simulation_summary.attempted,
+        simulations_succeeded = simulation_summary.succeeded,
+        cannot_sell_count = simulation_summary.cannot_sell,
+        simulator_errors_count = simulation_summary.errors,
+        token_apply_ms,
+        "range block simulation summary"
+    );
+
     state.progress.current_block = Some(report.block_number);
     state.progress.blocks_processed += 1;
     state.progress.txs_scanned += report.transaction_count;
@@ -116,4 +129,54 @@ pub(super) fn apply_report(
         .values()
         .map(|token| token.v2_pools.len())
         .sum();
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SimulationSummary {
+    attempted: usize,
+    succeeded: usize,
+    cannot_sell: usize,
+    errors: usize,
+}
+
+fn simulation_summary(
+    state: &RangeIndexState,
+    report: &TokenBlockUpdateReport,
+) -> SimulationSummary {
+    let mut summary = SimulationSummary {
+        errors: report
+            .transaction_errors
+            .iter()
+            .filter(|error| looks_like_simulator_error(&error.message))
+            .count(),
+        ..SimulationSummary::default()
+    };
+
+    for update in &report.token_updates {
+        summary.attempted += update.simulated_uniswap_v2_pools.len();
+        summary.succeeded += update.simulated_uniswap_v2_pools.len();
+
+        let Some(token) = state.processor.registry.token(&update.token_address) else {
+            continue;
+        };
+        for pool_address in &update.simulated_uniswap_v2_pools {
+            let Some(pool) = token.uniswap_v2_pool(pool_address) else {
+                continue;
+            };
+            if pool.base.state.can_buy && !pool.base.state.can_sell {
+                summary.cannot_sell += 1;
+            }
+        }
+    }
+
+    summary
+}
+
+fn looks_like_simulator_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("simulat")
+        || message.contains("transfer_failed")
+        || message.contains("revert")
+        || message.contains("cannot sell")
+        || message.contains("cannot buy")
 }

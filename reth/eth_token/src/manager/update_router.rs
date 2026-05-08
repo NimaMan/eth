@@ -82,6 +82,7 @@ impl ProcessedTokenUpdateRouter {
                     token_state_updated,
                     discovered_uniswap_v2_pools: discovered,
                     updated_uniswap_v2_pools: updated,
+                    simulated_uniswap_v2_pools: Vec::new(),
                 });
             }
         }
@@ -153,10 +154,11 @@ impl ProcessedTokenUpdateRouter {
             let simulation_pool_addresses =
                 simulation_pool_addresses(token, &updated, token_control_replay);
             let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
-            simulate_updated_v2_pools(
+            let simulated = simulate_updated_v2_pools(
                 token,
                 tx,
                 &simulation_pool_addresses,
+                &discovered,
                 &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
@@ -169,6 +171,7 @@ impl ProcessedTokenUpdateRouter {
                     token_state_updated,
                     discovered_uniswap_v2_pools: discovered,
                     updated_uniswap_v2_pools: updated,
+                    simulated_uniswap_v2_pools: simulated,
                 });
             }
         }
@@ -231,6 +234,7 @@ impl ProcessedTokenUpdateRouter {
                     token_state_updated,
                     discovered_uniswap_v2_pools: discovered,
                     updated_uniswap_v2_pools: updated,
+                    simulated_uniswap_v2_pools: Vec::new(),
                 });
             }
         }
@@ -341,10 +345,11 @@ impl ProcessedTokenUpdateRouter {
             let simulation_pool_addresses =
                 simulation_pool_addresses(token, &updated, token_control_replay);
             let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
-            simulate_updated_v2_pools(
+            let simulated = simulate_updated_v2_pools(
                 token,
                 tx,
                 &simulation_pool_addresses,
+                &discovered,
                 &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
@@ -359,6 +364,7 @@ impl ProcessedTokenUpdateRouter {
                     token_state_updated,
                     discovered_uniswap_v2_pools: discovered,
                     updated_uniswap_v2_pools: updated,
+                    simulated_uniswap_v2_pools: simulated,
                 });
             }
         }
@@ -768,6 +774,7 @@ async fn simulate_updated_v2_pools(
     token: &mut ERC20Token,
     tx: &ProcessedTransaction,
     pool_addresses: &[String],
+    current_block_pool_addresses: &[String],
     prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
     force_simulation: bool,
@@ -776,6 +783,7 @@ async fn simulate_updated_v2_pools(
         return Ok(Vec::new());
     }
 
+    let token_address = token.contract_address.clone();
     let tx_context = UniswapV2TxContext {
         block_number: tx.block_number,
         block_timestamp: tx.block_timestamp,
@@ -803,26 +811,102 @@ async fn simulate_updated_v2_pools(
             continue;
         };
 
-        match trading_simulation {
-            V2TradingSimulation::Historical(pool_simulator) => {
-                pool.evaluate_trading_status_v2_with_pool_simulator(
+        let pool_config = if should_simulate_at_current_block(
+            pool_address,
+            current_block_pool_addresses,
+            trading_simulation,
+        ) {
+            UniswapV2TradingSimulationConfig {
+                block_number: Some(tx.block_number),
+                prior_txs: Vec::new(),
+                ..config.clone()
+            }
+        } else {
+            config.clone()
+        };
+        let prior_tx_count = pool_config.prior_txs.len();
+        let tx_hash = hash_string(&tx.hash);
+        tracing::debug!(
+            target: "pool_buy_sell_sim",
+            block_number = tx.block_number,
+            token_address = %token_address,
+            pool_address = %pool_address,
+            tx_hash = %tx_hash,
+            prior_tx_count,
+            force_simulation,
+            action = "evaluate_v2_trading",
+            result = "started",
+            "starting v2 pool trading simulation"
+        );
+
+        let simulation_result = match trading_simulation {
+            V2TradingSimulation::Historical(pool_simulator) => pool
+                .evaluate_trading_status_v2_with_pool_simulator(
                     pool_simulator,
                     &tx_context,
-                    config.clone(),
+                    pool_config,
                 )
-                .await?;
-            }
-            V2TradingSimulation::Live(pool_simulator) => {
-                pool.evaluate_live_trading_status_v2(pool_simulator, &tx_context, config.clone())
-                    .await?;
-            }
+                .await
+                .map(|_| ()),
+            V2TradingSimulation::Live(pool_simulator) => pool
+                .evaluate_live_trading_status_v2(pool_simulator, &tx_context, pool_config)
+                .await
+                .map(|_| ()),
             #[cfg(test)]
-            V2TradingSimulation::Noop => {}
+            V2TradingSimulation::Noop => Ok(()),
+        };
+
+        match simulation_result {
+            Ok(()) => {
+                tracing::info!(
+                    target: "pool_buy_sell_sim",
+                    block_number = tx.block_number,
+                    token_address = %token_address,
+                    pool_address = %pool_address,
+                    tx_hash = %tx_hash,
+                    prior_tx_count,
+                    force_simulation,
+                    can_buy = pool.base.state.can_buy,
+                    can_sell = pool.base.state.can_sell,
+                    buy_tax = ?pool.base.buy_tax,
+                    sell_tax = ?pool.base.sell_tax,
+                    action = "evaluate_v2_trading",
+                    result = "ok",
+                    "completed v2 pool trading simulation"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    block_number = tx.block_number,
+                    token_address = %token_address,
+                    pool_address = %pool_address,
+                    tx_hash = %tx_hash,
+                    prior_tx_count,
+                    force_simulation,
+                    action = "evaluate_v2_trading",
+                    result = "error",
+                    reason = %error,
+                    "failed v2 pool trading simulation"
+                );
+                return Err(error);
+            }
         }
         simulated.push(pool_address.clone());
     }
 
     Ok(simulated)
+}
+
+fn should_simulate_at_current_block(
+    pool_address: &str,
+    current_block_pool_addresses: &[String],
+    trading_simulation: V2TradingSimulation<'_>,
+) -> bool {
+    matches!(trading_simulation, V2TradingSimulation::Historical(_))
+        && current_block_pool_addresses
+            .iter()
+            .any(|current_pool| current_pool == pool_address)
 }
 
 fn simulation_pool_addresses(

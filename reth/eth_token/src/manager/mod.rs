@@ -34,6 +34,7 @@ pub struct TokenStateUpdateReport {
     pub token_state_updated: bool,
     pub discovered_uniswap_v2_pools: Vec<String>,
     pub updated_uniswap_v2_pools: Vec<String>,
+    pub simulated_uniswap_v2_pools: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

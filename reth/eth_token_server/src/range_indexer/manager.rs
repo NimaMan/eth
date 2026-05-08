@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::views::run::RunSummaryView;
 
 use super::pipeline;
+use super::RangeIndexStatus;
 use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
 
 const DEFAULT_HISTORICAL_END_BLOCK_LAG: u64 = 256;
@@ -25,7 +27,33 @@ struct RangeIndexManagerInner {
     provider: Arc<RethQueryProvider>,
     processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     runs: RwLock<HashMap<String, Arc<RangeIndexJob>>>,
+    active_run_id: RwLock<Option<String>>,
     next_id: AtomicU64,
+}
+
+#[derive(Debug)]
+pub enum StartRangeIndexError {
+    ActiveRunConflict { active_run_id: String },
+    InvalidRequest(eyre::Report),
+}
+
+impl fmt::Display for StartRangeIndexError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ActiveRunConflict { active_run_id } => {
+                write!(formatter, "active run already exists: {active_run_id}")
+            }
+            Self::InvalidRequest(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for StartRangeIndexError {}
+
+impl From<eyre::Report> for StartRangeIndexError {
+    fn from(error: eyre::Report) -> Self {
+        Self::InvalidRequest(error)
+    }
 }
 
 impl RangeIndexManager {
@@ -40,19 +68,50 @@ impl RangeIndexManager {
                 provider,
                 processed_block_disk_cache,
                 runs: RwLock::new(HashMap::new()),
+                active_run_id: RwLock::new(None),
                 next_id: AtomicU64::new(1),
             }),
         }
     }
 
-    pub async fn start_run(&self, request: StartRangeIndexRequest) -> Result<Arc<RangeIndexJob>> {
+    pub async fn start_run(
+        &self,
+        request: StartRangeIndexRequest,
+    ) -> std::result::Result<Arc<RangeIndexJob>, StartRangeIndexError> {
+        let replace_active = request.replace_active;
         let request = self.resolve_request(request)?;
         self.inner.provider.refresh_static_file_provider()?;
+
+        let mut active_run_id = self.inner.active_run_id.write().await;
+        if let Some(current_run_id) = active_run_id.as_ref() {
+            let current_run = self.inner.runs.read().await.get(current_run_id).cloned();
+            if let Some(current_run) = current_run {
+                let progress = current_run.progress().await;
+                match active_run_start_decision(Some(&progress.status), replace_active) {
+                    ActiveRunStartDecision::Reject => {
+                        return Err(StartRangeIndexError::ActiveRunConflict {
+                            active_run_id: current_run_id.clone(),
+                        });
+                    }
+                    ActiveRunStartDecision::StopAndStart => {
+                        current_run.request_stop();
+                        current_run.mark_stopping().await;
+                        tracing::info!(
+                            run_id = %current_run.id,
+                            "requested stop for replaced active token tracking run"
+                        );
+                    }
+                    ActiveRunStartDecision::Start => {}
+                }
+            }
+        }
+
         let sequence = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         let id = format!("run-{sequence}");
         let run = Arc::new(RangeIndexJob::new(id.clone(), request));
 
         self.inner.runs.write().await.insert(id, run.clone());
+        *active_run_id = Some(run.id.clone());
 
         let task_run = run.clone();
         let task_provider = self.inner.provider.clone();
@@ -75,6 +134,11 @@ impl RangeIndexManager {
         Ok(run)
     }
 
+    pub async fn active_run(&self) -> Option<Arc<RangeIndexJob>> {
+        let active_run_id = self.inner.active_run_id.read().await.clone()?;
+        self.get_run(&active_run_id).await
+    }
+
     pub async fn get_run(&self, id: &str) -> Option<Arc<RangeIndexJob>> {
         self.inner.runs.read().await.get(id).cloned()
     }
@@ -91,6 +155,13 @@ impl RangeIndexManager {
 
     pub async fn stop_run(&self, id: &str) -> Option<Arc<RangeIndexJob>> {
         let run = self.get_run(id).await?;
+        run.request_stop();
+        run.mark_stopping().await;
+        Some(run)
+    }
+
+    pub async fn stop_active_run(&self) -> Option<Arc<RangeIndexJob>> {
+        let run = self.active_run().await?;
         run.request_stop();
         run.mark_stopping().await;
         Some(run)
@@ -151,5 +222,74 @@ impl RangeIndexManager {
         };
 
         Ok(resolved)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActiveRunStartDecision {
+    Start,
+    Reject,
+    StopAndStart,
+}
+
+fn active_run_start_decision(
+    status: Option<&RangeIndexStatus>,
+    replace_active: bool,
+) -> ActiveRunStartDecision {
+    let Some(status) = status else {
+        return ActiveRunStartDecision::Start;
+    };
+    if status.is_terminal() {
+        return ActiveRunStartDecision::Start;
+    }
+    if replace_active {
+        ActiveRunStartDecision::StopAndStart
+    } else {
+        ActiveRunStartDecision::Reject
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_run_becomes_active_start_candidate() {
+        assert_eq!(
+            active_run_start_decision(None, false),
+            ActiveRunStartDecision::Start
+        );
+    }
+
+    #[test]
+    fn second_run_without_replace_conflicts_while_active_is_running() {
+        assert_eq!(
+            active_run_start_decision(Some(&RangeIndexStatus::Running), false),
+            ActiveRunStartDecision::Reject
+        );
+    }
+
+    #[test]
+    fn second_run_with_replace_stops_running_active_run() {
+        assert_eq!(
+            active_run_start_decision(Some(&RangeIndexStatus::Running), true),
+            ActiveRunStartDecision::StopAndStart
+        );
+    }
+
+    #[test]
+    fn terminal_active_run_allows_new_run_without_replace() {
+        assert_eq!(
+            active_run_start_decision(Some(&RangeIndexStatus::Completed), false),
+            ActiveRunStartDecision::Start
+        );
+        assert_eq!(
+            active_run_start_decision(Some(&RangeIndexStatus::Failed), false),
+            ActiveRunStartDecision::Start
+        );
+        assert_eq!(
+            active_run_start_decision(Some(&RangeIndexStatus::Stopped), false),
+            ActiveRunStartDecision::Start
+        );
     }
 }

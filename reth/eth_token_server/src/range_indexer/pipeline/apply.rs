@@ -5,6 +5,7 @@ use std::time::Instant;
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use futures_util::FutureExt;
 use tokio::time::{timeout, Duration};
+use tracing::Instrument;
 use tx_processor::PoolBuySellSimulator;
 
 use crate::range_indexer::{RangeIndexError, RangeIndexJob};
@@ -23,11 +24,14 @@ pub(super) async fn apply_processed_block(
     let block_number = processed.block.header.number;
     let mut processor = state::take_processor_for_apply(run, block_number).await;
     let token_apply_started = Instant::now();
-    let apply_future = processor.process_block_with_discovery_provider(
-        &processed.block,
-        discovery_provider,
-        pool_simulator,
+    let apply_span = tracing::info_span!(
+        "range_block_apply",
+        run_id = %run.id,
+        block_number
     );
+    let apply_future = processor
+        .process_block_with_discovery_provider(&processed.block, discovery_provider, pool_simulator)
+        .instrument(apply_span);
     let report = match timeout(
         TOKEN_APPLY_TIMEOUT,
         AssertUnwindSafe(apply_future).catch_unwind(),
@@ -83,6 +87,7 @@ pub(super) async fn apply_processed_block(
     let mut run_state = run.state.write().await;
     run_state.processor = processor;
     state::apply_report(
+        &run.id,
         &mut run_state,
         report,
         processed.upstream_ms,
