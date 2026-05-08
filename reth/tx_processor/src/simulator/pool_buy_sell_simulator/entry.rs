@@ -280,7 +280,7 @@ pub async fn check_can_buy_sell_pool(
     }
 
     if config.prior_txs.is_empty() {
-        validate_pool_registration(simulator.clone(), &config, block_number).await?;
+        validate_pool_registration(&mut chain, &config, block_number)?;
     } else {
         let pool_has_code = chain
             .account_has_code(config.pool_address)

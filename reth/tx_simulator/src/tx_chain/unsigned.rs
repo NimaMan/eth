@@ -131,6 +131,14 @@ impl UnsignedTxChainSimulation {
             .unwrap_or(U256::ZERO))
     }
 
+    pub fn block_base_fee(&self) -> Option<u128> {
+        self.forked_state
+            .block_header
+            .header()
+            .base_fee_per_gas
+            .map(u128::from)
+    }
+
     pub fn set_eth_balance(&mut self, owner: Address, balance: U256) -> Result<U256> {
         let mut account = self.forked_state.db.basic(owner)?.unwrap_or_default();
         let previous = U256::from(account.balance);
