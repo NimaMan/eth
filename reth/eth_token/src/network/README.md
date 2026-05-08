@@ -12,8 +12,9 @@ tracked token.
 
 Concept and folder skeleton are in place. The `model` layer now defines the
 stable serializable IDs, node/edge kinds, labels, confidence, observations, and
-evidence summaries. The activity, ingest, graph, cluster, and snapshot layers are
-still placeholders.
+evidence summaries. The `activity` layer now defines per-address movements,
+totals, fee/bribe costs, and lightweight PnL summaries. The ingest, graph,
+cluster, and snapshot layers are still placeholders.
 
 ## Folder Layout
 
