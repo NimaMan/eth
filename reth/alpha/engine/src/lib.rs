@@ -96,6 +96,7 @@ where
             }
             EngineEvent::Risk(event) => {
                 self.active_risks.push(event.clone());
+                self.store.record_risk_event(&event).await?;
                 self.run_risk_strategies(&event).await
             }
             EngineEvent::Execution(report) => {
@@ -330,6 +331,7 @@ pub struct MemoryTradingStore {
     snapshots: Arc<Mutex<Vec<PositionSnapshot>>>,
     order_intents: Arc<Mutex<Vec<OrderIntent>>>,
     execution_reports: Arc<Mutex<Vec<ExecutionReport>>>,
+    risk_events: Arc<Mutex<Vec<RiskEvent>>>,
 }
 
 impl MemoryTradingStore {
@@ -343,6 +345,10 @@ impl MemoryTradingStore {
 
     pub fn execution_reports(&self) -> Vec<ExecutionReport> {
         self.execution_reports.lock().expect("store lock").clone()
+    }
+
+    pub fn risk_events(&self) -> Vec<RiskEvent> {
+        self.risk_events.lock().expect("store lock").clone()
     }
 }
 
@@ -377,6 +383,14 @@ impl TradingStore for MemoryTradingStore {
             .lock()
             .expect("store lock")
             .push(report.clone());
+        Ok(())
+    }
+
+    async fn record_risk_event(&self, event: &RiskEvent) -> Result<()> {
+        self.risk_events
+            .lock()
+            .expect("store lock")
+            .push(event.clone());
         Ok(())
     }
 }

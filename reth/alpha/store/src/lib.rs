@@ -1,0 +1,554 @@
+//! PostgreSQL persistence for the alpha trading runtime.
+
+use async_trait::async_trait;
+use eth_alpha_core::{
+    amount::Amount,
+    error::{AlphaCoreError, Result},
+    execution::{ExecutionReport, ExecutionStatus},
+    order::{OrderIntent, OrderSide},
+    position::{Position, PositionSnapshot, PositionState},
+    risk::{RiskEvent, RiskKind, RiskSeverity},
+    store::TradingStore,
+};
+use serde_json::Value;
+use sqlx::postgres::{PgPool, PgPoolOptions};
+
+const DEFAULT_MAX_CONNECTIONS: u32 = 5;
+
+#[derive(Clone)]
+pub struct PostgresTradingStore {
+    pool: PgPool,
+    run_id: String,
+}
+
+impl PostgresTradingStore {
+    pub async fn connect(database_url: &str, run_id: impl Into<String>) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(DEFAULT_MAX_CONNECTIONS)
+            .connect(database_url)
+            .await
+            .map_err(store_error)?;
+        let store = Self {
+            pool,
+            run_id: run_id.into(),
+        };
+        store.migrate().await?;
+        Ok(store)
+    }
+
+    pub fn from_pool(pool: PgPool, run_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            run_id: run_id.into(),
+        }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub async fn migrate(&self) -> Result<()> {
+        let mut connection = self.pool.acquire().await.map_err(store_error)?;
+        sqlx::query("SET client_min_messages TO WARNING")
+            .execute(&mut *connection)
+            .await
+            .map_err(store_error)?;
+        for statement in MIGRATIONS {
+            sqlx::query(statement)
+                .execute(&mut *connection)
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(())
+    }
+
+    pub async fn start_run(&self, mode: &str, config: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.trader_runs (
+                run_id, mode, status, config, started_at, last_heartbeat_at, metadata
+            )
+            VALUES ($1, $2, 'running', $3, NOW(), NOW(), '{}'::jsonb)
+            ON CONFLICT (run_id) DO UPDATE SET
+                mode = EXCLUDED.mode,
+                status = 'running',
+                config = EXCLUDED.config,
+                last_heartbeat_at = NOW()
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(mode)
+        .bind(config)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_stale_runs(&self, max_age_secs: u64) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET status = 'stale',
+                metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
+            WHERE run_id <> $1
+              AND status = 'running'
+              AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(u64_to_i64(max_age_secs))
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn heartbeat(&self, metadata: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET last_heartbeat_at = NOW(), status = 'running', metadata = $2
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_stopped(&self, status: &str, metadata: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET status = $2, stopped_at = NOW(), last_heartbeat_at = NOW(), metadata = $3
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(status)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl TradingStore for PostgresTradingStore {
+    async fn upsert_position(&self, position: &Position) -> Result<()> {
+        let payload = to_json(position)?;
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.positions (
+                run_id, position_id, portfolio_id, wallet_id, strategy_name,
+                token_address, pool_address, state, entry_order_id, exit_order_id, payload,
+                created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            ON CONFLICT (run_id, position_id) DO UPDATE SET
+                portfolio_id = EXCLUDED.portfolio_id,
+                wallet_id = EXCLUDED.wallet_id,
+                strategy_name = EXCLUDED.strategy_name,
+                token_address = EXCLUDED.token_address,
+                pool_address = EXCLUDED.pool_address,
+                state = EXCLUDED.state,
+                entry_order_id = EXCLUDED.entry_order_id,
+                exit_order_id = EXCLUDED.exit_order_id,
+                payload = EXCLUDED.payload,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(&position.id.0)
+        .bind(&position.key.portfolio_id.0)
+        .bind(&position.key.wallet_id.0)
+        .bind(&position.key.strategy_name.0)
+        .bind(position.key.token_address.to_string())
+        .bind(position.key.pool_address.to_string())
+        .bind(position_state_label(&position.state))
+        .bind(position.entry_order_id.as_ref().map(|id| id.0.as_str()))
+        .bind(position.exit_order_id.as_ref().map(|id| id.0.as_str()))
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn append_position_snapshot(&self, snapshot: &PositionSnapshot) -> Result<()> {
+        let payload = to_json(snapshot)?;
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.position_snapshots (
+                run_id, position_id, state, block_number, current_value_eth,
+                realized_profit_eth, unrealized_profit_eth, roi, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(&snapshot.position_id.0)
+        .bind(position_state_label(&snapshot.state))
+        .bind(u64_to_i64(snapshot.block_number))
+        .bind(snapshot.current_value_eth.to_string())
+        .bind(snapshot.realized_profit_eth.to_string())
+        .bind(snapshot.unrealized_profit_eth.to_string())
+        .bind(snapshot.roi.to_string())
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn record_order_intent(&self, intent: &OrderIntent) -> Result<()> {
+        let payload = to_json(intent)?;
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.order_intents (
+                run_id, portfolio_id, wallet_id, strategy_name, side, token_address,
+                pool_address, amount_raw, amount_decimals, max_slippage_bps,
+                deadline_secs, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(&intent.portfolio_id.0)
+        .bind(&intent.wallet_id.0)
+        .bind(&intent.strategy_name.0)
+        .bind(order_side_label(intent.side))
+        .bind(intent.token_address.to_string())
+        .bind(intent.pool_address.to_string())
+        .bind(amount_raw(&intent.amount))
+        .bind(i16::from(intent.amount.decimals))
+        .bind(u32_to_i32(intent.max_slippage_bps))
+        .bind(u64_to_i64(intent.deadline_secs))
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn record_execution_report(&self, report: &ExecutionReport) -> Result<()> {
+        let payload = to_json(report)?;
+        let (filled_amount_raw, filled_amount_decimals) = report
+            .filled_amount
+            .as_ref()
+            .map(|amount| (Some(amount_raw(amount)), Some(i16::from(amount.decimals))))
+            .unwrap_or((None, None));
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.execution_reports (
+                run_id, order_id, status, tx_hash, block_number, filled_amount_raw,
+                filled_amount_decimals, gas_used, error, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(&report.order_id.0)
+        .bind(execution_status_label(&report.status))
+        .bind(report.tx_hash.map(|hash| hash.to_string()))
+        .bind(report.block_number.map(u64_to_i64))
+        .bind(filled_amount_raw)
+        .bind(filled_amount_decimals)
+        .bind(report.gas_used.map(u64_to_i64))
+        .bind(report.error.as_deref())
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn record_risk_event(&self, event: &RiskEvent) -> Result<()> {
+        let payload = to_json(event)?;
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.risk_events (
+                run_id, kind, severity, token_address, pool_address, pending_tx_hash,
+                observed_block, message, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(risk_kind_label(&event.kind))
+        .bind(risk_severity_label(&event.severity))
+        .bind(event.token_address.to_string())
+        .bind(event.pool_address.map(|address| address.to_string()))
+        .bind(event.pending_tx_hash.map(|hash| hash.to_string()))
+        .bind(event.observed_block.map(u64_to_i64))
+        .bind(&event.message)
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+}
+
+fn to_json<T>(value: &T) -> Result<Value>
+where
+    T: serde::Serialize,
+{
+    serde_json::to_value(value).map_err(store_error)
+}
+
+fn amount_raw(amount: &Amount) -> String {
+    amount.raw.to_string()
+}
+
+fn order_side_label(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    }
+}
+
+fn execution_status_label(status: &ExecutionStatus) -> &'static str {
+    match status {
+        ExecutionStatus::Submitted => "submitted",
+        ExecutionStatus::Pending => "pending",
+        ExecutionStatus::Confirmed => "confirmed",
+        ExecutionStatus::Failed => "failed",
+        ExecutionStatus::Cancelled => "cancelled",
+    }
+}
+
+fn position_state_label(state: &PositionState) -> &'static str {
+    match state {
+        PositionState::Init => "init",
+        PositionState::BuyIntentCreated => "buy_intent_created",
+        PositionState::BuySubmitted => "buy_submitted",
+        PositionState::BuyConfirmed => "buy_confirmed",
+        PositionState::SellIntentCreated => "sell_intent_created",
+        PositionState::SellSubmitted => "sell_submitted",
+        PositionState::SellConfirmed => "sell_confirmed",
+        PositionState::Failed => "failed",
+        PositionState::Cancelled => "cancelled",
+        PositionState::Scammed => "scammed",
+    }
+}
+
+fn risk_kind_label(kind: &RiskKind) -> String {
+    match kind {
+        RiskKind::LiquidityRemoval => "liquidity_removal".to_string(),
+        RiskKind::TaxChange => "tax_change".to_string(),
+        RiskKind::Honeypot => "honeypot".to_string(),
+        RiskKind::TradingDisabled => "trading_disabled".to_string(),
+        RiskKind::TradingEnabled => "trading_enabled".to_string(),
+        RiskKind::LpApproval => "lp_approval".to_string(),
+        RiskKind::ScamConfirmed => "scam_confirmed".to_string(),
+        RiskKind::Custom(value) => value.clone(),
+    }
+}
+
+fn risk_severity_label(severity: &RiskSeverity) -> &'static str {
+    match severity {
+        RiskSeverity::Info => "info",
+        RiskSeverity::Warning => "warning",
+        RiskSeverity::Critical => "critical",
+    }
+}
+
+fn u64_to_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn u32_to_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+fn store_error(error: impl std::fmt::Display) -> AlphaCoreError {
+    AlphaCoreError::Store(error.to_string())
+}
+
+const MIGRATIONS: &[&str] = &[
+    "CREATE SCHEMA IF NOT EXISTS alpha_trading",
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.trader_runs (
+        run_id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL,
+        config JSONB NOT NULL DEFAULT '{}'::jsonb,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        stopped_at TIMESTAMPTZ
+    )
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.order_intents (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        portfolio_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        strategy_name TEXT NOT NULL,
+        side TEXT NOT NULL,
+        token_address TEXT NOT NULL,
+        pool_address TEXT NOT NULL,
+        amount_raw TEXT NOT NULL,
+        amount_decimals SMALLINT NOT NULL,
+        max_slippage_bps INTEGER NOT NULL,
+        deadline_secs BIGINT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS order_intents_run_created_idx
+    ON alpha_trading.order_intents (run_id, created_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS order_intents_token_created_idx
+    ON alpha_trading.order_intents (token_address, created_at DESC)
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.execution_reports (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        order_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        tx_hash TEXT,
+        block_number BIGINT,
+        filled_amount_raw TEXT,
+        filled_amount_decimals SMALLINT,
+        gas_used BIGINT,
+        error TEXT,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS execution_reports_run_created_idx
+    ON alpha_trading.execution_reports (run_id, created_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS execution_reports_order_created_idx
+    ON alpha_trading.execution_reports (order_id, created_at DESC)
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.positions (
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        position_id TEXT NOT NULL,
+        portfolio_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        strategy_name TEXT NOT NULL,
+        token_address TEXT NOT NULL,
+        pool_address TEXT NOT NULL,
+        state TEXT NOT NULL,
+        entry_order_id TEXT,
+        exit_order_id TEXT,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (run_id, position_id)
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS positions_run_state_idx
+    ON alpha_trading.positions (run_id, state, updated_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS positions_token_idx
+    ON alpha_trading.positions (token_address, updated_at DESC)
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.position_snapshots (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        position_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        block_number BIGINT NOT NULL,
+        current_value_eth TEXT NOT NULL,
+        realized_profit_eth TEXT NOT NULL,
+        unrealized_profit_eth TEXT NOT NULL,
+        roi TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS position_snapshots_position_block_idx
+    ON alpha_trading.position_snapshots (run_id, position_id, block_number DESC)
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.risk_events (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        token_address TEXT NOT NULL,
+        pool_address TEXT,
+        pending_tx_hash TEXT,
+        observed_block BIGINT,
+        message TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS risk_events_run_created_idx
+    ON alpha_trading.risk_events (run_id, created_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS risk_events_token_created_idx
+    ON alpha_trading.risk_events (token_address, created_at DESC)
+    "#,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn labels_are_dashboard_friendly() {
+        assert_eq!(order_side_label(OrderSide::Buy), "buy");
+        assert_eq!(
+            position_state_label(&PositionState::BuyConfirmed),
+            "buy_confirmed"
+        );
+        assert_eq!(
+            execution_status_label(&ExecutionStatus::Confirmed),
+            "confirmed"
+        );
+        assert_eq!(risk_kind_label(&RiskKind::LpApproval), "lp_approval");
+    }
+
+    #[test]
+    fn migrations_cover_runtime_tables() {
+        let combined = MIGRATIONS.join("\n");
+        for table in [
+            "trader_runs",
+            "order_intents",
+            "execution_reports",
+            "positions",
+            "position_snapshots",
+            "risk_events",
+        ] {
+            assert!(combined.contains(table));
+        }
+    }
+
+    #[test]
+    fn heartbeat_metadata_is_json() {
+        let metadata = json!({
+            "live_status": "live",
+            "positions": 3,
+        });
+        assert_eq!(metadata["live_status"], "live");
+    }
+}

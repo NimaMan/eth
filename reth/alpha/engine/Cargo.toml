@@ -9,12 +9,14 @@ alloy-primitives = "1.5.7"
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive", "env"] }
 eth_alpha_core = { path = "../core" }
+eth_alpha_store = { path = "../store" }
 eth_strategies = { path = "../strategies" }
 eyre = "0.6"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 rust_decimal = "1.36"
 serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

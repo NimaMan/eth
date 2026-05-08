@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
@@ -9,14 +10,14 @@ use eth_alpha_core::{
     market::{MarketEvent, PoolProtocol, PoolSnapshot},
     risk::{RiskEvent, RiskKind, RiskSeverity},
 };
-use eth_alpha_engine::{
-    AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, MemoryTradingStore, PaperExecutionAdapter,
-};
+use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, PaperExecutionAdapter};
+use eth_alpha_store::PostgresTradingStore;
 use eth_strategies::{MarketTrackerConfig, MarketTrackerStrategy};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde::Deserialize;
+use serde_json::json;
 use tokio::time;
 use tracing::{info, warn};
 
@@ -43,6 +44,15 @@ struct Args {
 
     #[arg(long, default_value = "0")]
     min_liquidity_eth: String,
+
+    #[arg(long, env = "ALPHA_DATABASE_URL")]
+    database_url: Option<String>,
+
+    #[arg(long, env = "ALPHA_TRADER_RUN_ID")]
+    run_id: Option<String>,
+
+    #[arg(long, env = "ALPHA_TRADER_MODE", default_value = "paper")]
+    mode: String,
 
     /// Process the current token-server snapshot immediately instead of only priming watermarks.
     #[arg(long, default_value_t = false)]
@@ -163,8 +173,31 @@ async fn main() -> Result<()> {
     let paper_buy_wei = parse_u256_decimal(&args.paper_buy_wei)?;
     let min_liquidity_eth = Decimal::from_str(&args.min_liquidity_eth)
         .wrap_err("invalid --min-liquidity-eth decimal")?;
+    let database_url = resolve_database_url(&args)?;
+    let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
 
-    let store = MemoryTradingStore::default();
+    let store = PostgresTradingStore::connect(&database_url, run_id.clone())
+        .await
+        .wrap_err("failed to initialize Postgres trading store")?;
+    store
+        .start_run(
+            &args.mode,
+            json!({
+                "token_server_url": &args.token_server_url,
+                "poll_interval_ms": args.poll_interval_ms,
+                "mempool_since_days": args.mempool_since_days,
+                "signal_limit": args.signal_limit,
+                "paper_buy_wei": &args.paper_buy_wei,
+                "min_liquidity_eth": &args.min_liquidity_eth,
+                "replay_current": args.replay_current,
+            }),
+        )
+        .await
+        .wrap_err("failed to record alpha trader run")?;
+    let stale_runs = store
+        .mark_stale_runs(60)
+        .await
+        .wrap_err("failed to mark stale alpha trader runs")?;
     let mut engine = AlphaEngine::new(
         BlockCriticalRiskPolicy,
         store.clone(),
@@ -183,20 +216,68 @@ async fn main() -> Result<()> {
     let mut seen_pool_blocks: HashMap<Address, u64> = HashMap::new();
     let mut seen_signal_ids: HashSet<String> = HashSet::new();
     let mut primed = false;
+    let mut shutdown = ShutdownSignals::new()?;
 
     info!(
         token_server_url = %args.token_server_url,
+        run_id = %run_id,
+        mode = %args.mode,
+        stale_runs,
         replay_current = args.replay_current,
         "starting alpha trader"
     );
 
     loop {
         let first_poll = !primed;
-        let status = client.status().await?;
-        let pools = client.pools().await?;
-        let signals = client
-            .mempool_signals(args.signal_limit, args.mempool_since_days)
-            .await?;
+        let poll_result = async {
+            let status = client.status().await?;
+            let pools = client.pools().await?;
+            let signals = client
+                .mempool_signals(args.signal_limit, args.mempool_since_days)
+                .await?;
+            Ok::<_, eyre::Report>((status, pools, signals))
+        }
+        .await;
+        let (status, pools, signals) = match poll_result {
+            Ok(result) => result,
+            Err(error) => {
+                warn!(error = %error, "alpha trader poll failed");
+                let metadata = json!({
+                    "token_server_url": &args.token_server_url,
+                    "poll_error": error.to_string(),
+                    "trading_enabled": false,
+                    "positions": engine.portfolio().active_position_count(),
+                });
+                store
+                    .heartbeat(metadata.clone())
+                    .await
+                    .wrap_err("failed to write alpha trader error heartbeat")?;
+                if args.once {
+                    store
+                        .mark_stopped("failed", metadata)
+                        .await
+                        .wrap_err("failed to mark alpha trader run failed")?;
+                    break;
+                }
+                tokio::select! {
+                    _ = time::sleep(Duration::from_millis(args.poll_interval_ms)) => {}
+                    _ = shutdown.recv() => {
+                        store
+                            .mark_stopped(
+                                "stopped",
+                                json!({
+                                    "reason": "shutdown_signal",
+                                    "positions": engine.portfolio().active_position_count(),
+                                }),
+                            )
+                            .await
+                            .wrap_err("failed to mark alpha trader run stopped")?;
+                        break;
+                    }
+                }
+                continue;
+            }
+        };
         let live_ready = status.progress.status == "live";
         let suppress_events = !args.replay_current && !live_ready;
 
@@ -288,11 +369,51 @@ async fn main() -> Result<()> {
             positions = engine.portfolio().active_position_count(),
             "alpha trader tick"
         );
+        let heartbeat_metadata = json!({
+            "live_status": status.progress.status,
+            "live_current_block": status.progress.current_block,
+            "live_blocks_processed": status.progress.blocks_processed,
+            "live_warmup_total_blocks": status.progress.warmup_total_blocks,
+            "live_tracked_tokens": status.progress.tracked_tokens,
+            "live_tracked_pools": status.progress.tracked_v2_pools,
+            "live_last_error": status.progress.last_error,
+            "trading_enabled": !suppress_events,
+            "pools_seen": seen_pool_blocks.len(),
+            "token_server_pool_count": pools.count,
+            "signal_count": signals.count,
+            "market_events": market_events,
+            "risk_events": risk_events,
+            "reports": reports,
+            "positions": engine.portfolio().active_position_count(),
+        });
+        store
+            .heartbeat(heartbeat_metadata.clone())
+            .await
+            .wrap_err("failed to write alpha trader heartbeat")?;
 
         if args.once {
+            store
+                .mark_stopped("completed", heartbeat_metadata)
+                .await
+                .wrap_err("failed to mark alpha trader run completed")?;
             break;
         }
-        time::sleep(Duration::from_millis(args.poll_interval_ms)).await;
+        tokio::select! {
+            _ = time::sleep(Duration::from_millis(args.poll_interval_ms)) => {}
+            _ = shutdown.recv() => {
+                store
+                    .mark_stopped(
+                        "stopped",
+                        json!({
+                            "reason": "shutdown_signal",
+                            "positions": engine.portfolio().active_position_count(),
+                        }),
+                    )
+                    .await
+                    .wrap_err("failed to mark alpha trader run stopped")?;
+                break;
+            }
+        }
     }
 
     Ok(())
@@ -405,4 +526,59 @@ fn parse_u256_decimal(value: &str) -> Result<U256> {
 
 fn decimal_from_f64(value: f64) -> Decimal {
     Decimal::from_f64(value).unwrap_or(Decimal::ZERO)
+}
+
+fn resolve_database_url(args: &Args) -> Result<String> {
+    args.database_url
+        .clone()
+        .or_else(|| env::var("MEMPOOL_DATABASE_URL").ok())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| eyre!("set ALPHA_DATABASE_URL or MEMPOOL_DATABASE_URL for alpha trader"))
+}
+
+fn default_run_id() -> String {
+    let unix_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    format!("alpha-trader-{unix_secs}-{}", std::process::id())
+}
+
+#[cfg(unix)]
+struct ShutdownSignals {
+    interrupt: tokio::signal::unix::Signal,
+    terminate: tokio::signal::unix::Signal,
+}
+
+#[cfg(unix)]
+impl ShutdownSignals {
+    fn new() -> Result<Self> {
+        Ok(Self {
+            interrupt: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .wrap_err("failed to install SIGINT handler")?,
+            terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .wrap_err("failed to install SIGTERM handler")?,
+        })
+    }
+
+    async fn recv(&mut self) {
+        tokio::select! {
+            _ = self.interrupt.recv() => {}
+            _ = self.terminate.recv() => {}
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct ShutdownSignals;
+
+#[cfg(not(unix))]
+impl ShutdownSignals {
+    fn new() -> Result<Self> {
+        Ok(Self)
+    }
+
+    async fn recv(&mut self) {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
