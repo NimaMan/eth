@@ -16,6 +16,7 @@ use crate::pools::BasePoolConfig;
 use crate::pools::UniswapV2Pool;
 
 use super::replay_context::triggers::tx_is_token_control_replay_candidate;
+use super::trading_failure::classify_v2_trading_failure;
 use super::{
     address_string, hash_string, normalize_address, normalize_address_string, parse_address_lossy,
     same_address_str, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
@@ -925,7 +926,7 @@ async fn simulate_updated_v2_pools(
                     pool_config,
                 )
                 .await
-                .map(|_| ()),
+                .map(|result| result.failure_reason.clone()),
             V2TradingSimulation::Live(pool_simulator) => {
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -934,7 +935,7 @@ async fn simulate_updated_v2_pools(
                 )
                 .await
                 {
-                    Ok(result) => result.map(|_| ()),
+                    Ok(result) => result.map(|result| result.failure_reason.clone()),
                     Err(_) => Err(eyre!(
                         "live v2 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} prior_tx_count={} force_simulation={}",
                         timeout.as_millis(),
@@ -949,11 +950,20 @@ async fn simulate_updated_v2_pools(
                 }
             }
             #[cfg(test)]
-            V2TradingSimulation::Noop => Ok(()),
+            V2TradingSimulation::Noop => Ok(None),
         };
 
         match simulation_result {
-            Ok(()) => {
+            Ok(failure_reason) => {
+                let failure_class = failure_reason
+                    .as_ref()
+                    .and_then(|reason| classify_v2_trading_failure(pool, tx, reason));
+                let failure_class_code = failure_class.map(|class| class.code());
+                let failure_class_description = failure_class.map(|class| class.description());
+                pool.base.set_trading_failure_context(
+                    failure_reason.clone(),
+                    failure_class_code.map(|code| code.to_string()),
+                );
                 tracing::info!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
@@ -966,6 +976,9 @@ async fn simulate_updated_v2_pools(
                     can_sell = pool.base.state.can_sell,
                     buy_tax = ?pool.base.buy_tax,
                     sell_tax = ?pool.base.sell_tax,
+                    reason = ?failure_reason,
+                    failure_class = ?failure_class_code,
+                    failure_class_description = ?failure_class_description,
                     action = "evaluate_v2_trading",
                     result = "ok",
                     "completed v2 pool trading simulation"

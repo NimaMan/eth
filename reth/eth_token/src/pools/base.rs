@@ -93,6 +93,8 @@ pub struct BasePool {
     pub sell_tax: Option<f64>,
     pub tax_check_block: Option<u64>,
     pub tax_check_tx: Option<String>,
+    pub last_trading_failure_reason: Option<String>,
+    pub last_trading_failure_class: Option<String>,
     pub scam_label: Option<String>,
     pub scam_block: Option<u64>,
     pub scam_tx_hash: Option<String>,
@@ -135,6 +137,8 @@ impl BasePool {
             sell_tax: None,
             tax_check_block: None,
             tax_check_tx: None,
+            last_trading_failure_reason: None,
+            last_trading_failure_class: None,
             scam_label: None,
             scam_block: None,
             scam_tx_hash: None,
@@ -275,6 +279,15 @@ impl BasePool {
         self.sell_tax = sell_tax;
         self.tax_check_block = Some(block_number);
         self.tax_check_tx = Some(tx_hash.into());
+        if can_sell {
+            self.last_trading_failure_reason = None;
+            self.last_trading_failure_class = None;
+        }
+    }
+
+    pub fn set_trading_failure_context(&mut self, reason: Option<String>, class: Option<String>) {
+        self.last_trading_failure_reason = reason;
+        self.last_trading_failure_class = class;
     }
 
     pub fn trading_status(&self) -> TradingStatus {

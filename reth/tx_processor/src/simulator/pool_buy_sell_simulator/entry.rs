@@ -475,6 +475,37 @@ pub async fn check_can_buy_sell_pool(
             false,
         ));
     }
+    if tokens_received == U256::ZERO {
+        let failure_message = if denom_spent_u256 > U256::ZERO {
+            format!(
+                "Buy transaction succeeded but buyer received zero tokens (denom_spent={denom_spent_u256})"
+            )
+        } else {
+            "Buy transaction succeeded but buyer received zero tokens and spent no denomination"
+                .to_string()
+        };
+        tracing::warn!(
+            target: "pool_buy_sell_sim",
+            step = "buy",
+            block = block_number,
+            token_address = %config.token_address,
+            pool_address = %config.pool_address,
+            denom_spent = %denom_spent_u256,
+            "simulated buy produced zero output tokens"
+        );
+        return Ok(create_failed_result(
+            config,
+            block_number,
+            prior_tx_results,
+            Some(buy_processed),
+            None,
+            None,
+            failure_message,
+            false,
+            false,
+            false,
+        ));
+    }
 
     // APPROVE
     let mut approve_tx = build_approve_for_route(

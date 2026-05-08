@@ -12,6 +12,7 @@ pub mod index;
 pub(crate) mod replay_context;
 pub mod retention;
 pub mod token_builder;
+pub(crate) mod trading_failure;
 pub mod update_router;
 
 pub use block_processor::{
