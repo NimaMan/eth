@@ -134,6 +134,8 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
 
 Use `--replay-current` for a local smoke test that replays the current token-server snapshot through paper execution.
 
+The deployed paper runtime uses a stable `--run-id snipe-all-v1-paper-live`. On startup it restores active positions from `alpha_trading.positions` and restores pool/signal watermarks from `alpha_trading.strategy_observations`.
+
 ## Lessons From Python
 
 The Python `LiveStrategyEngine` sometimes updated positions when a signal was submitted and later confirmed on the next token update. In this engine, confirmations should come from `ExecutionReport`.

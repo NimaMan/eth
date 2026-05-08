@@ -7,19 +7,26 @@ use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
+    execution::ExecutionReport,
     market::{MarketEvent, PoolProtocol, PoolSnapshot},
+    portfolio::PortfolioState,
     risk::{RiskEvent, RiskKind, RiskSeverity},
 };
 use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, PaperExecutionAdapter};
-use eth_alpha_store::PostgresTradingStore;
+use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
+
+const STRATEGY_NAME: &str = "snipe-all-v1";
+const STRATEGY_LABEL: &str = "Snipe All v1";
+const POOL_UPDATE_SOURCE: &str = "pool_update";
+const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -68,18 +75,18 @@ struct TokenServerClient {
     http: reqwest::Client,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct LiveStatusResponse {
     progress: LiveProgressWire,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct LivePoolListResponse {
     count: usize,
     pools: Vec<PoolWire>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct LiveProgressWire {
     status: String,
     current_block: Option<u64>,
@@ -90,7 +97,7 @@ struct LiveProgressWire {
     last_error: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PoolWire {
     token_address: String,
     pool_address: String,
@@ -104,13 +111,13 @@ struct PoolWire {
     is_scam: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct MempoolSignalsResponse {
     count: usize,
     signals: Vec<MempoolSignalWire>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct MempoolSignalWire {
     signal_id: String,
     signal_type: String,
@@ -183,8 +190,8 @@ async fn main() -> Result<()> {
         .start_run(
             &args.mode,
             json!({
-                "strategy_name": "snipe-all-v1",
-                "strategy_label": "Snipe All v1",
+                "strategy_name": STRATEGY_NAME,
+                "strategy_label": STRATEGY_LABEL,
                 "token_server_url": &args.token_server_url,
                 "poll_interval_ms": args.poll_interval_ms,
                 "mempool_since_days": args.mempool_since_days,
@@ -200,11 +207,22 @@ async fn main() -> Result<()> {
         .mark_stale_runs(60)
         .await
         .wrap_err("failed to mark stale alpha trader runs")?;
+    let restored_positions = store
+        .load_active_positions(STRATEGY_NAME)
+        .await
+        .wrap_err("failed to restore active alpha positions")?;
+    let mut portfolio = PortfolioState::default();
+    for position in restored_positions {
+        portfolio.positions.insert(position.id.clone(), position);
+    }
+    let restored_position_count = portfolio.active_position_count();
+
     let mut engine = AlphaEngine::new(
         BlockCriticalRiskPolicy,
         store.clone(),
         PaperExecutionAdapter::new(),
-    );
+    )
+    .with_portfolio(portfolio);
     engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
         buy_amount: Amount {
             raw: paper_buy_wei,
@@ -219,8 +237,7 @@ async fn main() -> Result<()> {
     })));
 
     let client = TokenServerClient::new(args.token_server_url.clone());
-    let mut seen_pool_blocks: HashMap<Address, u64> = HashMap::new();
-    let mut seen_signal_ids: HashSet<String> = HashSet::new();
+    let (mut seen_pool_blocks, mut seen_signal_ids) = load_persisted_watermarks(&store).await?;
     let mut primed = false;
     let mut shutdown = ShutdownSignals::new()?;
 
@@ -230,6 +247,9 @@ async fn main() -> Result<()> {
         mode = %args.mode,
         stale_runs,
         replay_current = args.replay_current,
+        restored_pool_watermarks = seen_pool_blocks.len(),
+        restored_signal_watermarks = seen_signal_ids.len(),
+        restored_positions = restored_position_count,
         "starting alpha trader"
     );
 
@@ -299,20 +319,57 @@ async fn main() -> Result<()> {
                     continue;
                 }
             };
-            let previous_block = seen_pool_blocks.insert(pool.address, pool.latest_block);
+            let previous_block = seen_pool_blocks.get(&pool.address).copied();
             let changed = previous_block
                 .map(|previous| pool.latest_block > previous)
                 .unwrap_or(true);
-            if !changed || suppress_events || (first_poll && !args.replay_current) {
+            if !changed {
+                continue;
+            }
+            seen_pool_blocks.insert(pool.address, pool.latest_block);
+
+            if suppress_events || (first_poll && !args.replay_current) {
+                record_pool_observation(
+                    &store,
+                    &pool_wire,
+                    &pool,
+                    previous_block,
+                    "primed",
+                    0,
+                    first_poll,
+                    suppress_events,
+                    &status,
+                    Value::Null,
+                )
+                .await?;
                 continue;
             }
 
             let event = MarketEvent::PoolUpdated {
                 block_number: pool.latest_block,
-                pool,
+                pool: pool.clone(),
             };
             let event_reports = engine.handle_event(EngineEvent::Market(event)).await?;
-            reports += event_reports.len();
+            let report_count = event_reports.len();
+            let decision = if report_count > 0 {
+                "submitted"
+            } else {
+                "hold"
+            };
+            record_pool_observation(
+                &store,
+                &pool_wire,
+                &pool,
+                previous_block,
+                decision,
+                report_count,
+                first_poll,
+                suppress_events,
+                &status,
+                json!({ "reports": reports_payload(&event_reports) }),
+            )
+            .await?;
+            reports += report_count;
             market_events += 1;
             for report in event_reports {
                 info!(
@@ -326,18 +383,72 @@ async fn main() -> Result<()> {
         for signal in signals.signals {
             let is_new = seen_signal_ids.insert(signal.signal_id.clone());
             if !is_new || suppress_events || (first_poll && !args.replay_current) {
+                if is_new {
+                    record_signal_observation(
+                        &store,
+                        &signal,
+                        "primed",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        Value::Null,
+                    )
+                    .await?;
+                }
                 continue;
             }
             let event = match signal.to_risk_event() {
                 Ok(Some(event)) => event,
-                Ok(None) => continue,
+                Ok(None) => {
+                    record_signal_observation(
+                        &store,
+                        &signal,
+                        "ignored",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "reason": "missing_token_address" }),
+                    )
+                    .await?;
+                    continue;
+                }
                 Err(error) => {
+                    record_signal_observation(
+                        &store,
+                        &signal,
+                        "invalid",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "error": error.to_string() }),
+                    )
+                    .await?;
                     warn!(error = %error, signal_id = %signal.signal_id, "skipping mempool signal");
                     continue;
                 }
             };
             let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
-            reports += event_reports.len();
+            let report_count = event_reports.len();
+            let decision = if report_count > 0 {
+                "submitted"
+            } else {
+                "hold"
+            };
+            record_signal_observation(
+                &store,
+                &signal,
+                decision,
+                report_count,
+                first_poll,
+                suppress_events,
+                &status,
+                json!({ "reports": reports_payload(&event_reports) }),
+            )
+            .await?;
+            reports += report_count;
             risk_events += 1;
             for report in event_reports {
                 info!(
@@ -423,6 +534,128 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn load_persisted_watermarks(
+    store: &PostgresTradingStore,
+) -> Result<(HashMap<Address, u64>, HashSet<String>)> {
+    let cursors = store
+        .load_strategy_observation_cursors(STRATEGY_NAME)
+        .await
+        .wrap_err("failed to load alpha trader observation watermarks")?;
+    let mut pool_blocks = HashMap::new();
+    let mut signal_ids = HashSet::new();
+
+    for cursor in cursors {
+        match cursor.event_source.as_str() {
+            POOL_UPDATE_SOURCE => {
+                let pool_address = cursor.pool_address.as_ref().unwrap_or(&cursor.event_key);
+                let Ok(pool_address) = Address::from_str(pool_address) else {
+                    warn!(
+                        event_key = %cursor.event_key,
+                        "skipping invalid persisted pool watermark"
+                    );
+                    continue;
+                };
+                let Some(block_number) = cursor.block_number else {
+                    continue;
+                };
+                pool_blocks
+                    .entry(pool_address)
+                    .and_modify(|current: &mut u64| *current = (*current).max(block_number))
+                    .or_insert(block_number);
+            }
+            MEMPOOL_SIGNAL_SOURCE => {
+                signal_ids.insert(cursor.event_key);
+            }
+            _ => {}
+        }
+    }
+
+    Ok((pool_blocks, signal_ids))
+}
+
+async fn record_pool_observation(
+    store: &PostgresTradingStore,
+    pool_wire: &PoolWire,
+    pool: &PoolSnapshot,
+    previous_block: Option<u64>,
+    decision: &str,
+    report_count: usize,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
+    store
+        .record_strategy_observation(StrategyObservationRecord {
+            strategy_name: STRATEGY_NAME.to_string(),
+            event_source: POOL_UPDATE_SOURCE.to_string(),
+            event_key: pool.address.to_string(),
+            token_address: Some(pool.token_address.to_string()),
+            pool_address: Some(pool.address.to_string()),
+            block_number: Some(pool.latest_block),
+            event_timestamp: None,
+            decision: decision.to_string(),
+            report_count,
+            payload: json!({
+                "pool": pool_wire,
+                "previous_block": previous_block,
+                "latest_block": pool.latest_block,
+                "first_poll": first_poll,
+                "suppress_events": suppress_events,
+                "live_status": status.progress.status,
+                "live_current_block": status.progress.current_block,
+                "live_blocks_processed": status.progress.blocks_processed,
+                "live_warmup_total_blocks": status.progress.warmup_total_blocks,
+                "extra": extra,
+            }),
+        })
+        .await
+        .wrap_err("failed to record pool strategy observation")
+}
+
+async fn record_signal_observation(
+    store: &PostgresTradingStore,
+    signal: &MempoolSignalWire,
+    decision: &str,
+    report_count: usize,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
+    store
+        .record_strategy_observation(StrategyObservationRecord {
+            strategy_name: STRATEGY_NAME.to_string(),
+            event_source: MEMPOOL_SIGNAL_SOURCE.to_string(),
+            event_key: signal.signal_id.clone(),
+            token_address: signal.token_address.clone(),
+            pool_address: signal.pool_address.clone(),
+            block_number: None,
+            event_timestamp: signal.detection_timestamp.clone(),
+            decision: decision.to_string(),
+            report_count,
+            payload: json!({
+                "signal": signal,
+                "first_poll": first_poll,
+                "suppress_events": suppress_events,
+                "live_status": status.progress.status,
+                "live_current_block": status.progress.current_block,
+                "live_blocks_processed": status.progress.blocks_processed,
+                "live_warmup_total_blocks": status.progress.warmup_total_blocks,
+                "extra": extra,
+            }),
+        })
+        .await
+        .wrap_err("failed to record mempool signal strategy observation")
+}
+
+fn reports_payload(reports: &[ExecutionReport]) -> Vec<Value> {
+    reports
+        .iter()
+        .filter_map(|report| serde_json::to_value(report).ok())
+        .collect()
 }
 
 impl PoolWire {

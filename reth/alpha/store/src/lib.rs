@@ -12,6 +12,7 @@ use eth_alpha_core::{
 };
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::Row;
 
 const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 
@@ -19,6 +20,28 @@ const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 pub struct PostgresTradingStore {
     pool: PgPool,
     run_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StrategyObservationCursor {
+    pub event_source: String,
+    pub event_key: String,
+    pub pool_address: Option<String>,
+    pub block_number: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StrategyObservationRecord {
+    pub strategy_name: String,
+    pub event_source: String,
+    pub event_key: String,
+    pub token_address: Option<String>,
+    pub pool_address: Option<String>,
+    pub block_number: Option<u64>,
+    pub event_timestamp: Option<String>,
+    pub decision: String,
+    pub report_count: usize,
+    pub payload: Value,
 }
 
 impl PostgresTradingStore {
@@ -77,6 +100,7 @@ impl PostgresTradingStore {
                 mode = EXCLUDED.mode,
                 status = 'running',
                 config = EXCLUDED.config,
+                stopped_at = NULL,
                 last_heartbeat_at = NOW()
             "#,
         )
@@ -139,6 +163,103 @@ impl PostgresTradingStore {
         .await
         .map_err(store_error)?;
         Ok(())
+    }
+
+    pub async fn load_strategy_observation_cursors(
+        &self,
+        strategy_name: &str,
+    ) -> Result<Vec<StrategyObservationCursor>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT event_source, event_key, pool_address, block_number
+            FROM alpha_trading.strategy_observations
+            WHERE run_id = $1 AND strategy_name = $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StrategyObservationCursor {
+                    event_source: row.try_get("event_source").map_err(store_error)?,
+                    event_key: row.try_get("event_key").map_err(store_error)?,
+                    pool_address: row.try_get("pool_address").map_err(store_error)?,
+                    block_number: row
+                        .try_get::<Option<i64>, _>("block_number")
+                        .map_err(store_error)?
+                        .and_then(i64_to_u64),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn record_strategy_observation(
+        &self,
+        record: StrategyObservationRecord,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.strategy_observations (
+                run_id, strategy_name, event_source, event_key, token_address,
+                pool_address, block_number, event_timestamp, decision, report_count,
+                payload, first_seen_at, last_seen_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            ON CONFLICT (run_id, strategy_name, event_source, event_key) DO UPDATE SET
+                token_address = EXCLUDED.token_address,
+                pool_address = EXCLUDED.pool_address,
+                block_number = EXCLUDED.block_number,
+                event_timestamp = EXCLUDED.event_timestamp,
+                decision = EXCLUDED.decision,
+                report_count = EXCLUDED.report_count,
+                payload = EXCLUDED.payload,
+                last_seen_at = NOW()
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(record.strategy_name)
+        .bind(record.event_source)
+        .bind(record.event_key)
+        .bind(record.token_address)
+        .bind(record.pool_address)
+        .bind(record.block_number.map(u64_to_i64))
+        .bind(record.event_timestamp)
+        .bind(record.decision)
+        .bind(usize_to_i32(record.report_count))
+        .bind(record.payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT payload::text AS payload
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+              AND strategy_name = $2
+              AND state NOT IN ('sell_confirmed', 'failed', 'cancelled', 'scammed')
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
+                serde_json::from_str::<Position>(&payload).map_err(store_error)
+            })
+            .collect()
     }
 }
 
@@ -371,6 +492,14 @@ fn u32_to_i32(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+fn usize_to_i32(value: usize) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+fn i64_to_u64(value: i64) -> Option<u64> {
+    u64::try_from(value).ok()
+}
+
 fn store_error(error: impl std::fmt::Display) -> AlphaCoreError {
     AlphaCoreError::Store(error.to_string())
 }
@@ -507,6 +636,32 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS risk_events_token_created_idx
     ON alpha_trading.risk_events (token_address, created_at DESC)
     "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.strategy_observations (
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        strategy_name TEXT NOT NULL,
+        event_source TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        token_address TEXT,
+        pool_address TEXT,
+        block_number BIGINT,
+        event_timestamp TEXT,
+        decision TEXT NOT NULL,
+        report_count INTEGER NOT NULL DEFAULT 0,
+        payload JSONB NOT NULL,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (run_id, strategy_name, event_source, event_key)
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS strategy_observations_run_seen_idx
+    ON alpha_trading.strategy_observations (run_id, strategy_name, last_seen_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS strategy_observations_token_idx
+    ON alpha_trading.strategy_observations (token_address, last_seen_at DESC)
+    "#,
 ];
 
 #[cfg(test)]
@@ -538,6 +693,7 @@ mod tests {
             "positions",
             "position_snapshots",
             "risk_events",
+            "strategy_observations",
         ] {
             assert!(combined.contains(table));
         }

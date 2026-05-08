@@ -7,13 +7,13 @@ PostgreSQL persistence for the alpha runtime. This crate is infrastructure: it i
 ## Responsibilities
 
 - Create and migrate the `alpha_trading` schema.
-- Persist trader runs, heartbeats, order intents, execution reports, positions, position snapshots, and risk events.
+- Persist trader runs, heartbeats, order intents, execution reports, positions, position snapshots, risk events, and strategy observations.
 - Keep indexed columns for common dashboard filters while retaining the full typed payload as JSONB.
 - Provide query helpers for API/frontend layers later.
 
 ## Non-Responsibilities
 
-- No strategy decisions.
+- No strategy implementation.
 - No token tracking.
 - No mempool simulation.
 - No transaction execution.
@@ -32,6 +32,9 @@ alpha_trading.execution_reports
 alpha_trading.positions
 alpha_trading.position_snapshots
 alpha_trading.risk_events
+alpha_trading.strategy_observations
 ```
 
 The dashboard should read these tables or API endpoints backed by these tables. It should not reconstruct positions from journal logs.
+
+`strategy_observations` stores the decision inputs and watermarks used by the trader: live pool updates, mempool signal ids, whether the event was primed/held/submitted, report count, and the full observed payload. This is where restart-safe signal and pool watermarks live.
