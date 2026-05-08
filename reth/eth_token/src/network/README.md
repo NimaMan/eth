@@ -10,8 +10,10 @@ tracked token.
 
 ## Status
 
-Concept only. The current Rust module is intentionally empty while the data model
-is being defined.
+Concept and folder skeleton are in place. The `model` layer now defines the
+stable serializable IDs, node/edge kinds, labels, confidence, observations, and
+evidence summaries. The activity, ingest, graph, cluster, and snapshot layers are
+still placeholders.
 
 ## Folder Layout
 
