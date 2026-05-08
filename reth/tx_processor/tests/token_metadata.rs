@@ -3,6 +3,9 @@ use reth_chain_query::{
     common_addresses::denom_tokens::{get_token_decimals, get_token_symbol},
     RethQueryProvider,
 };
+use std::path::Path;
+
+const RETH_MAINNET_DATADIR: &str = "/home/nima/.local/share/reth/mainnet";
 
 #[test]
 fn denom_tokens_have_expected_metadata() {
@@ -34,24 +37,36 @@ fn denom_tokens_have_expected_metadata() {
         ),
     ];
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")
-        .expect("failed to open Reth datadir for metadata tests");
-
-    for (addr, expected_symbol, expected_decimals) in cases {
-        let symbol =
-            get_token_symbol(addr).unwrap_or_else(|| panic!("symbol missing for address {addr:?}"));
+    for (addr, expected_symbol, expected_decimals) in &cases {
+        let symbol = get_token_symbol(*addr)
+            .unwrap_or_else(|| panic!("symbol missing for address {addr:?}"));
         assert_eq!(
-            symbol, expected_symbol,
+            symbol, *expected_symbol,
             "unexpected symbol for address {addr:?}"
         );
 
         let decimals = get_token_decimals(symbol)
             .unwrap_or_else(|| panic!("decimals missing for symbol {symbol}"));
         assert_eq!(
-            decimals, expected_decimals,
+            decimals, *expected_decimals,
             "unexpected decimals for symbol {symbol}"
         );
+    }
 
+    if !Path::new(RETH_MAINNET_DATADIR)
+        .join("rocksdb/CURRENT")
+        .exists()
+    {
+        eprintln!(
+            "skipping live Reth metadata assertions; datadir not found at {RETH_MAINNET_DATADIR}"
+        );
+        return;
+    }
+
+    let provider = RethQueryProvider::new(RETH_MAINNET_DATADIR)
+        .expect("failed to open Reth datadir for metadata tests");
+
+    for (addr, expected_symbol, expected_decimals) in cases {
         let metadata = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(provider.get_token_metadata(addr, Some(23848765), None))
