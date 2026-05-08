@@ -13,8 +13,11 @@ tracked token.
 Concept and folder skeleton are in place. The `model` layer now defines the
 stable serializable IDs, node/edge kinds, labels, confidence, observations, and
 evidence summaries. The `activity` layer now defines per-address movements,
-totals, fee/bribe costs, and lightweight PnL summaries. The ingest, graph,
-cluster, and snapshot layers are still placeholders.
+totals, fee/bribe costs, and lightweight PnL summaries. The `ingest` layer now
+converts `ProcessedTransaction` data into typed activity, label, and edge update
+batches. The `graph` layer now applies those batches into persistent raw
+node/edge/activity state. The cluster and snapshot layers are still
+placeholders.
 
 ## Folder Layout
 

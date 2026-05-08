@@ -218,6 +218,16 @@ impl EvidenceSummary {
             self.examples.push(evidence);
         }
     }
+
+    pub fn merge(&mut self, other: Self) {
+        self.observed.merge(&other.observed);
+        for evidence in other.examples {
+            if self.examples.len() >= self.max_examples {
+                break;
+            }
+            self.examples.push(evidence);
+        }
+    }
 }
 
 impl Default for EvidenceSummary {

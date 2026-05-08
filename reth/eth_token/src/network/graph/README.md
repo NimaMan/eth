@@ -23,3 +23,26 @@ suppress noisy nodes for holder maps and downstream snapshots.
 
 Build a small append/update API that accepts typed network events and maintains
 node/edge state with first/last seen block and evidence counts.
+
+## Current Contract
+
+The graph layer now exposes `RawTokenNetworkGraph`, which owns persistent state
+for one token network:
+
+- nodes keyed by stable `NetworkNodeId`;
+- collapsed edges keyed by stable `NetworkEdgeId`;
+- per-address `AddressActivity`;
+- secondary indexes for token, address, pool, time-window, and synthetic nodes;
+- an `apply_batch` API for `NetworkIngestBatch`.
+
+Applying a batch:
+
+- ensures address/pool/token nodes exist;
+- updates address activity from movement and cost updates;
+- merges node labels by kind/source/value and combines observation ranges;
+- merges duplicate edges and combines evidence counts/examples;
+- bounds stored address examples and edge evidence examples while keeping
+  running totals intact.
+
+This layer still does not simplify the graph, compute clusters, or produce
+Asena-facing snapshots.
