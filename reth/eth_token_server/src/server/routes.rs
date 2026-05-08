@@ -104,6 +104,16 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(mempool_signals_by_type);
 
+    let alpha_strategies = warp::path!("alpha" / "strategies")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(alpha_strategies);
+
+    let alpha_strategy_detail = warp::path!("alpha" / "strategies" / String)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(alpha_strategy_detail);
+
     let progress = warp::path!("runs" / String / "progress")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -154,6 +164,8 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_retention)
         .or(mempool_signals_by_type)
         .or(mempool_signals)
+        .or(alpha_strategy_detail)
+        .or(alpha_strategies)
         .or(token_detail)
         .or(tokens)
         .or(progress)
@@ -188,6 +200,7 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "live_stream_count": state.config.live_stream_count,
             "live_block_apply_timeout_ms": state.config.live_block_apply_timeout_ms,
             "mempool_signal_limit": state.config.mempool_signal_limit,
+            "alpha_trading_enabled": true,
         }),
         StatusCode::OK,
     ))
@@ -282,6 +295,33 @@ async fn mempool_signals_by_type(
         Ok(signals) => Ok(json_response(&signals, StatusCode::OK)),
         Err(error) => Ok(error_response(
             format!("failed to load mempool signals: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+async fn alpha_strategies(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match state.alpha_trading.list_strategies().await {
+        Ok(strategies) => Ok(json_response(&strategies, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load alpha strategies: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+async fn alpha_strategy_detail(
+    strategy_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.alpha_trading.strategy_detail(&strategy_id).await {
+        Ok(Some(strategy)) => Ok(json_response(&strategy, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "alpha strategy not found",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to load alpha strategy: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }

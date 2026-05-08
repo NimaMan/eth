@@ -12,7 +12,7 @@ use eth_alpha_core::{
 };
 use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, PaperExecutionAdapter};
 use eth_alpha_store::PostgresTradingStore;
-use eth_strategies::{MarketTrackerConfig, MarketTrackerStrategy};
+use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -183,6 +183,8 @@ async fn main() -> Result<()> {
         .start_run(
             &args.mode,
             json!({
+                "strategy_name": "snipe-all-v1",
+                "strategy_label": "Snipe All v1",
                 "token_server_url": &args.token_server_url,
                 "poll_interval_ms": args.poll_interval_ms,
                 "mempool_since_days": args.mempool_since_days,
@@ -203,13 +205,17 @@ async fn main() -> Result<()> {
         store.clone(),
         PaperExecutionAdapter::new(),
     );
-    engine.add_strategy(Box::new(MarketTrackerStrategy::new(MarketTrackerConfig {
+    engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
         buy_amount: Amount {
             raw: paper_buy_wei,
             decimals: 18,
         },
+        sell_amount: Amount {
+            raw: paper_buy_wei,
+            decimals: 18,
+        },
         min_denom_reserve: min_liquidity_eth,
-        ..MarketTrackerConfig::default()
+        ..SnipeAllConfig::default()
     })));
 
     let client = TokenServerClient::new(args.token_server_url.clone());

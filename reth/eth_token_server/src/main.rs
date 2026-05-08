@@ -1,4 +1,4 @@
-use eth_token_server::{server, TokenServerConfig};
+use eth_token_server::{config::shared_config_value, server, TokenServerConfig};
 use std::path::PathBuf;
 use tracing::{Level, Metadata};
 use tracing_subscriber::{
@@ -7,12 +7,14 @@ use tracing_subscriber::{
 
 const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/eth_token_server";
 const DEFAULT_SIMULATOR_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/simulators";
+const TOKEN_SERVER_LOG_DIR_CONFIG: &str = "TOKEN_SERVER_LOG_DIR";
+const SIMULATOR_LOG_DIR_CONFIG: &str = "SIMULATOR_LOG_DIR";
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let _log_guards = init_logging()?;
 
-    let config = TokenServerConfig::from_env()?;
+    let config = TokenServerConfig::from_config_file()?;
     server::serve(config).await
 }
 
@@ -28,12 +30,8 @@ fn init_logging() -> eyre::Result<LogGuards> {
             "info,pool_buy_sell_sim=debug,replay_parity_sim=debug,token_safety_lab=debug",
         )
     });
-    let log_dir = std::env::var_os("ETH_TOKEN_SERVER_LOG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOG_DIR));
-    let simulator_log_dir = std::env::var_os("ETH_SIMULATOR_LOG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_SIMULATOR_LOG_DIR));
+    let log_dir = config_path(TOKEN_SERVER_LOG_DIR_CONFIG, DEFAULT_LOG_DIR)?;
+    let simulator_log_dir = config_path(SIMULATOR_LOG_DIR_CONFIG, DEFAULT_SIMULATOR_LOG_DIR)?;
     std::fs::create_dir_all(&log_dir)?;
     std::fs::create_dir_all(&simulator_log_dir)?;
 
@@ -95,6 +93,12 @@ fn init_logging() -> eyre::Result<LogGuards> {
         _simulator: simulator_guard,
         _simulation_errors: simulation_errors_guard,
     })
+}
+
+fn config_path(key: &str, default: &str) -> eyre::Result<PathBuf> {
+    Ok(shared_config_value(key)?
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default)))
 }
 
 fn is_simulator_target(metadata: &Metadata<'_>) -> bool {

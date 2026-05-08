@@ -7,6 +7,29 @@ This crate contains built-in strategies. Strategies are decision logic only.
 ## Current Implementations
 
 - `MarketTrackerStrategy`: submits one paper buy per tradable pool or `TradingEnabled` risk event, then suppresses repeat buys for that pool. It blocks itself when a matching critical risk is active.
+- `SnipeAllStrategy`: first live paper policy. It buys every newly observed eligible live pool once and exits a matching open position when a liquidity-removal risk event arrives.
+
+## Snipe All V1
+
+`SnipeAllStrategy` is intentionally simple and explicit. Mempool signals are assumed to be a normal part of every serious strategy, so the strategy name describes the entry posture rather than the signal source.
+
+Entry:
+
+- Buy each eligible live pool once.
+- Skip pools that cannot buy, cannot sell, are flagged as scam, or are below `min_denom_reserve`.
+- Skip historical warmup state in the live trader; the runtime primes watermarks and only sends new live changes once the token tracker reports `live`.
+
+Exit:
+
+- Sell a matching open position on `RiskKind::LiquidityRemoval`.
+- `LpApproval`, creator-flow labels, and tax/honeypot rules are scaffolded as named rule modules but currently hold.
+
+Planned rule growth:
+
+- Label token creators by public mempool vs private execution behavior.
+- Sell immediately when private-labeled creators approve LP tokens.
+- Add tax/honeypot exits and creator blocklists.
+- Persist strategy-decision audit rows so the frontend can show exactly which named rule opened, held, or exited a position.
 
 ## Responsibilities
 

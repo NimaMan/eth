@@ -4,6 +4,7 @@ use eth_live_feed::LiveTokenRuntimeConfig;
 use eyre::{eyre, Result};
 use reth_chain_query::RethQueryProvider;
 
+use crate::alpha_trading::AlphaTradingStore;
 use crate::config::TokenServerConfig;
 use crate::live::LiveTracker;
 use crate::mempool_signals::MempoolSignalStore;
@@ -17,6 +18,7 @@ pub struct ServerState {
     pub live_tracker: LiveTracker,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     pub mempool_signals: MempoolSignalStore,
+    pub alpha_trading: AlphaTradingStore,
 }
 
 impl ServerState {
@@ -48,6 +50,7 @@ impl ServerState {
         );
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
+        let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
 
         Ok(Self {
             config,
@@ -55,6 +58,7 @@ impl ServerState {
             live_tracker,
             processed_block_disk_cache,
             mempool_signals,
+            alpha_trading,
         })
     }
 }

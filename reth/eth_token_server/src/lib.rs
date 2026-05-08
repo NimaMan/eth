@@ -1,3 +1,4 @@
+pub mod alpha_trading;
 pub mod config;
 pub mod error;
 pub mod live;

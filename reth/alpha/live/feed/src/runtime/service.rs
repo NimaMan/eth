@@ -518,6 +518,15 @@ impl LiveTokenRuntime {
         let mut processor = self.clone_processor_for_apply(block_number).await;
         let apply_started = Instant::now();
         let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
+        let block_transaction_count = loaded.block.transactions.len();
+        let tracked_tokens_before = processor.registry().tokens.len();
+        let tracked_v2_pools_before: usize = processor
+            .registry()
+            .tokens
+            .values()
+            .map(|token| token.pool_addresses().len())
+            .sum();
+        let block_source = loaded.source;
         let report = match tokio::time::timeout(
             apply_timeout,
             processor.process_block_live_with_discovery_provider(
@@ -531,9 +540,13 @@ impl LiveTokenRuntime {
             Ok(report) => report,
             Err(_) => {
                 bail!(
-                    "live token block apply timed out after {} ms at block {}",
+                    "live token block apply timed out after {} ms at block {} source={} txs={} tracked_tokens_before={} tracked_v2_pools_before={}",
                     self.inner.config.block_apply_timeout_ms,
-                    block_number
+                    block_number,
+                    block_source,
+                    block_transaction_count,
+                    tracked_tokens_before,
+                    tracked_v2_pools_before
                 );
             }
         };

@@ -1,37 +1,48 @@
+use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use eyre::{eyre, Result};
 
-const LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR";
-const LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV: &str =
-    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS";
-const LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME: &str = "processed_block_cache";
-const LEGACY_LIVE_CACHE_RETRY_ATTEMPTS_ENV: &str = "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS";
-const LEGACY_LIVE_CACHE_RETRY_DELAY_MS_ENV: &str = "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS";
-const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
-const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
-    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
+const ETH_CONFIG_PATH_ENV: &str = "ETH_CONFIG_PATH";
+const ETH_NODE_ROOT_CONFIG: &str = "ETH_NODE_ROOT";
+const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
+const TOKEN_SERVER_BIND_CONFIG: &str = "TOKEN_SERVER_BIND";
+const TOKEN_SERVER_HISTORY_LIMIT_CONFIG: &str = "TOKEN_SERVER_HISTORY_LIMIT";
+const TOKEN_SERVER_DEFAULT_BLOCKS_CONFIG: &str = "TOKEN_SERVER_DEFAULT_BLOCKS";
+const LIVE_TOKEN_TRACKER_WARMUP_BLOCKS_CONFIG: &str = "LIVE_TOKEN_TRACKER_WARMUP_BLOCKS";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_CONFIG: &str = "PROCESSED_BLOCK_DISK_CACHE_DIR";
+const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_CONFIG: &str = "PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
 const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
-const LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_ENV: &str =
-    "ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS";
-const LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_ENV: &str =
-    "ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS";
+const LIVE_BLOCKCHAIN_DATA_REDIS_URL_CONFIG: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
+const ETH_PROCESSED_BLOCK_STREAM_CONFIG: &str = "ETH_PROCESSED_BLOCK_STREAM";
+const LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_CONFIG: &str =
+    "LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS";
+const LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_CONFIG: &str =
+    "LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS";
+const LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS_CONFIG: &str = "LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS";
+const LIVE_TOKEN_TRACKER_STREAM_COUNT_CONFIG: &str = "LIVE_TOKEN_TRACKER_STREAM_COUNT";
+const LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG: &str =
+    "LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS";
+const MEMPOOL_DATABASE_URL_CONFIG: &str = "MEMPOOL_DATABASE_URL";
+const ALPHA_DATABASE_URL_CONFIG: &str = "ALPHA_DATABASE_URL";
+const MEMPOOL_SIGNAL_LIMIT_CONFIG: &str = "MEMPOOL_SIGNAL_LIMIT";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
-const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 100_000;
+const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 1_000_000;
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
 const DEFAULT_LIVE_BLOCK_STREAM: &str = "eth/live/blocks";
 const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS: usize = 20;
 const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS: u64 = 100;
 const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
 const DEFAULT_STREAM_COUNT: usize = 100;
-const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 180_000;
+const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 3_000;
 const DEFAULT_MEMPOOL_DATABASE_URL: &str = "postgresql://postgres:postgres@localhost:5432/eth_db";
 const DEFAULT_MEMPOOL_SIGNAL_LIMIT: i64 = 200;
 
@@ -52,123 +63,148 @@ pub struct TokenServerConfig {
     pub live_stream_count: usize,
     pub live_block_apply_timeout_ms: u64,
     pub mempool_database_url: String,
+    pub alpha_database_url: String,
     pub mempool_signal_limit: i64,
 }
 
 impl TokenServerConfig {
-    pub fn from_env() -> Result<Self> {
-        let bind = env_string("ETH_TOKEN_SERVER_BIND", DEFAULT_BIND).parse()?;
-        let reth_datadir = PathBuf::from(env_string("RETH_DATADIR", DEFAULT_RETH_DATADIR));
-        let history_limit = env_parse("ETH_TOKEN_SERVER_HISTORY_LIMIT", DEFAULT_HISTORY_LIMIT)?;
-        let default_blocks = env_parse("ETH_TOKEN_SERVER_DEFAULT_BLOCKS", DEFAULT_BLOCKS)?;
-        let live_warmup_blocks = env_parse(
-            "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS",
+    pub fn from_config_file() -> Result<Self> {
+        let config = load_config_env()?;
+        Self::from_config_values(&config)
+    }
+
+    fn from_config_values(config: &HashMap<String, String>) -> Result<Self> {
+        let bind = config_string(config, TOKEN_SERVER_BIND_CONFIG, DEFAULT_BIND).parse()?;
+        let reth_datadir = PathBuf::from(config_string(
+            config,
+            RETH_DATADIR_CONFIG,
+            DEFAULT_RETH_DATADIR,
+        ));
+        let history_limit = config_parse(
+            config,
+            TOKEN_SERVER_HISTORY_LIMIT_CONFIG,
+            DEFAULT_HISTORY_LIMIT,
+        )?;
+        let default_blocks =
+            config_parse(config, TOKEN_SERVER_DEFAULT_BLOCKS_CONFIG, DEFAULT_BLOCKS)?;
+        let live_warmup_blocks = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_WARMUP_BLOCKS_CONFIG,
             DEFAULT_LIVE_WARMUP_BLOCKS,
         )?;
-        let processed_block_disk_cache_dir = env_optional_path_any(&[
-            PROCESSED_BLOCK_DISK_CACHE_DIR_ENV,
-            LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV,
-        ])
-        .or_else(default_processed_block_disk_cache_dir);
-        let processed_block_disk_cache_blocks = env_parse_any(
-            &[
-                PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV,
-                LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV,
-            ],
+        let processed_block_disk_cache_dir =
+            config_optional_path(config, PROCESSED_BLOCK_DISK_CACHE_DIR_CONFIG)
+                .or_else(|| default_processed_block_disk_cache_dir(config));
+        let processed_block_disk_cache_blocks = config_parse(
+            config,
+            PROCESSED_BLOCK_DISK_CACHE_BLOCKS_CONFIG,
             DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS,
         )?;
-        let redis_url = env_string("ETH_TOKEN_SERVER_REDIS_URL", DEFAULT_REDIS_URL);
-        let live_block_stream = env_string(
-            "ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM",
+        let redis_url = config_string(
+            config,
+            LIVE_BLOCKCHAIN_DATA_REDIS_URL_CONFIG,
+            DEFAULT_REDIS_URL,
+        );
+        let live_block_stream = config_string(
+            config,
+            ETH_PROCESSED_BLOCK_STREAM_CONFIG,
             DEFAULT_LIVE_BLOCK_STREAM,
         );
-        let live_processed_block_disk_cache_retry_attempts = env_parse_any(
-            &[
-                LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_ENV,
-                LEGACY_LIVE_CACHE_RETRY_ATTEMPTS_ENV,
-            ],
+        let live_processed_block_disk_cache_retry_attempts = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_CONFIG,
             DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS,
         )?;
-        let live_processed_block_disk_cache_retry_delay_ms = env_parse_any(
-            &[
-                LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_ENV,
-                LEGACY_LIVE_CACHE_RETRY_DELAY_MS_ENV,
-            ],
+        let live_processed_block_disk_cache_retry_delay_ms = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_CONFIG,
             DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS,
         )?;
-        let live_stream_block_ms = env_parse(
-            "ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS",
+        let live_stream_block_ms = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS_CONFIG,
             DEFAULT_STREAM_BLOCK_MS,
         )?;
-        let live_stream_count =
-            env_parse("ETH_TOKEN_SERVER_LIVE_STREAM_COUNT", DEFAULT_STREAM_COUNT)?;
-        let live_block_apply_timeout_ms = env_parse(
-            "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS",
+        let live_stream_count = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_STREAM_COUNT_CONFIG,
+            DEFAULT_STREAM_COUNT,
+        )?;
+        let live_block_apply_timeout_ms = config_parse(
+            config,
+            LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG,
             DEFAULT_BLOCK_APPLY_TIMEOUT_MS,
         )?;
-        let mempool_database_url = env_string_any(
-            &[
-                "ETH_TOKEN_SERVER_MEMPOOL_DATABASE_URL",
-                "MEMPOOL_DATABASE_URL",
-            ],
+        let mempool_database_url = config_string(
+            config,
+            MEMPOOL_DATABASE_URL_CONFIG,
             DEFAULT_MEMPOOL_DATABASE_URL,
         );
-        let mempool_signal_limit = env_parse(
-            "ETH_TOKEN_SERVER_MEMPOOL_SIGNAL_LIMIT",
+        let alpha_database_url = config_string(
+            config,
+            ALPHA_DATABASE_URL_CONFIG,
+            mempool_database_url.as_str(),
+        );
+        let mempool_signal_limit = config_parse(
+            config,
+            MEMPOOL_SIGNAL_LIMIT_CONFIG,
             DEFAULT_MEMPOOL_SIGNAL_LIMIT,
         )?;
 
         if history_limit == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_HISTORY_LIMIT must be greater than zero"
+                "{TOKEN_SERVER_HISTORY_LIMIT_CONFIG} must be greater than zero"
             ));
         }
         if default_blocks == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_DEFAULT_BLOCKS must be greater than zero"
+                "{TOKEN_SERVER_DEFAULT_BLOCKS_CONFIG} must be greater than zero"
             ));
         }
         if live_warmup_blocks == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS must be greater than zero"
+                "{LIVE_TOKEN_TRACKER_WARMUP_BLOCKS_CONFIG} must be greater than zero"
             ));
         }
         if processed_block_disk_cache_dir.is_some() && processed_block_disk_cache_blocks == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS must be greater than zero"
+                "{PROCESSED_BLOCK_DISK_CACHE_BLOCKS_CONFIG} must be greater than zero"
             ));
         }
         if redis_url.trim().is_empty() {
-            return Err(eyre!("ETH_TOKEN_SERVER_REDIS_URL must not be empty"));
+            return Err(eyre!(
+                "{LIVE_BLOCKCHAIN_DATA_REDIS_URL_CONFIG} must not be empty"
+            ));
         }
         if live_block_stream.trim().is_empty() {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM must not be empty"
+                "{ETH_PROCESSED_BLOCK_STREAM_CONFIG} must not be empty"
             ));
         }
         if live_stream_block_ms == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS must be greater than zero"
+                "{LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS_CONFIG} must be greater than zero"
             ));
         }
         if live_stream_count == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_LIVE_STREAM_COUNT must be greater than zero"
+                "{LIVE_TOKEN_TRACKER_STREAM_COUNT_CONFIG} must be greater than zero"
             ));
         }
         if live_block_apply_timeout_ms == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS must be greater than zero"
+                "{LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG} must be greater than zero"
             ));
         }
         if mempool_database_url.trim().is_empty() {
-            return Err(eyre!(
-                "ETH_TOKEN_SERVER_MEMPOOL_DATABASE_URL must not be empty"
-            ));
+            return Err(eyre!("{MEMPOOL_DATABASE_URL_CONFIG} must not be empty"));
+        }
+        if alpha_database_url.trim().is_empty() {
+            return Err(eyre!("{ALPHA_DATABASE_URL_CONFIG} must not be empty"));
         }
         if mempool_signal_limit <= 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_MEMPOOL_SIGNAL_LIMIT must be greater than zero"
+                "{MEMPOOL_SIGNAL_LIMIT_CONFIG} must be greater than zero"
             ));
         }
 
@@ -188,75 +224,159 @@ impl TokenServerConfig {
             live_stream_count,
             live_block_apply_timeout_ms,
             mempool_database_url,
+            alpha_database_url,
             mempool_signal_limit,
         })
     }
 }
 
-fn env_string(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
+pub fn shared_config_value(key: &str) -> Result<Option<String>> {
+    let config = load_config_env()?;
+    Ok(config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned))
 }
 
-fn env_string_any(keys: &[&str], default: &str) -> String {
-    for key in keys {
-        if let Ok(value) = env::var(key) {
-            let value = value.trim();
-            if !value.is_empty() {
-                return value.to_string();
-            }
-        }
+fn default_processed_block_disk_cache_dir(config: &HashMap<String, String>) -> Option<PathBuf> {
+    let root = config_string(config, ETH_NODE_ROOT_CONFIG, DEFAULT_ETH_NODE_ROOT);
+    if root.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(root).join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME))
     }
-    default.to_string()
 }
 
-fn env_optional_path(key: &str) -> Option<PathBuf> {
-    env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
+fn eth_config_path() -> PathBuf {
+    env::var_os(ETH_CONFIG_PATH_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("config.env")
+        })
+}
+
+fn load_config_env() -> Result<HashMap<String, String>> {
+    let path = eth_config_path();
+    let contents = fs::read_to_string(&path).map_err(|err| {
+        eyre!(
+            "failed to read shared config file {}: {err}",
+            path.display()
+        )
+    })?;
+    Ok(parse_env_config(&contents))
+}
+
+fn parse_env_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+
+        values.insert(key.to_string(), unquote(value.trim()).to_string());
+    }
+
+    values
+}
+
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+}
+
+fn config_string(config: &HashMap<String, String>, key: &str, default: &str) -> String {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn config_optional_path(config: &HashMap<String, String>, key: &str) -> Option<PathBuf> {
+    config
+        .get(key)
+        .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
 
-fn env_optional_path_any(keys: &[&str]) -> Option<PathBuf> {
-    keys.iter().find_map(|key| env_optional_path(key))
-}
-
-fn default_processed_block_disk_cache_dir() -> Option<PathBuf> {
-    let root = env_string("ETH_NODE_ROOT", DEFAULT_ETH_NODE_ROOT);
-    if root.trim().is_empty() {
-        None
-    } else {
-        let root = PathBuf::from(root);
-        let preferred = root.join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME);
-        let legacy = root.join(LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME);
-        if preferred.exists() || !legacy.exists() {
-            Some(preferred)
-        } else {
-            Some(legacy)
-        }
-    }
-}
-
-fn env_parse_any<T>(keys: &[&str], default: T) -> Result<T>
-where
-    T: std::str::FromStr + Copy,
-    T::Err: std::error::Error + Send + Sync + 'static,
-{
-    for key in keys {
-        if let Ok(value) = env::var(key) {
-            return Ok(value.parse()?);
-        }
-    }
-    Ok(default)
-}
-
-fn env_parse<T>(key: &str, default: T) -> Result<T>
+fn config_parse<T>(config: &HashMap<String, String>, key: &str, default: T) -> Result<T>
 where
     T: std::str::FromStr,
     T::Err: std::error::Error + Send + Sync + 'static,
 {
-    match env::var(key) {
-        Ok(value) => Ok(value.parse()?),
-        Err(_) => Ok(default),
+    Ok(config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.parse())
+        .transpose()?
+        .unwrap_or(default))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_live_warmup_from_shared_config_key() {
+        let values = parse_env_config(
+            r#"
+            TOKEN_SERVER_BIND=127.0.0.1:8765
+            LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
+            LIVE_BLOCKCHAIN_DATA_REDIS_URL=redis://localhost:6379/0
+            ETH_PROCESSED_BLOCK_STREAM=eth/live/blocks
+            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            "#,
+        );
+
+        let config = TokenServerConfig::from_config_values(&values).unwrap();
+
+        assert_eq!(config.live_warmup_blocks, 7_000);
+        assert_eq!(config.redis_url, "redis://localhost:6379/0");
+    }
+
+    #[test]
+    fn ignores_non_canonical_warmup_key() {
+        let values = parse_env_config("TOKEN_SERVER_LIVE_WARMUP_BLOCKS=2000");
+
+        let config = TokenServerConfig::from_config_values(&values).unwrap();
+
+        assert_eq!(config.live_warmup_blocks, DEFAULT_LIVE_WARMUP_BLOCKS);
+    }
+
+    #[test]
+    fn strips_quotes_from_config_values() {
+        let values = parse_env_config(
+            r#"
+            TOKEN_SERVER_BIND="127.0.0.1:9999"
+            LIVE_TOKEN_TRACKER_WARMUP_BLOCKS='123'
+            "#,
+        );
+
+        let config = TokenServerConfig::from_config_values(&values).unwrap();
+
+        assert_eq!(config.bind.to_string(), "127.0.0.1:9999");
+        assert_eq!(config.live_warmup_blocks, 123);
     }
 }

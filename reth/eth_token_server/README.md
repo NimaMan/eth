@@ -16,25 +16,33 @@ cd /home/nima/code/crypto/blockchains/eth/reth
 RUST_LOG=info cargo run -p eth_token_server
 ```
 
-Default configuration:
+Runtime configuration is read from the shared workspace config file:
+`/home/nima/code/crypto/blockchains/eth/config.env`. Set `ETH_CONFIG_PATH` only
+when running against a different config file.
+
+Token server keys:
 
 - `RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth`
-- `ETH_TOKEN_SERVER_BIND=127.0.0.1:8765`
-- `ETH_TOKEN_SERVER_HISTORY_LIMIT=1000`
-- `ETH_TOKEN_SERVER_DEFAULT_BLOCKS=7000`
-- `ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS=7000`
-- `ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS=30000`
-- `ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS=20`
-- `ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS=100`
-- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR=$ETH_NODE_ROOT/processed_block_disk_cache`
-- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS=100000`
+- `TOKEN_SERVER_BIND=127.0.0.1:8765`
+- `TOKEN_SERVER_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_token_server`
+- `TOKEN_SERVER_HISTORY_LIMIT=1000`
+- `TOKEN_SERVER_DEFAULT_BLOCKS=7000`
+- `SIMULATOR_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/simulators`
+- `LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000`
+- `LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS=3000`
+- `LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS=20`
+- `LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS=100`
+- `LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS=5000`
+- `LIVE_TOKEN_TRACKER_STREAM_COUNT=100`
+- `LIVE_BLOCKCHAIN_DATA_REDIS_URL=redis://localhost:6379/0`
+- `ETH_PROCESSED_BLOCK_STREAM=eth/live/blocks`
+- `PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed_block_disk_cache`
+- `PROCESSED_BLOCK_DISK_CACHE_BLOCKS=1000000`
+- `MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db`
+- `MEMPOOL_SIGNAL_LIMIT=200`
 
-To override the traced `ProcessedBlock` disk cache location:
-
-```bash
-export ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed_block_disk_cache
-export ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS=100000
-```
+To override the traced `ProcessedBlock` disk cache location, set
+`PROCESSED_BLOCK_DISK_CACHE_DIR` in `config.env`.
 
 The cache stores a sparse token-analysis subset of traced `ProcessedBlock`s as
 `bincode` compressed with `zstd`: block header, only non-empty token-relevant
@@ -44,15 +52,6 @@ maps, empty event families, and unrelated decoded event families are not
 retained. Runs acquire cached blocks in 250-block chunks, so only one cache
 read batch is retained before those blocks are applied to the token tracker in
 block order.
-
-For compatibility, the server still accepts the old
-`ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR` and
-`ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS` environment variables, and will
-use an existing `$ETH_NODE_ROOT/processed_block_cache` directory if the newer
-`processed_block_disk_cache` directory is not present.
-It also accepts the old `ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS` and
-`ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS` names as aliases for the live
-processed-block disk-cache retry settings.
 
 To measure the same fill-missing-then-read path used by server runs:
 

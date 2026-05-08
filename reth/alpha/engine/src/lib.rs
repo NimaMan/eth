@@ -14,7 +14,7 @@ use eth_alpha_core::{
     execution::{ExecutionReport, ExecutionStatus},
     ids::OrderId,
     market::{MarketEvent, MarketSnapshotRef},
-    order::OrderIntent,
+    order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
     position::{Position, PositionKey, PositionSnapshot},
     risk::{RiskDecision, RiskEvent, RiskKind, RiskPolicy, RiskSeverity},
@@ -297,6 +297,9 @@ pub struct BlockCriticalRiskPolicy;
 
 impl RiskPolicy for BlockCriticalRiskPolicy {
     fn evaluate_order(&self, intent: &OrderIntent, active_risks: &[RiskEvent]) -> RiskDecision {
+        if intent.side == OrderSide::Sell {
+            return RiskDecision::Allow;
+        }
         if let Some(risk) = active_risks.iter().rev().find(|risk| {
             risk.severity == RiskSeverity::Critical
                 && risk.kind != RiskKind::TradingEnabled
