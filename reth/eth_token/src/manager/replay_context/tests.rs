@@ -1,6 +1,7 @@
 use alloy_primitives::{address, B256, U256};
 use tx_processor::tx_processor::data_models::{
-    ERC20TransferEvent, TradingEnabledEvent, UniswapV2MintEvent, UniswapV2SwapEvent,
+    ERC20ApprovalEvent, ERC20TransferEvent, TradingEnabledEvent, UniswapV2MintEvent,
+    UniswapV2SwapEvent,
 };
 use tx_processor::ProcessedTransaction;
 
@@ -112,6 +113,54 @@ fn token_control_prior_is_keyed_by_token_not_sender() {
 }
 
 #[test]
+fn same_block_erc20_approval_is_token_prior_for_router_replay() {
+    let registry = registry();
+    let mut context = BlockReplayContext::default();
+
+    let token = address!("df22ce0de1c93bae44efc948770f65352631c403");
+    let owner = address!("90ed7090d469f83e474aaef297be834a113ede67");
+    let pool = address!("90920d41573c981afb151213de19c9e8c9601b98");
+    let router = address!("7a250d5630b4cf539739df2c5dacb4c659f2488d");
+
+    let mut approve_tx = tx(11, 8, owner);
+    approve_tx.to_address = Some(token);
+    approve_tx.erc20_approval_events.push(ERC20ApprovalEvent {
+        token_address: token,
+        owner,
+        spender: router,
+        amount: U256::from(50_000),
+        log_index: 0,
+    });
+
+    let mut router_tx = tx(12, 9, owner);
+    router_tx.to_address = Some(router);
+    router_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: token,
+        from_address: owner,
+        to_address: pool,
+        amount: U256::from(50_000),
+        log_index: 1,
+    });
+    router_tx.uniswap_v2_mints.push(UniswapV2MintEvent {
+        pair_address: pool,
+        sender: router,
+        amount0: U256::from(50_000),
+        amount1: U256::from(1),
+        log_index: 2,
+    });
+
+    assert!(context
+        .prior_txs_for_transaction(&registry, &router_tx)
+        .is_empty());
+
+    context.observe_transaction(&registry, &approve_tx);
+    let prior_txs = context.prior_txs_for_transaction(&registry, &router_tx);
+
+    assert_eq!(prior_txs.len(), 1);
+    assert_eq!(prior_txs[0].hash, approve_tx.hash);
+}
+
+#[test]
 fn token_control_candidate_detects_trading_enable_event() {
     let registry = registry();
     let token_state = registry
@@ -169,8 +218,98 @@ fn pool_setup_prior_is_recorded_but_swaps_are_not_pool_priors() {
     assert_eq!(prior_txs.len(), 1);
     assert_eq!(prior_txs[0].hash, mint_tx.hash);
 
+    let mut lp_transfer_tx = tx(10, 12, sender);
+    lp_transfer_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: pool,
+        from_address: sender,
+        to_address: address!("000000000000000000000000000000000000dead"),
+        amount: U256::from(10),
+        log_index: 2,
+    });
+    let lp_transfer_priors = context.prior_txs_for_transaction(&registry, &lp_transfer_tx);
+    assert_eq!(lp_transfer_priors.len(), 1);
+    assert_eq!(lp_transfer_priors[0].hash, mint_tx.hash);
+
     context.observe_transaction(&registry, &swap_tx);
     let prior_txs_after_swap = context.prior_txs_for_transaction(&registry, &swap_tx);
     assert_eq!(prior_txs_after_swap.len(), 1);
     assert_eq!(prior_txs_after_swap[0].hash, mint_tx.hash);
+}
+
+#[test]
+fn direct_owner_setup_calls_to_token_are_same_block_priors() {
+    let registry = registry();
+    let mut context = BlockReplayContext::default();
+
+    let token = address!("df22ce0de1c93bae44efc948770f65352631c403");
+    let owner = address!("90ed7090d469f83e474aaef297be834a113ede67");
+    let pool = address!("90920d41573c981afb151213de19c9e8c9601b98");
+    let buyer = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    let mut fund_token_tx = tx(6, 22, owner);
+    fund_token_tx.to_address = Some(token);
+    fund_token_tx.value = U256::from(1_000_000_000_000_000_000u128);
+
+    let mut transfer_to_token_tx = tx(7, 23, owner);
+    transfer_to_token_tx.to_address = Some(token);
+    transfer_to_token_tx
+        .erc20_transfers
+        .push(ERC20TransferEvent {
+            token_address: token,
+            from_address: owner,
+            to_address: token,
+            amount: U256::from(100),
+            log_index: 0,
+        });
+
+    let mut add_liquidity_tx = tx(8, 24, owner);
+    add_liquidity_tx.to_address = Some(token);
+    add_liquidity_tx.uniswap_v2_mints.push(UniswapV2MintEvent {
+        pair_address: pool,
+        sender: owner,
+        amount0: U256::from(100),
+        amount1: U256::from(1),
+        log_index: 1,
+    });
+
+    let mut swap_tx = tx(9, 25, buyer);
+    swap_tx.uniswap_v2_swaps.push(UniswapV2SwapEvent {
+        pair_address: pool,
+        sender: buyer,
+        to: buyer,
+        amount0_in: U256::from(1),
+        amount1_in: U256::ZERO,
+        amount0_out: U256::ZERO,
+        amount1_out: U256::from(10),
+        log_index: 2,
+    });
+    swap_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: token,
+        from_address: pool,
+        to_address: buyer,
+        amount: U256::from(10),
+        log_index: 3,
+    });
+
+    context.observe_transaction(&registry, &fund_token_tx);
+    context.observe_transaction(&registry, &transfer_to_token_tx);
+    let add_liquidity_priors = context.prior_txs_for_transaction(&registry, &add_liquidity_tx);
+    assert_eq!(
+        add_liquidity_priors
+            .iter()
+            .map(|tx| tx.hash)
+            .collect::<Vec<_>>(),
+        vec![fund_token_tx.hash, transfer_to_token_tx.hash]
+    );
+
+    context.observe_transaction(&registry, &add_liquidity_tx);
+    let swap_priors = context.prior_txs_for_transaction(&registry, &swap_tx);
+    assert_eq!(
+        swap_priors.iter().map(|tx| tx.hash).collect::<Vec<_>>(),
+        vec![
+            fund_token_tx.hash,
+            transfer_to_token_tx.hash,
+            add_liquidity_tx.hash
+        ]
+    );
 }

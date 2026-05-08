@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use alloy_primitives::Address;
-use eyre::Result;
+use eyre::{eyre, Result};
+use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 use tx_processor::{LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction};
 
@@ -32,6 +34,15 @@ pub(crate) enum V2TradingSimulation<'a> {
     #[cfg(test)]
     Noop,
 }
+
+impl V2TradingSimulation<'_> {
+    fn is_live(self) -> bool {
+        matches!(self, Self::Live(_))
+    }
+}
+
+const LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS: u64 = 2_500;
+const LIVE_POOL_SIMULATION_TIMEOUT_MS: u64 = 2_500;
 
 impl ProcessedTokenUpdateRouter {
     pub fn new(history_limit: usize) -> Self {
@@ -104,6 +115,7 @@ impl ProcessedTokenUpdateRouter {
             tx,
             V2TradingSimulation::Historical(pool_simulator),
             prior_txs,
+            None,
         )
         .await
     }
@@ -122,6 +134,7 @@ impl ProcessedTokenUpdateRouter {
             tx,
             V2TradingSimulation::Live(pool_simulator),
             prior_txs,
+            None,
         )
         .await
     }
@@ -133,6 +146,7 @@ impl ProcessedTokenUpdateRouter {
         tx: &ProcessedTransaction,
         trading_simulation: V2TradingSimulation<'_>,
         prior_txs: &[ProcessedTransaction],
+        block_header: Option<&BlockHeader>,
     ) -> Result<Vec<TokenStateUpdateReport>> {
         let token_addresses = candidate_token_addresses(registry, token_index, tx);
         let mut reports = Vec::new();
@@ -153,15 +167,22 @@ impl ProcessedTokenUpdateRouter {
                 token_state_updated && tx_is_token_control_replay_candidate(token, tx);
             let simulation_pool_addresses =
                 simulation_pool_addresses(token, &updated, token_control_replay);
+            let current_block_pool_addresses = current_block_simulation_pool_addresses(
+                &simulation_pool_addresses,
+                &updated,
+                &discovered,
+                token_control_replay,
+            );
             let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
             let simulated = simulate_updated_v2_pools(
                 token,
                 tx,
                 &simulation_pool_addresses,
-                &discovered,
+                &current_block_pool_addresses,
                 &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
+                block_header,
             )
             .await?;
 
@@ -194,6 +215,7 @@ impl ProcessedTokenUpdateRouter {
             token_index,
             tx,
             pool_metadata_provider,
+            None,
         )
         .await?;
         let mut reports = Vec::new();
@@ -213,6 +235,7 @@ impl ProcessedTokenUpdateRouter {
                     token,
                     tx,
                     pool_metadata_provider,
+                    None,
                 )
                 .await?;
             discovered.extend(
@@ -220,6 +243,7 @@ impl ProcessedTokenUpdateRouter {
                     token,
                     tx,
                     pool_metadata_provider,
+                    None,
                 )
                 .await?,
             );
@@ -261,6 +285,7 @@ impl ProcessedTokenUpdateRouter {
             pool_metadata_provider,
             V2TradingSimulation::Historical(pool_simulator),
             prior_txs,
+            None,
         )
         .await
     }
@@ -286,6 +311,7 @@ impl ProcessedTokenUpdateRouter {
             pool_metadata_provider,
             V2TradingSimulation::Live(pool_simulator),
             prior_txs,
+            None,
         )
         .await
     }
@@ -300,15 +326,22 @@ impl ProcessedTokenUpdateRouter {
         pool_metadata_provider: &P,
         trading_simulation: V2TradingSimulation<'_>,
         prior_txs: &[ProcessedTransaction],
+        block_header: Option<&BlockHeader>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
         P: UniswapV2PoolMetadataProvider,
     {
+        let pool_metadata_timeout = if trading_simulation.is_live() {
+            Some(Duration::from_millis(LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS))
+        } else {
+            None
+        };
         let token_addresses = candidate_token_addresses_with_pool_discovery(
             registry,
             token_index,
             tx,
             pool_metadata_provider,
+            pool_metadata_timeout,
         )
         .await?;
         let mut reports = Vec::new();
@@ -328,6 +361,7 @@ impl ProcessedTokenUpdateRouter {
                     token,
                     tx,
                     pool_metadata_provider,
+                    pool_metadata_timeout,
                 )
                 .await?;
             discovered.extend(
@@ -335,6 +369,7 @@ impl ProcessedTokenUpdateRouter {
                     token,
                     tx,
                     pool_metadata_provider,
+                    pool_metadata_timeout,
                 )
                 .await?,
             );
@@ -344,15 +379,22 @@ impl ProcessedTokenUpdateRouter {
                 token_state_updated && tx_is_token_control_replay_candidate(token, tx);
             let simulation_pool_addresses =
                 simulation_pool_addresses(token, &updated, token_control_replay);
+            let current_block_pool_addresses = current_block_simulation_pool_addresses(
+                &simulation_pool_addresses,
+                &updated,
+                &discovered,
+                token_control_replay,
+            );
             let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
             let simulated = simulate_updated_v2_pools(
                 token,
                 tx,
                 &simulation_pool_addresses,
-                &discovered,
+                &current_block_pool_addresses,
                 &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
+                block_header,
             )
             .await?;
 
@@ -425,6 +467,7 @@ impl ProcessedTokenUpdateRouter {
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
+        metadata_timeout: Option<Duration>,
     ) -> Result<Vec<String>>
     where
         P: UniswapV2PoolMetadataProvider,
@@ -453,6 +496,7 @@ impl ProcessedTokenUpdateRouter {
                     transaction_hash: tx.hash,
                     tx_index: tx.tx_index,
                 },
+                metadata_timeout,
             )
             .await?;
 
@@ -499,6 +543,7 @@ impl ProcessedTokenUpdateRouter {
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
+        metadata_timeout: Option<Duration>,
     ) -> Result<Vec<String>>
     where
         P: UniswapV2PoolMetadataProvider,
@@ -523,6 +568,7 @@ impl ProcessedTokenUpdateRouter {
                     transaction_hash: tx.hash,
                     tx_index: tx.tx_index,
                 },
+                metadata_timeout,
             )
             .await?
             else {
@@ -599,6 +645,7 @@ async fn candidate_token_addresses_with_pool_discovery<P>(
     token_index: &TrackedTokenIndex,
     tx: &ProcessedTransaction,
     pool_metadata_provider: &P,
+    metadata_timeout: Option<Duration>,
 ) -> Result<Vec<String>>
 where
     P: UniswapV2PoolMetadataProvider,
@@ -626,6 +673,7 @@ where
                 transaction_hash: tx.hash,
                 tx_index: tx.tx_index,
             },
+            metadata_timeout,
         )
         .await?
         else {
@@ -642,14 +690,40 @@ where
 async fn optional_uniswap_v2_pool_metadata<P>(
     pool_metadata_provider: &P,
     lookup: UniswapV2PoolMetadataLookup,
+    metadata_timeout: Option<Duration>,
 ) -> Result<Option<UniswapV2PoolMetadata>>
 where
     P: UniswapV2PoolMetadataProvider,
 {
-    match pool_metadata_provider
-        .uniswap_v2_pool_metadata(&lookup)
+    let metadata_result = if let Some(timeout) = metadata_timeout {
+        match tokio::time::timeout(
+            timeout,
+            pool_metadata_provider.uniswap_v2_pool_metadata(&lookup),
+        )
         .await
-    {
+        {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!(
+                    block_number = lookup.block_number,
+                    tx_index = lookup.tx_index,
+                    tx_hash = %hash_string(&lookup.transaction_hash),
+                    pool_address = %address_string(&lookup.pool_address),
+                    timeout_ms = timeout.as_millis(),
+                    action = "uniswap_v2_pool_metadata_lookup",
+                    result = "timeout",
+                    "live uniswap v2 pool metadata lookup timed out"
+                );
+                return Ok(None);
+            }
+        }
+    } else {
+        pool_metadata_provider
+            .uniswap_v2_pool_metadata(&lookup)
+            .await
+    };
+
+    match metadata_result {
         Ok(metadata) => Ok(metadata),
         Err(error) if is_not_uniswap_v2_pool_metadata_miss(&error.to_string()) => Ok(None),
         Err(error) => Err(error),
@@ -657,7 +731,9 @@ where
 }
 
 fn is_not_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
-    message.contains("token0() view call failed") || message.contains("token1() view call failed")
+    message.contains("token0() view call failed")
+        || message.contains("token1() view call failed")
+        || message.contains("missing live block header")
 }
 
 fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
@@ -778,6 +854,7 @@ async fn simulate_updated_v2_pools(
     prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
     force_simulation: bool,
+    block_header: Option<&BlockHeader>,
 ) -> Result<Vec<String>> {
     if pool_addresses.is_empty() {
         return Ok(Vec::new());
@@ -818,6 +895,7 @@ async fn simulate_updated_v2_pools(
         ) {
             UniswapV2TradingSimulationConfig {
                 block_number: Some(tx.block_number),
+                block_header: block_header.cloned(),
                 prior_txs: Vec::new(),
                 ..config.clone()
             }
@@ -848,10 +926,28 @@ async fn simulate_updated_v2_pools(
                 )
                 .await
                 .map(|_| ()),
-            V2TradingSimulation::Live(pool_simulator) => pool
-                .evaluate_live_trading_status_v2(pool_simulator, &tx_context, pool_config)
+            V2TradingSimulation::Live(pool_simulator) => {
+                let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
+                match tokio::time::timeout(
+                    timeout,
+                    pool.evaluate_live_trading_status_v2(pool_simulator, &tx_context, pool_config),
+                )
                 .await
-                .map(|_| ()),
+                {
+                    Ok(result) => result.map(|_| ()),
+                    Err(_) => Err(eyre!(
+                        "live v2 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} prior_tx_count={} force_simulation={}",
+                        timeout.as_millis(),
+                        tx.block_number,
+                        tx.tx_index,
+                        tx_hash,
+                        token_address,
+                        pool_address,
+                        prior_tx_count,
+                        force_simulation
+                    )),
+                }
+            }
             #[cfg(test)]
             V2TradingSimulation::Noop => Ok(()),
         };
@@ -901,12 +997,11 @@ async fn simulate_updated_v2_pools(
 fn should_simulate_at_current_block(
     pool_address: &str,
     current_block_pool_addresses: &[String],
-    trading_simulation: V2TradingSimulation<'_>,
+    _trading_simulation: V2TradingSimulation<'_>,
 ) -> bool {
-    matches!(trading_simulation, V2TradingSimulation::Historical(_))
-        && current_block_pool_addresses
-            .iter()
-            .any(|current_pool| current_pool == pool_address)
+    current_block_pool_addresses
+        .iter()
+        .any(|current_pool| current_pool == pool_address)
 }
 
 fn simulation_pool_addresses(
@@ -918,6 +1013,24 @@ fn simulation_pool_addresses(
     if include_all_token_pools {
         addresses.extend(token.pool_addresses());
     }
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+fn current_block_simulation_pool_addresses(
+    simulation_pool_addresses: &[String],
+    updated: &[String],
+    discovered: &[String],
+    force_simulation: bool,
+) -> Vec<String> {
+    let mut addresses = if force_simulation {
+        simulation_pool_addresses.to_vec()
+    } else {
+        Vec::new()
+    };
+    addresses.extend(updated.iter().cloned());
+    addresses.extend(discovered.iter().cloned());
     addresses.sort();
     addresses.dedup();
     addresses
@@ -1050,4 +1163,61 @@ fn touches_v2_pool(tx: &ProcessedTransaction, pool_address: &str) -> bool {
             .erc20_approval_events
             .iter()
             .any(|event| same_address_str(event.token_address, pool_address))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovered_current_block_pool_uses_current_block_state() {
+        let pool = "0xb80b6c2453b82996950a81c42db446e95a3fa2d5";
+
+        assert!(should_simulate_at_current_block(
+            pool,
+            &[pool.to_string()],
+            V2TradingSimulation::Noop
+        ));
+    }
+
+    #[test]
+    fn existing_pool_without_current_discovery_uses_parent_replay() {
+        assert!(!should_simulate_at_current_block(
+            "0xb80b6c2453b82996950a81c42db446e95a3fa2d5",
+            &[],
+            V2TradingSimulation::Noop
+        ));
+    }
+
+    #[test]
+    fn updated_pool_uses_current_block_state_without_setup_replay() {
+        let updated = vec!["0x0000000000000000000000000000000000000001".to_string()];
+        let current = current_block_simulation_pool_addresses(&[], &updated, &[], false);
+
+        assert_eq!(current, updated);
+    }
+
+    #[test]
+    fn forced_token_control_simulates_all_pools_at_current_block() {
+        let pools = vec![
+            "0x0000000000000000000000000000000000000002".to_string(),
+            "0x0000000000000000000000000000000000000001".to_string(),
+        ];
+        let current = current_block_simulation_pool_addresses(&pools, &[], &[], true);
+
+        assert_eq!(
+            current,
+            vec![
+                "0x0000000000000000000000000000000000000001".to_string(),
+                "0x0000000000000000000000000000000000000002".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn live_header_gap_is_optional_pool_metadata_miss() {
+        assert!(is_not_uniswap_v2_pool_metadata_miss(
+            "missing live block header for 25050934"
+        ));
+    }
 }

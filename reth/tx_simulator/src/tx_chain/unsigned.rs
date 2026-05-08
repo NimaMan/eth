@@ -124,6 +124,21 @@ impl UnsignedTxChainSimulation {
         Ok(previous_nonce)
     }
 
+    pub fn eth_balance(&mut self, owner: Address) -> Result<U256> {
+        let account = self.forked_state.db.basic(owner)?;
+        Ok(account
+            .map(|acc| U256::from(acc.balance))
+            .unwrap_or(U256::ZERO))
+    }
+
+    pub fn set_eth_balance(&mut self, owner: Address, balance: U256) -> Result<U256> {
+        let mut account = self.forked_state.db.basic(owner)?.unwrap_or_default();
+        let previous = U256::from(account.balance);
+        account.balance = balance;
+        self.forked_state.db.insert_account_info(owner, account);
+        Ok(previous)
+    }
+
     fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {
         if let Some(from) = tx.from {
             if tx.nonce.is_none() {
@@ -259,6 +274,47 @@ impl TxSimulator {
     ) -> Result<UnsignedTxChainSimulation> {
         self.start_simulation_chain_with_gas_block(at_block, None)
             .await
+    }
+
+    /// Start a simulation chain using a caller-supplied canonical header for
+    /// `at_block`. Disk-cache/live catchup callers can already have the block
+    /// header even when the read-only static-file provider cannot see it yet.
+    pub async fn start_simulation_chain_with_header(
+        &self,
+        at_block: u64,
+        block_header: SealedHeader,
+    ) -> Result<UnsignedTxChainSimulation> {
+        if block_header.number != at_block {
+            return Err(eyre::eyre!(
+                "block header hint mismatch: header={}, requested={}",
+                block_header.number,
+                at_block
+            ));
+        }
+
+        let latest = self.get_latest_block()?;
+        if at_block > latest {
+            if let Some(forked_state) = self
+                .block_context_loader()
+                .replay_live_state(at_block, Some(block_header))
+                .await?
+            {
+                return Ok(UnsignedTxChainSimulation::new(
+                    Arc::new(self.clone()),
+                    forked_state,
+                ));
+            }
+            return Err(eyre::eyre!(
+                "state for block {} not yet available locally or via live cache",
+                at_block
+            ));
+        }
+
+        let forked_state = self.create_forked_state_with_header(at_block, block_header)?;
+        Ok(UnsignedTxChainSimulation::new(
+            Arc::new(self.clone()),
+            forked_state,
+        ))
     }
 
     /// Start a simulation chain with state from `at_block` but allow overriding gas/environment

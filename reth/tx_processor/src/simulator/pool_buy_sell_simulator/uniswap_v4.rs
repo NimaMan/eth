@@ -12,6 +12,7 @@ use super::balance_deltas::{
 };
 use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
+use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
 use super::WETH_DECIMALS;
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
@@ -162,6 +163,17 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
                 previous_nonce,
                 replay_nonce = prior_nonce,
                 "normalizing sender nonce for selected prior transaction replay"
+            );
+        }
+        if let Some(adjustment) = ensure_replay_sender_can_pay(&mut chain, &setup_call)? {
+            tracing::debug!(
+                target: "pool_buy_sell_sim",
+                step = "v4_prior_replay_sender_funding",
+                tx_hash = %prior_hash,
+                sender = %adjustment.sender,
+                previous_balance = %adjustment.previous_balance,
+                replay_balance = %adjustment.replay_balance,
+                "funding selected prior transaction sender for replay validation"
             );
         }
         let setup_result = chain.step_with_trace(setup_call.clone()).await.map_err(|err| {

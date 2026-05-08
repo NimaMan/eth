@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 use crate::RethQueryProvider;
 use tx_simulator::{
     tx_builders::processed_tx_json_unsigned_builder::build_unsigned_transaction_from_processed_tx_json,
-    UnsignedTxChainSimulation,
+    UnsignedTransaction, UnsignedTxChainSimulation,
 };
 
 /// Replays pending transactions on top of the resolved block so metadata view
@@ -67,6 +67,18 @@ pub(super) async fn prepare_state_for_metadata(
             hash = hash_hex,
             "Replaying pending tx before fetching token metadata"
         );
+        if let Some(adjustment) = ensure_replay_sender_can_pay(&mut chain, &unsigned_tx)? {
+            debug!(
+                target: "reth_chain_query::erc20",
+                block = resolved_block,
+                pending_block = candidate_block,
+                hash = hash_hex,
+                sender = %adjustment.sender,
+                previous_balance = %adjustment.previous_balance,
+                replay_balance = %adjustment.replay_balance,
+                "funding pending metadata replay sender for validation"
+            );
+        }
         chain.step(unsigned_tx).await?;
     }
 
@@ -90,4 +102,89 @@ async fn find_pending_transaction(
     }
 
     Ok(None)
+}
+
+fn ensure_replay_sender_can_pay(
+    chain: &mut UnsignedTxChainSimulation,
+    tx: &UnsignedTransaction,
+) -> Result<Option<ReplayFundingAdjustment>> {
+    let Some(sender) = tx.from else {
+        return Ok(None);
+    };
+
+    let required_balance = required_replay_sender_balance(tx);
+    if required_balance.is_zero() {
+        return Ok(None);
+    }
+
+    let current_balance = chain.eth_balance(sender)?;
+    if current_balance >= required_balance {
+        return Ok(None);
+    }
+
+    chain.set_eth_balance(sender, required_balance)?;
+    Ok(Some(ReplayFundingAdjustment {
+        sender,
+        previous_balance: current_balance,
+        replay_balance: required_balance,
+    }))
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct ReplayFundingAdjustment {
+    sender: Address,
+    previous_balance: U256,
+    replay_balance: U256,
+}
+
+fn required_replay_sender_balance(tx: &UnsignedTransaction) -> U256 {
+    let value = tx.value.unwrap_or(U256::ZERO);
+    let gas_cost = match (tx.gas, tx.gas_price.or(tx.max_fee_per_gas)) {
+        (Some(gas), Some(fee_cap)) => U256::from(gas)
+            .checked_mul(U256::from(fee_cap))
+            .unwrap_or(U256::MAX),
+        _ => U256::ZERO,
+    };
+
+    value.checked_add(gas_cost).unwrap_or(U256::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unsigned_tx() -> UnsignedTransaction {
+        UnsignedTransaction {
+            from: Some(Address::ZERO),
+            to: Some(Address::ZERO),
+            gas: Some(30_000),
+            gas_price: None,
+            max_fee_per_gas: Some(50),
+            max_priority_fee_per_gas: Some(2),
+            value: Some(U256::from(11)),
+            data: None,
+            nonce: Some(0),
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn required_replay_sender_balance_includes_value_and_fee_cap() {
+        assert_eq!(
+            required_replay_sender_balance(&unsigned_tx()),
+            U256::from(1_500_011)
+        );
+    }
+
+    #[test]
+    fn required_replay_sender_balance_prefers_legacy_gas_price() {
+        let mut tx = unsigned_tx();
+        tx.gas_price = Some(3);
+        tx.max_fee_per_gas = Some(50);
+
+        assert_eq!(required_replay_sender_balance(&tx), U256::from(90_011));
+    }
 }

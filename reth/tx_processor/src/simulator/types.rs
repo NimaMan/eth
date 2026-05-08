@@ -1,6 +1,7 @@
 use crate::tx_processor::data_models::ProcessedTransaction;
 /// Type definitions for trading viability analysis
 use alloy_primitives::{Address, B256, U256};
+use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_GAS_LIMIT_NO_PRIOR: u64 = 5_000_000;
@@ -18,6 +19,7 @@ pub struct PoolBuySellParameters {
     pub buyer_address: Address,
     pub prior_txs: Vec<ProcessedTransaction>,
     pub block_number: Option<u64>,
+    pub block_header: Option<BlockHeader>,
     pub slippage_tolerance: f64,
     pub gas_price: Option<u128>,
     pub max_fee_per_gas: Option<u128>,
@@ -58,6 +60,7 @@ impl Default for PoolBuySellParameters {
             ]),
             prior_txs: Vec::new(),
             block_number: None,
+            block_header: None,
             slippage_tolerance: 5.0,
             gas_price: None,
             max_fee_per_gas: None,
@@ -123,6 +126,11 @@ impl PoolBuySellParameters {
 
     pub fn with_block(mut self, block: u64) -> Self {
         self.block_number = Some(block);
+        self
+    }
+
+    pub fn with_block_header(mut self, header: BlockHeader) -> Self {
+        self.block_header = Some(header);
         self
     }
 

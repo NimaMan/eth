@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
+use reth_chain_query::provider::BlockHeader;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
     LivePoolBuySellSimulator, PoolBuySellParameters, PoolBuySellSimulationResult,
@@ -18,6 +19,7 @@ pub struct UniswapV2TradingSimulationConfig {
     pub buyer_address: Option<Address>,
     pub prior_txs: Vec<ProcessedTransaction>,
     pub block_number: Option<u64>,
+    pub block_header: Option<BlockHeader>,
     pub slippage_tolerance: Option<f64>,
     pub gas_price: Option<u128>,
     pub max_fee_per_gas: Option<u128>,
@@ -87,6 +89,9 @@ impl UniswapV2Pool {
 
         if let Some(block_number) = config.block_number {
             params = params.with_block(block_number);
+        }
+        if let Some(block_header) = config.block_header.clone() {
+            params = params.with_block_header(block_header);
         }
         if let Some(buyer_address) = config.buyer_address {
             params = params.with_buyer(buyer_address);

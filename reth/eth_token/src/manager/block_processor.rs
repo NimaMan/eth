@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::time::Duration;
 
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ use super::{
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
+const LIVE_METADATA_LOOKUP_TIMEOUT_MS: u64 = 2_500;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenTransactionUpdateError {
@@ -209,6 +211,7 @@ impl BlockTokenProcessor {
                     &tx.processed,
                     trading_simulation,
                     &prior_txs,
+                    Some(&block.header),
                 )
                 .await
             {
@@ -392,6 +395,7 @@ impl BlockTokenProcessor {
                     &tx.processed,
                     trading_simulation,
                     &prior_txs,
+                    Some(&block.header),
                 )
                 .await
             {
@@ -633,6 +637,7 @@ impl BlockTokenProcessor {
                     pool_metadata_provider,
                     trading_simulation,
                     &prior_txs,
+                    Some(&block.header),
                 )
                 .await
             {
@@ -708,7 +713,33 @@ impl BlockTokenProcessor {
                 pending_tx_hashes: pending_tx_hashes.to_vec(),
             };
 
-            let Some(metadata) = metadata_provider.token_metadata(&lookup).await? else {
+            let metadata = if self.is_live_mode {
+                match tokio::time::timeout(
+                    Duration::from_millis(LIVE_METADATA_LOOKUP_TIMEOUT_MS),
+                    metadata_provider.token_metadata(&lookup),
+                )
+                .await
+                {
+                    Ok(metadata) => metadata?,
+                    Err(_) => {
+                        tracing::warn!(
+                            block_number = tx.block_number,
+                            tx_index = tx.tx_index,
+                            tx_hash = %hash_string(&tx.hash),
+                            token_address = %token_address_string,
+                            timeout_ms = LIVE_METADATA_LOOKUP_TIMEOUT_MS,
+                            action = "token_metadata_lookup",
+                            result = "timeout",
+                            "live token metadata lookup timed out"
+                        );
+                        None
+                    }
+                }
+            } else {
+                metadata_provider.token_metadata(&lookup).await?
+            };
+
+            let Some(metadata) = metadata else {
                 continue;
             };
 

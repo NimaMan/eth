@@ -163,10 +163,8 @@ impl<'a> BlockContextLoader<'a> {
 
     fn fetch_header_from_mdbx(&self, block_number: u64) -> Result<Option<SealedHeader>> {
         self.simulator.refresh_static_file_provider()?;
-        let maybe_header = self
-            .simulator
-            .provider_factory
-            .header_by_number(block_number)?;
+        let provider = self.simulator.provider_factory.provider()?;
+        let maybe_header = provider.header_by_number(block_number)?;
         Ok(maybe_header.map(SealedHeader::new_unhashed))
     }
 
@@ -178,6 +176,9 @@ impl<'a> BlockContextLoader<'a> {
         let payload = match cache.fetch_block_header(block_number).await? {
             Some(payload) => payload,
             None => {
+                if let Some(header) = self.fetch_header_from_mdbx(block_number)? {
+                    return Ok(header);
+                }
                 let latest_live = cache.latest_block_number().await.ok().flatten();
                 let available_blocks = cache.recent_block_numbers(5).await.unwrap_or_default();
                 let latest_persisted = self.simulator.get_latest_block().ok();
@@ -198,7 +199,9 @@ impl<'a> BlockContextLoader<'a> {
         for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
             let simulator = self.simulator.clone();
             match tokio::task::spawn_blocking(move || {
-                simulator.provider_factory.caught_up_static_file_provider()?;
+                simulator
+                    .provider_factory
+                    .caught_up_static_file_provider()?;
                 simulator
                     .provider_factory
                     .history_by_block_number(block_number)
@@ -460,7 +463,13 @@ fn apply_prestate_diff(fork_state: &mut ForkedState, diff: &DiffMode) -> Result<
 
     for (address, post_state) in &diff.post {
         let created_in_tx = !diff.pre.contains_key(address);
-        apply_post_state_to_account(fork_state, *address, post_state, created_in_tx)?;
+        apply_post_state_to_account(
+            fork_state,
+            *address,
+            diff.pre.get(address),
+            post_state,
+            created_in_tx,
+        )?;
     }
 
     Ok(())
@@ -478,6 +487,7 @@ fn mark_account_not_existing(fork_state: &mut ForkedState, address: Address) {
 fn apply_post_state_to_account(
     fork_state: &mut ForkedState,
     address: Address,
+    pre_state: Option<&PreStateAccountState>,
     post_state: &PreStateAccountState,
     created_in_tx: bool,
 ) -> Result<()> {
@@ -502,6 +512,16 @@ fn apply_post_state_to_account(
         }
     }
 
+    if let Some(pre_state) = pre_state {
+        for slot in removed_storage_slots(pre_state, post_state) {
+            let slot: U256 = slot.into();
+            fork_state
+                .db
+                .insert_account_storage(address, slot, U256::ZERO)
+                .map_err(|err| eyre!("failed to clear storage diff for {address}: {err:?}"))?;
+        }
+    }
+
     for (slot, value) in &post_state.storage {
         let slot: U256 = (*slot).into();
         let value: U256 = (*value).into();
@@ -513,6 +533,18 @@ fn apply_post_state_to_account(
 
     fork_state.nonces.remove(&address);
     Ok(())
+}
+
+fn removed_storage_slots(
+    pre_state: &PreStateAccountState,
+    post_state: &PreStateAccountState,
+) -> Vec<B256> {
+    pre_state
+        .storage
+        .keys()
+        .filter(|slot| !post_state.storage.contains_key(*slot))
+        .copied()
+        .collect()
 }
 
 impl TxSimulator {
@@ -560,5 +592,36 @@ impl TxSimulator {
                 state_diffs,
             )
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::b256;
+
+    use super::*;
+
+    #[test]
+    fn removed_storage_slots_detects_zeroed_diff_storage() {
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000000");
+        let previous = b256!("0000000000000000000000007a9bc53fbe126d61f9a6449fe8bb4e2f5ff29f52");
+        let mut pre_state = PreStateAccountState::default();
+        pre_state.storage.insert(slot, previous);
+        let post_state = PreStateAccountState::default();
+
+        assert_eq!(removed_storage_slots(&pre_state, &post_state), vec![slot]);
+    }
+
+    #[test]
+    fn removed_storage_slots_keeps_nonzero_post_updates() {
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000000");
+        let previous = b256!("0000000000000000000000007a9bc53fbe126d61f9a6449fe8bb4e2f5ff29f52");
+        let updated = b256!("000000000000000000000000dadb0d80178819f2319190d340ce9a924f783711");
+        let mut pre_state = PreStateAccountState::default();
+        pre_state.storage.insert(slot, previous);
+        let mut post_state = PreStateAccountState::default();
+        post_state.storage.insert(slot, updated);
+
+        assert!(removed_storage_slots(&pre_state, &post_state).is_empty());
     }
 }

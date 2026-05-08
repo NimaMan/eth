@@ -17,6 +17,12 @@ pub(crate) fn token_prior_lookup_addresses(
         }
     }
 
+    for token in registry.tokens.values() {
+        if tx_directly_targets_token(tx, token) {
+            addresses.insert(normalize_address(&token.contract_address));
+        }
+    }
+
     for pool_address in pool_lookup_addresses_from_tx(tx) {
         for token in registry.tokens.values() {
             if token
@@ -48,6 +54,13 @@ pub(crate) fn token_state_prior_addresses(
         }
     }
 
+    for event in &tx.erc20_approval_events {
+        let address = address_string(&event.token_address);
+        if registry.token(&address).is_some() {
+            addresses.insert(address);
+        }
+    }
+
     if tx_action_indicates_token_control(tx) {
         for token in registry.tokens.values() {
             if tx_directly_touches_token(tx, token)
@@ -55,6 +68,12 @@ pub(crate) fn token_state_prior_addresses(
             {
                 addresses.insert(normalize_address(&token.contract_address));
             }
+        }
+    }
+
+    for token in registry.tokens.values() {
+        if tx_directly_targets_token(tx, token) && tx_touches_any_token_control_address(tx, token) {
+            addresses.insert(normalize_address(&token.contract_address));
         }
     }
 
@@ -141,6 +160,12 @@ fn token_control_event_addresses(tx: &ProcessedTransaction) -> BTreeSet<String> 
 fn pool_lookup_addresses_from_tx(tx: &ProcessedTransaction) -> BTreeSet<String> {
     let mut addresses = BTreeSet::new();
 
+    for event in &tx.erc20_transfers {
+        addresses.insert(address_string(&event.token_address));
+    }
+    for event in &tx.erc20_approval_events {
+        addresses.insert(address_string(&event.token_address));
+    }
     for event in &tx.uniswap_v2_syncs {
         addresses.insert(address_string(&event.pair_address));
     }
@@ -175,6 +200,15 @@ fn tx_directly_touches_token(tx: &ProcessedTransaction, token: &ERC20Token) -> b
             .unique_addresses
             .iter()
             .any(|address| same_address_str(*address, &token_address))
+}
+
+fn tx_directly_targets_token(tx: &ProcessedTransaction, token: &ERC20Token) -> bool {
+    let token_address = normalize_address(&token.contract_address);
+    tx.to_address
+        .is_some_and(|address| same_address_str(address, &token_address))
+        || tx
+            .contract_address
+            .is_some_and(|address| same_address_str(address, &token_address))
 }
 
 fn tx_touches_any_token_control_address(tx: &ProcessedTransaction, token: &ERC20Token) -> bool {

@@ -122,6 +122,7 @@ impl TxSimulator {
 
     /// Get latest block number from local database
     pub fn get_latest_block(&self) -> Result<u64> {
+        self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
         let block_number = provider.best_block_number()?;
         Ok(block_number)

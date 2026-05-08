@@ -1,6 +1,9 @@
 use crate::tx_processor::TxProcessor;
-use alloy_primitives::{Address, I256, U256};
+use alloy_consensus::{Header as AlloyHeader, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+use alloy_primitives::{Address, Bloom, Bytes, B256, B64, I256, U256};
 use eyre::{eyre, Result, WrapErr};
+use reth_chain_query::provider::BlockHeader;
+use reth_primitives_traits::SealedHeader;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
@@ -14,6 +17,7 @@ use super::failure::{
     enrich_failure_reason_with_trace, format_failure_with_full_trace, format_failure_with_revert,
 };
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
+use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
 use super::uniswap_v4::check_can_buy_sell_uniswap_v4;
 use super::validation::validate_pool_registration;
@@ -105,12 +109,25 @@ pub async fn check_can_buy_sell_pool(
         }
     };
 
-    let header = simulator
-        .block_context_loader()
-        .load_block_header(block_number, None)
-        .await?;
+    let header_hint = block_header_hint(&config, block_number)?;
+    let header = match header_hint.clone() {
+        Some(header) => header,
+        None => {
+            simulator
+                .block_context_loader()
+                .load_block_header(block_number, None)
+                .await?
+        }
+    };
     let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
-    let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
+    let mut chain = match header_hint {
+        Some(header) => {
+            simulator
+                .start_simulation_chain_with_header(block_number, header)
+                .await?
+        }
+        None => simulator.start_simulation_chain(Some(block_number)).await?,
+    };
     let mut prior_tx_results: Vec<ProcessedTransaction> =
         Vec::with_capacity(config.prior_txs.len());
 
@@ -148,6 +165,17 @@ pub async fn check_can_buy_sell_pool(
                 previous_nonce,
                 replay_nonce = prior_nonce,
                 "normalizing sender nonce for selected prior transaction replay"
+            );
+        }
+        if let Some(adjustment) = ensure_replay_sender_can_pay(&mut chain, &setup_call)? {
+            tracing::debug!(
+                target: "pool_buy_sell_sim",
+                step = "prior_replay_sender_funding",
+                tx_hash = %prior_hash,
+                sender = %adjustment.sender,
+                previous_balance = %adjustment.previous_balance,
+                replay_balance = %adjustment.replay_balance,
+                "funding selected prior transaction sender for replay validation"
             );
         }
         let setup_sim_result = chain
@@ -507,7 +535,11 @@ pub async fn check_can_buy_sell_pool(
     // SELL (optional delay)
     if config.block_delay > 0 {
         let requested_sell_block = block_number + config.block_delay;
-        let latest = simulator.get_latest_block()?;
+        let latest = simulator
+            .live_latest_block_number()
+            .await?
+            .unwrap_or(simulator.get_latest_block()?);
+        let latest = latest.max(block_number);
         let sell_block = if requested_sell_block > latest {
             latest
         } else {
@@ -672,4 +704,102 @@ pub async fn check_can_buy_sell_pool(
         failure_reason,
         block_number,
     })
+}
+
+fn block_header_hint(
+    config: &PoolBuySellParameters,
+    block_number: u64,
+) -> Result<Option<SealedHeader>> {
+    let Some(header) = &config.block_header else {
+        return Ok(None);
+    };
+    if header.number != block_number {
+        return Err(eyre!(
+            "block header hint mismatch: header={}, requested={}",
+            header.number,
+            block_number
+        ));
+    }
+    Ok(Some(sealed_header_from_block_header(header)))
+}
+
+fn sealed_header_from_block_header(header: &BlockHeader) -> SealedHeader {
+    let sparse_header = AlloyHeader {
+        parent_hash: header.parent_hash,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        beneficiary: Address::ZERO,
+        state_root: EMPTY_ROOT_HASH,
+        transactions_root: EMPTY_ROOT_HASH,
+        receipts_root: EMPTY_ROOT_HASH,
+        logs_bloom: Bloom::ZERO,
+        difficulty: U256::ZERO,
+        number: header.number,
+        gas_limit: header.gas_limit,
+        gas_used: header.gas_used,
+        timestamp: header.timestamp,
+        extra_data: Bytes::default(),
+        mix_hash: B256::ZERO,
+        nonce: B64::ZERO,
+        base_fee_per_gas: header.base_fee_per_gas,
+        withdrawals_root: header.withdrawals_root,
+        blob_gas_used: header.blob_gas_used,
+        excess_blob_gas: header.excess_blob_gas,
+        parent_beacon_block_root: header.parent_beacon_block_root,
+        requests_hash: header.requests_hash,
+        block_access_list_hash: header.block_access_list_hash,
+        slot_number: header.slot_number,
+    };
+    SealedHeader::new(sparse_header, header.hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn processed_block_header(number: u64) -> BlockHeader {
+        BlockHeader {
+            number,
+            hash: B256::from([1_u8; 32]),
+            parent_hash: B256::from([2_u8; 32]),
+            timestamp: 1_777_000_000,
+            gas_limit: 60_000_000,
+            gas_used: 21_000_000,
+            base_fee_per_gas: Some(123_456_789),
+            withdrawals_root: Some(B256::from([3_u8; 32])),
+            blob_gas_used: Some(393_216),
+            excess_blob_gas: Some(1_179_648),
+            parent_beacon_block_root: Some(B256::from([4_u8; 32])),
+            requests_hash: Some(B256::from([5_u8; 32])),
+            block_access_list_hash: Some(B256::from([6_u8; 32])),
+            slot_number: Some(42),
+        }
+    }
+
+    #[test]
+    fn block_header_hint_uses_processed_block_header() {
+        let config =
+            PoolBuySellParameters::default().with_block_header(processed_block_header(100));
+
+        let header = block_header_hint(&config, 100)
+            .expect("header hint should parse")
+            .expect("header should be present");
+
+        assert_eq!(header.number, 100);
+        assert_eq!(header.hash(), B256::from([1_u8; 32]));
+        assert_eq!(header.parent_hash, B256::from([2_u8; 32]));
+        assert_eq!(header.timestamp, 1_777_000_000);
+        assert_eq!(header.base_fee_per_gas, Some(123_456_789));
+        assert_eq!(header.gas_limit, 60_000_000);
+        assert_eq!(header.gas_used, 21_000_000);
+    }
+
+    #[test]
+    fn block_header_hint_rejects_wrong_block() {
+        let config =
+            PoolBuySellParameters::default().with_block_header(processed_block_header(100));
+
+        let error = block_header_hint(&config, 101).expect_err("mismatch should fail");
+
+        assert!(error.to_string().contains("block header hint mismatch"));
+    }
 }

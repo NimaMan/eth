@@ -101,13 +101,18 @@ async fn token_metadata_with_mode(
     lookup: &TokenMetadataLookup,
     mode: RethMetadataMode,
 ) -> Result<Option<ERC20TokenMetadata>> {
-    let metadata = provider
+    let metadata = match provider
         .get_token_metadata(
             lookup.token_address,
             Some(mode.token_metadata_block(lookup)),
             mode.pending_tx_hashes(lookup),
         )
-        .await?;
+        .await
+    {
+        Ok(metadata) => metadata,
+        Err(error) if is_optional_token_metadata_read_error(&error.to_string()) => return Ok(None),
+        Err(error) => return Err(error),
+    };
 
     Ok(metadata.map(|metadata| ERC20TokenMetadata {
         address: address_string(&metadata.address),
@@ -125,6 +130,10 @@ async fn uniswap_v2_pool_metadata(
     let (token0, token1) = provider
         .uni_v2_get_tokens(lookup.pool_address, Some(lookup.block_number))
         .await?;
+
+    if is_native_eth_sentinel(&token0) || is_native_eth_sentinel(&token1) {
+        return Ok(None);
+    }
 
     if let Some(tracked_token_address) = lookup.tracked_token_address {
         if token0 != tracked_token_address && token1 != tracked_token_address {
@@ -144,6 +153,18 @@ async fn uniswap_v2_pool_metadata(
         token0_decimals,
         token1_decimals,
     )))
+}
+
+fn is_native_eth_sentinel(address: &alloy_primitives::Address) -> bool {
+    address_string(address).eq_ignore_ascii_case("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+}
+
+fn is_optional_token_metadata_read_error(message: &str) -> bool {
+    message.contains("Failed to get token name")
+        || message.contains("Failed to get token symbol")
+        || message.contains("Failed to get token decimals")
+        || message.contains("Token decimals call")
+        || message.contains("missing live block header")
 }
 
 #[cfg(test)]
@@ -193,5 +214,28 @@ mod tests {
             RethMetadataMode::Live.pending_tx_hashes(&lookup),
             Some(lookup.pending_tx_hashes.clone())
         );
+    }
+
+    #[test]
+    fn native_eth_sentinel_is_not_treated_as_v2_erc20_metadata() {
+        assert!(is_native_eth_sentinel(&address!(
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        )));
+    }
+
+    #[test]
+    fn optional_token_metadata_read_errors_are_not_token_discovery_failures() {
+        assert!(is_optional_token_metadata_read_error(
+            "Failed to get token decimals for 0x1111111111111111111111111111111111111111"
+        ));
+        assert!(is_optional_token_metadata_read_error(
+            "Token decimals call for 0x1111111111111111111111111111111111111111 returned 0 bytes (expected >= 32)"
+        ));
+        assert!(is_optional_token_metadata_read_error(
+            "missing live block header for block 123"
+        ));
+        assert!(!is_optional_token_metadata_read_error(
+            "transaction validation error: lack of funds"
+        ));
     }
 }
