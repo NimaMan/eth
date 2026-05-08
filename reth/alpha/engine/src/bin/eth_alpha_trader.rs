@@ -197,6 +197,8 @@ async fn main() -> Result<()> {
         let signals = client
             .mempool_signals(args.signal_limit, args.mempool_since_days)
             .await?;
+        let live_ready = status.progress.status == "live";
+        let suppress_events = !args.replay_current && !live_ready;
 
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
@@ -214,7 +216,7 @@ async fn main() -> Result<()> {
             let changed = previous_block
                 .map(|previous| pool.latest_block > previous)
                 .unwrap_or(true);
-            if !changed || (first_poll && !args.replay_current) {
+            if !changed || suppress_events || (first_poll && !args.replay_current) {
                 continue;
             }
 
@@ -236,7 +238,7 @@ async fn main() -> Result<()> {
 
         for signal in signals.signals {
             let is_new = seen_signal_ids.insert(signal.signal_id.clone());
-            if !is_new || (first_poll && !args.replay_current) {
+            if !is_new || suppress_events || (first_poll && !args.replay_current) {
                 continue;
             }
             let event = match signal.to_risk_event() {
@@ -276,6 +278,7 @@ async fn main() -> Result<()> {
             live_tracked_tokens = status.progress.tracked_tokens,
             live_tracked_pools = status.progress.tracked_v2_pools,
             live_last_error = ?status.progress.last_error,
+            trading_enabled = !suppress_events,
             pools_seen = seen_pool_blocks.len(),
             token_server_pool_count = pools.count,
             signal_count = signals.count,
