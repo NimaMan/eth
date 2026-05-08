@@ -70,7 +70,7 @@ eth_alpha_engine -> eth_live_state
 
 `LiveTxSimulator` already uses MDBX when it is caught up and otherwise uses tracked live state. The improvement is to move shared key/schema ownership out of `tx_simulator` so every crate uses one protocol.
 
-Python also publishes token snapshots through `LiveDataPublisher`. The Rust contract keeps the same keys and preserves the token snapshot index so tracked-token discovery is explicit instead of being hidden inside a process-local cache.
+The removed Python live data registry used the same key layout. The Rust contract keeps those keys and preserves the token snapshot index so tracked-token discovery is explicit instead of being hidden inside a process-local cache.
 
 When writing a block, publish atomically:
 

@@ -36,16 +36,14 @@ The dict returned by :func:`build_token_snapshot` has these top-level sections:
                ``include_history=True`` to keep snapshots lean.
 
 Call ``build_token_snapshot`` with an ``ERC20Token`` to obtain a JSON
-friendly dict. Use :class:`TokenSnapshot` for typed access and
-``load_token_snapshot`` when you need to pull snapshots from the live
-data registry (Redis) in another process.
+friendly dict. Use :class:`TokenSnapshot` for typed access to an existing
+snapshot payload.
 """
 
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, MutableMapping, Optional
 
 from erc20_token.erc20_token import ERC20Token, TokenLifecycleState
-from eth_data.live_data_registry import RedisSnapshotReader
 
 
 SNAPSHOT_VERSION = 1
@@ -206,21 +204,6 @@ class TokenSnapshot:
         return payload
 
 
-def load_token_snapshot(
-    token_address: str,
-    reader: Optional["RedisSnapshotReader"] = None,
-) -> Optional[TokenSnapshot]:
-    """
-    Fetch the latest snapshot for ``token_address`` from the live data registry.
-    """
-    if reader is None:
-        reader = RedisSnapshotReader()
-    snapshot = reader.get_token_snapshot(token_address)
-    if snapshot is None:
-        return None
-    return TokenSnapshot.from_dict(snapshot)
-
-
 def _enum_value(value: Optional[TokenLifecycleState]) -> Optional[str]:
     return value.value if value is not None else None
 
@@ -264,7 +247,6 @@ __all__ = [
     "build_token_snapshot",
     "build_token_snapshot_map",
     "TokenSnapshot",
-    "load_token_snapshot",
     "SNAPSHOT_VERSION",
     "DEFAULT_HISTORY_SNAPSHOT_LIMIT",
 ]

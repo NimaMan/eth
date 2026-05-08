@@ -3,7 +3,6 @@ from collections import defaultdict
 from eth_token.erc20_token.token_snapshot import (
     TokenSnapshot,
     build_token_snapshot,
-    load_token_snapshot,
 )
 from eth_token.erc20_token.erc20_token import TokenLifecycleState
 
@@ -55,16 +54,6 @@ class DummyToken:
         return {"0xpool": {"pool_type": "UNISWAP-V2"}}
 
 
-class DummyReader:
-    def __init__(self, snapshot):
-        self.snapshot = snapshot
-        self.requests = []
-
-    def get_token_snapshot(self, token_address):
-        self.requests.append(token_address)
-        return self.snapshot
-
-
 def test_token_snapshot_from_dict_roundtrip():
     dummy = DummyToken()
     snapshot_dict = build_token_snapshot(dummy)
@@ -73,15 +62,3 @@ def test_token_snapshot_from_dict_roundtrip():
     assert token_snapshot.contract_address == snapshot_dict["contract_address"]
     assert token_snapshot.metadata["symbol"] == snapshot_dict["metadata"]["symbol"]
     assert token_snapshot.to_dict() == snapshot_dict
-
-
-def test_load_token_snapshot_uses_reader():
-    dummy = DummyToken()
-    snapshot_dict = build_token_snapshot(dummy)
-    reader = DummyReader(snapshot_dict)
-
-    snap = load_token_snapshot(dummy.contract_address, reader=reader)
-
-    assert snap is not None
-    assert reader.requests == [dummy.contract_address]
-    assert snap.contract_address == dummy.contract_address

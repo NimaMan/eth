@@ -1,7 +1,7 @@
 use eth_live_state::keys;
 
 #[test]
-fn canonical_keys_match_existing_live_data_registry() {
+fn canonical_keys_match_legacy_live_state_contract() {
     assert_eq!(
         keys::latest_block_number_key(),
         "eth/live/latest/block_number"

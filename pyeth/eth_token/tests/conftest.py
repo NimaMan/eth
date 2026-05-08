@@ -2,7 +2,6 @@
 
 import pytest
 from web3 import Web3
-from eth_token.token_manager.live_block_token_processor import LiveBlockTokenProcessor
 
 
 @pytest.fixture(scope="session")
@@ -12,8 +11,3 @@ def w3():
     web3 = Web3(provider)
     assert web3.is_connected(), "Web3 failed to connect to the node"
     return web3
-
-
-@pytest.fixture
-def block_live_token_processor():
-    return LiveBlockTokenProcessor()

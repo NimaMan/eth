@@ -108,7 +108,7 @@ Backtest and live execution use the same sequence. Backtest swaps in a simulated
 | `MempoolProcessor` pending transaction checks | `eth_mempool_risk` |
 | Strategy engines / position managers | `eth_alpha_engine` plus `eth_alpha_core::PortfolioState` and position types |
 | `TradeSignal` execution-like messages | `StrategyDecision` converted to `OrderIntent` by the engine |
-| `LiveResultsWriter` / strategy position DB writes | `TradingStore` implementation |
+| Legacy strategy position DB writes | `TradingStore` implementation |
 | `TokenPnLWriter` | analytics or reporting writer derived from stored executions and snapshots |
 
 ## Current Skeleton

@@ -1,6 +1,5 @@
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
-from eth_data.live_data_registry.snapshot_serialization import normalize_block_header
 
 
 def test_metadata_nonce_too_high_is_retryable() -> None:
@@ -38,7 +37,6 @@ def test_token_processor_accepts_pyreth_block_shape() -> None:
     transactions = BlockTokenProcessor._get_block_transactions(FakeBlock())
 
     assert [tx["tx_index"] if isinstance(tx, dict) else tx.tx_index for tx in transactions] == [0, 1, 2]
-    assert normalize_block_header(FakeBlock())["parentHash"] == "0xparent"
 
 
 def test_historical_processor_uses_pyreth_adapter_when_provider_is_supplied() -> None:

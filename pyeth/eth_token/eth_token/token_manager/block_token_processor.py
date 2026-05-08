@@ -15,9 +15,8 @@ Responsibilities
    - Record which tokens changed during the block and refresh cache mappings after processing.
 4. Track block-processing context (start/latest block numbers, last two headers) so downstream
    consumers can reason about continuity and previous-block metadata.
-5. Serve both historical catch-up (`HistoricalBlockTokenProcessor`) and live streaming
-   (`LiveBlockTokenProcessor`) flows through the same stateful engine, keeping shared token state in
-   sync while offering a simple synchronous mutation API callable from async workflows.
+5. Serve historical catch-up (`HistoricalBlockTokenProcessor`) and caller-managed block replay while
+   keeping token state mutation deterministic.
 """
 
 import asyncio
@@ -459,20 +458,20 @@ class HistoricalBlockTokenProcessor:
                         block_number=current_block
                     )
                     token_process_elapsed = time.perf_counter() - token_process_started_at
+                    token_stage_elapsed = time.perf_counter() - started_at
+                    total_elapsed = process_block_elapsed + token_stage_elapsed
                     self.block_token_processor.latest_processed_block = current_block
                     processed_count += 1
                     self.logger.info(
-                        "Historical warmup updated_tokens=%s %s->%s|%s (%s/%s) "
-                        "process_block=%.3fs token_process=%.3fs total=%.3fs",
+                        "Historical warmup updated_tokens=%s %s->%s|%s "
+                        "(process_block=%.3fs token_process=%.3fs total=%.3fs)",
                         len(self.block_token_processor.updated_tokens),
                         current_block,
                         len(transactions),
                         self.block_token_processor.last_block_failure_count,
-                        processed_count,
-                        total_blocks,
                         process_block_elapsed,
                         token_process_elapsed,
-                        time.perf_counter() - started_at,
+                        total_elapsed,
                     )
             except Exception as e:
                 self.logger.error(f"Error catching up to live at block {batch_blocks[0]}-{batch_blocks[-1]}: {e}")
