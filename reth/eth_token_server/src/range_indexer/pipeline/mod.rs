@@ -9,8 +9,8 @@ use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
 use crate::memory;
-use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::range_indexer::{RangeIndexError, RangeIndexJob};
+use tx_processor::ProcessedBlockDiskCacheStore;
 
 pub async fn run_range_index(
     run: Arc<RangeIndexJob>,

@@ -4,11 +4,10 @@ use std::time::Instant;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use eth_token::manager::BlockTokenProcessor;
-use eth_token_server::processed_block_disk_cache::{
-    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
-};
 use reth_chain_query::RethQueryProvider;
-use tx_processor::{BlockProcessor, PoolBuySellSimulator};
+use tx_processor::{
+    BlockProcessor, PoolBuySellSimulator, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
+};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

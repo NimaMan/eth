@@ -8,8 +8,8 @@ use crate::alpha_trading::AlphaTradingStore;
 use crate::config::TokenServerConfig;
 use crate::live::LiveTracker;
 use crate::mempool_signals::MempoolSignalStore;
-use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::range_indexer::RangeIndexManager;
+use tx_processor::ProcessedBlockDiskCacheStore;
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -32,12 +32,6 @@ impl ServerState {
             Some(path) => Some(Arc::new(ProcessedBlockDiskCacheStore::open(path)?)),
             None => None,
         };
-        let live_processed_block_disk_cache = match config.processed_block_disk_cache_dir.as_ref() {
-            Some(path) => Some(Arc::new(tx_processor::ProcessedBlockDiskCacheStore::open(
-                path,
-            )?)),
-            None => None,
-        };
         let range_indexer = RangeIndexManager::new(
             config.clone(),
             provider.clone(),
@@ -46,7 +40,7 @@ impl ServerState {
         let live_tracker = LiveTracker::new(
             live_runtime_config(&config),
             provider,
-            live_processed_block_disk_cache,
+            processed_block_disk_cache.clone(),
         );
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;

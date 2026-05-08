@@ -8,8 +8,8 @@ use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::config::TokenServerConfig;
-use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::views::run::RunSummaryView;
+use tx_processor::ProcessedBlockDiskCacheStore;
 
 use super::pipeline;
 use super::RangeIndexStatus;

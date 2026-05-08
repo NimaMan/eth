@@ -1,9 +1,7 @@
 use serde::Serialize;
 
-use crate::processed_block_disk_cache::{
-    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheStore,
-};
 use crate::range_indexer::progress::now_unix_secs;
+use tx_processor::{ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheStore};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessedBlockDiskCacheCoverageResponse {

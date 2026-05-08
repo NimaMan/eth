@@ -18,18 +18,13 @@ pub use tx_simulator::{
 // Export transaction processing modules
 pub mod block_processor;
 pub mod live;
+pub mod processed_block_provider;
 pub mod processed_tx_provider;
 pub mod simulator;
 pub mod tx_builder;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
-pub use block_processor::processed_block_disk_cache::{
-    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
-    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
-    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
-    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter,
-};
 pub use block_processor::{
     BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
     ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
@@ -38,6 +33,16 @@ pub use block_processor::{
 pub use live::{
     LiveAddressBlockParticipationIndexWorker, LiveBlockProcessor, LiveBlockProcessorConfig,
     LiveBlockService, LiveProcessedBlock,
+};
+pub use processed_block_provider::{
+    load_cached_processed_block_with_retry, load_processed_block, load_processed_block_range,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
+    CompactProcessedTransaction, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
+    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
+    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
+    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
+    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics,
+    ProcessedBlockProviderRetry, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use processed_tx_provider::{
     processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,

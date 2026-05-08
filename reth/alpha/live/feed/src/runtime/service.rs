@@ -13,14 +13,14 @@ use eth_token::manager::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
-use tx_processor::{BlockProcessor, LivePoolBuySellSimulator, ProcessedBlockDiskCacheStore};
+use tx_processor::{
+    load_processed_block, BlockProcessor, LivePoolBuySellSimulator,
+    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockDiskCacheStore,
+    ProcessedBlockProviderRetry,
+};
 
 use super::config::LiveTokenRuntimeConfig;
 use super::event::LiveTokenEvent;
-use super::loader::{
-    load_cached_processed_block_with_retry, load_processed_block, LiveBlockLoad,
-    ProcessedBlockDiskCacheRetry,
-};
 use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
@@ -266,7 +266,7 @@ impl LiveTokenRuntime {
                 .apply_block(
                     block_number,
                     false,
-                    ProcessedBlockDiskCacheRetry::none(),
+                    ProcessedBlockProviderRetry::none(),
                     &tx_processor,
                     &warmup_discovery_provider,
                     &pool_simulator,
@@ -401,8 +401,7 @@ impl LiveTokenRuntime {
             let applied = self
                 .apply_live_tail_block(
                     block_number,
-                    latest_block,
-                    ProcessedBlockDiskCacheRetry {
+                    ProcessedBlockProviderRetry {
                         attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
                         delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
                     },
@@ -425,8 +424,7 @@ impl LiveTokenRuntime {
     async fn apply_live_tail_block<P>(
         &self,
         block_number: u64,
-        latest_block: u64,
-        retry: ProcessedBlockDiskCacheRetry,
+        retry: ProcessedBlockProviderRetry,
         tx_processor: &BlockProcessor,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
@@ -434,33 +432,6 @@ impl LiveTokenRuntime {
     where
         P: TokenDiscoveryProvider,
     {
-        if let Some(cache_store) = self.inner.processed_block_disk_cache.clone() {
-            let loaded = load_cached_processed_block_with_retry(
-                self.inner.provider.as_ref(),
-                cache_store,
-                block_number,
-                retry,
-            )
-            .await?;
-            let Some(loaded) = loaded else {
-                tracing::warn!(
-                    block_number,
-                    latest_block,
-                    "waiting for processed block disk cache entry before live token apply"
-                );
-                return Ok(false);
-            };
-            self.apply_loaded_block(
-                block_number,
-                true,
-                loaded,
-                discovery_provider,
-                pool_simulator,
-            )
-            .await?;
-            return Ok(true);
-        }
-
         self.apply_block(
             block_number,
             true,
@@ -477,7 +448,7 @@ impl LiveTokenRuntime {
         &self,
         block_number: u64,
         is_live_tail: bool,
-        retry: ProcessedBlockDiskCacheRetry,
+        retry: ProcessedBlockProviderRetry,
         tx_processor: &BlockProcessor,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,

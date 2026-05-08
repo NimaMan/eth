@@ -3,22 +3,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::tx_processor::data_models::{
-    AccessControlRoleGrantedEvent, AccessControlRoleRevokedEvent, ContractCreationEvent,
-    ERC20ApprovalEvent, ERC20TransferEvent, InternalTransaction, OwnershipTransferStartedEvent,
-    OwnershipTransferredEvent, ProcessedAccessListItem, ProxyAdminChangedEvent,
-    TradingDisabledEvent, TradingEnabledEvent, TransactionFees, UniswapV2BurnEvent,
-    UniswapV2MintEvent, UniswapV2PairCreatedEvent, UniswapV2SwapEvent, UniswapV2SyncEvent,
-};
 use crate::{
-    processed_block_trace_config_hash, ProcessedBlock, ProcessedBlockTransactions,
-    ProcessedTransaction,
+    processed_block_provider::CompactProcessedTransaction, processed_block_trace_config_hash,
+    ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction,
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use eyre::{bail, Result};
 use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 use super::reader::ProcessedBlockDiskCacheReader;
 use super::writer::ProcessedBlockDiskCacheWriter;
@@ -97,46 +89,8 @@ struct LegacyProcessedBlockDiskCacheKey {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessedBlockDiskCacheTransaction {
-    processed: SparseProcessedTransaction,
+    processed: CompactProcessedTransaction,
     processing_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SparseProcessedTransaction {
-    hash: B256,
-    block_number: u64,
-    block_timestamp: u64,
-    tx_index: u64,
-    from_address: Address,
-    to_address: Option<Address>,
-    contract_address: Option<Address>,
-    value: U256,
-    status: bool,
-    nonce: u64,
-    raw_tx_type: u8,
-    fees: TransactionFees,
-    input: Option<Vec<u8>>,
-    access_list: Option<Vec<ProcessedAccessListItem>>,
-    blob_versioned_hashes: Option<Vec<B256>>,
-    bribe_amount: Option<U256>,
-    unique_addresses: Option<Vec<Address>>,
-    erc20_contracts: Option<Vec<Address>>,
-    internal_transactions: Option<Vec<InternalTransaction>>,
-    erc20_transfers: Option<Vec<ERC20TransferEvent>>,
-    erc20_approval_events: Option<Vec<ERC20ApprovalEvent>>,
-    uniswap_v2_syncs: Option<Vec<UniswapV2SyncEvent>>,
-    uniswap_v2_swaps: Option<Vec<UniswapV2SwapEvent>>,
-    uniswap_v2_mints: Option<Vec<UniswapV2MintEvent>>,
-    uniswap_v2_burns: Option<Vec<UniswapV2BurnEvent>>,
-    uniswap_v2_pair_created_events: Option<Vec<UniswapV2PairCreatedEvent>>,
-    ownership_transferred_events: Option<Vec<OwnershipTransferredEvent>>,
-    ownership_transfer_started_events: Option<Vec<OwnershipTransferStartedEvent>>,
-    access_control_role_granted_events: Option<Vec<AccessControlRoleGrantedEvent>>,
-    access_control_role_revoked_events: Option<Vec<AccessControlRoleRevokedEvent>>,
-    proxy_admin_changed_events: Option<Vec<ProxyAdminChangedEvent>>,
-    contract_creation_events: Option<Vec<ContractCreationEvent>>,
-    trading_enabled_events: Option<Vec<TradingEnabledEvent>>,
-    trading_disabled_events: Option<Vec<TradingDisabledEvent>>,
 }
 
 impl ProcessedBlockDiskCacheKey {
@@ -511,7 +465,7 @@ impl ProcessedBlockDiskCacheEntry {
                 .transactions
                 .iter()
                 .map(|tx| ProcessedBlockDiskCacheTransaction {
-                    processed: SparseProcessedTransaction::from_processed(&tx.processed),
+                    processed: CompactProcessedTransaction::from_processed(&tx.processed),
                     processing_error: tx.processing_error.clone(),
                 })
                 .collect(),
@@ -582,93 +536,6 @@ impl ProcessedBlockDiskCacheTransaction {
     }
 }
 
-impl SparseProcessedTransaction {
-    fn from_processed(tx: &ProcessedTransaction) -> Self {
-        Self {
-            hash: tx.hash,
-            block_number: tx.block_number,
-            block_timestamp: tx.block_timestamp,
-            tx_index: tx.tx_index,
-            from_address: tx.from_address,
-            to_address: tx.to_address,
-            contract_address: tx.contract_address,
-            value: tx.value,
-            status: tx.status,
-            nonce: tx.nonce,
-            raw_tx_type: tx.raw_tx_type,
-            fees: tx.fees.clone(),
-            input: option_vec(&tx.input),
-            access_list: option_vec(&tx.access_list),
-            blob_versioned_hashes: option_vec(&tx.blob_versioned_hashes),
-            bribe_amount: option_nonzero_u256(tx.bribe_amount),
-            unique_addresses: option_address_set(&tx.unique_addresses),
-            erc20_contracts: option_address_set(&tx.erc20_contracts),
-            internal_transactions: option_vec(&tx.internal_transactions),
-            erc20_transfers: option_vec(&tx.erc20_transfers),
-            erc20_approval_events: option_vec(&tx.erc20_approval_events),
-            uniswap_v2_syncs: option_vec(&tx.uniswap_v2_syncs),
-            uniswap_v2_swaps: option_vec(&tx.uniswap_v2_swaps),
-            uniswap_v2_mints: option_vec(&tx.uniswap_v2_mints),
-            uniswap_v2_burns: option_vec(&tx.uniswap_v2_burns),
-            uniswap_v2_pair_created_events: option_vec(&tx.uniswap_v2_pair_created_events),
-            ownership_transferred_events: option_vec(&tx.ownership_transferred_events),
-            ownership_transfer_started_events: option_vec(&tx.ownership_transfer_started_events),
-            access_control_role_granted_events: option_vec(&tx.access_control_role_granted_events),
-            access_control_role_revoked_events: option_vec(&tx.access_control_role_revoked_events),
-            proxy_admin_changed_events: option_vec(&tx.proxy_admin_changed_events),
-            contract_creation_events: option_vec(&tx.contract_creation_events),
-            trading_enabled_events: option_vec(&tx.trading_enabled_events),
-            trading_disabled_events: option_vec(&tx.trading_disabled_events),
-        }
-    }
-
-    fn into_processed(self) -> ProcessedTransaction {
-        let mut tx = ProcessedTransaction::new(
-            self.hash,
-            self.block_number,
-            self.block_timestamp,
-            self.tx_index,
-            self.from_address,
-            self.to_address,
-            self.value,
-            self.status,
-            self.nonce,
-            self.raw_tx_type,
-            Vec::new(),
-        );
-
-        tx.contract_address = self.contract_address;
-        tx.fees = self.fees;
-        tx.input = self.input.unwrap_or_default();
-        tx.access_list = self.access_list.unwrap_or_default();
-        tx.blob_versioned_hashes = self.blob_versioned_hashes.unwrap_or_default();
-        tx.bribe_amount = self.bribe_amount.unwrap_or_default();
-        tx.unique_addresses = option_address_vec_into_set(self.unique_addresses);
-        tx.erc20_contracts = option_address_vec_into_set(self.erc20_contracts);
-        tx.internal_transactions = self.internal_transactions.unwrap_or_default();
-        tx.erc20_transfers = self.erc20_transfers.unwrap_or_default();
-        tx.erc20_approval_events = self.erc20_approval_events.unwrap_or_default();
-        tx.uniswap_v2_syncs = self.uniswap_v2_syncs.unwrap_or_default();
-        tx.uniswap_v2_swaps = self.uniswap_v2_swaps.unwrap_or_default();
-        tx.uniswap_v2_mints = self.uniswap_v2_mints.unwrap_or_default();
-        tx.uniswap_v2_burns = self.uniswap_v2_burns.unwrap_or_default();
-        tx.uniswap_v2_pair_created_events = self.uniswap_v2_pair_created_events.unwrap_or_default();
-        tx.ownership_transferred_events = self.ownership_transferred_events.unwrap_or_default();
-        tx.ownership_transfer_started_events =
-            self.ownership_transfer_started_events.unwrap_or_default();
-        tx.access_control_role_granted_events =
-            self.access_control_role_granted_events.unwrap_or_default();
-        tx.access_control_role_revoked_events =
-            self.access_control_role_revoked_events.unwrap_or_default();
-        tx.proxy_admin_changed_events = self.proxy_admin_changed_events.unwrap_or_default();
-        tx.contract_creation_events = self.contract_creation_events.unwrap_or_default();
-        tx.trading_enabled_events = self.trading_enabled_events.unwrap_or_default();
-        tx.trading_disabled_events = self.trading_disabled_events.unwrap_or_default();
-
-        tx
-    }
-}
-
 fn metadata_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionData {
     TransactionData {
         hash: tx.hash,
@@ -706,35 +573,6 @@ fn receipt_from_processed_transaction(tx: &ProcessedTransaction) -> TransactionR
     }
 }
 
-fn option_vec<T: Clone>(items: &[T]) -> Option<Vec<T>> {
-    if items.is_empty() {
-        None
-    } else {
-        Some(items.to_vec())
-    }
-}
-
-fn option_address_set(items: &HashSet<Address>) -> Option<Vec<Address>> {
-    if items.is_empty() {
-        return None;
-    }
-    let mut items: Vec<_> = items.iter().copied().collect();
-    items.sort_unstable();
-    Some(items)
-}
-
-fn option_address_vec_into_set(items: Option<Vec<Address>>) -> HashSet<Address> {
-    items.unwrap_or_default().into_iter().collect()
-}
-
-fn option_nonzero_u256(value: U256) -> Option<U256> {
-    if value.is_zero() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
 fn monotonic_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -745,7 +583,9 @@ fn monotonic_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tx_processor::data_models::ProcessedAccessListItem;
+    use alloy_primitives::Address;
+
+    use crate::tx_processor::data_models::{ProcessedAccessListItem, TransactionFees};
 
     #[test]
     fn round_trips_replay_fields() {

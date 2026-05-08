@@ -179,6 +179,7 @@ fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<LiveTxEntr
             .unwrap_or(Value::Null),
     );
 
+    prune_empty_json_fields(&mut payload);
     let tx_json = serde_json::to_string(&payload).map_err(|err| {
         eyre!(
             "failed to encode processed transaction {}: {}",
@@ -205,4 +206,31 @@ fn address_set_to_strings(addresses: &HashSet<Address>) -> Vec<String> {
         .collect();
     values.sort();
     values
+}
+
+fn prune_empty_json_fields(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for nested in object.values_mut() {
+                prune_empty_json_fields(nested);
+            }
+            object.retain(|_, nested| !is_empty_json_field(nested));
+        }
+        Value::Array(items) => {
+            for nested in items {
+                prune_empty_json_fields(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_empty_json_field(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(value) => value.is_empty(),
+        Value::Array(values) => values.is_empty(),
+        Value::Object(values) => values.is_empty(),
+        _ => false,
+    }
 }

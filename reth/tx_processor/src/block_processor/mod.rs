@@ -1,5 +1,4 @@
 mod conversion;
-pub mod processed_block_disk_cache;
 pub mod types;
 
 use crate::tx_processor::data_models::{
