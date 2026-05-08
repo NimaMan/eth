@@ -1,6 +1,8 @@
 use alloy_primitives::Address;
 use eth_token::erc20::ERC20Token;
-use eth_token::pools::{LPHolderSnapshot, PoolRuntimeState, TradingStatus, UniswapV2Pool};
+use eth_token::pools::{
+    LPHolderSnapshot, PoolLifecycle, PoolRuntimeState, TaxBucket, TradingStatus, UniswapV2Pool,
+};
 use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
 use serde_json::Value;
@@ -36,6 +38,7 @@ pub enum PoolRiskLevel {
     Scam,
     Honeypot,
     HighTax,
+    ExtremeTax,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -84,13 +87,18 @@ pub struct PoolView {
     pub can_buy: bool,
     pub can_sell: bool,
     pub trading_enabled: bool,
+    pub stage: PoolLifecycle,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
+    pub buy_tax_bucket: TaxBucket,
+    pub sell_tax_bucket: TaxBucket,
+    pub tax_bucket: TaxBucket,
     pub is_scam: bool,
     pub scam_label: Option<String>,
     pub risk_level: PoolRiskLevel,
     pub risk_label: Option<String>,
     pub creation_block: Option<u64>,
+    pub creation_timestamp: Option<u64>,
     pub can_buy_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub trading_status: TradingStatus,
@@ -132,6 +140,11 @@ impl PoolView {
         let liquidity_to_fdv_ratio = supply_ratio
             .pooled_token_supply_ratio
             .and_then(|_| total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply)));
+        let buy_tax = display_tax(pool.base.buy_tax);
+        let sell_tax = display_tax(pool.base.sell_tax);
+        let buy_tax_bucket = TaxBucket::from_percent(buy_tax);
+        let sell_tax_bucket = TaxBucket::from_percent(sell_tax);
+        let tax_bucket = TaxBucket::combined(buy_tax, sell_tax);
         let risk = pool_risk(pool);
         Self {
             token_address: token.contract_address.clone(),
@@ -163,13 +176,18 @@ impl PoolView {
             can_buy: pool.base.state.can_buy,
             can_sell: pool.base.state.can_sell,
             trading_enabled: pool.base.trading_enabled(),
-            buy_tax: display_tax(pool.base.buy_tax),
-            sell_tax: display_tax(pool.base.sell_tax),
+            stage: pool.base.state.lifecycle,
+            buy_tax,
+            sell_tax,
+            buy_tax_bucket,
+            sell_tax_bucket,
+            tax_bucket,
             is_scam: risk.level != PoolRiskLevel::Clear,
             scam_label: risk.label.clone(),
             risk_level: risk.level,
             risk_label: risk.label,
             creation_block: pool.base.creation_block,
+            creation_timestamp: pool.base.creation_timestamp,
             can_buy_block: pool.base.can_buy_block,
             latest_block_number: pool.base.latest_block_number,
             trading_status,
@@ -188,7 +206,6 @@ impl PoolView {
     }
 }
 
-const HIGH_TAX_PERCENT: f64 = 10.0;
 const DUST_WETH_LIQUIDITY: f64 = 0.01;
 const DRAINED_WETH_LIQUIDITY: f64 = 0.000001;
 const DUST_STABLE_LIQUIDITY: f64 = 10.0;
@@ -221,23 +238,29 @@ fn pool_risk(pool: &UniswapV2Pool) -> PoolRiskView {
         };
     }
 
-    if tax_above_threshold(pool.base.buy_tax) || tax_above_threshold(pool.base.sell_tax) {
-        return PoolRiskView {
-            level: PoolRiskLevel::HighTax,
-            label: Some("high_tax".to_string()),
-        };
+    match TaxBucket::combined(
+        display_tax(pool.base.buy_tax),
+        display_tax(pool.base.sell_tax),
+    ) {
+        TaxBucket::ExtremeTax => {
+            return PoolRiskView {
+                level: PoolRiskLevel::ExtremeTax,
+                label: TaxBucket::ExtremeTax.risk_label().map(str::to_string),
+            };
+        }
+        TaxBucket::HighTax => {
+            return PoolRiskView {
+                level: PoolRiskLevel::HighTax,
+                label: TaxBucket::HighTax.risk_label().map(str::to_string),
+            };
+        }
+        _ => {}
     }
 
     PoolRiskView {
         level: PoolRiskLevel::Clear,
         label: None,
     }
-}
-
-fn tax_above_threshold(value: Option<f64>) -> bool {
-    value
-        .filter(|value| value.is_finite())
-        .is_some_and(|value| value >= HIGH_TAX_PERCENT)
 }
 
 fn display_tax(value: Option<f64>) -> Option<f64> {
