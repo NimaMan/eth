@@ -158,6 +158,9 @@ pub struct ClassificationResult {
 - `ContractCreation`: New deployments with deployer and contract address
 - `CreatorTransaction`: From known token creators with target analysis  
 - `Regular`: Standard transfers and approvals
+- `LiquidityPoolApproval`: Fast-path creator transaction category used when a
+  tracked pool/LP token approves a known router or Permit2, even if the approver
+  is not the token creator
 
 **Priority Assignment**:
 - `Critical`: Creator transactions with critical functions
@@ -172,6 +175,7 @@ The main processing loop implements an asynchronous queue-based design that sepa
 **Queue-Based Processing Flow**:
 - Main loop receives transactions from IPC and routes them
 - Contract Creation and Creator Actions are queued for simulation
+- Tracked pool LP approvals are published immediately and are not simulated
 - Background simulation workers process the simulation queue by priority
 - Main loop continues without blocking on simulation
 - Signals are detected and published after simulation completes
@@ -183,7 +187,10 @@ The main processing loop implements an asynchronous queue-based design that sepa
 - Low priority transactions are dropped when queue is full
 
 **Focused Scope**: 
-The system currently processes only Contract Creation and Creator Action transactions. DEX interactions and regular transfers are filtered out early to focus computational resources on high-value signals. This design decision simplifies the pipeline while capturing the most important events for scam detection.
+The system processes Contract Creation and Creator Action transactions for
+simulation. DEX interactions and ordinary transfers are filtered out early, with
+one explicit exception: tracked-pool LP approvals to known routers/Permit2 take
+a direct no-simulation path because they are early liquidity-removal warnings.
 
 ### 5. Signal Processing Coordination
 
@@ -486,7 +493,7 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 - `tax_signals.log`: High tax, honeypot, or suspicious tax patterns (consolidated)
 - `liquidity_removals.log`: LP removal operations (also includes ScamDetection entries)
 - (scam detections merged into `liquidity_removals.log`)
-- `lp_approval_signals.log`: Creator approving router to spend LP tokens
+- `lp_approval_signals.log`: Tracked pool holder approving router/Permit2 to spend LP tokens
 - `signal_manager.log`: Per‑TX activity summary from detectors
 
 #### 7.3 Database (Optional)
@@ -543,7 +550,7 @@ const LIQUIDITY_REMOVAL_PRIORITY: Priority = High;
 
 ## Binary Signal Types
 
-The system generates three simple binary signals:
+The system generates four simple binary signals:
 
 1. **Trading Enabled Signal**
    - Token becomes tradeable with reasonable taxes (≤25%)
@@ -559,6 +566,17 @@ The system generates three simple binary signals:
    - LP removal functions detected (removeLiquidity*, decreaseLiquidity)
    - Pool has minimum ETH value (≥0.05 ETH)
    - Immediate alert for potential rug pulls
+
+4. **LP Approval Signal**
+   - `approve(spender, amount)` on a tracked pool/LP token
+   - Spender is a known router from `reth_chain_query::common_addresses::ROUTERS` or Permit2
+   - Published immediately on `tcp://127.0.0.1:5556` topic `lp_approval`
+   - No simulation or buy/sell test; payload is enriched from TokenTrackingCache
+
+V2/Sushi LP approvals are actionable early sell signals. V3 `decreaseLiquidity`
+remains a direct liquidity-removal risk when tied to a tracked token/pool. V4 is
+only partially supported for obvious removal/modify-liquidity intent; do not
+treat V4 simulation/PnL as validated yet.
 
 ## Integration Points
 
@@ -688,6 +706,8 @@ mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
 
 ### Health Checks
 - IPC connection status
+- LP approval fast-path counters: router approvals seen, tracked pool approvals,
+  pool cache misses, LP approvals published, and DB write errors
 - Queue depths (should be <1000)
 - Simulation success rate (>80%)
 - Publishing latency (<10ms)

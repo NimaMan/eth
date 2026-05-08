@@ -27,6 +27,7 @@ pub struct LiquidityRemovalSignalRecord {
     pub detection_tx_hash: String,
     pub liquidity_removed_denom: Option<f64>,
     pub remaining_liquidity_denom: Option<f64>,
+    pub removal_percentage: Option<f64>,
     pub pool_drain_risk_level: String,
     pub creator_address: String,
     pub signal_source: String,
@@ -45,15 +46,19 @@ impl LiquidityRemovalSignalRecord {
             detection_tx_hash: signal.tx_hash.clone(),
             liquidity_removed_denom: signal.eth_removed,
             remaining_liquidity_denom: signal.remaining_eth,
-            pool_drain_risk_level: match signal.removal_percentage.unwrap_or(0.0) {
-                p if p > 80.0 => "CRITICAL".to_string(),
-                p if p > 60.0 => "HIGH".to_string(),
-                p if p > 30.0 => "MEDIUM".to_string(),
-                _ => "LOW".to_string(),
-            },
+            removal_percentage: signal.removal_percentage,
+            pool_drain_risk_level: drain_risk_label(signal.removal_percentage),
             creator_address: signal.creator_address.clone(),
             signal_source: "mempool".to_string(),
         }
+    }
+}
+
+fn drain_risk_label(removal_percentage: Option<f64>) -> String {
+    match removal_percentage.unwrap_or(0.0) {
+        p if p > 50.0 => "DRAINING".to_string(),
+        p if p >= 20.0 => "SIGNIFICANT".to_string(),
+        _ => "LOW".to_string(),
     }
 }
 
@@ -166,6 +171,9 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
         let remaining_liquidity = record
             .remaining_liquidity_denom
             .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
+        let removal_percentage = record
+            .removal_percentage
+            .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
 
         let detection_timestamp = record.detection_timestamp.naive_utc();
 
@@ -174,8 +182,8 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
             INSERT INTO live_trading.liquidity_removal_signals (
                 token_address, pool_address, pool_type, denom_address, denom_currency,
                 detection_timestamp, detection_tx_hash, liquidity_removed_eth,
-                remaining_liquidity_eth, pool_drain_risk_level, creator_address, signal_source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                remaining_liquidity_eth, removal_percentage, pool_drain_risk_level, creator_address, signal_source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (pool_address, detection_tx_hash) DO NOTHING
             "#,
         )
@@ -188,6 +196,7 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
         .bind(&record.detection_tx_hash)
         .bind(liquidity_removed.as_ref())
         .bind(remaining_liquidity.as_ref())
+        .bind(removal_percentage.as_ref())
         .bind(&record.pool_drain_risk_level)
         .bind(&record.creator_address)
         .bind(&record.signal_source);

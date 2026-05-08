@@ -108,11 +108,9 @@ impl SimulationManager {
         &self,
         tx: &crate::mempool_fetcher::MempoolTransaction,
         category: &crate::tx_router::TransactionCategory,
-    ) -> Vec<crate::signal_detector::Signal> {
+    ) -> bool {
         let mut signal_manager = self.signal_manager.lock().await;
-        signal_manager.detect_lp_approval(tx, category).await;
-        // Return empty vec for now, signals are published internally
-        Vec::new()
+        signal_manager.detect_lp_approval(tx, category).await
     }
 
     /// Process pending simulations

@@ -1,7 +1,6 @@
 use alloy_primitives::U256;
 use chrono::{DateTime, Utc};
 use eyre::Result;
-use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::BigDecimal;
 use std::str::FromStr;
@@ -27,7 +26,9 @@ pub struct LpApprovalSignalRecord {
     pub detection_timestamp: DateTime<Utc>,
     pub detection_tx_hash: String,
     pub approved_spender: String,
-    /// Percentage (0-100) of LP tokens approved for the router
+    /// Raw LP-token approval amount as a base-unit decimal string.
+    pub approval_amount: Option<String>,
+    /// Percentage (0-100) of LP tokens approved for the router, if known.
     pub approval_percentage: Option<f64>,
     pub is_unlimited_approval: bool,
     pub approval_type: String,
@@ -50,21 +51,33 @@ impl LpApprovalSignalRecord {
         let unlimited = approval_pct
             .map(|pct| pct >= 99.99)
             .unwrap_or(is_unlimited_amount);
+        let approval_amount = if is_unlimited_amount {
+            None
+        } else {
+            Some(signal.amount.to_string())
+        };
 
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: DEFAULT_POOL_TYPE.to_string(),
-            denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
-            denom_currency: Some("WETH".to_string()),
+            pool_type: normalize_pool_type(&signal.pool_type),
+            denom_address: signal
+                .denom_address
+                .clone()
+                .unwrap_or_else(|| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+            denom_currency: signal
+                .denom_currency
+                .clone()
+                .or_else(|| Some("WETH".to_string())),
             detection_timestamp: Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             approved_spender: signal.spender_address.clone(),
+            approval_amount,
             approval_percentage: approval_pct,
             is_unlimited_approval: unlimited,
-            approval_type: "TOKEN".to_string(),
+            approval_type: "LP_TOKEN".to_string(),
             previous_allowance: signal.previous_allowance,
-            creator_address: signal.creator_address.clone(),
+            creator_address: signal.approver_address.clone(),
             signal_source: "mempool".to_string(),
         }
     }
@@ -167,9 +180,10 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
     let mut transaction = pool.begin().await?;
 
     for record in batch.iter() {
-        let approval_percentage = record
-            .approval_percentage
-            .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
+        let approval_amount = record
+            .approval_amount
+            .as_deref()
+            .and_then(|v| BigDecimal::from_str(v).ok());
         let previous_allowance = record
             .previous_allowance
             .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
@@ -195,7 +209,7 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
         .bind(&detection_timestamp)
         .bind(&record.detection_tx_hash)
         .bind(&record.approved_spender)
-        .bind(approval_percentage.as_ref())
+        .bind(approval_amount.as_ref())
         .bind(&record.is_unlimited_approval)
         .bind(&record.approval_type)
         .bind(previous_allowance.as_ref())
@@ -218,4 +232,15 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
 
     batch.clear();
     Ok(())
+}
+
+fn normalize_pool_type(pool_type: &str) -> String {
+    match pool_type.trim().to_lowercase().as_str() {
+        "uniswapv2" | "uniswap-v2" | "v2" => "UNISWAP-V2".to_string(),
+        "uniswapv3" | "uniswap-v3" | "v3" => "UNISWAP-V3".to_string(),
+        "uniswapv4" | "uniswap-v4" | "v4" => "UNISWAP-V4".to_string(),
+        "sushiswap" | "sushi" | "sushi-swap" => "SUSHI-SWAP".to_string(),
+        other if other.is_empty() => "UNKNOWN".to_string(),
+        other => other.to_uppercase(),
+    }
 }

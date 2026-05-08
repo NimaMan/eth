@@ -92,6 +92,7 @@ pub struct PublisherStats {
     pub zmq_published: std::sync::atomic::AtomicU64,
     pub logs_written: std::sync::atomic::AtomicU64,
     pub db_written: std::sync::atomic::AtomicU64,
+    pub db_errors: std::sync::atomic::AtomicU64,
     pub errors: std::sync::atomic::AtomicU64,
 }
 
@@ -216,6 +217,12 @@ impl SignalPublisher {
                     }
                     Err(e) => {
                         error!("❌ Failed to initialize unified signal writer: {}", e);
+                        stats_clone
+                            .db_errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        stats_clone
+                            .errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
                 };
@@ -226,6 +233,9 @@ impl SignalPublisher {
                 // Use unified writer to handle all signal types
                 if let Err(e) = unified_writer.write_signal(signal).await {
                     error!("Failed to write signal to database: {}", e);
+                    stats_clone
+                        .db_errors
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     stats_clone
                         .errors
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -356,7 +366,14 @@ impl SignalPublisher {
                 writeln!(
                     self.log_files.trading_enabled,
                     "[{}] TRADING_ENABLED | Token: {} | Pool: {} | PoolType: {} | Creator: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
-                    timestamp, s.token_address, s.pool_address, s.pool_type, s.creator_address, s.buy_tax, s.sell_tax, s.tx_hash
+                    timestamp,
+                    s.token_address,
+                    s.pool_address,
+                    s.pool_type,
+                    s.creator_address,
+                    s.buy_tax,
+                    s.sell_tax,
+                    s.tx_hash
                 )?;
                 self.log_files.trading_enabled.flush()?;
             }
@@ -364,8 +381,13 @@ impl SignalPublisher {
                 writeln!(
                     self.log_files.tax_signals,
                     "[{}] TAX_SIGNAL | Token: {} | Pool: {} | Type: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
-                    timestamp, s.token_address, s.pool_address, s.signal_type,
-                    s.buy_tax.unwrap_or(-1.0), s.sell_tax.unwrap_or(-1.0), s.tx_hash
+                    timestamp,
+                    s.token_address,
+                    s.pool_address,
+                    s.signal_type,
+                    s.buy_tax.unwrap_or(-1.0),
+                    s.sell_tax.unwrap_or(-1.0),
+                    s.tx_hash
                 )?;
                 self.log_files.tax_signals.flush()?;
             }
@@ -374,15 +396,25 @@ impl SignalPublisher {
                     .estimated_eth_removed
                     .map(|eth| format!(" | EstETH: {:.3}", eth))
                     .unwrap_or_default();
+                let remaining_info = s
+                    .remaining_eth
+                    .map(|eth| format!(" | RemainingETH: {:.3}", eth))
+                    .unwrap_or_default();
+                let percentage_info = s
+                    .removal_percentage
+                    .map(|pct| format!(" | DrainPct: {:.2}%", pct))
+                    .unwrap_or_default();
                 writeln!(
                     self.log_files.liquidity_removal,
-                    "[{}] LIQUIDITY_REMOVAL | Pool: {} | Function: {} | Remover: {} | TxHash: {}{}",
+                    "[{}] LIQUIDITY_REMOVAL | Pool: {} | Function: {} | Remover: {} | TxHash: {}{}{}{}",
                     timestamp,
                     s.pool_address,
                     s.function_name,
                     s.remover_address,
                     s.tx_hash,
-                    eth_info
+                    eth_info,
+                    remaining_info,
+                    percentage_info
                 )?;
                 self.log_files.liquidity_removal.flush()?;
             }
@@ -409,10 +441,12 @@ impl SignalPublisher {
 
                 writeln!(
                     self.log_files.lp_approval,
-                    "[{}] LP_APPROVAL | Creator: {} | LP Token: {} | Router: {} | Percent: {} | RawAmount: {} | TxHash: {}",
+                    "[{}] LP_APPROVAL | Approver: {} | Token: {} | Pool: {} | PoolType: {} | Router: {} | Percent: {} | RawAmount: {} | TxHash: {}",
                     timestamp,
-                    s.creator,
-                    s.lp_token_address,
+                    s.approver_address,
+                    s.token_address,
+                    s.pool_address,
+                    s.pool_type,
                     s.router_address,
                     percent_str,
                     raw_display,
@@ -467,6 +501,10 @@ impl SignalPublisher {
                 .stats
                 .db_written
                 .load(std::sync::atomic::Ordering::Relaxed),
+            db_errors: self
+                .stats
+                .db_errors
+                .load(std::sync::atomic::Ordering::Relaxed),
             errors: self.stats.errors.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
@@ -484,5 +522,6 @@ pub struct PublisherStatsSnapshot {
     pub zmq_published: u64,
     pub logs_written: u64,
     pub db_written: u64,
+    pub db_errors: u64,
     pub errors: u64,
 }

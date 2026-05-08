@@ -66,7 +66,7 @@ use mempool_processor::{
         hydrate_cache_from_live_token_server, start_live_token_server_cache_sync,
         TokenTrackingSubscriber,
     },
-    tx_router::{SimulationPriority, TransactionCategory, TransactionRouter},
+    tx_router::{TransactionCategory, TransactionRouter},
 };
 use tx_simulator::LiveChainCache;
 
@@ -676,31 +676,9 @@ async fn main() -> Result<()> {
                         ..
                     } = &classification.category
                     {
-                        simulation_manager
+                        let _published = simulation_manager
                             .detect_lp_approval(&tx, &classification.category)
                             .await;
-
-                        let followup_job = TxSimulationJob {
-                            tx: tx.clone(),
-                            category: classification.category.clone(),
-                            priority: SimulationPriority::High,
-                            simulation_type: SimulationType::BuySellOnly,
-                            tx_hash: parse_tx_hash_or_zero(&tx.hash),
-                        };
-                        match simulation_manager.submit(followup_job).await {
-                            Ok(()) => {
-                                metrics
-                                    .simulations_submitted
-                                    .fetch_add(1, Ordering::Relaxed);
-                            }
-                            Err(e) => {
-                                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                                warn!(
-                                    "Follow-up simulation submission error for {}: {}",
-                                    tx.hash, e
-                                );
-                            }
-                        }
                     }
                     continue;
                 }
@@ -797,6 +775,15 @@ async fn main() -> Result<()> {
                     arrival_stats.flush_errors
                 );
             }
+            let lp_approval_stats = tx_router.lp_approval_stats();
+            info!(
+                "📊 LP approval path: router_approvals={} tracked_pool_approvals={} pool_cache_misses={} published={} db_errors={}",
+                lp_approval_stats.router_approvals_seen,
+                lp_approval_stats.tracked_pool_approvals,
+                lp_approval_stats.pool_cache_misses,
+                publisher_stats.lp_approvals,
+                publisher_stats.db_errors
+            );
             let cache_stats = token_cache.stats().await;
             info!(
                 "📊 Token cache stats: {} tokens, {} pools, {} creators",

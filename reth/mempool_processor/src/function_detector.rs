@@ -4,10 +4,11 @@
 // based on their function selectors (4-byte signatures)
 
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::Address as AlloyAddress;
+use alloy_primitives::{address, Address as AlloyAddress};
 use chrono::Utc;
 use hex;
 use lazy_static::lazy_static;
+use reth_chain_query::common_addresses::ROUTERS;
 use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -380,20 +381,11 @@ impl FunctionDetector {
             return CreatorFunctionType::Other("approve".to_string());
         }
 
-        // Extract spender address from input data (bytes 4-36)
-        let spender_bytes = &tx.input[16..36]; // Skip 12 bytes of padding
-        let spender_hex = hex::encode(spender_bytes);
-
-        // Known DEX routers that handle liquidity removal
-        const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
-        const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
-
-        // Check if spender is a known router
-        let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
-            || spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
-
         // Only check pool if router is being approved
-        if !is_router_approval {
+        let Some(spender) = approval_spender(&tx.input) else {
+            return CreatorFunctionType::Other("approve".to_string());
+        };
+        if !is_known_lp_approval_spender(&spender) {
             return CreatorFunctionType::Other("approve".to_string());
         }
 
@@ -561,18 +553,10 @@ impl FunctionDetector {
             // Check if this was classified as an LP approval
             // We need to check the same way as classify_approve does
             if input_data.len() >= 68 {
-                // Extract spender address from input data
-                let spender_bytes = &input_data[16..36];
-                let spender_hex = hex::encode(spender_bytes);
-
-                // Check if spender is a known router
-                const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
-                const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
-
-                let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
-                    || spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
-
-                if is_router_approval {
+                if approval_spender(input_data)
+                    .map(|spender| is_known_lp_approval_spender(&spender))
+                    .unwrap_or(false)
+                {
                     // Check if the 'to' address is a pool
                     let is_lp_approval = if let Some(ref cache) = self.token_cache {
                         tokio::task::block_in_place(|| {
@@ -696,6 +680,18 @@ impl FunctionDetector {
         info!("   Swaps: {}", stats.swaps);
         info!("   Other functions: {}", stats.other_functions);
     }
+}
+
+fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
+    if input.len() < 68 || input.get(0..4)? != [0x09, 0x5e, 0xa7, 0xb3].as_slice() {
+        return None;
+    }
+    Some(AlloyAddress::from_slice(&input[16..36]))
+}
+
+fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
+    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
+        || ROUTERS.values().any(|router| router == spender)
 }
 
 /// Detector for liquidity removal functions

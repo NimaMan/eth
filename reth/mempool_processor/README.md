@@ -21,8 +21,8 @@ To achieve that we:
    mempool feed, classifies creator actions, simulates their effects on each
    tracked pool, and emits semantic signals.
 3. **Act on convergence** – trading components listen to the signals
-   (`TradingEnabled`, `HighTax`, `LiquidityRemoval`). When a signal lines up with
-   the strategy we immediately execute the corresponding buy or sell.
+   (`TradingEnabled`, `HighTax`, `LiquidityRemoval`, `LpApproval`). When a signal
+   lines up with the strategy we immediately execute the corresponding buy or sell.
 
 Everything else in this repository (function detection, simulators, caches) is
 in service of that control loop.
@@ -388,7 +388,7 @@ Reth Node (IPC @ /home/nima/storage/samsung8tb/ethereum/reth/reth.ipc)
 │ - Dex/Other                   │
 └──────────────────────────────┘
         │
-        ├── (LP Approval, no simulation) ──────────────────────────────────────────────┐
+        ├── (tracked-pool LP approval to known router/Permit2, no simulation) ─────────┐
         │                                                                             │
         │                                        ┌──────────────────────────────────┐  │
         │                                        │  SignalManager (direct path)     │  │
@@ -423,7 +423,7 @@ Per‑pool simulation (CreatorTransaction)
 │  • TaxDetector                → HighTax / Honeypot signals                        │
 │  • TradingStatusDetector      → TradingEnabled signals                            │
 │  • LiquidityDetector          → Pool drain / scam detections                      │
-│  • LpApprovalDetector         → LP approvals (direct path or from results)       │
+│  • LpApprovalDetector         → tracked-pool LP approvals (direct path)          │
 │  → Publishes every signal via SignalPublisher                                     │
 └──────────────────────────────────────────────────────────────────────────────────┘
         │
@@ -468,7 +468,7 @@ mempool_signal_detector (Single Binary)
 │   ├── Trading Enabled (buy+sell OK)    ──▶ New tradeable tokens
 │   ├── Tax Signal (high tax/honeypot)   ──▶ Excessive fees or cannot sell
 │   ├── Liquidity/Scam Detection         ──▶ Pool drains (incl. dedicated removal)
-│   └── LP Approval Detection            ──▶ Creator approving router to spend LP tokens
+│   └── LP Approval Detection            ──▶ Any tracked pool holder approving routers
 │
 ├── 💾 TokenTrackingCache                ──▶ Comprehensive token data
 │   ├── Token information + simulation   ──▶ Full token state
@@ -530,7 +530,36 @@ simulation_manager.submit(request).await?;
 2. **TaxSignal**: HighTaxOrHoneypot (incl. cannot sell) or SuspiciousPattern
 3. **LiquidityRemoval**: ETH removed from pool (minor/significant/major)
 4. **ScamDetected**: Pool drain >60% or <0.3 ETH remaining
-5. **LpApproval**: Creator approves router to spend LP tokens
+5. **LpApproval**: Any tracked pool LP-token holder approves a known router or Permit2
+
+### **LP Approval Early-Warning Path**
+
+LP approvals are latency-sensitive because a pool holder can approve a router and
+remove liquidity seconds later. The router therefore has a direct fast path:
+
+- Detect `approve(spender, amount)` calls where `to` is a tracked pool/LP token.
+- Accept known router spenders from `reth_chain_query::common_addresses::ROUTERS`
+  plus Permit2.
+- Classify the transaction as `LiquidityPoolApproval` with `Critical` priority.
+- Publish immediately on ZMQ endpoint `tcp://127.0.0.1:5556`, topic
+  `lp_approval`, and write the DB/log record.
+- Do not run mempool simulation or buy/sell tests for LP approvals.
+
+The published signal is enriched from `TokenTrackingCache`: actual
+`token_address`, `pool_address`, `pool_type`, denom metadata, spender/router,
+approval amount, approval percentage when known, and owner/approver address.
+If the pool is missing from cache the transaction is not promoted to a signal;
+the miss is counted in the periodic LP approval diagnostics.
+
+### **V3 / V4 Liquidity Scope**
+
+- V2/Sushi LP approvals are actionable early sell signals because the pool token
+  is an ERC20 and router approval commonly precedes removal.
+- V3 positions do not always emit an ERC20 LP approval before removal. V3
+  `decreaseLiquidity` remains a direct liquidity-removal risk when it can be tied
+  to a tracked token or pool.
+- V4 support is partial. The processor detects obvious removal/modify-liquidity
+  intent, but V4 simulation and PnL should not be treated as validated yet.
 
 ## 🚀 Performance Characteristics
 
@@ -660,7 +689,7 @@ while True:
     elif topic == "scam_detection":
         print(f"🚨 Scam Detected: pool={signal['pool_address']} drained={signal['drain_percentage']}% remaining={signal['eth_remaining']} ETH")
     elif topic == "lp_approval":
-        print(f"⚠️ LP Approval: creator={signal['creator']} lp_token={signal['lp_token_address']} router={signal['router_address']}")
+        print(f"⚠️ LP Approval: approver={signal['approver_address']} token={signal['token_address']} pool={signal['pool_address']} router={signal['router_address']}")
 ```
 
 ## 📁 Project Structure

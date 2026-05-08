@@ -71,6 +71,8 @@ pub struct LiquidityRemovalSignal {
     pub remover_address: String,
     pub function_name: String,
     pub estimated_eth_removed: Option<f64>,
+    pub remaining_eth: Option<f64>,
+    pub removal_percentage: Option<f64>,
     pub timestamp: u64,
 }
 

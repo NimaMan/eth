@@ -5,7 +5,6 @@
 /// signal types without modifying multiple places.
 use alloy_primitives::U256;
 use eyre::Result;
-use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
@@ -153,16 +152,16 @@ impl UnifiedSignalWriter {
                         pool_type: s.pool_type.clone(),
                         change_type: crate::signal_detector::liquidity_detector::LiquidityChangeType::MajorRemoval,
                         eth_change: s.estimated_eth_removed.unwrap_or(0.0),
-                        percentage_change: 0.0, // We don't have this from LiquidityRemovalSignal
-                        remaining_liquidity: 0.0, // We don't have this from LiquidityRemovalSignal
+                        percentage_change: s.removal_percentage.unwrap_or(0.0),
+                        remaining_liquidity: s.remaining_eth.unwrap_or(0.0),
                         from_address: s.remover_address.clone(),
                         tx_hash: s.tx_hash.clone(),
                         details: format!("Function: {}", s.function_name),
                         eth_removed: s.estimated_eth_removed,
                         token_removed: None,
-                        remaining_eth: None,
+                        remaining_eth: s.remaining_eth,
                         remaining_token: None,
-                        removal_percentage: None,
+                        removal_percentage: s.removal_percentage,
                         creator_address: s.remover_address.clone(),
                     };
                     writer.write_signal(&liquidity_signal)?;
@@ -290,11 +289,20 @@ impl LiquidityRemovalSignalRecord {
             detection_timestamp: chrono::Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             liquidity_removed_denom: signal.estimated_eth_removed,
-            remaining_liquidity_denom: None,
-            pool_drain_risk_level: "HIGH".to_string(),
+            remaining_liquidity_denom: signal.remaining_eth,
+            removal_percentage: signal.removal_percentage,
+            pool_drain_risk_level: liquidity_removal_risk_label(signal.removal_percentage),
             creator_address: signal.remover_address.clone(),
             signal_source: "mempool".to_string(),
         }
+    }
+}
+
+fn liquidity_removal_risk_label(removal_percentage: Option<f64>) -> String {
+    match removal_percentage.unwrap_or(0.0) {
+        p if p > 50.0 => "DRAINING".to_string(),
+        p if p >= 20.0 => "SIGNIFICANT".to_string(),
+        _ => "LOW".to_string(),
     }
 }
 
@@ -312,21 +320,33 @@ impl LpApprovalSignalRecord {
         let unlimited = approval_pct
             .map(|pct| pct >= 99.99)
             .unwrap_or(is_unlimited_amount);
+        let approval_amount = if is_unlimited_amount {
+            None
+        } else {
+            Some(signal.amount.to_string())
+        };
 
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: DEFAULT_POOL_TYPE.to_string(),
-            denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
-            denom_currency: Some("WETH".to_string()),
+            pool_type: normalize_pool_type(&signal.pool_type),
+            denom_address: signal
+                .denom_address
+                .clone()
+                .unwrap_or_else(|| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+            denom_currency: signal
+                .denom_currency
+                .clone()
+                .or_else(|| Some("WETH".to_string())),
             detection_timestamp: chrono::Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             approved_spender: signal.router_address.clone(),
+            approval_amount,
             approval_percentage: approval_pct,
             is_unlimited_approval: unlimited,
             approval_type: "LP_TOKEN".to_string(),
             previous_allowance: signal.previous_allowance,
-            creator_address: signal.creator.clone(),
+            creator_address: signal.approver_address.clone(),
             signal_source: "mempool".to_string(),
         }
     }

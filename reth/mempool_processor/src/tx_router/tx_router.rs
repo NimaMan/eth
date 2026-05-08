@@ -1,11 +1,13 @@
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::Address as AlloyAddress;
+use alloy_primitives::{address, Address as AlloyAddress};
+use reth_chain_query::common_addresses::ROUTERS;
 use reth_chain_query::to_checksum_address;
 /// Main Transaction Router
 ///
 /// Routes transactions to appropriate simulation strategies based on their
 /// characteristics and assigns processing priorities
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::{ContractCreationRouter, CreatorTransactionRouter};
@@ -46,6 +48,14 @@ pub struct ClassificationResult {
     pub requires_buy_sell_test: bool,
 }
 
+/// Runtime counters for the direct LP approval path.
+#[derive(Debug, Clone, Default)]
+pub struct LpApprovalRouterStats {
+    pub router_approvals_seen: u64,
+    pub tracked_pool_approvals: u64,
+    pub pool_cache_misses: u64,
+}
+
 /// Simulation priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimulationPriority {
@@ -60,6 +70,9 @@ pub struct TransactionRouter {
     contract_router: ContractCreationRouter,
     creator_router: CreatorTransactionRouter,
     token_cache: Option<Arc<TokenTrackingCache>>,
+    lp_router_approvals_seen: AtomicU64,
+    lp_tracked_pool_approvals: AtomicU64,
+    lp_pool_cache_misses: AtomicU64,
 }
 
 impl TransactionRouter {
@@ -69,6 +82,17 @@ impl TransactionRouter {
             contract_router: ContractCreationRouter::new(),
             creator_router: CreatorTransactionRouter::new(token_cache.clone()),
             token_cache,
+            lp_router_approvals_seen: AtomicU64::new(0),
+            lp_tracked_pool_approvals: AtomicU64::new(0),
+            lp_pool_cache_misses: AtomicU64::new(0),
+        }
+    }
+
+    pub fn lp_approval_stats(&self) -> LpApprovalRouterStats {
+        LpApprovalRouterStats {
+            router_approvals_seen: self.lp_router_approvals_seen.load(Ordering::Relaxed),
+            tracked_pool_approvals: self.lp_tracked_pool_approvals.load(Ordering::Relaxed),
+            pool_cache_misses: self.lp_pool_cache_misses.load(Ordering::Relaxed),
         }
     }
 
@@ -84,6 +108,17 @@ impl TransactionRouter {
         if tx.to.is_none() || to_str == "0x0" || to_str.is_empty() {
             let result = self.classify_contract_creation(tx).await;
             return result;
+        }
+
+        if let Some(result) = self.classify_tracked_lp_approval(tx).await {
+            return result;
+        }
+
+        if matches!(
+            tx.function_category.as_ref(),
+            Some(CreatorFunctionType::LiquidityPoolApproval)
+        ) {
+            return self.classify_regular_transaction(tx).await;
         }
 
         // Check if from a known creator
@@ -144,6 +179,52 @@ impl TransactionRouter {
         result
     }
 
+    async fn classify_tracked_lp_approval(
+        &self,
+        tx: &MempoolTransaction,
+    ) -> Option<ClassificationResult> {
+        let spender = approval_spender(&tx.input)?;
+        if !is_known_lp_approval_spender(&spender) {
+            return None;
+        }
+
+        self.lp_router_approvals_seen
+            .fetch_add(1, Ordering::Relaxed);
+
+        let Some(ref cache) = self.token_cache else {
+            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
+        let Some(target_address) = tx
+            .to
+            .as_ref()
+            .map(|to| to_checksum_address(&AlloyAddress::from_slice(to)))
+        else {
+            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
+
+        let Some(pool) = cache.get_pool_by_address(&target_address).await else {
+            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
+
+        self.lp_tracked_pool_approvals
+            .fetch_add(1, Ordering::Relaxed);
+
+        Some(ClassificationResult {
+            category: TransactionCategory::CreatorTransaction {
+                creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+                target_address: pool.address.clone(),
+                target_token: Some(pool.token_address.clone()),
+                function_type: CreatorFunctionType::LiquidityPoolApproval,
+            },
+            priority: SimulationPriority::Critical,
+            requires_simulation: false,
+            requires_buy_sell_test: false,
+        })
+    }
+
     async fn tracked_liquidity_removal_token(&self, tx: &MempoolTransaction) -> Option<String> {
         let cache = self.token_cache.as_ref()?;
         for candidate in liquidity_removal_token_candidates(&tx.input) {
@@ -160,6 +241,9 @@ impl TransactionRouter {
             .to
             .as_ref()
             .map(|address| format!("0x{}", hex::encode(address)))?;
+        if let Some(pool) = cache.get_pool_by_address(&target).await {
+            return Some(pool.token_address.clone());
+        }
         cache
             .get_token(&target)
             .await
@@ -267,6 +351,7 @@ fn should_route_tracked_token_call(function_type: &CreatorFunctionType) -> bool 
             | CreatorFunctionType::TaxModification
             | CreatorFunctionType::MaxWalletLimit
             | CreatorFunctionType::OwnershipChange
+            | CreatorFunctionType::LiquidityPoolApproval
     )
 }
 
@@ -300,6 +385,18 @@ fn calldata_address_param(input: &[u8], param_idx: usize) -> Option<String> {
     Some(format!("0x{}", hex::encode(&input[start..end])))
 }
 
+fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
+    if input.len() < 68 || input.get(0..4)? != [0x09, 0x5e, 0xa7, 0xb3].as_slice() {
+        return None;
+    }
+    Some(AlloyAddress::from_slice(&input[16..36]))
+}
+
+fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
+    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
+        || ROUTERS.values().any(|router| router == spender)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -309,7 +406,7 @@ mod tests {
     use alloy_primitives::U256;
     use serde_json::json;
 
-    use super::{CreatorFunctionType, TransactionCategory, TransactionRouter};
+    use super::{CreatorFunctionType, SimulationPriority, TransactionCategory, TransactionRouter};
     use crate::mempool_fetcher::MempoolTransaction;
     use crate::token_tracking::types::PoolLifecycle;
     use crate::token_tracking::{
@@ -395,9 +492,150 @@ mod tests {
         }
     }
 
-    async fn hydrate_token(cache: &TokenTrackingCache, token_address: &str) {
-        let creator_address = "0x3333333333333333333333333333333333333333".to_string();
+    #[tokio::test]
+    async fn routes_tracked_lp_approval_from_non_creator_without_simulation() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let token_address = "0x1111111111111111111111111111111111111111".to_string();
         let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+        hydrate_token_with_pool(&cache, &token_address, &pool_address).await;
+
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes(&pool_address)),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(1_000_000u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert_eq!(classification.priority, SimulationPriority::Critical);
+        assert!(!classification.requires_simulation);
+        assert!(!classification.requires_buy_sell_test);
+        match classification.category {
+            TransactionCategory::CreatorTransaction {
+                target_address,
+                target_token,
+                function_type,
+                ..
+            } => {
+                assert_eq!(target_address, pool_address);
+                assert_eq!(target_token.as_deref(), Some(token_address.as_str()));
+                assert_eq!(function_type, CreatorFunctionType::LiquidityPoolApproval);
+            }
+            other => panic!("unexpected category: {other:?}"),
+        }
+
+        let stats = router.lp_approval_stats();
+        assert_eq!(stats.router_approvals_seen, 1);
+        assert_eq!(stats.tracked_pool_approvals, 1);
+        assert_eq!(stats.pool_cache_misses, 0);
+    }
+
+    #[tokio::test]
+    async fn counts_router_approval_pool_cache_miss() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x5555555555555555555555555555555555555555")),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(1u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert!(matches!(
+            classification.category,
+            TransactionCategory::Regular {
+                is_approval: true,
+                ..
+            }
+        ));
+
+        let stats = router.lp_approval_stats();
+        assert_eq!(stats.router_approvals_seen, 1);
+        assert_eq!(stats.tracked_pool_approvals, 0);
+        assert_eq!(stats.pool_cache_misses, 1);
+    }
+
+    #[tokio::test]
+    async fn does_not_promote_tracked_token_approval_as_lp_approval() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let token_address = "0x1111111111111111111111111111111111111111".to_string();
+        hydrate_token(&cache, &token_address).await;
+
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes(&token_address)),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(1u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::LiquidityPoolApproval),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert!(matches!(
+            classification.category,
+            TransactionCategory::Regular {
+                is_approval: true,
+                ..
+            }
+        ));
+        assert!(!classification.requires_simulation);
+        assert!(!classification.requires_buy_sell_test);
+
+        let stats = router.lp_approval_stats();
+        assert_eq!(stats.router_approvals_seen, 1);
+        assert_eq!(stats.tracked_pool_approvals, 0);
+        assert_eq!(stats.pool_cache_misses, 1);
+    }
+
+    async fn hydrate_token(cache: &TokenTrackingCache, token_address: &str) {
+        hydrate_token_with_pool(
+            cache,
+            token_address,
+            "0x4444444444444444444444444444444444444444",
+        )
+        .await;
+    }
+
+    async fn hydrate_token_with_pool(
+        cache: &TokenTrackingCache,
+        token_address: &str,
+        pool_address: &str,
+    ) {
+        let creator_address = "0x3333333333333333333333333333333333333333".to_string();
         let token = Token {
             address: token_address.to_string(),
             symbol: "TEST".to_string(),
@@ -422,7 +660,7 @@ mod tests {
             total_liquidity: 0.0,
         };
         let pool = Pool {
-            address: pool_address.clone(),
+            address: pool_address.to_string(),
             token_address: token_address.to_string(),
             pool_type: PoolType::UniswapV2,
             token_reserve: 1_000.0,
@@ -447,7 +685,7 @@ mod tests {
         };
 
         let mut pools = HashMap::new();
-        pools.insert(pool_address, pool);
+        pools.insert(pool_address.to_string(), pool);
         let mut data = HashMap::new();
         data.insert(token_address.to_string(), TokenWithPools { token, pools });
         cache
@@ -470,5 +708,14 @@ mod tests {
 
     fn address_bytes(address: &str) -> Vec<u8> {
         hex::decode(address.trim_start_matches("0x")).unwrap()
+    }
+
+    fn approve_calldata(spender: &str, amount: U256) -> Vec<u8> {
+        let mut input = hex::decode("095ea7b3").unwrap();
+        input.extend_from_slice(&[0u8; 12]);
+        input.extend_from_slice(&address_bytes(spender));
+        let amount_bytes = amount.to_be_bytes::<32>();
+        input.extend_from_slice(&amount_bytes);
+        input
     }
 }

@@ -12,10 +12,9 @@ use eyre::Result;
 /// separate tax_calculator modules.
 use std::sync::Arc;
 
-// Import from tx_processor
-use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
-    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+    LivePoolBuySellSimulator as TxLivePoolBuySellSimulator, PoolBuySellParameters,
+    PoolBuySellSimulationResult, PoolType,
 };
 use tx_simulator::TxSimulator;
 
@@ -24,8 +23,7 @@ pub type PoolSimulationResult = PoolBuySellSimulationResult;
 
 /// Wrapper around tx_processor's pool buy/sell simulator
 pub struct PoolBuySellSimulator {
-    tx_simulator: Arc<TxSimulator>,
-    tx_processor: Arc<TxProcessor>,
+    live_pool_simulator: TxLivePoolBuySellSimulator,
     default_buyer_address: Address,
     default_test_amount: U256,
     default_denom_address: Address,
@@ -36,7 +34,7 @@ impl PoolBuySellSimulator {
     /// Create a new pool buy/sell simulator
     pub fn new(reth_datadir: &str) -> Result<Self> {
         let tx_simulator = Arc::new(TxSimulator::new(reth_datadir)?);
-        let tx_processor = Arc::new(TxProcessor::new());
+        let live_pool_simulator = TxLivePoolBuySellSimulator::from_simulator(tx_simulator);
 
         // Default configuration
         let default_buyer_address = Address::from([
@@ -51,8 +49,7 @@ impl PoolBuySellSimulator {
         let default_denom_decimals = 18;
 
         Ok(Self {
-            tx_simulator,
-            tx_processor,
+            live_pool_simulator,
             default_buyer_address,
             default_test_amount,
             default_denom_address,
@@ -67,15 +64,14 @@ impl PoolBuySellSimulator {
         test_amount: U256,
     ) -> Result<Self> {
         let tx_simulator = Arc::new(TxSimulator::new(reth_datadir)?);
-        let tx_processor = Arc::new(TxProcessor::new());
+        let live_pool_simulator = TxLivePoolBuySellSimulator::from_simulator(tx_simulator);
         let default_denom_address = Address::from([
             0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
             0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
         ]);
 
         Ok(Self {
-            tx_simulator,
-            tx_processor,
+            live_pool_simulator,
             default_buyer_address: buyer_address,
             default_test_amount: test_amount,
             default_denom_address,
@@ -85,7 +81,7 @@ impl PoolBuySellSimulator {
 
     /// Create with existing TxSimulator (for database sharing)
     pub fn with_tx_simulator(tx_simulator: Arc<TxSimulator>) -> Result<Self> {
-        let tx_processor = Arc::new(TxProcessor::new());
+        let live_pool_simulator = TxLivePoolBuySellSimulator::from_simulator(tx_simulator);
 
         // Default configuration
         let default_buyer_address = Address::from([
@@ -99,8 +95,7 @@ impl PoolBuySellSimulator {
         ]);
 
         Ok(Self {
-            tx_simulator,
-            tx_processor,
+            live_pool_simulator,
             default_buyer_address,
             default_test_amount,
             default_denom_address,
@@ -114,15 +109,14 @@ impl PoolBuySellSimulator {
         buyer_address: Address,
         test_amount: U256,
     ) -> Result<Self> {
-        let tx_processor = Arc::new(TxProcessor::new());
+        let live_pool_simulator = TxLivePoolBuySellSimulator::from_simulator(tx_simulator);
         let default_denom_address = Address::from([
             0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
             0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
         ]);
 
         Ok(Self {
-            tx_simulator,
-            tx_processor,
+            live_pool_simulator,
             default_buyer_address: buyer_address,
             default_test_amount: test_amount,
             default_denom_address,
@@ -146,6 +140,7 @@ impl PoolBuySellSimulator {
             test_amount: self.default_test_amount,
             buyer_address: self.default_buyer_address,
             block_number,
+            block_header: None,
             gas_price: None,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
@@ -173,7 +168,7 @@ impl PoolBuySellSimulator {
         &self,
         config: PoolBuySellParameters,
     ) -> Result<PoolBuySellSimulationResult> {
-        check_can_buy_sell_pool(self.tx_simulator.clone(), self.tx_processor.clone(), config).await
+        self.live_pool_simulator.check_pool(config).await
     }
 
     /// Simulate buy/sell with custom configuration (alias for simulate_with_config)

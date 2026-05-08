@@ -310,6 +310,7 @@ impl SimulationManager {
                 buyer_address,
                 prior_txs: replay_sequence.to_vec(),
                 block_number: None,
+                block_header: None,
                 slippage_tolerance: 5.0,
                 gas_price: original_gas_price.map(|v| v as u128),
                 max_fee_per_gas: original_max_fee.map(|v| v as u128),

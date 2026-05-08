@@ -16,7 +16,7 @@ use tracing::{error, warn};
 use tx_processor::processed_tx_provider::ProcessedTxProvider;
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
 use tx_processor::ProcessedTransaction;
-use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_simulator::{LiveTxSimulator, TxSimulator, UnsignedTransaction};
 
 struct SimRequest {
     simulator: Arc<TxSimulator>,
@@ -105,13 +105,16 @@ struct PoolDrainInfo {
 
 pub struct LiquidityRemovalSimulator {
     simulator: Arc<TxSimulator>,
+    live_tx_simulator: LiveTxSimulator,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl LiquidityRemovalSimulator {
     pub fn new(simulator: Arc<TxSimulator>) -> Self {
+        let live_tx_simulator = LiveTxSimulator::from_simulator(simulator.clone());
         Self {
             simulator,
+            live_tx_simulator,
             token_cache: None,
         }
     }
@@ -183,8 +186,16 @@ impl LiquidityRemovalSimulator {
                 let lower = msg.to_lowercase();
                 if lower.contains("insufficient") || lower.contains("lack of funds") {
                     let from = unsigned_tx.from.unwrap_or_default();
-                    let sim_block = block_number
-                        .unwrap_or_else(|| self.simulator.get_latest_block().unwrap_or(0));
+                    let sim_block = match self.resolve_simulation_block_number(block_number).await {
+                        Ok(number) => number,
+                        Err(err) => {
+                            warn!(
+                                "Failed to resolve live simulation block for diagnostics: {}",
+                                err
+                            );
+                            0
+                        }
+                    };
                     if sim_block > 0 {
                         if let Ok(rqp) = RethQueryProvider::with_simulator(self.simulator.clone()) {
                             // Gather diagnostics
@@ -391,10 +402,7 @@ impl LiquidityRemovalSimulator {
         const RETRY_DELAY_MS: u64 = 150;
 
         let mut attempt = 0usize;
-        let resolved_block = match block_number {
-            Some(number) => number,
-            None => self.simulator.get_latest_block()?,
-        };
+        let resolved_block = self.resolve_simulation_block_number(block_number).await?;
         let mut header_base_fee: Option<u128> = None;
         let mut adjusted_for_base_fee = false;
 
@@ -464,6 +472,13 @@ impl LiquidityRemovalSimulator {
             .load_block_header(block_number, None)
             .await?;
         Ok(header.header().base_fee_per_gas.map(|fee| fee as u128))
+    }
+
+    async fn resolve_simulation_block_number(&self, block_number: Option<u64>) -> Result<u64> {
+        match block_number {
+            Some(number) => Ok(number),
+            None => self.live_tx_simulator.latest_state_block_number().await,
+        }
     }
 
     fn is_missing_header_error(err: &eyre::Report) -> bool {

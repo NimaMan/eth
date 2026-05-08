@@ -1,6 +1,7 @@
 use crate::config::TaxDetectionConfig;
 use crate::signal_publisher::SignalPublisher;
 use crate::simulator::SimulationResult;
+use crate::token_tracking::types::PoolType;
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{Address, U256};
 use reth_chain_query::to_checksum_address;
@@ -214,7 +215,8 @@ impl SignalManager {
                         .map(|tax| format!("{:.1}%", tax))
                         .unwrap_or_else(|| "None".to_string());
 
-                    format!("[{}] SIGNAL_DETECTED | TAX_SIGNAL | {} | token: {} | pool: {} | buy_tax: {} | sell_tax: {} | type: {}",
+                    format!(
+                        "[{}] SIGNAL_DETECTED | TAX_SIGNAL | {} | token: {} | pool: {} | buy_tax: {} | sell_tax: {} | type: {}",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                         s.tx_hash,
                         s.token_address,
@@ -225,7 +227,8 @@ impl SignalManager {
                     )
                 }
                 Signal::ScamDetection(s) => {
-                    format!("[{}] SIGNAL_DETECTED | SCAM_DETECTION | {} | pool: {} | token: {} | scammer: {} | eth_drained: {:.4} | drain_%: {:.1}%",
+                    format!(
+                        "[{}] SIGNAL_DETECTED | SCAM_DETECTION | {} | pool: {} | token: {} | scammer: {} | eth_drained: {:.4} | drain_%: {:.1}%",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                         s.tx_hash,
                         s.pool_address,
@@ -675,6 +678,8 @@ impl SignalManager {
                     }
                     .to_string(),
                     estimated_eth_removed: Some(liq_signal.eth_change.abs()),
+                    remaining_eth: Some(liq_signal.remaining_liquidity),
+                    removal_percentage: Some(liq_signal.percentage_change),
                     timestamp: chrono::Utc::now().timestamp() as u64,
                 };
                 self.log_activity(
@@ -742,7 +747,7 @@ impl SignalManager {
         &mut self,
         tx: &crate::mempool_fetcher::MempoolTransaction,
         category: &crate::tx_router::TransactionCategory,
-    ) {
+    ) -> bool {
         // Check for LP approval
         if let Some(lp_signal) = self
             .lp_approval_detector
@@ -753,16 +758,35 @@ impl SignalManager {
                 // Create an LP approval signal
                 let mut enriched_signal = lp_signal.clone();
 
-                // Compute approval percentage using cached pool data if available
-                if let Some(ref token_cache) = self.token_cache {
-                    if let Some(pool_state) = token_cache
-                        .get_pool_by_address(&lp_signal.lp_token_address)
-                        .await
-                    {
-                        if let Some(pct) = pool_state.lp_tokens_approved_percentage {
-                            enriched_signal.approval_percentage = Some(pct.min(100.0));
-                        }
-                    }
+                // LP approvals are actionable only when the LP token is a tracked pool.
+                // Refuse un-enriched signals to keep regular ERC20 approvals out of
+                // the liquidity-removal early-warning stream.
+                let Some(ref token_cache) = self.token_cache else {
+                    warn!(
+                        "LP approval {} cannot be published without TokenTrackingCache enrichment",
+                        lp_signal.tx_hash
+                    );
+                    return false;
+                };
+                let Some(pool_state) = token_cache
+                    .get_pool_by_address(&lp_signal.pool_address)
+                    .await
+                else {
+                    warn!(
+                        "LP approval {} passed routing but pool {} was not found in cache during enrichment",
+                        lp_signal.tx_hash, lp_signal.pool_address
+                    );
+                    return false;
+                };
+
+                enriched_signal.token_address = pool_state.token_address.clone();
+                enriched_signal.pool_address = pool_state.address.clone();
+                enriched_signal.lp_token_address = pool_state.address.clone();
+                enriched_signal.pool_type = pool_type_label(&pool_state.pool_type);
+                enriched_signal.denom_address = Some(pool_state.denom_address.clone());
+                enriched_signal.denom_currency = Some(pool_state.denom_currency.clone());
+                if let Some(pct) = pool_state.lp_tokens_approved_percentage {
+                    enriched_signal.approval_percentage = Some(pct.min(100.0));
                 }
 
                 // Fallback: treat max approval as 100%
@@ -781,14 +805,26 @@ impl SignalManager {
                 let mut pub_guard = publisher.lock().await;
                 if let Err(e) = pub_guard.publish(signal.clone()).await {
                     error!("Failed to publish LP approval signal: {}", e);
+                    return false;
                 } else {
                     info!(
                         "Successfully published LP approval signal for {}",
                         enriched_signal.tx_hash
                     );
+                    return true;
                 }
             }
-        } else {
         }
+        false
     }
+}
+
+fn pool_type_label(pool_type: &PoolType) -> String {
+    match pool_type {
+        PoolType::UniswapV2 => "UNISWAP-V2",
+        PoolType::UniswapV3 => "UNISWAP-V3",
+        PoolType::UniswapV4 => "UNISWAP-V4",
+        PoolType::Unknown => "UNKNOWN",
+    }
+    .to_string()
 }

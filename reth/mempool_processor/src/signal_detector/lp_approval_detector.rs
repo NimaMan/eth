@@ -1,29 +1,15 @@
 /// LP Token Approval Detector
 ///
-/// Detects when token creators approve routers to spend their LP tokens,
+/// Detects when LP token holders approve routers to spend their LP tokens,
 /// which is typically the precursor to a rug pull (liquidity removal)
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::TransactionCategory;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{address, Address, U256};
 use chrono::Utc;
-use lazy_static::lazy_static;
-use reth_chain_query::common_addresses::get_address_by_name;
+use reth_chain_query::common_addresses::ROUTERS;
+use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::Path;
-
-lazy_static! {
-    static ref KNOWN_ROUTER_ADDRESSES: HashSet<Address> = {
-        let mut set = HashSet::new();
-        const ROUTER_NAMES: [&str; 2] = ["UniswapV2Router02", "SushiSwapRouter"];
-        for name in ROUTER_NAMES {
-            if let Some(address) = get_address_by_name(name) {
-                set.insert(address);
-            }
-        }
-        set
-    };
-}
 
 /// Custom serialization for U256
 mod u256_serde {
@@ -50,6 +36,7 @@ mod u256_serde {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LpApprovalSignal {
     pub tx_hash: String,
+    /// Backward-compatible alias for the LP token approver.
     pub creator: String,
     pub lp_token_address: String,
     pub router_address: String,
@@ -59,9 +46,13 @@ pub struct LpApprovalSignal {
     // Additional fields for database
     pub token_address: String,
     pub pool_address: String,
+    pub pool_type: String,
+    pub denom_address: Option<String>,
+    pub denom_currency: Option<String>,
     pub spender_address: String,
     pub approval_percentage: Option<f64>,
     pub previous_allowance: Option<f64>,
+    pub approver_address: String,
     pub creator_address: String,
 }
 
@@ -101,38 +92,47 @@ impl LpApprovalDetector {
         // Extract amount from calldata
         let amount = U256::from_be_slice(&tx.input[36..68]);
 
-        if !KNOWN_ROUTER_ADDRESSES.contains(&router_address) {
+        if !is_known_lp_approval_spender(&router_address) {
             return None;
         }
 
-        let router_hex = format!("0x{}", hex::encode(router_address));
+        let router_hex = to_checksum_address(&router_address);
 
-        // Derive creator and LP token address directly from transaction fields
-        let creator = format!("0x{}", hex::encode(&tx.from));
+        // Derive approver and LP token address directly from transaction fields.
+        let approver = to_checksum_address(&Address::from_slice(&tx.from));
         let lp_token_address = tx
             .to
             .as_ref()
-            .map(|t| format!("0x{}", hex::encode(t)))
+            .map(|t| to_checksum_address(&Address::from_slice(t)))
             .unwrap_or_else(|| "unknown".to_string());
 
         let signal = LpApprovalSignal {
             tx_hash: tx.hash.clone(),
-            creator: creator.clone(),
+            creator: approver.clone(),
             lp_token_address: lp_token_address.clone(),
             router_address: router_hex.clone(),
             amount,
             timestamp: Utc::now().timestamp(),
             // Additional fields for database
-            token_address: lp_token_address.clone(), // Will be resolved to actual token via LP token
-            pool_address: lp_token_address.clone(),  // LP token address IS the pool address
+            token_address: lp_token_address.clone(), // Resolved to actual token by SignalManager
+            pool_address: lp_token_address.clone(),  // LP token address is the V2 pool address
+            pool_type: "UNKNOWN".to_string(),
+            denom_address: None,
+            denom_currency: None,
             spender_address: router_hex.clone(),
             approval_percentage: None,
             previous_allowance: None,
-            creator_address: creator.clone(),
+            approver_address: approver.clone(),
+            creator_address: approver.clone(),
         };
 
         Some(signal)
     }
     /// Log database write for tracking
     pub fn log_db_write(&mut self, _signal: &LpApprovalSignal, _success: bool) {}
+}
+
+fn is_known_lp_approval_spender(spender: &Address) -> bool {
+    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
+        || ROUTERS.values().any(|router| router == spender)
 }
