@@ -12,7 +12,7 @@ server stops or when the run is removed in a later lifecycle endpoint.
 ## Run
 
 ```bash
-cd /home/nima/code/crypto/blockchains/eth/reth
+cd /home/nima/code/crypto/blockchains/eth
 RUST_LOG=info cargo run -p eth_token_server
 ```
 
@@ -50,7 +50,7 @@ To override the traced `ProcessedBlock` disk cache location, set
 `PROCESSED_BLOCK_DISK_CACHE_DIR` in `config.env`.
 
 The cache stores a sparse token-analysis subset of traced `ProcessedBlock`s as
-`bincode` compressed with `zstd`: block header, only non-empty token-relevant
+JSON compressed with `zstd`: block header, only non-empty token-relevant
 processed transaction fields, original calldata/gas replay fields, and
 per-transaction processing errors. Full traces, receipts, raw metadata, state
 maps, empty event families, and unrelated decoded event families are not
@@ -104,8 +104,8 @@ The inspector should use the view DTOs exposed by this server:
 - `GET /runs/:id/tokens/:address` returns `TokenDetailResponse` with:
   - `token`: full cloned `ERC20Token` state for debugging and exploratory inspection.
   - `summary`: compact token summary.
-  - `pools`: frontend-facing `PoolView` rows for the token's V2 pools.
-- `GET /runs/:id/pools` returns all tracked V2 pools as the same `PoolView` rows.
+  - `pools`: frontend-facing `PoolView` rows for the token's tracked pools.
+- `GET /runs/:id/pools` returns all tracked pools as the same `PoolView` rows.
 - `GET /live/tokens` and `GET /live/pools` return the same token and pool row DTOs for the live tracker.
 
 Prefer the explicit `pools` array for UI rendering. The raw `token.v2_pools`
@@ -128,7 +128,7 @@ V2 LP state. The LP fields are intended for the token detail page:
 
 Known server exposure gaps:
 
-- No V3/V4 pool rows yet.
+- V3/V4 rows are exposed, but V4 pools use a composite `pool_address` of `pool_manager#pool_id` because a V4 pool is not an ERC-20-style pool contract address.
 - No token snapshot DTO matching Python `build_token_snapshot` yet.
 - Token tax/max-buy event fields are not exposed because Rust token state does not track them yet.
 - Denom symbols/names and cross-pool liquidity matrix/best-price views are not exposed yet.

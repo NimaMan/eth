@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+
+use eth_token::contract_analysis::{analyze_erc20_token, ContractAnalysisReport};
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::manager::TrackedTokenStatus;
 use serde::Serialize;
@@ -28,6 +31,8 @@ pub struct TokenView {
     pub latest_block: Option<u64>,
     pub latest_timestamp: Option<u64>,
     pub pool_count: usize,
+    pub protocols: Vec<String>,
+    pub pool_count_by_protocol: BTreeMap<String, usize>,
     pub has_pools: bool,
     pub is_scam: bool,
     pub scam_label: Option<String>,
@@ -36,6 +41,7 @@ pub struct TokenView {
     pub unique_address_count: usize,
     pub current_owner: Option<String>,
     pub ownership_renounced: bool,
+    pub contract_analysis: ContractAnalysisReport,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -46,10 +52,19 @@ pub struct TokenDetailResponse {
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
     pub network: TokenNetworkView,
+    pub contract_analysis: ContractAnalysisReport,
 }
 
 impl TokenView {
     pub fn from_token(token: &ERC20Token, index_status: Option<TrackedTokenStatus>) -> Self {
+        let summary = token.get_token_summary();
+        let mut pool_count_by_protocol = BTreeMap::new();
+        for pool in token.all_pool_bases() {
+            *pool_count_by_protocol
+                .entry(pool.identity.protocol.clone())
+                .or_insert(0) += 1;
+        }
+
         Self {
             contract_address: token.contract_address.clone(),
             name: token.name.clone(),
@@ -65,6 +80,8 @@ impl TokenView {
             latest_block: token.latest_block_number,
             latest_timestamp: token.latest_block_timestamp,
             pool_count: token.pool_count(),
+            protocols: summary.protocols,
+            pool_count_by_protocol,
             has_pools: token.has_pool(),
             is_scam: token.is_scam(),
             scam_label: token.scam_label(),
@@ -73,6 +90,7 @@ impl TokenView {
             unique_address_count: token.unique_addresses().len(),
             current_owner: token.current_owner(),
             ownership_renounced: token.ownership_renounced(),
+            contract_analysis: analyze_erc20_token(token),
         }
     }
 }
@@ -108,6 +126,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let index_status = index_status(&state, &address);
     let network = TokenNetworkView::from_graph(token, state.processor.network_graphs.get(&address));
     let pools = PoolView::from_token_pools(token);
+    let contract_analysis = analyze_erc20_token(token);
 
     Some(TokenDetailResponse {
         run_id: run.id.clone(),
@@ -116,6 +135,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
         index_status,
         pools,
         network,
+        contract_analysis,
     })
 }
 

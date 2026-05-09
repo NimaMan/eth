@@ -585,11 +585,11 @@ impl LiveTokenRuntime {
         let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
         let block_transaction_count = loaded.block.transactions.len();
         let tracked_tokens_before = processor.registry().tokens.len();
-        let tracked_v2_pools_before: usize = processor
+        let tracked_pools_before: usize = processor
             .registry()
             .tokens
             .values()
-            .map(|token| token.pool_addresses().len())
+            .map(|token| token.pool_count())
             .sum();
         let block_source = loaded.source;
         let report = match tokio::time::timeout(
@@ -605,13 +605,13 @@ impl LiveTokenRuntime {
             Ok(report) => report,
             Err(_) => {
                 let message = format!(
-                    "live token block apply timed out after {} ms at block {} source={} txs={} tracked_tokens_before={} tracked_v2_pools_before={}",
+                    "live token block apply timed out after {} ms at block {} source={} txs={} tracked_tokens_before={} tracked_pools_before={}",
                     self.inner.config.block_apply_timeout_ms,
                     block_number,
                     block_source,
                     block_transaction_count,
                     tracked_tokens_before,
-                    tracked_v2_pools_before
+                    tracked_pools_before
                 );
                 tracing::error!(
                     target: LIVE_TOKEN_TRACKER_LOG_TARGET,
@@ -620,7 +620,7 @@ impl LiveTokenRuntime {
                     source = block_source,
                     txs = block_transaction_count,
                     tracked_tokens_before,
-                    tracked_v2_pools_before,
+                    tracked_pools_before,
                     timeout_ms = self.inner.config.block_apply_timeout_ms,
                     upstream_ms = loaded.upstream_ms,
                     disk_cache_hit = loaded.disk_cache_hit,
@@ -686,7 +686,10 @@ impl LiveTokenRuntime {
                 txs_processed = state.progress.txs_processed,
                 tx_failures = state.progress.tx_failures,
                 tracked_tokens = state.progress.tracked_tokens,
+                tracked_pools = state.progress.tracked_pools,
                 tracked_v2_pools = state.progress.tracked_v2_pools,
+                tracked_v3_pools = state.progress.tracked_v3_pools,
+                tracked_v4_pools = state.progress.tracked_v4_pools,
                 block_source = ?state.progress.last_block_source,
                 disk_cache_hits = state.progress.processed_block_disk_cache_hits,
                 disk_cache_misses = state.progress.processed_block_disk_cache_misses,
@@ -710,7 +713,10 @@ impl LiveTokenRuntime {
             target: LIVE_TOKEN_TRACKER_LOG_TARGET,
             live_id = ?state.progress.id,
             tracked_tokens = state.progress.tracked_tokens,
+            tracked_pools = state.progress.tracked_pools,
             tracked_v2_pools = state.progress.tracked_v2_pools,
+            tracked_v3_pools = state.progress.tracked_v3_pools,
+            tracked_v4_pools = state.progress.tracked_v4_pools,
             "live token runtime warmup completed; entering live tail"
         );
         drop(state);
@@ -754,7 +760,10 @@ impl LiveTokenRuntime {
             txs_processed = state.progress.txs_processed,
             tx_failures = state.progress.tx_failures,
             tracked_tokens = state.progress.tracked_tokens,
+            tracked_pools = state.progress.tracked_pools,
             tracked_v2_pools = state.progress.tracked_v2_pools,
+            tracked_v3_pools = state.progress.tracked_v3_pools,
+            tracked_v4_pools = state.progress.tracked_v4_pools,
             block_source = ?state.progress.last_block_source,
             last_block_upstream_ms = ?state.progress.last_block_upstream_ms,
             last_block_token_apply_ms = ?state.progress.last_block_token_apply_ms,
@@ -862,6 +871,8 @@ fn apply_report(
     state.updated_tokens.extend(updated_tokens.clone());
 
     let mut updated_v2_pools = Vec::new();
+    let mut updated_v3_pools = Vec::new();
+    let mut updated_v4_pools = Vec::new();
     for update in report.token_updates {
         state
             .discovered_v2_pools
@@ -870,9 +881,27 @@ fn apply_report(
         state
             .updated_v2_pools
             .extend(update.updated_uniswap_v2_pools);
+        state
+            .discovered_v3_pools
+            .extend(update.discovered_uniswap_v3_pools);
+        updated_v3_pools.extend(update.updated_uniswap_v3_pools.clone());
+        state
+            .updated_v3_pools
+            .extend(update.updated_uniswap_v3_pools);
+        state
+            .discovered_v4_pools
+            .extend(update.discovered_uniswap_v4_pools);
+        updated_v4_pools.extend(update.updated_uniswap_v4_pools.clone());
+        state
+            .updated_v4_pools
+            .extend(update.updated_uniswap_v4_pools);
     }
     updated_v2_pools.sort();
     updated_v2_pools.dedup();
+    updated_v3_pools.sort();
+    updated_v3_pools.dedup();
+    updated_v4_pools.sort();
+    updated_v4_pools.dedup();
 
     for error in report.transaction_errors {
         state.errors.push(LiveTokenError {
@@ -894,14 +923,25 @@ fn apply_report(
     state.progress.updated_tokens_unique = state.updated_tokens.len();
     state.progress.discovered_v2_pools_unique = state.discovered_v2_pools.len();
     state.progress.updated_v2_pools_unique = state.updated_v2_pools.len();
+    state.progress.discovered_v3_pools_unique = state.discovered_v3_pools.len();
+    state.progress.updated_v3_pools_unique = state.updated_v3_pools.len();
+    state.progress.discovered_v4_pools_unique = state.discovered_v4_pools.len();
+    state.progress.updated_v4_pools_unique = state.updated_v4_pools.len();
     state.progress.tracked_tokens = state.processor.registry().tokens.len();
     state.progress.indexed_tokens = state.processor.block_processor().token_index.entries.len();
-    state.progress.indexed_v2_pools = state
+    state.progress.indexed_pools = state
         .processor
         .block_processor()
         .token_index
         .pool_to_token
         .len();
+    state.progress.indexed_v2_pools = state
+        .processor
+        .registry()
+        .tokens
+        .values()
+        .map(|token| token.v2_pools.len())
+        .sum();
     state.progress.tracked_v2_pools = state
         .processor
         .registry()
@@ -909,12 +949,37 @@ fn apply_report(
         .values()
         .map(|token| token.v2_pools.len())
         .sum();
+    state.progress.indexed_v3_pools = state
+        .processor
+        .registry()
+        .tokens
+        .values()
+        .map(|token| token.v3_pools.len())
+        .sum();
+    state.progress.tracked_v3_pools = state.progress.indexed_v3_pools;
+    state.progress.indexed_v4_pools = state
+        .processor
+        .registry()
+        .tokens
+        .values()
+        .map(|token| token.v4_pools.len())
+        .sum();
+    state.progress.tracked_v4_pools = state.progress.indexed_v4_pools;
+    state.progress.tracked_pools = state
+        .processor
+        .registry()
+        .tokens
+        .values()
+        .map(|token| token.pool_count())
+        .sum();
 
     LiveTokenEvent::BlockApplied {
         block_number,
         block_hash,
         updated_tokens,
         updated_v2_pools,
+        updated_v3_pools,
+        updated_v4_pools,
     }
 }
 

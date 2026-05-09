@@ -15,6 +15,10 @@ pub struct LiveTokenState {
     pub updated_tokens: BTreeSet<String>,
     pub discovered_v2_pools: BTreeSet<String>,
     pub updated_v2_pools: BTreeSet<String>,
+    pub discovered_v3_pools: BTreeSet<String>,
+    pub updated_v3_pools: BTreeSet<String>,
+    pub discovered_v4_pools: BTreeSet<String>,
+    pub updated_v4_pools: BTreeSet<String>,
     pub last_retention_report: Option<LiveTokenRetentionReport>,
 }
 
@@ -28,6 +32,10 @@ impl LiveTokenState {
             updated_tokens: BTreeSet::new(),
             discovered_v2_pools: BTreeSet::new(),
             updated_v2_pools: BTreeSet::new(),
+            discovered_v3_pools: BTreeSet::new(),
+            updated_v3_pools: BTreeSet::new(),
+            discovered_v4_pools: BTreeSet::new(),
+            updated_v4_pools: BTreeSet::new(),
             last_retention_report: None,
         }
     }
@@ -42,6 +50,10 @@ impl LiveTokenState {
             updated_tokens: BTreeSet::new(),
             discovered_v2_pools: BTreeSet::new(),
             updated_v2_pools: BTreeSet::new(),
+            discovered_v3_pools: BTreeSet::new(),
+            updated_v3_pools: BTreeSet::new(),
+            discovered_v4_pools: BTreeSet::new(),
+            updated_v4_pools: BTreeSet::new(),
             last_retention_report: None,
         }
     }

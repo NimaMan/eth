@@ -13,6 +13,8 @@ pub enum LiveTokenEvent {
         block_hash: String,
         updated_tokens: Vec<String>,
         updated_v2_pools: Vec<String>,
+        updated_v3_pools: Vec<String>,
+        updated_v4_pools: Vec<String>,
     },
     RuntimeLive {
         id: String,
