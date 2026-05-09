@@ -44,3 +44,6 @@ clap = { version = "4.0", features = ["derive", "env"] }
 
 # Testing
 tokio-test = "0.4"
+
+[profile.release]
+lto = "thin"

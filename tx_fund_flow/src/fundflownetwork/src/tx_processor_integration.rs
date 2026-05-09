@@ -150,10 +150,11 @@ mod tests {
             0,
             Address::from([1u8; 20]),
             Some(Address::from([2u8; 20])),
-            Address::ZERO,
             U256::from(1_000_000_000_000_000_000u128), // 1 ETH
-            "1".to_string(),
+            true,
             0,
+            0,
+            Vec::new(),
         );
 
         // Add gas fees

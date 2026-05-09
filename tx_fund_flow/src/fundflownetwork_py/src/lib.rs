@@ -1,10 +1,15 @@
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
+use pyo3::exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use std::collections::HashMap;
+use serde_json::json;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+use tx_fund_flow_fundflownetwork::graph_discovery::{
+    DiscoveryConfig, DiscoveryOutput, GraphExplorer,
+};
 
 /// Python wrapper for FundFlowNetwork builder
 #[pyclass]
@@ -58,45 +63,39 @@ impl PyFundFlowNetworkBuilder {
         max_nodes: usize,
         include_tokens: bool,
     ) -> PyResult<PyObject> {
-        let address = Address::from_str(&seed_address).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Invalid Ethereum address: {}",
-                e
-            ))
-        })?;
+        let address = parse_address(&seed_address)?;
+        let min_value_wei = eth_to_wei(min_value_eth)?;
+        if max_depth == 0 {
+            return Err(PyValueError::new_err("max_depth must be at least 1"));
+        }
+        if max_nodes == 0 {
+            return Err(PyValueError::new_err("max_nodes must be at least 1"));
+        }
 
         let db_url = self.database_url.clone();
+        let config = DiscoveryConfig {
+            max_depth,
+            max_nodes,
+            min_value_wei,
+            max_txs_per_address: 100,
+            max_block_number: None,
+        };
 
-        // Run async work in the runtime
         let result = self
             .runtime
             .block_on(async move {
-                // Create database connection
-                let _db_pool = sqlx::PgPool::connect(&db_url)
+                let db_pool = sqlx::PgPool::connect(&db_url)
                     .await
                     .map_err(|e| format!("Database connection failed: {}", e))?;
-
-                // Build the network using Layer 1 (graph exploration)
-                let mut network = FundFlowNetwork::new();
-
-                // TODO: Implement actual network building logic
-                // This is a placeholder - integrate with actual fundflownetwork module
-
-                // For now, create a simple example network
-                network.add_node(
-                    address,
-                    HashMap::from([
-                        ("label".to_string(), "Seed Address".to_string()),
-                        ("entity_type".to_string(), "Unknown".to_string()),
-                    ]),
-                );
-
-                Ok::<serde_json::Value, String>(network.to_cytoscape_json())
+                let explorer = GraphExplorer::new(db_pool);
+                explorer
+                    .explore(address, config, &HashSet::new())
+                    .await
+                    .map_err(|e| format!("Graph discovery failed: {}", e))
             })
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))?;
+            .map_err(PyRuntimeError::new_err)?;
 
-        // Convert JSON to Python dict
-        let py_dict = json_to_pyobject(py, &result)?;
+        let py_dict = json_to_pyobject(py, &discovery_to_cytoscape_json(&result, include_tokens))?;
         Ok(py_dict)
     }
 
@@ -112,22 +111,16 @@ impl PyFundFlowNetworkBuilder {
     #[pyo3(signature = (network, address, depth=1))]
     fn expand_node(
         &self,
-        py: Python<'_>,
         network: &Bound<'_, PyDict>,
         address: String,
         depth: u32,
     ) -> PyResult<PyObject> {
-        let addr = Address::from_str(&address).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Invalid Ethereum address: {}",
-                e
-            ))
-        })?;
-
-        // TODO: Implement node expansion logic
-
-        // For now, return the same network
-        Ok(network.to_object(py))
+        let _ = network;
+        let _address = parse_address(&address)?;
+        Err(PyNotImplementedError::new_err(format!(
+            "incremental expansion is not wired to persisted discovery state yet; requested depth={}",
+            depth
+        )))
     }
 
     /// Get fund flow insights for an address
@@ -139,30 +132,12 @@ impl PyFundFlowNetworkBuilder {
     /// Returns:
     ///     Dictionary with upstream sources and downstream sinks
     #[pyo3(signature = (address, lookback_blocks=10000))]
-    fn get_fund_flow_insights(
-        &self,
-        py: Python<'_>,
-        address: String,
-        lookback_blocks: u64,
-    ) -> PyResult<PyObject> {
-        let addr = Address::from_str(&address).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Invalid Ethereum address: {}",
-                e
-            ))
-        })?;
-
-        let insights = PyDict::new_bound(py);
-
-        // TODO: Implement actual insights calculation
-        insights.set_item("address", address)?;
-        insights.set_item("upstream_sources", PyList::empty_bound(py))?;
-        insights.set_item("downstream_sinks", PyList::empty_bound(py))?;
-        insights.set_item("total_inflow_eth", 0.0)?;
-        insights.set_item("total_outflow_eth", 0.0)?;
-        insights.set_item("net_flow_eth", 0.0)?;
-
-        Ok(insights.to_object(py))
+    fn get_fund_flow_insights(&self, address: String, lookback_blocks: u64) -> PyResult<PyObject> {
+        let _address = parse_address(&address)?;
+        Err(PyNotImplementedError::new_err(format!(
+            "fund-flow insight aggregation needs processed transaction flow extraction; requested lookback_blocks={}",
+            lookback_blocks
+        )))
     }
 
     /// Export network to different formats
@@ -182,15 +157,12 @@ impl PyFundFlowNetworkBuilder {
     ) -> PyResult<PyObject> {
         match format {
             "cytoscape" => Ok(network.to_object(py)), // Already in Cytoscape format
-            "visjs" => {
-                // TODO: Convert to VisJS format
-                Ok(network.to_object(py))
-            }
-            "graphml" => {
-                // TODO: Convert to GraphML format
-                let graphml = "<graphml><!-- Network data --></graphml>";
-                Ok(graphml.to_object(py))
-            }
+            "visjs" => Err(PyNotImplementedError::new_err(
+                "visjs export requires a typed FundFlowNetwork, not a Python dict",
+            )),
+            "graphml" => Err(PyNotImplementedError::new_err(
+                "graphml export requires a typed FundFlowNetwork, not a Python dict",
+            )),
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Unknown export format: {}. Use 'cytoscape', 'visjs', or 'graphml'",
                 format
@@ -231,36 +203,83 @@ fn json_to_pyobject(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObj
     }
 }
 
-// Placeholder for FundFlowNetwork (should come from tx_fund_flow-fundflownetwork)
-struct FundFlowNetwork {
-    nodes: Vec<HashMap<String, String>>,
-    edges: Vec<HashMap<String, String>>,
+fn parse_address(value: &str) -> PyResult<Address> {
+    Address::from_str(value).map_err(|e| PyValueError::new_err(format!("Invalid address: {}", e)))
 }
 
-impl FundFlowNetwork {
-    fn new() -> Self {
-        Self {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        }
+fn eth_to_wei(value: f64) -> PyResult<U256> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(PyValueError::new_err(
+            "min_value_eth must be a finite non-negative number",
+        ));
     }
 
-    fn add_node(&mut self, address: Address, metadata: HashMap<String, String>) {
-        let mut node = metadata;
-        node.insert("id".to_string(), format!("{:?}", address));
-        self.nodes.push(node);
+    let wei = value * 1_000_000_000_000_000_000_f64;
+    if wei > u128::MAX as f64 {
+        return Err(PyValueError::new_err("min_value_eth is too large"));
     }
 
-    fn to_cytoscape_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "stats": {
-                "total_nodes": self.nodes.len(),
-                "total_edges": self.edges.len(),
-            }
-        })
+    Ok(U256::from(wei.round() as u128))
+}
+
+fn discovery_to_cytoscape_json(
+    output: &DiscoveryOutput,
+    include_tokens_requested: bool,
+) -> serde_json::Value {
+    let mut elements = Vec::new();
+
+    for node in output.graph.nodes.values() {
+        let address = format!("{:?}", node.address);
+        let label = node
+            .name
+            .as_deref()
+            .or(node.entity_type.as_deref())
+            .unwrap_or(&address);
+        elements.push(json!({
+            "data": {
+                "id": address,
+                "label": label,
+                "address": address,
+                "entity_type": node.entity_type,
+                "is_contract": node.is_contract,
+                "explored": node.explored,
+                "exploration_depth": node.exploration_depth,
+                "first_seen_block": node.first_seen_block,
+            },
+            "classes": if node.is_contract { "contract" } else { "eoa" },
+        }));
     }
+
+    for edge in &output.graph.edges {
+        let source = format!("{:?}", edge.node1);
+        let target = format!("{:?}", edge.node2);
+        elements.push(json!({
+            "data": {
+                "id": format!("{:?}-{}-{}", edge.tx_hash, source, target),
+                "source": source,
+                "target": target,
+                "tx_hash": format!("{:?}", edge.tx_hash),
+                "value_wei": edge.value.to_string(),
+                "block_number": edge.block_number,
+            },
+            "classes": "observed-transaction",
+        }));
+    }
+
+    json!({
+        "elements": elements,
+        "layout": {
+            "name": "cose",
+            "animate": false,
+        },
+        "discovery": {
+            "stats": output.discovery_stats,
+            "stop_reason": output.stop_reason,
+            "priority_transactions": output.priority_transactions,
+            "include_tokens_requested": include_tokens_requested,
+            "token_edges_supported": false,
+        },
+    })
 }
 
 /// Python module definition

@@ -43,16 +43,8 @@ tokio-test = "0.4"
 
 [features]
 default = []
+proptest = []
 
 [[test]]
 name = "validation_tests"
 path = "tests/validation_tests.rs"
-
-[[test]]
-name = "resilience_tests"
-path = "tests/resilience_tests.rs"
-required-features = ["tokio/full"]
-
-[[test]]
-name = "error_handling_tests"
-path = "tests/error_handling_tests.rs"

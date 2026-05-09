@@ -2,7 +2,7 @@
 
 use crate::{QarqaError, QarqaResult};
 use std::time::Duration;
-use tracing::{warn, error, info};
+use tracing::{error, info, warn};
 
 /// Retry configuration for resilient operations
 #[derive(Debug, Clone)]
@@ -69,7 +69,7 @@ impl CircuitBreaker {
             last_state_change: std::time::Instant::now(),
         }
     }
-    
+
     /// Check if operation should be allowed
     pub fn should_allow(&mut self) -> bool {
         match self.state {
@@ -87,7 +87,7 @@ impl CircuitBreaker {
             CircuitBreakerState::HalfOpen => true,
         }
     }
-    
+
     /// Record successful operation
     pub fn record_success(&mut self) {
         match self.state {
@@ -110,14 +110,17 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Record failed operation
     pub fn record_failure(&mut self) {
         match self.state {
             CircuitBreakerState::Closed => {
                 self.failure_count += 1;
                 if self.failure_count >= self.failure_threshold {
-                    error!("Circuit breaker opening due to {} failures", self.failure_count);
+                    error!(
+                        "Circuit breaker opening due to {} failures",
+                        self.failure_count
+                    );
                     self.state = CircuitBreakerState::Open;
                     self.last_state_change = std::time::Instant::now();
                 }
@@ -137,20 +140,17 @@ impl CircuitBreaker {
 }
 
 /// Retry an async operation with exponential backoff
-pub async fn retry_with_backoff<F, T, Fut>(
-    config: &RetryConfig,
-    mut operation: F,
-) -> QarqaResult<T>
+pub async fn retry_with_backoff<F, T, Fut>(config: &RetryConfig, mut operation: F) -> QarqaResult<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = QarqaResult<T>>,
 {
     let mut attempt = 0;
     let mut backoff = config.initial_backoff;
-    
+
     loop {
         attempt += 1;
-        
+
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) if attempt >= config.max_attempts => {
@@ -158,9 +158,11 @@ where
                 return Err(e);
             }
             Err(e) => {
-                warn!("Attempt {}/{} failed: {}. Retrying in {:?}", 
-                      attempt, config.max_attempts, e, backoff);
-                
+                warn!(
+                    "Attempt {}/{} failed: {}. Retrying in {:?}",
+                    attempt, config.max_attempts, e, backoff
+                );
+
                 // Add jitter
                 let jitter = if config.jitter_factor > 0.0 {
                     let jitter_range = backoff.as_secs_f64() * config.jitter_factor;
@@ -169,13 +171,13 @@ where
                 } else {
                     Duration::ZERO
                 };
-                
+
                 tokio::time::sleep(backoff + jitter).await;
-                
+
                 // Exponential backoff
                 backoff = Duration::from_secs_f64(
                     (backoff.as_secs_f64() * config.backoff_multiplier)
-                        .min(config.max_backoff.as_secs_f64())
+                        .min(config.max_backoff.as_secs_f64()),
                 );
             }
         }
@@ -198,17 +200,15 @@ impl<T> FallbackHandler<T> for NoFallback {
 }
 
 /// Timeout wrapper for async operations
-pub async fn with_timeout<F, T>(
-    duration: Duration,
-    future: F,
-) -> QarqaResult<T>
+pub async fn with_timeout<F, T>(duration: Duration, future: F) -> QarqaResult<T>
 where
     F: std::future::Future<Output = QarqaResult<T>>,
 {
     match tokio::time::timeout(duration, future).await {
         Ok(result) => result,
         Err(_) => Err(QarqaError::Timeout(format!(
-            "Operation timed out after {:?}", duration
+            "Operation timed out after {:?}",
+            duration
         ))),
     }
 }
@@ -232,11 +232,11 @@ impl RateLimiter {
             requests: std::collections::VecDeque::new(),
         }
     }
-    
+
     /// Check if request should be allowed
     pub fn should_allow(&mut self) -> bool {
         let now = std::time::Instant::now();
-        
+
         // Remove old requests outside the window
         while let Some(&front) = self.requests.front() {
             if now.duration_since(front) > self.window {
@@ -245,7 +245,7 @@ impl RateLimiter {
                 break;
             }
         }
-        
+
         // Check if we can allow new request
         if self.requests.len() < self.max_requests as usize {
             self.requests.push_back(now);
@@ -254,7 +254,7 @@ impl RateLimiter {
             false
         }
     }
-    
+
     /// Get remaining capacity
     pub fn remaining_capacity(&self) -> u32 {
         let current = self.requests.len() as u32;
@@ -265,50 +265,55 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_circuit_breaker() {
         let mut cb = CircuitBreaker::new(2, 2, Duration::from_millis(100));
-        
+
         // Initially closed
         assert!(cb.should_allow());
-        
+
         // Record failures
         cb.record_failure();
         assert!(cb.should_allow()); // Still closed
-        
+
         cb.record_failure();
         assert!(!cb.should_allow()); // Now open
-        
+
         // Wait for timeout
         std::thread::sleep(Duration::from_millis(150));
         assert!(cb.should_allow()); // Half-open
-        
+
         // Success in half-open
         cb.record_success();
         cb.record_success();
         assert!(cb.should_allow()); // Closed again
     }
-    
+
     #[test]
     fn test_rate_limiter() {
         let mut limiter = RateLimiter::new(3, Duration::from_secs(1));
-        
+
         // Allow first 3 requests
         assert!(limiter.should_allow());
         assert!(limiter.should_allow());
         assert!(limiter.should_allow());
-        
+
         // Deny 4th request
         assert!(!limiter.should_allow());
-        
+
         // Wait and try again
         std::thread::sleep(Duration::from_secs(1));
         assert!(limiter.should_allow());
     }
-    
+
     #[tokio::test]
     async fn test_retry_with_backoff() {
+        use std::sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc,
+        };
+
         let config = RetryConfig {
             max_attempts: 3,
             initial_backoff: Duration::from_millis(10),
@@ -316,19 +321,26 @@ mod tests {
             backoff_multiplier: 2.0,
             jitter_factor: 0.0,
         };
-        
-        let mut attempts = 0;
-        let result = retry_with_backoff(&config, || async {
-            attempts += 1;
-            if attempts < 3 {
-                Err(QarqaError::Network("Simulated failure".to_string()))
-            } else {
-                Ok(42)
+
+        let attempts = Arc::new(AtomicU32::new(0));
+        let result = retry_with_backoff(&config, {
+            let attempts = Arc::clone(&attempts);
+            move || {
+                let attempts = Arc::clone(&attempts);
+                async move {
+                    let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                    if attempt < 3 {
+                        Err(QarqaError::Network("Simulated failure".to_string()))
+                    } else {
+                        Ok(42)
+                    }
+                }
             }
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts, 3);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
     }
 }
