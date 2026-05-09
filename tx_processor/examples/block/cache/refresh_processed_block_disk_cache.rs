@@ -1,23 +1,27 @@
 use std::cmp::min;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
-use eyre::{bail, Result};
+use eyre::{Result, bail};
+use reth_chain_query::reth_index::{AddressBlockParticipationWriter, RethIndexDB};
 use tx_processor::{
-    load_processed_block_range_with_options, prune_processed_block_disk_cache,
-    should_prune_processed_block_disk_cache, BlockProcessor, ProcessedBlockDiskCacheStore,
-    ProcessedBlockRangeLoadOptions, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    BlockProcessor, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
+    address_participations_from_processed_block, load_processed_block_range_with_options,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
 };
 
 const DEFAULT_BLOCKS: u64 = 100_000;
 const DEFAULT_RETAIN_BLOCKS: u64 = 1_000_000;
-const DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
+const DISK_CACHE_DIR_ENV: &str = "PROCESSED_BLOCK_DISK_CACHE_DIR";
+const TOKEN_SERVER_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
 const DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 
-/// Refresh the processed-block disk cache for a block range.
+/// Refresh processed-block disk cache and related block-derived indexes.
 ///
 /// Example:
 /// cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- \
@@ -28,9 +32,13 @@ struct Args {
     #[arg(long)]
     reth_datadir: Option<PathBuf>,
 
-    /// Processed-block disk cache directory. Defaults to ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR or <reth_datadir>/processed-block-cache.
+    /// Processed-block disk cache directory. Defaults to PROCESSED_BLOCK_DISK_CACHE_DIR/config.env or <ETH_NODE_ROOT>/processed-block-cache.
     #[arg(long)]
     cache_dir: Option<PathBuf>,
+
+    /// RethIndex directory for the address -> blocks participation index. Defaults to <reth_datadir>/reth_index.
+    #[arg(long)]
+    reth_index_dir: Option<PathBuf>,
 
     /// First block to refresh. If omitted, the range is derived from --blocks and the selected end block.
     #[arg(long)]
@@ -67,6 +75,10 @@ struct Args {
     /// Skip periodic pruning while refreshing.
     #[arg(long, default_value_t = false)]
     no_prune: bool,
+
+    /// Only refresh processed-block cache files; do not update the address -> blocks index.
+    #[arg(long, default_value_t = false)]
+    skip_address_block_index: bool,
 }
 
 #[tokio::main]
@@ -98,12 +110,19 @@ async fn main() -> Result<()> {
         .get_latest_block()?
         .saturating_sub(args.latest_offset);
     let (start_block, end_block) = resolve_range(&args, latest)?;
-    let cache_dir = resolve_cache_dir(args.cache_dir.as_deref(), &reth_datadir);
+    let cache_dir = resolve_cache_dir(args.cache_dir.as_deref())?;
     let store = ProcessedBlockDiskCacheStore::open(&cache_dir)?;
     let processor = BlockProcessor::new(provider.clone());
+    let address_index = if args.skip_address_block_index {
+        None
+    } else {
+        let index_dir = resolve_reth_index_dir(args.reth_index_dir.as_deref(), &reth_datadir);
+        let db = Arc::new(RethIndexDB::open(&index_dir)?);
+        Some((index_dir, AddressBlockParticipationWriter::new(db)))
+    };
 
     println!(
-        "Refreshing processed-block disk cache: chain_id={} range={}..={} blocks={} chunk_size={} fill_batch_blocks={} fill_concurrency={} cache_dir={}",
+        "Refreshing processed-block disk cache: chain_id={} range={}..={} blocks={} chunk_size={} fill_batch_blocks={} fill_concurrency={} cache_dir={} address_block_index={}",
         provider.chain_id(),
         start_block,
         end_block,
@@ -111,7 +130,11 @@ async fn main() -> Result<()> {
         args.chunk_size,
         args.fill_batch_blocks,
         args.fill_concurrency,
-        cache_dir.display()
+        cache_dir.display(),
+        address_index
+            .as_ref()
+            .map(|(index_dir, _)| index_dir.display().to_string())
+            .unwrap_or_else(|| "disabled".to_string())
     );
 
     let started = Instant::now();
@@ -145,10 +168,29 @@ async fn main() -> Result<()> {
             chunk.disk_read_ms += loaded_block.disk_cache_metrics.disk_cache_read_ms;
             chunk.disk_write_ms += loaded_block.disk_cache_metrics.disk_cache_write_ms;
         }
+
+        if let Some((_, address_index_writer)) = &address_index {
+            let index_started = Instant::now();
+            let mut index_blocks = Vec::with_capacity(loaded.len());
+            for loaded_block in &loaded {
+                let participations =
+                    address_participations_from_processed_block(&loaded_block.block);
+                chunk.address_index_participating_txs += participations.len() as u64;
+                index_blocks.push((loaded_block.block.header.number, participations));
+            }
+            let inserted_by_block =
+                address_index_writer.ingest_block_participation_batch(index_blocks)?;
+            chunk.address_index_blocks += inserted_by_block.len() as u64;
+            chunk.address_index_inserted += inserted_by_block
+                .into_iter()
+                .map(|inserted| inserted as u64)
+                .sum::<u64>();
+            chunk.address_index_write_ms += index_started.elapsed().as_millis();
+        }
         totals.add(&chunk);
 
         println!(
-            "chunk {}..{} blocks={} hits={} writes={} txs={} elapsed_ms={} disk_read_ms={} disk_write_ms={}",
+            "chunk {}..{} blocks={} hits={} writes={} txs={} elapsed_ms={} disk_read_ms={} disk_write_ms={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={}",
             cursor,
             chunk_end,
             chunk.blocks,
@@ -157,7 +199,11 @@ async fn main() -> Result<()> {
             chunk.transactions,
             chunk_started.elapsed().as_millis(),
             chunk.disk_read_ms,
-            chunk.disk_write_ms
+            chunk.disk_write_ms,
+            chunk.address_index_blocks,
+            chunk.address_index_participating_txs,
+            chunk.address_index_inserted,
+            chunk.address_index_write_ms
         );
 
         if !args.no_prune && should_prune_processed_block_disk_cache(chunk_end, end_block) {
@@ -172,7 +218,7 @@ async fn main() -> Result<()> {
 
     let coverage = store.coverage()?;
     println!(
-        "done blocks={} hits={} writes={} txs={} elapsed_ms={} cache_files={} cache_bytes={} trace_hash={}",
+        "done blocks={} hits={} writes={} txs={} elapsed_ms={} cache_files={} cache_bytes={} trace_hash={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={}",
         totals.blocks,
         totals.cache_hits,
         totals.cache_writes,
@@ -180,7 +226,11 @@ async fn main() -> Result<()> {
         started.elapsed().as_millis(),
         coverage.file_count,
         coverage.total_bytes,
-        coverage.trace_config_hash
+        coverage.trace_config_hash,
+        totals.address_index_blocks,
+        totals.address_index_participating_txs,
+        totals.address_index_inserted,
+        totals.address_index_write_ms
     );
 
     Ok(())
@@ -194,6 +244,10 @@ struct RefreshTotals {
     cache_writes: u64,
     disk_read_ms: u128,
     disk_write_ms: u128,
+    address_index_blocks: u64,
+    address_index_participating_txs: u64,
+    address_index_inserted: u64,
+    address_index_write_ms: u128,
 }
 
 impl RefreshTotals {
@@ -204,21 +258,41 @@ impl RefreshTotals {
         self.cache_writes += other.cache_writes;
         self.disk_read_ms += other.disk_read_ms;
         self.disk_write_ms += other.disk_write_ms;
+        self.address_index_blocks += other.address_index_blocks;
+        self.address_index_participating_txs += other.address_index_participating_txs;
+        self.address_index_inserted += other.address_index_inserted;
+        self.address_index_write_ms += other.address_index_write_ms;
     }
 }
 
 fn resolve_reth_datadir(value: Option<&Path>) -> Result<PathBuf> {
     match value {
         Some(path) => Ok(path.to_path_buf()),
-        None => Ok(PathBuf::from(tx_simulator::config::repo::eth_node_root()?)),
+        None => Ok(PathBuf::from(tx_simulator::config::repo::reth_datadir()?)),
     }
 }
 
-fn resolve_cache_dir(value: Option<&Path>, reth_datadir: &Path) -> PathBuf {
+fn resolve_cache_dir(value: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = value {
+        return Ok(path.to_path_buf());
+    }
+    if let Some(value) =
+        non_empty_env(DISK_CACHE_DIR_ENV).or_else(|| non_empty_env(TOKEN_SERVER_DISK_CACHE_DIR_ENV))
+    {
+        return Ok(PathBuf::from(value));
+    }
+    if let Some(value) = config_env_value(&[DISK_CACHE_DIR_ENV, TOKEN_SERVER_DISK_CACHE_DIR_ENV])? {
+        return Ok(PathBuf::from(value));
+    }
+
+    let root = PathBuf::from(tx_simulator::config::repo::eth_node_root()?);
+    Ok(root.join(DISK_CACHE_DIR_NAME))
+}
+
+fn resolve_reth_index_dir(value: Option<&Path>, reth_datadir: &Path) -> PathBuf {
     value
         .map(PathBuf::from)
-        .or_else(|| non_empty_env(DISK_CACHE_DIR_ENV).map(PathBuf::from))
-        .unwrap_or_else(|| reth_datadir.join(DISK_CACHE_DIR_NAME))
+        .unwrap_or_else(|| reth_datadir.join("reth_index"))
 }
 
 fn resolve_range(args: &Args, latest: u64) -> Result<(u64, u64)> {
@@ -246,4 +320,44 @@ fn non_empty_env(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn config_env_value(keys: &[&str]) -> Result<Option<String>> {
+    let path = tx_simulator::config::repo::config_path();
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim();
+        if keys.iter().any(|candidate| *candidate == key) {
+            let value = unquote(raw_value.trim()).trim().to_string();
+            if !value.is_empty() {
+                return Ok(Some(value));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|inner| inner.strip_suffix('\''))
+        })
+        .unwrap_or(value)
 }

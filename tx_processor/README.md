@@ -50,6 +50,15 @@ live_block_processor
   -> Redis stream eth/live/blocks
 ```
 
+Backfill path:
+
+```text
+refresh_processed_block_disk_cache
+  -> load existing ProcessedBlock cache or process missing blocks
+  -> write processed-block disk cache
+  -> write derived address_to_blocks index
+```
+
 ## Where To Look First
 
 | Need | Start here |
@@ -69,6 +78,7 @@ live_block_processor
 cargo run -p tx_processor --example process_transaction_by_hash -- <tx_hash>
 cargo run -p tx_processor --example process_block -- --block <block>
 cargo run -p tx_processor --bin live_block_processor
+cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- --blocks 100000
 cargo run -p tx_processor --release --example profile_processed_blocks -- --mode all
 cargo test -p tx_processor
 ```

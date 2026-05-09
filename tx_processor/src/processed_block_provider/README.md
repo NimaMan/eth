@@ -44,3 +44,10 @@ directly from `start_block..=end_block` without fetching headers first.
 Only this layout is current. Older `.json.zst`, `.bin.zst`, and `token-chain-*`
 cache layouts should be removed from disk; runtime code does not read or
 migrate them.
+
+The historical backfill entrypoint is
+`tx_processor/examples/block/cache/refresh_processed_block_disk_cache.rs`.
+It fills missing processed-block cache files and, by default, updates derived
+block-level indexes such as `reth_index/address_to_blocks` from the same
+`ProcessedBlock` values. Use `--skip-address-block-index` only for a deliberate
+cache-only refresh.

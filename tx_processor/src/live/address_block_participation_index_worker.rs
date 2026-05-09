@@ -4,12 +4,10 @@ use std::{
     time::Instant,
 };
 
-use alloy_primitives::Address;
-use reth_chain_query::reth_index::{
-    AddressBlockParticipationWriter, AddressParticipation, RethIndexDB,
-};
+use reth_chain_query::reth_index::{AddressBlockParticipationWriter, RethIndexDB};
 use tokio::{sync::mpsc, task::JoinHandle};
 
+use crate::address_participations_from_processed_block;
 use crate::ProcessedBlock;
 
 const DEFAULT_QUEUE_BLOCKS: usize = 256;
@@ -132,40 +130,6 @@ struct AddressIndexWriteStats {
     participating_txs: usize,
     inserted: usize,
     write_ms: u128,
-}
-
-fn address_participations_from_processed_block(
-    block: &ProcessedBlock,
-) -> Vec<AddressParticipation> {
-    block
-        .transactions
-        .iter()
-        .filter_map(|tx| {
-            let mut addresses = tx
-                .processed
-                .unique_addresses
-                .iter()
-                .copied()
-                .collect::<Vec<Address>>();
-
-            addresses.push(tx.processed.from_address);
-            if let Some(address) = tx.processed.to_address {
-                addresses.push(address);
-            }
-            if let Some(address) = tx.processed.contract_address {
-                addresses.push(address);
-            }
-
-            if addresses.is_empty() {
-                None
-            } else {
-                Some(AddressParticipation {
-                    tx_index: tx.processed.tx_index,
-                    addresses,
-                })
-            }
-        })
-        .collect()
 }
 
 fn reth_index_dir(reth_datadir: &Path) -> PathBuf {

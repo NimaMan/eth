@@ -23,6 +23,11 @@ processor enqueues processed blocks after Redis publication succeeds; the worker
 does extraction and MDBX writes on a background task so index writes cannot
 delay live block publication.
 
+For historical ranges, `tx_processor`'s
+`refresh_processed_block_disk_cache` example writes this index while it fills or
+reads the processed-block disk cache. That keeps the replay cache and
+`address_to_blocks` synchronized from the same block data.
+
 ## Why Blocks, Not Tx Numbers
 
 For this project, the useful query is usually "which blocks should I replay for

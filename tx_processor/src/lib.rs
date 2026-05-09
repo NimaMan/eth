@@ -16,6 +16,7 @@ pub use tx_simulator::{
 };
 
 // Export transaction processing modules
+pub mod address_block_participation;
 pub mod block_processor;
 pub mod live;
 pub mod processed_block_provider;
@@ -25,6 +26,7 @@ pub mod tx_builder;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
+pub use address_block_participation::address_participations_from_processed_block;
 pub use block_processor::{
     BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
     ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
