@@ -122,48 +122,41 @@ impl RethQueryProvider {
             return Ok(None);
         }
 
-        let (name, symbol, decimals) = if let Some(chain) = pending_chain.as_mut() {
-            let name_res = self
-                .execute_view_call_with_pending(
-                    address,
-                    Bytes::copy_from_slice(&erc20::NAME),
-                    resolved_block,
-                    Some(chain),
-                )
-                .await?;
-            let symbol_res = self
-                .execute_view_call_with_pending(
-                    address,
-                    Bytes::copy_from_slice(&erc20::SYMBOL),
-                    resolved_block,
-                    Some(chain),
-                )
-                .await?;
-            let decimals_value = call_uint256_view(
-                self,
+        let decimals = match self
+            .execute_optional_metadata_uint8(
                 address,
-                Bytes::copy_from_slice(&erc20::DECIMALS),
+                erc20::DECIMALS,
                 resolved_block,
-                Some(chain),
+                pending_chain.as_mut(),
             )
-            .await?;
-
-            let decimals = match decimals_value {
-                Some(value) => value.to::<u8>(),
-                None => return Ok(None),
-            };
-
-            (
-                decode_string_from_contract_output(&name_res.output),
-                decode_string_from_contract_output(&symbol_res.output),
-                decimals,
+            .await?
+        {
+            Some(decimals) => decimals,
+            None => return Ok(None),
+        };
+        let name = match self
+            .execute_optional_metadata_string(
+                address,
+                erc20::NAME,
+                resolved_block,
+                pending_chain.as_mut(),
             )
-        } else {
-            tokio::try_join!(
-                self.get_token_name(address, Some(resolved_block)),
-                self.get_token_symbol(address, Some(resolved_block)),
-                self.get_token_decimals(address, Some(resolved_block)),
-            )?
+            .await?
+        {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+        let symbol = match self
+            .execute_optional_metadata_string(
+                address,
+                erc20::SYMBOL,
+                resolved_block,
+                pending_chain.as_mut(),
+            )
+            .await?
+        {
+            Some(symbol) => symbol,
+            None => return Ok(None),
         };
 
         Ok(Some(TokenMetadata {
@@ -188,5 +181,99 @@ impl RethQueryProvider {
             self.simulate_contract_view_call(contract, data, Some(block_number))
                 .await
         }
+    }
+
+    async fn execute_optional_metadata_string(
+        &self,
+        contract: Address,
+        selector: [u8; 4],
+        block_number: u64,
+        chain: Option<&mut UnsignedTxChainSimulation>,
+    ) -> Result<Option<String>> {
+        let result = self
+            .execute_view_call_with_pending(
+                contract,
+                Bytes::copy_from_slice(&selector),
+                block_number,
+                chain,
+            )
+            .await?;
+        Ok(optional_string_from_view_result(&result))
+    }
+
+    async fn execute_optional_metadata_uint8(
+        &self,
+        contract: Address,
+        selector: [u8; 4],
+        block_number: u64,
+        chain: Option<&mut UnsignedTxChainSimulation>,
+    ) -> Result<Option<u8>> {
+        let result = self
+            .execute_view_call_with_pending(
+                contract,
+                Bytes::copy_from_slice(&selector),
+                block_number,
+                chain,
+            )
+            .await?;
+        Ok(optional_uint8_from_view_result(&result))
+    }
+}
+
+fn optional_string_from_view_result(result: &ViewFunctionResult) -> Option<String> {
+    if !result.success {
+        return None;
+    }
+    Some(decode_string_from_contract_output(&result.output))
+}
+
+fn optional_uint8_from_view_result(result: &ViewFunctionResult) -> Option<u8> {
+    if !result.success || result.output.len() < 32 {
+        return None;
+    }
+    Some(result.output[31])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view_result(success: bool, output: Vec<u8>) -> ViewFunctionResult {
+        ViewFunctionResult {
+            success,
+            output: Bytes::from(output),
+            gas_used: 0,
+        }
+    }
+
+    #[test]
+    fn optional_uint8_metadata_requires_successful_word_output() {
+        let mut output = vec![0u8; 32];
+        output[31] = 18;
+
+        assert_eq!(
+            optional_uint8_from_view_result(&view_result(true, output)),
+            Some(18)
+        );
+        assert_eq!(
+            optional_uint8_from_view_result(&view_result(false, vec![0u8; 32])),
+            None
+        );
+        assert_eq!(
+            optional_uint8_from_view_result(&view_result(true, vec![18])),
+            None
+        );
+    }
+
+    #[test]
+    fn optional_string_metadata_requires_successful_call() {
+        assert_eq!(
+            optional_string_from_view_result(&view_result(false, vec![0u8; 96])),
+            None
+        );
+        assert_eq!(
+            optional_string_from_view_result(&view_result(true, vec![0u8; 16])),
+            Some(String::new())
+        );
     }
 }
