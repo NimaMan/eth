@@ -1,8 +1,11 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use tx_processor::{LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction};
+use tx_processor::{
+    BlockTxStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction,
+};
 
 use crate::chain_metadata::UniswapV2PoolMetadataProvider;
 use reth_chain_query::provider::BlockHeader;
@@ -43,6 +46,10 @@ pub struct TokenTransactionApplier {
 #[derive(Clone, Copy)]
 pub(crate) enum V2TradingSimulation<'a> {
     Historical(&'a PoolBuySellSimulator),
+    HistoricalBlockSession {
+        pool_simulator: &'a PoolBuySellSimulator,
+        block_session: &'a Mutex<BlockTxStateSession>,
+    },
     Live(&'a LivePoolBuySellSimulator),
     #[cfg(test)]
     Noop,

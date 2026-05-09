@@ -64,7 +64,8 @@ pub use crate::tx_chain::token_metadata::{TokenMetadataResult, TokenMetadataSimu
 pub use live::{LiveStateSource, LiveStateStatus, LiveTxSimulator};
 pub use live_chain_cache::{LiveChainCache, LiveChainCacheBuilder};
 pub use session::{
-    BlockReplaySession, SessionStepSummary, SessionTransaction, SessionTransactionKind,
+    BlockReplaySession, BlockTxAdvanceProfile, BlockTxExecuteProfile, BlockTxStateSession,
+    BlockTxTraceProfile, SessionStepSummary, SessionTransaction, SessionTransactionKind,
     SimulationSession, SimulationSessionOptions, SimulationSessionState,
 };
 pub use simulator::{RethTxSimulator, TxSimulator};

@@ -27,23 +27,74 @@ use alloy_eips::eip2930::AccessList;
 use alloy_eips::eip7702::{RecoveredAuthorization, SignedAuthorization};
 use eyre::{eyre, Result};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::task;
 
 // Reth imports
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::StateProviderBox;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::database::{EvmStateProvider, StateProviderDatabase};
 use reth_revm::db::CacheDB;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
+#[derive(Clone)]
+pub(crate) struct SharedStateProvider(Arc<Mutex<StateProviderBox>>);
+
+impl SharedStateProvider {
+    pub(crate) fn new(provider: StateProviderBox) -> Self {
+        Self(Arc::new(Mutex::new(provider)))
+    }
+}
+
+impl EvmStateProvider for SharedStateProvider {
+    fn basic_account(&self, address: &Address) -> reth_provider::ProviderResult<Option<Account>> {
+        self.0
+            .lock()
+            .expect("state provider lock poisoned")
+            .basic_account(address)
+    }
+
+    fn block_hash(&self, number: u64) -> reth_provider::ProviderResult<Option<B256>> {
+        self.0
+            .lock()
+            .expect("state provider lock poisoned")
+            .block_hash(number)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> reth_provider::ProviderResult<Option<Bytecode>> {
+        self.0
+            .lock()
+            .expect("state provider lock poisoned")
+            .bytecode_by_hash(code_hash)
+    }
+
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: B256,
+    ) -> reth_provider::ProviderResult<Option<U256>> {
+        self.0
+            .lock()
+            .expect("state provider lock poisoned")
+            .storage(account, storage_key)
+    }
+}
+
+pub(crate) type SharedStateProviderDatabase = StateProviderDatabase<SharedStateProvider>;
+
 /// Forked state for sequential transaction simulation
+#[derive(Clone)]
 pub(crate) struct ForkedState {
-    pub db: CacheDB<StateProviderDatabase<StateProviderBox>>,
+    pub db: CacheDB<SharedStateProviderDatabase>,
     pub block_number: u64,
     pub block_header: SealedHeader,
     pub nonces: HashMap<Address, u64>,
@@ -185,7 +236,7 @@ impl TxSimulator {
     fn forked_state_from_context(block_number: u64, context: BlockContext) -> Result<ForkedState> {
         match context.state {
             BlockStateProvider::Historical(state) => {
-                let db = CacheDB::new(StateProviderDatabase::new(state));
+                let db = CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(state)));
                 Ok(ForkedState {
                     db,
                     block_number,

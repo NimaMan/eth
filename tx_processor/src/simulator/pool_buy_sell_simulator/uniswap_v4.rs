@@ -51,11 +51,6 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         return Err(eyre!("Uniswap V4 target token must be an ERC20 address"));
     }
 
-    let v4_cfg = config
-        .uniswap_v4_config
-        .clone()
-        .ok_or_else(|| eyre!("Uniswap V4 configuration must be provided"))?;
-
     let block_number = config.block_number.unwrap_or(simulator.get_latest_block()?);
     let header_hint = block_header_hint(&config, block_number)?;
     let header = match header_hint.clone() {
@@ -68,7 +63,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         }
     };
     let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
-    let mut chain = match header_hint {
+    let chain = match header_hint {
         Some(header) => {
             simulator
                 .start_simulation_chain_with_header(block_number, header)
@@ -76,6 +71,69 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         }
         None => simulator.start_simulation_chain(Some(block_number)).await?,
     };
+
+    check_can_buy_sell_uniswap_v4_with_prepared_chain(
+        simulator,
+        tx_processor,
+        config,
+        block_number,
+        base_fee,
+        chain,
+    )
+    .await
+}
+
+pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    chain: UnsignedTxChainSimulation,
+) -> Result<PoolBuySellSimulationResult> {
+    if config.block_delay > 0 {
+        return Err(eyre!(
+            "Uniswap V4 pool simulation currently does not support block delays"
+        ));
+    }
+    if config.token_address.is_zero() {
+        return Err(eyre!("Uniswap V4 target token must be an ERC20 address"));
+    }
+
+    let block_number = config.block_number.unwrap_or(simulator.get_latest_block()?);
+    let header_hint = block_header_hint(&config, block_number)?;
+    let header = match header_hint {
+        Some(header) => header,
+        None => {
+            simulator
+                .block_context_loader()
+                .load_block_header(block_number, None)
+                .await?
+        }
+    };
+    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
+
+    check_can_buy_sell_uniswap_v4_with_prepared_chain(
+        simulator,
+        tx_processor,
+        config,
+        block_number,
+        base_fee,
+        chain,
+    )
+    .await
+}
+
+async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    block_number: u64,
+    base_fee: Option<u128>,
+    mut chain: UnsignedTxChainSimulation,
+) -> Result<PoolBuySellSimulationResult> {
+    let v4_cfg = config
+        .uniswap_v4_config
+        .clone()
+        .ok_or_else(|| eyre!("Uniswap V4 configuration must be provided"))?;
 
     if !chain.account_has_code(v4_cfg.pool_manager)? {
         return Ok(create_failed_result(

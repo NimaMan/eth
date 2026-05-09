@@ -31,7 +31,6 @@ struct PreparedSignedExecution {
 pub struct SignedTxChainSimulation {
     simulator: Arc<TxSimulator>,
     forked_state: ForkedState,
-    inspector: Option<TracingInspector>,
 }
 
 impl SignedTxChainSimulation {
@@ -39,81 +38,19 @@ impl SignedTxChainSimulation {
         Self {
             simulator,
             forked_state,
-            inspector: None,
         }
     }
 
     /// Execute a signed transaction and persist its state changes
     pub fn step(&mut self, tx: &TransactionSigned) -> Result<SimulationResult> {
-        let PreparedSignedExecution {
-            evm_env, tx_env, ..
-        } = self.prepare_signed_execution(tx)?;
-
-        let inspector = self
-            .inspector
-            .get_or_insert_with(|| TracingInspector::new(TracingInspectorConfig::default_geth()));
-        let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(
-            &mut self.forked_state.db,
-            evm_env,
-            inspector,
-        );
-        let res = evm.transact(tx_env)?;
-        self.forked_state.db.commit(res.state);
-        if let Some(inspector) = self.inspector.as_mut() {
-            reset_trace_collector_for_next_tx(inspector);
-        }
-
-        let success = res.result.is_success();
-        let gas_used = res.result.tx_gas_used();
-        let revert_reason = Self::revert_reason_from(success, res.result.output());
-
-        Ok(SimulationResult {
-            success,
-            gas_used,
-            revert_reason,
-            revert_context: None,
-        })
+        self.simulator
+            .simulate_signed_on_fork_without_trace(&mut self.forked_state, tx)
     }
 
     /// Same as step() but returns full trace
     pub fn step_with_trace(&mut self, tx: &TransactionSigned) -> Result<FullSimulationResult> {
-        let PreparedSignedExecution {
-            evm_env,
-            tx_env,
-            gas_limit,
-        } = self.prepare_signed_execution(tx)?;
-
-        let mut inspector =
-            TracingInspector::new(TracingInspectorConfig::default_geth().set_record_logs(true));
-        let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(
-            &mut self.forked_state.db,
-            evm_env,
-            &mut inspector,
-        );
-        let res = evm.transact(tx_env)?;
-        self.forked_state.db.commit(res.state);
-        let emitted_logs = res.result.logs().to_vec();
-
-        let success = res.result.is_success();
-        let gas_used = res.result.tx_gas_used();
-        let revert_reason = Self::revert_reason_from(success, res.result.output());
-        let call_frame = inspector
-            .with_transaction_gas_limit(gas_limit)
-            .into_geth_builder()
-            .geth_call_traces(
-                alloy_rpc_types_trace::geth::CallConfig::default().with_log(),
-                gas_used,
-            );
-
-        Ok(FullSimulationResult {
-            success,
-            gas_used,
-            revert_reason,
-            revert_context: None,
-            call_trace: call_frame,
-            struct_logs: None,
-            logs: emitted_logs,
-        })
+        self.simulator
+            .simulate_signed_on_fork_with_trace(&mut self.forked_state, tx)
     }
 
     /// Execute a read-only call against the current forked state and return raw output
@@ -199,29 +136,6 @@ impl SignedTxChainSimulation {
             .get_nonce_from_state(&mut self.forked_state, address)
     }
 
-    fn prepare_signed_execution(
-        &mut self,
-        tx: &TransactionSigned,
-    ) -> Result<PreparedSignedExecution> {
-        let block_header = self.forked_state.block_header.clone();
-
-        let evm_env = self
-            .simulator
-            .evm_config
-            .evm_env(&block_header)
-            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
-
-        let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
-        let tx_env = self.simulator.evm_config.tx_env(&recovered);
-        let gas_limit = tx_env.gas_limit;
-
-        Ok(PreparedSignedExecution {
-            evm_env,
-            tx_env,
-            gas_limit,
-        })
-    }
-
     fn revert_reason_from(success: bool, revert_data: Option<&Bytes>) -> Option<String> {
         if success {
             return None;
@@ -235,11 +149,100 @@ impl SignedTxChainSimulation {
     }
 }
 
-/// Local name for upstream `revm-inspectors` `TracingInspector::fuse`.
-///
-/// This clears per-transaction trace buffers before the next sequential tx.
-fn reset_trace_collector_for_next_tx(inspector: &mut TracingInspector) {
-    inspector.fuse();
+impl TxSimulator {
+    pub(crate) fn simulate_signed_on_fork_without_trace(
+        &self,
+        forked_state: &mut ForkedState,
+        tx: &TransactionSigned,
+    ) -> Result<SimulationResult> {
+        let PreparedSignedExecution {
+            evm_env, tx_env, ..
+        } = self.prepare_signed_execution_on_fork(forked_state, tx)?;
+
+        let mut evm = self.evm_config.evm_with_env(&mut forked_state.db, evm_env);
+        let res = evm.transact(tx_env)?;
+        forked_state.db.commit(res.state);
+
+        let success = res.result.is_success();
+        let gas_used = res.result.tx_gas_used();
+        let revert_reason =
+            SignedTxChainSimulation::revert_reason_from(success, res.result.output());
+
+        Ok(SimulationResult {
+            success,
+            gas_used,
+            revert_reason,
+            revert_context: None,
+        })
+    }
+
+    pub(crate) fn simulate_signed_on_fork_with_trace(
+        &self,
+        forked_state: &mut ForkedState,
+        tx: &TransactionSigned,
+    ) -> Result<FullSimulationResult> {
+        let PreparedSignedExecution {
+            evm_env,
+            tx_env,
+            gas_limit,
+        } = self.prepare_signed_execution_on_fork(forked_state, tx)?;
+
+        let mut inspector =
+            TracingInspector::new(TracingInspectorConfig::default_geth().set_record_logs(true));
+        let mut evm = self.evm_config.evm_with_env_and_inspector(
+            &mut forked_state.db,
+            evm_env,
+            &mut inspector,
+        );
+        let res = evm.transact(tx_env)?;
+        forked_state.db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
+
+        let success = res.result.is_success();
+        let gas_used = res.result.tx_gas_used();
+        let revert_reason =
+            SignedTxChainSimulation::revert_reason_from(success, res.result.output());
+        let call_frame = inspector
+            .with_transaction_gas_limit(gas_limit)
+            .into_geth_builder()
+            .geth_call_traces(
+                alloy_rpc_types_trace::geth::CallConfig::default().with_log(),
+                gas_used,
+            );
+
+        Ok(FullSimulationResult {
+            success,
+            gas_used,
+            revert_reason,
+            revert_context: None,
+            call_trace: call_frame,
+            struct_logs: None,
+            logs: emitted_logs,
+        })
+    }
+
+    fn prepare_signed_execution_on_fork(
+        &self,
+        forked_state: &mut ForkedState,
+        tx: &TransactionSigned,
+    ) -> Result<PreparedSignedExecution> {
+        let block_header = forked_state.block_header.clone();
+
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+
+        let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
+        let tx_env = self.evm_config.tx_env(&recovered);
+        let gas_limit = tx_env.gas_limit;
+
+        Ok(PreparedSignedExecution {
+            evm_env,
+            tx_env,
+            gas_limit,
+        })
+    }
 }
 
 impl TxSimulator {

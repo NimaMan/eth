@@ -1,8 +1,9 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use eyre::{eyre, Result};
 use reth_chain_query::provider::BlockHeader;
-use tx_processor::ProcessedTransaction;
+use tx_processor::{BlockTxStateSession, ProcessedTransaction, UnsignedTxChainSimulation};
 
 use crate::erc20::ERC20Token;
 use crate::pools::trading_failure::classify_v2_trading_failure;
@@ -96,6 +97,51 @@ pub(super) async fn simulate_updated_v2_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
+            V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session,
+            } => {
+                if !can_use_block_session_for_pool_config(&pool_config, tx) {
+                    pool.evaluate_trading_status_v2_with_pool_simulator(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                    )
+                    .await
+                    .map(|result| result.failure_reason.clone())
+                } else {
+                    match block_session_chain_after_tx(block_session, tx, "v2", pool_address) {
+                        Ok(chain) => pool
+                            .evaluate_trading_status_v2_with_pool_simulator_and_chain(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config.clone(),
+                                chain,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone()),
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "pool_buy_sell_sim",
+                                block_number = tx.block_number,
+                                tx_index = tx.tx_index,
+                                tx_hash = %tx_hash,
+                                token_address = %token_address,
+                                pool_address = %pool_address,
+                                error = %error,
+                                "failed to branch block tx state session for v2 pool; falling back to regular pool simulation"
+                            );
+                            pool.evaluate_trading_status_v2_with_pool_simulator(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone())
+                        }
+                    }
+                }
+            }
             V2TradingSimulation::Live(pool_simulator) => {
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -262,6 +308,51 @@ pub(super) async fn simulate_updated_v3_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
+            V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session,
+            } => {
+                if !can_use_block_session_for_pool_config(&pool_config, tx) {
+                    pool.evaluate_trading_status_v3_with_pool_simulator(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                    )
+                    .await
+                    .map(|result| result.failure_reason.clone())
+                } else {
+                    match block_session_chain_after_tx(block_session, tx, "v3", pool_address) {
+                        Ok(chain) => pool
+                            .evaluate_trading_status_v3_with_pool_simulator_and_chain(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config.clone(),
+                                chain,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone()),
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "pool_buy_sell_sim",
+                                block_number = tx.block_number,
+                                tx_index = tx.tx_index,
+                                tx_hash = %tx_hash,
+                                token_address = %token_address,
+                                pool_address = %pool_address,
+                                error = %error,
+                                "failed to branch block tx state session for v3 pool; falling back to regular pool simulation"
+                            );
+                            pool.evaluate_trading_status_v3_with_pool_simulator(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone())
+                        }
+                    }
+                }
+            }
             V2TradingSimulation::Live(pool_simulator) => {
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -423,6 +514,51 @@ pub(super) async fn simulate_updated_v4_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
+            V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session,
+            } => {
+                if !can_use_block_session_for_pool_config(&pool_config, tx) {
+                    pool.evaluate_trading_status_v4_with_pool_simulator(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                    )
+                    .await
+                    .map(|result| result.failure_reason.clone())
+                } else {
+                    match block_session_chain_after_tx(block_session, tx, "v4", pool_key) {
+                        Ok(chain) => pool
+                            .evaluate_trading_status_v4_with_pool_simulator_and_chain(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config.clone(),
+                                chain,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone()),
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "pool_buy_sell_sim",
+                                block_number = tx.block_number,
+                                tx_index = tx.tx_index,
+                                tx_hash = %tx_hash,
+                                token_address = %token_address,
+                                pool_key = %pool_key,
+                                error = %error,
+                                "failed to branch block tx state session for v4 pool; falling back to regular pool simulation"
+                            );
+                            pool.evaluate_trading_status_v4_with_pool_simulator(
+                                pool_simulator,
+                                &tx_context,
+                                pool_config,
+                            )
+                            .await
+                            .map(|result| result.failure_reason.clone())
+                        }
+                    }
+                }
+            }
             V2TradingSimulation::Live(pool_simulator) => {
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -569,6 +705,38 @@ pub(super) fn simulation_prior_txs(
     simulation_prior_txs.sort_by_key(|tx| tx.tx_index);
     simulation_prior_txs.dedup_by_key(|tx| tx.hash);
     simulation_prior_txs
+}
+
+fn block_session_chain_after_tx(
+    block_session: &Mutex<BlockTxStateSession>,
+    tx: &ProcessedTransaction,
+    pool_kind: &'static str,
+    pool_id: &str,
+) -> Result<UnsignedTxChainSimulation> {
+    let tx_index = usize::try_from(tx.tx_index)
+        .map_err(|_| eyre!("tx index {} does not fit usize", tx.tx_index))?;
+    let mut session = block_session
+        .lock()
+        .map_err(|err| eyre!("block tx state session lock poisoned: {err}"))?;
+    session.simulation_chain_after_tx(tx_index).map_err(|err| {
+        eyre!(
+            "failed to create {} session branch block={} tx_index={} pool={}: {}",
+            pool_kind,
+            tx.block_number,
+            tx.tx_index,
+            pool_id,
+            err
+        )
+    })
+}
+
+fn can_use_block_session_for_pool_config(
+    pool_config: &PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+) -> bool {
+    pool_config.block_number == Some(tx.block_number)
+        && pool_config.prior_txs.is_empty()
+        && pool_config.block_delay.unwrap_or(0) == 0
 }
 
 fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {

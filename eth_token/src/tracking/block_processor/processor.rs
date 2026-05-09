@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use alloy_primitives::{Address, B256};
@@ -118,11 +119,17 @@ impl BlockTokenProcessor {
             return self.live_mode_historical_simulator_report(block, "process_block");
         }
 
-        self.process_block_with_trading_simulation(
-            block,
-            V2TradingSimulation::Historical(pool_simulator),
-        )
-        .await
+        let block_session = historical_block_session(block, pool_simulator).await;
+        let trading_simulation = match block_session.as_ref() {
+            Some(session) => V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session: session,
+            },
+            None => V2TradingSimulation::Historical(pool_simulator),
+        };
+
+        self.process_block_with_trading_simulation(block, trading_simulation)
+            .await
     }
 
     pub(crate) async fn process_block_with_live_pool_simulator(
@@ -271,10 +278,19 @@ impl BlockTokenProcessor {
             );
         }
 
+        let block_session = historical_block_session(block, pool_simulator).await;
+        let trading_simulation = match block_session.as_ref() {
+            Some(session) => V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session: session,
+            },
+            None => V2TradingSimulation::Historical(pool_simulator),
+        };
+
         self.process_block_with_metadata_provider_and_trading_simulation(
             block,
             metadata_provider,
-            V2TradingSimulation::Historical(pool_simulator),
+            trading_simulation,
         )
         .await
     }
@@ -510,11 +526,20 @@ impl BlockTokenProcessor {
             );
         }
 
+        let block_session = historical_block_session(block, pool_simulator).await;
+        let trading_simulation = match block_session.as_ref() {
+            Some(session) => V2TradingSimulation::HistoricalBlockSession {
+                pool_simulator,
+                block_session: session,
+            },
+            None => V2TradingSimulation::Historical(pool_simulator),
+        };
+
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             metadata_provider,
             pool_metadata_provider,
-            V2TradingSimulation::Historical(pool_simulator),
+            trading_simulation,
         )
         .await
     }
@@ -922,6 +947,28 @@ impl BlockTokenProcessor {
                     "{entrypoint} cannot run in live mode with PoolBuySellSimulator; use LiveBlockTokenProcessor with LivePoolBuySellSimulator"
                 ),
             }],
+        }
+    }
+}
+
+async fn historical_block_session(
+    block: &ProcessedBlock,
+    pool_simulator: &PoolBuySellSimulator,
+) -> Option<Mutex<tx_processor::BlockTxStateSession>> {
+    match pool_simulator
+        .simulator()
+        .block_tx_state_session(block.header.number)
+        .await
+    {
+        Ok(session) => Some(Mutex::new(session)),
+        Err(error) => {
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                block_number = block.header.number,
+                error = %error,
+                "failed to create block tx state session; falling back to prior transaction replay"
+            );
+            None
         }
     }
 }

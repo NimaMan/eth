@@ -6,7 +6,7 @@ use crate::{
     block_context::BlockStateProvider,
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
-    tx_chain::sequential::ForkedState,
+    tx_chain::sequential::{ForkedState, SharedStateProvider, SharedStateProviderDatabase},
     types::{FullSimulationResult, SimulationResult},
 };
 use eyre::Result;
@@ -22,7 +22,6 @@ use alloy_rpc_types_trace::geth::{CallConfig, CallFrame};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::Recovered;
-use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -177,7 +176,8 @@ impl TxSimulator {
 
         match context.state {
             BlockStateProvider::Historical(state) => {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(state)));
                 Self::run_signed_execution_on_db(
                     simulator,
                     tx,
@@ -218,7 +218,7 @@ impl TxSimulator {
         simulator: TxSimulator,
         tx: TransactionSigned,
         block_header: reth_primitives_traits::SealedHeader,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        db: &mut CacheDB<SharedStateProviderDatabase>,
         inspector_config: TracingInspectorConfig,
         trace_mode: SignedTraceMode,
     ) -> Result<SignedExecutionResult> {

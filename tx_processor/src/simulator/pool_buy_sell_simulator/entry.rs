@@ -6,7 +6,7 @@ use reth_chain_query::provider::BlockHeader;
 use reth_primitives_traits::SealedHeader;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
 
 use super::balance_deltas::{
     extract_denom_received_from_processed_transaction, extract_token_balance_delta,
@@ -19,7 +19,7 @@ use super::failure::{
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
-use super::uniswap_v4::check_can_buy_sell_uniswap_v4;
+use super::uniswap_v4::{check_can_buy_sell_uniswap_v4, check_can_buy_sell_uniswap_v4_with_chain};
 use super::validation::validate_pool_registration;
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 use crate::tx_builder::UnsignedTxBuilder;
@@ -75,6 +75,83 @@ pub async fn check_can_buy_sell_pool(
         None => simulator.get_latest_block()?,
     };
 
+    let header_hint = block_header_hint(&config, block_number)?;
+    let header = match header_hint.clone() {
+        Some(header) => header,
+        None => {
+            simulator
+                .block_context_loader()
+                .load_block_header(block_number, None)
+                .await?
+        }
+    };
+    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
+    let chain = match header_hint {
+        Some(header) => {
+            simulator
+                .start_simulation_chain_with_header(block_number, header)
+                .await?
+        }
+        None => simulator.start_simulation_chain(Some(block_number)).await?,
+    };
+
+    check_can_buy_sell_pool_with_prepared_chain(
+        simulator,
+        tx_processor,
+        config,
+        block_number,
+        base_fee,
+        chain,
+    )
+    .await
+}
+
+pub async fn check_can_buy_sell_pool_with_chain(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    chain: UnsignedTxChainSimulation,
+) -> Result<PoolBuySellSimulationResult> {
+    if matches!(config.pool_type, PoolType::UniswapV4) {
+        return check_can_buy_sell_uniswap_v4_with_chain(simulator, tx_processor, config, chain)
+            .await;
+    }
+
+    let block_number = match config.block_number {
+        Some(b) => b,
+        None => simulator.get_latest_block()?,
+    };
+    let header_hint = block_header_hint(&config, block_number)?;
+    let header = match header_hint {
+        Some(header) => header,
+        None => {
+            simulator
+                .block_context_loader()
+                .load_block_header(block_number, None)
+                .await?
+        }
+    };
+    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
+
+    check_can_buy_sell_pool_with_prepared_chain(
+        simulator,
+        tx_processor,
+        config,
+        block_number,
+        base_fee,
+        chain,
+    )
+    .await
+}
+
+async fn check_can_buy_sell_pool_with_prepared_chain(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    block_number: u64,
+    base_fee: Option<u128>,
+    mut chain: UnsignedTxChainSimulation,
+) -> Result<PoolBuySellSimulationResult> {
     let route = match config.pool_type {
         PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 {
             pool: config.pool_address,
@@ -109,25 +186,6 @@ pub async fn check_can_buy_sell_pool(
         }
     };
 
-    let header_hint = block_header_hint(&config, block_number)?;
-    let header = match header_hint.clone() {
-        Some(header) => header,
-        None => {
-            simulator
-                .block_context_loader()
-                .load_block_header(block_number, None)
-                .await?
-        }
-    };
-    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
-    let mut chain = match header_hint {
-        Some(header) => {
-            simulator
-                .start_simulation_chain_with_header(block_number, header)
-                .await?
-        }
-        None => simulator.start_simulation_chain(Some(block_number)).await?,
-    };
     let mut prior_tx_results: Vec<ProcessedTransaction> =
         Vec::with_capacity(config.prior_txs.len());
 
