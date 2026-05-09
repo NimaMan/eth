@@ -8,7 +8,7 @@ use crate::{
     ProcessedBlock, ProcessedBlockTransactions,
 };
 use alloy_primitives::B256;
-use eyre::{bail, Result};
+use eyre::{bail, Result, WrapErr};
 use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 
@@ -67,24 +67,6 @@ struct ProcessedBlockDiskCacheEntry {
     key: ProcessedBlockDiskCacheKey,
     header: BlockHeader,
     transactions: Vec<ProcessedBlockDiskCacheTransaction>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyProcessedBlockDiskCacheEntry {
-    key: LegacyProcessedBlockDiskCacheKey,
-    header: BlockHeader,
-    transactions: Vec<ProcessedBlockDiskCacheTransaction>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyProcessedBlockDiskCacheKey {
-    chain_id: u64,
-    block_number: u64,
-    block_hash: B256,
-    _unused_a: u32,
-    _unused_b: u32,
-    trace_engine: String,
-    trace_config_hash: B256,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,7 +132,7 @@ impl ProcessedBlockDiskCacheStore {
                 continue;
             }
             let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("zst") {
+            if !is_current_cache_file_path(&path) {
                 continue;
             }
 
@@ -201,7 +183,7 @@ impl ProcessedBlockDiskCacheStore {
             .ok_or_else(|| eyre::eyre!("cache path has no parent: {}", path.display()))?;
         fs::create_dir_all(parent)?;
 
-        let bytes = bincode::serialize(&ProcessedBlockDiskCacheEntry::from_block(
+        let bytes = serde_json::to_vec(&ProcessedBlockDiskCacheEntry::from_block(
             key.clone(),
             block,
         ))?;
@@ -394,7 +376,11 @@ impl ProcessedBlockDiskCacheStore {
 
     fn path_for_key(&self, key: &ProcessedBlockDiskCacheKey) -> PathBuf {
         self.current_block_dir(key.chain_id, key.block_number)
-            .join(format!("{:#x}.bin.zst", key.block_hash))
+            .join(format!(
+                "{}.{}.json.zst",
+                b256_path_component(key.block_hash),
+                b256_path_component(key.trace_config_hash)
+            ))
     }
 
     fn current_block_dir(&self, chain_id: u64, block_number: u64) -> PathBuf {
@@ -419,7 +405,7 @@ fn current_cache_file_stats(path: &Path) -> Result<(usize, u64)> {
             continue;
         }
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("zst") {
+        if !is_current_cache_file_path(&path) {
             continue;
         }
         file_count += 1;
@@ -484,41 +470,8 @@ impl ProcessedBlockDiskCacheEntry {
     }
 }
 
-impl LegacyProcessedBlockDiskCacheEntry {
-    fn into_current(self) -> ProcessedBlockDiskCacheEntry {
-        ProcessedBlockDiskCacheEntry {
-            key: self.key.into_current(),
-            header: self.header,
-            transactions: self.transactions,
-        }
-    }
-}
-
-impl LegacyProcessedBlockDiskCacheKey {
-    fn into_current(self) -> ProcessedBlockDiskCacheKey {
-        ProcessedBlockDiskCacheKey {
-            chain_id: self.chain_id,
-            block_number: self.block_number,
-            block_hash: self.block_hash,
-            trace_engine: self.trace_engine,
-            trace_config_hash: self.trace_config_hash,
-        }
-    }
-}
-
 fn decode_cache_entry(bytes: &[u8]) -> Result<ProcessedBlockDiskCacheEntry> {
-    match bincode::deserialize::<ProcessedBlockDiskCacheEntry>(bytes) {
-        Ok(entry) => Ok(entry),
-        Err(current_error) => {
-            let legacy_entry: LegacyProcessedBlockDiskCacheEntry =
-                bincode::deserialize(bytes).map_err(|legacy_error| {
-                    eyre::eyre!(
-                        "failed to decode processed block disk cache entry; current decode error: {current_error}; legacy decode error: {legacy_error}"
-                    )
-                })?;
-            Ok(legacy_entry.into_current())
-        }
-    }
+    serde_json::from_slice(bytes).wrap_err("failed to decode processed block disk cache JSON entry")
 }
 
 impl ProcessedBlockDiskCacheTransaction {
@@ -534,10 +487,27 @@ fn monotonic_nanos() -> u128 {
         .unwrap_or_default()
 }
 
+fn b256_path_component(value: B256) -> String {
+    format!("{value:#x}")
+}
+
+fn is_current_cache_file_path(path: &Path) -> bool {
+    if path.extension().and_then(|value| value.to_str()) != Some("zst") {
+        return false;
+    }
+    let current_hash = b256_path_component(processed_block_trace_config_hash(true));
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(|name| name.ends_with(".json.zst") && name.contains(&current_hash))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
+    use serde_json::json;
+    use std::collections::HashMap;
 
     use crate::tx_processor::data_models::{ProcessedAccessListItem, TransactionFees};
     use crate::ProcessedTransaction;
@@ -579,6 +549,14 @@ mod tests {
         tx.tx_type = "swap".to_string();
         tx.actions.push("token_tracking".to_string());
         tx.erc721_contracts.insert(Address::repeat_byte(0x77));
+        tx.other_events.push(HashMap::from([(
+            "debug".to_string(),
+            json!({"kind": "state", "values": [1, 2, 3]}),
+        )]));
+        tx.latest_states.insert(
+            Address::repeat_byte(0x88),
+            json!({"reserve0": "1", "nested": {"ok": true}}),
+        );
 
         let block = ProcessedBlock {
             header: BlockHeader {
@@ -625,6 +603,11 @@ mod tests {
         assert!(cached_tx
             .erc721_contracts
             .contains(&Address::repeat_byte(0x77)));
+        assert_eq!(cached_tx.other_events[0]["debug"]["kind"], "state");
+        assert_eq!(
+            cached_tx.latest_states[&Address::repeat_byte(0x88)]["nested"]["ok"],
+            true
+        );
 
         std::fs::remove_dir_all(root).expect("remove temp cache");
     }

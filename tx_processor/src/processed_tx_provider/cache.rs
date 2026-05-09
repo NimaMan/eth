@@ -294,7 +294,7 @@ impl ProcessedBlockCacheStore {
 
 pub fn processed_block_trace_config_hash(include_traces: bool) -> B256 {
     let config = format!(
-        "include_traces={include_traces};tracer=callTracer;version=2;compact_tx_schema={COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION}"
+        "include_traces={include_traces};tracer=callTracer;version=2;compact_tx_schema={COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION};processed_block_storage_schema=2"
     );
     keccak256(config.as_bytes())
 }
