@@ -9,6 +9,7 @@ const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/eth_t
 const DEFAULT_SIMULATOR_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/simulators";
 const TOKEN_SERVER_LOG_DIR_CONFIG: &str = "TOKEN_SERVER_LOG_DIR";
 const SIMULATOR_LOG_DIR_CONFIG: &str = "SIMULATOR_LOG_DIR";
+const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -20,6 +21,7 @@ async fn main() -> eyre::Result<()> {
 
 struct LogGuards {
     _token_server: tracing_appender::non_blocking::WorkerGuard,
+    _live_token_tracker: tracing_appender::non_blocking::WorkerGuard,
     _simulator: tracing_appender::non_blocking::WorkerGuard,
     _simulation_errors: tracing_appender::non_blocking::WorkerGuard,
 }
@@ -37,6 +39,10 @@ fn init_logging() -> eyre::Result<LogGuards> {
 
     let file_appender = tracing_appender::rolling::daily(&log_dir, "eth_token_server.log");
     let (file_writer, token_server_guard) = tracing_appender::non_blocking(file_appender);
+    let live_token_tracker_appender =
+        tracing_appender::rolling::daily(&log_dir, "live_token_tracker.log");
+    let (live_token_tracker_writer, live_token_tracker_guard) =
+        tracing_appender::non_blocking(live_token_tracker_appender);
     let simulator_appender = tracing_appender::rolling::daily(&simulator_log_dir, "simulator.log");
     let (simulator_writer, simulator_guard) = tracing_appender::non_blocking(simulator_appender);
     let simulation_errors_appender =
@@ -54,6 +60,14 @@ fn init_logging() -> eyre::Result<LogGuards> {
         .with_ansi(false)
         .with_writer(file_writer)
         .with_filter(filter_fn(|metadata| !is_simulator_target(metadata)));
+    let live_token_tracker_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_target(true)
+        .with_current_span(true)
+        .with_span_list(true)
+        .with_ansi(false)
+        .with_writer(live_token_tracker_writer)
+        .with_filter(filter_fn(is_live_token_tracker_metadata));
     let simulator_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_target(true)
@@ -79,6 +93,7 @@ fn init_logging() -> eyre::Result<LogGuards> {
         .with(filter)
         .with(stdout_layer)
         .with(file_layer)
+        .with(live_token_tracker_layer)
         .with(simulator_layer)
         .with(simulation_errors_layer)
         .init();
@@ -90,6 +105,7 @@ fn init_logging() -> eyre::Result<LogGuards> {
     );
     Ok(LogGuards {
         _token_server: token_server_guard,
+        _live_token_tracker: live_token_tracker_guard,
         _simulator: simulator_guard,
         _simulation_errors: simulation_errors_guard,
     })
@@ -110,4 +126,9 @@ fn is_simulator_target(metadata: &Metadata<'_>) -> bool {
 
 fn is_simulator_log_metadata(metadata: &Metadata<'_>) -> bool {
     is_simulator_target(metadata) || metadata.name() == "range_block_apply"
+}
+
+fn is_live_token_tracker_metadata(metadata: &Metadata<'_>) -> bool {
+    metadata.target() == LIVE_TOKEN_TRACKER_LOG_TARGET
+        || metadata.target().starts_with("eth_live_feed::runtime")
 }

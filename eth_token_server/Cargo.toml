@@ -3,12 +3,13 @@ name = "eth_token_server"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+workspace = "../reth"
 
 [dependencies]
 eth_live_feed = { path = "../alpha/live/feed" }
-eth_token = { path = "../eth_token" }
-reth_chain_query = { path = "../reth_chain_query" }
-tx_processor = { path = "../tx_processor" }
+eth_token = { path = "../reth/eth_token" }
+reth_chain_query = { path = "../reth/reth_chain_query" }
+tx_processor = { path = "../reth/tx_processor" }
 
 alloy-primitives = "1.5.7"
 bincode = "1.3"

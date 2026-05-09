@@ -83,7 +83,7 @@ warp            = "0.3"
 tokio-tungstenite = "0.20"
 
 # Transaction processing with proven tax calculation
-eth_live_feed = { path = "../alpha/live/feed" }
+eth_live_feed = { path = "../../alpha/live/feed" }
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
 reth_chain_query = { path = "../reth_chain_query" }

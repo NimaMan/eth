@@ -3,6 +3,7 @@ name = "eth_strategies"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
+workspace = "../../reth"
 
 [dependencies]
 alloy-primitives = "1.5.7"

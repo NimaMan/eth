@@ -41,6 +41,11 @@ Token server keys:
 - `MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db`
 - `MEMPOOL_SIGNAL_LIMIT=200`
 
+`TOKEN_SERVER_LOG_DIR` contains two token-server log streams:
+
+- `eth_token_server.log.<date>`: the full token server runtime log.
+- `live_token_tracker.log.<date>`: focused JSON records for live token tracker warmup, live-tail block apply, metadata/simulation timeouts, and terminal failures.
+
 To override the traced `ProcessedBlock` disk cache location, set
 `PROCESSED_BLOCK_DISK_CACHE_DIR` in `config.env`.
 

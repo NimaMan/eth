@@ -3,6 +3,7 @@ name = "eth_alpha_store"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
+workspace = "../../reth"
 
 [dependencies]
 async-trait = "0.1"

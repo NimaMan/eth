@@ -3,21 +3,22 @@ name = "eth_live_feed"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
+workspace = "../../../reth"
 
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["serde"] }
 async-trait = "0.1"
 eth_live_state = { path = "../state" }
-eth_token = { path = "../../../eth_token" }
+eth_token = { path = "../../../reth/eth_token" }
 eyre.workspace = true
 redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
-reth_chain_query = { path = "../../../reth_chain_query" }
+reth_chain_query = { path = "../../../reth/reth_chain_query" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = "1.0"
 tokio = { workspace = true }
 tracing = "0.1"
-tx_processor = { path = "../../../tx_processor" }
+tx_processor = { path = "../../../reth/tx_processor" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
