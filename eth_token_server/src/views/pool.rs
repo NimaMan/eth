@@ -356,6 +356,21 @@ impl PoolView {
         pools
     }
 
+    pub fn from_token_pool_summaries(token: &ERC20Token) -> Vec<Self> {
+        Self::from_token_pools(token)
+            .into_iter()
+            .map(Self::into_list_summary)
+            .collect()
+    }
+
+    pub fn into_list_summary(mut self) -> Self {
+        self.price_ratio_history.clear();
+        self.liquidity_history.clear();
+        self.lp_holders.clear();
+        self.lp_last_approval = None;
+        self
+    }
+
     fn from_base(
         token: &ERC20Token,
         base: &BasePool,
@@ -688,7 +703,7 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let mut pools = Vec::new();
 
     for token in state.processor.registry.tokens.values() {
-        pools.extend(PoolView::from_token_pools(token));
+        pools.extend(PoolView::from_token_pool_summaries(token));
     }
 
     pools.sort_by(|left, right| {
@@ -706,6 +721,7 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
 
 #[cfg(test)]
 mod tests {
+    use eth_token::erc20::{ERC20Token, ERC20TokenMetadata};
     use eth_token::pools::BasePoolConfig;
 
     use super::*;
@@ -770,5 +786,39 @@ mod tests {
 
         pool.base.latest_block_number = Some(456);
         assert_eq!(latest_pool_block_number(&pool.base), Some(456));
+    }
+
+    #[test]
+    fn pool_list_summary_omits_heavy_detail_fields() {
+        let token_address = "0x1111111111111111111111111111111111111111";
+        let pool_address = "0x2222222222222222222222222222222222222222";
+        let denom_address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+        let mut token = ERC20Token::new(ERC20TokenMetadata::new(
+            token_address,
+            "Token",
+            "TOK",
+            18,
+            "1000000000000000000000000",
+        ));
+        let mut pool = UniswapV2Pool::new(
+            pool_address,
+            token_address,
+            denom_address,
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.update_reserves(1_000.0, 1.0, 10, 100, "0xtx1");
+        pool.base.update_reserves(900.0, 1.2, 11, 112, "0xtx2");
+        token.v2_pools.insert(pool_address.to_string(), pool);
+
+        let full = PoolView::from_token_pools(&token);
+        assert!(!full[0].price_ratio_history.is_empty());
+        assert!(!full[0].liquidity_history.is_empty());
+
+        let summary = PoolView::from_token_pool_summaries(&token);
+        assert!(summary[0].price_ratio_history.is_empty());
+        assert!(summary[0].liquidity_history.is_empty());
+        assert!(summary[0].lp_holders.is_empty());
+        assert!(summary[0].lp_last_approval.is_none());
     }
 }

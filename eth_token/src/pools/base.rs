@@ -9,6 +9,12 @@ use super::data_models::{PoolLifecycle, PoolLiquiditySnapshot, PoolRuntimeState}
 use super::reserves::PoolReserveTracker;
 
 pub const DEFAULT_TEST_BUY_ETH: f64 = 0.01;
+const MIN_MEANINGFUL_WETH_LIQUIDITY: f64 = 0.01;
+const MIN_MEANINGFUL_STABLE_LIQUIDITY: f64 = 10.0;
+const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const USDC_ADDRESS: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const USDT_ADDRESS: &str = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+const DAI_ADDRESS: &str = "0x6b175474e89094c44da98b954eedeac495271d0f";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PoolIdentity {
@@ -226,11 +232,7 @@ impl BasePool {
             );
         }
 
-        if denom_reserve >= self.config.denom_threshold {
-            self.state.total_liquidity = denom_reserve;
-        } else {
-            self.state.total_liquidity = 0.0;
-        }
+        self.state.total_liquidity = denom_reserve.max(0.0);
 
         self.reserve_tracker.update_reserves(
             denom_reserve,
@@ -262,8 +264,8 @@ impl BasePool {
             self.can_buy_block = Some(block_number);
             self.can_buy_tx = Some(tx_hash.into());
             self.can_buy_timestamp = Some(timestamp);
-            self.state.lifecycle = PoolLifecycle::Active;
         }
+        self.refresh_lifecycle();
     }
 
     pub fn set_sell_status(
@@ -283,6 +285,7 @@ impl BasePool {
             self.last_trading_failure_reason = None;
             self.last_trading_failure_class = None;
         }
+        self.refresh_lifecycle();
     }
 
     pub fn set_trading_failure_context(&mut self, reason: Option<String>, class: Option<String>) {
@@ -383,13 +386,65 @@ impl BasePool {
             self.scam_label = None;
             self.scam_block = None;
             self.scam_tx_hash = None;
-            if self.state.denom_reserve >= self.config.denom_threshold
-                && self.state.lifecycle == PoolLifecycle::Discovered
-            {
-                self.state.lifecycle = PoolLifecycle::LiquidityDeposited;
-            }
+            self.refresh_lifecycle();
         }
     }
+
+    fn refresh_lifecycle(&mut self) {
+        if self.reserve_tracker.is_scam {
+            self.state.lifecycle = PoolLifecycle::Scam;
+            return;
+        }
+
+        let has_seen_reserves = self.state.last_update_block > 0 || self.state.last_sync_block > 0;
+        if !has_seen_reserves {
+            self.state.lifecycle = if self.state.can_buy && self.state.can_sell {
+                PoolLifecycle::Trading
+            } else if self.state.can_buy {
+                PoolLifecycle::CannotSell
+            } else {
+                PoolLifecycle::Discovered
+            };
+            return;
+        }
+
+        if self.state.denom_reserve <= 0.0 || self.state.token_reserve <= 0.0 {
+            self.state.lifecycle = PoolLifecycle::Drained;
+            return;
+        }
+
+        if !self.has_meaningful_liquidity() {
+            self.state.lifecycle = PoolLifecycle::Dust;
+            return;
+        }
+
+        self.state.lifecycle = if self.state.can_buy && self.state.can_sell {
+            PoolLifecycle::Trading
+        } else if self.state.can_buy {
+            PoolLifecycle::CannotSell
+        } else {
+            PoolLifecycle::LiquidityDeposited
+        };
+    }
+
+    fn has_meaningful_liquidity(&self) -> bool {
+        let configured_threshold = self.config.denom_threshold.max(0.0);
+        let display_threshold = meaningful_liquidity_threshold(&self.identity.denom_address);
+        self.state.denom_reserve >= configured_threshold.max(display_threshold)
+            && self.state.token_reserve > 0.0
+    }
+}
+
+fn meaningful_liquidity_threshold(denom_address: &str) -> f64 {
+    match normalize_address_string(denom_address) {
+        address if address == WETH_ADDRESS => MIN_MEANINGFUL_WETH_LIQUIDITY,
+        address if is_stable_denom(&address) => MIN_MEANINGFUL_STABLE_LIQUIDITY,
+        _ => 0.0,
+    }
+}
+
+fn is_stable_denom(denom_address: &str) -> bool {
+    matches!(denom_address, USDC_ADDRESS | USDT_ADDRESS | DAI_ADDRESS)
 }
 
 fn normalize_address(value: impl AsRef<str>) -> Option<String> {
@@ -416,6 +471,20 @@ mod tests {
                 denom_threshold: 0.05,
                 threshold_unit: Some("ETH".to_string()),
                 token1_is_denom: Some(true),
+                ..BasePoolConfig::new(18)
+            },
+        )
+    }
+
+    fn weth_pool() -> BasePool {
+        BasePool::new(
+            PoolIdentity::new("0xPOOL", "0xTOKEN", WETH_ADDRESS, "UNISWAP-V2"),
+            BasePoolConfig {
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                history_limit: 10,
+                denom_threshold: 0.0,
+                threshold_unit: None,
                 ..BasePoolConfig::new(18)
             },
         )
@@ -458,6 +527,40 @@ mod tests {
         assert_eq!(pool.price(), 0.0);
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Scam);
         assert_eq!(pool.scam_block, Some(10));
+    }
+
+    #[test]
+    fn weth_dust_reserve_is_dust_not_liquidity_deposited() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(100.0, 0.001, 10, 1_700, "0xTX");
+
+        assert!(!pool.is_scam());
+        assert_eq!(pool.state.total_liquidity, 0.001);
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
+    }
+
+    #[test]
+    fn current_pool_lifecycle_tracks_trading_and_cannot_sell() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::LiquidityDeposited);
+
+        pool.mark_can_buy_from_event(11, "0xBUY", 1_710);
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::CannotSell);
+
+        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Trading);
+    }
+
+    #[test]
+    fn empty_reserves_mark_seen_pool_as_drained() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(0.0, 0.0, 10, 1_700, "0xSYNC");
+
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Drained);
     }
 
     #[test]

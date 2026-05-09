@@ -6,6 +6,10 @@ pub enum PoolLifecycle {
     #[default]
     Discovered,
     LiquidityDeposited,
+    Trading,
+    CannotSell,
+    Dust,
+    Drained,
     Active,
     Scam,
     Evicted,
@@ -72,7 +76,7 @@ impl PoolRuntimeState {
     pub fn mark_active(&mut self) {
         self.can_buy = true;
         self.can_sell = true;
-        self.lifecycle = PoolLifecycle::Active;
+        self.lifecycle = PoolLifecycle::Trading;
     }
 
     pub fn mark_scam(&mut self) {

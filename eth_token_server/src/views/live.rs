@@ -108,7 +108,7 @@ pub async fn pool_list(tracker: &LiveTracker) -> LivePoolListResponse {
     let mut pools = Vec::new();
 
     for token in state.processor.registry().tokens.values() {
-        pools.extend(PoolView::from_token_pools(token));
+        pools.extend(PoolView::from_token_pool_summaries(token));
     }
 
     pools.sort_by(|left, right| {

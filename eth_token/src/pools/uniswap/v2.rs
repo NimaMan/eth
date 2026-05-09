@@ -504,9 +504,6 @@ impl UniswapV2Pool {
             return Ok(false);
         }
 
-        self.base
-            .mark_can_buy_from_event(tx.block_number, tx.tx_hash.clone(), tx.block_timestamp);
-
         let amount0_in = parse_raw_f64(&swap.amount0_in)?;
         let amount1_in = parse_raw_f64(&swap.amount1_in)?;
         let amount0_out = parse_raw_f64(&swap.amount0_out)?;
@@ -746,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn swap_tracks_volumes_direction_and_trading_status() {
+    fn swap_tracks_volumes_direction_without_setting_simulator_status() {
         let mut pool = pool();
         let tx = UniswapV2TxContext::new(101, 1_701, "0xSWAP");
 
@@ -764,10 +761,35 @@ mod tests {
         )
         .unwrap();
 
-        assert!(pool.base.trading_enabled());
+        assert!(!pool.base.state.can_buy);
+        assert!(!pool.base.trading_enabled());
         assert_eq!(pool.base.state.total_swaps, 1);
         assert_eq!(pool.base.state.denom_volume_in, 1_000_000_000_000_000_000.0);
         assert_eq!(pool.recent_swaps(1)[0]["is_buy"], true);
+    }
+
+    #[test]
+    fn sell_swap_does_not_mark_pool_as_buyable() {
+        let mut pool = pool();
+        let tx = UniswapV2TxContext::new(101, 1_701, "0xSWAP");
+
+        pool.process_swap(
+            &UniswapV2SwapEvent {
+                pair_address: "0xPOOL".to_string(),
+                sender: Some("0xSENDER".to_string()),
+                to: Some("0xTO".to_string()),
+                amount0_in: "50000000000000000000".to_string(),
+                amount1_in: "0".to_string(),
+                amount0_out: "0".to_string(),
+                amount1_out: "1000000000000000000".to_string(),
+            },
+            &tx,
+        )
+        .unwrap();
+
+        assert!(!pool.base.state.can_buy);
+        assert!(!pool.base.trading_enabled());
+        assert_eq!(pool.recent_swaps(1)[0]["is_sell"], true);
     }
 
     #[test]
