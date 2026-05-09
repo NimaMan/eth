@@ -28,6 +28,25 @@ pub struct PoolLiquidityInfo {
 }
 
 impl RethQueryProvider {
+    /// Get normalized liquidity info for a Uniswap V2 pool at a block.
+    pub async fn get_uniswap_v2_liquidity(
+        &self,
+        pool: Address,
+        block: Option<u64>,
+    ) -> Result<PoolLiquidityInfo> {
+        self.get_v2_style_liquidity("Uniswap-V2", pool, block).await
+    }
+
+    /// Get normalized liquidity info for a Sushiswap V2 pool at a block.
+    pub async fn get_sushiswap_v2_liquidity(
+        &self,
+        pool: Address,
+        block: Option<u64>,
+    ) -> Result<PoolLiquidityInfo> {
+        self.get_v2_style_liquidity("SushiswapV2", pool, block)
+            .await
+    }
+
     /// Get liquidity info for a specific AMM route at a block.
     ///
     /// - UniswapV2/SushiswapV2: returns reserves (reserve0, reserve1)
@@ -40,75 +59,12 @@ impl RethQueryProvider {
         let block_number = block.unwrap_or(self.get_latest_block()?);
         match *route {
             AmmSwapRoute::UniswapV2 { pool } => {
-                // token0/token1 via token0()/token1() view
-                let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number))
+                self.get_uniswap_v2_liquidity(pool, Some(block_number))
                     .await
-                    .unwrap_or((Address::ZERO, Address::ZERO));
-                let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
-                let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
-                let (r0, r1, _ts) = self.uni_v2_get_reserves(pool, Some(block_number)).await?;
-                let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number)),
-                    self.get_token_decimals(t1, Some(block_number)),
-                ) {
-                    Ok((a, b)) => (a, b),
-                    Err(_) => (18u8, 18u8),
-                };
-                let price = compute_price_from_reserves_1e18(r0, r1, d0, d1);
-                Ok(PoolLiquidityInfo {
-                    protocol: "Uniswap-V2",
-                    pool,
-                    pool_id: None,
-                    token0: Some(t0),
-                    token1: Some(t1),
-                    token0_symbol: s0,
-                    token1_symbol: s1,
-                    token0_decimals: Some(d0),
-                    token1_decimals: Some(d1),
-                    reserve0: Some(r0),
-                    reserve1: Some(r1),
-                    v3_liquidity: None,
-                    tick: None,
-                    sqrt_price_x96: None,
-                    price_1e18: Some(price),
-                    block_number,
-                })
             }
             AmmSwapRoute::SushiswapV2 { pool } => {
-                let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number))
+                self.get_sushiswap_v2_liquidity(pool, Some(block_number))
                     .await
-                    .unwrap_or((Address::ZERO, Address::ZERO));
-                let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
-                let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
-                let (r0, r1, _ts) = self.uni_v2_get_reserves(pool, Some(block_number)).await?;
-                let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number)),
-                    self.get_token_decimals(t1, Some(block_number)),
-                ) {
-                    Ok((a, b)) => (a, b),
-                    Err(_) => (18u8, 18u8),
-                };
-                let price = compute_price_from_reserves_1e18(r0, r1, d0, d1);
-                Ok(PoolLiquidityInfo {
-                    protocol: "SushiswapV2",
-                    pool,
-                    pool_id: None,
-                    token0: Some(t0),
-                    token1: Some(t1),
-                    token0_symbol: s0,
-                    token1_symbol: s1,
-                    token0_decimals: Some(d0),
-                    token1_decimals: Some(d1),
-                    reserve0: Some(r0),
-                    reserve1: Some(r1),
-                    v3_liquidity: None,
-                    tick: None,
-                    sqrt_price_x96: None,
-                    price_1e18: Some(price),
-                    block_number,
-                })
             }
             AmmSwapRoute::UniswapV3 { pool, .. } => {
                 // token addresses via token0()/token1() as well
@@ -293,6 +249,48 @@ impl RethQueryProvider {
             // Curve/Balancer/Fraxswap: to be added in a later pass.
             _ => Err(eyre::eyre!("Route not supported for liquidity query")),
         }
+    }
+
+    async fn get_v2_style_liquidity(
+        &self,
+        protocol: &'static str,
+        pool: Address,
+        block: Option<u64>,
+    ) -> Result<PoolLiquidityInfo> {
+        let block_number = block.unwrap_or(self.get_latest_block()?);
+        let (t0, t1) = self
+            .uni_v2_get_tokens(pool, Some(block_number))
+            .await
+            .unwrap_or((Address::ZERO, Address::ZERO));
+        let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
+        let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
+        let (r0, r1, _ts) = self.uni_v2_get_reserves(pool, Some(block_number)).await?;
+        let (d0, d1) = match tokio::try_join!(
+            self.get_token_decimals(t0, Some(block_number)),
+            self.get_token_decimals(t1, Some(block_number)),
+        ) {
+            Ok((a, b)) => (a, b),
+            Err(_) => (18u8, 18u8),
+        };
+        let price = compute_price_from_reserves_1e18(r0, r1, d0, d1);
+        Ok(PoolLiquidityInfo {
+            protocol,
+            pool,
+            pool_id: None,
+            token0: Some(t0),
+            token1: Some(t1),
+            token0_symbol: s0,
+            token1_symbol: s1,
+            token0_decimals: Some(d0),
+            token1_decimals: Some(d1),
+            reserve0: Some(r0),
+            reserve1: Some(r1),
+            v3_liquidity: None,
+            tick: None,
+            sqrt_price_x96: None,
+            price_1e18: Some(price),
+            block_number,
+        })
     }
 }
 

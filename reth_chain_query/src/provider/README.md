@@ -23,6 +23,8 @@ pub struct RethQueryProvider {
 - `get_block_gas_metadata(b)` – `(gas_limit, gas_used, base_fee_opt)`
 
 ### DEX Queries (`dex/amm/*`)
+- `get_uniswap_v2_liquidity(pair, block)` – Normalized V2 pool reserves, tokens, decimals, and price
+- `get_sushiswap_v2_liquidity(pair, block)` – Normalized Sushi V2 pool reserves, tokens, decimals, and price
 - `uni_v2_get_tokens(pair, block)` – Read `token0`/`token1` via local view calls
 - `uni_v2_get_reserves(pair, block)` – Read Uniswap V2 reserves at `block`
 - `uni_v2_calc_amount_out(amount_in, reserve_in, reserve_out)` – Pure math helper
@@ -165,6 +167,7 @@ let block = provider.get_block_transactions(block_num, options).await?;
 
 ### AMM Reads (Uniswap V2)
 ```rust
+let info = provider.get_uniswap_v2_liquidity(pair, Some(block)).await?;
 let (token0, token1) = provider.uni_v2_get_tokens(pair, Some(block)).await?;
 let (r0, r1, ts)   = provider.uni_v2_get_reserves(pair, Some(block)).await?;
 let amount_out     = provider.uni_v2_calc_amount_out(amount_in, r0, r1);
