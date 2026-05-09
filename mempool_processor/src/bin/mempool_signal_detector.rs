@@ -1,10 +1,11 @@
-use alloy_primitives::B256;
+#[path = "mempool_signal_detector/support.rs"]
+mod support;
+
 use clap::Parser;
 use eyre::Result;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 /// Mempool Signal Detector Service
@@ -30,25 +31,7 @@ use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::Layer;
 
-#[derive(Clone, Debug, Default)]
-struct LocalTimeFormatter;
-
-impl tracing_subscriber::fmt::time::FormatTime for LocalTimeFormatter {
-    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
-        let now = chrono::Local::now();
-        write!(w, "[{}]", now.format("%Y-%m-%d %H:%M:%S%.3f"))
-    }
-}
-
-fn parse_tx_hash_or_zero(hash: &str) -> B256 {
-    let trimmed = hash.trim();
-    let normalized = if trimmed.starts_with("0x") {
-        trimmed.to_string()
-    } else {
-        format!("0x{trimmed}")
-    };
-    B256::from_str(&normalized).unwrap_or(B256::ZERO)
-}
+use support::{arrival_recording_ingress_observer, parse_tx_hash_or_zero, LocalTimeFormatter};
 
 // Mempool processor imports
 use mempool_processor::{
@@ -56,7 +39,7 @@ use mempool_processor::{
     config::MempoolProcessorConfig,
     function_detector::CreatorFunctionType,
     function_detector::FunctionDetector,
-    mempool_fetcher::{IngressStatsSnapshot, MempoolFetcherIPCClient, MempoolIngressObserver},
+    mempool_fetcher::MempoolFetcherIPCClient,
     signal_detector::SignalManagerConfig,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     simulator::{
@@ -69,32 +52,6 @@ use mempool_processor::{
     tx_router::{TransactionCategory, TransactionRouter},
 };
 use tx_simulator::LiveChainCache;
-
-struct ArrivalRecordingIngressObserver {
-    arrival_recorder: Option<Arc<MempoolArrivalRecorder>>,
-}
-
-impl ArrivalRecordingIngressObserver {
-    fn new(arrival_recorder: Option<Arc<MempoolArrivalRecorder>>) -> Self {
-        Self { arrival_recorder }
-    }
-}
-
-impl MempoolIngressObserver for ArrivalRecordingIngressObserver {
-    fn tx_received(&self, hash: &str, first_seen_ms: u64, _stats: IngressStatsSnapshot) {
-        if let Some(recorder) = self.arrival_recorder.as_ref() {
-            recorder.record_hash_hex_ms_at(hash, first_seen_ms);
-        }
-    }
-
-    fn tx_dropped_queue_full(&self, hash: &str, first_seen_ms: u64, _stats: IngressStatsSnapshot) {
-        if let Some(recorder) = self.arrival_recorder.as_ref() {
-            recorder.record_hash_hex_ms_at(hash, first_seen_ms);
-        }
-    }
-
-    fn queue_depth_updated(&self, _stats: IngressStatsSnapshot) {}
-}
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -599,9 +556,7 @@ async fn main() -> Result<()> {
     // simulation workers are ready so ingress timestamps are captured and the
     // detector can drain immediately.
     info!("\n🔌 Connecting to Reth IPC...");
-    let ingress_observer: Arc<dyn MempoolIngressObserver> = Arc::new(
-        ArrivalRecordingIngressObserver::new(arrival_recorder.clone()),
-    );
+    let ingress_observer = arrival_recording_ingress_observer(arrival_recorder.clone());
     let ipc_client =
         MempoolFetcherIPCClient::new_with_observer(Some(&cfg_ipc_path), Some(ingress_observer))?;
     ipc_client.start().await?;

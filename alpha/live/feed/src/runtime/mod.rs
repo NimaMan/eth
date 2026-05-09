@@ -1,5 +1,6 @@
 mod config;
 mod event;
+mod helpers;
 mod progress;
 mod redis_stream;
 mod service;

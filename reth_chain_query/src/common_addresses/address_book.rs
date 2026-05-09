@@ -133,12 +133,12 @@ pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|
     }
 
     // Include every CEX label
-    for entry in CEX_ADDRESSES {
+    for entry in CEX_ADDRESSES.iter() {
         map.entry(entry.name).or_insert(entry.address);
     }
 
     // Include every ETF label
-    for entry in ETF_ADDRESSES {
+    for entry in ETF_ADDRESSES.iter() {
         map.entry(entry.name).or_insert(entry.address);
     }
 

@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import math
+import urllib.parse
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+
+SEVERITY_RANK = {
+    "critical": 5,
+    "high": 4,
+    "medium": 3,
+    "low": 2,
+    "info": 1,
+}
+
+WETH_LIQUIDITY_LOW = 1.0
+WETH_LIQUIDITY_DUST = 0.01
+STABLE_LIQUIDITY_LOW = 1_000.0
+STABLE_LIQUIDITY_DUST = 10.0
+EXTREME_PRICE_RATIO = 1_000.0
+VERY_EXTREME_PRICE_RATIO = 100_000.0
+TINY_SUPPLY_PERCENT = 0.01
+LP_APPROVAL_HIGH_PERCENT = 20.0
+LP_APPROVAL_MEDIUM_PERCENT = 5.0
+LP_HOLDER_CONCENTRATION_HIGH_PERCENT = 90.0
+LP_HOLDER_CONCENTRATION_MEDIUM_PERCENT = 50.0
+
+
+def pool_metrics(pool: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "currency": pool.get("currency"),
+        "liquidity_level": pool.get("liquidity_level"),
+        "denom_reserve": finite_number(pool.get("denom_reserve")),
+        "token_reserve": finite_number(pool.get("token_reserve")),
+        "total_liquidity": finite_number(pool.get("total_liquidity")),
+        "raw_price_ratio_to_initial": finite_number(pool.get("raw_price_ratio_to_initial")),
+        "price_ratio_to_initial": finite_number(pool.get("price_ratio_to_initial")),
+        "pooled_token_supply_percent": finite_number(pool.get("pooled_token_supply_percent")),
+        "liquidity_to_fdv_percent": finite_number(pool.get("liquidity_to_fdv_percent")),
+        "buy_tax": finite_number(pool.get("buy_tax")),
+        "sell_tax": finite_number(pool.get("sell_tax")),
+        "tax_bucket": pool.get("tax_bucket"),
+        "can_buy": pool.get("can_buy"),
+        "can_sell": pool.get("can_sell"),
+        "risk_level": pool.get("risk_level"),
+        "risk_label": pool.get("risk_label"),
+        "stage": pool.get("stage"),
+    }
+
+
+def contract_analysis_metrics(analysis: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "interface_quality": nested_get(analysis, "interface", "quality"),
+        "metadata_complete": nested_get(analysis, "interface", "metadata_complete"),
+        "metadata": analysis.get("metadata"),
+        "declared_total_supply_scaled": nested_get(
+            analysis, "supply", "declared_total_supply_scaled"
+        ),
+        "minted_from_transfers": nested_get(analysis, "supply", "minted_from_transfers"),
+        "minted_to_declared_ratio": nested_get(
+            analysis, "supply", "minted_to_declared_ratio"
+        ),
+        "hidden_mint_detected": nested_get(analysis, "supply", "hidden_mint_detected"),
+        "current_owner": nested_get(analysis, "authority", "current_owner"),
+        "ownership_renounced": nested_get(analysis, "authority", "ownership_renounced"),
+        "control_address_count": nested_get(
+            analysis, "authority", "control_address_count"
+        ),
+        "pool_count": nested_get(analysis, "pools", "pool_count"),
+        "trading_pool_count": nested_get(analysis, "pools", "trading_pool_count"),
+        "cannot_sell_pool_count": nested_get(
+            analysis, "pools", "cannot_sell_pool_count"
+        ),
+        "scam_pool_count": nested_get(analysis, "pools", "scam_pool_count"),
+    }
+
+
+def contract_analysis_next_step(kind: str) -> str:
+    if kind == "hidden_mint_evidence":
+        return "verify totalSupply, transfer mint events, and reserve/supply ratios before trusting FDV"
+    if kind in {"metadata_incomplete", "invalid_metadata"}:
+        return "treat as a nonstandard ERC20 case and separate chain behavior from metadata-read gaps"
+    if kind == "raw_trading_event_without_pool_trading":
+        return "keep token-level trading events separate from pool-derived trading viability"
+    if kind in {"cannot_sell_pool", "pool_scam_evidence"}:
+        return "replay observed chain routes and simulator setup for the affected pool"
+    return "inspect the contract-analysis evidence and decide whether it needs a focused lab case"
+
+
+def nested_get(value: Mapping[str, Any], *path: str) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
+def is_meaningfully_liquid(pool: Mapping[str, Any]) -> bool:
+    value = finite_number(pool.get("denom_reserve")) or 0.0
+    return value >= meaningful_liquidity_threshold(pool)
+
+
+def is_low_liquidity(pool: Mapping[str, Any]) -> bool:
+    value = finite_number(pool.get("denom_reserve")) or 0.0
+    return value <= low_liquidity_threshold(pool)
+
+
+def looks_like_liquidity_drain(
+    pool: Mapping[str, Any],
+    current_liquidity: float,
+    max_liquidity: float,
+) -> bool:
+    low_threshold = low_liquidity_threshold(pool)
+    if max_liquidity <= low_threshold:
+        return False
+    if current_liquidity <= meaningful_liquidity_threshold(pool):
+        return True
+    if max_liquidity <= 0.0:
+        return False
+    return current_liquidity / max_liquidity <= 0.05
+
+
+def meaningful_liquidity_threshold(pool: Mapping[str, Any]) -> float:
+    currency = str(pool.get("currency") or "").upper()
+    if currency in {"USDC", "USDT", "DAI"}:
+        return STABLE_LIQUIDITY_DUST
+    return WETH_LIQUIDITY_DUST
+
+
+def low_liquidity_threshold(pool: Mapping[str, Any]) -> float:
+    currency = str(pool.get("currency") or "").upper()
+    if currency in {"USDC", "USDT", "DAI"}:
+        return STABLE_LIQUIDITY_LOW
+    return WETH_LIQUIDITY_LOW
+
+
+def finite_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def as_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_address(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def is_burn_address(value: str) -> bool:
+    value = normalize_address(value)
+    return value in {
+        "",
+        "0x0000000000000000000000000000000000000000",
+        "0x000000000000000000000000000000000000dead",
+    } or value.endswith("dead")
+
+
+def opt_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def metric_number(value: Any) -> str:
+    number = finite_number(value)
+    if number is None:
+        return "-"
+    if abs(number) >= 1_000_000 or (0 < abs(number) < 0.0001):
+        return f"{number:.4e}"
+    return f"{number:.4f}"
+
+
+def compact_text(value: str, max_len: int = 120) -> str:
+    value = " ".join(str(value).split())
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
+
+
+def collapse_message(message: str) -> str:
+    message = compact_text(message, 220)
+    for marker in (" at block ", " block "):
+        if marker in message:
+            prefix, _, suffix = message.partition(marker)
+            return f"{prefix}{marker}<block>{suffix[suffix.find(' '):] if ' ' in suffix else ''}".strip()
+    return message
+
+
+def looks_like_timeout(message: str) -> bool:
+    lowered = message.lower()
+    return "timed out" in lowered or "timeout" in lowered
+
+
+def sample_range(label: str, values: Sequence[int]) -> str:
+    if not values:
+        return f"{label}=none"
+    if len(values) == 1:
+        return f"{label}={values[0]}"
+    return f"{label}={values[0]}..{values[-1]} ({len(values)} unique)"
+
+
+def sample_values(label: str, values: Sequence[str]) -> str:
+    if not values:
+        return f"{label}=none"
+    return f"{label}={', '.join(short_hash(value) for value in values[:5])}"
+
+
+def short_hash(value: str | None) -> str:
+    if not value:
+        return "-"
+    value = str(value)
+    if len(value) <= 12:
+        return value
+    return value[:6] + ".." + value[-6:]
+
+
+def url_quote(value: str) -> str:
+    return urllib.parse.quote(value, safe="")
+
+
+def clean_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: clean_json(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [clean_json(item) for item in value]
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+    return value

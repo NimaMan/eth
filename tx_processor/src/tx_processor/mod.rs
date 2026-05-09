@@ -1,6 +1,7 @@
 pub mod address_balance_change_calculator;
 /// Transaction processing modules for decoding events and building ProcessedTransaction
 /// These modules handle the core transaction processing pipeline
+mod address_index;
 pub mod data_models;
 pub mod tax_calculator;
 pub mod tx_classifier;

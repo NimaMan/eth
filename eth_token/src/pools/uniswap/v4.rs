@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use alloy_primitives::{Address, B256, U256};
-use eyre::{eyre, Result};
+use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::tx_processor::data_models::{
-    ERC721TransferEvent, UniswapV4DonateEvent as ProcessedV4DonateEvent,
+    ApprovalForAllEvent, ERC721ApprovalEvent, ERC721TransferEvent,
+    UniswapV4DonateEvent as ProcessedV4DonateEvent,
     UniswapV4DynamicLPFeeUpdatedEvent as ProcessedV4DynamicLPFeeUpdatedEvent,
     UniswapV4FeeUpdatedEvent as ProcessedV4FeeUpdatedEvent,
     UniswapV4InitializeEvent as ProcessedV4InitializeEvent,
@@ -21,8 +22,18 @@ use super::concentrated::{
     current_tick_in_range, scale_i128, token_price_from_sqrt_price_x96, update_tick_delta,
     virtual_reserves_from_liquidity, VirtualReserves,
 };
-use super::v2::{LPHolderSnapshot, UniswapV2TxContext};
+use super::v2::{LPApprovalSnapshot, LPHolderSnapshot, UniswapV2TxContext};
 use super::v3::ConcentratedVirtualReserveSnapshot;
+
+mod helpers;
+
+use self::helpers::{
+    add_lp_approval_amount, address_string, apply_liquidity_delta, event_json, hash_string,
+    normalize_address, normalize_address_string, normalize_hash_string,
+    owner_from_position_transfer, parse_address, parse_hash, position_token_id,
+    position_transfer_for_modify_event, same_address, set_lp_approval_amount_at_least,
+    token0_decimals, token1_decimals,
+};
 
 pub const UNISWAP_V4_PROTOCOL: &str = "UNISWAP-V4";
 pub const V4_NATIVE_ETH_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
@@ -48,7 +59,13 @@ pub struct UniswapV4Pool {
     pub sqrt_price_x96: Option<String>,
     pub active_liquidity: u128,
     pub tick_liquidity_net: BTreeMap<i32, i128>,
+    #[serde(default)]
+    pub known_routers: BTreeSet<String>,
     pub liquidity_positions: BTreeMap<String, UniswapV4LiquidityPosition>,
+    #[serde(default)]
+    pub position_approvals: BTreeMap<String, UniswapV4PositionApproval>,
+    #[serde(default)]
+    pub operator_approvals: BTreeMap<String, BTreeMap<String, UniswapV4OperatorApproval>>,
     pub protocol_fee: Option<u32>,
     pub dynamic_lp_fee: Option<u32>,
     pub last_swap_fee: Option<u32>,
@@ -56,6 +73,8 @@ pub struct UniswapV4Pool {
     pub initialize_events: Vec<Value>,
     pub modify_liquidity_events: Vec<Value>,
     pub liquidity_position_events: Vec<Value>,
+    #[serde(default)]
+    pub lp_approval_events: Vec<Value>,
     pub donate_events: Vec<Value>,
     pub fee_update_events: Vec<Value>,
     pub last_virtual_reserves: Option<ConcentratedVirtualReserveSnapshot>,
@@ -71,6 +90,26 @@ pub struct UniswapV4LiquidityPosition {
     pub tick_upper: i32,
     pub last_update_block: u64,
     pub last_update_tx: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UniswapV4PositionApproval {
+    pub position_id: String,
+    pub owner: String,
+    pub spender: String,
+    pub block_number: u64,
+    pub tx_hash: String,
+    pub block_timestamp: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UniswapV4OperatorApproval {
+    pub owner: String,
+    pub operator: String,
+    pub approved: bool,
+    pub block_number: u64,
+    pub tx_hash: String,
+    pub block_timestamp: Option<u64>,
 }
 
 impl UniswapV4Pool {
@@ -103,7 +142,10 @@ impl UniswapV4Pool {
             sqrt_price_x96: None,
             active_liquidity: 0,
             tick_liquidity_net: BTreeMap::new(),
+            known_routers: BTreeSet::new(),
             liquidity_positions: BTreeMap::new(),
+            position_approvals: BTreeMap::new(),
+            operator_approvals: BTreeMap::new(),
             protocol_fee: None,
             dynamic_lp_fee: None,
             last_swap_fee: None,
@@ -111,6 +153,7 @@ impl UniswapV4Pool {
             initialize_events: Vec::new(),
             modify_liquidity_events: Vec::new(),
             liquidity_position_events: Vec::new(),
+            lp_approval_events: Vec::new(),
             donate_events: Vec::new(),
             fee_update_events: Vec::new(),
             last_virtual_reserves: None,
@@ -141,6 +184,10 @@ impl UniswapV4Pool {
         pool.current_tick = Some(event.tick);
         pool.sqrt_price_x96 = Some(event.sqrt_price_x96.to_string());
         pool
+    }
+
+    pub fn set_known_routers(&mut self, routers: impl IntoIterator<Item = impl AsRef<str>>) {
+        self.known_routers = routers.into_iter().map(normalize_address).collect();
     }
 
     pub fn update_from_processed_transaction(
@@ -198,6 +245,7 @@ impl UniswapV4Pool {
             }
         }
         self.process_position_transfers(transaction, tx, &modified_position_ids);
+        self.process_position_approvals(transaction, tx);
 
         for event in &transaction.uniswap_v4_protocol_fee_controller_updates {
             if same_address(&event.pool_manager_address, &self.pool_manager_address) {
@@ -244,18 +292,19 @@ impl UniswapV4Pool {
     }
 
     pub fn lp_holders(&self) -> Vec<LPHolderSnapshot> {
-        let mut balances = BTreeMap::<String, f64>::new();
-        for position in self.liquidity_positions.values() {
-            if position.liquidity == 0 {
-                continue;
-            }
-            *balances.entry(position.owner.clone()).or_insert(0.0) += position.liquidity as f64;
-        }
-
+        let balances = self.lp_balances_by_holder();
+        let approvals_by_holder = self.lp_approvals_by_holder(&balances);
         let total: f64 = balances.values().sum();
         let mut holders = balances
             .into_iter()
+            .filter(|(_, balance)| *balance > 0.0)
             .map(|(address, balance)| LPHolderSnapshot {
+                approvals: approvals_by_holder
+                    .get(&address)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
                 address,
                 balance,
                 share: if total > 0.0 {
@@ -263,7 +312,6 @@ impl UniswapV4Pool {
                 } else {
                     0.0
                 },
-                approvals: Default::default(),
             })
             .collect::<Vec<_>>();
         holders.sort_by(|left, right| {
@@ -276,11 +324,64 @@ impl UniswapV4Pool {
         holders
     }
 
+    pub fn total_approved_to_routers(&self) -> f64 {
+        self.lp_holders()
+            .into_iter()
+            .map(|holder| {
+                holder
+                    .approvals
+                    .values()
+                    .filter(|approval| approval.is_router)
+                    .map(|approval| approval.amount.min(holder.balance))
+                    .sum::<f64>()
+            })
+            .sum()
+    }
+
+    pub fn lp_approved_percentage(&self) -> f64 {
+        let total = self.lp_total_supply();
+        if total == 0.0 {
+            0.0
+        } else {
+            (self.total_approved_to_routers() / total) * 100.0
+        }
+    }
+
+    pub fn last_lp_approval_block(&self) -> Option<u64> {
+        self.lp_approval_events
+            .last()
+            .and_then(|event| event.get("block_number"))
+            .and_then(Value::as_u64)
+    }
+
+    pub fn last_lp_approval_event(&self) -> Option<Value> {
+        self.lp_approval_events.last().cloned()
+    }
+
+    pub fn holders_with_approvals(&self) -> Vec<String> {
+        self.lp_holders()
+            .into_iter()
+            .filter(|holder| !holder.approvals.is_empty())
+            .map(|holder| holder.address)
+            .collect()
+    }
+
     pub fn touches_position_transfer(&self, transaction: &ProcessedTransaction) -> bool {
         transaction
             .erc721_transfers
             .iter()
             .any(|transfer| self.position_transfer_matches_known_position(transfer))
+    }
+
+    pub fn touches_position_approval(&self, transaction: &ProcessedTransaction) -> bool {
+        transaction
+            .erc721_approval_events
+            .iter()
+            .any(|approval| self.position_approval_matches_known_position(approval))
+            || transaction
+                .approval_for_all_events
+                .iter()
+                .any(|approval| self.operator_approval_matches_known_owner(approval))
     }
 
     pub fn build_simulator_pool_config(
@@ -383,6 +484,7 @@ impl UniswapV4Pool {
         let position_id = normalize_hash_string(hash_string(&event.salt));
         let transfer = position_transfer_for_modify_event(event, transaction);
         let previous = self.liquidity_positions.get(&position_id);
+        let previous_owner = previous.map(|position| position.owner.clone());
         let position_manager_address = transfer
             .map(|transfer| address_string(&transfer.token_address))
             .unwrap_or_else(|| address_string(&event.sender));
@@ -405,7 +507,13 @@ impl UniswapV4Pool {
             last_update_tx: tx.tx_hash.clone(),
         };
         self.liquidity_positions
-            .insert(position_id, position.clone());
+            .insert(position_id.clone(), position.clone());
+        if previous_owner
+            .as_deref()
+            .is_some_and(|previous_owner| previous_owner != position.owner)
+        {
+            self.position_approvals.remove(&position_id);
+        }
         position
     }
 
@@ -437,6 +545,7 @@ impl UniswapV4Pool {
             position.owner = owner.clone();
             position.last_update_block = tx.block_number;
             position.last_update_tx = tx.tx_hash.clone();
+            self.position_approvals.remove(&position_id);
 
             let transfer_event = json!({
                 "event": "position_transfer",
@@ -457,8 +566,152 @@ impl UniswapV4Pool {
         }
     }
 
+    fn process_position_approvals(
+        &mut self,
+        transaction: &ProcessedTransaction,
+        tx: &UniswapV2TxContext,
+    ) {
+        let mut events = Vec::new();
+        for event in &transaction.erc721_approval_events {
+            if self.position_approval_matches_known_position(event) {
+                events.push(V4ApprovalAction::Position(event));
+            }
+        }
+        for event in &transaction.approval_for_all_events {
+            if self.operator_approval_matches_known_owner(event) {
+                events.push(V4ApprovalAction::Operator(event));
+            }
+        }
+
+        events.sort_by_key(V4ApprovalAction::log_index);
+        for event in events {
+            match event {
+                V4ApprovalAction::Position(event) => self.process_position_approval(event, tx),
+                V4ApprovalAction::Operator(event) => self.process_operator_approval(event, tx),
+            }
+        }
+    }
+
+    fn process_position_approval(&mut self, event: &ERC721ApprovalEvent, tx: &UniswapV2TxContext) {
+        let Some(position_id) = self.position_id_for_token_id(event.token_id) else {
+            return;
+        };
+        let owner = address_string(&event.owner);
+        let spender = address_string(&event.approved_address);
+        let amount = self
+            .liquidity_positions
+            .get(&position_id)
+            .map(|position| position.liquidity as f64)
+            .unwrap_or(0.0);
+
+        if event.approved_address.is_zero() {
+            self.position_approvals.remove(&position_id);
+        } else {
+            self.position_approvals.insert(
+                position_id.clone(),
+                UniswapV4PositionApproval {
+                    position_id: position_id.clone(),
+                    owner: owner.clone(),
+                    spender: spender.clone(),
+                    block_number: tx.block_number,
+                    tx_hash: tx.tx_hash.clone(),
+                    block_timestamp: Some(tx.block_timestamp),
+                },
+            );
+        }
+
+        append_with_history_limit(
+            &mut self.lp_approval_events,
+            json!({
+                "approval_type": "erc721_position",
+                "block_number": tx.block_number,
+                "block_timestamp": tx.block_timestamp,
+                "tx_hash": tx.tx_hash,
+                "position_id": position_id,
+                "owner": owner,
+                "spender": spender,
+                "amount": amount,
+                "approved": !event.approved_address.is_zero(),
+                "is_router": self.known_routers.contains(&address_string(&event.approved_address)),
+                "log_index": event.log_index,
+            }),
+            self.base.config.history_limit,
+        );
+    }
+
+    fn process_operator_approval(&mut self, event: &ApprovalForAllEvent, tx: &UniswapV2TxContext) {
+        let owner = address_string(&event.owner);
+        let operator = address_string(&event.operator);
+        let amount = self
+            .lp_balances_by_holder()
+            .get(&owner)
+            .copied()
+            .unwrap_or(0.0);
+
+        if event.approved {
+            self.operator_approvals
+                .entry(owner.clone())
+                .or_default()
+                .insert(
+                    operator.clone(),
+                    UniswapV4OperatorApproval {
+                        owner: owner.clone(),
+                        operator: operator.clone(),
+                        approved: true,
+                        block_number: tx.block_number,
+                        tx_hash: tx.tx_hash.clone(),
+                        block_timestamp: Some(tx.block_timestamp),
+                    },
+                );
+        } else if let Some(approvals) = self.operator_approvals.get_mut(&owner) {
+            approvals.remove(&operator);
+            if approvals.is_empty() {
+                self.operator_approvals.remove(&owner);
+            }
+        }
+
+        append_with_history_limit(
+            &mut self.lp_approval_events,
+            json!({
+                "approval_type": "erc721_approval_for_all",
+                "block_number": tx.block_number,
+                "block_timestamp": tx.block_timestamp,
+                "tx_hash": tx.tx_hash,
+                "owner": owner,
+                "spender": operator,
+                "operator": address_string(&event.operator),
+                "amount": amount,
+                "approved": event.approved,
+                "is_router": self.known_routers.contains(&address_string(&event.operator)),
+                "log_index": event.log_index,
+            }),
+            self.base.config.history_limit,
+        );
+    }
+
     fn position_transfer_matches_known_position(&self, transfer: &ERC721TransferEvent) -> bool {
         self.position_transfer_id(transfer).is_some()
+    }
+
+    fn position_approval_matches_known_position(&self, approval: &ERC721ApprovalEvent) -> bool {
+        let Some(position_manager) = self.position_manager_address.as_ref() else {
+            return false;
+        };
+        same_address(&approval.token_address, position_manager)
+            && self.position_id_for_token_id(approval.token_id).is_some()
+    }
+
+    fn operator_approval_matches_known_owner(&self, approval: &ApprovalForAllEvent) -> bool {
+        let Some(position_manager) = self.position_manager_address.as_ref() else {
+            return false;
+        };
+        let owner = address_string(&approval.owner);
+        same_address(&approval.token_address, position_manager)
+            && (self.operator_approvals.contains_key(&owner)
+                || self
+                    .liquidity_positions
+                    .values()
+                    .any(|position| position.owner == owner))
     }
 
     fn position_transfer_id(&self, transfer: &ERC721TransferEvent) -> Option<String> {
@@ -466,14 +719,78 @@ impl UniswapV4Pool {
         if !same_address(&transfer.token_address, position_manager) {
             return None;
         }
+        self.position_id_for_token_id(transfer.token_id)
+    }
+
+    fn position_id_for_token_id(&self, token_id: U256) -> Option<String> {
         self.liquidity_positions
             .keys()
             .find(|position_id| {
                 parse_hash(position_id)
                     .map(position_token_id)
-                    .is_ok_and(|token_id| token_id == transfer.token_id)
+                    .is_ok_and(|position_token_id| position_token_id == token_id)
             })
             .cloned()
+    }
+
+    fn lp_balances_by_holder(&self) -> BTreeMap<String, f64> {
+        let mut balances = BTreeMap::<String, f64>::new();
+        for position in self.liquidity_positions.values() {
+            if position.liquidity == 0 {
+                continue;
+            }
+            *balances.entry(position.owner.clone()).or_insert(0.0) += position.liquidity as f64;
+        }
+        balances
+    }
+
+    fn lp_approvals_by_holder(
+        &self,
+        balances: &BTreeMap<String, f64>,
+    ) -> BTreeMap<String, BTreeMap<String, LPApprovalSnapshot>> {
+        let mut approvals = BTreeMap::<String, BTreeMap<String, LPApprovalSnapshot>>::new();
+        for position in self.liquidity_positions.values() {
+            if position.liquidity == 0 {
+                continue;
+            }
+            let Some(approval) = self.position_approvals.get(&position.position_id) else {
+                continue;
+            };
+            if approval.owner != position.owner || approval.spender == V4_NATIVE_ETH_ADDRESS {
+                continue;
+            }
+            add_lp_approval_amount(
+                &mut approvals,
+                &self.known_routers,
+                &position.owner,
+                &approval.spender,
+                position.liquidity as f64,
+                approval.block_number,
+                &approval.tx_hash,
+            );
+        }
+
+        for (owner, operators) in &self.operator_approvals {
+            let Some(balance) = balances
+                .get(owner)
+                .copied()
+                .filter(|balance| *balance > 0.0)
+            else {
+                continue;
+            };
+            for approval in operators.values().filter(|approval| approval.approved) {
+                set_lp_approval_amount_at_least(
+                    &mut approvals,
+                    &self.known_routers,
+                    owner,
+                    &approval.operator,
+                    balance,
+                    approval.block_number,
+                    &approval.tx_hash,
+                );
+            }
+        }
+        approvals
     }
 
     fn process_swap(&mut self, event: &ProcessedV4SwapEvent, tx: &UniswapV2TxContext) {
@@ -614,6 +931,20 @@ impl V4PoolAction<'_> {
     }
 }
 
+enum V4ApprovalAction<'a> {
+    Position(&'a ERC721ApprovalEvent),
+    Operator(&'a ApprovalForAllEvent),
+}
+
+impl V4ApprovalAction<'_> {
+    fn log_index(&self) -> u64 {
+        match self {
+            Self::Position(event) => event.log_index,
+            Self::Operator(event) => event.log_index,
+        }
+    }
+}
+
 pub fn v4_pool_display_key(pool_manager: impl AsRef<str>, pool_id: impl AsRef<str>) -> String {
     format!(
         "{}#{}",
@@ -638,415 +969,5 @@ pub fn is_native_eth_currency(address: &str) -> bool {
     normalize_address(address) == V4_NATIVE_ETH_ADDRESS
 }
 
-fn token0_decimals(pool: &UniswapV4Pool) -> u8 {
-    if pool.base.config.token1_is_denom.unwrap_or(false) {
-        pool.base.config.token_decimals
-    } else {
-        pool.denom_decimals()
-    }
-}
-
-fn token1_decimals(pool: &UniswapV4Pool) -> u8 {
-    if pool.base.config.token1_is_denom.unwrap_or(false) {
-        pool.denom_decimals()
-    } else {
-        pool.base.config.token_decimals
-    }
-}
-
-fn event_json<T: Serialize>(event: &T, tx: &UniswapV2TxContext) -> Value {
-    let mut value = serde_json::to_value(event).unwrap_or_else(|_| json!({}));
-    if let Some(object) = value.as_object_mut() {
-        object.insert("block_number".to_string(), json!(tx.block_number));
-        object.insert("block_timestamp".to_string(), json!(tx.block_timestamp));
-        object.insert("tx_hash".to_string(), json!(tx.tx_hash));
-    }
-    value
-}
-
-fn position_transfer_for_modify_event<'a>(
-    event: &ProcessedV4ModifyLiquidityEvent,
-    transaction: &'a ProcessedTransaction,
-) -> Option<&'a ERC721TransferEvent> {
-    let token_id = position_token_id(event.salt);
-    transaction
-        .erc721_transfers
-        .iter()
-        .filter(|transfer| same_address(&transfer.token_address, &address_string(&event.sender)))
-        .filter(|transfer| transfer.token_id == token_id)
-        .min_by_key(|transfer| transfer.log_index.abs_diff(event.log_index))
-}
-
-fn owner_from_position_transfer(transfer: &ERC721TransferEvent) -> Option<String> {
-    if !transfer.to_address.is_zero() {
-        Some(address_string(&transfer.to_address))
-    } else if !transfer.from_address.is_zero() {
-        Some(address_string(&transfer.from_address))
-    } else {
-        None
-    }
-}
-
-fn position_token_id(salt: B256) -> U256 {
-    U256::from_be_slice(salt.as_slice())
-}
-
-fn apply_liquidity_delta(current: u128, delta: i128) -> u128 {
-    if delta >= 0 {
-        current.saturating_add(delta as u128)
-    } else {
-        current.saturating_sub(delta.unsigned_abs())
-    }
-}
-
-fn parse_address(value: &str) -> Result<Address> {
-    value
-        .parse()
-        .map_err(|err| eyre!("invalid address {value}: {err}"))
-}
-
-fn parse_hash(value: &str) -> Result<B256> {
-    value
-        .parse()
-        .map_err(|err| eyre!("invalid pool id {value}: {err}"))
-}
-
-fn same_address(address: &Address, value: &str) -> bool {
-    address_string(address) == normalize_address(value)
-}
-
-fn address_string(address: &Address) -> String {
-    format!("{address:#x}")
-}
-
-fn hash_string(hash: &B256) -> String {
-    format!("{hash:#x}")
-}
-
-fn normalize_address(value: impl AsRef<str>) -> String {
-    value.as_ref().trim().to_ascii_lowercase()
-}
-
-fn normalize_address_string(value: impl Into<String>) -> String {
-    normalize_address(value.into())
-}
-
-fn normalize_hash_string(value: impl AsRef<str>) -> String {
-    let value = value.as_ref().trim().to_ascii_lowercase();
-    if value.starts_with("0x") {
-        value
-    } else {
-        format!("0x{value}")
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use alloy_primitives::{address, b256, Address, U256};
-    use tx_processor::ProcessedTransaction;
-
-    use super::*;
-
-    fn initialize_event() -> ProcessedV4InitializeEvent {
-        ProcessedV4InitializeEvent {
-            pool_manager_address: address!("000000000004444c5dc75cb358380d2e3de08a90"),
-            event_id: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
-            currency0: address!("0000000000000000000000000000000000000000"),
-            currency1: address!("0000000000000000000000000000000000000001"),
-            fee: 3000,
-            tick_spacing: 60,
-            hooks: address!("0000000000000000000000000000000000000000"),
-            sqrt_price_x96: U256::from(1u128) << 96,
-            tick: 0,
-            log_index: 1,
-        }
-    }
-
-    fn tx() -> (ProcessedTransaction, UniswapV2TxContext) {
-        (
-            ProcessedTransaction::new(
-                b256!("0000000000000000000000000000000000000000000000000000000000000001"),
-                100,
-                1_700,
-                1,
-                address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                None,
-                U256::ZERO,
-                true,
-                0,
-                0,
-                Vec::new(),
-            ),
-            UniswapV2TxContext::new(100, 1_700, "0xTX"),
-        )
-    }
-
-    #[test]
-    fn initialize_preserves_native_eth_currency_and_uses_weth_display_denom() {
-        let event = initialize_event();
-        let pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-
-        assert_eq!(pool.pool_key.currency0, V4_NATIVE_ETH_ADDRESS);
-        assert_eq!(pool.base.identity.denom_address, WETH_ADDRESS);
-    }
-
-    #[test]
-    fn unknown_pool_id_is_not_a_match() {
-        let event = initialize_event();
-        let pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-
-        assert!(!pool.matches_event(
-            event.pool_manager_address,
-            b256!("2222222222222222222222222222222222222222222222222222222222222222")
-        ));
-    }
-
-    #[test]
-    fn modifies_active_liquidity_only_when_current_tick_inside_range() {
-        let event = initialize_event();
-        let mut pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-        let (mut processed, ctx) = tx();
-        processed
-            .uniswap_v4_modifies
-            .push(ProcessedV4ModifyLiquidityEvent {
-                pool_manager_address: event.pool_manager_address,
-                event_id: event.event_id,
-                sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                tick_lower: -60,
-                tick_upper: 60,
-                liquidity_delta: 1_000_000_000_000_000_000i128,
-                salt: B256::ZERO,
-                log_index: 2,
-            });
-
-        pool.update_from_processed_transaction(&processed, &ctx)
-            .unwrap();
-
-        assert_eq!(pool.active_liquidity, 1_000_000_000_000_000_000u128);
-        assert_eq!(pool.base.price(), 1.0);
-    }
-
-    #[test]
-    fn modify_liquidity_tracks_position_nft_owner_as_lp_holder() {
-        let event = initialize_event();
-        let mut pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-        let (mut processed, ctx) = tx();
-        let position_manager = address!("bd216513d74c8cf14cf4747e6aaa6420ff64ee9e");
-        let owner = address!("0d82a9f1ae5b693c9b00c8e874057fb78824cfd3");
-        let salt = b256!("000000000000000000000000000000000000000000000000000000000003ea79");
-        processed.erc721_transfers.push(ERC721TransferEvent {
-            token_address: position_manager,
-            from_address: Address::ZERO,
-            to_address: owner,
-            token_id: position_token_id(salt),
-            log_index: 3,
-        });
-        processed
-            .uniswap_v4_modifies
-            .push(ProcessedV4ModifyLiquidityEvent {
-                pool_manager_address: event.pool_manager_address,
-                event_id: event.event_id,
-                sender: position_manager,
-                tick_lower: -60,
-                tick_upper: 60,
-                liquidity_delta: 100i128,
-                salt,
-                log_index: 2,
-            });
-
-        pool.update_from_processed_transaction(&processed, &ctx)
-            .unwrap();
-
-        let holders = pool.lp_holders();
-        assert_eq!(holders.len(), 1);
-        assert_eq!(
-            holders[0].address,
-            "0x0d82a9f1ae5b693c9b00c8e874057fb78824cfd3"
-        );
-        assert_eq!(holders[0].balance, 100.0);
-        assert_eq!(pool.lp_total_supply(), 100.0);
-        assert_eq!(
-            pool.modify_liquidity_events[0]["liquidity_provider"],
-            "0x0d82a9f1ae5b693c9b00c8e874057fb78824cfd3"
-        );
-        assert_eq!(
-            pool.position_manager_address.as_deref(),
-            Some("0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e")
-        );
-    }
-
-    #[test]
-    fn repeated_modify_uses_existing_position_owner_when_no_transfer_event() {
-        let event = initialize_event();
-        let mut pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-        let (mut processed, ctx) = tx();
-        let position_manager = address!("bd216513d74c8cf14cf4747e6aaa6420ff64ee9e");
-        let owner = address!("0d82a9f1ae5b693c9b00c8e874057fb78824cfd3");
-        let salt = b256!("000000000000000000000000000000000000000000000000000000000003ea79");
-        processed.erc721_transfers.push(ERC721TransferEvent {
-            token_address: position_manager,
-            from_address: Address::ZERO,
-            to_address: owner,
-            token_id: position_token_id(salt),
-            log_index: 3,
-        });
-        processed
-            .uniswap_v4_modifies
-            .push(ProcessedV4ModifyLiquidityEvent {
-                pool_manager_address: event.pool_manager_address,
-                event_id: event.event_id,
-                sender: position_manager,
-                tick_lower: -60,
-                tick_upper: 60,
-                liquidity_delta: 100i128,
-                salt,
-                log_index: 2,
-            });
-        pool.update_from_processed_transaction(&processed, &ctx)
-            .unwrap();
-
-        let (mut processed, ctx) = tx();
-        processed.from_address = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        processed
-            .uniswap_v4_modifies
-            .push(ProcessedV4ModifyLiquidityEvent {
-                pool_manager_address: event.pool_manager_address,
-                event_id: event.event_id,
-                sender: position_manager,
-                tick_lower: -60,
-                tick_upper: 60,
-                liquidity_delta: -25i128,
-                salt,
-                log_index: 2,
-            });
-        pool.update_from_processed_transaction(&processed, &ctx)
-            .unwrap();
-
-        let holders = pool.lp_holders();
-        assert_eq!(holders.len(), 1);
-        assert_eq!(
-            holders[0].address,
-            "0x0d82a9f1ae5b693c9b00c8e874057fb78824cfd3"
-        );
-        assert_eq!(holders[0].balance, 75.0);
-    }
-
-    #[test]
-    fn position_transfer_updates_existing_lp_holder() {
-        let event = initialize_event();
-        let mut pool = UniswapV4Pool::from_initialize_event(
-            &event,
-            "0x0000000000000000000000000000000000000001",
-            display_denom_for_v4_currency(event.currency0),
-            BasePoolConfig {
-                token_decimals: 18,
-                denom_decimals: Some(18),
-                token1_is_denom: Some(false),
-                ..BasePoolConfig::new(18)
-            },
-        );
-        let (mut processed, ctx) = tx();
-        let position_manager = address!("bd216513d74c8cf14cf4747e6aaa6420ff64ee9e");
-        let owner = address!("0d82a9f1ae5b693c9b00c8e874057fb78824cfd3");
-        let next_owner = address!("7ca2d5fa2c6b3e01294a74e353c89141837ad784");
-        let salt = b256!("000000000000000000000000000000000000000000000000000000000003ea79");
-        processed.erc721_transfers.push(ERC721TransferEvent {
-            token_address: position_manager,
-            from_address: Address::ZERO,
-            to_address: owner,
-            token_id: position_token_id(salt),
-            log_index: 3,
-        });
-        processed
-            .uniswap_v4_modifies
-            .push(ProcessedV4ModifyLiquidityEvent {
-                pool_manager_address: event.pool_manager_address,
-                event_id: event.event_id,
-                sender: position_manager,
-                tick_lower: -60,
-                tick_upper: 60,
-                liquidity_delta: 100i128,
-                salt,
-                log_index: 2,
-            });
-        pool.update_from_processed_transaction(&processed, &ctx)
-            .unwrap();
-
-        let (mut transfer_tx, ctx) = tx();
-        transfer_tx.erc721_transfers.push(ERC721TransferEvent {
-            token_address: position_manager,
-            from_address: owner,
-            to_address: next_owner,
-            token_id: position_token_id(salt),
-            log_index: 1,
-        });
-
-        assert!(pool.touches_position_transfer(&transfer_tx));
-        pool.update_from_processed_transaction(&transfer_tx, &ctx)
-            .unwrap();
-
-        let holders = pool.lp_holders();
-        assert_eq!(holders.len(), 1);
-        assert_eq!(
-            holders[0].address,
-            "0x7ca2d5fa2c6b3e01294a74e353c89141837ad784"
-        );
-        assert_eq!(holders[0].balance, 100.0);
-        assert_eq!(
-            pool.liquidity_position_events
-                .last()
-                .and_then(|event| event["event"].as_str()),
-            Some("position_transfer")
-        );
-    }
-}
+mod tests;
