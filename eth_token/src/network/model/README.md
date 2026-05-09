@@ -35,3 +35,37 @@ The model layer now exposes:
 
 The next layer should consume these types rather than introducing parallel graph
 identifiers or ad hoc JSON fields.
+
+## Edge Semantics
+
+The edge model separates observed relations from inferred relations. This matters
+because the same pair of addresses can be connected by multiple evidence types
+with different meanings.
+
+### Observed Edges
+
+- `TokenTransfer`: direct tracked-token transfer. This is the strongest holder
+  relationship edge.
+- `DenomTransfer`: direct ETH/WETH/stable/known-denom value transfer. This is a
+  value-flow edge, not automatically a funding edge.
+- `PoolTrade`: address to pool trade relation.
+- `PoolCreation`: token to pool relation.
+- `LiquidityEvent`: address to pool liquidity relation.
+- `LpTransfer`: LP token movement.
+- `LpApproval`: LP approval or router permission relation.
+- `ControlRelation`: creator, owner, admin, proxy, or policy relation.
+- `FeeSourceTouches`: transaction fee source touched an address in the same
+  transaction. This preserves the old Python `tx owner` edge.
+
+### Inferred Edges
+
+- `Funding`: derived from a denom flow plus timing/order context.
+- `SharedIntermediary`: derived when a non-holder address connects multiple
+  holders.
+- `TemporalCoactivity`: derived when addresses act through the same noisy hub in
+  the same block/time window.
+- `Synthetic`: reserved for internal view-building links.
+
+Observed edges should carry source event evidence. Inferred edges must carry
+confidence, explanation, and enough examples to let Asena or strategy code show
+why the relation exists.
