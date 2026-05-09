@@ -42,6 +42,10 @@ name = "compare_block_sources"
 path = "examples/block/compare_block_sources.rs"
 
 [[example]]
+name = "refresh_processed_block_disk_cache"
+path = "examples/block/cache/refresh_processed_block_disk_cache.rs"
+
+[[example]]
 name = "provider_process_block"
 path = "examples/provider/process_block.rs"
 
