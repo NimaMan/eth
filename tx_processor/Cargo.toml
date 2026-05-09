@@ -2,7 +2,7 @@
 name    = "tx_processor"
 version = "0.4.0"
 edition = "2021"
-workspace = "../reth"
+workspace = ".."
 
 [features]
 default = []
@@ -37,6 +37,10 @@ path = "examples/block/process_block_batch.rs"
 [[example]]
 name = "profile_processed_blocks"
 path = "examples/block/profile/main.rs"
+
+[[example]]
+name = "profile_processed_block_range_throughput"
+path = "examples/block/profile/range_throughput.rs"
 
 [[example]]
 name = "compare_block_sources"

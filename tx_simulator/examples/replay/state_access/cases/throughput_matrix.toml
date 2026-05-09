@@ -1,0 +1,18 @@
+# Reference matrix for the 100K `ProcessedBlock` throughput investigation.
+
+range_sizes = [20, 2000, 20000, 100000]
+cold_concurrencies = [1, 4, 8, 16, 24, 32, 48]
+chunk_size = 250
+fill_batch_blocks = 250
+fill_concurrency = 4
+
+# Commands:
+# cargo run --manifest-path Cargo.toml -p tx_processor --release \
+#   --example profile_processed_block_range_throughput -- \
+#   --mode matrix --range-sizes 20,2000,20000,100000 \
+#   --concurrencies 1,4,8,16,24,32,48 --chunk-size 250 \
+#   --fill-batch-blocks 250 --fill-concurrency 4 --cache-dir /path/to/cache
+#
+# cargo run --manifest-path Cargo.toml -p tx_simulator --release \
+#   --example profile_state_access_range -- \
+#   --start 25028579 --end 25028598 --concurrency 24

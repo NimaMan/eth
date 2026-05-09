@@ -2,7 +2,7 @@
 name = "tx_simulator"
 version = "0.2.0"
 edition = "2021"
-workspace = "../reth"
+workspace = ".."
 
 [dependencies]
 # Core
@@ -139,6 +139,10 @@ path = "examples/block/verify_block_trace_rpc_equivalence.rs"
 [[example]]
 name = "profile_replay_engines"
 path = "examples/replay/profile/main.rs"
+
+[[example]]
+name = "profile_state_access_range"
+path = "examples/replay/state_access/main.rs"
 
 # Chain data loader diagnostics
 [[example]]

@@ -10,8 +10,40 @@ use crate::{
 
 const PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
 pub const DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH: u64 = 250;
-const PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS: usize = 25;
-const PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
+pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS: usize =
+    DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH as usize;
+pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessedBlockRangeLoadOptions {
+    pub fill_batch_blocks: usize,
+    pub fill_concurrency: usize,
+}
+
+impl Default for ProcessedBlockRangeLoadOptions {
+    fn default() -> Self {
+        Self {
+            fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+            fill_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+        }
+    }
+}
+
+impl ProcessedBlockRangeLoadOptions {
+    pub fn with_fill_batch_blocks(mut self, value: usize) -> Self {
+        if value > 0 {
+            self.fill_batch_blocks = value;
+        }
+        self
+    }
+
+    pub fn with_fill_concurrency(mut self, value: usize) -> Self {
+        if value > 0 {
+            self.fill_concurrency = value;
+        }
+        self
+    }
+}
 
 pub struct LoadedProcessedBlockWithMetrics {
     pub block: ProcessedBlock,
@@ -40,6 +72,25 @@ pub async fn load_processed_block_range(
     end_block: u64,
     processed_block_disk_cache: Option<&ProcessedBlockDiskCacheStore>,
 ) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
+    load_processed_block_range_with_options(
+        tx_processor,
+        provider,
+        start_block,
+        end_block,
+        processed_block_disk_cache,
+        ProcessedBlockRangeLoadOptions::default(),
+    )
+    .await
+}
+
+pub async fn load_processed_block_range_with_options(
+    tx_processor: &BlockProcessor,
+    provider: &RethQueryProvider,
+    start_block: u64,
+    end_block: u64,
+    processed_block_disk_cache: Option<&ProcessedBlockDiskCacheStore>,
+    options: ProcessedBlockRangeLoadOptions,
+) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
     if let Some(cache_store) = processed_block_disk_cache {
         return load_cached_block_range(
             tx_processor,
@@ -47,6 +98,7 @@ pub async fn load_processed_block_range(
             start_block,
             end_block,
             cache_store,
+            options,
         )
         .await;
     }
@@ -75,6 +127,7 @@ async fn load_cached_block_range(
     start_block: u64,
     end_block: u64,
     cache_store: &ProcessedBlockDiskCacheStore,
+    options: ProcessedBlockRangeLoadOptions,
 ) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
     let reader = cache_store.reader();
     let plan = reader.plan_range(provider, start_block, end_block).await?;
@@ -111,10 +164,7 @@ async fn load_cached_block_range(
 
         let fill_started = Instant::now();
         let mut write_wall_ms = 0u128;
-        for missing_chunk in plan
-            .missing_keys
-            .chunks(PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS)
-        {
+        for missing_chunk in plan.missing_keys.chunks(options.fill_batch_blocks.max(1)) {
             let missing_blocks = missing_chunk
                 .iter()
                 .map(|key| key.block_number)
@@ -123,7 +173,7 @@ async fn load_cached_block_range(
                 .process_block_batch(
                     missing_blocks,
                     BlockBatchOptions::default()
-                        .with_max_concurrency(PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY),
+                        .with_max_concurrency(options.fill_concurrency.max(1)),
                 )
                 .await?;
 
@@ -172,8 +222,8 @@ async fn load_cached_block_range(
             missing_blocks = missing_count,
             fill_ms,
             write_wall_ms,
-            fill_batch_blocks = PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
-            fill_concurrency = PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+            fill_batch_blocks = options.fill_batch_blocks.max(1),
+            fill_concurrency = options.fill_concurrency.max(1),
             "filled missing processed block disk cache entries"
         );
     }

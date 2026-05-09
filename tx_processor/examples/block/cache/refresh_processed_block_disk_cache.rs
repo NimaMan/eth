@@ -6,9 +6,10 @@ use std::time::Instant;
 use clap::Parser;
 use eyre::{bail, Result};
 use tx_processor::{
-    load_processed_block_range, prune_processed_block_disk_cache,
+    load_processed_block_range_with_options, prune_processed_block_disk_cache,
     should_prune_processed_block_disk_cache, BlockProcessor, ProcessedBlockDiskCacheStore,
-    DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    ProcessedBlockRangeLoadOptions, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 
 const DEFAULT_BLOCKS: u64 = 100_000;
@@ -20,7 +21,7 @@ const DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
 ///
 /// Example:
 /// cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- \
-///   --blocks 100000 --retain-blocks 1000000
+///   --blocks 100000 --chunk-size 250 --fill-batch-blocks 250 --fill-concurrency 4 --retain-blocks 1000000
 #[derive(Debug, Parser)]
 struct Args {
     /// Reth data directory. Defaults to RETH_DATADIR/RETH_DB_PATH/config.env via tx_simulator.
@@ -46,6 +47,14 @@ struct Args {
     /// Blocks per cache-fill/read chunk.
     #[arg(long, default_value_t = DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH)]
     chunk_size: u64,
+
+    /// Missing blocks per traced cache-fill batch.
+    #[arg(long, default_value_t = DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS)]
+    fill_batch_blocks: usize,
+
+    /// Parallel traced block processing jobs per cache-fill batch.
+    #[arg(long, default_value_t = DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY)]
+    fill_concurrency: usize,
 
     /// Retain this many recent disk-cache blocks when pruning.
     #[arg(long, default_value_t = DEFAULT_RETAIN_BLOCKS)]
@@ -75,6 +84,12 @@ async fn main() -> Result<()> {
     if args.chunk_size == 0 {
         bail!("--chunk-size must be greater than zero");
     }
+    if args.fill_batch_blocks == 0 {
+        bail!("--fill-batch-blocks must be greater than zero");
+    }
+    if args.fill_concurrency == 0 {
+        bail!("--fill-concurrency must be greater than zero");
+    }
 
     let reth_datadir = resolve_reth_datadir(args.reth_datadir.as_deref())?;
     let reth_datadir_str = reth_datadir.to_string_lossy();
@@ -88,30 +103,36 @@ async fn main() -> Result<()> {
     let processor = BlockProcessor::new(provider.clone());
 
     println!(
-        "Refreshing processed-block disk cache: chain_id={} range={}..={} blocks={} chunk_size={} cache_dir={}",
+        "Refreshing processed-block disk cache: chain_id={} range={}..={} blocks={} chunk_size={} fill_batch_blocks={} fill_concurrency={} cache_dir={}",
         provider.chain_id(),
         start_block,
         end_block,
         end_block - start_block + 1,
         args.chunk_size,
+        args.fill_batch_blocks,
+        args.fill_concurrency,
         cache_dir.display()
     );
 
     let started = Instant::now();
     let mut totals = RefreshTotals::default();
     let mut cursor = start_block;
+    let load_options = ProcessedBlockRangeLoadOptions::default()
+        .with_fill_batch_blocks(args.fill_batch_blocks)
+        .with_fill_concurrency(args.fill_concurrency);
     while cursor <= end_block {
         let chunk_end = min(
             cursor.saturating_add(args.chunk_size.saturating_sub(1)),
             end_block,
         );
         let chunk_started = Instant::now();
-        let loaded = load_processed_block_range(
+        let loaded = load_processed_block_range_with_options(
             &processor,
             provider.as_ref(),
             cursor,
             chunk_end,
             Some(&store),
+            load_options,
         )
         .await?;
 

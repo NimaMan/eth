@@ -2,6 +2,8 @@
 
 This folder is for replay-only investigations inside `tx_simulator`. It focuses
 on making local block replay faster while still producing correct call traces.
+State-read optimization experiments live next to this profiler in
+`examples/replay/state_access`.
 
 The `tx_processor/examples/block/profile` harness measures complete
 `ProcessedBlock` production. This folder isolates the replay engine:

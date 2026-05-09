@@ -36,14 +36,17 @@ pub use live::{
 };
 pub use processed_block_provider::{
     load_cached_processed_block_with_retry, load_processed_block, load_processed_block_range,
-    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
-    CompactProcessedTransaction, LiveProcessedBlockProvider, LoadedProcessedBlock,
-    LoadedProcessedBlockWithMetrics, ProcessedBlockDiskCacheBlockRange,
-    ProcessedBlockDiskCacheChainCoverage, ProcessedBlockDiskCacheCoverage,
-    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
-    ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
-    ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
-    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    load_processed_block_range_with_options, prune_processed_block_disk_cache,
+    should_prune_processed_block_disk_cache, CompactProcessedTransaction,
+    LiveProcessedBlockProvider, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
+    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
+    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
+    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
+    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics,
+    ProcessedBlockProviderRetry, ProcessedBlockRangeLoadOptions,
+    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use processed_tx_provider::{
     processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,
