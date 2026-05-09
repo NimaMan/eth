@@ -794,7 +794,7 @@ impl BlockTokenProcessor {
     fn refresh_token_index(&mut self, token_address: &str, current_block: u64) {
         let Some(status) = self.registry.token(token_address).map(|token| {
             if token.is_scam() {
-                TrackedTokenStatus::InactiveScam
+                TrackedTokenStatus::InactiveHiddenMint
             } else if token.trading_enabled() {
                 TrackedTokenStatus::Active
             } else {

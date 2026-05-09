@@ -139,7 +139,7 @@ fn supply_surface(token: &ERC20Token) -> SupplySurfaceReport {
         declared_total_supply_scaled,
         minted_from_transfers,
         minted_to_declared_ratio,
-        hidden_mint_detected: token.status_manager.scam_label.as_deref() == Some("hidden_mint")
+        hidden_mint_detected: token.hidden_mint_detected()
             || minted_to_declared_ratio
                 .map(|ratio| ratio > token.status_manager.hidden_mint_threshold)
                 .unwrap_or(false),
@@ -173,7 +173,7 @@ fn pool_surface(token: &ERC20Token) -> PoolSurfaceReport {
     let mut pool_count_by_protocol = BTreeMap::new();
     let mut trading_pool_count = 0;
     let mut cannot_sell_pool_count = 0;
-    let mut scam_pool_count = 0;
+    let mut liquidity_removal_pool_count = 0;
 
     for pool in token.all_pool_bases() {
         let protocol = pool.identity.protocol.clone();
@@ -186,8 +186,8 @@ fn pool_surface(token: &ERC20Token) -> PoolSurfaceReport {
         if pool.state.can_buy && !pool.state.can_sell {
             cannot_sell_pool_count += 1;
         }
-        if pool.is_scam() {
-            scam_pool_count += 1;
+        if pool.has_liquidity_removal() {
+            liquidity_removal_pool_count += 1;
         }
     }
 
@@ -197,7 +197,7 @@ fn pool_surface(token: &ERC20Token) -> PoolSurfaceReport {
         pool_count_by_protocol,
         trading_pool_count,
         cannot_sell_pool_count,
-        scam_pool_count,
+        liquidity_removal_pool_count,
     }
 }
 
@@ -314,12 +314,15 @@ fn append_pool_evidence(pools: &PoolSurfaceReport, evidence: &mut Vec<ContractEv
         ));
     }
 
-    if pools.scam_pool_count > 0 {
+    if pools.liquidity_removal_pool_count > 0 {
         evidence.push(ContractEvidence::new(
-            BehaviorFlagKind::PoolScamEvidence,
+            BehaviorFlagKind::PoolLiquidityRemovalEvidence,
             ContractSeverity::High,
             ContractEvidenceSource::Pools,
-            format!("{} pool(s) carry scam evidence", pools.scam_pool_count),
+            format!(
+                "{} pool(s) show liquidity-removal evidence",
+                pools.liquidity_removal_pool_count
+            ),
         ));
     }
 }

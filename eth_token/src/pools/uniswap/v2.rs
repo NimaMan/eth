@@ -849,7 +849,8 @@ mod tests {
     #[test]
     fn pool_data_for_publishing_matches_python_keys() {
         let mut pool = pool();
-        pool.base.mark_can_buy_from_event(200, "0xBUY", 1_800);
+        pool.base
+            .set_simulated_buy_status(true, 200, "0xBUY", 1_800);
         pool.base.update_reserves(100.0, 2.0, 200, 1_800, "0xSYNC");
 
         let data = pool.pool_data_for_publishing();

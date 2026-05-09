@@ -50,7 +50,7 @@ pub enum BehaviorFlagKind {
     RawTradingEventWithoutPoolTrading,
     ActiveOwnerControl,
     CannotSellPool,
-    PoolScamEvidence,
+    PoolLiquidityRemovalEvidence,
 }
 
 impl BehaviorFlagKind {
@@ -62,7 +62,7 @@ impl BehaviorFlagKind {
             Self::RawTradingEventWithoutPoolTrading => "raw_trading_event_without_pool_trading",
             Self::ActiveOwnerControl => "active_owner_control",
             Self::CannotSellPool => "cannot_sell_pool",
-            Self::PoolScamEvidence => "pool_scam_evidence",
+            Self::PoolLiquidityRemovalEvidence => "pool_liquidity_removal_evidence",
         }
     }
 }
@@ -157,7 +157,7 @@ pub struct PoolSurfaceReport {
     pub pool_count_by_protocol: BTreeMap<String, usize>,
     pub trading_pool_count: usize,
     pub cannot_sell_pool_count: usize,
-    pub scam_pool_count: usize,
+    pub liquidity_removal_pool_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

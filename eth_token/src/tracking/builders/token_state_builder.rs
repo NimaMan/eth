@@ -118,7 +118,7 @@ fn refresh_token_index(
         return;
     };
     let status = if token.is_scam() {
-        TrackedTokenStatus::InactiveScam
+        TrackedTokenStatus::InactiveHiddenMint
     } else if token.trading_enabled() {
         TrackedTokenStatus::Active
     } else {

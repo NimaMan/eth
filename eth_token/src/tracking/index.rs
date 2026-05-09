@@ -13,7 +13,8 @@ use super::TokenRegistry;
 pub enum TrackedTokenStatus {
     Creation,
     Active,
-    InactiveScam,
+    #[serde(alias = "InactiveScam")]
+    InactiveHiddenMint,
     InactiveOther,
 }
 

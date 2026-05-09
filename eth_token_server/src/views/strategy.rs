@@ -123,7 +123,7 @@ pub struct CohortCount {
 enum NonEligibleReason {
     UnsupportedCurrency,
     MissingCreationData,
-    DustLiquidity,
+    LowLiquidity,
     CannotBuy,
     CannotSell,
     MissingPriceData,
@@ -131,7 +131,7 @@ enum NonEligibleReason {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum RiskOutcome {
-    ScamFlag,
+    LiquidityRemoval,
     HoneypotFlag,
     HighTax,
     ExtremeTax,
@@ -246,7 +246,7 @@ fn eligibility_reason(record: &PoolStatsRecord) -> Option<NonEligibleReason> {
     }
     if !record.liquidity.is_finite() || record.liquidity < min_eligible_liquidity(&record.currency)
     {
-        return Some(NonEligibleReason::DustLiquidity);
+        return Some(NonEligibleReason::LowLiquidity);
     }
     if !record.can_buy {
         return Some(NonEligibleReason::CannotBuy);
@@ -339,8 +339,10 @@ fn crossed_threshold(record: &PoolStatsRecord, threshold: f64, window_seconds: u
 fn risk_outcomes(eligible_records: &[&PoolStatsRecord]) -> Vec<ReasonCount> {
     let mut counts = BTreeMap::new();
     for record in eligible_records {
-        if matches!(record.risk_level, PoolRiskLevel::Scam) {
-            *counts.entry(RiskOutcome::ScamFlag).or_insert(0usize) += 1;
+        if matches!(record.risk_level, PoolRiskLevel::LiquidityRemoval) {
+            *counts
+                .entry(RiskOutcome::LiquidityRemoval)
+                .or_insert(0usize) += 1;
         }
         if matches!(record.risk_level, PoolRiskLevel::Honeypot) {
             *counts.entry(RiskOutcome::HoneypotFlag).or_insert(0usize) += 1;
@@ -510,7 +512,7 @@ impl NonEligibleReason {
         match self {
             Self::UnsupportedCurrency => "unsupported_currency",
             Self::MissingCreationData => "missing_creation_data",
-            Self::DustLiquidity => "dust_liquidity",
+            Self::LowLiquidity => "low_liquidity",
             Self::CannotBuy => "cannot_buy",
             Self::CannotSell => "cannot_sell",
             Self::MissingPriceData => "missing_price_data",
@@ -521,7 +523,7 @@ impl NonEligibleReason {
         match self {
             Self::UnsupportedCurrency => "Unsupported currency",
             Self::MissingCreationData => "Missing creation data",
-            Self::DustLiquidity => "Dust liquidity",
+            Self::LowLiquidity => "Low liquidity",
             Self::CannotBuy => "Cannot buy",
             Self::CannotSell => "Cannot sell",
             Self::MissingPriceData => "Missing price data",
@@ -532,7 +534,7 @@ impl NonEligibleReason {
 impl RiskOutcome {
     fn key(self) -> &'static str {
         match self {
-            Self::ScamFlag => "scam_flag",
+            Self::LiquidityRemoval => "liquidity_removal",
             Self::HoneypotFlag => "honeypot_flag",
             Self::HighTax => "high_tax",
             Self::ExtremeTax => "extreme_tax",
@@ -542,7 +544,7 @@ impl RiskOutcome {
 
     fn label(self) -> &'static str {
         match self {
-            Self::ScamFlag => "Scam flag",
+            Self::LiquidityRemoval => "Liquidity removal",
             Self::HoneypotFlag => "Honeypot flag",
             Self::HighTax => "High tax",
             Self::ExtremeTax => "Extreme tax",
@@ -588,7 +590,7 @@ mod tests {
 
         assert_eq!(
             eligibility_reason(&record),
-            Some(NonEligibleReason::DustLiquidity)
+            Some(NonEligibleReason::LowLiquidity)
         );
     }
 
@@ -604,13 +606,13 @@ mod tests {
     }
 
     #[test]
-    fn eligibility_rejects_dust_liquidity() {
+    fn eligibility_rejects_low_liquidity() {
         let mut record = record();
         record.liquidity = 0.49;
 
         assert_eq!(
             eligibility_reason(&record),
-            Some(NonEligibleReason::DustLiquidity)
+            Some(NonEligibleReason::LowLiquidity)
         );
     }
 

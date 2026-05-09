@@ -34,7 +34,7 @@ struct Range {
 struct StatusCounts {
     creation: usize,
     active: usize,
-    inactive_scam: usize,
+    inactive_hidden_mint: usize,
     inactive_other: usize,
 }
 
@@ -194,7 +194,10 @@ async fn main() -> Result<()> {
     println!("updated_v2_pools:       {}", unique_updated_v2_pools.len());
     println!("status_creation:        {}", status_counts.creation);
     println!("status_active:          {}", status_counts.active);
-    println!("status_inactive_scam:   {}", status_counts.inactive_scam);
+    println!(
+        "status_inactive_hidden_mint: {}",
+        status_counts.inactive_hidden_mint
+    );
     println!("status_inactive_other:  {}", status_counts.inactive_other);
     println!(
         "latest_processed_block: {:?}",
@@ -302,7 +305,7 @@ fn status_counts(processor: &BlockTokenProcessor) -> StatusCounts {
         match &entry.token_status {
             TrackedTokenStatus::Creation => counts.creation += 1,
             TrackedTokenStatus::Active => counts.active += 1,
-            TrackedTokenStatus::InactiveScam => counts.inactive_scam += 1,
+            TrackedTokenStatus::InactiveHiddenMint => counts.inactive_hidden_mint += 1,
             TrackedTokenStatus::InactiveOther => counts.inactive_other += 1,
         }
     }

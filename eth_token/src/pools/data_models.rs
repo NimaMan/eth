@@ -11,7 +11,8 @@ pub enum PoolLifecycle {
     Dust,
     Drained,
     Active,
-    Scam,
+    #[serde(alias = "SCAM", alias = "Scam")]
+    LiquidityRemoved,
     Evicted,
 }
 
@@ -79,10 +80,10 @@ impl PoolRuntimeState {
         self.lifecycle = PoolLifecycle::Trading;
     }
 
-    pub fn mark_scam(&mut self) {
+    pub fn mark_liquidity_removed(&mut self) {
         self.can_buy = false;
         self.can_sell = false;
-        self.lifecycle = PoolLifecycle::Scam;
+        self.lifecycle = PoolLifecycle::LiquidityRemoved;
     }
 
     pub fn record_swap(&mut self, denom_in: f64, token_in: f64, denom_out: f64, token_out: f64) {

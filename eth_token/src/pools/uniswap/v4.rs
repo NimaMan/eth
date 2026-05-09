@@ -294,9 +294,22 @@ impl UniswapV4Pool {
             (-denom_amount).max(0.0),
             (-token_amount).max(0.0),
         );
+        let mut swap_event = event_json(event, tx);
+        if let Some(object) = swap_event.as_object_mut() {
+            object.insert("token_amount".to_string(), json!(token_amount));
+            object.insert("denom_amount".to_string(), json!(denom_amount));
+            object.insert(
+                "is_buy".to_string(),
+                json!(token_amount < 0.0 && denom_amount > 0.0),
+            );
+            object.insert(
+                "is_sell".to_string(),
+                json!(token_amount > 0.0 && denom_amount < 0.0),
+            );
+        }
         append_with_history_limit(
             &mut self.base.swap_events,
-            event_json(event, tx),
+            swap_event,
             self.base.config.history_limit,
         );
         self.refresh_virtual_reserves(tx);

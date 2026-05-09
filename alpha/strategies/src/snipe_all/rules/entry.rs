@@ -19,7 +19,7 @@ pub fn evaluate(
         return RuleDecision::hold(RULE_NAME, "pool cannot be sold");
     }
     if pool.is_scam {
-        return RuleDecision::hold(RULE_NAME, "pool is flagged as scam");
+        return RuleDecision::hold(RULE_NAME, "pool has liquidity-removal risk");
     }
     if !config.is_supported_denom(pool) {
         return RuleDecision::hold(RULE_NAME, "unsupported pool denomination");

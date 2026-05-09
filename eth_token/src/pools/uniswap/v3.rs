@@ -244,11 +244,22 @@ impl UniswapV3Pool {
             (-denom_amount).max(0.0),
             (-token_amount).max(0.0),
         );
-        self.base
-            .mark_can_buy_from_event(tx.block_number, tx.tx_hash.clone(), tx.block_timestamp);
+        let mut swap_event = event_json(event, tx);
+        if let Some(object) = swap_event.as_object_mut() {
+            object.insert("token_amount".to_string(), json!(token_amount));
+            object.insert("denom_amount".to_string(), json!(denom_amount));
+            object.insert(
+                "is_buy".to_string(),
+                json!(token_amount < 0.0 && denom_amount > 0.0),
+            );
+            object.insert(
+                "is_sell".to_string(),
+                json!(token_amount > 0.0 && denom_amount < 0.0),
+            );
+        }
         append_with_history_limit(
             &mut self.base.swap_events,
-            event_json(event, tx),
+            swap_event,
             self.base.config.history_limit,
         );
         self.refresh_virtual_reserves(tx);
@@ -416,7 +427,9 @@ mod tests {
         assert_eq!(pool.current_tick, Some(0));
         assert_eq!(pool.active_liquidity, 1_000_000_000_000_000_000u128);
         assert_eq!(pool.base.price(), 1.0);
-        assert!(pool.base.state.can_buy);
+        assert!(!pool.base.state.can_buy);
         assert_eq!(pool.base.state.total_swaps, 1);
+        assert_eq!(pool.base.swap_events[0]["is_buy"], true);
+        assert_eq!(pool.base.swap_events[0]["is_sell"], false);
     }
 }

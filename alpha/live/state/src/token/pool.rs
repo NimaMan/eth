@@ -22,6 +22,10 @@ pub struct PoolSnapshot {
     pub fee_bps: Option<u32>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub liquidity_removal: bool,
+    pub liquidity_removal_label: Option<String>,
+    pub liquidity_removal_block: Option<BlockNumber>,
+    pub liquidity_removal_tx_hash: Option<B256>,
     pub latest_block_number: Option<BlockNumber>,
     pub last_update_unix_secs: Option<TimestampUnixSecs>,
 }
@@ -46,6 +50,10 @@ impl PoolSnapshot {
             fee_bps: None,
             is_scam: false,
             scam_label: None,
+            liquidity_removal: false,
+            liquidity_removal_label: None,
+            liquidity_removal_block: None,
+            liquidity_removal_tx_hash: None,
             latest_block_number: None,
             last_update_unix_secs: None,
         }

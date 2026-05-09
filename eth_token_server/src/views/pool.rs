@@ -36,7 +36,7 @@ pub struct LiquidityPoint {
 #[serde(rename_all = "snake_case")]
 pub enum PoolRiskLevel {
     Clear,
-    Scam,
+    LiquidityRemoval,
     Honeypot,
     HighTax,
     ExtremeTax,
@@ -121,6 +121,10 @@ pub struct PoolView {
     pub last_trading_failure_class: Option<String>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub liquidity_removal: bool,
+    pub liquidity_removal_label: Option<String>,
+    pub liquidity_removal_block: Option<u64>,
+    pub liquidity_removal_tx_hash: Option<String>,
     pub risk_level: PoolRiskLevel,
     pub risk_label: Option<String>,
     pub creation_block: Option<u64>,
@@ -414,6 +418,7 @@ impl PoolView {
         trading_status.trading_enabled = current_trading.can_buy;
         trading_status.can_buy_and_sell = current_trading.can_buy && current_trading.can_sell;
         let risk = pool_risk(base, current_trading);
+        let liquidity_removal = base.has_liquidity_removal();
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -469,8 +474,20 @@ impl PoolView {
             tax_bucket,
             last_trading_failure_reason: base.last_trading_failure_reason.clone(),
             last_trading_failure_class: base.last_trading_failure_class.clone(),
-            is_scam: risk.level != PoolRiskLevel::Clear,
-            scam_label: risk.label.clone(),
+            is_scam: liquidity_removal,
+            scam_label: if liquidity_removal {
+                base.scam_label.clone()
+            } else {
+                None
+            },
+            liquidity_removal,
+            liquidity_removal_label: if liquidity_removal {
+                base.scam_label.clone()
+            } else {
+                None
+            },
+            liquidity_removal_block: base.scam_block,
+            liquidity_removal_tx_hash: base.scam_tx_hash.clone(),
             risk_level: risk.level,
             risk_label: risk.label,
             creation_block: base.creation_block,
@@ -515,7 +532,10 @@ fn current_trading_view(
         PoolLiquidityLevel::Liquid | PoolLiquidityLevel::Unknown
     ) && !matches!(
         base.state.lifecycle,
-        PoolLifecycle::Dust | PoolLifecycle::Drained | PoolLifecycle::Scam | PoolLifecycle::Evicted
+        PoolLifecycle::Dust
+            | PoolLifecycle::Drained
+            | PoolLifecycle::LiquidityRemoved
+            | PoolLifecycle::Evicted
     );
     CurrentTradingView {
         can_buy: liquidity_allows_trading && base.state.can_buy,
@@ -524,10 +544,13 @@ fn current_trading_view(
 }
 
 fn pool_risk(base: &BasePool, current_trading: CurrentTradingView) -> PoolRiskView {
-    if base.is_scam() {
+    if base.has_liquidity_removal() {
         return PoolRiskView {
-            level: PoolRiskLevel::Scam,
-            label: base.scam_label.clone().or_else(|| Some("scam".to_string())),
+            level: PoolRiskLevel::LiquidityRemoval,
+            label: base
+                .scam_label
+                .clone()
+                .or_else(|| Some("liquidity_removal".to_string())),
         };
     }
 

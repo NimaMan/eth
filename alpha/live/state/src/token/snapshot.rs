@@ -66,7 +66,8 @@ pub enum TokenLifecycle {
     ContractCreation,
     PairCreation,
     TradingEnabled,
-    InactiveScam,
+    #[serde(alias = "INACTIVE_SCAM", alias = "InactiveScam")]
+    InactiveHiddenMint,
     InactiveOther,
 }
 
@@ -75,6 +76,9 @@ pub struct TokenStatus {
     pub lifecycle: Option<TokenLifecycle>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub hidden_mint_detected: bool,
+    pub hidden_mint_block: Option<BlockNumber>,
+    pub hidden_mint_tx: Option<B256>,
     pub has_pool: bool,
     pub trading_enabled: bool,
     pub trading_enabled_block: Option<BlockNumber>,
@@ -89,6 +93,9 @@ impl Default for TokenStatus {
             lifecycle: None,
             is_scam: false,
             scam_label: None,
+            hidden_mint_detected: false,
+            hidden_mint_block: None,
+            hidden_mint_tx: None,
             has_pool: false,
             trading_enabled: false,
             trading_enabled_block: None,

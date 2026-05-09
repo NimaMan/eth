@@ -156,7 +156,7 @@ impl BasePool {
     }
 
     pub fn price(&self) -> f64 {
-        if self.is_scam() {
+        if self.has_liquidity_removal() {
             0.0
         } else {
             self.state.price_denom_per_token.max(0.0)
@@ -242,7 +242,7 @@ impl BasePool {
             timestamp,
             tx_hash,
         );
-        self.sync_scam_state_from_reserve_tracker();
+        self.sync_liquidity_removal_state_from_reserve_tracker();
     }
 
     pub fn map_token_and_denom(&self, token0_value: f64, token1_value: f64) -> (f64, f64) {
@@ -253,22 +253,7 @@ impl BasePool {
         }
     }
 
-    pub fn mark_can_buy_from_event(
-        &mut self,
-        block_number: u64,
-        tx_hash: impl Into<String>,
-        timestamp: u64,
-    ) {
-        if !self.state.can_buy {
-            self.state.can_buy = true;
-            self.can_buy_block = Some(block_number);
-            self.can_buy_tx = Some(tx_hash.into());
-            self.can_buy_timestamp = Some(timestamp);
-        }
-        self.refresh_lifecycle();
-    }
-
-    pub fn set_buy_status(
+    pub fn set_simulated_buy_status(
         &mut self,
         can_buy: bool,
         block_number: u64,
@@ -284,7 +269,7 @@ impl BasePool {
         self.refresh_lifecycle();
     }
 
-    pub fn set_sell_status(
+    pub fn set_simulated_sell_status(
         &mut self,
         can_sell: bool,
         buy_tax: Option<f64>,
@@ -333,6 +318,10 @@ impl BasePool {
     }
 
     pub fn is_scam(&self) -> bool {
+        self.has_liquidity_removal()
+    }
+
+    pub fn has_liquidity_removal(&self) -> bool {
         self.reserve_tracker.is_scam
     }
 
@@ -392,13 +381,13 @@ impl BasePool {
         )
     }
 
-    fn sync_scam_state_from_reserve_tracker(&mut self) {
+    fn sync_liquidity_removal_state_from_reserve_tracker(&mut self) {
         if self.reserve_tracker.is_scam {
             self.scam_label = self.reserve_tracker.scam_label.clone();
             self.scam_block = self.reserve_tracker.scam_block;
             self.scam_tx_hash = self.reserve_tracker.scam_tx_hash.clone();
             self.clear_current_trading_status();
-            self.state.lifecycle = PoolLifecycle::Scam;
+            self.state.lifecycle = PoolLifecycle::LiquidityRemoved;
         } else {
             self.scam_label = None;
             self.scam_block = None;
@@ -410,7 +399,7 @@ impl BasePool {
     fn refresh_lifecycle(&mut self) {
         if self.reserve_tracker.is_scam {
             self.clear_current_trading_status();
-            self.state.lifecycle = PoolLifecycle::Scam;
+            self.state.lifecycle = PoolLifecycle::LiquidityRemoved;
             return;
         }
 
@@ -543,14 +532,14 @@ mod tests {
     }
 
     #[test]
-    fn below_threshold_marks_pool_as_scam_and_zeroes_price() {
+    fn below_threshold_marks_pool_as_liquidity_removed_and_zeroes_price() {
         let mut pool = test_pool();
 
         pool.update_reserves(100.0, 0.01, 10, 1_700, "0xTX");
 
-        assert!(pool.is_scam());
+        assert!(pool.has_liquidity_removal());
         assert_eq!(pool.price(), 0.0);
-        assert_eq!(pool.state.lifecycle, PoolLifecycle::Scam);
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::LiquidityRemoved);
         assert_eq!(pool.scam_block, Some(10));
     }
 
@@ -560,7 +549,7 @@ mod tests {
 
         pool.update_reserves(100.0, 0.001, 10, 1_700, "0xTX");
 
-        assert!(!pool.is_scam());
+        assert!(!pool.has_liquidity_removal());
         assert_eq!(pool.state.total_liquidity, 0.001);
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
     }
@@ -572,10 +561,10 @@ mod tests {
         pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
         assert_eq!(pool.state.lifecycle, PoolLifecycle::LiquidityDeposited);
 
-        pool.mark_can_buy_from_event(11, "0xBUY", 1_710);
+        pool.set_simulated_buy_status(true, 11, "0xBUY", 1_710);
         assert_eq!(pool.state.lifecycle, PoolLifecycle::CannotSell);
 
-        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+        pool.set_simulated_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Trading);
     }
 
@@ -593,8 +582,8 @@ mod tests {
         let mut pool = weth_pool();
 
         pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
-        pool.set_buy_status(true, 11, "0xBUY", 1_710);
-        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+        pool.set_simulated_buy_status(true, 11, "0xBUY", 1_710);
+        pool.set_simulated_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
         assert!(pool.trading_enabled());
         assert!(pool.can_buy_and_sell());
 
@@ -615,8 +604,8 @@ mod tests {
         let mut pool = weth_pool();
 
         pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
-        pool.set_buy_status(true, 11, "0xBUY", 1_710);
-        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+        pool.set_simulated_buy_status(true, 11, "0xBUY", 1_710);
+        pool.set_simulated_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
 
         pool.update_reserves(100.0, 0.001, 13, 1_730, "0xDUST");
 
@@ -639,8 +628,8 @@ mod tests {
     fn trading_status_tracks_buy_and_sell_state() {
         let mut pool = test_pool();
 
-        pool.mark_can_buy_from_event(20, "0xBUY", 2_000);
-        pool.set_sell_status(true, Some(1.5), Some(2.0), 21, "0xSELL");
+        pool.set_simulated_buy_status(true, 20, "0xBUY", 2_000);
+        pool.set_simulated_sell_status(true, Some(1.5), Some(2.0), 21, "0xSELL");
 
         let status = pool.trading_status();
         assert!(status.trading_enabled);

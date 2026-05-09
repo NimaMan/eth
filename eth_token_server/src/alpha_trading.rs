@@ -601,7 +601,7 @@ fn strategy_rules() -> Vec<StrategyRuleView> {
             name: "Buy Eligible Pools",
             status: "active",
             description:
-                "Submit one paper buy for each new live pool that can buy, can sell, is not flagged as scam, and meets the configured liquidity floor.",
+                "Submit one paper buy for each new live pool that can buy, can sell, has no liquidity-removal flag, and meets the configured liquidity floor.",
         },
         StrategyRuleView {
             rule_id: "exit_liquidity_removal",

@@ -84,7 +84,7 @@ impl PoolReserveTracker {
             self.history_limit,
         );
         self.latest_snapshot = Some(snapshot.clone());
-        self.check_for_scam(&snapshot);
+        self.check_for_liquidity_removal(&snapshot);
     }
 
     pub fn latest_price(&self) -> Option<f64> {
@@ -125,7 +125,7 @@ impl PoolReserveTracker {
         }
     }
 
-    fn check_for_scam(&mut self, snapshot: &ReserveSnapshot) {
+    fn check_for_liquidity_removal(&mut self, snapshot: &ReserveSnapshot) {
         let Some(threshold) = self.denom_threshold else {
             return;
         };
@@ -133,7 +133,7 @@ impl PoolReserveTracker {
         if snapshot.denom_reserve < threshold {
             let unit = self.threshold_unit.as_deref().unwrap_or("units");
             self.is_scam = true;
-            self.scam_label = Some(format!("Denom_removal ({unit}<{threshold})"));
+            self.scam_label = Some(format!("liquidity_removal ({unit}<{threshold})"));
             self.scam_block = Some(snapshot.block_number);
             self.scam_tx_hash = Some(snapshot.tx_hash.clone());
         } else if self.is_scam {
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn threshold_marks_and_clears_scam_state() {
+    fn threshold_marks_and_clears_liquidity_removal_state() {
         let mut tracker = PoolReserveTracker::new("pool", "denom", Some("token"), Some("V2"), 10)
             .with_threshold(0.05, "ETH");
 

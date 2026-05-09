@@ -28,7 +28,8 @@ pub enum TokenLifecycleState {
     ContractCreation,
     PairCreation,
     TradingEnabled,
-    InactiveScam,
+    #[serde(alias = "INACTIVE_SCAM", alias = "InactiveScam")]
+    InactiveHiddenMint,
     InactiveOther,
 }
 
@@ -73,6 +74,8 @@ pub struct PoolStateSnapshot {
     pub trading_enabled: bool,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub liquidity_removal: bool,
+    pub liquidity_removal_label: Option<String>,
 }
 
 impl PoolStateSnapshot {
@@ -88,8 +91,10 @@ impl PoolStateSnapshot {
             can_buy: base.state.can_buy,
             can_sell: base.state.can_sell,
             trading_enabled: base.trading_enabled(),
-            is_scam: base.is_scam(),
+            is_scam: base.has_liquidity_removal(),
             scam_label: base.scam_label.clone(),
+            liquidity_removal: base.has_liquidity_removal(),
+            liquidity_removal_label: base.scam_label.clone(),
         }
     }
 }
@@ -122,6 +127,10 @@ pub struct TokenSummary {
     pub token_life_cycle_status: Option<TokenLifecycleState>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub hidden_mint_detected: bool,
+    pub hidden_mint_block: Option<u64>,
+    pub hidden_mint_tx: Option<String>,
+    pub liquidity_removal_pool_count: usize,
     pub creation_block: Option<u64>,
     pub creator_address: Option<String>,
     pub has_pools: bool,
@@ -837,16 +846,35 @@ impl ERC20Token {
     }
 
     pub fn is_scam(&self) -> bool {
-        self.status_manager.is_scam || self.all_pool_bases().iter().any(|pool| pool.is_scam())
+        self.hidden_mint_detected()
     }
 
     pub fn scam_label(&self) -> Option<String> {
-        if let Some(label) = self.status_manager.scam_label.clone() {
-            return Some(label);
-        }
+        self.status_manager.scam_label.clone()
+    }
+
+    pub fn hidden_mint_detected(&self) -> bool {
+        self.status_manager.is_scam
+            && self.status_manager.scam_label.as_deref() == Some("hidden_mint")
+    }
+
+    pub fn hidden_mint_block(&self) -> Option<u64> {
+        self.hidden_mint_detected()
+            .then_some(self.status_manager.scam_block)
+            .flatten()
+    }
+
+    pub fn hidden_mint_tx(&self) -> Option<String> {
+        self.hidden_mint_detected()
+            .then(|| self.status_manager.scam_tx.clone())
+            .flatten()
+    }
+
+    pub fn liquidity_removal_pool_count(&self) -> usize {
         self.all_pool_bases()
-            .into_iter()
-            .find_map(|pool| pool.scam_label.clone())
+            .iter()
+            .filter(|pool| pool.has_liquidity_removal())
+            .count()
     }
 
     pub fn current_prices(&self) -> HashMap<String, PoolStateSnapshot> {
@@ -972,6 +1000,10 @@ impl ERC20Token {
             token_life_cycle_status: self.token_life_cycle_status.clone(),
             is_scam: self.is_scam(),
             scam_label: self.scam_label(),
+            hidden_mint_detected: self.hidden_mint_detected(),
+            hidden_mint_block: self.hidden_mint_block(),
+            hidden_mint_tx: self.hidden_mint_tx(),
+            liquidity_removal_pool_count: self.liquidity_removal_pool_count(),
             creation_block: self.creation_block,
             creator_address: self.creator_address.clone(),
             has_pools: self.has_pool(),
@@ -996,12 +1028,14 @@ impl ERC20Token {
             "summary": self.get_token_summary(),
             "is_scam": self.is_scam(),
             "scam_reason": self.scam_label().unwrap_or_default(),
+            "hidden_mint_detected": self.hidden_mint_detected(),
+            "liquidity_removal_pool_count": self.liquidity_removal_pool_count(),
         })
     }
 
     fn refresh_lifecycle_status(&mut self) {
         if self.is_scam() {
-            self.token_life_cycle_status = Some(TokenLifecycleState::InactiveScam);
+            self.token_life_cycle_status = Some(TokenLifecycleState::InactiveHiddenMint);
         } else if self.trading_enabled() {
             self.token_life_cycle_status = Some(TokenLifecycleState::TradingEnabled);
         } else if self.has_pool() {
@@ -1350,7 +1384,8 @@ mod tests {
                 },
                 std::iter::empty::<&str>(),
             );
-            pool.base.mark_can_buy_from_event(200, "0xBUY", 1_700);
+            pool.base
+                .set_simulated_buy_status(true, 200, "0xBUY", 1_700);
         }
         token.refresh_lifecycle_status();
 

@@ -60,23 +60,22 @@ impl TokenStatusManager {
         Ok(())
     }
 
-    pub fn mark_scam(
+    pub fn mark_hidden_mint_evidence(
         &mut self,
-        label: impl Into<String>,
         block_number: Option<u64>,
         tx_hash: Option<String>,
     ) {
-        let label = label.into();
-        if self.is_scam && self.scam_label.as_deref() == Some(label.as_str()) {
+        let label = "hidden_mint";
+        if self.is_scam && self.scam_label.as_deref() == Some(label) {
             return;
         }
         self.is_scam = true;
-        self.scam_label = Some(label);
+        self.scam_label = Some(label.to_string());
         self.scam_block = block_number;
         self.scam_tx = tx_hash;
     }
 
-    pub fn clear_scam_flag(&mut self) {
+    pub fn clear_hidden_mint_evidence(&mut self) {
         self.is_scam = false;
         self.scam_label = None;
         self.scam_block = None;
@@ -115,11 +114,7 @@ impl TokenStatusManager {
         if total_supply > 0.0
             && total_supply_from_transfers > total_supply * self.hidden_mint_threshold
         {
-            self.mark_scam(
-                "hidden_mint",
-                Some(tx.block_number),
-                Some(hash_string(&tx.hash)),
-            );
+            self.mark_hidden_mint_evidence(Some(tx.block_number), Some(hash_string(&tx.hash)));
             return Ok(true);
         }
         Ok(false)
@@ -189,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_mint_marks_scam_when_transfer_mints_exceed_supply_threshold() {
+    fn hidden_mint_marks_token_when_transfer_mints_exceed_supply_threshold() {
         let tx = tx();
         let mut status_manager = TokenStatusManager::new("100000000000000000000");
 

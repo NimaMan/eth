@@ -193,14 +193,14 @@ impl UniswapV2Pool {
         tx: &UniswapV2TxContext,
         outcome: &UniswapV2TradingSimulationOutcome,
     ) {
-        self.base.set_buy_status(
+        self.base.set_simulated_buy_status(
             outcome.can_buy,
             tx.block_number,
             tx.tx_hash.clone(),
             tx.block_timestamp,
         );
 
-        self.base.set_sell_status(
+        self.base.set_simulated_sell_status(
             outcome.can_sell,
             Some(outcome.buy_tax_percent),
             Some(outcome.sell_tax_percent),
@@ -290,14 +290,14 @@ impl UniswapV3Pool {
         tx: &UniswapV2TxContext,
         outcome: &PoolTradingSimulationOutcome,
     ) {
-        self.base.set_buy_status(
+        self.base.set_simulated_buy_status(
             outcome.can_buy,
             tx.block_number,
             tx.tx_hash.clone(),
             tx.block_timestamp,
         );
 
-        self.base.set_sell_status(
+        self.base.set_simulated_sell_status(
             outcome.can_sell,
             Some(outcome.buy_tax_percent),
             Some(outcome.sell_tax_percent),
@@ -383,14 +383,14 @@ impl UniswapV4Pool {
         tx: &UniswapV2TxContext,
         outcome: &PoolTradingSimulationOutcome,
     ) {
-        self.base.set_buy_status(
+        self.base.set_simulated_buy_status(
             outcome.can_buy,
             tx.block_number,
             tx.tx_hash.clone(),
             tx.block_timestamp,
         );
 
-        self.base.set_sell_status(
+        self.base.set_simulated_sell_status(
             outcome.can_sell,
             Some(outcome.buy_tax_percent),
             Some(outcome.sell_tax_percent),

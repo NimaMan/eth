@@ -46,7 +46,8 @@ pub(super) async fn simulate_updated_v2_pools(
         let should_simulate = token
             .uniswap_v2_pool(pool_address)
             .map(|pool| {
-                !pool.base.is_scam() && (force_simulation || should_simulate_v2_trading(pool, tx))
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v2_trading(pool, tx))
             })
             .unwrap_or(false);
         if !should_simulate {
@@ -223,7 +224,8 @@ pub(super) async fn simulate_updated_v3_pools(
         let should_simulate = token
             .uniswap_v3_pool(pool_address)
             .map(|pool| {
-                !pool.base.is_scam() && (force_simulation || should_simulate_v3_trading(pool, tx))
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v3_trading(pool, tx))
             })
             .unwrap_or(false);
         if !should_simulate {
@@ -379,7 +381,8 @@ pub(super) async fn simulate_updated_v4_pools(
         let should_simulate = token
             .uniswap_v4_pool(pool_key)
             .map(|pool| {
-                !pool.base.is_scam() && (force_simulation || should_simulate_v4_trading(pool, tx))
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v4_trading(pool, tx))
             })
             .unwrap_or(false);
         if !should_simulate {
@@ -569,7 +572,7 @@ pub(super) fn simulation_prior_txs(
 }
 
 fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
-    if pool.base.is_scam() {
+    if pool.base.has_liquidity_removal() {
         return false;
     }
 
@@ -579,7 +582,7 @@ fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -
 }
 
 fn should_simulate_v3_trading(pool: &UniswapV3Pool, tx: &ProcessedTransaction) -> bool {
-    if pool.base.is_scam() {
+    if pool.base.has_liquidity_removal() {
         return false;
     }
 
@@ -589,7 +592,7 @@ fn should_simulate_v3_trading(pool: &UniswapV3Pool, tx: &ProcessedTransaction) -
 }
 
 fn should_simulate_v4_trading(pool: &UniswapV4Pool, tx: &ProcessedTransaction) -> bool {
-    if pool.base.is_scam() {
+    if pool.base.has_liquidity_removal() {
         return false;
     }
 
