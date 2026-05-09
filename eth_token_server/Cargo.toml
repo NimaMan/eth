@@ -8,8 +8,8 @@ workspace = "../reth"
 [dependencies]
 eth_live_feed = { path = "../alpha/live/feed" }
 eth_token = { path = "../eth_token" }
-reth_chain_query = { path = "../reth/reth_chain_query" }
-tx_processor = { path = "../reth/tx_processor" }
+reth_chain_query = { path = "../reth_chain_query" }
+tx_processor = { path = "../tx_processor" }
 
 alloy-primitives = "1.5.7"
 bincode = "1.3"

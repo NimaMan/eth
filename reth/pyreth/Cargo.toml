@@ -18,8 +18,8 @@ default = []
 [dependencies]
 # Core dependencies
 tx_simulator = { path = "../../tx_simulator" }
-tx_processor = { path = "../tx_processor" }
-reth_chain_query = { path = "../reth_chain_query" }
+tx_processor = { path = "../../tx_processor" }
+reth_chain_query = { path = "../../reth_chain_query" }
 
 # Python bindings
 pyo3 = { version = "0.21", features = ["extension-module", "abi3-py39"] }

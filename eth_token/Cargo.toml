@@ -9,12 +9,12 @@ workspace = "../reth"
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }
 eyre.workspace = true
 indexmap = "2"
-reth_chain_query = { path = "../reth/reth_chain_query" }
+reth_chain_query = { path = "../reth_chain_query" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing = "0.1"
-tx_processor = { path = "../reth/tx_processor" }
+tx_processor = { path = "../tx_processor" }
 
 [[example]]
 name = "uniswap_v2_pool_replay_reserves"

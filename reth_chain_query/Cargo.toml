@@ -2,6 +2,7 @@
 name = "reth_chain_query"
 version = "0.2.0"
 edition = "2021"
+workspace = "../reth"
 authors = ["Nima"]
 description = "Direct blockchain state queries using Reth database"
 license = "MIT"
@@ -18,7 +19,7 @@ hex = "0.4"
 futures = "0.3"
 
 # Transaction simulator for database access
-tx_simulator = { path = "../../tx_simulator" }
+tx_simulator = { path = "../tx_simulator" }
 
 # Reth dependencies for provider types
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }

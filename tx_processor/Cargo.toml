@@ -2,6 +2,7 @@
 name    = "tx_processor"
 version = "0.4.0"
 edition = "2021"
+workspace = "../reth"
 
 [features]
 default = []
@@ -112,7 +113,7 @@ path = "examples/token_parameter_extraction/denom_token_metadata.rs"
 
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
-tx_simulator = { path = "../../tx_simulator" }
+tx_simulator = { path = "../tx_simulator" }
 
 
 # Basic dependencies
