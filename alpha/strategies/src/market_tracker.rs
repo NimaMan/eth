@@ -66,7 +66,7 @@ impl MarketTrackerStrategy {
             return Ok(StrategyDecision::Hold);
         }
 
-        self.submit_buy(pool.token_address, pool.address)
+        self.submit_buy(pool.token_address, pool.address.clone())
     }
 
     fn submit_buy(
@@ -74,7 +74,7 @@ impl MarketTrackerStrategy {
         token_address: TokenAddress,
         pool_address: PoolAddress,
     ) -> Result<StrategyDecision> {
-        self.submitted_pools.insert(pool_address);
+        self.submitted_pools.insert(pool_address.clone());
         Ok(StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
             wallet_id: self.config.wallet_id.clone(),
@@ -92,7 +92,7 @@ impl MarketTrackerStrategy {
     fn has_blocking_risk(
         ctx: &StrategyContext<'_>,
         token_address: TokenAddress,
-        pool_address: PoolAddress,
+        pool_address: &PoolAddress,
     ) -> bool {
         ctx.active_risks.iter().rev().any(|risk| {
             risk.severity == RiskSeverity::Critical
@@ -100,6 +100,7 @@ impl MarketTrackerStrategy {
                 && risk.token_address == token_address
                 && risk
                     .pool_address
+                    .as_ref()
                     .map(|pool| pool == pool_address)
                     .unwrap_or(true)
         })
@@ -119,7 +120,7 @@ impl Strategy for MarketTrackerStrategy {
         let MarketEvent::PoolUpdated { pool, .. } = event else {
             return Ok(StrategyDecision::Hold);
         };
-        if Self::has_blocking_risk(ctx, pool.token_address, pool.address) {
+        if Self::has_blocking_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::Hold);
         }
         self.decision_for_pool(pool)
@@ -133,13 +134,13 @@ impl Strategy for MarketTrackerStrategy {
         if event.kind != RiskKind::TradingEnabled {
             return Ok(StrategyDecision::Hold);
         }
-        let Some(pool_address) = event.pool_address else {
+        let Some(pool_address) = event.pool_address.clone() else {
             return Ok(StrategyDecision::Hold);
         };
         if self.submitted_pools.contains(&pool_address) {
             return Ok(StrategyDecision::Hold);
         }
-        if Self::has_blocking_risk(ctx, event.token_address, pool_address) {
+        if Self::has_blocking_risk(ctx, event.token_address, &pool_address) {
             return Ok(StrategyDecision::Hold);
         }
         if ctx.market.token_address != event.token_address {
@@ -155,6 +156,7 @@ impl Strategy for MarketTrackerStrategy {
 mod tests {
     use alloy_primitives::Address;
     use eth_alpha_core::{
+        ids::TokenPoolId,
         market::{MarketSnapshotRef, PoolProtocol},
         portfolio::PortfolioState,
         risk::RiskSeverity,
@@ -163,9 +165,10 @@ mod tests {
     use super::*;
 
     fn pool() -> PoolSnapshot {
+        let token_address = Address::repeat_byte(0x11);
         PoolSnapshot {
-            address: Address::repeat_byte(0x22),
-            token_address: Address::repeat_byte(0x11),
+            address: TokenPoolId::new(token_address, Address::repeat_byte(0x22).to_string()),
+            token_address,
             protocol: PoolProtocol::UniswapV2,
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
@@ -183,7 +186,7 @@ mod tests {
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             token: None,
             pool: Some(pool.clone()),
         };
@@ -226,7 +229,7 @@ mod tests {
             kind: RiskKind::LiquidityRemoval,
             severity: RiskSeverity::Critical,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,
             observed_block: Some(1),
             message: "liquidity removal".to_string(),
@@ -234,7 +237,7 @@ mod tests {
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             token: None,
             pool: Some(pool.clone()),
         };

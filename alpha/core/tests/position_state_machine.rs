@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, B256};
 use eth_alpha_core::{
     Amount, ExecutionReport, ExecutionStatus, OrderId, OrderSide, PortfolioId, Position,
-    PositionId, PositionKey, PositionState, StrategyName, WalletId,
+    PositionId, PositionKey, PositionState, StrategyName, TokenPoolId, WalletId,
 };
 
 fn position() -> Position {
@@ -12,7 +12,7 @@ fn position() -> Position {
             wallet_id: WalletId("wallet".to_string()),
             strategy_name: StrategyName("strategy".to_string()),
             token_address: Address::ZERO,
-            pool_address: Address::with_last_byte(1),
+            pool_address: TokenPoolId::new(Address::ZERO, Address::with_last_byte(1).to_string()),
         },
     )
 }

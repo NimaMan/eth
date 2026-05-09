@@ -57,6 +57,17 @@ ExecutionState
 
 Strategies receive read-only context and return decisions. They do not mutate engine state directly.
 
+## Pool Identity
+
+Alpha decisions use `TokenPoolId`, not a raw pool contract address, as the unique pool key. The id is token-scoped:
+
+```text
+v2/v3: token_address:pool_contract_address
+v4:    token_address:pool_manager#pool_id
+```
+
+This is the identity used by market events, risk events, order intents, positions, strategy memory, and watermarks. A pool contract, pool manager, V4 pool id, hook, fee tier, or protocol name is source metadata; it should not replace the token-scoped id when matching a position or deciding whether a pool was already bought.
+
 ## Expected Public Surface
 
 ```rust

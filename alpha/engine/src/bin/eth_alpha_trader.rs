@@ -8,6 +8,7 @@ use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
     execution::ExecutionReport,
+    ids::TokenPoolId,
     market::{MarketEvent, PoolProtocol, PoolSnapshot},
     portfolio::PortfolioState,
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -112,6 +113,7 @@ struct PoolWire {
     denom_reserve: Option<f64>,
     token_reserve: Option<f64>,
     price: Option<f64>,
+    creation_block: Option<u64>,
     latest_block_number: Option<u64>,
     runtime_state: Option<PoolRuntimeStateWire>,
     can_buy: bool,
@@ -251,8 +253,7 @@ async fn main() -> Result<()> {
     })));
 
     let client = TokenServerClient::new(args.token_server_url.clone());
-    let (mut seen_pool_blocks, mut seen_non_address_pool_blocks, mut seen_signal_ids) =
-        load_persisted_watermarks(&store).await?;
+    let (mut seen_pool_blocks, mut seen_signal_ids) = load_persisted_watermarks(&store).await?;
     let mut primed = false;
     let mut shutdown = ShutdownSignals::new()?;
 
@@ -263,7 +264,6 @@ async fn main() -> Result<()> {
         stale_runs,
         replay_current = args.replay_current,
         restored_pool_watermarks = seen_pool_blocks.len(),
-        restored_non_address_pool_watermarks = seen_non_address_pool_blocks.len(),
         restored_signal_watermarks = seen_signal_ids.len(),
         restored_positions = restored_position_count,
         "starting alpha trader"
@@ -328,41 +328,6 @@ async fn main() -> Result<()> {
         let mut reports = 0usize;
 
         for pool_wire in pools.pools {
-            let pool_identity = pool_wire.pool_identity();
-            if !is_evm_address(&pool_wire.pool_address) {
-                let latest_block = pool_wire.latest_block_number();
-                let changed = match seen_non_address_pool_blocks.get(&pool_identity) {
-                    Some(Some(previous_block)) => latest_block
-                        .map(|block| block > *previous_block)
-                        .unwrap_or(false),
-                    Some(None) => latest_block.is_some(),
-                    None => true,
-                };
-                if !changed {
-                    continue;
-                }
-                seen_non_address_pool_blocks.insert(pool_identity.clone(), latest_block);
-                let decision = if suppress_events || (first_poll && !args.replay_current) {
-                    "primed"
-                } else {
-                    "unsupported_pool_identity"
-                };
-                record_non_address_pool_observation(
-                    &store,
-                    &pool_wire,
-                    &pool_identity,
-                    decision,
-                    first_poll,
-                    suppress_events,
-                    &status,
-                    json!({
-                        "reason": "alpha_core_pool_address_is_evm_address",
-                        "protocol": &pool_wire.protocol,
-                    }),
-                )
-                .await?;
-                continue;
-            }
             let pool = match pool_wire.to_pool_snapshot() {
                 Ok(pool) => pool,
                 Err(error) => {
@@ -377,7 +342,7 @@ async fn main() -> Result<()> {
             if !changed {
                 continue;
             }
-            seen_pool_blocks.insert(pool.address, pool.latest_block);
+            seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
 
             if suppress_events || (first_poll && !args.replay_current) {
                 record_pool_observation(
@@ -595,43 +560,27 @@ async fn main() -> Result<()> {
 
 async fn load_persisted_watermarks(
     store: &PostgresTradingStore,
-) -> Result<(
-    HashMap<Address, u64>,
-    HashMap<String, Option<u64>>,
-    HashSet<String>,
-)> {
+) -> Result<(HashMap<TokenPoolId, u64>, HashSet<String>)> {
     let cursors = store
         .load_strategy_observation_cursors(STRATEGY_NAME)
         .await
         .wrap_err("failed to load alpha trader observation watermarks")?;
     let mut pool_blocks = HashMap::new();
-    let mut non_address_pool_blocks = HashMap::new();
     let mut signal_ids = HashSet::new();
 
     for cursor in cursors {
         match cursor.event_source.as_str() {
             POOL_UPDATE_SOURCE => {
-                let pool_address = cursor.pool_address.as_ref().unwrap_or(&cursor.event_key);
-                if let Ok(pool_address) = Address::from_str(pool_address) {
-                    let Some(block_number) = cursor.block_number else {
-                        continue;
-                    };
-                    pool_blocks
-                        .entry(pool_address)
-                        .and_modify(|current: &mut u64| *current = (*current).max(block_number))
-                        .or_insert(block_number);
-                } else {
-                    let watermark = non_address_pool_blocks
-                        .entry(pool_address.to_string())
-                        .or_insert(None);
-                    if let Some(block_number) = cursor.block_number {
-                        *watermark = Some(
-                            watermark
-                                .map(|current: u64| current.max(block_number))
-                                .unwrap_or(block_number),
-                        );
-                    }
-                }
+                let Some(block_number) = cursor.block_number else {
+                    continue;
+                };
+                let Some(pool_id) = cursor_pool_id(&cursor)? else {
+                    continue;
+                };
+                pool_blocks
+                    .entry(pool_id)
+                    .and_modify(|current: &mut u64| *current = (*current).max(block_number))
+                    .or_insert(block_number);
             }
             MEMPOOL_SIGNAL_SOURCE => {
                 signal_ids.insert(cursor.event_key);
@@ -640,7 +589,23 @@ async fn load_persisted_watermarks(
         }
     }
 
-    Ok((pool_blocks, non_address_pool_blocks, signal_ids))
+    Ok((pool_blocks, signal_ids))
+}
+
+fn cursor_pool_id(
+    cursor: &eth_alpha_store::StrategyObservationCursor,
+) -> Result<Option<TokenPoolId>> {
+    let Some(pool_identity) = cursor.pool_address.as_ref() else {
+        return Ok(None);
+    };
+    if pool_identity.contains(':') {
+        return Ok(Some(TokenPoolId::from(pool_identity.as_str())));
+    }
+    let Some(token_address) = cursor.token_address.as_ref() else {
+        return Ok(None);
+    };
+    let token_address = parse_address(token_address)?;
+    Ok(Some(TokenPoolId::new(token_address, pool_identity)))
 }
 
 async fn record_pool_observation(
@@ -681,49 +646,6 @@ async fn record_pool_observation(
         })
         .await
         .wrap_err("failed to record pool strategy observation")
-}
-
-async fn record_non_address_pool_observation(
-    store: &PostgresTradingStore,
-    pool_wire: &PoolWire,
-    pool_identity: &str,
-    decision: &str,
-    first_poll: bool,
-    suppress_events: bool,
-    status: &LiveStatusResponse,
-    extra: Value,
-) -> Result<()> {
-    store
-        .record_strategy_observation(StrategyObservationRecord {
-            strategy_name: STRATEGY_NAME.to_string(),
-            event_source: POOL_UPDATE_SOURCE.to_string(),
-            event_key: format!(
-                "{}:{}",
-                pool_identity,
-                pool_wire
-                    .latest_block_number()
-                    .map(|block| block.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            ),
-            token_address: Some(pool_wire.token_address.clone()),
-            pool_address: Some(pool_identity.to_string()),
-            block_number: pool_wire.latest_block_number(),
-            event_timestamp: None,
-            decision: decision.to_string(),
-            report_count: 0,
-            payload: json!({
-                "pool": pool_wire,
-                "first_poll": first_poll,
-                "suppress_events": suppress_events,
-                "live_status": status.progress.status,
-                "live_current_block": status.progress.current_block,
-                "live_blocks_processed": status.progress.blocks_processed,
-                "live_warmup_total_blocks": status.progress.warmup_total_blocks,
-                "extra": extra,
-            }),
-        })
-        .await
-        .wrap_err("failed to record non-address pool strategy observation")
 }
 
 async fn record_signal_observation(
@@ -781,6 +703,7 @@ impl PoolWire {
                         .or_else(|| state.last_sync_block.filter(|block| *block > 0))
                 })
             })
+            .or_else(|| self.creation_block.filter(|block| *block > 0))
     }
 
     fn pool_identity(&self) -> String {
@@ -788,10 +711,10 @@ impl PoolWire {
     }
 
     fn to_pool_snapshot(&self) -> Result<PoolSnapshot> {
-        let address = parse_address(&self.pool_address)?;
         let token_address = parse_address(&self.token_address)?;
+        let pool_id = TokenPoolId::new(token_address, self.pool_identity());
         let denom_reserve = required_pool_float(self.denom_reserve, "denom_reserve", self)?;
-        let token_reserve = required_pool_float(self.token_reserve, "token_reserve", self)?;
+        let token_reserve = self.token_reserve.unwrap_or_default();
         let Some(latest_block) = self.latest_block_number() else {
             return Err(eyre!(
                 "pool {} for token {} has no latest block",
@@ -800,7 +723,7 @@ impl PoolWire {
             ));
         };
         Ok(PoolSnapshot {
-            address,
+            address: pool_id,
             token_address,
             protocol: parse_protocol(&self.protocol),
             denom_reserve: decimal_from_f64(denom_reserve),
@@ -833,8 +756,7 @@ impl MempoolSignalWire {
         let pool_address = self
             .pool_address
             .as_ref()
-            .map(|value| parse_address(value))
-            .transpose()?;
+            .map(|value| TokenPoolId::new(token_address, value));
         let pending_tx_hash = self
             .detection_tx_hash
             .as_ref()
@@ -903,10 +825,6 @@ fn parse_protocol(value: &str) -> PoolProtocol {
 
 fn parse_address(value: &str) -> Result<Address> {
     Address::from_str(value).map_err(|error| eyre!("invalid address {value}: {error}"))
-}
-
-fn is_evm_address(value: &str) -> bool {
-    Address::from_str(value).is_ok()
 }
 
 fn required_pool_float(value: Option<f64>, field: &str, pool: &PoolWire) -> Result<f64> {

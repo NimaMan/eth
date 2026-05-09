@@ -21,8 +21,8 @@ pub use amount::{Amount, DecimalAmount};
 pub use error::{AlphaCoreError, Result};
 pub use execution::{ExecutionAdapter, ExecutionReport, ExecutionStatus};
 pub use ids::{
-    BlockHash, BlockNumber, ChainId, OrderId, PortfolioId, PositionId, StrategyName, TxHash,
-    WalletId,
+    BlockHash, BlockNumber, ChainId, OrderId, PortfolioId, PositionId, StrategyName, TokenPoolId,
+    TxHash, WalletId,
 };
 pub use market::{MarketEvent, PoolSnapshot, TokenSnapshot};
 pub use order::{OrderIntent, OrderSide, OrderStatus};

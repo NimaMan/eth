@@ -125,7 +125,7 @@ where
                 self.market = Some(MarketSnapshotRef {
                     block_number: *block_number,
                     token_address: pool.token_address,
-                    pool_address: Some(pool.address),
+                    pool_address: Some(pool.address.clone()),
                     token: None,
                     pool: Some(pool.clone()),
                 });
@@ -165,13 +165,14 @@ where
                 market.token_address == event.token_address
                     && event
                         .pool_address
-                        .map(|pool| Some(pool) == market.pool_address)
+                        .as_ref()
+                        .map(|pool| Some(pool) == market.pool_address.as_ref())
                         .unwrap_or(true)
             })
             .unwrap_or_else(|| MarketSnapshotRef {
                 block_number: event.observed_block.unwrap_or_default(),
                 token_address: event.token_address,
-                pool_address: event.pool_address,
+                pool_address: event.pool_address.clone(),
                 token: None,
                 pool: None,
             });
@@ -246,7 +247,7 @@ where
             wallet_id: intent.wallet_id.clone(),
             strategy_name: intent.strategy_name.clone(),
             token_address: intent.token_address,
-            pool_address: intent.pool_address,
+            pool_address: intent.pool_address.clone(),
         };
         let id = position_id_for_key(&key);
         self.portfolio
@@ -323,7 +324,8 @@ impl RiskPolicy for BlockCriticalRiskPolicy {
                 && risk.token_address == intent.token_address
                 && risk
                     .pool_address
-                    .map(|pool| pool == intent.pool_address)
+                    .as_ref()
+                    .map(|pool| pool == &intent.pool_address)
                     .unwrap_or(true)
         }) {
             return RiskDecision::Reject {
@@ -420,7 +422,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use eth_alpha_core::{
         amount::Amount,
-        ids::{PortfolioId, StrategyName, WalletId},
+        ids::{PortfolioId, StrategyName, TokenPoolId, WalletId},
         market::{PoolProtocol, PoolSnapshot},
         order::{OrderIntent, OrderSide},
         risk::{RiskKind, RiskSeverity},
@@ -448,7 +450,7 @@ mod tests {
                 strategy_name: self.name(),
                 side: OrderSide::Buy,
                 token_address: pool.token_address,
-                pool_address: pool.address,
+                pool_address: pool.address.clone(),
                 amount: Amount {
                     raw: U256::from(1_000_000u64),
                     decimals: 18,
@@ -471,7 +473,8 @@ mod tests {
         engine.add_strategy(Box::new(BuyOnMarketStrategy));
 
         let token = Address::repeat_byte(0x11);
-        let pool = Address::repeat_byte(0x22);
+        let pool_address = Address::repeat_byte(0x22);
+        let pool = TokenPoolId::new(token, pool_address.to_string());
         let reports = engine
             .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
                 block_number: 1,
@@ -514,7 +517,10 @@ mod tests {
                 kind: RiskKind::LpApproval,
                 severity: RiskSeverity::Warning,
                 token_address: Address::repeat_byte(0x33),
-                pool_address: Some(Address::repeat_byte(0x44)),
+                pool_address: Some(TokenPoolId::new(
+                    Address::repeat_byte(0x33),
+                    Address::repeat_byte(0x44).to_string(),
+                )),
                 pending_tx_hash: None,
                 observed_block: None,
                 message: "lp approval".to_string(),
@@ -538,13 +544,14 @@ mod tests {
         engine.add_strategy(Box::new(BuyOnMarketStrategy));
 
         let token = Address::repeat_byte(0x11);
-        let pool = Address::repeat_byte(0x22);
+        let pool_address = Address::repeat_byte(0x22);
+        let pool = TokenPoolId::new(token, pool_address.to_string());
         engine
             .handle_event(EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LiquidityRemoval,
                 severity: RiskSeverity::Critical,
                 token_address: token,
-                pool_address: Some(pool),
+                pool_address: Some(pool.clone()),
                 pending_tx_hash: None,
                 observed_block: Some(1),
                 message: "liquidity removal".to_string(),

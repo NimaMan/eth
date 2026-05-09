@@ -9,7 +9,7 @@ pub fn evaluate(
     state: &SnipeAllState,
     pool: &PoolSnapshot,
 ) -> RuleDecision {
-    if state.has_bought(pool.address) {
+    if state.has_bought(&pool.address) {
         return RuleDecision::hold(RULE_NAME, "pool already bought");
     }
     if !pool.can_buy {

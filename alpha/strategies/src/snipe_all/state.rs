@@ -9,16 +9,16 @@ pub struct SnipeAllState {
 }
 
 impl SnipeAllState {
-    pub fn has_bought(&self, pool: PoolAddress) -> bool {
-        self.bought_pools.contains(&pool)
+    pub fn has_bought(&self, pool: &PoolAddress) -> bool {
+        self.bought_pools.contains(pool)
     }
 
     pub fn mark_bought(&mut self, pool: PoolAddress) {
         self.bought_pools.insert(pool);
     }
 
-    pub fn is_exiting(&self, pool: PoolAddress) -> bool {
-        self.exiting_pools.contains(&pool)
+    pub fn is_exiting(&self, pool: &PoolAddress) -> bool {
+        self.exiting_pools.contains(pool)
     }
 
     pub fn mark_exiting(&mut self, pool: PoolAddress) {

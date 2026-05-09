@@ -38,3 +38,5 @@ alpha_trading.strategy_observations
 The dashboard should read these tables or API endpoints backed by these tables. It should not reconstruct positions from journal logs.
 
 `strategy_observations` stores the decision inputs and watermarks used by the trader: live pool updates, mempool signal ids, whether the event was primed/held/submitted, report count, and the full observed payload. This is where restart-safe signal and pool watermarks live.
+
+The current SQL column is still named `pool_address` for compatibility, but alpha writes the canonical token-scoped `TokenPoolId` into it. Do not assume that value is always an EVM address; V4 rows use `token_address:pool_manager#pool_id`.

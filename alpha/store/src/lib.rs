@@ -26,6 +26,7 @@ pub struct PostgresTradingStore {
 pub struct StrategyObservationCursor {
     pub event_source: String,
     pub event_key: String,
+    pub token_address: Option<String>,
     pub pool_address: Option<String>,
     pub block_number: Option<u64>,
 }
@@ -171,7 +172,7 @@ impl PostgresTradingStore {
     ) -> Result<Vec<StrategyObservationCursor>> {
         let rows = sqlx::query(
             r#"
-            SELECT event_source, event_key, pool_address, block_number
+            SELECT event_source, event_key, token_address, pool_address, block_number
             FROM alpha_trading.strategy_observations
             WHERE run_id = $1 AND strategy_name = $2
             "#,
@@ -187,6 +188,7 @@ impl PostgresTradingStore {
                 Ok(StrategyObservationCursor {
                     event_source: row.try_get("event_source").map_err(store_error)?,
                     event_key: row.try_get("event_key").map_err(store_error)?,
+                    token_address: row.try_get("token_address").map_err(store_error)?,
                     pool_address: row.try_get("pool_address").map_err(store_error)?,
                     block_number: row
                         .try_get::<Option<i64>, _>("block_number")
@@ -257,7 +259,10 @@ impl PostgresTradingStore {
         rows.into_iter()
             .map(|row| {
                 let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
-                serde_json::from_str::<Position>(&payload).map_err(store_error)
+                let mut position =
+                    serde_json::from_str::<Position>(&payload).map_err(store_error)?;
+                normalize_position_pool_id(&mut position);
+                Ok(position)
             })
             .collect()
     }
@@ -408,7 +413,12 @@ impl TradingStore for PostgresTradingStore {
         .bind(risk_kind_label(&event.kind))
         .bind(risk_severity_label(&event.severity))
         .bind(event.token_address.to_string())
-        .bind(event.pool_address.map(|address| address.to_string()))
+        .bind(
+            event
+                .pool_address
+                .as_ref()
+                .map(|address| address.to_string()),
+        )
         .bind(event.pending_tx_hash.map(|hash| hash.to_string()))
         .bind(event.observed_block.map(u64_to_i64))
         .bind(&event.message)
@@ -429,6 +439,15 @@ where
 
 fn amount_raw(amount: &Amount) -> String {
     amount.raw.to_string()
+}
+
+fn normalize_position_pool_id(position: &mut Position) {
+    if position.key.pool_address.as_str().contains(':') {
+        return;
+    }
+    let pool_identity = position.key.pool_address.to_string();
+    position.key.pool_address =
+        eth_alpha_core::ids::TokenPoolId::new(position.key.token_address, pool_identity);
 }
 
 fn order_side_label(side: OrderSide) -> &'static str {

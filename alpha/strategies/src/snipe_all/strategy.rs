@@ -32,14 +32,14 @@ impl SnipeAllStrategy {
     }
 
     fn buy_pool(&mut self, pool: &PoolSnapshot) -> StrategyDecision {
-        self.state.mark_bought(pool.address);
+        self.state.mark_bought(pool.address.clone());
         StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
             wallet_id: self.config.wallet_id.clone(),
             strategy_name: self.name(),
             side: OrderSide::Buy,
             token_address: pool.token_address,
-            pool_address: pool.address,
+            pool_address: pool.address.clone(),
             amount: self.config.buy_amount.clone(),
             route: None,
             max_slippage_bps: self.config.max_slippage_bps,
@@ -52,7 +52,7 @@ impl SnipeAllStrategy {
         token_address: TokenAddress,
         pool_address: PoolAddress,
     ) -> StrategyDecision {
-        self.state.mark_exiting(pool_address);
+        self.state.mark_exiting(pool_address.clone());
         StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
             wallet_id: self.config.wallet_id.clone(),
@@ -70,7 +70,7 @@ impl SnipeAllStrategy {
     fn has_blocking_entry_risk(
         ctx: &StrategyContext<'_>,
         token_address: TokenAddress,
-        pool_address: PoolAddress,
+        pool_address: &PoolAddress,
     ) -> bool {
         ctx.active_risks.iter().rev().any(|risk| {
             risk.severity == RiskSeverity::Critical
@@ -78,6 +78,7 @@ impl SnipeAllStrategy {
                 && risk.token_address == token_address
                 && risk
                     .pool_address
+                    .as_ref()
                     .map(|pool| pool == pool_address)
                     .unwrap_or(true)
         })
@@ -87,12 +88,12 @@ impl SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         strategy_name: &StrategyName,
         token_address: TokenAddress,
-        pool_address: PoolAddress,
+        pool_address: &PoolAddress,
     ) -> bool {
         ctx.portfolio.positions.values().any(|position| {
             position.key.strategy_name == *strategy_name
                 && position.key.token_address == token_address
-                && position.key.pool_address == pool_address
+                && &position.key.pool_address == pool_address
                 && !position.state.is_terminal()
         })
     }
@@ -111,12 +112,12 @@ impl Strategy for SnipeAllStrategy {
         let MarketEvent::PoolUpdated { pool, .. } = event else {
             return Ok(StrategyDecision::Hold);
         };
-        if Self::has_blocking_entry_risk(ctx, pool.token_address, pool.address) {
+        if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::Hold);
         }
         let strategy_name = self.name();
-        if Self::has_active_position(ctx, &strategy_name, pool.token_address, pool.address) {
-            self.state.mark_bought(pool.address);
+        if Self::has_active_position(ctx, &strategy_name, pool.token_address, &pool.address) {
+            self.state.mark_bought(pool.address.clone());
             return Ok(StrategyDecision::Hold);
         }
 
@@ -150,7 +151,10 @@ impl Strategy for SnipeAllStrategy {
         Ok(
             match liquidity_removal::evaluate(&self.config, &self.state, ctx, &self.name(), event) {
                 RuleDecision::Exit { .. } => {
-                    let pool_address = event.pool_address.or(ctx.market.pool_address);
+                    let pool_address = event
+                        .pool_address
+                        .clone()
+                        .or_else(|| ctx.market.pool_address.clone());
                     match pool_address {
                         Some(pool_address) => self.sell_pool(event.token_address, pool_address),
                         None => StrategyDecision::Hold,
@@ -176,7 +180,7 @@ mod tests {
     use eth_alpha_core::{
         amount::Amount,
         execution::{ExecutionReport, ExecutionStatus},
-        ids::{OrderId, PositionId},
+        ids::{OrderId, PositionId, TokenPoolId},
         market::{MarketSnapshotRef, PoolProtocol},
         order::OrderSide,
         portfolio::PortfolioState,
@@ -187,9 +191,10 @@ mod tests {
     use super::*;
 
     fn pool() -> PoolSnapshot {
+        let token_address = Address::repeat_byte(0x11);
         PoolSnapshot {
-            address: Address::repeat_byte(0x22),
-            token_address: Address::repeat_byte(0x11),
+            address: TokenPoolId::new(token_address, Address::repeat_byte(0x22).to_string()),
+            token_address,
             protocol: PoolProtocol::UniswapV2,
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
@@ -221,7 +226,7 @@ mod tests {
                 wallet_id: strategy.config.wallet_id.clone(),
                 strategy_name: strategy.name(),
                 token_address: pool.token_address,
-                pool_address: pool.address,
+                pool_address: pool.address.clone(),
             },
         );
         position.mark_intent_created(OrderSide::Buy).unwrap();
@@ -251,7 +256,7 @@ mod tests {
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             token: None,
             pool: Some(pool.clone()),
         };
@@ -297,7 +302,7 @@ mod tests {
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             token: None,
             pool: Some(pool.clone()),
         };
@@ -326,7 +331,7 @@ mod tests {
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             token: None,
             pool: Some(pool.clone()),
         };
@@ -340,7 +345,7 @@ mod tests {
             kind: RiskKind::LiquidityRemoval,
             severity: RiskSeverity::Critical,
             token_address: pool.token_address,
-            pool_address: Some(pool.address),
+            pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,
             observed_block: Some(2),
             message: "liquidity removal".to_string(),
