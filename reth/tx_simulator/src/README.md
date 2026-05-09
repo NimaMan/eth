@@ -12,16 +12,16 @@ What This Module Provides
 - Fast no-trace execution: Plain simulation paths avoid inspector allocation when traces are not requested.
 - Mixed simulation sessions: `SimulationSession` keeps one warm fork for arbitrary signed/unsigned sequences, balance/nonce overrides, and read-only calls.
 - Block replay sessions: `BlockReplaySession` pins replay options for trace, profile, and execute-only lower-bound runs.
-- Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
+- Trace collector reset: Block call-tracing keeps one tracing inspector alive and resets its per-tx trace buffers between transactions for Reth-style performance. Upstream Reth/REVM calls this `fuse`.
 - Live state: `live::LiveTxSimulator` uses MDBX when it is caught up, otherwise the state tracked by the live block processor.
 
 How This Compares To Reth
-- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and fuses inspectors across block tracing.
+- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and resets inspectors across block tracing. In upstream code the reset method is named `fuse`.
 - We do the same locally via Reth crates, bypassing only the RPC layer.
 
 Relevant Reth Source (for parity)
-- Block and bundle tracing use a fused inspector between txs: rust/reth/crates/rpc/rpc/src/debug.rs:124
-- Fusing pattern after each tx: rust/reth/crates/rpc/rpc/src/debug.rs:574
+- Block and bundle tracing reset the inspector between txs: rust/reth/crates/rpc/rpc/src/debug.rs:124
+- Upstream reset method (`fuse`) after each tx: rust/reth/crates/rpc/rpc/src/debug.rs:574
 - Default geth structlog tracer setup: rust/reth/crates/rpc/rpc/src/debug.rs:872
 - Lower‑level helpers that construct `TracingInspector`: rust/reth/crates/rpc/rpc-eth-api/src/helpers/trace.rs:72
 
@@ -33,7 +33,7 @@ Key Building Blocks Here
 - Stateful unsigned chain: rust/tx_simulator/src/tx_chain/unsigned.rs:1
   - Persists state and nonces; uses the plain EVM path unless a trace is requested.
 - Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
-  - Recovers signer, persists state; fuses inspector between steps.
+  - Recovers signer, persists state; resets trace collector between steps.
 - Stateful session API: rust/tx_simulator/src/session/:1
   - Preferred high-level API for mixed signed/unsigned sequences and block replay/profile sessions.
 - Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1

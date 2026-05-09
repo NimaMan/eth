@@ -28,7 +28,7 @@ Parity with Reth
   - From prestate config: rust/reth/crates/rpc/rpc/src/debug.rs:321
   - From flat call config: rust/reth/crates/rpc/rpc/src/debug.rs:816
   - Default structlog: rust/reth/crates/rpc/rpc/src/debug.rs:872
-- Inspector fusing between sequential txs: rust/reth/crates/rpc/rpc/src/debug.rs:124, 574
+- Inspector reset between sequential txs: rust/reth/crates/rpc/rpc/src/debug.rs:124, 574. Upstream names this reset `fuse`.
 
 Subfolders
 - call/: Geth call tracer (current default)
@@ -38,4 +38,3 @@ Subfolders
 - fourbyte/: FourByte inspector
 - mux/: Mux tracer (aggregate)
 - js/: JS tracer (code + config)
-

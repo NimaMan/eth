@@ -43,7 +43,7 @@ impl BlockReplaySession {
         self
     }
 
-    /// Select the local replay engine. If omitted, callTracer options use the fused engine.
+    /// Select the local replay engine. If omitted, callTracer options use the reusable inspector engine.
     pub fn with_engine(mut self, engine: BlockTraceEngine) -> Self {
         self.engine = Some(engine);
         self

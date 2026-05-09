@@ -17,5 +17,4 @@ Planned APIs
 - trace_block_with_tracer(..., TracerKind::GethCall { .. }) -> Vec<TraceOutput::GethCall>
 
 Notes
-- Inspector is fused between sequential txs for chain and block tracing for parity and performance.
-
+- Inspector trace buffers are reset between sequential txs for chain and block tracing for parity and performance. Upstream calls that reset `fuse`.

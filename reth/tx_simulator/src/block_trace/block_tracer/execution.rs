@@ -15,7 +15,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_revm::DatabaseCommit;
 use reth_revm::State;
 use revm::Database;
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use revm_inspectors::tracing::{DebugInspector, TracingInspector, TracingInspectorConfig};
 use std::fmt::Debug;
 
 use crate::block_trace::types::ReplayProfileConfig;
@@ -40,7 +40,7 @@ impl<'a> BlockTracer<'a> {
                 Self::trace_block_sync_fresh_inspector(simulator, block_hash, opts)
             }
             BlockTraceEngine::RethFusedCallTracer => {
-                Self::trace_block_sync_reth_fused_call_tracer(simulator, block_hash, opts)
+                Self::trace_block_sync_reth_reusable_call_tracer(simulator, block_hash, opts)
             }
             BlockTraceEngine::RethDebug => Self::trace_block_sync_profiled(
                 simulator,
@@ -104,8 +104,8 @@ impl<'a> BlockTracer<'a> {
     }
 
     /// Synchronous block tracing implementation modeled after Reth's debug tracer:
-    /// keep one inspector alive, extract a result per transaction, then fuse it.
-    fn trace_block_sync_reth_fused_call_tracer(
+    /// keep one inspector alive, extract a result per transaction, then reset trace buffers.
+    fn trace_block_sync_reth_reusable_call_tracer(
         simulator: &TxSimulator,
         block_hash: B256,
         opts: GethDebugTracingOptions,
@@ -162,7 +162,7 @@ impl<'a> BlockTracer<'a> {
 
             db.commit(res.state);
             if index + 1 < transactions.len() {
-                inspector.fuse();
+                reset_trace_collector_for_next_tx(&mut inspector);
             }
         }
 
@@ -358,6 +358,23 @@ where
         .apply_pre_execution_changes()
         .map_err(|err| eyre::eyre!("failed to apply block pre-execution changes: {}", err))?;
     Ok(())
+}
+
+/// Local name for upstream `revm-inspectors`/Reth `TracingInspector::fuse`.
+///
+/// This resets per-transaction trace buffers before reusing the inspector for the next tx.
+/// It does not advance EVM state; state advancement is `db.commit(res.state)`.
+pub(super) fn reset_trace_collector_for_next_tx(inspector: &mut TracingInspector) {
+    inspector.fuse();
+}
+
+/// Local name for upstream Reth `DebugInspector::fuse`.
+pub(super) fn reset_debug_trace_collector_for_next_tx(
+    inspector: &mut DebugInspector,
+) -> Result<()> {
+    inspector
+        .fuse()
+        .map_err(|err| eyre::eyre!("debug inspector reset for next tx: {}", err))
 }
 
 /// Create an inspector based on the tracing options.

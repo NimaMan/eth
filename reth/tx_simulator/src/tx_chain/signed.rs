@@ -59,7 +59,9 @@ impl SignedTxChainSimulation {
         );
         let res = evm.transact(tx_env)?;
         self.forked_state.db.commit(res.state);
-        self.inspector = self.inspector.take().map(|insp| insp.fused());
+        if let Some(inspector) = self.inspector.as_mut() {
+            reset_trace_collector_for_next_tx(inspector);
+        }
 
         let success = res.result.is_success();
         let gas_used = res.result.tx_gas_used();
@@ -231,6 +233,13 @@ impl SignedTxChainSimulation {
         }
         reason
     }
+}
+
+/// Local name for upstream `revm-inspectors` `TracingInspector::fuse`.
+///
+/// This clears per-transaction trace buffers before the next sequential tx.
+fn reset_trace_collector_for_next_tx(inspector: &mut TracingInspector) {
+    inspector.fuse();
 }
 
 impl TxSimulator {

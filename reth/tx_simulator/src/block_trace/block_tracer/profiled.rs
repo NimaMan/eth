@@ -20,8 +20,11 @@ use crate::block_trace::types::{
 use crate::TxSimulator;
 
 use super::engine::BlockTraceEngine;
-use super::execution::ensure_engine_supports_options;
 use super::execution::{apply_block_pre_execution_changes, create_inspector};
+use super::execution::{
+    ensure_engine_supports_options, reset_debug_trace_collector_for_next_tx,
+    reset_trace_collector_for_next_tx,
+};
 use super::instrumented_db::{
     prewarm_profiled_cache_db, InstrumentedStateProviderDatabase, ProfiledCacheDb,
 };
@@ -98,7 +101,7 @@ impl<'a> BlockTracer<'a> {
                 &opts,
                 &mut profile,
             )?,
-            BlockTraceEngine::RethFusedCallTracer => Self::trace_profiled_tracing_fused(
+            BlockTraceEngine::RethFusedCallTracer => Self::trace_profiled_reusable_call_tracer(
                 simulator,
                 &recovered,
                 &mut db,
@@ -331,7 +334,7 @@ impl<'a> BlockTracer<'a> {
         Ok(results)
     }
 
-    fn trace_profiled_tracing_fused(
+    fn trace_profiled_reusable_call_tracer(
         simulator: &TxSimulator,
         transactions: &[Recovered<TransactionSigned>],
         db: &mut ProfiledCacheDb,
@@ -404,11 +407,11 @@ impl<'a> BlockTracer<'a> {
             profile.db_commit_ms += tx_profile.db_commit_ms;
 
             if index + 1 < transactions.len() {
-                let fuse_started = Instant::now();
-                inspector.fuse();
-                let fuse_ms = ms(fuse_started.elapsed());
-                tx_profile.inspector_build_ms += fuse_ms;
-                profile.inspector_build_ms += fuse_ms;
+                let reset_started = Instant::now();
+                reset_trace_collector_for_next_tx(&mut inspector);
+                let reset_ms = ms(reset_started.elapsed());
+                tx_profile.inspector_build_ms += reset_ms;
+                profile.inspector_build_ms += reset_ms;
             }
             tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
@@ -499,13 +502,11 @@ impl<'a> BlockTracer<'a> {
             profile.db_commit_ms += tx_profile.db_commit_ms;
 
             if index + 1 < transactions.len() {
-                let fuse_started = Instant::now();
-                inspector
-                    .fuse()
-                    .map_err(|err| eyre::eyre!("debug inspector fuse: {}", err))?;
-                let fuse_ms = ms(fuse_started.elapsed());
-                tx_profile.inspector_build_ms += fuse_ms;
-                profile.inspector_build_ms += fuse_ms;
+                let reset_started = Instant::now();
+                reset_debug_trace_collector_for_next_tx(&mut inspector)?;
+                let reset_ms = ms(reset_started.elapsed());
+                tx_profile.inspector_build_ms += reset_ms;
+                profile.inspector_build_ms += reset_ms;
             }
             tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);

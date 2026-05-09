@@ -7,9 +7,9 @@ use alloy_rpc_types_trace::geth::{
 pub enum BlockTraceEngine {
     /// Historical implementation: build a fresh inspector for every transaction.
     FreshInspector,
-    /// Reth-style implementation: reuse one call tracer inspector and fuse it between txs.
+    /// Reth-style implementation: reuse one call tracer inspector and reset it between txs.
     RethFusedCallTracer,
-    /// Reth debug RPC style: one DebugInspector, get_result per tx, fuse between txs.
+    /// Reth debug RPC style: one DebugInspector, get_result per tx, reset it between txs.
     RethDebug,
 }
 

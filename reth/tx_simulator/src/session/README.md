@@ -28,5 +28,6 @@ View calls use a nested no-commit overlay, so they observe the session state wit
 - `profile()` returns traces plus replay timing and provider-read counters,
 - `execute_only_profile()` runs the no-inspector lower-bound diagnostic.
 
-The default trace engine is the fused call tracer for `callTracer`-compatible options and the
-Reth debug engine for broader geth debug options.
+The default trace engine reuses one call tracer for `callTracer`-compatible options and resets
+its per-tx trace buffers between transactions. Broader geth debug options use the Reth debug
+engine.

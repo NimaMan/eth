@@ -8,7 +8,7 @@ Modules
 - ../session/block_replay.rs: `BlockReplaySession`, a pinned block replay/profile builder.
 
 Notes
-- Fast callTracer replay uses a fused inspector between transactions.
+- Fast callTracer replay reuses one inspector and resets its per-tx trace buffers between transactions. Upstream Reth/REVM names that reset `fuse`.
 - Arbitrary geth debug tracer options route through the Reth-style debug inspector engine.
 - `execute_only_profile` is a no-trace lower-bound diagnostic; full-trace acceptance should use
   `trace` or `profile`.
