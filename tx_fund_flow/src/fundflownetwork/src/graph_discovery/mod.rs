@@ -14,7 +14,7 @@ pub mod explorer;
 
 pub use types::{
     UndirectedGraph, GraphNode, GraphEdge, 
-    DiscoveryConfig, DiscoveryOutput, TxCandidate
+    DiscoveryConfig, DiscoveryOutput, DiscoveryStats, StopReason, TxCandidate
 };
 pub use explorer::GraphExplorer;
 pub use routing_rules::RoutingRules;

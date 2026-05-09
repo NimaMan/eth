@@ -26,8 +26,8 @@ transaction data.
 ## Data Flow
 
 ```text
-tx_processor ProcessedTransaction / DB-backed query output
-  -> fund-flow graph/network construction
+seed address / tx_processor ProcessedTransaction / DB-backed query output
+  -> discovery-driven directed fund-flow graph/network construction
   -> ranking/analysis
   -> Rust examples or fundflownetwork_py bindings
 ```
@@ -41,6 +41,7 @@ tx_processor ProcessedTransaction / DB-backed query output
 | DB fetching | `src/eth_db_fetcher/` |
 | Network analysis | `src/fundflownetwork/README.md`, `src/fundflownetwork/` |
 | Python bindings | `src/fundflownetwork_py/` |
+| Discovery-to-directed-network builder | `src/fundflownetwork/src/processed_network_builder.rs` |
 | Integration with tx processor | `src/fundflownetwork/src/tx_processor_integration.rs` |
 
 ## Tests And Commands

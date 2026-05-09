@@ -22,10 +22,28 @@ impl RawTxParticipant {
             tx_hash: self.tx_hash.parse()?,
             from_address: self.from_address.parse()?,
             to_address: self.to_address.parse()?,
-            value: U256::from_str_radix(&self.value, 10)?,
+            value: parse_transaction_value(&self.value)?,
             block_number: self.block_number as u64,
         })
     }
+}
+
+fn parse_transaction_value(value: &str) -> Result<U256> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(U256::ZERO);
+    }
+
+    if trimmed.contains('.') || trimmed.contains('e') || trimmed.contains('E') {
+        let value = trimmed.parse::<f64>()?;
+        if !value.is_finite() || value <= 0.0 {
+            return Ok(U256::ZERO);
+        }
+
+        return Ok(U256::from(value.round() as u128));
+    }
+
+    Ok(U256::from_str_radix(trimmed, 10)?)
 }
 
 pub struct TxParticipant {
@@ -112,9 +130,9 @@ impl GraphDiscoveryQueries {
         .ok_or_else(|| eyre::eyre!("Address not found: {}", address_str))?;
         
         // Step 2: Get transaction hashes for this address with block filtering
-        let tx_hashes: Vec<(String, i32)> = if let Some(max_block) = max_block {
+        let tx_hashes: Vec<(String, i32, String)> = if let Some(max_block) = max_block {
             sqlx::query_as(
-                "SELECT DISTINCT tp.tx_hash, t.block_number 
+                "SELECT DISTINCT tp.tx_hash, t.block_number, COALESCE(t.value::text, '0') AS value
                  FROM eth_db.tx_participants tp 
                  JOIN eth_db.transactions t ON t.tx_hash = tp.tx_hash
                  WHERE tp.address_id = $1 AND t.block_number <= $2 
@@ -128,7 +146,7 @@ impl GraphDiscoveryQueries {
             .await?
         } else {
             sqlx::query_as(
-                "SELECT DISTINCT tp.tx_hash, t.block_number 
+                "SELECT DISTINCT tp.tx_hash, t.block_number, COALESCE(t.value::text, '0') AS value
                  FROM eth_db.tx_participants tp 
                  JOIN eth_db.transactions t ON t.tx_hash = tp.tx_hash
                  WHERE tp.address_id = $1 
@@ -148,8 +166,9 @@ impl GraphDiscoveryQueries {
         let mut all_participants = Vec::new();
         
         // Step 3: For each transaction, get ALL participant pairs
-        for (tx_hash, block_number) in tx_hashes {
+        for (tx_hash, block_number, value) in tx_hashes {
             let participants = self.get_tx_participants(&tx_hash.parse()?).await?;
+            let value = parse_transaction_value(&value)?;
             
             // Create pairs between our target address and all other participants
             for participant in participants {
@@ -158,7 +177,7 @@ impl GraphDiscoveryQueries {
                         tx_hash: tx_hash.parse()?,
                         from_address: *address,
                         to_address: participant,
-                        value: U256::ZERO, // Phase 1 doesn't care about values
+                        value,
                         block_number: block_number as u64,
                     });
                 }

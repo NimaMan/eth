@@ -58,7 +58,7 @@ pub fn extract_fund_flows_from_processed_tx(
         });
     }
 
-    // 5. ERC721/1155 transfers (treat as token movements with amount = 1)
+    // 5. ERC721 transfers (treat each NFT as 1 unit)
     for transfer in &tx.erc721_transfers {
         token_movements.push(TokenMovement {
             token_address: transfer.token_address,
@@ -68,6 +68,21 @@ pub fn extract_fund_flows_from_processed_tx(
             token_symbol: None,
             token_decimals: Some(0),
         });
+    }
+
+    // 6. ERC1155 transfers. The current core flow type has no token_id field, so
+    // each id/amount pair becomes one movement for the collection contract.
+    for transfer in &tx.erc1155_transfers {
+        for amount in &transfer.amounts {
+            token_movements.push(TokenMovement {
+                token_address: transfer.token_address,
+                from: transfer.from_address,
+                to: transfer.to_address,
+                amount: *amount,
+                token_symbol: None,
+                token_decimals: Some(0),
+            });
+        }
     }
 
     Ok(CompleteFundFlows {
@@ -115,6 +130,12 @@ impl ProcessedTxConverter {
         }
 
         for transfer in &tx.erc721_transfers {
+            addresses.push(transfer.from_address);
+            addresses.push(transfer.to_address);
+            addresses.push(transfer.token_address);
+        }
+
+        for transfer in &tx.erc1155_transfers {
             addresses.push(transfer.from_address);
             addresses.push(transfer.to_address);
             addresses.push(transfer.token_address);

@@ -3,12 +3,15 @@ use pyo3::exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::json;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tx_fund_flow_fundflownetwork::graph_discovery::{
-    DiscoveryConfig, DiscoveryOutput, GraphExplorer,
+use tx_fund_flow_fundflownetwork::graph_discovery::DiscoveryConfig;
+use tx_fund_flow_fundflownetwork::{
+    CytoscapeExporter, DiscoveredFundFlowNetwork, FundFlowBuildConfig,
+    ProcessedFundFlowNetworkBuilder, DEFAULT_MAX_PROCESSED_TXS,
 };
 
 /// Python wrapper for FundFlowNetwork builder
@@ -16,17 +19,22 @@ use tx_fund_flow_fundflownetwork::graph_discovery::{
 pub struct PyFundFlowNetworkBuilder {
     runtime: Arc<Runtime>,
     database_url: String,
+    reth_datadir: String,
 }
 
 #[pymethods]
 impl PyFundFlowNetworkBuilder {
     #[new]
-    #[pyo3(signature = (database_url=None))]
-    fn new(database_url: Option<String>) -> PyResult<Self> {
+    #[pyo3(signature = (database_url=None, reth_datadir=None))]
+    fn new(database_url: Option<String>, reth_datadir: Option<String>) -> PyResult<Self> {
         let db_url = database_url.unwrap_or_else(|| {
             std::env::var("DATABASE_URL").unwrap_or_else(|_| {
                 "postgresql://postgres:postgres@localhost:5432/eth_db".to_string()
             })
+        });
+        let reth_datadir = reth_datadir.unwrap_or_else(|| {
+            std::env::var("RETH_DATADIR")
+                .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string())
         });
 
         let runtime = Runtime::new().map_err(|e| {
@@ -39,6 +47,7 @@ impl PyFundFlowNetworkBuilder {
         Ok(Self {
             runtime: Arc::new(runtime),
             database_url: db_url,
+            reth_datadir,
         })
     }
 
@@ -73,12 +82,20 @@ impl PyFundFlowNetworkBuilder {
         }
 
         let db_url = self.database_url.clone();
-        let config = DiscoveryConfig {
+        let reth_datadir = self.reth_datadir.clone();
+        let discovery = DiscoveryConfig {
             max_depth,
             max_nodes,
             min_value_wei,
             max_txs_per_address: 100,
             max_block_number: None,
+        };
+        let build_config = FundFlowBuildConfig {
+            discovery,
+            max_processed_txs: DEFAULT_MAX_PROCESSED_TXS,
+            min_edge_eth: min_value_eth,
+            include_gas: false,
+            include_tokens,
         };
 
         let result = self
@@ -87,15 +104,18 @@ impl PyFundFlowNetworkBuilder {
                 let db_pool = sqlx::PgPool::connect(&db_url)
                     .await
                     .map_err(|e| format!("Database connection failed: {}", e))?;
-                let explorer = GraphExplorer::new(db_pool);
-                explorer
-                    .explore(address, config, &HashSet::new())
+                let builder = ProcessedFundFlowNetworkBuilder::new(db_pool, &reth_datadir)
+                    .map_err(|e| format!("Fund-flow builder initialization failed: {}", e))?;
+                builder
+                    .build_from_address(address, build_config, &HashSet::new())
                     .await
-                    .map_err(|e| format!("Graph discovery failed: {}", e))
+                    .map_err(|e| format!("Directed fund-flow build failed: {}", e))
             })
             .map_err(PyRuntimeError::new_err)?;
 
-        let py_dict = json_to_pyobject(py, &discovery_to_cytoscape_json(&result, include_tokens))?;
+        let network_json = build_to_cytoscape_json(&result, include_tokens)
+            .map_err(|e| PyRuntimeError::new_err(format!("Network export failed: {}", e)))?;
+        let py_dict = json_to_pyobject(py, &network_json)?;
         Ok(py_dict)
     }
 
@@ -158,10 +178,10 @@ impl PyFundFlowNetworkBuilder {
         match format {
             "cytoscape" => Ok(network.to_object(py)), // Already in Cytoscape format
             "visjs" => Err(PyNotImplementedError::new_err(
-                "visjs export requires a typed FundFlowNetwork, not a Python dict",
+                "visjs export requires a typed FundFlowNetwork exporter; this Python API currently returns Cytoscape dicts",
             )),
             "graphml" => Err(PyNotImplementedError::new_err(
-                "graphml export requires a typed FundFlowNetwork, not a Python dict",
+                "graphml export requires a typed FundFlowNetwork exporter; this Python API currently returns Cytoscape dicts",
             )),
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Unknown export format: {}. Use 'cytoscape', 'visjs', or 'graphml'",
@@ -222,64 +242,43 @@ fn eth_to_wei(value: f64) -> PyResult<U256> {
     Ok(U256::from(wei.round() as u128))
 }
 
-fn discovery_to_cytoscape_json(
-    output: &DiscoveryOutput,
+fn build_to_cytoscape_json(
+    output: &DiscoveredFundFlowNetwork,
     include_tokens_requested: bool,
-) -> serde_json::Value {
-    let mut elements = Vec::new();
+) -> eyre::Result<Value> {
+    let mut network = CytoscapeExporter::export(&output.network)?;
 
-    for node in output.graph.nodes.values() {
-        let address = format!("{:?}", node.address);
-        let label = node
-            .name
-            .as_deref()
-            .or(node.entity_type.as_deref())
-            .unwrap_or(&address);
-        elements.push(json!({
-            "data": {
-                "id": address,
-                "label": label,
-                "address": address,
-                "entity_type": node.entity_type,
-                "is_contract": node.is_contract,
-                "explored": node.explored,
-                "exploration_depth": node.exploration_depth,
-                "first_seen_block": node.first_seen_block,
-            },
-            "classes": if node.is_contract { "contract" } else { "eoa" },
-        }));
+    if let Value::Object(map) = &mut network {
+        map.insert(
+            "discovery".to_string(),
+            json!({
+                "stats": output.discovery.discovery_stats,
+                "stop_reason": output.discovery.stop_reason,
+                "graph_nodes": output.discovery.graph.node_count(),
+                "graph_edges": output.discovery.graph.edge_count(),
+                "priority_transactions": output.discovery.priority_transactions,
+            }),
+        );
+        map.insert("processing".to_string(), json!(output.processing));
+        map.insert(
+            "fund_flow".to_string(),
+            json!({
+                "directed": true,
+                "complete_transactions": output.complete_flows.len(),
+                "aggregated_flows": output.fund_flows.len(),
+                "include_tokens_requested": include_tokens_requested,
+                "token_edges_supported": false,
+                "token_flow_mode": if include_tokens_requested { "weth_as_eth_without_token_valuation" } else { "disabled" },
+                "gas_edges_included": false,
+            }),
+        );
+        map.insert(
+            "network_metadata".to_string(),
+            json!(output.network.metadata),
+        );
     }
 
-    for edge in &output.graph.edges {
-        let source = format!("{:?}", edge.node1);
-        let target = format!("{:?}", edge.node2);
-        elements.push(json!({
-            "data": {
-                "id": format!("{:?}-{}-{}", edge.tx_hash, source, target),
-                "source": source,
-                "target": target,
-                "tx_hash": format!("{:?}", edge.tx_hash),
-                "value_wei": edge.value.to_string(),
-                "block_number": edge.block_number,
-            },
-            "classes": "observed-transaction",
-        }));
-    }
-
-    json!({
-        "elements": elements,
-        "layout": {
-            "name": "cose",
-            "animate": false,
-        },
-        "discovery": {
-            "stats": output.discovery_stats,
-            "stop_reason": output.stop_reason,
-            "priority_transactions": output.priority_transactions,
-            "include_tokens_requested": include_tokens_requested,
-            "token_edges_supported": false,
-        },
-    })
+    Ok(network)
 }
 
 /// Python module definition
