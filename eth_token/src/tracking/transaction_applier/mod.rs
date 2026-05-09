@@ -48,7 +48,7 @@ pub(crate) enum V2TradingSimulation<'a> {
     Historical(&'a PoolBuySellSimulator),
     HistoricalBlockSession {
         pool_simulator: &'a PoolBuySellSimulator,
-        block_session: &'a Mutex<BlockTxStateSession>,
+        block_session: &'a Mutex<Option<BlockTxStateSession>>,
     },
     Live(&'a LivePoolBuySellSimulator),
     #[cfg(test)]

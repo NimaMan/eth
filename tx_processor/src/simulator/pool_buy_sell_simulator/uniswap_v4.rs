@@ -86,9 +86,10 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
-    config: PoolBuySellParameters,
+    mut config: PoolBuySellParameters,
     chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
+    config.prior_txs.clear();
     if config.block_delay > 0 {
         return Err(eyre!(
             "Uniswap V4 pool simulation currently does not support block delays"

@@ -109,9 +109,10 @@ pub async fn check_can_buy_sell_pool(
 pub async fn check_can_buy_sell_pool_with_chain(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
-    config: PoolBuySellParameters,
+    mut config: PoolBuySellParameters,
     chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
+    config.prior_txs.clear();
     if matches!(config.pool_type, PoolType::UniswapV4) {
         return check_can_buy_sell_uniswap_v4_with_chain(simulator, tx_processor, config, chain)
             .await;
