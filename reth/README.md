@@ -174,7 +174,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Depends on: `tx_processor`, `tx_simulator`, `reth_chain_query`, Reth/REVM/Alloy
 - Used by: Operations stack, downstream bots; integrates with Python token tracking service
 - Key: `MempoolFetcherIPCClient`, `FunctionDetector`, `TransactionRouter`, `SimulationManager`, `SignalManager`
-- Docs: `rust/mempool_processor/README.md`, plus `src/signal_detector/README.md`, `src/bin/README.md`
+- Docs: `../mempool_processor/README.md`, plus `src/signal_detector/README.md`, `src/bin/README.md`
 
 ### pyreth
 - Purpose: Python bindings that expose `ChainQuery`, `TxProcessor`, `TxSimulator`, price readers, and selected simulators to Python with a stable `ProcessedTransaction` schema.

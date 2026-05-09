@@ -28,15 +28,15 @@ fn reads_foundry_artifact_bytecode_from_runtime_path() {
 }
 
 #[test]
-fn default_artifact_paths_point_at_soleth() {
+fn default_artifact_paths_point_at_solidity() {
     assert!(minimal_router_bytecode_path()
-        .ends_with("soleth/baygus-executor/contracts/uniswap_v4/MinimalV4Router.bin"));
+        .ends_with("solidity/baygus-executor/contracts/uniswap_v4/MinimalV4Router.bin"));
     assert!(baygus_executor_artifact_path()
-        .ends_with("soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json"));
+        .ends_with("solidity/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json"));
     assert!(mock_pool_manager_artifact_path()
-        .ends_with("soleth/baygus-executor/out/MockPoolManager.sol/MockPoolManager.json"));
+        .ends_with("solidity/baygus-executor/out/MockPoolManager.sol/MockPoolManager.json"));
     assert!(mock_erc20_artifact_path()
-        .ends_with("soleth/baygus-executor/out/MockERC20.sol/MockERC20.json"));
+        .ends_with("solidity/baygus-executor/out/MockERC20.sol/MockERC20.json"));
 }
 
 #[test]

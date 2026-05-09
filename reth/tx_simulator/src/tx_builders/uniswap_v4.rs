@@ -5,12 +5,12 @@ use std::str::FromStr;
 mod artifacts;
 mod encoding;
 
+#[allow(deprecated)]
+pub use self::artifacts::baygus_router_artifact_path;
 pub use self::artifacts::{
     baygus_executor_artifact_path, minimal_router_bytecode_path, mock_erc20_artifact_path,
-    mock_pool_manager_artifact_path, soleth_baygus_executor_dir,
+    mock_pool_manager_artifact_path, solidity_baygus_executor_dir,
 };
-#[allow(deprecated)]
-pub use self::artifacts::{baygus_router_artifact_path, soleth_baygus_router_dir};
 pub use self::encoding::compute_contract_address;
 
 use self::artifacts::{read_foundry_artifact_bytecode, read_raw_bytecode_file};

@@ -1,24 +1,24 @@
-# Soleth Workspace (Solidity)
+# Solidity Workspace
 
-Soleth is the on-chain execution layer for the Baygus stack. It hosts the Solidity contracts that the Rust (`reth`) and Python (`pyeth`) tooling target when they decide to buy, sell, unwind, or route liquidity. Think of Soleth as the set of on-chain primitives our agents call after off-chain analysis/simulation is done.
+This is the on-chain execution layer for the Baygus stack. It hosts the Solidity contracts that the Rust (`reth`) and Python (`pyeth`) tooling target when they decide to buy, sell, unwind, or route liquidity. Think of this folder as the set of on-chain primitives our agents call after off-chain analysis/simulation is done.
 
 ## Relation to the rest of the stack
 - **reth/** (Rust): simulators, calldata builders, transaction processors, mempool signal detectors. These produce decisions (buy/sell/skip), gas estimates, and calldata.
 - **eth_tx_executor** (Rust, under `reth/eth_tx_executor`): execution harness that consumes trades/alerts, builds/sends signed transactions to mainnet. Targets Baygus Executor when the agent chooses to route via our contracts.
 - **pyeth/** (Python): bindings and higher-level orchestration for agents/services that consume the Rust outputs.
-- **soleth/** (Solidity): the contracts those agents actually execute against on-chain (Baygus Executor and future adapters).
+- **solidity/**: the contracts those agents actually execute against on-chain (Baygus Executor and future adapters).
 
 Data/control flow (typical cycle):
 1) Mempool or historical signal → `tx_processor`/`mempool_processor` in Rust simulates viability.
 2) Agent decides to trade → `reth_chain_query` builds executor calldata (V2/V3/V4 paths) and simulates via `tx_simulator`.
-3) `eth_tx_executor` (or an equivalent sender) signs and broadcasts the transaction to the on-chain Baygus Executor (Soleth). The executor runs swaps/settlement on-chain.
+3) `eth_tx_executor` (or an equivalent sender) signs and broadcasts the transaction to the on-chain Baygus Executor. The executor runs swaps/settlement on-chain.
 4) Post-trade, receipts and traces flow back into Rust/Python for accounting and future decisions.
 
 ## Projects here
 - **baygus-executor/**: primary contract project. A command-driven executor that can run single-hop and multi-hop swaps across Uniswap v2/v3/v4 (and adapters for Balancer/Curve in progress). Foundry-based, with tests and docs under this folder.
 - (Space for future Solidity components will mirror this structure.)
 
-## Responsibilities of Soleth (on-chain executor)
+## Responsibilities Of The Solidity Layer
 - Provide the on-chain executor entrypoints the off-chain agent targets.
 - Enforce safety (reentrancy guards, bounded slippage, calldata sanity) and execute swaps/settlement.
 - Support bounded builder/validator payment commands for private-bundle execution when the off-chain

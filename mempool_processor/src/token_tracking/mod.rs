@@ -1,4 +1,4 @@
-// rust/mempool_processor/src/token_tracking/mod.rs
+// mempool_processor/src/token_tracking/mod.rs
 //
 // Module for subscribing to pool and token creator updates published by the Python component.
 

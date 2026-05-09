@@ -12,7 +12,7 @@ members = [
     "reth_chain_query",
     "eth_token",
     "../eth_token_server",
-    "mempool_processor",
+    "../mempool_processor",
     "pyreth",
 ]
 

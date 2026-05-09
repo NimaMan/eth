@@ -24,7 +24,7 @@ pub const CMD_COINBASE_TIP: u8 = 0x0b;
 pub const CMD_PERMIT2_SIGNATURE_TRANSFER_FROM: u8 = 0x0c;
 pub const CMD_V2_PAIR_SWAP: u8 = 0x0d;
 
-/// BaygusExecutor command bytes from `soleth/baygus-executor/contracts/src/types/SharedTypes.sol`.
+/// BaygusExecutor command bytes from `solidity/baygus-executor/contracts/src/types/SharedTypes.sol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum BaygusCommand {

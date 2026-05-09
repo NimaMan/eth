@@ -32,7 +32,7 @@ Only the first category should be in the deployed production bytecode.
 
 ## Required Checks
 
-Run from `soleth/baygus-executor/contracts`:
+Run from `solidity/baygus-executor/contracts`:
 
 ```bash
 forge fmt --check
@@ -44,7 +44,7 @@ Run from `reth`:
 
 ```bash
 cargo test -p tx_simulator tx_builders::baygus_executor --lib
-cargo test -p tx_simulator default_artifact_paths_point_at_soleth --lib
+cargo test -p tx_simulator default_artifact_paths_point_at_solidity --lib
 cargo run -p tx_processor --example baygus_execution_plan
 ```
 
@@ -96,5 +96,5 @@ Record these values for every deployment:
 - `BaygusExecutor` bytecode hash
 - deployed runtime size
 - deploy gas and hot-path execution gas versus direct execution
-- artifact path used by Rust: `soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json`
+- artifact path used by Rust: `solidity/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json`
 - Foundry and Rust check output

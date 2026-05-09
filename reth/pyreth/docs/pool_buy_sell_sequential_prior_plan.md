@@ -49,7 +49,7 @@ Replaying only TX #3 without TX #1/#2 leaves the sandbox with no token/pair, cau
 - Add regression tests ensuring the simulator handles empty prior lists (legacy behavior) and multiple entries.
 
 ### 7. Documentation
-- Update simulator README (rust/mempool_processor/src/simulator/README.md) with instructions on collecting sequential prior transactions and how the new API is used.
+- Update simulator README (`blockchains/eth/mempool_processor/src/simulator/README.md`) with instructions on collecting sequential prior transactions and how the new API is used.
 - Mention the specific MIND block example as a “known-good” scenario.
 
 ## Notes

@@ -47,7 +47,7 @@ Pool targets were checked against local Reth RPC at block `25028188`.
 Each executable validation should run the same pattern:
 
 1. Build a simulation chain at a fixed recent block.
-2. Deploy the current `soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json` bytecode into
+2. Deploy the current `solidity/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json` bytecode into
    the simulated state with mainnet adapter addresses.
 3. Fund a deterministic test account with ETH and/or token balances using state overrides or setup
    transfers from known rich accounts.
