@@ -18,8 +18,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Sequence
 
 
 DEFAULT_API_BASE = "http://127.0.0.1:8765"
@@ -739,6 +740,42 @@ class ProtocolCoverageDetector(IssueDetector):
         return candidates
 
 
+class ContractAnalysisDetector(IssueDetector):
+    name = "contract_analysis"
+
+    def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
+        candidates = []
+        for token in snapshot.tokens:
+            analysis = token.get("contract_analysis") or {}
+            if not analysis:
+                continue
+
+            for evidence in analysis.get("evidence") or []:
+                severity = str(evidence.get("severity") or "info").lower()
+                if SEVERITY_RANK.get(severity, 0) < SEVERITY_RANK["medium"]:
+                    continue
+
+                kind = str(evidence.get("kind") or "unknown")
+                source = str(evidence.get("source") or "unknown")
+                message = compact_text(str(evidence.get("message") or ""), 160)
+                candidates.append(
+                    issue(
+                        snapshot,
+                        kind=f"contract_analysis.{kind}",
+                        severity=severity,
+                        token=token,
+                        evidence=[
+                            f"source={source}",
+                            f"message={message}",
+                            f"interface_quality={nested_get(analysis, 'interface', 'quality')}",
+                        ],
+                        metrics=contract_analysis_metrics(analysis),
+                        suggested_next_step=contract_analysis_next_step(kind),
+                    )
+                )
+        return candidates
+
+
 ALL_DETECTORS: list[IssueDetector] = [
     ServerIndexerErrorDetector(),
     LifecycleConsistencyDetector(),
@@ -750,6 +787,7 @@ ALL_DETECTORS: list[IssueDetector] = [
     LpControlDetector(),
     TaxSafetyDetector(),
     ProtocolCoverageDetector(),
+    ContractAnalysisDetector(),
 ]
 
 
@@ -832,6 +870,54 @@ def pool_metrics(pool: Mapping[str, Any]) -> dict[str, Any]:
         "risk_label": pool.get("risk_label"),
         "stage": pool.get("stage"),
     }
+
+
+def contract_analysis_metrics(analysis: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "interface_quality": nested_get(analysis, "interface", "quality"),
+        "metadata_complete": nested_get(analysis, "interface", "metadata_complete"),
+        "metadata": analysis.get("metadata"),
+        "declared_total_supply_scaled": nested_get(
+            analysis, "supply", "declared_total_supply_scaled"
+        ),
+        "minted_from_transfers": nested_get(analysis, "supply", "minted_from_transfers"),
+        "minted_to_declared_ratio": nested_get(
+            analysis, "supply", "minted_to_declared_ratio"
+        ),
+        "hidden_mint_detected": nested_get(analysis, "supply", "hidden_mint_detected"),
+        "current_owner": nested_get(analysis, "authority", "current_owner"),
+        "ownership_renounced": nested_get(analysis, "authority", "ownership_renounced"),
+        "control_address_count": nested_get(
+            analysis, "authority", "control_address_count"
+        ),
+        "pool_count": nested_get(analysis, "pools", "pool_count"),
+        "trading_pool_count": nested_get(analysis, "pools", "trading_pool_count"),
+        "cannot_sell_pool_count": nested_get(
+            analysis, "pools", "cannot_sell_pool_count"
+        ),
+        "scam_pool_count": nested_get(analysis, "pools", "scam_pool_count"),
+    }
+
+
+def contract_analysis_next_step(kind: str) -> str:
+    if kind == "hidden_mint_evidence":
+        return "verify totalSupply, transfer mint events, and reserve/supply ratios before trusting FDV"
+    if kind in {"metadata_incomplete", "invalid_metadata"}:
+        return "treat as a nonstandard ERC20 case and separate chain behavior from metadata-read gaps"
+    if kind == "raw_trading_event_without_pool_trading":
+        return "keep token-level trading events separate from pool-derived trading viability"
+    if kind in {"cannot_sell_pool", "pool_scam_evidence"}:
+        return "replay observed chain routes and simulator setup for the affected pool"
+    return "inspect the contract-analysis evidence and decide whether it needs a focused lab case"
+
+
+def nested_get(value: Mapping[str, Any], *path: str) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
 
 
 def is_meaningfully_liquid(pool: Mapping[str, Any]) -> bool:

@@ -62,6 +62,7 @@ run cache data.
 | LP control | concentrated LP holders, high approved LP share, router or non-router approvals, zero LP supply with reserves | LP ownership and approvals determine whether liquidity can be removed |
 | tax safety | no, low, moderate, high, and extreme tax buckets from `eth_token::pools::TaxBucket` | tax is a trading safety input and should be grouped consistently across pages and tools |
 | lifecycle consistency | token without a pool showing pool-derived trading state, pool with liquidity but no reliable trading simulation, trading state before pool creation | token-level labels must not invent pool state |
+| contract analysis | structured `eth_token::contract_analysis` evidence such as hidden mint, invalid metadata, raw trading events without pool trading, and pool scam evidence | contract behavior must be separated from simulator/indexer failures and kept as reusable evidence |
 | token supply anomalies | balances or pool supply share over total supply, hidden mint indicators, supply in pool over 100% | supply math errors and hidden mints can invalidate liquidity and FDV metrics |
 | protocol coverage | V2, V3, and V4 pools missing protocol-specific metrics or showing V2-only assumptions | the triage runner must stay protocol-aware as V3 and V4 enter the range builds |
 | server/indexer errors | block application errors, simulator errors, metadata soft misses that are not expected, timeout clusters | infrastructure failures should be separated from token behavior |
