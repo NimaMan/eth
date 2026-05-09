@@ -28,7 +28,7 @@ src/tx_processor/data_models/
   models 1:1. Any change here must be reflected in the Python README and data
   classes to keep cross-runtime compatibility.
 - **No implicit coercion**: Deserialisers reject floats and malformed hex. The
-  bridge (`rust/pyreth/src/tx_processor/processed_tx_bridge.rs`) enforces the
+  bridge (`pyreth/src/tx_processor/processed_tx_bridge.rs`) enforces the
   same rules when accepting Python dictionaries.
 
 ## Key Structs

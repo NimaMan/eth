@@ -14,7 +14,7 @@ What is an “Action” here?
 
 How it fits together
 1) Build unsigned tx(s) with reth_chain_query builders
-   - Location: `rust/reth_chain_query/src/tx_builders/*`
+   - Location: `reth_chain_query/src/tx_builders/*`
    - Stateless calldata constructors for V2/V3 buy/sell/approve and helpers like `spender_for_route`
 2) Simulate at block b using tx_processor simulators
    - Single tx: `ProcessedTxProvider::process_transaction_from_unsigned_tx(unsigned, Some(b))`
@@ -48,7 +48,7 @@ End-to-end trading viability (Python → Rust → Python)
 2. They build a `pyreth.PoolBuySellParameters`:
    - Inject the target token/pool, the paired denomination (USDC/WETH/…), the historical block (usually `tx.block_number - 1`), prior control transactions, and the token decimals.
    - Optionally attach a sealed header so the simulator runs against the exact parent block state.
-3. The PyO3 bridge (`rust/pyreth/src/simulator/pool_buy_sell_simulator.rs`) converts that struct into a Rust `PoolBuySellParameters`, enforcing that the denom address and token decimals are provided, and forwards it to `check_can_buy_sell_pool`.
+3. The PyO3 bridge (`pyreth/src/simulator/pool_buy_sell_simulator.rs`) converts that struct into a Rust `PoolBuySellParameters`, enforcing that the denom address and token decimals are provided, and forwards it to `check_can_buy_sell_pool`.
 4. `check_can_buy_sell_pool` (this crate) chooses the route, constructs the swap sequence, and executes it on a forked state:
    - Currently V2/V3 routes build `swapExactETHForTokens` for the buy leg (with a WETH→denom→token path when a denom token is specified), first replay any required prior transactions, then run `approve` and `swapExactTokensForETHSupportingFeeOnTransferTokens` for the sell.
    - Each step produces a `ProcessedTransaction`; failures return a `PoolBuySellSimulationResult` with `failure_reason`.

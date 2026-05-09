@@ -3,7 +3,7 @@ Load processed transactions touching a specific address over a recent block
 range using the address-level provider.
 
 Usage (from repo root after building pyreth):
-  PYTHONPATH=$(pwd) python rust/pyreth/examples/provider/fetch_address_transactions.py \
+  PYTHONPATH=$(pwd) python pyreth/examples/provider/fetch_address_transactions.py \
       --address 0xdAC17F958D2ee523a2206206994597C13D831ec7
 
 Optionally export PYRETH_DATADIR if your Reth database lives elsewhere.

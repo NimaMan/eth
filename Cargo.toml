@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "alpha/core",
+    "alpha/engine",
+    "alpha/store",
+    "alpha/strategies",
+    "alpha/live/state",
+    "alpha/live/feed",
+    "tx_simulator",
+    "tx_processor",
+    "reth_chain_query",
+    "eth_token",
+    "eth_token_server",
+    "mempool_processor",
+    "pyreth",
+]
+
+[workspace.package]
+edition = "2021"
+license = "UNLICENSED"
+
+[workspace.dependencies]
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

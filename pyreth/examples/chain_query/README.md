@@ -112,7 +112,7 @@ Supported period types for aggregation:
 
 1. Build pyreth module:
 ```bash
-cd /home/nima/code/crypto/rust/pyreth
+cd /home/nima/code/crypto/blockchains/eth/pyreth
 maturin develop --release
 ```
 

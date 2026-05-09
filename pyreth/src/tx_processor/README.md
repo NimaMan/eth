@@ -28,7 +28,7 @@ Data Model Contract
 
 Binding Surface (current and planned)
 
-- Tx processing entry points (rust/pyreth/src/python/tx_processor/py_tx_processor.rs):
+- Tx processing entry points (pyreth/src/python/tx_processor/py_tx_processor.rs):
   - TxProcessor.process_transaction_from_hash_with_simulation(hash: str) -> PyProcessedTransaction
     - Loads tx by hash and SIMULATES it at block-1 to compute balance changes, internal traces, etc.
   - TxProcessor.load_transaction_from_hash_db_only(hash: str) -> PyProcessedTransaction
@@ -37,7 +37,7 @@ Binding Surface (current and planned)
   - TxProcessor.simulate_unsigned_transaction(...) -> PyProcessedTransaction
     - Pure simulation for a synthetic tx (e.g., for buy→approve→sell checks).
   - Batch helpers returning list[PyProcessedTransaction]
-- Pool viability and swap simulators (rust/pyreth/src/python/simulator/*):
+- Pool viability and swap simulators (pyreth/src/python/simulator/*):
   - PoolBuySellSimulator.check_uniswap_v2_pool(...)
   - PoolBuySellSimulator.check_uniswap_v3_pool(...)
   - PoolBuySellSimulator.check_sushiswap_pool(...)
@@ -60,7 +60,7 @@ Trading Viability (Buy→Approve→Sell) Flow
   - Flags: can_buy, can_approve, can_sell, is_tradeable, buy_tax_percent, sell_tax_percent
   - Transactions: buy_transaction, approve_transaction, sell_transaction (ProcessedTransaction)
 - Python binding returns a PyPoolBuySellSimulationResult and (planned) the three PyProcessedTransaction objects so Python can inspect and/or persist them using the same schema.
-- Python→Rust: In code paths like `rust/pyreth/src/python/simulator/pool_buy_sell_simulator.rs`, Python provides
+- Python→Rust: In code paths like `pyreth/src/python/simulator/pool_buy_sell_simulator.rs`, Python provides
   input parameters (or a seed tx) and Rust performs the simulations and returns results as PyProcessedTransaction
   instances. This complements the common Rust→Python path used for high‑throughput decoding from the Reth DB.
 - This preserves a single workflow in Python whether a tx came from chain or simulation.
@@ -85,7 +85,7 @@ Examples (intended usage from Python)
 Performance & Compatibility
 
 - Use DB‑only for fast, large‑scale event decoding; use simulation paths when you need balance deltas and internal traces.
-- validate_rust_python_compatibility.py in rust/tx_processor/examples/python can compare field‑by‑field outputs between Rust and Python processors on the same tx hash.
+- validate_rust_python_compatibility.py in tx_processor/examples/python can compare field-by-field outputs between Rust and Python processors on the same tx hash.
 - Keep both ProcessedTransaction schemas aligned; add CI checks on a few canonical transactions.
 
 Implementation Notes

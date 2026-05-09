@@ -249,7 +249,7 @@ let is_high_risk = node.risk_score.unwrap_or(0.0) > 0.8;
 
 ### **Running Tests**
 ```bash
-cd /home/nima/code/crypto/rust/tx_fund_flow/core_types
+cd /home/nima/code/crypto/blockchains/eth/tx_fund_flow/src/core_types
 cargo test
 ```
 

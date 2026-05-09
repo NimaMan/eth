@@ -58,7 +58,7 @@ fn compare_blocks(
     }
 
     let log_path = env::var("BLOCK_FETCHER_DIFF_LOG").unwrap_or_else(|_| {
-        "/home/nima/code/crypto/eth/logs/dev/block_fetcher_diffs.log".to_string()
+        "/home/nima/code/crypto/blockchains/eth/logs/dev/block_fetcher_diffs.log".to_string()
     });
     if let Some(parent) = std::path::Path::new(&log_path).parent() {
         std::fs::create_dir_all(parent)?;

@@ -38,7 +38,7 @@ Python examples demonstrating pyreth module usage.
 ## Installation
 
 ```bash
-cd /home/nima/code/crypto/rust/pyreth
+cd /home/nima/code/crypto/blockchains/eth/pyreth
 maturin develop --release
 ```
 

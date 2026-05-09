@@ -193,7 +193,7 @@ result.error_message    # String: Error details if failed
 ### AttributeError: 'PyReth' object has no attribute 'pool_buy_sell_simulator'
 **Solution**: Rebuild PyReth with latest changes
 ```bash
-cd /home/nima/code/crypto/rust/pyreth
+cd /home/nima/code/crypto/blockchains/eth/pyreth
 maturin develop --release
 ```
 

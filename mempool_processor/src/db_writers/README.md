@@ -15,8 +15,8 @@ Data Model
 - Value: `first_seen_ms` (u64, big‑endian)
 
 Where it lives
-- DB/table: `rust/reth_chain_query/src/reth_index/{database.rs,tables/mempool_tx_arrivals.rs}`
-- High-level writer: `rust/reth_chain_query/src/reth_index/writers/mempool_arrival_writer.rs`
+- DB/table: `reth_chain_query/src/reth_index/{database.rs,tables/mempool_tx_arrivals.rs}`
+- High-level writer: `reth_chain_query/src/reth_index/writers/mempool_arrival_writer.rs`
   - Resolves tx hashes to txumbers using a shared `ProviderFactory`
   - Performs batch writes in one MDBX RW transaction
 
@@ -47,4 +47,3 @@ Integration Checklist
   - `MempoolArrivalWriter::new(db, provider_factory)`
 - In the main loop: call `tracker.record_transaction(hash)` per tx.
 - On flush: resolve + write via `writer.write_arrivals_by_hashes_ms(...)`.
-

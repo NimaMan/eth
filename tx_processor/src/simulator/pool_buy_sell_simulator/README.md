@@ -237,7 +237,7 @@ When extending or debugging the simulator:
 
 1. **Pick the right builder** for the pool type and remember that fee-on-transfer
    tokens must always use “supporting” variants of sell swaps.
-2. **Update both Rust and Python bindings** (`rust/pyreth`) if you add fields to
+2. **Update both Rust and Python bindings** (`pyreth`) if you add fields to
    `PoolBuySellSimulationResult` or change configuration defaults.
 3. **Keep balance extraction in sync** with the naming used by
    `AddressBalanceChangeCalculator`. Currency symbols (WETH→ETH) must match.

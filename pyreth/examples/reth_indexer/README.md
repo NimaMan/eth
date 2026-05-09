@@ -23,7 +23,7 @@ Run against a temporary index first:
 env \
   PYRETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth \
   /home/nima/miniconda3/bin/python \
-  /home/nima/code/crypto/blockchains/eth/reth/pyreth/examples/reth_indexer/benchmark_address_index_history.py \
+  /home/nima/code/crypto/blockchains/eth/pyreth/examples/reth_indexer/benchmark_address_index_history.py \
   --blocks 100 \
   --batch-size 20
 ```
@@ -34,7 +34,7 @@ Only write to the production sidecar DB when the timing looks healthy:
 env \
   PYRETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth \
   /home/nima/miniconda3/bin/python \
-  /home/nima/code/crypto/blockchains/eth/reth/pyreth/examples/reth_indexer/benchmark_address_index_history.py \
+  /home/nima/code/crypto/blockchains/eth/pyreth/examples/reth_indexer/benchmark_address_index_history.py \
   --start-block 25000000 \
   --end-block 25001000 \
   --batch-size 20 \

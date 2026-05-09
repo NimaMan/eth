@@ -541,11 +541,11 @@ pub fn get_address_by_name(name: &str) -> Option<Address> {
 def main():
     """Generate all Rust files."""
     # Create common_addresses directory
-    common_dir = Path("/home/nima/code/crypto/rust/reth_chain_query/src/common_addresses")
+    common_dir = Path("/home/nima/code/crypto/blockchains/eth/reth_chain_query/src/common_addresses")
     common_dir.mkdir(exist_ok=True)
     
     # Keep entities directory for backward compatibility
-    entities_dir = Path("/home/nima/code/crypto/rust/reth_chain_query/src/entities")
+    entities_dir = Path("/home/nima/code/crypto/blockchains/eth/reth_chain_query/src/entities")
     
     # Generate DENOM tokens (to common_addresses)
     denom_code = generate_denom_tokens_rust()

@@ -3,7 +3,7 @@ name = "eth_live_feed"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
-workspace = "../../../reth"
+workspace = "../../.."
 
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["serde"] }

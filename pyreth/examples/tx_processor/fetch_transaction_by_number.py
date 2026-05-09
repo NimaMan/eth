@@ -2,7 +2,7 @@
 Fetch a transaction by its global txumber using PyReth's ChainQuery.
 
 Usage:
-    PYTHONPATH=$(pwd) python rust/pyreth/examples/python/fetch_transaction_by_number.py \
+    PYTHONPATH=$(pwd) python pyreth/examples/python/fetch_transaction_by_number.py \
         --tx-number 3033187389
 
 Environment:

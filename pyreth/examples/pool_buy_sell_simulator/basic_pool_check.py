@@ -72,7 +72,7 @@ def main():
         if "pool_buy_sell_simulator" in str(e):
             print("❌ Error: pool_buy_sell_simulator method not found")
             print("   Make sure you have the latest PyReth build")
-            print("   Try: cd /home/nima/code/crypto/rust/pyreth && maturin develop")
+            print("   Try: cd /home/nima/code/crypto/blockchains/eth/pyreth && maturin develop")
         else:
             raise
     except Exception as e:

@@ -2,7 +2,7 @@
 name      = "mempool_processor"
 version   = "0.1.0"
 edition   = "2021"
-workspace = "../reth"
+workspace = ".."
 
 [dependencies]
 

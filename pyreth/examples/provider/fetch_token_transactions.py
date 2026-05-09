@@ -3,7 +3,7 @@ Load processed transactions for an ERC20 token contract using the token-level
 provider. Useful for feeding token tracking or analytics pipelines.
 
 Usage (from repo root after building pyreth):
-  PYTHONPATH=$(pwd) python rust/pyreth/examples/provider/fetch_token_transactions.py \
+  PYTHONPATH=$(pwd) python pyreth/examples/provider/fetch_token_transactions.py \
       --token 0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 
 Optionally export PYRETH_DATADIR if your Reth database lives elsewhere.

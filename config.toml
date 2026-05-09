@@ -4,19 +4,19 @@
 name = "eth-rust-monorepo"
 
 [workspace.paths]
-reth = "rust/reth"
-reth_chain_query = "rust/reth_chain_query"
-tx_simulator = "../tx_simulator"
-tx_processor = "rust/tx_processor"
-mempool_processor = "../mempool_processor"
-pyreth = "rust/pyreth"
+reth = "."
+reth_chain_query = "reth_chain_query"
+tx_simulator = "tx_simulator"
+tx_processor = "tx_processor"
+mempool_processor = "mempool_processor"
+pyreth = "pyreth"
 
 [lighthouse]
 image = "sigp/lighthouse:v7.0.1"
 rpc_endpoint = "http://localhost:5052"
 metrics_endpoint = "http://localhost:5054"
 execution_endpoint = "http://reth:8551"
-jwt_path = "rust/reth/jwttoken/jwt.hex"
+jwt_path = "/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex"
 checkpoint_sync_url = "https://sync-mainnet.beaconcha.in"
 p2p_port_tcp = 9000
 p2p_port_udp = 9000

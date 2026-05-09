@@ -15,27 +15,27 @@ Replaying only TX #3 without TX #1/#2 leaves the sandbox with no token/pair, cau
 
 ## Implementation Plan
 ### 1. Example Guidance
-- Add a new example under `rust/pyreth/examples/pool_buy_sell_simulator/`:
+- Add a new example under `pyreth/examples/pool_buy_sell_simulator/`:
   - Download block `23606650`, extract the deployer sequence (above).
   - Convert each transaction to `ProcessedTransaction` via existing helpers.
   - Feed the sequence into the simulator before running the standard buy/approve/sell block.
   - Document expected outcomes (buy/sell should succeed once the full sequence is applied).
 
 ### 2. API Changes
-- Update `PoolBuySellParameters` (`rust/tx_processor/src/simulator/types.rs`):
+- Update `PoolBuySellParameters` (`../tx_processor/src/simulator/types.rs`):
   - Replace `prior_tx: Option<ProcessedTransaction>` with `prior_txs: Vec<ProcessedTransaction>`.
   - Maintain backward compatibility in Python binding by accepting both single and list parameters.
 - Adjust result struct to optionally return the list of `prior_transactions` for debug/logging.
 
 ### 3. Simulator Logic
-- In `rust/tx_processor/src/simulator/pool_buy_sell_simulator.rs`:
+- In `../tx_processor/src/simulator/pool_buy_sell_simulator.rs`:
   - Iterate through `prior_txs` in order; for each, set the `UnsignedTransaction` and run `step_with_trace` on the simulation chain.
   - Collect individual `ProcessedTransaction` results for diagnostics.
   - Only after the entire sequence succeeds, run our standard buy/approve/sell.
   - If any prior fails, surface its error directly (include hash/nonce in failure reason).
 
 ### 4. Python Bridge
-- Update `rust/pyreth/src/tx_processor/py_processed_transaction.rs` + `processed_tx_bridge.rs` to allow passing a list of prior tx dicts.
+- Update `pyreth/src/tx_processor/py_processed_transaction.rs` + `processed_tx_bridge.rs` to allow passing a list of prior tx dicts.
 - Expose the vector in the `PoolBuySellSimulationResult` returned to Python (for logging/debugging).
 
 ### 5. Callers & Tests

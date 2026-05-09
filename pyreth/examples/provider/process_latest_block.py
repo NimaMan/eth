@@ -3,7 +3,7 @@ Process the latest canonical block via the processed transaction provider and
 print a compact summary.
 
 Usage (from repo root after building pyreth):
-  PYTHONPATH=$(pwd) python rust/pyreth/examples/provider/process_latest_block.py
+  PYTHONPATH=$(pwd) python pyreth/examples/provider/process_latest_block.py
 
 Optionally export PYRETH_DATADIR if your Reth database lives elsewhere.
 """

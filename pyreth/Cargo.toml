@@ -2,6 +2,7 @@
 name = "pyreth"
 version = "0.5.0"
 edition = "2021"
+workspace = ".."
 authors = ["PyReth Team"]
 description = "Python bindings for Reth-based Ethereum tools"
 license = "MIT OR Apache-2.0"
@@ -17,9 +18,9 @@ default = []
 
 [dependencies]
 # Core dependencies
-tx_simulator = { path = "../../tx_simulator" }
-tx_processor = { path = "../../tx_processor" }
-reth_chain_query = { path = "../../reth_chain_query" }
+tx_simulator = { path = "../tx_simulator" }
+tx_processor = { path = "../tx_processor" }
+reth_chain_query = { path = "../reth_chain_query" }
 
 # Python bindings
 pyo3 = { version = "0.21", features = ["extension-module", "abi3-py39"] }

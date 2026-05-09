@@ -5,7 +5,7 @@ PyReth processed transaction provider.
 Token: 0xc8Ab73b7EaeE2FD3C858dcDB22fB03433A7aeB9F
 
 Usage (from repo root after building pyreth):
-  PYTHONPATH=$(pwd) python rust/pyreth/examples/provider/token_processed_transactions_example.py
+  PYTHONPATH=$(pwd) python pyreth/examples/provider/token_processed_transactions_example.py
 
 This script scans a configurable window of most recent blocks (default 2,000)
 for events touching the token and prints a short summary for the first
