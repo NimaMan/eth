@@ -1,14 +1,12 @@
-# Replay Context
+# Simulation Triggers
 
-`replay_context` owns block-local setup replay policy for token and pool simulations.
+`replay_context` now only owns token-control trigger policy used by token/pool
+simulation.
 
-The token manager applies transactions in block order, while the pool simulator starts from the previous block and only sees the prior transactions it is handed. This module records earlier same-block transactions that must be replayed before synthetic buy/sell checks.
+Historical token processing uses `BlockTxStateSession` to branch from the
+canonical state after the current mined transaction. Live token processing uses
+`BlockStateSession` to branch from the selected live/persisted block state.
 
-Responsibilities:
-
-- Keep token-control priors keyed by token address, not sender address.
-- Keep pool setup priors keyed by pool address.
-- Return only priors observed earlier in the current block.
-- Leave execution semantics to `tx_processor`; this module only decides which processed transactions are relevant setup.
-
-This is intentionally under `manager/` because replay context is block-application policy, not pool math and not low-level transaction execution.
+The low-level `PoolBuySellParameters.prior_txs` API remains in `tx_processor`
+for direct and mempool simulations, but token tracking no longer builds
+same-block prior replay lists.

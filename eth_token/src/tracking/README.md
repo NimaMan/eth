@@ -29,8 +29,8 @@ decisions, and live retention.
   trading-status checks and calls the existing simulator/pool APIs.
 - `index/` and `retention.rs` own live tracked-token indexing and retention.
 - `builders/` rebuilds single-token state from processed history.
-- `replay_context/` tracks same-block prior transactions needed by simulation
-  replay.
+- `replay_context/` owns token-control trigger policy for deciding when to
+  refresh all known pools.
 
 `eth_token::manager` is now only a compatibility facade. New code should import
 from `eth_token::tracking`.

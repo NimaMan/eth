@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use eyre::{eyre, Result};
 use reth_chain_query::provider::BlockHeader;
 use tx_processor::{
-    BlockTxStateSession, PoolBuySellSimulator, ProcessedTransaction, UnsignedTxChainSimulation,
+    BlockStateSession, BlockTxStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator,
+    ProcessedTransaction, UnsignedTxChainSimulation,
 };
 
 use crate::erc20::ERC20Token;
@@ -23,7 +25,6 @@ pub(super) async fn simulate_updated_v2_pools(
     tx: &ProcessedTransaction,
     pool_addresses: &[String],
     current_block_pool_addresses: &[String],
-    prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
@@ -39,10 +40,7 @@ pub(super) async fn simulate_updated_v2_pools(
         tx_hash: hash_string(&tx.hash),
         from_address: Some(address_string(&tx.from_address)),
     };
-    let config = PoolTradingSimulationConfig {
-        prior_txs: prior_txs.to_vec(),
-        ..Default::default()
-    };
+    let config = PoolTradingSimulationConfig::default();
 
     let mut simulated = Vec::new();
     for pool_address in pool_addresses {
@@ -69,13 +67,11 @@ pub(super) async fn simulate_updated_v2_pools(
             PoolTradingSimulationConfig {
                 block_number: Some(tx.block_number),
                 block_header: block_header.cloned(),
-                prior_txs: Vec::new(),
                 ..config.clone()
             }
         } else {
             config.clone()
         };
-        let prior_tx_count = pool_config.prior_txs.len();
         let tx_hash = hash_string(&tx.hash);
         tracing::debug!(
             target: "pool_buy_sell_sim",
@@ -83,7 +79,6 @@ pub(super) async fn simulate_updated_v2_pools(
             token_address = %token_address,
             pool_address = %pool_address,
             tx_hash = %tx_hash,
-            prior_tx_count,
             force_simulation,
             action = "evaluate_v2_trading",
             result = "started",
@@ -121,11 +116,29 @@ pub(super) async fn simulate_updated_v2_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::Live(pool_simulator) => {
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions,
+            } => {
+                let chain = live_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v2",
+                    pool_address,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
                     timeout,
-                    pool.evaluate_live_trading_status_v2(pool_simulator, &tx_context, pool_config),
+                    pool.evaluate_live_trading_status_v2_with_chain(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                        chain,
+                    ),
                 )
                 .await
                 {
@@ -139,7 +152,6 @@ pub(super) async fn simulate_updated_v2_pools(
                             tx_hash = %tx_hash,
                             token_address = %token_address,
                             pool_address = %pool_address,
-                            prior_tx_count,
                             force_simulation,
                             timeout_ms = timeout.as_millis(),
                             action = "pool_trading_simulation",
@@ -147,14 +159,13 @@ pub(super) async fn simulate_updated_v2_pools(
                             "live v2 pool trading simulation timed out"
                         );
                         Err(eyre!(
-                            "live v2 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} prior_tx_count={} force_simulation={}",
+                            "live v2 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} force_simulation={}",
                             timeout.as_millis(),
                             tx.block_number,
                             tx.tx_index,
                             tx_hash,
                             token_address,
                             pool_address,
-                            prior_tx_count,
                             force_simulation
                         ))
                     }
@@ -181,7 +192,6 @@ pub(super) async fn simulate_updated_v2_pools(
                     token_address = %token_address,
                     pool_address = %pool_address,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     can_buy = pool.base.state.can_buy,
                     can_sell = pool.base.state.can_sell,
@@ -202,7 +212,6 @@ pub(super) async fn simulate_updated_v2_pools(
                     token_address = %token_address,
                     pool_address = %pool_address,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     action = "evaluate_v2_trading",
                     result = "error",
@@ -223,7 +232,6 @@ pub(super) async fn simulate_updated_v3_pools(
     tx: &ProcessedTransaction,
     pool_addresses: &[String],
     current_block_pool_addresses: &[String],
-    prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
@@ -239,10 +247,7 @@ pub(super) async fn simulate_updated_v3_pools(
         tx_hash: hash_string(&tx.hash),
         from_address: Some(address_string(&tx.from_address)),
     };
-    let config = PoolTradingSimulationConfig {
-        prior_txs: prior_txs.to_vec(),
-        ..Default::default()
-    };
+    let config = PoolTradingSimulationConfig::default();
 
     let mut simulated = Vec::new();
     for pool_address in pool_addresses {
@@ -269,13 +274,11 @@ pub(super) async fn simulate_updated_v3_pools(
             PoolTradingSimulationConfig {
                 block_number: Some(tx.block_number),
                 block_header: block_header.cloned(),
-                prior_txs: Vec::new(),
                 ..config.clone()
             }
         } else {
             config.clone()
         };
-        let prior_tx_count = pool_config.prior_txs.len();
         let tx_hash = hash_string(&tx.hash);
 
         let simulation_result = match trading_simulation {
@@ -309,11 +312,29 @@ pub(super) async fn simulate_updated_v3_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::Live(pool_simulator) => {
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions,
+            } => {
+                let chain = live_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v3",
+                    pool_address,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
                     timeout,
-                    pool.evaluate_live_trading_status_v3(pool_simulator, &tx_context, pool_config),
+                    pool.evaluate_live_trading_status_v3_with_chain(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                        chain,
+                    ),
                 )
                 .await
                 {
@@ -327,7 +348,6 @@ pub(super) async fn simulate_updated_v3_pools(
                             tx_hash = %tx_hash,
                             token_address = %token_address,
                             pool_address = %pool_address,
-                            prior_tx_count,
                             force_simulation,
                             timeout_ms = timeout.as_millis(),
                             action = "pool_trading_simulation",
@@ -335,14 +355,13 @@ pub(super) async fn simulate_updated_v3_pools(
                             "live v3 pool trading simulation timed out"
                         );
                         Err(eyre!(
-                            "live v3 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} prior_tx_count={} force_simulation={}",
+                            "live v3 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} force_simulation={}",
                             timeout.as_millis(),
                             tx.block_number,
                             tx.tx_index,
                             tx_hash,
                             token_address,
                             pool_address,
-                            prior_tx_count,
                             force_simulation
                         ))
                     }
@@ -362,7 +381,6 @@ pub(super) async fn simulate_updated_v3_pools(
                     token_address = %token_address,
                     pool_address = %pool_address,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     can_buy = pool.base.state.can_buy,
                     can_sell = pool.base.state.can_sell,
@@ -381,7 +399,6 @@ pub(super) async fn simulate_updated_v3_pools(
                     token_address = %token_address,
                     pool_address = %pool_address,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     action = "evaluate_v3_trading",
                     result = "error",
@@ -402,7 +419,6 @@ pub(super) async fn simulate_updated_v4_pools(
     tx: &ProcessedTransaction,
     pool_keys: &[String],
     current_block_pool_keys: &[String],
-    prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
@@ -418,10 +434,7 @@ pub(super) async fn simulate_updated_v4_pools(
         tx_hash: hash_string(&tx.hash),
         from_address: Some(address_string(&tx.from_address)),
     };
-    let config = PoolTradingSimulationConfig {
-        prior_txs: prior_txs.to_vec(),
-        ..Default::default()
-    };
+    let config = PoolTradingSimulationConfig::default();
 
     let mut simulated = Vec::new();
     for pool_key in pool_keys {
@@ -452,13 +465,11 @@ pub(super) async fn simulate_updated_v4_pools(
             PoolTradingSimulationConfig {
                 block_number: Some(tx.block_number),
                 block_header: block_header.cloned(),
-                prior_txs: Vec::new(),
                 ..config.clone()
             }
         } else {
             config.clone()
         };
-        let prior_tx_count = pool_config.prior_txs.len();
         let tx_hash = hash_string(&tx.hash);
 
         let simulation_result = match trading_simulation {
@@ -487,11 +498,29 @@ pub(super) async fn simulate_updated_v4_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::Live(pool_simulator) => {
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions,
+            } => {
+                let chain = live_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v4",
+                    pool_key,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
                     timeout,
-                    pool.evaluate_live_trading_status_v4(pool_simulator, &tx_context, pool_config),
+                    pool.evaluate_live_trading_status_v4_with_chain(
+                        pool_simulator,
+                        &tx_context,
+                        pool_config,
+                        chain,
+                    ),
                 )
                 .await
                 {
@@ -505,7 +534,6 @@ pub(super) async fn simulate_updated_v4_pools(
                             tx_hash = %tx_hash,
                             token_address = %token_address,
                             pool_key = %pool_key,
-                            prior_tx_count,
                             force_simulation,
                             timeout_ms = timeout.as_millis(),
                             action = "pool_trading_simulation",
@@ -513,14 +541,13 @@ pub(super) async fn simulate_updated_v4_pools(
                             "live v4 pool trading simulation timed out"
                         );
                         Err(eyre!(
-                            "live v4 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} prior_tx_count={} force_simulation={}",
+                            "live v4 pool trading simulation timed out after {} ms block={} tx_index={} tx_hash={} token={} pool={} force_simulation={}",
                             timeout.as_millis(),
                             tx.block_number,
                             tx.tx_index,
                             tx_hash,
                             token_address,
                             pool_key,
-                            prior_tx_count,
                             force_simulation
                         ))
                     }
@@ -540,7 +567,6 @@ pub(super) async fn simulate_updated_v4_pools(
                     token_address = %token_address,
                     pool_key = %pool_key,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     can_buy = pool.base.state.can_buy,
                     can_sell = pool.base.state.can_sell,
@@ -559,7 +585,6 @@ pub(super) async fn simulate_updated_v4_pools(
                     token_address = %token_address,
                     pool_key = %pool_key,
                     tx_hash = %tx_hash,
-                    prior_tx_count,
                     force_simulation,
                     action = "evaluate_v4_trading",
                     result = "error",
@@ -615,24 +640,6 @@ pub(super) fn current_block_simulation_pool_addresses(
     addresses.sort();
     addresses.dedup();
     addresses
-}
-
-pub(super) fn simulation_prior_txs(
-    prior_txs: &[ProcessedTransaction],
-    current_tx: &ProcessedTransaction,
-    include_current_tx: bool,
-) -> Vec<ProcessedTransaction> {
-    let mut simulation_prior_txs = prior_txs.to_vec();
-    if include_current_tx
-        && !simulation_prior_txs
-            .iter()
-            .any(|prior_tx| prior_tx.hash == current_tx.hash)
-    {
-        simulation_prior_txs.push(current_tx.clone());
-    }
-    simulation_prior_txs.sort_by_key(|tx| tx.tx_index);
-    simulation_prior_txs.dedup_by_key(|tx| tx.hash);
-    simulation_prior_txs
 }
 
 async fn block_session_chain_after_tx(
@@ -694,8 +701,70 @@ fn pool_config_for_block_session(
     tx: &ProcessedTransaction,
 ) -> PoolTradingSimulationConfig {
     pool_config.block_number = Some(tx.block_number);
-    pool_config.prior_txs.clear();
     pool_config
+}
+
+async fn live_block_state_session_chain(
+    block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
+    pool_simulator: &LivePoolBuySellSimulator,
+    pool_config: &PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+    pool_kind: &'static str,
+    pool_id: &str,
+) -> Result<UnsignedTxChainSimulation> {
+    let block_number = state_session_block_number(pool_config, tx);
+    let needs_session = !block_sessions
+        .lock()
+        .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?
+        .contains_key(&block_number);
+
+    if needs_session {
+        let session = pool_simulator
+            .simulator()
+            .block_state_session(block_number)
+            .await
+            .map_err(|err| {
+                eyre!(
+                    "failed to create live block state session block={} for {} pool={}: {}",
+                    block_number,
+                    pool_kind,
+                    pool_id,
+                    err
+                )
+            })?;
+        let mut guard = block_sessions
+            .lock()
+            .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?;
+        guard.entry(block_number).or_insert(session);
+    }
+
+    let guard = block_sessions
+        .lock()
+        .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?;
+    let session = guard.get(&block_number).ok_or_else(|| {
+        eyre!(
+            "live block state session was not initialized for block {}",
+            block_number
+        )
+    })?;
+    Ok(session.simulation_chain())
+}
+
+fn pool_config_for_state_session(
+    mut pool_config: PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+) -> PoolTradingSimulationConfig {
+    pool_config.block_number = Some(state_session_block_number(&pool_config, tx));
+    pool_config
+}
+
+fn state_session_block_number(
+    pool_config: &PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+) -> u64 {
+    pool_config
+        .block_number
+        .unwrap_or_else(|| tx.block_number.saturating_sub(1))
 }
 
 fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {

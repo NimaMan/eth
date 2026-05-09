@@ -10,9 +10,9 @@
 /// - Consistent performance
 // Re-export the NEW TX Simulator types (NO CallRequest - uses UnsignedTransaction)
 pub use tx_simulator::{
-    BlockTxStateSession, ChainStateInfo, FullSimulationResult, SequentialSimulationOptions,
-    SequentialSimulationResult, SequentialTransactionResult, SimulationResult, TxSimulator,
-    UnsignedTransaction, UnsignedTxChainSimulation,
+    BlockStateSession, BlockTxStateSession, ChainStateInfo, FullSimulationResult,
+    SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,
+    SimulationResult, TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation,
 };
 
 // Export transaction processing modules

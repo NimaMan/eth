@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_processor::{
-    BlockTxStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction,
+    BlockStateSession, BlockTxStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator,
+    ProcessedTransaction,
 };
 
 use crate::chain_metadata::UniswapV2PoolMetadataProvider;
@@ -32,7 +34,7 @@ use pool_updates::{
 use touches::touches_token_state;
 use trading_status::{
     current_block_simulation_pool_addresses, simulate_updated_v2_pools, simulate_updated_v3_pools,
-    simulate_updated_v4_pools, simulation_pool_addresses, simulation_prior_txs,
+    simulate_updated_v4_pools, simulation_pool_addresses,
 };
 
 pub type ProcessedTokenUpdateRouter = TokenTransactionApplier;
@@ -50,14 +52,17 @@ pub(crate) enum V2TradingSimulation<'a> {
         pool_simulator: &'a PoolBuySellSimulator,
         block_session: &'a Mutex<Option<BlockTxStateSession>>,
     },
-    Live(&'a LivePoolBuySellSimulator),
+    LiveBlockSession {
+        pool_simulator: &'a LivePoolBuySellSimulator,
+        block_sessions: &'a Mutex<BTreeMap<u64, BlockStateSession>>,
+    },
     #[cfg(test)]
     Noop,
 }
 
 impl V2TradingSimulation<'_> {
     fn is_live(self) -> bool {
-        matches!(self, Self::Live(_))
+        matches!(self, Self::LiveBlockSession { .. })
     }
 }
 
@@ -151,14 +156,12 @@ impl TokenTransactionApplier {
         token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
         pool_simulator: &PoolBuySellSimulator,
-        prior_txs: &[ProcessedTransaction],
     ) -> Result<Vec<TokenStateUpdateReport>> {
         self.update_registry_from_processed_transaction_with_trading_simulation(
             registry,
             token_index,
             tx,
             V2TradingSimulation::Historical(pool_simulator),
-            prior_txs,
             None,
         )
         .await
@@ -170,14 +173,16 @@ impl TokenTransactionApplier {
         token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
         pool_simulator: &LivePoolBuySellSimulator,
-        prior_txs: &[ProcessedTransaction],
+        block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
     ) -> Result<Vec<TokenStateUpdateReport>> {
         self.update_registry_from_processed_transaction_with_trading_simulation(
             registry,
             token_index,
             tx,
-            V2TradingSimulation::Live(pool_simulator),
-            prior_txs,
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions,
+            },
             None,
         )
         .await
@@ -189,7 +194,6 @@ impl TokenTransactionApplier {
         token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
         trading_simulation: V2TradingSimulation<'_>,
-        prior_txs: &[ProcessedTransaction],
         block_header: Option<&BlockHeader>,
     ) -> Result<Vec<TokenStateUpdateReport>> {
         if !tx.status {
@@ -218,7 +222,6 @@ impl TokenTransactionApplier {
             let updated_v4 = update_touched_v4_pools(token, tx)?;
             let token_control_replay =
                 token_state_updated && tx_is_token_control_replay_candidate(token, tx);
-            let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
             let simulation_v2_pool_addresses = simulation_pool_addresses(
                 token.uniswap_v2_pool_addresses(),
                 &updated_v2,
@@ -235,7 +238,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v2_pool_addresses,
                 &current_block_v2_pool_addresses,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,
@@ -257,7 +259,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v3_pool_addresses,
                 &current_block_v3_pool_addresses,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,
@@ -279,7 +280,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v4_pool_keys,
                 &current_block_v4_pool_keys,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,
@@ -409,7 +409,6 @@ impl TokenTransactionApplier {
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
         pool_simulator: &PoolBuySellSimulator,
-        prior_txs: &[ProcessedTransaction],
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
         P: UniswapV2PoolMetadataProvider,
@@ -420,7 +419,6 @@ impl TokenTransactionApplier {
             tx,
             pool_metadata_provider,
             V2TradingSimulation::Historical(pool_simulator),
-            prior_txs,
             None,
         )
         .await
@@ -435,7 +433,7 @@ impl TokenTransactionApplier {
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
-        prior_txs: &[ProcessedTransaction],
+        block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
         P: UniswapV2PoolMetadataProvider,
@@ -445,8 +443,10 @@ impl TokenTransactionApplier {
             token_index,
             tx,
             pool_metadata_provider,
-            V2TradingSimulation::Live(pool_simulator),
-            prior_txs,
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions,
+            },
             None,
         )
         .await
@@ -461,7 +461,6 @@ impl TokenTransactionApplier {
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
         trading_simulation: V2TradingSimulation<'_>,
-        prior_txs: &[ProcessedTransaction],
         block_header: Option<&BlockHeader>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
@@ -522,7 +521,6 @@ impl TokenTransactionApplier {
             let updated_v4 = update_touched_v4_pools(token, tx)?;
             let token_control_replay =
                 token_state_updated && tx_is_token_control_replay_candidate(token, tx);
-            let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
             let simulation_v2_pool_addresses = simulation_pool_addresses(
                 token.uniswap_v2_pool_addresses(),
                 &updated_v2,
@@ -539,7 +537,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v2_pool_addresses,
                 &current_block_v2_pool_addresses,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,
@@ -561,7 +558,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v3_pool_addresses,
                 &current_block_v3_pool_addresses,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,
@@ -583,7 +579,6 @@ impl TokenTransactionApplier {
                 tx,
                 &simulation_v4_pool_keys,
                 &current_block_v4_pool_keys,
-                &simulation_prior_txs,
                 trading_simulation,
                 token_control_replay,
                 block_header,

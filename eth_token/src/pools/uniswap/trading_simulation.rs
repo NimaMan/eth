@@ -6,7 +6,7 @@ use reth_chain_query::provider::BlockHeader;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
     LivePoolBuySellSimulator, PoolBuySellParameters, PoolBuySellSimulationResult,
-    PoolBuySellSimulator, PoolType, ProcessedTransaction, TxSimulator, UnsignedTxChainSimulation,
+    PoolBuySellSimulator, PoolType, TxSimulator, UnsignedTxChainSimulation,
 };
 
 use crate::pools::base::DEFAULT_TEST_BUY_ETH;
@@ -20,7 +20,6 @@ use super::v4::UniswapV4Pool;
 pub struct UniswapV2TradingSimulationConfig {
     pub test_amount: Option<U256>,
     pub buyer_address: Option<Address>,
-    pub prior_txs: Vec<ProcessedTransaction>,
     pub block_number: Option<u64>,
     pub block_header: Option<BlockHeader>,
     pub slippage_tolerance: Option<f64>,
@@ -94,8 +93,7 @@ impl UniswapV2Pool {
             .with_test_amount(test_amount)
             .with_denom_address(denom_address)
             .with_denom_decimals(denom_decimals)
-            .with_token_decimals(self.base.config.token_decimals)
-            .with_prior_transactions(config.prior_txs.clone());
+            .with_token_decimals(self.base.config.token_decimals);
 
         if let Some(block_number) = config.block_number {
             params = params.with_block(block_number);
@@ -208,6 +206,26 @@ impl UniswapV2Pool {
         Ok(result)
     }
 
+    pub async fn evaluate_live_trading_status_v2_with_chain(
+        &mut self,
+        pool_simulator: &LivePoolBuySellSimulator,
+        tx: &UniswapV2TxContext,
+        mut config: UniswapV2TradingSimulationConfig,
+        chain: UnsignedTxChainSimulation,
+    ) -> Result<PoolBuySellSimulationResult> {
+        if config.block_number.is_none() {
+            config.block_number = Some(tx.block_number.saturating_sub(1));
+        }
+
+        let params = self.build_buy_sell_parameters(&config)?;
+        let result = pool_simulator.check_pool_with_chain(params, chain).await?;
+        self.apply_trading_simulation_outcome(
+            tx,
+            &UniswapV2TradingSimulationOutcome::from(&result),
+        );
+        Ok(result)
+    }
+
     pub fn apply_trading_simulation_outcome(
         &mut self,
         tx: &UniswapV2TxContext,
@@ -262,8 +280,7 @@ impl UniswapV3Pool {
         .with_test_amount(test_amount)
         .with_denom_address(denom_address)
         .with_denom_decimals(denom_decimals)
-        .with_token_decimals(self.base.config.token_decimals)
-        .with_prior_transactions(config.prior_txs.clone());
+        .with_token_decimals(self.base.config.token_decimals);
 
         apply_common_parameter_config(&mut params, config);
         Ok(params)
@@ -322,6 +339,23 @@ impl UniswapV3Pool {
         Ok(result)
     }
 
+    pub async fn evaluate_live_trading_status_v3_with_chain(
+        &mut self,
+        pool_simulator: &LivePoolBuySellSimulator,
+        tx: &UniswapV2TxContext,
+        mut config: PoolTradingSimulationConfig,
+        chain: UnsignedTxChainSimulation,
+    ) -> Result<PoolBuySellSimulationResult> {
+        if config.block_number.is_none() {
+            config.block_number = Some(tx.block_number.saturating_sub(1));
+        }
+
+        let params = self.build_buy_sell_parameters(&config)?;
+        let result = pool_simulator.check_pool_with_chain(params, chain).await?;
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
+        Ok(result)
+    }
+
     pub fn apply_trading_simulation_outcome(
         &mut self,
         tx: &UniswapV2TxContext,
@@ -372,8 +406,7 @@ impl UniswapV4Pool {
                 .with_denom_address(denom_address)
                 .with_denom_decimals(denom_decimals)
                 .with_token_decimals(self.base.config.token_decimals)
-                .with_uniswap_v4_config(self.build_simulator_pool_config()?)
-                .with_prior_transactions(config.prior_txs.clone());
+                .with_uniswap_v4_config(self.build_simulator_pool_config()?);
 
         apply_common_parameter_config(&mut params, config);
         Ok(params)
@@ -428,6 +461,23 @@ impl UniswapV4Pool {
                 .check_pool_before_live_block(params, tx.block_number)
                 .await?
         };
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
+        Ok(result)
+    }
+
+    pub async fn evaluate_live_trading_status_v4_with_chain(
+        &mut self,
+        pool_simulator: &LivePoolBuySellSimulator,
+        tx: &UniswapV2TxContext,
+        mut config: PoolTradingSimulationConfig,
+        chain: UnsignedTxChainSimulation,
+    ) -> Result<PoolBuySellSimulationResult> {
+        if config.block_number.is_none() {
+            config.block_number = Some(tx.block_number.saturating_sub(1));
+        }
+
+        let params = self.build_buy_sell_parameters(&config)?;
+        let result = pool_simulator.check_pool_with_chain(params, chain).await?;
         self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
         Ok(result)
     }

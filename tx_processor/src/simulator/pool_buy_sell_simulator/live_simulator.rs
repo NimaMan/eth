@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use eyre::Result;
-use tx_simulator::{LiveTxSimulator, TxSimulator};
+use tx_simulator::{LiveTxSimulator, TxSimulator, UnsignedTxChainSimulation};
 
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
 use crate::tx_processor::TxProcessor;
 
-use super::entry::check_can_buy_sell_pool;
+use super::entry::{check_can_buy_sell_pool, check_can_buy_sell_pool_with_chain};
 
 #[derive(Clone)]
 pub struct LivePoolBuySellSimulator {
@@ -50,6 +50,15 @@ impl LivePoolBuySellSimulator {
             config.block_number = Some(status.selected_block_number);
         }
         check_can_buy_sell_pool(self.simulator(), self.tx_processor(), config).await
+    }
+
+    pub async fn check_pool_with_chain(
+        &self,
+        config: PoolBuySellParameters,
+        chain: UnsignedTxChainSimulation,
+    ) -> Result<PoolBuySellSimulationResult> {
+        check_can_buy_sell_pool_with_chain(self.simulator(), self.tx_processor(), config, chain)
+            .await
     }
 
     pub async fn check_pool_at_block(

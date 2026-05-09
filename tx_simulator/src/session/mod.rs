@@ -5,10 +5,12 @@
 //! [`BlockReplaySession`] for full-block replay, tracing, and profiling.
 
 mod block_replay;
+mod block_state;
 mod block_tx_state;
 mod simulation;
 
 pub use block_replay::BlockReplaySession;
+pub use block_state::BlockStateSession;
 pub use block_tx_state::{
     BlockTxAdvanceProfile, BlockTxExecuteProfile, BlockTxStateSession, BlockTxTraceProfile,
 };

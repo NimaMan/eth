@@ -5,7 +5,8 @@ use std::time::Duration;
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
 use tx_processor::{
-    LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedBlock, ProcessedTransaction,
+    BlockStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedBlock,
+    ProcessedTransaction,
 };
 
 use crate::chain_metadata::{
@@ -16,7 +17,6 @@ use crate::network::{
     graph::RawTokenNetworkGraph, ingest::extract_token_network_updates, model::TokenNetworkId,
 };
 
-use crate::tracking::replay_context::BlockReplayContext;
 use crate::tracking::transaction_applier::V2TradingSimulation;
 use crate::tracking::ProcessedTokenUpdateRouter;
 use crate::tracking::{
@@ -134,8 +134,15 @@ impl BlockTokenProcessor {
         block: &ProcessedBlock,
         pool_simulator: &LivePoolBuySellSimulator,
     ) -> TokenBlockUpdateReport {
-        self.process_block_with_trading_simulation(block, V2TradingSimulation::Live(pool_simulator))
-            .await
+        let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
+        self.process_block_with_trading_simulation(
+            block,
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions: &block_sessions,
+            },
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -180,7 +187,6 @@ impl BlockTokenProcessor {
         let created_token_addresses = Vec::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
-        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -196,7 +202,6 @@ impl BlockTokenProcessor {
                 continue;
             }
 
-            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -204,7 +209,6 @@ impl BlockTokenProcessor {
                     &self.token_index,
                     &tx.processed,
                     trading_simulation,
-                    &prior_txs,
                     Some(&block.header),
                 )
                 .await
@@ -233,7 +237,6 @@ impl BlockTokenProcessor {
                     });
                 }
             }
-            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
@@ -298,10 +301,14 @@ impl BlockTokenProcessor {
     where
         P: TokenMetadataProvider,
     {
+        let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
         self.process_block_with_metadata_provider_and_trading_simulation(
             block,
             metadata_provider,
-            V2TradingSimulation::Live(pool_simulator),
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions: &block_sessions,
+            },
         )
         .await
     }
@@ -361,7 +368,6 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
-        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -396,7 +402,6 @@ impl BlockTokenProcessor {
                 }
             }
 
-            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -404,7 +409,6 @@ impl BlockTokenProcessor {
                     &self.token_index,
                     &tx.processed,
                     trading_simulation,
-                    &prior_txs,
                     Some(&block.header),
                 )
                 .await
@@ -433,7 +437,6 @@ impl BlockTokenProcessor {
                     });
                 }
             }
-            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
@@ -493,11 +496,15 @@ impl BlockTokenProcessor {
     where
         P: TokenDiscoveryProvider,
     {
+        let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             discovery_provider,
             discovery_provider,
-            V2TradingSimulation::Live(pool_simulator),
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions: &block_sessions,
+            },
         )
         .await
     }
@@ -549,11 +556,15 @@ impl BlockTokenProcessor {
         T: TokenMetadataProvider,
         V: UniswapV2PoolMetadataProvider,
     {
+        let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             metadata_provider,
             pool_metadata_provider,
-            V2TradingSimulation::Live(pool_simulator),
+            V2TradingSimulation::LiveBlockSession {
+                pool_simulator,
+                block_sessions: &block_sessions,
+            },
         )
         .await
     }
@@ -618,7 +629,6 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
-        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -653,7 +663,6 @@ impl BlockTokenProcessor {
                 }
             }
 
-            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
@@ -662,7 +671,6 @@ impl BlockTokenProcessor {
                     &tx.processed,
                     pool_metadata_provider,
                     trading_simulation,
-                    &prior_txs,
                     Some(&block.header),
                 )
                 .await
@@ -691,7 +699,6 @@ impl BlockTokenProcessor {
                     });
                 }
             }
-            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
