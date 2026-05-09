@@ -134,32 +134,14 @@ impl SimulationManager {
             );
         }
 
-        // Filter to V2 (supported) pools
-        let v2_pools: Vec<_> = pool_candidates
-            .into_iter()
-            .filter(|pool_state| {
-                let is_v2 = matches!(
-                    pool_state.pool_type,
-                    CachePoolType::UniswapV2 | CachePoolType::Unknown
-                );
-                if !is_v2 {
-                    info!(
-                        "  Skipping {:?} pool {} (not supported)",
-                        pool_state.pool_type, pool_state.address
-                    );
-                }
-                is_v2
-            })
-            .collect();
-
-        if v2_pools.is_empty() {
-            info!("  No V2 pools found for token");
+        if pool_candidates.is_empty() {
+            info!("  No pools found for token");
             return vec![];
         }
 
         let mut results = Vec::new();
 
-        for (pool_idx, pool_state) in v2_pools.into_iter().enumerate() {
+        for (pool_idx, pool_state) in pool_candidates.into_iter().enumerate() {
             let pool_address = match pool_state
                 .address
                 .trim_start_matches("0x")
@@ -177,7 +159,7 @@ impl SimulationManager {
                         simulation_time_ms: 0.0,
                         token_address: Some(token_address),
                         pool_address: None,
-                        pool_type: Some("V2".to_string()),
+                        pool_type: Some(cache_pool_type_label(&pool_state.pool_type).to_string()),
                         debug_info: None,
                         liquidity_removal_result: None,
                     });
@@ -185,7 +167,7 @@ impl SimulationManager {
                 }
             };
 
-            let pool_type = format!("{:?}", pool_state.pool_type);
+            let pool_type = cache_pool_type_label(&pool_state.pool_type).to_string();
             info!(
                 "  [Pool {}] Simulating pool: {:?} (Type: {}, ETH: {:.6})",
                 pool_idx, pool_address, &pool_type, pool_state.eth_reserve_hint
@@ -268,10 +250,26 @@ impl SimulationManager {
             let original_gas_price = tx_call_request.gas_price;
             let original_max_fee = tx_call_request.max_fee_per_gas;
 
-            let pool_type_enum = match pool_type.as_str() {
-                "V2" => PoolType::UniswapV2,
-                "V3" => PoolType::UniswapV3 { fee_tier: 3_000 },
-                _ => PoolType::UniswapV2,
+            let pool_type_enum = match simulation_pool_type(&pool_state) {
+                Ok(pool_type) => pool_type,
+                Err(reason) => {
+                    warn!(
+                        "  [Pool {}] Skipping pool {} ({}): {}",
+                        pool_idx, pool_state.address, pool_type, reason
+                    );
+                    results.push(SimulationResult {
+                        request: request.clone(),
+                        pool_viability_result: None,
+                        error: Some(reason),
+                        simulation_time_ms: 0.0,
+                        token_address: Some(token_address),
+                        pool_address: Some(pool_address),
+                        pool_type: Some(pool_type.clone()),
+                        debug_info: None,
+                        liquidity_removal_result: None,
+                    });
+                    continue;
+                }
             };
 
             let token_decimals =
@@ -415,5 +413,36 @@ impl SimulationManager {
         }
 
         results
+    }
+}
+
+fn cache_pool_type_label(pool_type: &CachePoolType) -> &'static str {
+    match pool_type {
+        CachePoolType::UniswapV2 => "UNISWAP-V2",
+        CachePoolType::UniswapV3 => "UNISWAP-V3",
+        CachePoolType::UniswapV4 => "UNISWAP-V4",
+        CachePoolType::Unknown => "UNKNOWN",
+    }
+}
+
+fn simulation_pool_type(pool_state: &PoolCandidate) -> Result<PoolType, String> {
+    match &pool_state.pool_type {
+        CachePoolType::UniswapV2 | CachePoolType::Unknown => Ok(PoolType::UniswapV2),
+        CachePoolType::UniswapV3 => {
+            let fee_tier = pool_state.fee_tier.ok_or_else(|| {
+                format!(
+                    "Uniswap V3 pool {} is missing fee_tier in TokenTrackingCache",
+                    pool_state.address
+                )
+            })?;
+            Ok(PoolType::UniswapV3 { fee_tier })
+        }
+        CachePoolType::UniswapV4 => Err(format!(
+            "Uniswap V4 pool {} is missing full pool-key simulation config in TokenTrackingCache",
+            pool_state
+                .pool_id
+                .as_deref()
+                .unwrap_or(pool_state.address.as_str())
+        )),
     }
 }

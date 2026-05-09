@@ -74,7 +74,10 @@ async fn main() -> Result<()> {
     let simulator = Arc::new(TxSimulator::new(&reth_datadir)?);
     let tx_processor = Arc::new(TxProcessor::new());
 
-    println!("run_id={run_id} active_block={active_block} v3_pools={}", pools.len());
+    println!(
+        "run_id={run_id} active_block={active_block} v3_pools={}",
+        pools.len()
+    );
     println!("reth_datadir={reth_datadir}");
     println!(
         "{:<4} {:<12} {:<42} {:<7} {:<7} {:<8} {:<13} {:<17} {:<11} {:<11} {:<12} {}",
@@ -111,7 +114,8 @@ async fn main() -> Result<()> {
 
         match result {
             Ok(result) => {
-                let matches_server = result.can_buy == pool.can_buy && result.can_sell == pool.can_sell;
+                let matches_server =
+                    result.can_buy == pool.can_buy && result.can_sell == pool.can_sell;
                 if matches_server {
                     ok += 1;
                 } else {
@@ -188,14 +192,15 @@ async fn fetch_active_run(token_server_url: &str) -> Result<ActiveRun> {
 }
 
 async fn fetch_v3_pools(token_server_url: &str, run_id: &str) -> Result<Vec<TokenServerPool>> {
-    let response: PoolListResponse = reqwest::get(format!("{token_server_url}/runs/{run_id}/pools"))
-        .await
-        .wrap_err("failed to request run pools")?
-        .error_for_status()
-        .wrap_err("run pools request failed")?
-        .json()
-        .await
-        .wrap_err("failed to decode run pools")?;
+    let response: PoolListResponse =
+        reqwest::get(format!("{token_server_url}/runs/{run_id}/pools"))
+            .await
+            .wrap_err("failed to request run pools")?
+            .error_for_status()
+            .wrap_err("run pools request failed")?
+            .json()
+            .await
+            .wrap_err("failed to decode run pools")?;
 
     Ok(response
         .pools
@@ -205,14 +210,15 @@ async fn fetch_v3_pools(token_server_url: &str, run_id: &str) -> Result<Vec<Toke
 }
 
 async fn fetch_tokens(token_server_url: &str, run_id: &str) -> Result<HashMap<String, u8>> {
-    let response: TokenListResponse = reqwest::get(format!("{token_server_url}/runs/{run_id}/tokens"))
-        .await
-        .wrap_err("failed to request run tokens")?
-        .error_for_status()
-        .wrap_err("run tokens request failed")?
-        .json()
-        .await
-        .wrap_err("failed to decode run tokens")?;
+    let response: TokenListResponse =
+        reqwest::get(format!("{token_server_url}/runs/{run_id}/tokens"))
+            .await
+            .wrap_err("failed to request run tokens")?
+            .error_for_status()
+            .wrap_err("run tokens request failed")?
+            .json()
+            .await
+            .wrap_err("failed to decode run tokens")?;
 
     Ok(response
         .tokens
@@ -312,7 +318,10 @@ fn trim(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         return value.to_string();
     }
-    let mut output = value.chars().take(max.saturating_sub(1)).collect::<String>();
+    let mut output = value
+        .chars()
+        .take(max.saturating_sub(1))
+        .collect::<String>();
     output.push('~');
     output
 }

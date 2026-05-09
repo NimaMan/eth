@@ -690,7 +690,7 @@ async fn main() -> Result<()> {
             let manager_stats = simulation_manager.stats().await;
 
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/ok/err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/ok/err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
                 total,
                 delta,
                 rate,
@@ -701,6 +701,7 @@ async fn main() -> Result<()> {
                 publisher_stats.liquidity_removals,
                 publisher_stats.lp_approvals,
                 publisher_stats.tax_signals,
+                publisher_stats.honeypot_signals,
                 publisher_stats.scam_detections,
                 publisher_stats.total_published,
                 publisher_stats.zmq_published,
@@ -784,11 +785,12 @@ async fn main() -> Result<()> {
         publisher.get_stats()
     };
     info!(
-        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
+        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
         publisher_stats.trading_enabled,
         publisher_stats.liquidity_removals,
         publisher_stats.lp_approvals,
         publisher_stats.tax_signals,
+        publisher_stats.honeypot_signals,
         publisher_stats.scam_detections,
         publisher_stats.total_published,
         publisher_stats.zmq_published,

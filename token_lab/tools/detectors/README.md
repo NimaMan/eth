@@ -4,7 +4,7 @@ Detector prototypes start here before promotion into production code.
 
 A detector is ready to promote when it has:
 
-- a concrete case that motivated it;
+- a concrete investigation that motivated it;
 - chain truth showing the behavior;
 - simulator parity or a documented simulator limitation;
 - thresholds that are expressed in meaningful units;
@@ -14,9 +14,9 @@ A detector is ready to promote when it has:
 ## Range Triage Tool
 
 `range_triage.py` is the first agent-native range triage runner. It inspects an
-already completed token range run and reports possible investigation cases. It
-does not mutate token state, rerun simulations, write case artifacts, or create
-frontend-only labels.
+already completed token range run and reports possible investigation candidates.
+It does not mutate token state, rerun simulations, write investigation
+artifacts, or create frontend-only labels.
 
 The tool should be easy for an agent to run from a shell and easy to parse. Run
 it from the ETH repo root:
@@ -43,9 +43,28 @@ Implementation shape:
   terminal table.
 
 The code lives under this folder because the rules are investigation rules, not
-production policy. Once a detector is proven by cases and regression coverage,
-promote the stable part into Rust crate logic, an `eth_token_server` triage
-endpoint, or a strategy-analysis endpoint.
+production policy. Once a detector is proven by investigations and regression
+coverage, promote the stable part into Rust crate logic, an `eth_token_server`
+triage endpoint, or a strategy-analysis endpoint.
+
+## Eligibility
+
+Token-lab severity uses the same first eligibility split as the strategy
+analysis contract: `ETH/WETH >= 0.5` quote liquidity and `USDC/USDT >= 500`
+quote liquidity. Pools below that threshold are still useful as evidence, but
+they should not dominate critical output unless the issue is token-level rather
+than pool-liquidity-specific.
+
+The canonical implementation lives in `alpha/token_eligibility`. For batch
+parity checks from token_lab, feed pool JSON into:
+
+```text
+cargo run -q -p eth_token_eligibility --bin token_eligibility
+```
+
+LP supply has a separate coverage status. A V2 pool discovered mid-range can
+have reserves while the LP mint happened before the observed window; token lab
+should report that as unknown LP supply, not as a zero-supply pool.
 
 ## Candidate Issue Families
 
@@ -95,5 +114,5 @@ Each candidate should include enough data for the next agent step:
 }
 ```
 
-Markdown output should be suitable for pasting into `cases/README.md`, but the
-tool should not edit that file by default.
+Markdown output should be suitable for pasting into
+`investigations/README.md`, but the tool should not edit that file by default.

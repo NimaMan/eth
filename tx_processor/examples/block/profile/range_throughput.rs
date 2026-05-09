@@ -3,18 +3,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
-use eyre::{Result, bail};
-use futures::{StreamExt, TryStreamExt, stream};
-use reth_chain_query::{RethQueryProvider, provider::BlockDataFetcher};
+use eyre::{bail, Result};
+use futures::{stream, StreamExt, TryStreamExt};
+use reth_chain_query::{provider::BlockDataFetcher, RethQueryProvider};
 use tx_processor::{
-    BlockProcessor, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    load_processed_block_range_with_options, BlockProcessor, ProcessedBlock,
+    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions, ProcessedBlockReplayStoreWriter,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
-    ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
-    ProcessedBlockReplayStoreWriter, load_processed_block_range_with_options,
 };
 use tx_simulator::{
-    TxSimulator,
     block_simulation::{BlockReplayProfile, BlockTraceEngine, ReplayProfileConfig},
+    TxSimulator,
 };
 
 #[derive(Debug, Parser)]

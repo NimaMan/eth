@@ -214,6 +214,8 @@ async fn run_example(args: Args) -> Result<()> {
         .with_context(|| format!("invalid token address {}", args.token))?;
     let pool_address = AlloyAddress::from_str(&args.pool)
         .with_context(|| format!("invalid pool address {}", args.pool))?;
+    let weth_address = AlloyAddress::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+        .context("invalid WETH address literal")?;
 
     info!("ℹ️ Fetching token metadata for {}", args.token);
     let decimals = match fetch_token_metadata(&provider, token_address, Some(args.block)).await {
@@ -248,6 +250,9 @@ async fn run_example(args: Args) -> Result<()> {
     params.block_number = Some(args.block);
     params.token_decimals = decimals;
     params.test_amount = U256::from(10_000_000_000_000_000u64); // 0.01 ETH probe
+    params.weth_address = weth_address;
+    params.denom_address = weth_address;
+    params.denom_decimals = 18;
 
     info!("🚦 Running buy/approve/sell viability probe");
     let sim_result = pool_simulator

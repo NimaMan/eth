@@ -398,13 +398,13 @@ if let Some(token_info) = token_info {
 
 **Simple Signal Types**:
 1. **Trading Enabled**: Token tradeable with reasonable taxes (≤25%)
-2. **High Tax Warning**: Taxes exceed thresholds (>25% or >50% for honeypot)
-3. **Liquidity Removal**: LP removal from pools with minimum ETH value
+2. **Honeypot Signal**: Buy and approve succeed, but sell fails
+3. **Tax Bucket Risk**: Taxes enter high/extreme buckets or exceed configured thresholds
+4. **Liquidity Removal**: LP removal from pools with minimum ETH value
 
 **Configuration** (in `/src/config.rs`):
 - `max_acceptable_buy_tax: 25%`
 - `max_acceptable_sell_tax: 25%`
-- `honeypot_sell_threshold: 50%`
 - `min_pool_eth: 0.05 ETH`
 
 ### 6. Signal Publishing (Simplified Output)
@@ -484,13 +484,14 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 **Publishing Channels**:
 
 #### 7.1 ZMQ Publishers  
-- **Port 5556**: All binary signals (topics: `trading_enabled`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`)
+- **Port 5556**: All binary signals (topics: `trading_enabled`, `honeypot_signal`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`)
 
 **Message Format**: `[topic, json_payload]` where topic is signal type
 
 #### 7.2 Semantic Signal Logs (under the run directory's `signals/` folder)
 - `trading_enabled.log`: Token becomes tradeable with reasonable taxes
-- `tax_signals.log`: High tax, honeypot, or suspicious tax patterns (consolidated)
+- `honeypot_signals.log`: Buy succeeds but sell fails for the same pool
+- `tax_signals.log`: Tax bucket risks, tax changes, or suspicious tax patterns
 - `liquidity_removals.log`: LP removal operations (also includes ScamDetection entries)
 - (scam detections merged into `liquidity_removals.log`)
 - `lp_approval_signals.log`: Tracked pool holder approving router/Permit2 to spend LP tokens
@@ -557,15 +558,20 @@ The system generates four simple binary signals:
    - Both buy and sell transactions succeed
    - Clear indication of legitimate token launch
 
-2. **High Tax Warning Signal** 
-   - Buy tax > 25% OR sell tax > 25%
-   - Sell tax > 50% indicates potential honeypot
-   - Simple threshold-based detection
+2. **Honeypot Signal**
+   - can_buy=true, can_approve=true, can_sell=false
+   - Published as `honeypot_signal`, separate from tax bucket changes
 
-3. **Liquidity Removal Signal**
-   - LP removal functions detected (removeLiquidity*, decreaseLiquidity)
-   - Pool has minimum ETH value (≥0.05 ETH)
-   - Immediate alert for potential rug pulls
+3. **Tax Bucket Risk Signal**
+   - Buy/sell tax enters high or extreme tax buckets, or exceeds configured thresholds
+   - Includes from/to bucket fields for later tax-change comparisons
+
+4. **Liquidity Removal Signal**
+   - V2/Sushi `removeLiquidity*` calls with tracked token/pool context
+   - V3 `decreaseLiquidity`/pool burn events mapped from the processed tx
+   - V4 negative `ModifyLiquidity` events mapped to tracked `pool_manager#pool_id`
+   - Immediate alert for potential rug pulls; unknown reserve impact is stored
+     as `UNKNOWN`, not `LOW`
 
 4. **LP Approval Signal**
    - `approve(spender, amount)` on a tracked pool/LP token
@@ -574,9 +580,10 @@ The system generates four simple binary signals:
    - No simulation or buy/sell test; payload is enriched from TokenTrackingCache
 
 V2/Sushi LP approvals are actionable early sell signals. V3 `decreaseLiquidity`
-remains a direct liquidity-removal risk when tied to a tracked token/pool. V4 is
-only partially supported for obvious removal/modify-liquidity intent; do not
-treat V4 simulation/PnL as validated yet.
+and pool burn events are direct liquidity-removal risks when tied to a tracked
+token/pool. V4 negative modify-liquidity events are surfaced as unknown-severity
+removal risk when tied to a tracked pool key; do not treat V4 simulation/PnL as
+validated yet.
 
 ## Integration Points
 
@@ -696,7 +703,8 @@ mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
 │   └── trading_enabled.log      # Creator-side trading enablement detections
 └── signals/                     # Semantic signal outputs (one file per signal type)
     ├── trading_enabled.log      # TradingEnabled signals
-    ├── tax_signals.log          # High tax / honeypot signals
+    ├── honeypot_signals.log     # Honeypot / cannot-sell signals
+    ├── tax_signals.log          # Tax bucket risk signals
     ├── liquidity_removals.log   # LiquidityRemoval + ScamDetection signals
     ├── lp_approval_signals.log  # LP approval (rug setup) signals
     └── signal_manager.log       # Summary + publication diagnostics

@@ -82,84 +82,79 @@ impl SimulationManager {
             removal_result.success, removal_result.is_scam, removal_result.drain_percentage
         );
 
-        let token_address = match &request.category {
-            TransactionCategory::CreatorTransaction {
-                target_token,
-                creator,
-                ..
-            } => {
-                if let Some(token) = target_token {
-                    match token.trim_start_matches("0x").parse::<Address>() {
-                        Ok(addr) => Some(addr),
-                        Err(e) => {
-                            error!("Invalid token address: {}", e);
-                            let result = SimulationResult {
-                                request: request.clone(),
-                                pool_viability_result: None,
-                                error: Some(format!("Invalid token address: {}", e)),
-                                simulation_time_ms: simulation_time,
-                                token_address: None,
-                                pool_address: None,
-                                pool_type: None,
-                                debug_info: None,
-                                liquidity_removal_result: None,
-                            };
-                            return vec![result];
+        let mut token_address = removal_result.token_address;
+
+        if token_address.is_none() {
+            token_address = match &request.category {
+                TransactionCategory::CreatorTransaction {
+                    target_token,
+                    creator,
+                    ..
+                } => {
+                    if let Some(token) = target_token {
+                        match token.trim_start_matches("0x").parse::<Address>() {
+                            Ok(addr) => Some(addr),
+                            Err(e) => {
+                                error!("Invalid token address: {}", e);
+                                let result = SimulationResult {
+                                    request: request.clone(),
+                                    pool_viability_result: None,
+                                    error: Some(format!("Invalid token address: {}", e)),
+                                    simulation_time_ms: simulation_time,
+                                    token_address: None,
+                                    pool_address: None,
+                                    pool_type: None,
+                                    debug_info: None,
+                                    liquidity_removal_result: None,
+                                };
+                                return vec![result];
+                            }
                         }
-                    }
-                } else if let Some(token_info) =
-                    self.token_cache.get_token_for_creator(creator).await
-                {
-                    match token_info
-                        .address
-                        .trim_start_matches("0x")
-                        .parse::<Address>()
+                    } else if let Some(token_info) =
+                        self.token_cache.get_token_for_creator(creator).await
                     {
-                        Ok(addr) => Some(addr),
-                        Err(e) => {
-                            let result = SimulationResult {
-                                request: request.clone(),
-                                pool_viability_result: None,
-                                error: Some(format!("Invalid token address: {}", e)),
-                                simulation_time_ms: simulation_time,
-                                token_address: None,
-                                pool_address: None,
-                                pool_type: None,
-                                debug_info: None,
-                                liquidity_removal_result: None,
-                            };
-                            return vec![result];
+                        match token_info
+                            .address
+                            .trim_start_matches("0x")
+                            .parse::<Address>()
+                        {
+                            Ok(addr) => Some(addr),
+                            Err(e) => {
+                                let result = SimulationResult {
+                                    request: request.clone(),
+                                    pool_viability_result: None,
+                                    error: Some(format!("Invalid token address: {}", e)),
+                                    simulation_time_ms: simulation_time,
+                                    token_address: None,
+                                    pool_address: None,
+                                    pool_type: None,
+                                    debug_info: None,
+                                    liquidity_removal_result: None,
+                                };
+                                return vec![result];
+                            }
                         }
+                    } else {
+                        None
                     }
-                } else {
-                    let result = SimulationResult {
-                        request: request.clone(),
-                        pool_viability_result: None,
-                        error: Some("No token found for creator".to_string()),
-                        simulation_time_ms: simulation_time,
-                        token_address: None,
-                        pool_address: None,
-                        pool_type: None,
-                        debug_info: None,
-                        liquidity_removal_result: None,
-                    };
-                    return vec![result];
                 }
-            }
-            _ => {
-                let result = SimulationResult {
-                    request: request.clone(),
-                    pool_viability_result: None,
-                    error: Some("Not a creator transaction".to_string()),
-                    simulation_time_ms: simulation_time,
-                    token_address: None,
-                    pool_address: None,
-                    pool_type: None,
-                    debug_info: None,
-                    liquidity_removal_result: None,
-                };
-                return vec![result];
-            }
+                _ => None,
+            };
+        }
+
+        let Some(token_address) = token_address else {
+            let result = SimulationResult {
+                request: request.clone(),
+                pool_viability_result: None,
+                error: Some("No tracked token found for liquidity removal".to_string()),
+                simulation_time_ms: simulation_time,
+                token_address: None,
+                pool_address: removal_result.pool_address,
+                pool_type: removal_result.pool_type.clone(),
+                debug_info: removal_result.debug_info.clone(),
+                liquidity_removal_result: Some(removal_result),
+            };
+            return vec![result];
         };
 
         let result = SimulationResult {
@@ -167,9 +162,9 @@ impl SimulationManager {
             pool_viability_result: None,
             error: None,
             simulation_time_ms: simulation_time,
-            token_address,
+            token_address: Some(token_address),
             pool_address: removal_result.pool_address,
-            pool_type: Some("V2".to_string()),
+            pool_type: removal_result.pool_type.clone(),
             debug_info: None,
             liquidity_removal_result: Some(removal_result),
         };

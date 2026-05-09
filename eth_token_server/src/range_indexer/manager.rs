@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::config::TokenServerConfig;
 use crate::views::run::RunSummaryView;
-use tx_processor::ProcessedBlockReplayStoreWriter;
+use tx_processor::{ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter};
 
-use super::RangeIndexStatus;
 use super::pipeline;
+use super::RangeIndexStatus;
 use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
 
 const DEFAULT_HISTORICAL_END_BLOCK_LAG: u64 = 256;
@@ -117,6 +117,16 @@ impl RangeIndexManager {
         let task_provider = self.inner.provider.clone();
         let task_processed_block_replay_store = self.inner.processed_block_replay_store.clone();
         let processed_block_disk_cache_blocks = self.inner.config.processed_block_disk_cache_blocks;
+        let processed_block_retry = ProcessedBlockProviderRetry {
+            attempts: self
+                .inner
+                .config
+                .live_processed_block_disk_cache_retry_attempts,
+            delay_ms: self
+                .inner
+                .config
+                .live_processed_block_disk_cache_retry_delay_ms,
+        };
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -128,6 +138,7 @@ impl RangeIndexManager {
                 task_provider,
                 task_processed_block_replay_store,
                 processed_block_disk_cache_blocks,
+                processed_block_retry,
             ));
         });
 

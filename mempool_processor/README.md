@@ -8,8 +8,12 @@ simulation, and semantic signal emission.
 - Read pending transactions from local Reth IPC/RPC.
 - Detect relevant function selectors, classify creator/pool/token actions, and
   simulate effects against live token context.
-- Persist and publish semantic signals such as trading enabled, high tax,
-  honeypot risk, LP approval, and liquidity removal.
+- Persist and publish semantic signals such as trading enabled, tax bucket
+  risk, honeypot/sell-blocked risk, LP approval, and liquidity removal.
+- Treat protocol support explicitly: V2/Sushi LP approvals are early-warning
+  signals, V2/Sushi and V3 pools can be buy/sell probed when metadata is
+  present, and V4 removal intent is surfaced as unknown-severity risk until V4
+  simulation is validated.
 
 ## Owns
 

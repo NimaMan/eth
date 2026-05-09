@@ -2,7 +2,7 @@
 /// A wrapper over `tx_processor::process_unsigned_tx` that returns a
 /// `LiquidityRemovalResult` by deriving pool-drain metrics from the
 /// `ProcessedTransaction.address_balance_changes`.
-use crate::token_tracking::TokenTrackingCache;
+use crate::token_tracking::{PoolType as CachePoolType, TokenTrackingCache};
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
 use once_cell::sync::{Lazy, OnceCell};
@@ -88,6 +88,13 @@ pub struct LiquidityRemovalResult {
     pub revert_reason: Option<String>,
     pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
     pub pool_address: Option<Address>,
+    /// Canonical pool identifier for non-address pools too. V2/V3 use the pool
+    /// address; V4 uses the `pool_manager#pool_id` display key used by eth_token.
+    pub pool_identifier: Option<String>,
+    pub pool_type: Option<String>,
+    pub token_address: Option<Address>,
+    pub function_name: Option<String>,
+    pub metrics_known: bool,
     pub eth_removed: f64,
     pub drain_percentage: f64,
     pub remaining_eth: f64,
@@ -98,9 +105,21 @@ pub struct LiquidityRemovalResult {
 #[derive(Debug)]
 struct PoolDrainInfo {
     pool_address: Address,
+    pool_identifier: String,
+    pool_type: String,
+    token_address: Option<Address>,
     eth_removed: f64,
     remaining_eth: f64,
     percentage: f64,
+}
+
+#[derive(Debug)]
+struct ProtocolRemovalInfo {
+    pool_address: Option<Address>,
+    pool_identifier: String,
+    pool_type: String,
+    token_address: Address,
+    function_name: &'static str,
 }
 
 pub struct LiquidityRemovalSimulator {
@@ -172,6 +191,11 @@ impl LiquidityRemovalSimulator {
                         )),
                         address_balance_changes: HashMap::new(),
                         pool_address: None,
+                        pool_identifier: None,
+                        pool_type: None,
+                        token_address: None,
+                        function_name: Some("nonce_mismatch".to_string()),
+                        metrics_known: false,
                         eth_removed: 0.0,
                         drain_percentage: 0.0,
                         remaining_eth: 0.0,
@@ -290,6 +314,11 @@ impl LiquidityRemovalSimulator {
                     revert_reason: Some(msg),
                     address_balance_changes: HashMap::new(),
                     pool_address: None,
+                    pool_identifier: None,
+                    pool_type: None,
+                    token_address: None,
+                    function_name: None,
+                    metrics_known: false,
                     eth_removed: 0.0,
                     drain_percentage: 0.0,
                     remaining_eth: 0.0,
@@ -304,19 +333,51 @@ impl LiquidityRemovalSimulator {
 
         // 3) Compute drain from deltas (deterministic, cache-backed pools only)
         let drain = self.compute_pool_drain(&address_balance_changes).await;
+        let protocol_removal = self.protocol_removal_from_processed(&processed).await;
 
-        let (pool_address, eth_removed, drain_percentage, remaining_eth) = if let Some(d) = drain {
+        let (
+            pool_address,
+            pool_identifier,
+            pool_type,
+            token_address,
+            function_name,
+            eth_removed,
+            drain_percentage,
+            remaining_eth,
+            metrics_known,
+        ) = if let Some(d) = drain {
+            let pool_identifier = Some(d.pool_identifier);
+            let pool_type = Some(d.pool_type);
             (
                 Some(d.pool_address),
+                pool_identifier,
+                pool_type,
+                d.token_address,
+                Some("remove_liquidity".to_string()),
                 d.eth_removed,
                 d.percentage,
                 d.remaining_eth,
+                true,
+            )
+        } else if let Some(candidate) = protocol_removal {
+            (
+                candidate.pool_address,
+                Some(candidate.pool_identifier),
+                Some(candidate.pool_type),
+                Some(candidate.token_address),
+                Some(candidate.function_name.to_string()),
+                0.0,
+                0.0,
+                0.0,
+                false,
             )
         } else {
-            (None, 0.0, 0.0, 0.0)
+            (None, None, None, None, None, 0.0, 0.0, 0.0, false)
         };
 
-        let is_scam = pool_address.is_some() && (drain_percentage > 60.0 || remaining_eth < 0.3);
+        let is_scam = metrics_known
+            && pool_address.is_some()
+            && (drain_percentage > 60.0 || remaining_eth < 0.3);
         let success = processed.status;
         let revert_reason = if success {
             None
@@ -329,6 +390,11 @@ impl LiquidityRemovalSimulator {
             revert_reason,
             address_balance_changes,
             pool_address,
+            pool_identifier,
+            pool_type,
+            token_address,
+            function_name,
+            metrics_known,
             eth_removed,
             drain_percentage,
             remaining_eth,
@@ -373,6 +439,9 @@ impl LiquidityRemovalSimulator {
                         let pct = ((initial - remaining) / initial * 100.0).min(100.0);
                         let candidate = PoolDrainInfo {
                             pool_address: *address,
+                            pool_identifier: pool_state.address.clone(),
+                            pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                            token_address: parse_address(&pool_state.token_address),
                             eth_removed: removed,
                             remaining_eth: remaining,
                             percentage: pct,
@@ -390,6 +459,85 @@ impl LiquidityRemovalSimulator {
             }
         }
         best
+    }
+
+    async fn protocol_removal_from_processed(
+        &self,
+        processed: &ProcessedTransaction,
+    ) -> Option<ProtocolRemovalInfo> {
+        let cache = self.token_cache.as_ref()?;
+
+        for burn in &processed.uniswap_v3_burns {
+            if burn.amount.is_zero() {
+                continue;
+            }
+            let pool_identifier = to_checksum_address(&burn.pool_address);
+            let Some(pool_state) = cache.get_pool(&pool_identifier).await else {
+                continue;
+            };
+            if !matches!(pool_state.pool_type, CachePoolType::UniswapV3) {
+                continue;
+            }
+            let Some(token_address) = parse_address(&pool_state.token_address) else {
+                continue;
+            };
+            return Some(ProtocolRemovalInfo {
+                pool_address: Some(burn.pool_address),
+                pool_identifier: pool_state.address.clone(),
+                pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                token_address,
+                function_name: "decreaseLiquidity",
+            });
+        }
+
+        for decrease in &processed.uniswap_v3_decreases {
+            if decrease.liquidity.is_zero() {
+                continue;
+            }
+            let pool_identifier = to_checksum_address(&decrease.pool_address);
+            let Some(pool_state) = cache.get_pool(&pool_identifier).await else {
+                continue;
+            };
+            if !matches!(pool_state.pool_type, CachePoolType::UniswapV3) {
+                continue;
+            }
+            let Some(token_address) = parse_address(&pool_state.token_address) else {
+                continue;
+            };
+            return Some(ProtocolRemovalInfo {
+                pool_address: Some(decrease.pool_address),
+                pool_identifier: pool_state.address.clone(),
+                pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                token_address,
+                function_name: "decreaseLiquidity",
+            });
+        }
+
+        for modify in &processed.uniswap_v4_modifies {
+            if modify.liquidity_delta >= 0 {
+                continue;
+            }
+            let pool_identifier =
+                v4_event_display_key(modify.pool_manager_address, modify.event_id);
+            let Some(pool_state) = cache.get_pool(&pool_identifier).await else {
+                continue;
+            };
+            if !matches!(pool_state.pool_type, CachePoolType::UniswapV4) {
+                continue;
+            }
+            let Some(token_address) = parse_address(&pool_state.token_address) else {
+                continue;
+            };
+            return Some(ProtocolRemovalInfo {
+                pool_address: None,
+                pool_identifier: pool_state.address.clone(),
+                pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                token_address,
+                function_name: "modifyLiquidity",
+            });
+        }
+
+        None
     }
 
     pub(crate) async fn process_with_optional_retry(
@@ -584,4 +732,25 @@ impl LiquidityRemovalSimulator {
 
         expected_str.parse::<u64>().ok()
     }
+}
+
+fn parse_address(value: &str) -> Option<Address> {
+    value.trim_start_matches("0x").parse::<Address>().ok()
+}
+
+fn pool_type_label(pool_type: &CachePoolType) -> &'static str {
+    match pool_type {
+        CachePoolType::UniswapV2 => "UNISWAP-V2",
+        CachePoolType::UniswapV3 => "UNISWAP-V3",
+        CachePoolType::UniswapV4 => "UNISWAP-V4",
+        CachePoolType::Unknown => "UNKNOWN",
+    }
+}
+
+fn v4_event_display_key(pool_manager: Address, pool_id: alloy_primitives::B256) -> String {
+    format!(
+        "{}#{:#x}",
+        to_checksum_address(&pool_manager).to_ascii_lowercase(),
+        pool_id
+    )
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use alloy_primitives::B256;
-use eyre::{Result, WrapErr, eyre};
+use eyre::{eyre, Result, WrapErr};
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use reth_chain_query::provider::BlockHeader;
@@ -12,9 +12,9 @@ use serde::Deserialize;
 use tx_simulator::live_chain_data::live_data_registry::keys;
 
 use crate::{
-    BlockProcessor, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION, CompactProcessedTransaction,
-    LoadedProcessedBlock, ProcessedBlock, ProcessedBlockProviderRetry,
-    ProcessedBlockReplayStoreWriter, ProcessedBlockSource, load_processed_block,
+    load_processed_block, BlockProcessor, CompactProcessedTransaction, LoadedProcessedBlock,
+    ProcessedBlock, ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter,
+    ProcessedBlockSource, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
 };
 
 #[derive(Clone)]

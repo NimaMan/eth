@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use eyre::{Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
+use tx_simulator::block_simulation::BlockTraceEngine;
 
 use crate::{
     BlockProcessor, ProcessedBlock, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
@@ -163,13 +164,33 @@ async fn read_cached_block(
     }))
 }
 
-async fn process_uncached_block_with_retry(
+pub(super) async fn process_uncached_block_with_retry(
     tx_processor: &BlockProcessor,
     block_number: u64,
     retry: ProcessedBlockProviderRetry,
 ) -> Result<ProcessedBlock> {
+    process_uncached_block_with_options_retry(
+        tx_processor,
+        block_number,
+        true,
+        BlockTraceEngine::default(),
+        retry,
+    )
+    .await
+}
+
+pub(super) async fn process_uncached_block_with_options_retry(
+    tx_processor: &BlockProcessor,
+    block_number: u64,
+    include_traces: bool,
+    trace_engine: BlockTraceEngine,
+    retry: ProcessedBlockProviderRetry,
+) -> Result<ProcessedBlock> {
     for attempt in 0..=retry.attempts {
-        match tx_processor.process_block(block_number).await {
+        match tx_processor
+            .process_block_with_trace_engine(block_number, include_traces, trace_engine)
+            .await
+        {
             Ok(block) => return Ok(block),
             Err(error) if attempt < retry.attempts && is_transient_reth_state_lag_error(&error) => {
                 tracing::warn!(

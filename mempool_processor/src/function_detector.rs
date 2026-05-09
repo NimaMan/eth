@@ -305,6 +305,14 @@ impl FunctionDetector {
             });
         }
 
+        if selector == &hex_to_bytes("ac9650d8") && is_uniswap_v3_position_manager(tx) {
+            return Some(FunctionDetectionResult {
+                function_name: "multicall".to_string(),
+                function_type: CreatorFunctionType::LiquidityRemoval,
+                selector: selector_hex.to_string(),
+            });
+        }
+
         // Check liquidity removal functions
         if let Some(function_name) = self.liquidity_removal.detect(selector) {
             return Some(FunctionDetectionResult {
@@ -694,6 +702,15 @@ fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
         || ROUTERS.values().any(|router| router == spender)
 }
 
+fn is_uniswap_v3_position_manager(tx: &crate::mempool_fetcher::MempoolTransaction) -> bool {
+    tx.to
+        .as_ref()
+        .map(|to| {
+            AlloyAddress::from_slice(to) == address!("C36442b4a4522E871399CD717aBDD847Ab11FE88")
+        })
+        .unwrap_or(false)
+}
+
 /// Detector for liquidity removal functions
 struct LiquidityRemovalDetector {
     signatures: HashMap<[u8; 4], &'static str>,
@@ -718,6 +735,11 @@ impl LiquidityRemovalDetector {
 
         // Uniswap V3 Position Manager
         signatures.insert(hex_to_bytes("0c49ccbe"), "decreaseLiquidity");
+
+        // Uniswap V4 Position/Pool Manager
+        signatures.insert(hex_to_bytes("dd46508f"), "modifyLiquidities");
+        signatures.insert(hex_to_bytes("a355de88"), "modifyLiquiditiesWithoutUnlock");
+        signatures.insert(hex_to_bytes("0d4f319d"), "modifyLiquidity");
 
         // Balancer
         signatures.insert(hex_to_bytes("8bdb3913"), "exitPool");

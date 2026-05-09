@@ -1,6 +1,6 @@
 # Artifacts
 
-Generated outputs for this case belong here.
+Generated outputs for this investigation belong here.
 
 Examples:
 

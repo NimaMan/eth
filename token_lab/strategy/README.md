@@ -15,8 +15,10 @@ Initial contract:
 - Unit of analysis: pool, not token. Tokens may have multiple pools, and trades
   happen against pools.
 - Launch definition: pool creation.
-- Real-liquidity lower bound: `0.5 ETH` or equivalent denom value. Pools below
-  this threshold should be tracked as dust, and the dust ratio should be shown.
+- Real-liquidity lower bound is quote-family specific: `0.5 ETH/WETH` for
+  ETH-family pools and `500 USDC/USDT` for USD-stable pools. Pools below their
+  family threshold should be tracked as dust, and the dust ratio should be
+  shown.
 - Winner thresholds: `2x`, `5x`, `10x`, `20x`, `50x`, `100x`.
 - Time windows from launch: `15m`, `1h`, `6h`, `24h`, `36h`, `48h`, `5d`,
   `7d`.
@@ -30,20 +32,37 @@ The first layer is a strict split between eligible and non-eligible pools.
 Eligibility is the set of pools we would have considered trading at the time of
 analysis.
 
+The source of truth for this split is the Rust crate
+`alpha/token_eligibility`. Token-lab tools can call its JSON CLI for parity
+checks:
+
+```text
+cargo run -q -p eth_token_eligibility --bin token_eligibility <<'JSON'
+{"currency":"WETH","denom_reserve":0.5,"can_buy":true,"can_sell":true}
+JSON
+```
+
 Initial eligible pool rules:
 
-- pool has at least `0.5 ETH` liquidity in an ETH/WETH-denominated pool;
+- quote currency is one of `ETH`, `WETH`, `USDC`, or `USDT`;
+- ETH/WETH-denominated pools have at least `0.5` quote liquidity;
+- USDC/USDT-denominated pools have at least `500` quote liquidity;
 - simulator says the pool can be bought and sold;
-- pool currency is currently supported by the strategy analysis. Stable,
-  unknown, or unsupported currencies go into non-eligible until we add explicit
-  ETH-equivalent thresholds.
+- pool is not flagged as scam by token/pool state;
+- block-only historical stats have price-ratio history.
+
+`DAI` remains unsupported for Snipe All and launch-strategy stats unless we
+explicitly add it later. Unknown or unsupported currencies go into
+non-eligible until they receive a named threshold and strategy support.
 
 Initial non-eligible reasons:
 
 - dust/test liquidity below the threshold;
 - buyable but not sellable;
 - not buyable;
+- current scam flag;
 - unsupported or unknown currency;
+- missing price-ratio history for block-only stats;
 - missing protocol-specific data needed for strategy stats.
 
 Later scams or failures among eligible pools are not removed from the eligible
@@ -53,6 +72,10 @@ tax changes, ownership/control actions, or later sell failure.
 
 Eligibility rules can expand later as we learn from the non-eligible pool
 summary and add support for more currencies, protocols, or simulator paths.
+
+Keep this contract aligned with the `/eth/trade/` eligibility table and
+`alpha/strategies/README.md`. The token lab measures the policy; it does not
+own the production strategy implementation.
 
 The first implementation computes time windows from block distance using a
 `12s` Ethereum block-time estimate because the current price-ratio history is

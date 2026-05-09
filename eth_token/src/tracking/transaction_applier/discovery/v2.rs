@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use eyre::Result;
@@ -182,7 +183,7 @@ impl TokenTransactionApplier {
         Ok(discovered)
     }
 
-    pub(crate) async fn discover_uniswap_v2_pools_from_swaps_for_token<P>(
+    pub(crate) async fn discover_uniswap_v2_pools_from_events_for_token<P>(
         &self,
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
@@ -195,8 +196,7 @@ impl TokenTransactionApplier {
         let token_address = token.contract_address.clone();
         let mut discovered = Vec::new();
 
-        for event in &tx.uniswap_v2_swaps {
-            let pool_address = address_string(&event.pair_address);
+        for pool_address in v2_pool_addresses_from_events(tx) {
             if token.uniswap_v2_pool(&pool_address).is_some()
                 || discovered.iter().any(|known| known == &pool_address)
             {
@@ -207,7 +207,7 @@ impl TokenTransactionApplier {
                 pool_metadata_provider,
                 UniswapV2PoolMetadataLookup {
                     tracked_token_address: Some(parse_address_lossy(&token_address)),
-                    pool_address: event.pair_address,
+                    pool_address: parse_address_lossy(&pool_address),
                     block_number: tx.block_number,
                     transaction_hash: tx.hash,
                     tx_index: tx.tx_index,
@@ -282,4 +282,21 @@ fn is_sushiswap_v2_pair_created_event(
     event: &tx_processor::tx_processor::data_models::UniswapV2PairCreatedEvent,
 ) -> bool {
     same_address_str(event.factory_address, SUSHISWAP_V2_FACTORY)
+}
+
+fn v2_pool_addresses_from_events(tx: &ProcessedTransaction) -> BTreeSet<String> {
+    let mut addresses = BTreeSet::new();
+    for event in &tx.uniswap_v2_syncs {
+        addresses.insert(address_string(&event.pair_address));
+    }
+    for event in &tx.uniswap_v2_swaps {
+        addresses.insert(address_string(&event.pair_address));
+    }
+    for event in &tx.uniswap_v2_mints {
+        addresses.insert(address_string(&event.pair_address));
+    }
+    for event in &tx.uniswap_v2_burns {
+        addresses.insert(address_string(&event.pair_address));
+    }
+    addresses
 }

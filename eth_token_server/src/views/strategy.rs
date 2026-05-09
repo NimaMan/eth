@@ -1,17 +1,20 @@
 use std::collections::BTreeMap;
 
 use eth_token::pools::TaxBucket;
+use eth_token_eligibility::{
+    evaluate_pool_with_config, EligibilityConfig, NonEligibleReason, PoolEligibilityInput,
+    ETH_ELIGIBLE_LIQUIDITY, STABLE_ELIGIBLE_LIQUIDITY,
+};
 use serde::Serialize;
 
 use crate::range_indexer::progress::now_unix_secs;
 use crate::range_indexer::RangeIndexJob;
 use crate::views::pool::{PoolRiskLevel, PoolView};
 
-const MIN_ELIGIBLE_WETH_LIQUIDITY: f64 = 0.5;
-const MIN_ELIGIBLE_STABLE_LIQUIDITY: f64 = 500.0;
-const SUPPORTED_CURRENCIES: [&str; 4] = ["ETH", "WETH", "USDC", "USDT"];
 const ETH_BLOCK_SECONDS: u64 = 12;
 const WINNER_THRESHOLDS: [f64; 6] = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
+const HOURLY_WINNER_HOURS: u64 = 36;
+const DAILY_WINNER_DAYS: u64 = 7;
 const WINDOWS: [WindowSpec; 8] = [
     WindowSpec {
         label: "15m",
@@ -57,6 +60,8 @@ pub struct LaunchStatsResponse {
     pub totals: LaunchStatsTotals,
     pub non_eligible_reasons: Vec<ReasonCount>,
     pub winner_matrix: Vec<WinnerThresholdRow>,
+    pub hourly_winner_matrix: Vec<WinnerThresholdRow>,
+    pub daily_winner_matrix: Vec<WinnerThresholdRow>,
     pub risk_outcomes: Vec<ReasonCount>,
     pub breakdowns: LaunchStatsBreakdowns,
 }
@@ -67,7 +72,7 @@ pub struct LaunchStatsFilter {
     pub launch_definition: &'static str,
     pub min_liquidity_eth: f64,
     pub min_liquidity_usd: f64,
-    pub supported_currencies: Vec<&'static str>,
+    pub supported_currencies: Vec<String>,
     pub eligibility_basis: &'static str,
 }
 
@@ -96,7 +101,7 @@ pub struct WinnerThresholdRow {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct WinnerWindowCell {
-    pub window: &'static str,
+    pub window: String,
     pub seconds: u64,
     pub count: usize,
     pub eligible_percent: Option<f64>,
@@ -120,16 +125,6 @@ pub struct CohortCount {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum NonEligibleReason {
-    UnsupportedCurrency,
-    MissingCreationData,
-    LowLiquidity,
-    CannotBuy,
-    CannotSell,
-    MissingPriceData,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum RiskOutcome {
     LiquidityRemoval,
     HoneypotFlag,
@@ -141,6 +136,12 @@ enum RiskOutcome {
 #[derive(Clone, Copy, Debug)]
 struct WindowSpec {
     label: &'static str,
+    seconds: u64,
+}
+
+#[derive(Clone, Debug)]
+struct OwnedWindowSpec {
+    label: String,
     seconds: u64,
 }
 
@@ -197,9 +198,10 @@ pub async fn launch_stats(run: &RangeIndexJob) -> LaunchStatsResponse {
 fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsResponse {
     let mut non_eligible_counts = BTreeMap::new();
     let mut eligible_records = Vec::new();
+    let eligibility_config = EligibilityConfig::strategy_stats();
 
     for record in records {
-        match eligibility_reason(record) {
+        match eligibility_reason(record, &eligibility_config) {
             Some(reason) => {
                 *non_eligible_counts.entry(reason).or_insert(0usize) += 1;
             }
@@ -219,9 +221,9 @@ fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsR
         filter: LaunchStatsFilter {
             unit: "pool",
             launch_definition: "pool_creation",
-            min_liquidity_eth: MIN_ELIGIBLE_WETH_LIQUIDITY,
-            min_liquidity_usd: MIN_ELIGIBLE_STABLE_LIQUIDITY,
-            supported_currencies: SUPPORTED_CURRENCIES.to_vec(),
+            min_liquidity_eth: ETH_ELIGIBLE_LIQUIDITY,
+            min_liquidity_usd: STABLE_ELIGIBLE_LIQUIDITY,
+            supported_currencies: eligibility_config.supported_quote_symbols.clone(),
             eligibility_basis: "current_snapshot",
         },
         totals: LaunchStatsTotals {
@@ -232,45 +234,31 @@ fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsR
         },
         non_eligible_reasons: reason_counts(non_eligible_counts, launched_pools),
         winner_matrix: winner_matrix(&eligible_records),
+        hourly_winner_matrix: hourly_winner_matrix(&eligible_records),
+        daily_winner_matrix: daily_winner_matrix(&eligible_records),
         risk_outcomes: risk_outcomes(&eligible_records),
         breakdowns: breakdowns(&eligible_records),
     }
 }
 
-fn eligibility_reason(record: &PoolStatsRecord) -> Option<NonEligibleReason> {
-    if !is_supported_currency(&record.currency) {
-        return Some(NonEligibleReason::UnsupportedCurrency);
-    }
-    if record.creation_block.is_none() || record.creation_timestamp.is_none() {
-        return Some(NonEligibleReason::MissingCreationData);
-    }
-    if !record.liquidity.is_finite() || record.liquidity < min_eligible_liquidity(&record.currency)
-    {
-        return Some(NonEligibleReason::LowLiquidity);
-    }
-    if !record.can_buy {
-        return Some(NonEligibleReason::CannotBuy);
-    }
-    if !record.can_sell {
-        return Some(NonEligibleReason::CannotSell);
-    }
-    if record.price_ratio_history.is_empty() {
-        return Some(NonEligibleReason::MissingPriceData);
-    }
-    None
-}
-
-fn is_supported_currency(currency: &str) -> bool {
-    SUPPORTED_CURRENCIES
-        .iter()
-        .any(|supported| supported.eq_ignore_ascii_case(currency))
-}
-
-fn min_eligible_liquidity(currency: &str) -> f64 {
-    match currency.to_ascii_uppercase().as_str() {
-        "USDC" | "USDT" => MIN_ELIGIBLE_STABLE_LIQUIDITY,
-        _ => MIN_ELIGIBLE_WETH_LIQUIDITY,
-    }
+fn eligibility_reason(
+    record: &PoolStatsRecord,
+    config: &EligibilityConfig,
+) -> Option<NonEligibleReason> {
+    let is_risk_blocked = matches!(
+        record.risk_level,
+        PoolRiskLevel::LiquidityRemoval | PoolRiskLevel::Honeypot
+    );
+    let input = PoolEligibilityInput::new(
+        Some(record.currency.clone()),
+        Some(record.liquidity),
+        record.can_buy,
+        record.can_sell,
+        is_risk_blocked,
+    )
+    .with_creation_data(record.creation_block, record.creation_timestamp)
+    .with_price_history(!record.price_ratio_history.is_empty());
+    evaluate_pool_with_config(&input, config).reason
 }
 
 fn normalized_liquidity(pool: &PoolView) -> f64 {
@@ -297,12 +285,46 @@ fn reason_counts(
 }
 
 fn winner_matrix(eligible_records: &[&PoolStatsRecord]) -> Vec<WinnerThresholdRow> {
+    let windows = WINDOWS
+        .iter()
+        .map(|window| OwnedWindowSpec {
+            label: window.label.to_string(),
+            seconds: window.seconds,
+        })
+        .collect::<Vec<_>>();
+    winner_matrix_for_windows(eligible_records, &windows)
+}
+
+fn hourly_winner_matrix(eligible_records: &[&PoolStatsRecord]) -> Vec<WinnerThresholdRow> {
+    let windows = (1..=HOURLY_WINNER_HOURS)
+        .map(|hour| OwnedWindowSpec {
+            label: format!("{}h", hour),
+            seconds: hour * 60 * 60,
+        })
+        .collect::<Vec<_>>();
+    winner_matrix_for_windows(eligible_records, &windows)
+}
+
+fn daily_winner_matrix(eligible_records: &[&PoolStatsRecord]) -> Vec<WinnerThresholdRow> {
+    let windows = (1..=DAILY_WINNER_DAYS)
+        .map(|day| OwnedWindowSpec {
+            label: format!("{}d", day),
+            seconds: day * 24 * 60 * 60,
+        })
+        .collect::<Vec<_>>();
+    winner_matrix_for_windows(eligible_records, &windows)
+}
+
+fn winner_matrix_for_windows(
+    eligible_records: &[&PoolStatsRecord],
+    windows: &[OwnedWindowSpec],
+) -> Vec<WinnerThresholdRow> {
     WINNER_THRESHOLDS
         .iter()
         .map(|threshold| WinnerThresholdRow {
             threshold: *threshold,
             label: format!("{}x", format_threshold(*threshold)),
-            windows: WINDOWS
+            windows: windows
                 .iter()
                 .map(|window| {
                     let count = eligible_records
@@ -310,7 +332,7 @@ fn winner_matrix(eligible_records: &[&PoolStatsRecord]) -> Vec<WinnerThresholdRo
                         .filter(|record| crossed_threshold(record, *threshold, window.seconds))
                         .count();
                     WinnerWindowCell {
-                        window: window.label,
+                        window: window.label.clone(),
                         seconds: window.seconds,
                         count,
                         eligible_percent: percent(count, eligible_records.len()),
@@ -507,30 +529,6 @@ fn tax_bucket_label(bucket: TaxBucket) -> &'static str {
     }
 }
 
-impl NonEligibleReason {
-    fn key(self) -> &'static str {
-        match self {
-            Self::UnsupportedCurrency => "unsupported_currency",
-            Self::MissingCreationData => "missing_creation_data",
-            Self::LowLiquidity => "low_liquidity",
-            Self::CannotBuy => "cannot_buy",
-            Self::CannotSell => "cannot_sell",
-            Self::MissingPriceData => "missing_price_data",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::UnsupportedCurrency => "Unsupported currency",
-            Self::MissingCreationData => "Missing creation data",
-            Self::LowLiquidity => "Low liquidity",
-            Self::CannotBuy => "Cannot buy",
-            Self::CannotSell => "Cannot sell",
-            Self::MissingPriceData => "Missing price data",
-        }
-    }
-}
-
 impl RiskOutcome {
     fn key(self) -> &'static str {
         match self {
@@ -573,23 +571,27 @@ mod tests {
         }
     }
 
+    fn test_eligibility_reason(record: &PoolStatsRecord) -> Option<NonEligibleReason> {
+        eligibility_reason(record, &EligibilityConfig::strategy_stats())
+    }
+
     #[test]
     fn eligibility_accepts_usd_stables_with_stable_liquidity_floor() {
         let mut record = record();
         record.currency = "USDC".to_string();
-        record.liquidity = MIN_ELIGIBLE_STABLE_LIQUIDITY;
+        record.liquidity = STABLE_ELIGIBLE_LIQUIDITY;
 
-        assert_eq!(eligibility_reason(&record), None);
+        assert_eq!(test_eligibility_reason(&record), None);
     }
 
     #[test]
     fn eligibility_rejects_usd_stables_below_stable_liquidity_floor() {
         let mut record = record();
         record.currency = "USDT".to_string();
-        record.liquidity = MIN_ELIGIBLE_STABLE_LIQUIDITY - 0.01;
+        record.liquidity = STABLE_ELIGIBLE_LIQUIDITY - 0.01;
 
         assert_eq!(
-            eligibility_reason(&record),
+            test_eligibility_reason(&record),
             Some(NonEligibleReason::LowLiquidity)
         );
     }
@@ -600,7 +602,7 @@ mod tests {
         record.currency = "DAI".to_string();
 
         assert_eq!(
-            eligibility_reason(&record),
+            test_eligibility_reason(&record),
             Some(NonEligibleReason::UnsupportedCurrency)
         );
     }
@@ -611,7 +613,7 @@ mod tests {
         record.liquidity = 0.49;
 
         assert_eq!(
-            eligibility_reason(&record),
+            test_eligibility_reason(&record),
             Some(NonEligibleReason::LowLiquidity)
         );
     }
@@ -622,7 +624,7 @@ mod tests {
         record.can_sell = false;
 
         assert_eq!(
-            eligibility_reason(&record),
+            test_eligibility_reason(&record),
             Some(NonEligibleReason::CannotSell)
         );
     }
@@ -634,5 +636,21 @@ mod tests {
         assert!(crossed_threshold(&record, 2.0, 15 * 60));
         assert!(!crossed_threshold(&record, 10.0, 15 * 60));
         assert!(crossed_threshold(&record, 10.0, 6 * 60 * 60));
+    }
+
+    #[test]
+    fn winner_matrices_include_hourly_and_daily_windows() {
+        let record = record();
+        let records = vec![&record];
+
+        let hourly = hourly_winner_matrix(&records);
+        let daily = daily_winner_matrix(&records);
+
+        assert_eq!(hourly[0].windows.len(), HOURLY_WINNER_HOURS as usize);
+        assert_eq!(hourly[0].windows[0].window, "1h");
+        assert_eq!(hourly[0].windows.last().unwrap().window, "36h");
+        assert_eq!(daily[0].windows.len(), DAILY_WINNER_DAYS as usize);
+        assert_eq!(daily[0].windows[0].window, "1d");
+        assert_eq!(daily[0].windows.last().unwrap().window, "7d");
     }
 }

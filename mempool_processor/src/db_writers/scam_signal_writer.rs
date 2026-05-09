@@ -10,6 +10,7 @@ use tracing::{error, info};
 /// Scam signal types
 #[derive(Debug, Clone)]
 pub enum ScamType {
+    Honeypot,
     CantSell,
     HighTax,
     LiquidityDrain,
@@ -19,6 +20,7 @@ pub enum ScamType {
 impl ScamType {
     pub fn as_str(&self) -> &'static str {
         match self {
+            ScamType::Honeypot => "honeypot",
             ScamType::CantSell => "cant_sell",
             ScamType::HighTax => "high_tax",
             ScamType::LiquidityDrain => "liquidity_drain",
@@ -62,6 +64,36 @@ impl ScamSignalRecord {
                 "sell_tax": sell_tax,
                 "can_buy": true,
                 "can_sell": false
+            }),
+            signal_source: "mempool".to_string(),
+        }
+    }
+
+    /// Create a honeypot signal for a pool that can be bought but cannot be sold.
+    pub fn honeypot(
+        token_address: String,
+        pool_address: String,
+        creator_address: String,
+        tx_hash: String,
+        buy_tax: Option<f64>,
+        sell_tax: Option<f64>,
+        failure_reason: Option<String>,
+        pool_type: String,
+    ) -> Self {
+        Self {
+            scam_type: ScamType::Honeypot,
+            token_address,
+            pool_address: Some(pool_address),
+            scammer_address: creator_address,
+            detection_timestamp: Utc::now(),
+            detection_tx_hash: tx_hash,
+            scam_details: json!({
+                "pool_type": pool_type,
+                "buy_tax": buy_tax,
+                "sell_tax": sell_tax,
+                "can_buy": true,
+                "can_sell": false,
+                "failure_reason": failure_reason
             }),
             signal_source: "mempool".to_string(),
         }

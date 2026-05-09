@@ -16,30 +16,42 @@ Signals are semantic trading/risk events defined in `signal_detector/types.rs` a
   - tx_hash, token_address, pool_address, pool_type
   - creator_address, buy_tax, sell_tax, timestamp
 
-2) TaxSignal (topic: `tax_signal`)
-- Trigger: consolidated tax issues per pool (high buy/sell tax beyond thresholds, honeypot pattern “can’t sell”), or suspicious patterns.
+2) Honeypot (topic: `honeypot_signal`)
+- Trigger: pool simulation can buy and approve, but cannot sell.
+- Payload (HoneypotSignal):
+  - tx_hash, token_address, pool_address, pool_type, creator_address
+  - can_buy, can_sell, buy_tax, sell_tax, failure_reason, confidence, timestamp
+- This is intentionally separate from tax. A sell-blocked pool is a trading
+  status failure, not a tax bucket transition.
+
+3) TaxSignal (topic: `tax_signal`)
+- Trigger: tax moves into a risky bucket, exceeds configured thresholds, changes bucket, or matches a suspicious pattern.
 - Payload (TaxSignalRecord):
   - tx_hash, token_address, pool_address, pool_type, creator_address
-  - signal_type: "HighTaxOrHoneypot" | "TaxChange" | "SuspiciousPattern"
+  - signal_type: "TaxBucketRisk" | "TaxChange" | "SuspiciousPattern"
   - signal_details, confidence
-  - buy_tax, sell_tax (optional), buy_tax_exceeds_threshold, sell_tax_exceeds_threshold, cant_sell
+  - buy_tax, sell_tax (optional)
+  - buy_tax_bucket_from/to, sell_tax_bucket_from/to, combined_tax_bucket_from/to
+  - buy_tax_exceeds_threshold, sell_tax_exceeds_threshold
   - timestamp
 
-3) LiquidityRemoval (topic: `liquidity_removal`)
+4) LiquidityRemoval (topic: `liquidity_removal`)
 - Trigger: liquidity removal on a pool (minor, significant, or major) detected via dedicated liquidity removal simulator or state changes.
 - Payload:
   - tx_hash, pool_address, pool_type, token_address (optional)
   - remover_address, function_name, estimated_eth_removed (optional)
   - remaining_eth, removal_percentage, timestamp
-- Risk label: `DRAINING` for >50% removed, `SIGNIFICANT` for 20-50%, otherwise `LOW`.
+- Risk label: `DRAINING` for >50% removed, `SIGNIFICANT` for 20-50%,
+  `LOW` for measured smaller removals, and `UNKNOWN` when protocol intent maps
+  to a tracked pool before reserve impact can be measured.
 
-4) ScamDetection (topic: `scam_detection`)
+5) ScamDetection (topic: `scam_detection`)
 - Trigger: pool drain above threshold (>60%) or remaining ETH below threshold (≤0.3 ETH).
 - Payload:
   - tx_hash, pool_address, pool_type, token_address
   - scammer_address, eth_drained, eth_remaining, drain_percentage, timestamp
 
-5) LpApproval (topic: `lp_approval`)
+6) LpApproval (topic: `lp_approval`)
 - Trigger: non‑simulated LP token approval transactions for tracked pools,
   regardless of whether the approver is the token creator.
 - Payload (LpApprovalSignal):
@@ -51,13 +63,18 @@ Signals are semantic trading/risk events defined in `signal_detector/types.rs` a
 Detection happens inside `signal_manager.rs`, which coordinates the following:
 
 - TradingStatusDetector (`trading_status_detector.rs`)
-  - Uses can_buy/can_sell and taxes from the SimulationResult (calculated upstream)
+  - Uses can_buy/can_approve/can_sell and taxes from the SimulationResult (calculated upstream)
   - Ensures pool isn’t already trading (via TokenTrackingCache)
   - Emits TradingEnabled signals
 
 - TaxDetector (`tax_signal_detector.rs`)
-  - Consolidates high tax, honeypot, and suspicious tax patterns
+  - Handles tax bucket risks, tax changes, and suspicious tax patterns
   - Produces TaxSignalRecord for publishing as `tax_signal`
+
+- Honeypot detection (`signal_manager.rs`)
+  - Emits `honeypot_signal` only for buy-then-stuck results:
+    `can_buy=true`, `can_approve=true`, `can_sell=false`
+  - Dedupes per `(token_address, pool_address)` during the process lifetime
 
 - LiquidityDetector (`liquidity_detector.rs`)
   - Detects drains/removals via state changes or LiquidityRemovalResult
@@ -72,11 +89,12 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 
 - ZMQ
   - Endpoint: `tcp://127.0.0.1:5556`
-  - Topics: `trading_enabled`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`
+  - Topics: `trading_enabled`, `honeypot_signal`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`
   - Format: JSON serialized signal structs
 
 - Semantic signal logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
+  - `honeypot_signals.log`
   - `tax_signals.log`
   - `liquidity_removals.log` (also contains ScamDetection entries)
   - `lp_approval_signals.log`
@@ -106,7 +124,7 @@ enriches the payload from `TokenTrackingCache` before publishing.
 
 - TaxDetector (via `TaxDetectionConfig`)
   - `max_acceptable_buy_tax`, `max_acceptable_sell_tax`
-  - Honeypot determination uses can_sell=false
+  - Tax buckets follow `eth_token::pools::TaxBucket`: unknown, no_tax, low_tax, moderate_tax, high_tax, extreme_tax
 
 - LiquidityDetector
   - `scam_drain_threshold` (default: 60%)
@@ -116,13 +134,18 @@ enriches the payload from `TokenTrackingCache` before publishing.
 ## Notes & Edge Cases
 
 - Per‑pool semantics: signals are specific to a single pool — multiple pools per token produce multiple independent signals.
-- Historical vs latest state: when at‑block simulation is not possible (pruned state), detectors still use best available results; TradingEnabled requires valid tax values and can_buy/can_sell.
+- Historical vs latest state: when at‑block simulation is not possible (pruned state), detectors still use best available results; TradingEnabled requires valid tax values and can_buy/can_approve/can_sell.
 - Publishing is best‑effort and non‑blocking; DB writes are optional and gated by build features.
 - LP approval diagnostics are included in the periodic mempool health output:
   router approvals seen, tracked pool approvals, pool cache misses, LP approvals
   published, and DB write errors.
 - V2/Sushi LP approvals are actionable early sell signals. V3
-  `decreaseLiquidity` is treated as a direct liquidity-removal risk when it maps
-  to a tracked token/pool. V4 detection is partial and should not be treated as
-  validated for simulation/PnL yet.
+  `decreaseLiquidity` and V3 pool burn events are treated as direct
+  liquidity-removal risk when they map to a tracked token/pool. V4 negative
+  `ModifyLiquidity` events are emitted as unknown-severity removal risk when
+  they map to the tracked `pool_manager#pool_id` key. V4 simulation/PnL is still
+  not validated.
+- Unknown reserve impact is not low risk. When the simulator can map a removal
+  intent to a tracked pool but cannot measure the drain before mining, the DB
+  writer stores the risk level as `UNKNOWN`.
 - **Open issue – missing TradingEnabled output:** The latest prod run (`logs/signal_detector_2025-10-26_21-43-44/`) shows multiple simulation results with `can_buy=true`/`can_sell=true` and finite taxes (e.g. `simulation_results.log` entries for tx `0x3a48c4...` on pool `0xBD2067...` and tx `0x60fa30...` on pool `0x36BFC4...`), yet `trading_enabled.log` remains empty and `signal_manager.log` records `TRADING_STATUS | No change`. This means `TradingStatusDetector::detect` is returning `None` even when all success criteria appear satisfied. The detector currently short-circuits only when either leg fails, taxes are `None`/above threshold, or the pair has already been emitted in-process, so one of those guards is tripping unexpectedly. Next steps: add DEBUG instrumentation (or temporarily bump log level) around the early returns in `trading_status_detector.rs` and confirm whether the dedupe set (`emitted_trading_pairs`) or tax gating is blocking emission. Until that’s fixed, live runs won’t produce TradingEnabled signals even though the simulator proves the pool is tradeable.

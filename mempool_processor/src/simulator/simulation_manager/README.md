@@ -12,7 +12,7 @@ signal detectors can reason about.
 
 | Source | What it contributes | Where it is consumed |
 | --- | --- | --- |
-| Python token-tracking publisher | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks | `TokenTrackingCache` (injected into `SimulationManager`) |
+| Python token-tracking publisher | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks, V3 fee tiers, V4 pool display keys | `TokenTrackingCache` (injected into `SimulationManager`) |
 | Canonical head listener | `SealedHeader` + DB view for the most recent block | `MempoolSimulator`, `LiquidityRemovalSimulator` |
 | Mempool fetcher | Raw transactions plus routing metadata (function detection, category, priority) | `RequestQueue` / flow modules |
 
@@ -52,7 +52,9 @@ simulation_manager/
    replayed through `pool_buy_sell_flow` to test each relevant pool reported by
    the token tracker (WETH/token, USDC/token, …). This is how we observe the
    *effect* that an in-flight transaction would have on the pools we plan to
-   trade against.
+   trade against. V2/Sushi and V3 pools are probed when the cache has complete
+   metadata. V4 buy/sell probes remain disabled until the cache exposes the full
+   V4 pool-key config required by `tx_processor`.
 
 3. **Track new deployments until the Python cache catches up**  
    `contract_creation_flow` processes deployment transactions, tries to resolve
@@ -61,10 +63,13 @@ simulation_manager/
    token we already have the creator context on our side.
 
 4. **Surface liquidity threats immediately**  
-   Liquidity removal signals (decrease/remove) are handled in their own flow so
-   they can run even when buy/sell probes are skipped. These simulations look
-   purely at the effect on reserves and are routed to the signal manager without
-   touching the creator replay queue.
+   Liquidity removal signals are handled in their own flow so they can run even
+   when buy/sell probes are skipped. V2/Sushi removals use reserve deltas when
+   available. V3 removals map processed pool burn/decrease events back to the
+   tracked pool. V4 removals map negative `ModifyLiquidity` events back to the
+   `pool_manager#pool_id` display key. If reserve impact is not measurable
+   before mining, the signal is still emitted as unknown severity instead of
+   being mislabeled as low risk.
 
 5. **Feed downstream detectors**  
    Every flow ultimately builds a `SimulationResult` and passes it to

@@ -12,20 +12,9 @@ pub fn evaluate(
     if state.has_bought(&pool.address) {
         return RuleDecision::hold(RULE_NAME, "pool already bought");
     }
-    if !pool.can_buy {
-        return RuleDecision::hold(RULE_NAME, "pool cannot be bought");
-    }
-    if !pool.can_sell {
-        return RuleDecision::hold(RULE_NAME, "pool cannot be sold");
-    }
-    if pool.is_scam {
-        return RuleDecision::hold(RULE_NAME, "pool has liquidity-removal risk");
-    }
-    if !config.is_supported_denom(pool) {
-        return RuleDecision::hold(RULE_NAME, "unsupported pool denomination");
-    }
-    if pool.denom_reserve < config.min_reserve_for_pool(pool) {
-        return RuleDecision::hold(RULE_NAME, "denom reserve below threshold");
+    let decision = config.eligibility_decision(pool);
+    if let Some(reason) = decision.reason {
+        return RuleDecision::hold(RULE_NAME, reason.key());
     }
 
     RuleDecision::Enter { rule: RULE_NAME }

@@ -23,6 +23,7 @@ pub struct MempoolSignalQuery {
 pub enum MempoolSignalKind {
     All,
     TradingEnabled,
+    Honeypot,
     Tax,
     LiquidityRemoval,
     LpApproval,
@@ -97,6 +98,8 @@ impl MempoolSignalKind {
     pub fn from_path(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "trading-enabled" | "trading_enabled" | "trading" => Some(Self::TradingEnabled),
+            "honeypot" | "honeypots" | "honeypot-signal" | "honeypot_signal" | "sell-blocked"
+            | "sell_blocked" => Some(Self::Honeypot),
             "tax" | "tax-signals" | "tax_signals" => Some(Self::Tax),
             "liquidity-removals" | "liquidity_removals" | "liquidity-removal"
             | "liquidity_removal" | "liquidity" => Some(Self::LiquidityRemoval),
@@ -112,6 +115,7 @@ impl MempoolSignalKind {
         match self {
             Self::All => "all",
             Self::TradingEnabled => "trading_enabled",
+            Self::Honeypot => "honeypot_signal",
             Self::Tax => "tax_signal",
             Self::LiquidityRemoval => "liquidity_removal",
             Self::LpApproval => "lp_approval",
@@ -122,13 +126,15 @@ impl MempoolSignalKind {
 fn signal_sql(kind: MempoolSignalKind) -> String {
     let body = match kind {
         MempoolSignalKind::All => format!(
-            "{} UNION ALL {} UNION ALL {} UNION ALL {}",
+            "{} UNION ALL {} UNION ALL {} UNION ALL {} UNION ALL {}",
             trading_enabled_select(),
+            honeypot_select(),
             tax_select(),
             liquidity_removal_select(),
             lp_approval_select()
         ),
         MempoolSignalKind::TradingEnabled => trading_enabled_select().to_string(),
+        MempoolSignalKind::Honeypot => honeypot_select().to_string(),
         MempoolSignalKind::Tax => tax_select().to_string(),
         MempoolSignalKind::LiquidityRemoval => liquidity_removal_select().to_string(),
         MempoolSignalKind::LpApproval => lp_approval_select().to_string(),
@@ -175,6 +181,72 @@ fn trading_enabled_select() -> &'static str {
     "#
 }
 
+fn honeypot_select() -> &'static str {
+    r#"
+    SELECT
+        signal_id::text AS signal_id,
+        'honeypot_signal' AS signal_type,
+        detection_timestamp::text AS detection_timestamp,
+        detection_tx_hash,
+        token_address,
+        pool_address,
+        COALESCE(scam_details->>'pool_type', 'UNKNOWN') AS pool_type,
+        scammer_address AS creator_address,
+        scammer_address AS subject_address,
+        'Legacy sell-blocked signal' AS headline,
+        scam_details->>'buy_tax' AS value_1,
+        scam_details->>'sell_tax' AS value_2,
+        'true'::text AS flag,
+        jsonb_build_object(
+            'signal_type', scam_type,
+            'signal_details', 'Pool can be bought but cannot be sold',
+            'confidence', '0.95',
+            'buy_tax_at_signal', scam_details->>'buy_tax',
+            'sell_tax_at_signal', scam_details->>'sell_tax',
+            'can_buy', scam_details->>'can_buy',
+            'can_sell', scam_details->>'can_sell',
+            'failure_reason', scam_details->>'failure_reason',
+            'signal_source', signal_source,
+            'created_at', created_at::text
+        )::text AS payload,
+        detection_timestamp AS sort_timestamp
+    FROM live_trading.scam_signals
+    WHERE scam_type IN ('honeypot', 'cant_sell')
+
+    UNION ALL
+
+    SELECT
+        signal_id::text AS signal_id,
+        'honeypot_signal' AS signal_type,
+        detection_timestamp::text AS detection_timestamp,
+        detection_tx_hash,
+        token_address,
+        pool_address,
+        pool_type,
+        creator_address,
+        creator_address AS subject_address,
+        'Honeypot / cannot sell' AS headline,
+        buy_tax_at_signal::text AS value_1,
+        sell_tax_at_signal::text AS value_2,
+        cant_sell::text AS flag,
+        jsonb_build_object(
+            'signal_type', signal_type,
+            'signal_details', signal_details,
+            'confidence', confidence::text,
+            'buy_tax_at_signal', buy_tax_at_signal::text,
+            'sell_tax_at_signal', sell_tax_at_signal::text,
+            'can_buy', NULL::boolean,
+            'can_sell', false,
+            'legacy_source', 'tax_signals',
+            'signal_source', signal_source,
+            'created_at', created_at::text
+        )::text AS payload,
+        detection_timestamp AS sort_timestamp
+    FROM live_trading.tax_signals
+    WHERE cant_sell
+    "#
+}
+
 fn tax_select() -> &'static str {
     r#"
     SELECT
@@ -190,21 +262,27 @@ fn tax_select() -> &'static str {
         signal_type AS headline,
         buy_tax_at_signal::text AS value_1,
         sell_tax_at_signal::text AS value_2,
-        cant_sell::text AS flag,
+        combined_tax_bucket_to AS flag,
         jsonb_build_object(
             'signal_type', signal_type,
             'signal_details', signal_details,
             'confidence', confidence::text,
             'buy_tax_at_signal', buy_tax_at_signal::text,
             'sell_tax_at_signal', sell_tax_at_signal::text,
+            'buy_tax_bucket_from', buy_tax_bucket_from,
+            'buy_tax_bucket_to', buy_tax_bucket_to,
+            'sell_tax_bucket_from', sell_tax_bucket_from,
+            'sell_tax_bucket_to', sell_tax_bucket_to,
+            'combined_tax_bucket_from', combined_tax_bucket_from,
+            'combined_tax_bucket_to', combined_tax_bucket_to,
             'buy_tax_exceeds_threshold', buy_tax_exceeds_threshold,
             'sell_tax_exceeds_threshold', sell_tax_exceeds_threshold,
-            'cant_sell', cant_sell,
             'signal_source', signal_source,
             'created_at', created_at::text
         )::text AS payload,
         detection_timestamp AS sort_timestamp
     FROM live_trading.tax_signals
+    WHERE NOT COALESCE(cant_sell, false)
     "#
 }
 

@@ -6,8 +6,8 @@ use eyre::Result;
 use reth_chain_query::reth_index::{AddressBlockParticipationWriter, RethIndexDB};
 
 use crate::{
-    ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
-    ProcessedBlockDiskCacheWriter, address_participations_from_processed_block,
+    address_participations_from_processed_block, ProcessedBlock, ProcessedBlockDiskCacheStore,
+    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter,
 };
 
 #[derive(Clone)]

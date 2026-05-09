@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum Signal {
     TradingEnabled(TradingEnabledSignal),
     TaxSignal(TaxSignalRecord),
+    Honeypot(HoneypotSignal),
     LiquidityRemoval(LiquidityRemovalSignal),
     ScamDetection(ScamDetectionSignal),
     LpApproval(LpApprovalSignal),
@@ -58,6 +59,27 @@ pub enum TaxWarningType {
     PotentialHoneypot,
 }
 
+/// Honeypot/sell-blocked signal.
+///
+/// Generated when a pool simulation can buy but cannot sell. This is kept out
+/// of tax signals because "cannot sell" is a trading-status failure, not a tax
+/// bucket transition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HoneypotSignal {
+    pub tx_hash: String,
+    pub token_address: String,
+    pub pool_address: String,
+    pub pool_type: String,
+    pub creator_address: String,
+    pub can_buy: bool,
+    pub can_sell: bool,
+    pub buy_tax: Option<f64>,
+    pub sell_tax: Option<f64>,
+    pub failure_reason: Option<String>,
+    pub confidence: f64,
+    pub timestamp: u64,
+}
+
 /// Liquidity removal signal
 ///
 /// Generated when liquidity is removed from a SPECIFIC pool.
@@ -96,7 +118,7 @@ pub struct ScamDetectionSignal {
 /// Tax signal record for publishing
 ///
 /// Generated when tax issues detected on a SPECIFIC pool.
-/// Covers high taxes, honeypots, and suspicious patterns.
+/// Covers tax bucket risks, tax changes, and suspicious tax patterns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaxSignalRecord {
     pub tx_hash: String,
@@ -104,11 +126,17 @@ pub struct TaxSignalRecord {
     pub pool_address: String,
     pub pool_type: String,
     pub creator_address: String,
-    pub signal_type: String, // "HighTaxOrHoneypot", "TaxChange", "SuspiciousPattern"
+    pub signal_type: String, // "TaxBucketRisk", "TaxChange", "SuspiciousPattern"
     pub signal_details: String,
     pub confidence: f64,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
+    pub buy_tax_bucket_from: Option<String>,
+    pub buy_tax_bucket_to: Option<String>,
+    pub sell_tax_bucket_from: Option<String>,
+    pub sell_tax_bucket_to: Option<String>,
+    pub combined_tax_bucket_from: Option<String>,
+    pub combined_tax_bucket_to: Option<String>,
     pub buy_tax_exceeds_threshold: bool,
     pub sell_tax_exceeds_threshold: bool,
     pub cant_sell: bool,

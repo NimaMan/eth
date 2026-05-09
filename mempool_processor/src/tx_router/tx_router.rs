@@ -151,6 +151,24 @@ impl TransactionRouter {
                     requires_buy_sell_test: true,
                 };
             }
+
+            if is_protocol_liquidity_removal_candidate(tx) {
+                return ClassificationResult {
+                    category: TransactionCategory::CreatorTransaction {
+                        creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+                        target_address: tx
+                            .to
+                            .as_ref()
+                            .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
+                            .unwrap_or_else(|| "none".to_string()),
+                        target_token: None,
+                        function_type: CreatorFunctionType::LiquidityRemoval,
+                    },
+                    priority: SimulationPriority::Critical,
+                    requires_simulation: true,
+                    requires_buy_sell_test: false,
+                };
+            }
         }
 
         if let Some(function_type) = tx
@@ -392,6 +410,30 @@ fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
     Some(AlloyAddress::from_slice(&input[16..36]))
 }
 
+fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
+    let Some(selector) = tx.input.get(0..4) else {
+        return false;
+    };
+
+    matches!(
+        selector,
+        // Uniswap V3 NonfungiblePositionManager decreaseLiquidity.
+        [0x0c, 0x49, 0xcc, 0xbe]
+            // Uniswap V4 PositionManager modifyLiquidities / without-unlock variant.
+            | [0xdd, 0x46, 0x50, 0x8f]
+            | [0xa3, 0x55, 0xde, 0x88]
+            // Uniswap V4 PoolManager modifyLiquidity.
+            | [0x0d, 0x4f, 0x31, 0x9d]
+    ) || (selector == [0xac, 0x96, 0x50, 0xd8].as_slice()
+        && tx
+            .to
+            .as_ref()
+            .map(|to| {
+                AlloyAddress::from_slice(to) == address!("C36442b4a4522E871399CD717aBDD847Ab11FE88")
+            })
+            .unwrap_or(false))
+}
+
 fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
     *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
         || ROUTERS.values().any(|router| router == spender)
@@ -448,6 +490,65 @@ mod tests {
             }
             other => panic!("unexpected category: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn routes_uniswap_v3_decrease_liquidity_without_token_param() {
+        let router = TransactionRouter::new(Some(Arc::new(TokenTrackingCache::with_defaults())));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0xC36442b4a4522E871399CD717aBDD847Ab11FE88")),
+            input: hex::decode("0c49ccbe").unwrap(),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["decreaseLiquidity".to_string()],
+            function_category: Some(CreatorFunctionType::LiquidityRemoval),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert_eq!(classification.priority, SimulationPriority::Critical);
+        assert!(classification.requires_simulation);
+        assert!(!classification.requires_buy_sell_test);
+        match classification.category {
+            TransactionCategory::CreatorTransaction {
+                target_token,
+                function_type,
+                ..
+            } => {
+                assert_eq!(target_token, None);
+                assert_eq!(function_type, CreatorFunctionType::LiquidityRemoval);
+            }
+            other => panic!("unexpected category: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn routes_uniswap_v3_position_manager_multicall_for_protocol_removal_scan() {
+        let router = TransactionRouter::new(Some(Arc::new(TokenTrackingCache::with_defaults())));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0xC36442b4a4522E871399CD717aBDD847Ab11FE88")),
+            input: hex::decode("ac9650d8").unwrap(),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["multicall".to_string()],
+            function_category: Some(CreatorFunctionType::LiquidityRemoval),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert_eq!(classification.priority, SimulationPriority::Critical);
+        assert!(classification.requires_simulation);
+        assert!(!classification.requires_buy_sell_test);
     }
 
     #[tokio::test]

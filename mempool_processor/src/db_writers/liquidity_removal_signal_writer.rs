@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use eyre::Result;
-use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::BigDecimal;
 use std::str::FromStr;
@@ -39,7 +38,7 @@ impl LiquidityRemovalSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: DEFAULT_POOL_TYPE.to_string(),
+            pool_type: normalize_pool_type(&signal.pool_type),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),
@@ -55,10 +54,25 @@ impl LiquidityRemovalSignalRecord {
 }
 
 fn drain_risk_label(removal_percentage: Option<f64>) -> String {
-    match removal_percentage.unwrap_or(0.0) {
+    let Some(removal_percentage) = removal_percentage else {
+        return "UNKNOWN".to_string();
+    };
+
+    match removal_percentage {
         p if p > 50.0 => "DRAINING".to_string(),
         p if p >= 20.0 => "SIGNIFICANT".to_string(),
         _ => "LOW".to_string(),
+    }
+}
+
+fn normalize_pool_type(pool_type: &str) -> String {
+    match pool_type.trim().to_lowercase().as_str() {
+        "uniswapv2" | "uniswap-v2" | "v2" => "UNISWAP-V2".to_string(),
+        "uniswapv3" | "uniswap-v3" | "v3" => "UNISWAP-V3".to_string(),
+        "uniswapv4" | "uniswap-v4" | "v4" => "UNISWAP-V4".to_string(),
+        "sushiswap" | "sushi" | "sushi-swap" => "SUSHI-SWAP".to_string(),
+        other if other.is_empty() => "UNKNOWN".to_string(),
+        other => other.to_uppercase(),
     }
 }
 

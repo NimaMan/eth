@@ -160,10 +160,10 @@ impl TradingStatusDetector {
         );
 
         // Check if trading works (both buy and sell)
-        if !buy_sell.can_buy || !buy_sell.can_sell {
+        if !buy_sell.can_buy || !buy_sell.can_approve || !buy_sell.can_sell {
             info!(
-                "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): can_buy={} can_sell={}",
-                token_address, pool_address, tx_hash, buy_sell.can_buy, buy_sell.can_sell
+                "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): can_buy={} can_approve={} can_sell={}",
+                token_address, pool_address, tx_hash, buy_sell.can_buy, buy_sell.can_approve, buy_sell.can_sell
             );
             return None;
         }
@@ -306,12 +306,13 @@ impl TradingStatusDetector {
 
                 writeln!(
                     file,
-                    "[{}] SIMULATION_RESULT | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
+                    "[{}] SIMULATION_RESULT | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_approve: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
                     timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                     tx_hash,
                     token_address,
                     pool_address,
                     buy_sell.can_buy,
+                    buy_sell.can_approve,
                     buy_sell.can_sell,
                     buy_tax_str,
                     sell_tax_str

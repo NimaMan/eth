@@ -11,6 +11,9 @@ detection.
   `SignalManager`.
 - Preserve short creator/token pending sequences when launch helpers depend on
   earlier unmined transactions.
+- Route protocol-specific liquidity risk from processed transaction events:
+  V2/Sushi reserve drains, V3 `decreaseLiquidity`/pool burns, and V4 negative
+  `ModifyLiquidity` events when they map to a tracked pool key.
 
 ## Owns
 
@@ -72,3 +75,7 @@ creator tx
   be dropped under flood conditions.
 - When at-block historical state is pruned, liquidity-removal simulation falls
   back to latest-block behavior with best-effort nonce handling.
+- V4 buy/sell probing is intentionally still gated. The simulator needs the
+  full V4 pool key (`pool_manager`, `pool_id`, currencies, fee, tick spacing,
+  hooks), while the mempool token cache currently only has the display key-level
+  pool identity needed for removal-risk routing.

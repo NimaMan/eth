@@ -16,6 +16,7 @@ pub async fn run_range_index(
     provider: Arc<RethQueryProvider>,
     processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     processed_block_disk_cache_blocks: u64,
+    processed_block_retry: cache::ProcessedBlockProviderRetry,
 ) {
     tracing::info!(
         run_id = %run.id,
@@ -31,6 +32,8 @@ pub async fn run_range_index(
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
+    let processed_block_load_options =
+        cache::ProcessedBlockRangeLoadOptions::default().with_retry(processed_block_retry);
     if let Some(replay_store) = processed_block_replay_store.as_deref() {
         cache::prune_processed_block_disk_cache(
             replay_store.disk_cache_store(),
@@ -75,6 +78,7 @@ pub async fn run_range_index(
                 next_block,
                 chunk_end,
                 processed_block_replay_store.as_deref(),
+                processed_block_load_options,
             )
             .await
             {

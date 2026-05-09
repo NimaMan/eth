@@ -54,6 +54,7 @@ impl SimulationResult {
 #[derive(Debug, Clone)]
 pub struct BuySellResult {
     pub can_buy: bool,
+    pub can_approve: bool,
     pub can_sell: bool,
     pub buy_tax: Option<f64>,  // 0-100% or None if calculation failed.
     pub sell_tax: Option<f64>, // 0-100% or None if calculation failed.
@@ -65,6 +66,7 @@ impl From<&PoolBuySellSimulationResult> for BuySellResult {
     fn from(result: &PoolBuySellSimulationResult) -> Self {
         Self {
             can_buy: result.can_buy,
+            can_approve: result.can_approve,
             can_sell: result.can_sell,
             buy_tax: if result.buy_tax_percent >= 0.0 {
                 Some(result.buy_tax_percent)

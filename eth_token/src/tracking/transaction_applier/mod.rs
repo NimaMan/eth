@@ -350,7 +350,7 @@ impl TokenTransactionApplier {
                 )
                 .await?;
             discovered_v2.extend(
-                self.discover_uniswap_v2_pools_from_swaps_for_token(
+                self.discover_uniswap_v2_pools_from_events_for_token(
                     token,
                     tx,
                     pool_metadata_provider,
@@ -498,7 +498,7 @@ impl TokenTransactionApplier {
                 )
                 .await?;
             discovered_v2.extend(
-                self.discover_uniswap_v2_pools_from_swaps_for_token(
+                self.discover_uniswap_v2_pools_from_events_for_token(
                     token,
                     tx,
                     pool_metadata_provider,

@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::RethQueryProvider;
 
 use crate::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore,
-    ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
+    ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
 };
+
+use super::load::{process_uncached_block_with_options_retry, process_uncached_block_with_retry};
 
 const PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
 pub const DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH: u64 = 250;
@@ -18,6 +21,7 @@ pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
 pub struct ProcessedBlockRangeLoadOptions {
     pub fill_batch_blocks: usize,
     pub fill_concurrency: usize,
+    pub retry: ProcessedBlockProviderRetry,
 }
 
 impl Default for ProcessedBlockRangeLoadOptions {
@@ -25,6 +29,7 @@ impl Default for ProcessedBlockRangeLoadOptions {
         Self {
             fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
             fill_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+            retry: ProcessedBlockProviderRetry::none(),
         }
     }
 }
@@ -41,6 +46,11 @@ impl ProcessedBlockRangeLoadOptions {
         if value > 0 {
             self.fill_concurrency = value;
         }
+        self
+    }
+
+    pub fn with_retry(mut self, retry: ProcessedBlockProviderRetry) -> Self {
+        self.retry = retry;
         self
     }
 }
@@ -118,7 +128,8 @@ pub async fn load_processed_block_range_with_options(
     let mut blocks = Vec::with_capacity((end_block - start_block + 1) as usize);
     for block_number in start_block..=end_block {
         let block_started = Instant::now();
-        let block = tx_processor.process_block(block_number).await?;
+        let block =
+            process_uncached_block_with_retry(tx_processor, block_number, options.retry).await?;
         blocks.push(LoadedProcessedBlockWithMetrics {
             block,
             upstream_ms: block_started.elapsed().as_millis(),
@@ -304,12 +315,13 @@ async fn fill_cache_entries(
             .iter()
             .map(|key| key.block_number)
             .collect::<Vec<_>>();
-        let processed_missing_blocks = tx_processor
-            .process_block_batch(
-                missing_blocks,
-                BlockBatchOptions::default().with_max_concurrency(options.fill_concurrency.max(1)),
-            )
-            .await?;
+        let processed_missing_blocks = process_block_batch_with_retry(
+            tx_processor,
+            missing_blocks,
+            BlockBatchOptions::default().with_max_concurrency(options.fill_concurrency.max(1)),
+            options.retry,
+        )
+        .await?;
 
         for block in processed_missing_blocks {
             let key = keys_by_block.get(&block.header.number).ok_or_else(|| {
@@ -361,6 +373,47 @@ async fn fill_cache_entries(
         fill_started.elapsed().as_millis(),
         write_wall_ms,
     ))
+}
+
+async fn process_block_batch_with_retry<I>(
+    tx_processor: &BlockProcessor,
+    block_numbers: I,
+    options: BlockBatchOptions,
+    retry: ProcessedBlockProviderRetry,
+) -> eyre::Result<Vec<ProcessedBlock>>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let blocks: Vec<u64> = block_numbers.into_iter().collect();
+    if blocks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let max_concurrency = options.max_concurrency.max(1);
+    let processor = tx_processor.clone();
+    let processed = stream::iter(blocks)
+        .map(move |number| {
+            let processor = processor.clone();
+            async move {
+                process_uncached_block_with_options_retry(
+                    &processor,
+                    number,
+                    options.include_traces,
+                    options.trace_engine,
+                    retry,
+                )
+                .await
+                .map_err(|err| eyre::eyre!("failed to process block {number}: {err}"))
+                .map(|block| (number, block))
+            }
+        })
+        .buffer_unordered(max_concurrency)
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    let mut ordered = processed;
+    ordered.sort_by_key(|(number, _)| *number);
+    Ok(ordered.into_iter().map(|(_, block)| block).collect())
 }
 
 pub fn should_prune_processed_block_disk_cache(chunk_end: u64, end_block: u64) -> bool {

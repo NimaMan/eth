@@ -20,7 +20,9 @@ pub mod trading_status_detector;
 /// 3. Signal Manager receives pool-specific results
 /// 4. Generates unique signal for (token, pool) pair
 ///
-/// Currently supports V2 pools only (V3/V4 in development)
+/// V2/Sushi and V3 pool signals are supported when token-cache metadata is
+/// available. V4 liquidity-removal intent is surfaced as unknown-severity risk
+/// until V4 simulation/PnL is validated end to end.
 pub mod types;
 
 pub use liquidity_detector::{
@@ -31,6 +33,6 @@ pub use signal_manager::{SignalManager, SignalManagerConfig};
 pub use tax_signal_detector::{TaxDetector, TaxSignal, TaxSignalType};
 pub use trading_status_detector::{TradingStatusDetector, TradingStatusSignal};
 pub use types::{
-    HighTaxWarningSignal, LiquidityRemovalSignal, ScamDetectionSignal, Signal, TaxWarningType,
-    TradingEnabledSignal,
+    HighTaxWarningSignal, HoneypotSignal, LiquidityRemovalSignal, ScamDetectionSignal, Signal,
+    TaxWarningType, TradingEnabledSignal,
 };

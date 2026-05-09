@@ -10,11 +10,13 @@ pub mod pool_buy_sell_simulator;
 /// - Each pool of a token is simulated INDEPENDENTLY
 /// - Buy/sell tests are run against SPECIFIC pools
 /// - Results include pool_address and pool_type
-/// - Currently supports V2 pools (V3/V4 filtered out)
+/// - V2/Sushi and V3 pools are probed when the token cache has enough metadata
+/// - V4 removal intent is detected from processed events; V4 buy/sell probes
+///   stay gated until the cache exposes full pool-key simulation config
 ///
 /// Simulation Flow:
 /// 1. Get all pools for a token from cache
-/// 2. Filter to supported pool types (V2 only)
+/// 2. Resolve protocol-specific simulation config for each supported pool
 /// 3. FOR EACH POOL:
 ///    - Run transaction simulation
 ///    - Run buy simulation on THIS pool

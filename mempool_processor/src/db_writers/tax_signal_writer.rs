@@ -23,6 +23,12 @@ pub struct TaxSignalRecord {
     pub confidence: Option<f64>,
     pub buy_tax_at_signal: Option<f64>,
     pub sell_tax_at_signal: Option<f64>,
+    pub buy_tax_bucket_from: Option<String>,
+    pub buy_tax_bucket_to: Option<String>,
+    pub sell_tax_bucket_from: Option<String>,
+    pub sell_tax_bucket_to: Option<String>,
+    pub combined_tax_bucket_from: Option<String>,
+    pub combined_tax_bucket_to: Option<String>,
     pub buy_tax_exceeds_threshold: bool,
     pub sell_tax_exceeds_threshold: bool,
     pub cant_sell: bool,
@@ -59,35 +65,37 @@ impl TaxSignalRecord {
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),
             detection_tx_hash: tx_hash.to_string(),
-            signal_type: format!("{:?}", signal.signal_type)
-                .split("::")
-                .last()
-                .unwrap_or("Unknown")
-                .to_string(),
+            signal_type: match &signal.signal_type {
+                crate::signal_detector::TaxSignalType::TaxBucketRisk { .. } => "TaxBucketRisk",
+                crate::signal_detector::TaxSignalType::TaxChange { .. } => "TaxChange",
+                crate::signal_detector::TaxSignalType::SuspiciousPattern => "SuspiciousPattern",
+            }
+            .to_string(),
             signal_details: signal.details.clone(),
             confidence: Some(signal.confidence),
             buy_tax_at_signal: signal.buy_tax,
             sell_tax_at_signal: signal.sell_tax,
             buy_tax_exceeds_threshold: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot {
+                crate::signal_detector::TaxSignalType::TaxBucketRisk {
                     buy_tax_exceeds_threshold,
                     ..
                 } => *buy_tax_exceeds_threshold,
                 _ => false,
             },
             sell_tax_exceeds_threshold: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot {
+                crate::signal_detector::TaxSignalType::TaxBucketRisk {
                     sell_tax_exceeds_threshold,
                     ..
                 } => *sell_tax_exceeds_threshold,
                 _ => false,
             },
-            cant_sell: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { cant_sell, .. } => {
-                    *cant_sell
-                }
-                _ => false,
-            },
+            buy_tax_bucket_from: signal.buy_tax_bucket_from.clone(),
+            buy_tax_bucket_to: signal.buy_tax_bucket_to.clone(),
+            sell_tax_bucket_from: signal.sell_tax_bucket_from.clone(),
+            sell_tax_bucket_to: signal.sell_tax_bucket_to.clone(),
+            combined_tax_bucket_from: signal.combined_tax_bucket_from.clone(),
+            combined_tax_bucket_to: signal.combined_tax_bucket_to.clone(),
+            cant_sell: false,
             creator_address: creator_address.to_string(),
             signal_source: "mempool".to_string(),
         }
@@ -112,6 +120,7 @@ impl TaxSignalWriter {
             .acquire_timeout(Duration::from_secs(3))
             .connect(database_url)
             .await?;
+        Self::ensure_schema(&pool).await?;
 
         let (sender, receiver) = mpsc::unbounded_channel::<TaxSignalRecord>();
 
@@ -126,6 +135,23 @@ impl TaxSignalWriter {
             sender,
             _handle: handle,
         })
+    }
+
+    async fn ensure_schema(pool: &Pool<Postgres>) -> Result<()> {
+        sqlx::query(
+            r#"
+            ALTER TABLE live_trading.tax_signals
+                ADD COLUMN IF NOT EXISTS buy_tax_bucket_from VARCHAR(32),
+                ADD COLUMN IF NOT EXISTS buy_tax_bucket_to VARCHAR(32),
+                ADD COLUMN IF NOT EXISTS sell_tax_bucket_from VARCHAR(32),
+                ADD COLUMN IF NOT EXISTS sell_tax_bucket_to VARCHAR(32),
+                ADD COLUMN IF NOT EXISTS combined_tax_bucket_from VARCHAR(32),
+                ADD COLUMN IF NOT EXISTS combined_tax_bucket_to VARCHAR(32)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 
     /// Submit a tax signal record for writing
@@ -206,10 +232,14 @@ impl TaxSignalWriter {
                     detection_timestamp, detection_tx_hash,
                     signal_type, signal_details, confidence,
                     buy_tax_at_signal, sell_tax_at_signal,
+                    buy_tax_bucket_from, buy_tax_bucket_to,
+                    sell_tax_bucket_from, sell_tax_bucket_to,
+                    combined_tax_bucket_from, combined_tax_bucket_to,
                     buy_tax_exceeds_threshold, sell_tax_exceeds_threshold, cant_sell,
                     creator_address, signal_source
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                    $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
                 ) ON CONFLICT (pool_address, detection_tx_hash) DO NOTHING
                 "#,
             )
@@ -225,6 +255,12 @@ impl TaxSignalWriter {
             .bind(&record.confidence)
             .bind(&record.buy_tax_at_signal)
             .bind(&record.sell_tax_at_signal)
+            .bind(&record.buy_tax_bucket_from)
+            .bind(&record.buy_tax_bucket_to)
+            .bind(&record.sell_tax_bucket_from)
+            .bind(&record.sell_tax_bucket_to)
+            .bind(&record.combined_tax_bucket_from)
+            .bind(&record.combined_tax_bucket_to)
             .bind(&record.buy_tax_exceeds_threshold)
             .bind(&record.sell_tax_exceeds_threshold)
             .bind(&record.cant_sell)

@@ -36,8 +36,10 @@ from range_triage_utils import (
     compact_text,
     contract_analysis_metrics,
     contract_analysis_next_step,
+    eligibility_label,
     finite_number,
     is_burn_address,
+    is_eligible_liquidity,
     is_low_liquidity,
     is_meaningfully_liquid,
     looks_like_liquidity_drain,
@@ -245,7 +247,7 @@ class ServerIndexerErrorDetector(IssueDetector):
                     },
                     suggested_next_step=(
                         "separate infrastructure/indexer failures from token behavior before "
-                        "creating token-level cases"
+                        "creating token-level investigations"
                     ),
                 )
             )
@@ -294,25 +296,36 @@ class SimulatorParityDetector(IssueDetector):
     def detect(self, snapshot: RangeRunSnapshot) -> list[IssueCandidate]:
         candidates = []
         for pool in snapshot.pools:
-            can_buy = bool(pool.get("can_buy"))
-            can_sell = bool(pool.get("can_sell"))
-            if not can_buy or can_sell:
+            runtime_state = pool.get("runtime_state") or {}
+            view_can_buy = bool(pool.get("can_buy"))
+            view_can_sell = bool(pool.get("can_sell"))
+            sim_can_buy = bool(runtime_state.get("can_buy", pool.get("can_buy")))
+            sim_can_sell = bool(runtime_state.get("can_sell", pool.get("can_sell")))
+            if not sim_can_buy or sim_can_sell:
                 continue
 
             reason = opt_str(pool.get("last_trading_failure_reason"))
             failure_class = opt_str(pool.get("last_trading_failure_class"))
-            severity = "high" if is_meaningfully_liquid(pool) else "medium"
-            runtime_state = pool.get("runtime_state") or {}
             observed_sell_volume = finite_number(runtime_state.get("token_volume_in")) or 0.0
             observed_sell_denom_out = finite_number(runtime_state.get("denom_volume_out")) or 0.0
             observed_sell = observed_sell_volume > 0.0 and observed_sell_denom_out > 0.0
-            if observed_sell and is_meaningfully_liquid(pool):
+            eligible = is_eligible_liquidity(pool)
+            if observed_sell and not view_can_sell and eligible:
                 severity = "critical"
+            elif observed_sell and eligible:
+                severity = "high"
+            elif observed_sell or is_meaningfully_liquid(pool):
+                severity = "medium"
+            else:
+                severity = "low"
 
             evidence = [
-                "can_buy=true",
-                "can_sell=false",
+                f"simulator_can_buy={sim_can_buy}",
+                f"simulator_can_sell={sim_can_sell}",
+                f"view_can_buy={view_can_buy}",
+                f"view_can_sell={view_can_sell}",
                 f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
+                f"eligibility={eligibility_label(pool)}",
             ]
             if failure_class:
                 evidence.append(f"failure_class={failure_class}")
@@ -325,7 +338,9 @@ class SimulatorParityDetector(IssueDetector):
 
             kind = "simulator_parity.cannot_sell"
             if observed_sell:
-                kind = "simulator_parity.observed_sell_but_sim_cannot_sell"
+                kind = "simulator_parity.observed_sell_overrides_sim_failure"
+                if not view_can_sell:
+                    kind = "simulator_parity.observed_sell_but_sim_cannot_sell"
             elif not failure_class and not reason:
                 kind = "simulator_parity.missing_failure_reason"
 
@@ -359,10 +374,18 @@ class RouteMismatchDetector(IssueDetector):
         candidates = []
         for pool in snapshot.pools:
             if not (bool(pool.get("can_buy")) and not bool(pool.get("can_sell"))):
-                continue
+                runtime_state = pool.get("runtime_state") or {}
+                if not (
+                    bool(runtime_state.get("can_buy"))
+                    and not bool(runtime_state.get("can_sell"))
+                ):
+                    continue
 
             runtime_state = pool.get("runtime_state") or {}
-            observed_sell = (finite_number(runtime_state.get("token_volume_in")) or 0.0) > 0.0
+            observed_sell = (
+                (finite_number(runtime_state.get("token_volume_in")) or 0.0) > 0.0
+                and (finite_number(runtime_state.get("denom_volume_out")) or 0.0) > 0.0
+            )
             failure_class = str(pool.get("last_trading_failure_class") or "")
             reason = str(pool.get("last_trading_failure_reason") or "")
             transfer_failed = (
@@ -374,12 +397,13 @@ class RouteMismatchDetector(IssueDetector):
                     issue(
                         snapshot,
                         kind="route_mismatch.observed_sell_with_transfer_from_failed_sim",
-                        severity="critical" if is_meaningfully_liquid(pool) else "medium",
+                        severity="critical" if is_eligible_liquidity(pool) else "medium",
                         pool=pool,
                         evidence=[
                             "observed token sell volume exists",
                             "classic simulator failed with transfer-from failure",
                             f"protocol={pool.get('protocol')}",
+                            f"eligibility={eligibility_label(pool)}",
                         ],
                         metrics=pool_metrics(pool)
                         | {
@@ -455,6 +479,8 @@ class PriceAndSupplyDetector(IssueDetector):
 
             if ratio is not None and ratio >= EXTREME_PRICE_RATIO:
                 severity = "critical" if ratio >= VERY_EXTREME_PRICE_RATIO else "high"
+                if not is_eligible_liquidity(pool):
+                    severity = "high" if is_meaningfully_liquid(pool) else "medium"
                 if is_low_liquidity(pool) or (supply_percent is not None and supply_percent <= TINY_SUPPLY_PERCENT):
                     candidates.append(
                         issue(
@@ -467,6 +493,7 @@ class PriceAndSupplyDetector(IssueDetector):
                                 f"display_price_ratio_to_initial={metric_number(displayed_ratio)}",
                                 f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
                                 f"supply_in_pool_percent={metric_number(supply_percent)}",
+                                f"eligibility={eligibility_label(pool)}",
                             ],
                             metrics=pool_metrics(pool),
                             suggested_next_step=(
@@ -477,16 +504,20 @@ class PriceAndSupplyDetector(IssueDetector):
                     )
 
             if supply_status and supply_status != "ok":
+                severity = "critical" if supply_label else "high"
+                if not is_eligible_liquidity(pool):
+                    severity = "high" if is_meaningfully_liquid(pool) else "medium"
                 candidates.append(
                     issue(
                         snapshot,
                         kind="supply.pool_reserve_exceeds_total_supply",
-                        severity="critical" if supply_label else "high",
+                        severity=severity,
                         pool=pool,
                         evidence=[
                             f"supply_ratio_status={supply_status}",
                             f"supply_ratio_label={supply_label or 'missing'}",
                             f"supply_in_pool_percent={metric_number(supply_percent)}",
+                            f"eligibility={eligibility_label(pool)}",
                         ],
                         metrics=pool_metrics(pool),
                         suggested_next_step=(
@@ -500,9 +531,12 @@ class PriceAndSupplyDetector(IssueDetector):
                     issue(
                         snapshot,
                         kind="supply.pool_supply_share_over_100_percent",
-                        severity="critical",
+                        severity="critical" if is_eligible_liquidity(pool) else "high",
                         pool=pool,
-                        evidence=[f"supply_in_pool_percent={metric_number(supply_percent)}"],
+                        evidence=[
+                            f"supply_in_pool_percent={metric_number(supply_percent)}",
+                            f"eligibility={eligibility_label(pool)}",
+                        ],
                         metrics=pool_metrics(pool),
                         suggested_next_step=(
                             "verify total supply, token decimals, and reserve extraction"
@@ -574,15 +608,23 @@ class LiquidityHealthDetector(IssueDetector):
 
             lp_supply = finite_number(pool.get("lp_total_supply")) or 0.0
             if lp_supply <= 0.0 and current_liquidity > meaningful_liquidity_threshold(pool):
+                lp_supply_known = bool(pool.get("lp_supply_known"))
+                kind = "lp.zero_supply_with_reserves"
+                severity = "high" if is_eligible_liquidity(pool) else "medium"
+                if not lp_supply_known:
+                    kind = "lp.unknown_supply_with_reserves"
+                    severity = "medium" if is_eligible_liquidity(pool) else "low"
                 candidates.append(
                     issue(
                         snapshot,
-                        kind="lp.zero_supply_with_reserves",
-                        severity="high",
+                        kind=kind,
+                        severity=severity,
                         pool=pool,
                         evidence=[
                             f"lp_total_supply={metric_number(lp_supply)}",
+                            f"lp_supply_status={pool.get('lp_supply_status') or 'unknown'}",
                             f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
+                            f"eligibility={eligibility_label(pool)}",
                         ],
                         metrics=pool_metrics(pool) | {"lp_total_supply": lp_supply},
                         suggested_next_step=(

@@ -76,6 +76,7 @@ pub struct SignalPublisher {
 struct LogFiles {
     trading_enabled: std::fs::File,
     tax_signals: std::fs::File,
+    honeypot_signals: std::fs::File,
     liquidity_removal: std::fs::File,
     lp_approval: std::fs::File,
 }
@@ -86,6 +87,7 @@ pub struct PublisherStats {
     pub total_published: std::sync::atomic::AtomicU64,
     pub trading_enabled: std::sync::atomic::AtomicU64,
     pub tax_signals: std::sync::atomic::AtomicU64,
+    pub honeypot_signals: std::sync::atomic::AtomicU64,
     pub liquidity_removals: std::sync::atomic::AtomicU64,
     pub lp_approvals: std::sync::atomic::AtomicU64,
     pub scam_detections: std::sync::atomic::AtomicU64,
@@ -178,6 +180,11 @@ impl SignalPublisher {
             .append(true)
             .open(log_dir.join("tax_signals.log"))?;
 
+        let honeypot_signals = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("honeypot_signals.log"))?;
+
         let liquidity_removal = OpenOptions::new()
             .create(true)
             .append(true)
@@ -191,6 +198,7 @@ impl SignalPublisher {
         Ok(LogFiles {
             trading_enabled,
             tax_signals,
+            honeypot_signals,
             liquidity_removal,
             lp_approval,
         })
@@ -266,6 +274,11 @@ impl SignalPublisher {
                     .tax_signals
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
+            Signal::Honeypot(_) => {
+                self.stats
+                    .honeypot_signals
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             Signal::LiquidityRemoval(_) => {
                 self.stats
                     .liquidity_removals
@@ -318,6 +331,7 @@ impl SignalPublisher {
         let topic_and_data: Option<(&str, String)> = match signal {
             Signal::TradingEnabled(s) => Some(("trading_enabled", serde_json::to_string(s)?)),
             Signal::TaxSignal(s) => Some(("tax_signal", serde_json::to_string(s)?)),
+            Signal::Honeypot(s) => Some(("honeypot_signal", serde_json::to_string(s)?)),
             Signal::LiquidityRemoval(s) => Some(("liquidity_removal", serde_json::to_string(s)?)),
             Signal::LpApproval(s) => Some(("lp_approval", serde_json::to_string(s)?)),
             Signal::ScamDetection(_) => None,
@@ -380,16 +394,34 @@ impl SignalPublisher {
             Signal::TaxSignal(s) => {
                 writeln!(
                     self.log_files.tax_signals,
-                    "[{}] TAX_SIGNAL | Token: {} | Pool: {} | Type: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
+                    "[{}] TAX_SIGNAL | Token: {} | Pool: {} | Type: {} | BuyTax: {}% | SellTax: {}% | CombinedBucket: {} | TxHash: {}",
                     timestamp,
                     s.token_address,
                     s.pool_address,
                     s.signal_type,
                     s.buy_tax.unwrap_or(-1.0),
                     s.sell_tax.unwrap_or(-1.0),
+                    s.combined_tax_bucket_to.as_deref().unwrap_or("unknown"),
                     s.tx_hash
                 )?;
                 self.log_files.tax_signals.flush()?;
+            }
+            Signal::Honeypot(s) => {
+                writeln!(
+                    self.log_files.honeypot_signals,
+                    "[{}] HONEYPOT_SIGNAL | Token: {} | Pool: {} | PoolType: {} | Creator: {} | CanBuy: {} | CanSell: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
+                    timestamp,
+                    s.token_address,
+                    s.pool_address,
+                    s.pool_type,
+                    s.creator_address,
+                    s.can_buy,
+                    s.can_sell,
+                    s.buy_tax.unwrap_or(-1.0),
+                    s.sell_tax.unwrap_or(-1.0),
+                    s.tx_hash
+                )?;
+                self.log_files.honeypot_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
                 let eth_info = s
@@ -477,6 +509,10 @@ impl SignalPublisher {
                 .stats
                 .tax_signals
                 .load(std::sync::atomic::Ordering::Relaxed),
+            honeypot_signals: self
+                .stats
+                .honeypot_signals
+                .load(std::sync::atomic::Ordering::Relaxed),
             liquidity_removals: self
                 .stats
                 .liquidity_removals
@@ -516,6 +552,7 @@ pub struct PublisherStatsSnapshot {
     pub total_published: u64,
     pub trading_enabled: u64,
     pub tax_signals: u64,
+    pub honeypot_signals: u64,
     pub liquidity_removals: u64,
     pub lp_approvals: u64,
     pub scam_detections: u64,

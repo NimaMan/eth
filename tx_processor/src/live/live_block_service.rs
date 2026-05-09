@@ -5,12 +5,12 @@ use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 use std::str::FromStr;
-use tx_simulator::{TxSimulator, live_chain_data::ChainStateSnapshot};
+use tx_simulator::{live_chain_data::ChainStateSnapshot, TxSimulator};
 
 use crate::live::{
     block_logger::BlockProcessingLogger,
     block_notifier::RedisBlockNotifier,
-    block_snapshot::{LiveBlockSnapshot, build_live_block_snapshot},
+    block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
     live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig},
     processed_block_replay_store_sink::LiveProcessedBlockReplayStoreSink,
     redis_block_publisher::RedisBlockPublisher,

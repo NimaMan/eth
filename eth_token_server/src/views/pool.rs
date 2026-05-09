@@ -132,6 +132,8 @@ pub struct PoolView {
     pub trading_status: TradingStatus,
     pub runtime_state: PoolRuntimeState,
     pub lp_total_supply: f64,
+    pub lp_supply_known: bool,
+    pub lp_supply_status: String,
     pub lp_holder_count: usize,
     pub lp_holders: Vec<LPHolderSnapshot>,
     pub lp_total_approved_to_routers: f64,
@@ -184,6 +186,8 @@ struct ConcentratedPoolViewFields {
 #[derive(Clone, Debug, Default)]
 struct LpPoolViewFields {
     lp_total_supply: f64,
+    lp_supply_known: bool,
+    lp_supply_status: &'static str,
     lp_holder_count: usize,
     lp_holders: Vec<LPHolderSnapshot>,
     lp_total_approved_to_routers: f64,
@@ -203,8 +207,16 @@ impl PoolView {
     pub fn from_v2_pool(token: &ERC20Token, pool: &UniswapV2Pool) -> Self {
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
+        let lp_supply_known =
+            pool.lp_tracker.total_supply > 0.0 || !pool.lp_tracker.mint_events.is_empty();
         let lp_fields = LpPoolViewFields {
             lp_total_supply: pool.lp_tracker.total_supply,
+            lp_supply_known,
+            lp_supply_status: if lp_supply_known {
+                "observed"
+            } else {
+                "unknown"
+            },
             lp_holder_count,
             lp_holders,
             lp_total_approved_to_routers: pool.total_approved_to_routers(),
@@ -231,6 +243,8 @@ impl PoolView {
             &pool.base,
             LpPoolViewFields {
                 lp_total_supply: pool.lp_total_supply(),
+                lp_supply_known: true,
+                lp_supply_status: "observed",
                 lp_holder_count,
                 lp_holders,
                 lp_transfer_count: pool.liquidity_position_events.len(),
@@ -266,6 +280,8 @@ impl PoolView {
             &pool.base,
             LpPoolViewFields {
                 lp_total_supply: pool.lp_total_supply(),
+                lp_supply_known: true,
+                lp_supply_status: "observed",
                 lp_holder_count,
                 lp_holders,
                 lp_total_approved_to_routers: pool.total_approved_to_routers(),
@@ -446,6 +462,7 @@ impl PoolView {
         trading_status.trading_enabled = current_trading.can_buy;
         trading_status.can_buy_and_sell = current_trading.can_buy && current_trading.can_sell;
         let risk = pool_risk(base, current_trading);
+        let stage = current_lifecycle_view(base, current_trading);
         let liquidity_removal = base.has_liquidity_removal();
         Self {
             token_address: token.contract_address.clone(),
@@ -499,7 +516,7 @@ impl PoolView {
             can_buy: current_trading.can_buy,
             can_sell: current_trading.can_sell,
             trading_enabled: current_trading.can_buy,
-            stage: base.state.lifecycle,
+            stage,
             buy_tax,
             sell_tax,
             buy_tax_bucket,
@@ -530,6 +547,8 @@ impl PoolView {
             trading_status,
             runtime_state: base.state.clone(),
             lp_total_supply: lp_fields.lp_total_supply,
+            lp_supply_known: lp_fields.lp_supply_known,
+            lp_supply_status: lp_fields.lp_supply_status.to_string(),
             lp_holder_count: lp_fields.lp_holder_count,
             lp_holders: lp_fields.lp_holders,
             lp_total_approved_to_routers: lp_fields.lp_total_approved_to_routers,
@@ -567,8 +586,20 @@ fn current_trading_view(
             | PoolLifecycle::Evicted
     );
     CurrentTradingView {
-        can_buy: liquidity_allows_trading && base.state.can_buy,
-        can_sell: liquidity_allows_trading && base.state.can_sell,
+        can_buy: liquidity_allows_trading && (base.state.can_buy || base.has_observed_buy()),
+        can_sell: liquidity_allows_trading && (base.state.can_sell || base.has_observed_sell()),
+    }
+}
+
+fn current_lifecycle_view(base: &BasePool, current_trading: CurrentTradingView) -> PoolLifecycle {
+    match base.state.lifecycle {
+        PoolLifecycle::Dust
+        | PoolLifecycle::Drained
+        | PoolLifecycle::LiquidityRemoved
+        | PoolLifecycle::Evicted => base.state.lifecycle,
+        _ if current_trading.can_buy && current_trading.can_sell => PoolLifecycle::Trading,
+        _ if current_trading.can_buy => PoolLifecycle::CannotSell,
+        _ => base.state.lifecycle,
     }
 }
 
@@ -864,6 +895,80 @@ mod tests {
     }
 
     #[test]
+    fn v2_lp_supply_status_marks_mid_range_unknown_supply() {
+        let token_address = "0x1111111111111111111111111111111111111111";
+        let pool_address = "0x2222222222222222222222222222222222222222";
+        let token = ERC20Token::new(ERC20TokenMetadata::new(
+            token_address,
+            "Token",
+            "TOK",
+            18,
+            "1000000000000000000000000",
+        ));
+        let mut pool = UniswapV2Pool::new(
+            pool_address,
+            token_address,
+            WETH_ADDRESS,
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.update_reserves(1_000.0, 1.0, 10, 100, "0xtx1");
+
+        let unknown = PoolView::from_v2_pool(&token, &pool);
+        assert_eq!(unknown.lp_total_supply, 0.0);
+        assert!(!unknown.lp_supply_known);
+        assert_eq!(unknown.lp_supply_status, "unknown");
+
+        pool.lp_tracker.record_transfer(
+            "0x0000000000000000000000000000000000000000",
+            "0xholder",
+            100.0,
+            11,
+            "0xmint",
+            Some(1),
+        );
+
+        let observed = PoolView::from_v2_pool(&token, &pool);
+        assert_eq!(observed.lp_total_supply, 100.0);
+        assert!(observed.lp_supply_known);
+        assert_eq!(observed.lp_supply_status, "observed");
+    }
+
+    #[test]
+    fn v2_lp_supply_status_keeps_mid_range_non_mint_transfer_unknown() {
+        let token_address = "0x1111111111111111111111111111111111111111";
+        let pool_address = "0x2222222222222222222222222222222222222222";
+        let token = ERC20Token::new(ERC20TokenMetadata::new(
+            token_address,
+            "Token",
+            "TOK",
+            18,
+            "1000000000000000000000000",
+        ));
+        let mut pool = UniswapV2Pool::new(
+            pool_address,
+            token_address,
+            WETH_ADDRESS,
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.update_reserves(1_000.0, 1.0, 10, 100, "0xtx1");
+        pool.lp_tracker.record_transfer(
+            "0xholder",
+            "0x000000000000000000000000000000000000dead",
+            100.0,
+            11,
+            "0xburn",
+            Some(1),
+        );
+
+        let view = PoolView::from_v2_pool(&token, &pool);
+        assert_eq!(view.lp_total_supply, 0.0);
+        assert!(!view.lp_supply_known);
+        assert_eq!(view.lp_supply_status, "unknown");
+    }
+
+    #[test]
     fn current_trading_view_masks_dust_or_drained_pool_flags() {
         let mut pool = UniswapV2Pool::new(
             "0xpool",
@@ -888,6 +993,31 @@ mod tests {
         let drained = current_trading_view(&pool.base, PoolLiquidityLevel::Drained);
         assert!(!drained.can_buy);
         assert!(!drained.can_sell);
+    }
+
+    #[test]
+    fn current_trading_view_uses_observed_chain_swaps_as_evidence() {
+        let mut pool = UniswapV2Pool::new(
+            "0xpool",
+            "0xtoken",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        pool.base.state.can_buy = true;
+        pool.base.state.can_sell = false;
+        pool.base.state.record_swap(0.0, 25.0, 0.1, 0.0);
+
+        let current = current_trading_view(&pool.base, PoolLiquidityLevel::Liquid);
+        assert!(current.can_buy);
+        assert!(current.can_sell);
+        assert!(!pool.base.state.can_sell);
+        assert_eq!(
+            current_lifecycle_view(&pool.base, current),
+            PoolLifecycle::Trading
+        );
+        assert_eq!(pool_risk(&pool.base, current).level, PoolRiskLevel::Clear);
     }
 
     #[test]

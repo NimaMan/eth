@@ -22,7 +22,8 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 
 ## Signal Types Supported
 
-- Tax detection signals (current format)
+- Honeypot/sell-blocked signals
+- Tax bucket risk signals
 - Liquidity removal signals
 - Trading enabled signals  
 - LP approval signals

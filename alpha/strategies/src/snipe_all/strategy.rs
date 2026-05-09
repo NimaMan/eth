@@ -359,6 +359,35 @@ mod tests {
     }
 
     #[test]
+    fn holds_weth_pool_below_eth_liquidity_floor() {
+        let mut pool = pool();
+        pool.denom_reserve = Decimal::new(49, 2);
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 1,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(decision, StrategyDecision::Hold);
+    }
+
+    #[test]
     fn restored_open_position_prevents_duplicate_buy() {
         let pool = pool();
         let market = MarketSnapshotRef {

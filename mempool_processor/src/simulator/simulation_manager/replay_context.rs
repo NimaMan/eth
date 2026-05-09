@@ -12,6 +12,8 @@ pub struct PoolCandidate {
     pub denom_address: String,
     pub denom_currency: String,
     pub pool_type: CachePoolType,
+    pub fee_tier: Option<u32>,
+    pub pool_id: Option<String>,
     pub eth_reserve_hint: f64,
 }
 
@@ -22,6 +24,8 @@ impl PoolCandidate {
             denom_address: pool.denom_address.clone(),
             denom_currency: pool.denom_currency.clone(),
             pool_type: pool.pool_type.clone(),
+            fee_tier: pool.fee_tier,
+            pool_id: pool.pool_id.clone(),
             eth_reserve_hint: pool.eth_reserve,
         }
     }
@@ -42,6 +46,8 @@ impl PoolCandidate {
             denom_address: format!("{:#x}", denom_address),
             denom_currency,
             pool_type: CachePoolType::UniswapV2,
+            fee_tier: None,
+            pool_id: None,
             eth_reserve_hint: 0.0,
         }
     }

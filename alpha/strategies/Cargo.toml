@@ -8,4 +8,5 @@ workspace = "../.."
 [dependencies]
 alloy-primitives = "1.5.7"
 eth_alpha_core = { path = "../core" }
+eth_token_eligibility = { path = "../token_eligibility" }
 rust_decimal = "1.36"

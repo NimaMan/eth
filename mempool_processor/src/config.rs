@@ -609,7 +609,8 @@ impl MempoolProcessorConfig {
             }
         }
 
-        // Honeypot threshold removed - now determined by can't sell condition
+        // Honeypot threshold removed; sell-blocked risk is determined by
+        // can_buy=true, can_approve=true, can_sell=false simulation output.
 
         config
     }

@@ -4,7 +4,10 @@ use eth_alpha_core::{
     ids::{PortfolioId, WalletId},
     market::PoolSnapshot,
 };
-use rust_decimal::Decimal;
+use eth_token_eligibility::{
+    evaluate_pool_with_config, EligibilityConfig, EligibilityDecision, PoolEligibilityInput,
+};
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 
 #[derive(Clone, Debug)]
 pub struct SnipeAllConfig {
@@ -31,7 +34,7 @@ impl Default for SnipeAllConfig {
             wallet_id: WalletId("paper-wallet".to_string()),
             sell_amount: buy_amount.clone(),
             buy_amount,
-            min_denom_reserve: Decimal::ZERO,
+            min_denom_reserve: Decimal::new(5, 1),
             min_stable_denom_reserve: Decimal::from(500u64),
             supported_denom_symbols: ["ETH", "WETH", "USDC", "USDT"]
                 .into_iter()
@@ -45,20 +48,27 @@ impl Default for SnipeAllConfig {
 }
 
 impl SnipeAllConfig {
-    pub fn is_supported_denom(&self, pool: &PoolSnapshot) -> bool {
-        let Some(symbol) = normalized_denom_symbol(pool) else {
-            return false;
-        };
-        self.supported_denom_symbols
-            .iter()
-            .any(|supported| supported.eq_ignore_ascii_case(&symbol))
+    pub fn eligibility_config(&self) -> EligibilityConfig {
+        EligibilityConfig {
+            supported_quote_symbols: self.supported_denom_symbols.clone(),
+            min_eth_liquidity: self.min_denom_reserve.to_f64().unwrap_or(0.0),
+            min_stable_liquidity: self.min_stable_denom_reserve.to_f64().unwrap_or(0.0),
+            ..EligibilityConfig::default()
+        }
     }
 
-    pub fn min_reserve_for_pool(&self, pool: &PoolSnapshot) -> DecimalAmount {
-        match normalized_denom_symbol(pool).as_deref() {
-            Some("USDC") | Some("USDT") => self.min_stable_denom_reserve,
-            _ => self.min_denom_reserve,
-        }
+    pub fn eligibility_input(&self, pool: &PoolSnapshot) -> PoolEligibilityInput {
+        PoolEligibilityInput::new(
+            normalized_denom_symbol(pool),
+            pool.denom_reserve.to_f64(),
+            pool.can_buy,
+            pool.can_sell,
+            pool.is_scam,
+        )
+    }
+
+    pub fn eligibility_decision(&self, pool: &PoolSnapshot) -> EligibilityDecision {
+        evaluate_pool_with_config(&self.eligibility_input(pool), &self.eligibility_config())
     }
 }
 

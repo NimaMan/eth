@@ -317,6 +317,38 @@ impl BasePool {
         self.state.can_buy && self.state.can_sell
     }
 
+    pub fn effective_can_buy(&self) -> bool {
+        self.current_liquidity_allows_trading() && (self.state.can_buy || self.has_observed_buy())
+    }
+
+    pub fn effective_can_sell(&self) -> bool {
+        self.current_liquidity_allows_trading() && (self.state.can_sell || self.has_observed_sell())
+    }
+
+    pub fn has_observed_buy(&self) -> bool {
+        positive_finite(self.state.denom_volume_in) && positive_finite(self.state.token_volume_out)
+    }
+
+    pub fn has_observed_sell(&self) -> bool {
+        positive_finite(self.state.token_volume_in) && positive_finite(self.state.denom_volume_out)
+    }
+
+    pub fn current_liquidity_allows_trading(&self) -> bool {
+        if matches!(
+            self.state.lifecycle,
+            PoolLifecycle::Dust
+                | PoolLifecycle::Drained
+                | PoolLifecycle::LiquidityRemoved
+                | PoolLifecycle::Evicted
+        ) || self.has_liquidity_removal()
+        {
+            return false;
+        }
+
+        let has_seen_reserves = self.state.last_update_block > 0 || self.state.last_sync_block > 0;
+        !has_seen_reserves || self.has_meaningful_liquidity()
+    }
+
     pub fn is_scam(&self) -> bool {
         self.has_liquidity_removal()
     }
@@ -459,6 +491,10 @@ fn meaningful_liquidity_threshold(denom_address: &str) -> f64 {
 
 fn is_stable_denom(denom_address: &str) -> bool {
     matches!(denom_address, USDC_ADDRESS | USDT_ADDRESS | DAI_ADDRESS)
+}
+
+fn positive_finite(value: f64) -> bool {
+    value.is_finite() && value > 0.0
 }
 
 fn normalize_address(value: impl AsRef<str>) -> Option<String> {
@@ -638,6 +674,43 @@ mod tests {
         assert_eq!(status.tx.as_deref(), Some("0xBUY"));
         assert_eq!(status.sell_tax, Some(2.0));
         assert_eq!(pool.trading_age_blocks(25), Some(5));
+    }
+
+    #[test]
+    fn observed_swaps_are_chain_evidence_without_mutating_simulation_flags() {
+        let mut pool = weth_pool();
+        pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        pool.set_simulated_buy_status(true, 11, "0xBUY", 1_710);
+        pool.set_simulated_sell_status(false, None, None, 12, "0xSIM_FAIL");
+
+        pool.state.record_swap(0.0, 25.0, 0.1, 0.0);
+
+        assert!(pool.has_observed_sell());
+        assert!(!pool.state.can_sell);
+        assert!(pool.effective_can_sell());
+        assert!(!pool.can_buy_and_sell());
+
+        let status = pool.trading_status();
+        assert!(!status.can_sell);
+        assert!(!status.can_buy_and_sell);
+    }
+
+    #[test]
+    fn observed_swaps_do_not_make_dust_or_drained_pools_tradable() {
+        let mut pool = weth_pool();
+        pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        pool.state.record_swap(1.0, 25.0, 0.1, 10.0);
+        assert!(pool.effective_can_buy());
+        assert!(pool.effective_can_sell());
+        assert!(!pool.trading_enabled());
+
+        pool.update_reserves(100.0, 0.001, 11, 1_712, "0xDUST");
+
+        assert!(pool.has_observed_buy());
+        assert!(pool.has_observed_sell());
+        assert!(!pool.effective_can_buy());
+        assert!(!pool.effective_can_sell());
+        assert!(!pool.trading_enabled());
     }
 
     #[test]

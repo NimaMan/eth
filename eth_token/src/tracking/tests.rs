@@ -448,6 +448,78 @@ async fn discovers_uniswap_v2_pool_from_swap_metadata_for_tracked_token() {
     assert_eq!(pool.base.creation_block, Some(100));
 }
 
+#[tokio::test]
+async fn discovers_uniswap_v2_pool_from_liquidity_metadata_for_tracked_token() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: address!("3333333333333333333333333333333333333333"),
+        from_address: address!("0000000000000000000000000000000000000000"),
+        to_address: address!("0000000000000000000000000000000000000000"),
+        amount: U256::from(1_000_u64),
+        log_index: 1,
+    });
+    tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: address!("3333333333333333333333333333333333333333"),
+        from_address: address!("0000000000000000000000000000000000000000"),
+        to_address: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        amount: U256::from(2_000_000_000_000_000_000_u128),
+        log_index: 2,
+    });
+    tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        reserve0: U256::from(100_000_000_000_000_000_000_u128),
+        reserve1: U256::from(2_000_000_000_000_000_000_u128),
+        log_index: 3,
+    });
+    tx.uniswap_v2_mints.push(UniswapV2MintEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        amount0: U256::from(100_000_000_000_000_000_000_u128),
+        amount1: U256::from(2_000_000_000_000_000_000_u128),
+        log_index: 4,
+    });
+
+    let pool_metadata = StaticUniswapV2PoolMetadataProvider::new([UniswapV2PoolMetadata::new(
+        "0x3333333333333333333333333333333333333333",
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222",
+        18,
+        18,
+    )]);
+
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    let reports = update_router
+        .update_registry_from_processed_transaction_with_discovery(
+            &mut registry,
+            &token_index,
+            &tx,
+            &pool_metadata,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(pool.base.token_reserve(), 100.0);
+    assert_eq!(pool.base.denom_reserve(), 2.0);
+    assert_eq!(pool.lp_tracker.transfers.len(), 2);
+    assert_eq!(pool.lp_tracker.total_supply, 2.0);
+    assert_eq!(
+        pool.lp_share("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        100.0
+    );
+}
+
 #[test]
 fn reports_token_state_update_for_tracked_token_transfer() {
     let mut registry = TokenRegistry::new();

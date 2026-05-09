@@ -47,6 +47,7 @@ impl TokenTransactionApplier {
                     test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
                 },
             );
+            pool.set_known_routers(self.known_routers.iter());
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);

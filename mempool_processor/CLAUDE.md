@@ -46,7 +46,7 @@ src/
 │   └── mempool_simulator.rs           # Unified mempool + pool sim (shared TxSimulator)
 ├── signal_detector/                   # Signal generation (ACTIVE)
 │   ├── signal_manager.rs              # Central signal coordinator
-│   ├── tax_detector.rs                # Tax calculation & honeypot detection
+│   ├── tax_detector.rs                # Tax bucket risk detection
 │   ├── trading_status_detector.rs     # Trading enabled detection  
 │   ├── liquidity_detector.rs          # Pool drain detection
 │   ├── lp_approval_detector.rs        # LP approval tracking
@@ -61,6 +61,7 @@ src/
 ├── db_writers/                       # Database persistence
 │   ├── trading_signal_writer.rs       # Trading enabled signals
 │   ├── tax_signal_writer.rs           # Tax signals
+│   ├── scam_signal_writer.rs          # Honeypot/sell-blocked signals
 │   └── liquidity_removal_...rs        # Liquidity signals
 └── config.rs                         # Configuration types
 ```
@@ -105,16 +106,17 @@ src/
 **SignalPublisher** (`signal_publisher.rs`):
 - Writes to separate log files per signal type:
   - `trading_enabled.log` - TRADING_ENABLED entries only
-  - `tax_signals.log` - TAX_SIGNAL entries (shows -1% for failed calculations)
+  - `honeypot_signals.log` - HONEYPOT_SIGNAL entries
+  - `tax_signals.log` - TAX_SIGNAL tax bucket risk entries
   - `liquidity_removals.log` - Pool drain signals
   - Scam alerts are included in `liquidity_removals.log`
-- ZMQ multipart publishing to tcp://127.0.0.1:5557
+- ZMQ multipart publishing to tcp://127.0.0.1:5556
 - Database writing via db_writers/ (optional)
 - **NEW**: Empty lines between signals for readability
 
 **TradingStatusDetector Logging**:
 - `simulation_results.log` - SIMULATION_RESULT entries (separate from trading_enabled.log)
-- **NEW**: Enhanced BuySell field shows actual results: "SimulationRan(can_buy:true, can_sell:false)"
+- **NEW**: Enhanced BuySell field shows actual results: "SimulationRan(can_buy:true, can_approve:true, can_sell:false)"
 
 ## Critical Implementation Notes
 
@@ -125,16 +127,16 @@ src/
 2. Calculate tokens received vs expected (calculate_buy_tax)
 3. Simulate sell transaction → state changes  
 4. Calculate ETH received vs expected (calculate_sell_tax)
-5. Generate TAX_SIGNAL only if:
+5. Generate HONEYPOT_SIGNAL only if can_buy=true, can_approve=true, can_sell=false
+6. Generate TAX_SIGNAL only for tax bucket/threshold risks:
    - trading_enabled = true, OR
    - trading_enabled = false AND (can_buy OR can_sell)
-6. Skip TAX_SIGNAL if honeypot (can't buy/sell and trading disabled)
 ```
 
 ### Signal Generation Rules
 - **Per-pool signals**: Each (token, pool) pair generates independent signals
 - **Trading status filtering**: Uses token cache to reduce honeypot noise
-- **Tax thresholds**: Buy tax >25%, sell tax >25%, or can't sell = signal
+- **Tax thresholds**: High/extreme tax buckets or configured tax thresholds = `tax_signal`; buy succeeds and sell fails = `honeypot_signal`
 - **Simulation fallback**: 0.01 ETH buy amount, fallback to 0.001 ETH on failure
 
 ### Performance Optimizations
@@ -170,6 +172,8 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 - Simulation manager is the bottleneck, not signal detection
 - Pool state synchronization with Python publisher is critical  
 - Transaction ordering matters for nonce handling
-- Consider V3/V4 pool support (currently V2 only)
+- V2/Sushi and V3 pool support are active where the token cache has enough
+  metadata; V4 removal intent is surfaced as unknown-severity risk until V4
+  buy/sell simulation is validated.
 - The 50K channel buffer size works well in practice
 - Focus on reliability over micro-optimizations

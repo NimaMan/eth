@@ -5,6 +5,7 @@ use crate::token_tracking::types::PoolType;
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{Address, U256};
 use reth_chain_query::to_checksum_address;
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -51,6 +52,8 @@ pub struct SignalManager {
     error_log_path: PathBuf,
     publisher: Option<Arc<Mutex<SignalPublisher>>>,
     total_signals_emitted: u64,
+    emitted_honeypot_pairs: HashSet<(String, String)>,
+    emitted_tax_states: HashSet<(String, String, String)>,
 }
 
 impl SignalManager {
@@ -111,6 +114,8 @@ impl SignalManager {
             error_log_path,
             publisher: None,
             total_signals_emitted: 0,
+            emitted_honeypot_pairs: HashSet::new(),
+            emitted_tax_states: HashSet::new(),
         }
     }
 
@@ -226,6 +231,19 @@ impl SignalManager {
                         s.signal_type
                     )
                 }
+                Signal::Honeypot(s) => {
+                    format!(
+                        "[{}] SIGNAL_DETECTED | HONEYPOT | {} | token: {} | pool: {} | pool_type: {} | creator: {} | can_buy: {} | can_sell: {}",
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        s.tx_hash,
+                        s.token_address,
+                        s.pool_address,
+                        s.pool_type,
+                        s.creator_address,
+                        s.can_buy,
+                        s.can_sell
+                    )
+                }
                 Signal::ScamDetection(s) => {
                     format!(
                         "[{}] SIGNAL_DETECTED | SCAM_DETECTION | {} | pool: {} | token: {} | scammer: {} | eth_drained: {:.4} | drain_%: {:.1}%",
@@ -339,26 +357,71 @@ impl SignalManager {
         let mut signals = Vec::new();
 
         // First, extract key values from simulation result
-        let (_buy_tax, _sell_tax, _can_buy, _can_sell) =
-            if let Some(buy_sell) = &result.buy_sell_result() {
-                self.log_activity(
-                    "BUY_SELL_RESULT",
-                    &format!(
-                        "can_buy: {} | can_sell: {}",
-                        buy_sell.can_buy, buy_sell.can_sell
-                    ),
-                );
+        let buy_sell_result = result.buy_sell_result();
+        let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &buy_sell_result {
+            self.log_activity(
+                "BUY_SELL_RESULT",
+                &format!(
+                    "can_buy: {} | can_approve: {} | can_sell: {}",
+                    buy_sell.can_buy, buy_sell.can_approve, buy_sell.can_sell
+                ),
+            );
 
-                (
-                    None::<f64>, // TODO: Calculate from state changes
-                    None::<f64>, // TODO: Calculate from state changes
-                    buy_sell.can_buy,
-                    buy_sell.can_sell,
-                )
-            } else {
-                // No buy/sell simulation
-                (None::<f64>, None::<f64>, false, false)
-            };
+            (
+                None::<f64>, // TODO: Calculate from state changes
+                None::<f64>, // TODO: Calculate from state changes
+                buy_sell.can_buy,
+                buy_sell.can_sell,
+            )
+        } else {
+            // No buy/sell simulation
+            (None::<f64>, None::<f64>, false, false)
+        };
+
+        if let Some(buy_sell) = &buy_sell_result {
+            if self.tax_signal_detector.is_honeypot(
+                buy_sell.buy_tax,
+                buy_sell.sell_tax,
+                buy_sell.can_buy,
+                buy_sell.can_approve,
+                buy_sell.can_sell,
+            ) {
+                if let (Some(token_address), Some(pool_address)) = (
+                    token_address_from_simulation_result(result),
+                    result.pool_address.map(|addr| to_checksum_address(&addr)),
+                ) {
+                    if self
+                        .emitted_honeypot_pairs
+                        .insert((token_address.clone(), pool_address.clone()))
+                    {
+                        let pool_type =
+                            result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
+                        let creator_address = creator_address_from_simulation_result(result);
+                        let failure_reason = result
+                            .pool_viability_result
+                            .as_ref()
+                            .and_then(|pool_result| pool_result.failure_reason.clone());
+
+                        signals.push(Signal::Honeypot(
+                            crate::signal_detector::types::HoneypotSignal {
+                                tx_hash: result.request.tx.hash.clone(),
+                                token_address,
+                                pool_address,
+                                pool_type,
+                                creator_address,
+                                can_buy: buy_sell.can_buy,
+                                can_sell: buy_sell.can_sell,
+                                buy_tax: buy_sell.buy_tax,
+                                sell_tax: buy_sell.sell_tax,
+                                failure_reason,
+                                confidence: 0.95,
+                                timestamp: chrono::Utc::now().timestamp() as u64,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
 
         // STEP 1: Tax detector (NOW ACTIVE) - Run to get tax signals
         let tax_signals = self.tax_signal_detector.detect(result);
@@ -375,79 +438,96 @@ impl SignalManager {
 
         // Process tax signals to create actual signal records
         for tax_signal in &tax_signals {
-            match tax_signal.signal_type {
-                TaxSignalType::HighTaxOrHoneypot {
-                    cant_sell,
-                    buy_tax_exceeds_threshold,
-                    sell_tax_exceeds_threshold,
-                } => {
-                    // Check trading status from token cache before logging TAX_SIGNAL
-                    let should_log_tax_signal = if let Some(ref token_cache) = self.token_cache {
-                        // Check if trading is enabled on any pool for this token
-                        let pools = token_cache
-                            .get_pools_for_token(&tax_signal.token_address)
-                            .await;
-                        let trading_enabled = pools.iter().any(|p| p.trading_enabled);
+            let (signal_type, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold) =
+                match tax_signal.signal_type {
+                    TaxSignalType::TaxBucketRisk {
+                        buy_tax_exceeds_threshold,
+                        sell_tax_exceeds_threshold,
+                    } => (
+                        "TaxBucketRisk",
+                        buy_tax_exceeds_threshold,
+                        sell_tax_exceeds_threshold,
+                    ),
+                    TaxSignalType::TaxChange { .. } => ("TaxChange", false, false),
+                    TaxSignalType::SuspiciousPattern => ("SuspiciousPattern", false, false),
+                };
 
-                        if trading_enabled {
-                            // Trading is enabled - always log TAX_SIGNAL
-                            true
-                        } else {
-                            // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
-                            if let Some(ref bs) = result.buy_sell_result() {
-                                bs.can_buy || bs.can_sell
-                            } else {
-                                // Can't determine buy/sell capability - skip
-                                false
-                            }
-                        }
-                    } else {
-                        // No token cache - log all TAX_SIGNALS
-                        true
-                    };
+            // Check trading status from token cache before logging TAX_SIGNAL
+            let should_log_tax_signal = if let Some(ref token_cache) = self.token_cache {
+                // Check if trading is enabled on any pool for this token
+                let pools = token_cache
+                    .get_pools_for_token(&tax_signal.token_address)
+                    .await;
+                let trading_enabled = pools.iter().any(|p| p.trading_enabled);
 
-                    if should_log_tax_signal {
-                        // Create pool-specific tax signal
-                        let pool_address = result
-                            .pool_address
-                            .map(|addr| to_checksum_address(&addr))
-                            .unwrap_or_else(|| "unknown".to_string());
-                        let pool_type =
-                            result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
-
-                        // Extract creator from category
-                        let creator_address = match &result.request.category {
-                            crate::tx_router::TransactionCategory::CreatorTransaction {
-                                creator,
-                                ..
-                            } => creator.clone(),
-                            _ => "unknown".to_string(),
-                        };
-
-                        signals.push(Signal::TaxSignal(
-                            crate::signal_detector::types::TaxSignalRecord {
-                                tx_hash: result.request.tx.hash.clone(),
-                                token_address: tax_signal.token_address.clone(),
-                                pool_address,
-                                pool_type,
-                                creator_address,
-                                signal_type: "HighTaxOrHoneypot".to_string(),
-                                signal_details: tax_signal.details.clone(),
-                                confidence: tax_signal.confidence,
-                                buy_tax: tax_signal.buy_tax,
-                                sell_tax: tax_signal.sell_tax,
-                                buy_tax_exceeds_threshold,
-                                sell_tax_exceeds_threshold,
-                                cant_sell,
-                                timestamp: chrono::Utc::now().timestamp() as u64,
-                            },
-                        ));
-                    }
+                if trading_enabled {
+                    // Trading is enabled - always log TAX_SIGNAL
+                    true
+                } else if let Some(ref bs) = buy_sell_result {
+                    // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
+                    bs.can_buy || bs.can_sell
+                } else {
+                    // Can't determine buy/sell capability - skip
+                    false
                 }
-                _ => {
-                    // Log other tax signals but don't convert to specific signal types yet
-                    info!("💸 Tax signal detected: {:?}", tax_signal);
+            } else {
+                // No token cache - log all TAX_SIGNALS
+                true
+            };
+
+            if should_log_tax_signal {
+                // Create pool-specific tax signal
+                let pool_address = result
+                    .pool_address
+                    .map(|addr| to_checksum_address(&addr))
+                    .unwrap_or_else(|| "unknown".to_string());
+                let pool_type = result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
+                let creator_address = creator_address_from_simulation_result(result);
+                let state_key = format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    signal_type,
+                    tax_signal.buy_tax_bucket_from.as_deref().unwrap_or("none"),
+                    tax_signal.buy_tax_bucket_to.as_deref().unwrap_or("none"),
+                    tax_signal.sell_tax_bucket_from.as_deref().unwrap_or("none"),
+                    tax_signal.sell_tax_bucket_to.as_deref().unwrap_or("none"),
+                    tax_signal
+                        .combined_tax_bucket_to
+                        .as_deref()
+                        .unwrap_or("none")
+                );
+
+                if !self.emitted_tax_states.insert((
+                    tax_signal.token_address.clone(),
+                    pool_address.clone(),
+                    state_key,
+                )) {
+                    continue;
                 }
+
+                signals.push(Signal::TaxSignal(
+                    crate::signal_detector::types::TaxSignalRecord {
+                        tx_hash: result.request.tx.hash.clone(),
+                        token_address: tax_signal.token_address.clone(),
+                        pool_address,
+                        pool_type,
+                        creator_address,
+                        signal_type: signal_type.to_string(),
+                        signal_details: tax_signal.details.clone(),
+                        confidence: tax_signal.confidence,
+                        buy_tax: tax_signal.buy_tax,
+                        sell_tax: tax_signal.sell_tax,
+                        buy_tax_bucket_from: tax_signal.buy_tax_bucket_from.clone(),
+                        buy_tax_bucket_to: tax_signal.buy_tax_bucket_to.clone(),
+                        sell_tax_bucket_from: tax_signal.sell_tax_bucket_from.clone(),
+                        sell_tax_bucket_to: tax_signal.sell_tax_bucket_to.clone(),
+                        combined_tax_bucket_from: tax_signal.combined_tax_bucket_from.clone(),
+                        combined_tax_bucket_to: tax_signal.combined_tax_bucket_to.clone(),
+                        buy_tax_exceeds_threshold,
+                        sell_tax_exceeds_threshold,
+                        cant_sell: false,
+                        timestamp: chrono::Utc::now().timestamp() as u64,
+                    },
+                ));
             }
         }
 
@@ -538,8 +618,12 @@ impl SignalManager {
                     self.log_activity(
                         "TRADING_STATUS",
                         &format!(
-                            "No change | Can Buy: {} | Can Sell: {} | buy_tax: {} | sell_tax: {}",
-                            buy_sell.can_buy, buy_sell.can_sell, buy_tax, sell_tax
+                            "No change | Can Buy: {} | Can Approve: {} | Can Sell: {} | buy_tax: {} | sell_tax: {}",
+                            buy_sell.can_buy,
+                            buy_sell.can_approve,
+                            buy_sell.can_sell,
+                            buy_tax,
+                            sell_tax
                         ),
                     );
                 } else {
@@ -670,16 +754,36 @@ impl SignalManager {
                     pool_type: liq_signal.pool_type.clone(),
                     token_address: Some(liq_signal.token_address.clone()),
                     remover_address: liq_signal.from_address.clone(),
-                    function_name: match liq_signal.change_type {
-                        super::liquidity_detector::LiquidityChangeType::CompleteDrain => {
-                            "liquidity_drain"
+                    function_name: liq_signal.function_name.clone().unwrap_or_else(|| {
+                        match liq_signal.change_type {
+                            super::liquidity_detector::LiquidityChangeType::CompleteDrain => {
+                                "liquidity_drain"
+                            }
+                            _ => "remove_liquidity",
                         }
-                        _ => "remove_liquidity",
-                    }
-                    .to_string(),
-                    estimated_eth_removed: Some(liq_signal.eth_change.abs()),
-                    remaining_eth: Some(liq_signal.remaining_liquidity),
-                    removal_percentage: Some(liq_signal.percentage_change),
+                        .to_string()
+                    }),
+                    estimated_eth_removed: liq_signal.eth_removed.or_else(|| {
+                        if liq_signal.eth_change != 0.0 {
+                            Some(liq_signal.eth_change.abs())
+                        } else {
+                            None
+                        }
+                    }),
+                    remaining_eth: liq_signal.remaining_eth.or_else(|| {
+                        if liq_signal.remaining_liquidity > 0.0 {
+                            Some(liq_signal.remaining_liquidity)
+                        } else {
+                            None
+                        }
+                    }),
+                    removal_percentage: liq_signal.removal_percentage.or_else(|| {
+                        if liq_signal.percentage_change > 0.0 {
+                            Some(liq_signal.percentage_change)
+                        } else {
+                            None
+                        }
+                    }),
                     timestamp: chrono::Utc::now().timestamp() as u64,
                 };
                 self.log_activity(
@@ -816,6 +920,31 @@ impl SignalManager {
             }
         }
         false
+    }
+}
+
+fn token_address_from_simulation_result(result: &SimulationResult) -> Option<String> {
+    if let Some(token_address) = &result.token_address {
+        return Some(to_checksum_address(token_address));
+    }
+
+    match &result.request.category {
+        crate::tx_router::TransactionCategory::CreatorTransaction { target_token, .. } => {
+            target_token.clone()
+        }
+        crate::tx_router::TransactionCategory::ContractCreation {
+            contract_address, ..
+        } => Some(contract_address.clone()),
+        _ => None,
+    }
+}
+
+fn creator_address_from_simulation_result(result: &SimulationResult) -> String {
+    match &result.request.category {
+        crate::tx_router::TransactionCategory::CreatorTransaction { creator, .. } => {
+            creator.clone()
+        }
+        _ => "unknown".to_string(),
     }
 }
 

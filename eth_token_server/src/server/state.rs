@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use eth_live_feed::LiveTokenRuntimeConfig;
-use eyre::{Result, eyre};
-use reth_chain_query::{RethQueryProvider, reth_index::RethIndexDB};
+use eyre::{eyre, Result};
+use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
 use crate::alpha_trading::AlphaTradingStore;
 use crate::config::TokenServerConfig;

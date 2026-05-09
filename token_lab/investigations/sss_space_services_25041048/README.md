@@ -1,14 +1,14 @@
 # SSS SpaceX Space Services
 
-This case tracks the SSS pool whose displayed price ratio became extremely high
-while the pool was also marked `cannot_sell`.
+This investigation tracks the SSS pool whose displayed price ratio became
+extremely high while the pool was also marked `cannot_sell`.
 
 The first objective is parity, not classification:
 
 1. Extract the chain truth for the pool and key transactions.
 2. Replay the same transactions with our simulator.
 3. Confirm whether the simulator can reproduce the chain behavior.
-4. Decide which odd behavior detectors this case should produce.
+4. Decide which odd behavior detectors this investigation should produce.
 
 ## Addresses
 
@@ -90,8 +90,8 @@ If simulator output differs from chain truth, classify the mismatch as one of:
 
 ### Current Status
 
-Pending. The case has chain observations, but transaction-level simulator parity
-still needs to be run.
+Pending. The investigation has chain observations, but transaction-level
+simulator parity still needs to be run.
 
 ## Findings
 
@@ -122,4 +122,4 @@ still needs to be run.
 
 ## Artifacts
 
-Generated outputs for this case belong under `artifacts/`.
+Generated outputs for this investigation belong under `artifacts/`.

@@ -26,6 +26,7 @@ pub struct LiquiditySignal {
     pub from_address: String,
     pub tx_hash: String,
     pub details: String,
+    pub function_name: Option<String>,
     // Additional fields for database
     pub eth_removed: Option<f64>,
     pub token_removed: Option<f64>,
@@ -129,11 +130,19 @@ impl LiquidityDetector {
         removal_result: &LiquidityRemovalResult,
         token_address: Address,
     ) -> Option<LiquiditySignal> {
-        // Check if a pool was identified and drained
-        let pool_address = removal_result.pool_address?;
+        let pool_address = removal_result.pool_identifier.clone().or_else(|| {
+            removal_result
+                .pool_address
+                .map(|addr| to_checksum_address(&addr))
+        })?;
 
         // Determine signal type and change type based on drain percentage
-        let (signal_type, change_type) = if removal_result.is_scam {
+        let (signal_type, change_type) = if !removal_result.metrics_known {
+            (
+                SignalType::LiquidityRemoval,
+                LiquidityChangeType::MinorRemoval,
+            )
+        } else if removal_result.is_scam {
             (SignalType::ScamDetected, LiquidityChangeType::CompleteDrain)
         } else if removal_result.drain_percentage > self.major_removal_threshold * 100.0 {
             (
@@ -156,28 +165,40 @@ impl LiquidityDetector {
         };
 
         // Get pool type from token cache if available
-        let pool_address_str = to_checksum_address(&pool_address);
-        let pool_type = if let Some(ref token_cache) = self.token_cache {
+        let pool_address_str = pool_address;
+        let pool_type = if let Some(pool_type) = &removal_result.pool_type {
+            pool_type.clone()
+        } else if let Some(ref token_cache) = self.token_cache {
             if let Some(pool_state) = token_cache.get_pool(&pool_address_str).await {
                 format!("{:?}", pool_state.pool_type)
             } else {
-                "Uniswap-V2".to_string() // Default to V2
+                "UNKNOWN".to_string()
             }
         } else {
-            "Uniswap-V2".to_string() // Default to Uniswap-V2
+            "UNKNOWN".to_string()
         };
 
-        let details = match signal_type {
-            SignalType::ScamDetected => format!(
-                "SCAM DETECTED - Liquidity removal: {:.1}% drain ({:.4} ETH -> {:.4} ETH)",
-                removal_result.drain_percentage,
-                removal_result.eth_removed + removal_result.remaining_eth,
-                removal_result.remaining_eth
-            ),
-            SignalType::LiquidityRemoval => format!(
-                "Liquidity removal: {:.4} ETH ({:.1}%)",
-                removal_result.eth_removed, removal_result.drain_percentage
-            ),
+        let details = if !removal_result.metrics_known {
+            format!(
+                "Liquidity removal candidate ({}) - severity unknown until mined/block update",
+                removal_result
+                    .function_name
+                    .as_deref()
+                    .unwrap_or("remove_liquidity")
+            )
+        } else {
+            match signal_type {
+                SignalType::ScamDetected => format!(
+                    "SCAM DETECTED - Liquidity removal: {:.1}% drain ({:.4} ETH -> {:.4} ETH)",
+                    removal_result.drain_percentage,
+                    removal_result.eth_removed + removal_result.remaining_eth,
+                    removal_result.remaining_eth
+                ),
+                SignalType::LiquidityRemoval => format!(
+                    "Liquidity removal: {:.4} ETH ({:.1}%)",
+                    removal_result.eth_removed, removal_result.drain_percentage
+                ),
+            }
         };
 
         info!(
@@ -197,12 +218,25 @@ impl LiquidityDetector {
             from_address: to_checksum_address(&from_address),
             tx_hash: tx_hash.to_string(),
             details,
+            function_name: removal_result.function_name.clone(),
             // Additional fields for database
-            eth_removed: Some(removal_result.eth_removed),
+            eth_removed: if removal_result.metrics_known {
+                Some(removal_result.eth_removed)
+            } else {
+                None
+            },
             token_removed: None, // Could be extracted from state changes if needed
-            remaining_eth: Some(removal_result.remaining_eth),
+            remaining_eth: if removal_result.metrics_known {
+                Some(removal_result.remaining_eth)
+            } else {
+                None
+            },
             remaining_token: None,
-            removal_percentage: Some(removal_result.drain_percentage),
+            removal_percentage: if removal_result.metrics_known {
+                Some(removal_result.drain_percentage)
+            } else {
+                None
+            },
             creator_address: to_checksum_address(&from_address),
         })
     }
@@ -295,6 +329,7 @@ impl LiquidityDetector {
             from_address: alloy_address_to_checksum(from_address),
             tx_hash: tx_hash.to_string(),
             details,
+            function_name: Some("pool_balance_drain".to_string()),
             // Additional fields for database
             eth_removed: Some(eth_change_f64.abs()),
             token_removed: None, // TODO: Calculate from state changes

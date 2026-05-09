@@ -50,7 +50,7 @@ struct Args {
     #[arg(long, default_value = "10000000000000000")]
     paper_buy_wei: String,
 
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value = "0.5")]
     min_liquidity_eth: String,
 
     #[arg(long, default_value = "500")]
@@ -814,17 +814,13 @@ fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSeveri
         "trading_enabled" => (RiskKind::TradingEnabled, RiskSeverity::Info),
         "liquidity_removal" => (RiskKind::LiquidityRemoval, RiskSeverity::Critical),
         "lp_approval" => (RiskKind::LpApproval, RiskSeverity::Warning),
+        "honeypot_signal" | "sell_blocked_signal" => (RiskKind::Honeypot, RiskSeverity::Critical),
         "tax_signal" => {
             let critical = signal
                 .flag
                 .as_deref()
-                .map(|flag| matches!(flag, "true" | "t" | "1"))
-                .unwrap_or(false)
-                || signal
-                    .headline
-                    .as_deref()
-                    .map(|headline| headline.to_ascii_lowercase().contains("honeypot"))
-                    .unwrap_or(false);
+                .map(is_critical_tax_bucket)
+                .unwrap_or(false);
             (
                 RiskKind::TaxChange,
                 if critical {
@@ -836,6 +832,13 @@ fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSeveri
         }
         other => (RiskKind::Custom(other.to_string()), RiskSeverity::Warning),
     }
+}
+
+fn is_critical_tax_bucket(bucket: &str) -> bool {
+    matches!(
+        bucket.trim().to_ascii_lowercase().as_str(),
+        "high_tax" | "extreme_tax" | "high" | "extreme"
+    )
 }
 
 fn parse_protocol(value: &str) -> PoolProtocol {

@@ -5,7 +5,7 @@ trading-strategy investigations.
 
 ## Purpose
 
-- Turn token/pool behavior into reproducible cases and reusable analysis.
+- Turn token/pool behavior into reproducible investigations and reusable analysis.
 - Compare range-builder output, chain truth, simulator replay, and trading
   guardrail expectations.
 - Promote confirmed patterns into production detectors, frontend summaries,
@@ -13,7 +13,7 @@ trading-strategy investigations.
 
 ## Owns
 
-- Case folders with the narrative, machine-readable facts, and generated
+- Investigation folders with the narrative, machine-readable facts, and generated
   artifacts for one concrete investigation.
 - Strategy analysis notes and contracts for launch/winner/scam cohort stats.
 - Read-only triage and detector prototype tools.
@@ -33,7 +33,7 @@ trading-strategy investigations.
 ```text
 token range/server output + simulator logs
   -> read-only triage ledger
-  -> case folder with chain truth and parity artifacts
+  -> investigation folder with chain truth and parity artifacts
   -> confirmed finding
   -> fix in owner crate or promote detector/guardrail
 ```
@@ -42,7 +42,7 @@ token range/server output + simulator logs
 
 | Folder | Purpose |
 | --- | --- |
-| `cases/` | Concrete token or pool investigations with narrative, metadata, and artifacts. |
+| `investigations/` | Concrete token or pool investigations with narrative, metadata, and artifacts. |
 | `odd_behaviors/` | Shared catalog of behavior patterns that deserve review or detectors. |
 | `strategy/` | Launch, winner, scam/risk, and cohort analysis used to design trading strategies. |
 | `tools/chain_truth/` | Chain-fact extraction used as the baseline for trust. |
@@ -54,9 +54,9 @@ token range/server output + simulator logs
 
 | Need | Start here |
 | --- | --- |
-| Working candidate ledger | `cases/README.md` |
-| One concrete investigation | `cases/<slug>/README.md` |
-| Case metadata shape | `cases/<slug>/case.toml` |
+| Working candidate ledger | `investigations/README.md` |
+| One concrete investigation | `investigations/<slug>/README.md` |
+| Investigation metadata shape | `investigations/<slug>/investigation.toml` |
 | Launch/winner strategy stats | `strategy/README.md` |
 | Triage candidate generation | `tools/detectors/README.md`, `tools/detectors/range_triage.py` |
 | Receipts/logs/balances/reserves truth | `tools/chain_truth/` |
@@ -78,9 +78,9 @@ token_lab/tools/detectors/range_triage.py \
 ## Current Hazards
 
 - The first artifact should be a candidate ledger, not a fix.
-- Do not write generated token-lab artifacts from normal range builds. Case
-  tools should write under `cases/<slug>/artifacts/`.
-- Promote a case only when it affects trading decisions, suggests a pipeline
-  bug, or should become a detector/guardrail.
+- Do not write generated token-lab artifacts from normal range builds.
+  Investigation tools should write under `investigations/<slug>/artifacts/`.
+- Promote an investigation only when it affects trading decisions, suggests a
+  pipeline bug, or should become a detector/guardrail.
 - A number is trusted only after it matches chain behavior or the mismatch is
   explained and tracked.

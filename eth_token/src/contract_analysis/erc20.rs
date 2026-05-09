@@ -183,7 +183,7 @@ fn pool_surface(token: &ERC20Token) -> PoolSurfaceReport {
         if pool.trading_enabled() {
             trading_pool_count += 1;
         }
-        if pool.state.can_buy && !pool.state.can_sell {
+        if pool.effective_can_buy() && !pool.effective_can_sell() {
             cannot_sell_pool_count += 1;
         }
         if pool.has_liquidity_removal() {

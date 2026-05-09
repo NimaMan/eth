@@ -10,12 +10,12 @@ use tracing::{debug, error, info};
 
 use super::{
     LiquidityRemovalSignalRecord, LiquidityRemovalSignalWriter, LpApprovalSignalRecord,
-    LpApprovalSignalWriter, SignalWriterConfig, TaxSignalRecord, TaxSignalWriter,
-    TradingSignalRecord, TradingSignalWriter,
+    LpApprovalSignalWriter, ScamSignalRecord, ScamSignalWriter, SignalWriterConfig,
+    TaxSignalRecord, TaxSignalWriter, TradingSignalRecord, TradingSignalWriter,
 };
 use crate::signal_detector::types::TaxSignalRecord as TaxSignal;
 use crate::signal_detector::{
-    LiquidityRemovalSignal, LpApprovalSignal, Signal, TradingEnabledSignal,
+    HoneypotSignal, LiquidityRemovalSignal, LpApprovalSignal, Signal, TradingEnabledSignal,
 };
 
 fn normalize_pool_type(pool_type: &str) -> String {
@@ -35,6 +35,7 @@ fn normalize_pool_type(pool_type: &str) -> String {
 pub struct UnifiedSignalWriter {
     trading_writer: Option<TradingSignalWriter>,
     tax_writer: Option<TaxSignalWriter>,
+    scam_writer: Option<ScamSignalWriter>,
     liquidity_removal_writer: Option<LiquidityRemovalSignalWriter>,
     lp_approval_writer: Option<LpApprovalSignalWriter>,
 }
@@ -74,6 +75,18 @@ impl UnifiedSignalWriter {
             }
         };
 
+        let scam_writer =
+            match ScamSignalWriter::new(database_url, 50, Duration::from_secs(5)).await {
+                Ok(w) => {
+                    info!("✅ Scam/honeypot signal writer initialized");
+                    Some(w)
+                }
+                Err(e) => {
+                    error!("Failed to create scam/honeypot signal writer: {}", e);
+                    None
+                }
+            };
+
         // Initialize liquidity removal signal writer
         let liquidity_removal_writer =
             match LiquidityRemovalSignalWriter::new_with_database_url(database_url).await {
@@ -103,6 +116,7 @@ impl UnifiedSignalWriter {
         // Check if at least one writer was initialized
         if trading_writer.is_none()
             && tax_writer.is_none()
+            && scam_writer.is_none()
             && liquidity_removal_writer.is_none()
             && lp_approval_writer.is_none()
         {
@@ -114,6 +128,7 @@ impl UnifiedSignalWriter {
         Ok(Self {
             trading_writer,
             tax_writer,
+            scam_writer,
             liquidity_removal_writer,
             lp_approval_writer,
         })
@@ -142,6 +157,16 @@ impl UnifiedSignalWriter {
                 }
             }
 
+            Signal::Honeypot(s) => {
+                if let Some(ref writer) = self.scam_writer {
+                    let record = ScamSignalRecord::from_honeypot_signal(&s);
+                    writer.write_signal(record)?;
+                    debug!("Written Honeypot signal to database");
+                } else {
+                    debug!("Scam/honeypot signal writer not available");
+                }
+            }
+
             Signal::LiquidityRemoval(s) => {
                 if let Some(ref writer) = self.liquidity_removal_writer {
                     // Convert to LiquiditySignal for the writer
@@ -157,6 +182,7 @@ impl UnifiedSignalWriter {
                         from_address: s.remover_address.clone(),
                         tx_hash: s.tx_hash.clone(),
                         details: format!("Function: {}", s.function_name),
+                        function_name: Some(s.function_name.clone()),
                         eth_removed: s.estimated_eth_removed,
                         token_removed: None,
                         remaining_eth: s.remaining_eth,
@@ -194,6 +220,7 @@ impl UnifiedSignalWriter {
     pub fn has_writers(&self) -> bool {
         self.trading_writer.is_some()
             || self.tax_writer.is_some()
+            || self.scam_writer.is_some()
             || self.liquidity_removal_writer.is_some()
             || self.lp_approval_writer.is_some()
     }
@@ -201,13 +228,18 @@ impl UnifiedSignalWriter {
     /// Get status of individual writers
     pub fn get_status(&self) -> String {
         format!(
-            "Writers status - Trading: {}, Tax: {}, LiquidityRemoval: {}, LpApproval: {}",
+            "Writers status - Trading: {}, Tax: {}, Honeypot: {}, LiquidityRemoval: {}, LpApproval: {}",
             if self.trading_writer.is_some() {
                 "✓"
             } else {
                 "✗"
             },
             if self.tax_writer.is_some() {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.scam_writer.is_some() {
                 "✓"
             } else {
                 "✗"
@@ -268,12 +300,34 @@ impl TaxSignalRecord {
             confidence: Some(signal.confidence),
             buy_tax_at_signal: signal.buy_tax,
             sell_tax_at_signal: signal.sell_tax,
+            buy_tax_bucket_from: signal.buy_tax_bucket_from.clone(),
+            buy_tax_bucket_to: signal.buy_tax_bucket_to.clone(),
+            sell_tax_bucket_from: signal.sell_tax_bucket_from.clone(),
+            sell_tax_bucket_to: signal.sell_tax_bucket_to.clone(),
+            combined_tax_bucket_from: signal.combined_tax_bucket_from.clone(),
+            combined_tax_bucket_to: signal.combined_tax_bucket_to.clone(),
             buy_tax_exceeds_threshold: signal.buy_tax_exceeds_threshold,
             sell_tax_exceeds_threshold: signal.sell_tax_exceeds_threshold,
             cant_sell: signal.cant_sell,
             creator_address: signal.creator_address.clone(),
             signal_source: "mempool".to_string(),
         }
+    }
+}
+
+impl ScamSignalRecord {
+    /// Convert from a semantic honeypot/sell-blocked signal.
+    pub fn from_honeypot_signal(signal: &HoneypotSignal) -> Self {
+        ScamSignalRecord::honeypot(
+            signal.token_address.clone(),
+            signal.pool_address.clone(),
+            signal.creator_address.clone(),
+            signal.tx_hash.clone(),
+            signal.buy_tax,
+            signal.sell_tax,
+            signal.failure_reason.clone(),
+            normalize_pool_type(&signal.pool_type),
+        )
     }
 }
 
