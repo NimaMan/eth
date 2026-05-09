@@ -12,5 +12,8 @@ pub mod provider;
 pub mod token;
 
 pub use address::AddressProcessedTxProvider;
+pub use cache::{
+    processed_block_trace_config_hash, ProcessedBlockCacheKey, ProcessedBlockCacheStore,
+};
 pub use provider::ProcessedTxProvider;
 pub use token::TokenProcessedTxProvider;

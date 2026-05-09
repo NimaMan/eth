@@ -576,6 +576,9 @@ mod tests {
             storage_keys: vec![B256::repeat_byte(0x55)],
         });
         tx.blob_versioned_hashes.push(B256::repeat_byte(0x66));
+        tx.tx_type = "swap".to_string();
+        tx.actions.push("token_tracking".to_string());
+        tx.erc721_contracts.insert(Address::repeat_byte(0x77));
 
         let block = ProcessedBlock {
             header: BlockHeader {
@@ -617,6 +620,11 @@ mod tests {
             cached_tx.blob_versioned_hashes,
             vec![B256::repeat_byte(0x66)]
         );
+        assert_eq!(cached_tx.tx_type, "swap");
+        assert_eq!(cached_tx.actions, vec!["token_tracking"]);
+        assert!(cached_tx
+            .erc721_contracts
+            .contains(&Address::repeat_byte(0x77)));
 
         std::fs::remove_dir_all(root).expect("remove temp cache");
     }

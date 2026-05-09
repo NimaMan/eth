@@ -43,7 +43,7 @@ pub use processed_block_provider::{
     ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
     ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
     ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
-    DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use processed_tx_provider::{
     processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,

@@ -4,7 +4,7 @@ mod live;
 mod load;
 mod range;
 
-pub use compact::CompactProcessedTransaction;
+pub use compact::{CompactProcessedTransaction, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION};
 pub use disk_cache::{
     ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
     ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,

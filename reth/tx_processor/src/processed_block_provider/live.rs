@@ -9,14 +9,12 @@ use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use reth_chain_query::provider::BlockHeader;
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
 use tx_simulator::live_chain_data::live_data_registry::keys;
 
-use super::compact::block_transaction_from_processed;
 use crate::{
-    load_processed_block, BlockProcessor, LoadedProcessedBlock, ProcessedBlock,
-    ProcessedBlockDiskCacheStore, ProcessedBlockProviderRetry, ProcessedBlockSource,
-    ProcessedTransaction,
+    load_processed_block, BlockProcessor, CompactProcessedTransaction, LoadedProcessedBlock,
+    ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockProviderRetry,
+    ProcessedBlockSource, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
 };
 
 #[derive(Clone)]
@@ -247,111 +245,28 @@ fn decode_transactions(
 }
 
 fn decode_transaction(payload: &str) -> Result<crate::ProcessedBlockTransactions> {
-    let mut value: Value = serde_json::from_str(payload)
-        .map_err(|err| eyre!("failed to decode live processed transaction JSON: {err}"))?;
-    let processing_error = value
-        .get("processing_error")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    normalize_live_transaction_payload(&mut value)?;
-    let processed: ProcessedTransaction = serde_json::from_value(value)
-        .map_err(|err| eyre!("failed to decode live processed transaction payload: {err}"))?;
-    Ok(block_transaction_from_processed(
-        processed,
-        processing_error,
-    ))
-}
-
-fn normalize_live_transaction_payload(value: &mut Value) -> Result<()> {
-    let Some(object) = value.as_object_mut() else {
-        return Err(eyre!("live processed transaction payload is not an object"));
-    };
-    if let Some(input) = object.get("input").and_then(Value::as_str) {
-        object.insert("input".to_string(), json!(hex_to_bytes(input, "input")?));
+    let decoded: RedisProcessedTransactionPayload = serde_json::from_str(payload)
+        .map_err(|err| eyre!("failed to decode compact live processed transaction JSON: {err}"))?;
+    if decoded.processed.processed_tx_schema_version != COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION
+    {
+        return Err(eyre!(
+            "unsupported live processed transaction schema version: expected {}, got {}",
+            COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+            decoded.processed.processed_tx_schema_version
+        ));
     }
-    insert_runtime_defaults(object);
-    Ok(())
+    Ok(decoded
+        .processed
+        .into_block_transaction(decoded.processing_error))
 }
 
-fn insert_runtime_defaults(object: &mut Map<String, Value>) {
-    for field in DEFAULT_ARRAY_FIELDS {
-        insert_default_if_missing_or_null(object, field, json!([]));
-    }
-    for field in DEFAULT_OBJECT_FIELDS {
-        insert_default_if_missing_or_null(object, field, json!({}));
-    }
-    insert_default_if_missing_or_null(object, "tx_type", json!(""));
-    insert_default_if_missing_or_null(object, "bribe_amount", json!("0"));
+#[derive(Debug, Deserialize)]
+struct RedisProcessedTransactionPayload {
+    #[serde(flatten)]
+    processed: CompactProcessedTransaction,
+    #[serde(default)]
+    processing_error: Option<String>,
 }
-
-fn insert_default_if_missing_or_null(object: &mut Map<String, Value>, field: &str, default: Value) {
-    match object.get(field) {
-        Some(value) if !value.is_null() => {}
-        _ => {
-            object.insert(field.to_string(), default);
-        }
-    }
-}
-
-fn hex_to_bytes(value: &str, label: &str) -> Result<Vec<u8>> {
-    let value = value.strip_prefix("0x").unwrap_or(value);
-    hex::decode(value).map_err(|err| eyre!("invalid {label} hex payload: {err}"))
-}
-
-const DEFAULT_ARRAY_FIELDS: &[&str] = &[
-    "actions",
-    "unique_addresses",
-    "erc20_contracts",
-    "erc721_contracts",
-    "erc1155_contracts",
-    "eth_transfers",
-    "erc20_transfers",
-    "erc721_transfers",
-    "erc1155_transfers",
-    "internal_transactions",
-    "uniswap_v2_syncs",
-    "uniswap_v2_swaps",
-    "uniswap_v3_pools",
-    "uniswap_v3_initializations",
-    "uniswap_v3_burns",
-    "uniswap_v3_mints",
-    "uniswap_v3_swaps",
-    "uniswap_v3_positions",
-    "uniswap_v3_increases",
-    "uniswap_v3_decreases",
-    "uniswap_v4_initializes",
-    "uniswap_v4_modifies",
-    "uniswap_v4_swaps",
-    "uniswap_v4_donates",
-    "uniswap_v4_protocol_fee_updates",
-    "uniswap_v4_dynamic_lp_fee_updates",
-    "uniswap_v4_protocol_fee_controller_updates",
-    "uniswap_v4_balance_deltas",
-    "permit2_events",
-    "access_list",
-    "blob_versioned_hashes",
-    "signed_authorizations",
-    "erc20_approval_events",
-    "erc721_approval_events",
-    "approval_for_all_events",
-    "uniswap_v2_mints",
-    "uniswap_v2_burns",
-    "deposit_events",
-    "withdraw_events",
-    "uniswap_v2_pair_created_events",
-    "ownership_transferred_events",
-    "ownership_transfer_started_events",
-    "access_control_role_granted_events",
-    "access_control_role_revoked_events",
-    "proxy_admin_changed_events",
-    "contract_creation_events",
-    "trading_enabled_events",
-    "trading_disabled_events",
-    "other_events",
-    "input",
-];
-
-const DEFAULT_OBJECT_FIELDS: &[&str] = &["address_balance_changes", "latest_states"];
 
 fn parse_optional_u64_string(value: Option<&str>, label: &str) -> Result<Option<u64>> {
     value
@@ -444,5 +359,25 @@ mod tests {
             decoded.processing_error.as_deref(),
             Some("simulated failure")
         );
+    }
+
+    #[test]
+    fn rejects_legacy_dense_live_transaction_payload() {
+        let tx = ProcessedTransaction::new(
+            B256::repeat_byte(0x11),
+            42,
+            1_700_000_000,
+            7,
+            Address::repeat_byte(0x22),
+            Some(Address::repeat_byte(0x33)),
+            U256::from(123),
+            true,
+            9,
+            2,
+            vec![0xde, 0xad, 0xbe, 0xef],
+        );
+        let payload = serde_json::to_string(&tx).expect("legacy dense payload");
+
+        let _ = decode_transaction(&payload).expect_err("legacy dense payload rejected");
     }
 }

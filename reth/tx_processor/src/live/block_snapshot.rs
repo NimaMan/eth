@@ -1,8 +1,9 @@
 use crate::block_processor::{ProcessedBlock, ProcessedBlockTransactions};
+use crate::processed_block_provider::CompactProcessedTransaction;
 use alloy_primitives::Address;
 use eyre::{eyre, Result};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashSet;
 
 /// Snapshot payload ready for Redis persistence.
@@ -115,74 +116,26 @@ fn to_hex(value: u64) -> String {
 fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<LiveTxEntry> {
     let tx_hash = format!("{:#x}", tx.processed.hash);
     let unique_addresses = address_set_to_strings(&tx.processed.unique_addresses);
-    let mut payload = serde_json::to_value(&tx.processed).map_err(|err| {
+    let compact = CompactProcessedTransaction::from_processed(&tx.processed);
+    let mut payload = compact.to_sparse_json_value().map_err(|err| {
         eyre!(
-            "failed to serialize processed transaction {}: {}",
+            "failed to serialize compact processed transaction {}: {}",
             tx_hash,
             err
         )
     })?;
-
     let object = payload.as_object_mut().ok_or_else(|| {
         eyre!(
-            "processed transaction {} did not serialize to an object",
+            "compact processed transaction {} did not serialize to an object",
             tx_hash
         )
     })?;
-
-    object.insert("hash".to_string(), json!(tx_hash.clone()));
-    object.insert(
-        "from_address".to_string(),
-        json!(reth_chain_query::to_checksum_address(
-            &tx.processed.from_address
-        )),
-    );
-    object.insert(
-        "to_address".to_string(),
-        tx.processed
-            .to_address
-            .map(|address| json!(reth_chain_query::to_checksum_address(&address)))
-            .unwrap_or(Value::Null),
-    );
-    object.insert(
-        "contract_address".to_string(),
-        tx.processed
-            .contract_address
-            .map(|address| json!(reth_chain_query::to_checksum_address(&address)))
-            .unwrap_or(Value::Null),
-    );
-    object.insert(
-        "input".to_string(),
-        json!(format!("0x{}", hex::encode(&tx.processed.input))),
-    );
-    object.insert(
-        "unique_addresses".to_string(),
-        json!(unique_addresses.clone()),
-    );
-    object.insert(
-        "erc20_contracts".to_string(),
-        address_set_to_json(&tx.processed.erc20_contracts),
-    );
-    object.insert(
-        "erc721_contracts".to_string(),
-        address_set_to_json(&tx.processed.erc721_contracts),
-    );
-    object.insert(
-        "erc1155_contracts".to_string(),
-        address_set_to_json(&tx.processed.erc1155_contracts),
-    );
-    object.insert(
-        "processing_error".to_string(),
-        tx.processing_error
-            .as_ref()
-            .map(|error| json!(error))
-            .unwrap_or(Value::Null),
-    );
-
-    prune_empty_json_fields(&mut payload);
+    if let Some(error) = &tx.processing_error {
+        object.insert("processing_error".to_string(), Value::String(error.clone()));
+    }
     let tx_json = serde_json::to_string(&payload).map_err(|err| {
         eyre!(
-            "failed to encode processed transaction {}: {}",
+            "failed to encode compact processed transaction {}: {}",
             tx_hash,
             err
         )
@@ -195,10 +148,6 @@ fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<LiveTxEntr
     })
 }
 
-fn address_set_to_json(addresses: &HashSet<Address>) -> Value {
-    json!(address_set_to_strings(addresses))
-}
-
 fn address_set_to_strings(addresses: &HashSet<Address>) -> Vec<String> {
     let mut values: Vec<String> = addresses
         .iter()
@@ -208,29 +157,72 @@ fn address_set_to_strings(addresses: &HashSet<Address>) -> Vec<String> {
     values
 }
 
-fn prune_empty_json_fields(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            for nested in object.values_mut() {
-                prune_empty_json_fields(nested);
-            }
-            object.retain(|_, nested| !is_empty_json_field(nested));
-        }
-        Value::Array(items) => {
-            for nested in items {
-                prune_empty_json_fields(nested);
-            }
-        }
-        _ => {}
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processed_block_provider::CompactProcessedTransaction;
+    use crate::tx_processor::data_models::ProcessedTransaction;
+    use alloy_primitives::{B256, U256};
+    use reth_chain_query::provider::BlockHeader;
 
-fn is_empty_json_field(value: &Value) -> bool {
-    match value {
-        Value::Null => true,
-        Value::String(value) => value.is_empty(),
-        Value::Array(values) => values.is_empty(),
-        Value::Object(values) => values.is_empty(),
-        _ => false,
+    #[test]
+    fn live_snapshot_uses_compact_transaction_payload() {
+        let mut tx = ProcessedTransaction::new(
+            B256::repeat_byte(0x11),
+            42,
+            1_700_000_000,
+            7,
+            Address::repeat_byte(0x22),
+            Some(Address::repeat_byte(0x33)),
+            U256::from(123),
+            true,
+            9,
+            2,
+            vec![0xde, 0xad, 0xbe, 0xef],
+        );
+        tx.unique_addresses.insert(Address::repeat_byte(0x22));
+        let block_tx = CompactProcessedTransaction::from_processed(&tx)
+            .into_block_transaction(Some("simulated failure".to_string()));
+        let block = ProcessedBlock {
+            header: BlockHeader {
+                number: 42,
+                hash: B256::repeat_byte(0xaa),
+                parent_hash: B256::repeat_byte(0xbb),
+                timestamp: 1_700_000_000,
+                gas_limit: 30_000_000,
+                gas_used: 21_000,
+                base_fee_per_gas: Some(1),
+                withdrawals_root: None,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: None,
+                requests_hash: None,
+                block_access_list_hash: None,
+                slot_number: None,
+            },
+            transactions: vec![block_tx],
+        };
+
+        let snapshot = build_live_block_snapshot(&block).expect("build live snapshot");
+        let payload: Value =
+            serde_json::from_str(&snapshot.tx_entries[0].payload_json).expect("payload json");
+        let object = payload.as_object().expect("payload object");
+
+        assert_eq!(
+            object
+                .get("processed_tx_schema_version")
+                .and_then(Value::as_u64),
+            Some(crate::COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION as u64)
+        );
+        assert_eq!(
+            object.get("input").and_then(Value::as_str),
+            Some("0xdeadbeef")
+        );
+        assert_eq!(
+            object.get("processing_error").and_then(Value::as_str),
+            Some("simulated failure")
+        );
+        assert!(!object.contains_key("actions"));
+        assert!(!object.contains_key("bribe_amount"));
     }
 }
