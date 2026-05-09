@@ -51,11 +51,17 @@ pub struct LoadedProcessedBlockWithMetrics {
     pub disk_cache_metrics: ProcessedBlockLoadMetrics,
 }
 
+#[derive(Clone)]
 struct DiskCacheFillMetrics {
     disk_cache_hit: bool,
     disk_cache_write_ms: u128,
     fill_ms: u128,
     source: &'static str,
+}
+
+struct FilledCacheEntry {
+    block: ProcessedBlock,
+    metrics: DiskCacheFillMetrics,
 }
 
 pub struct ProcessedBlockLoadMetrics {
@@ -155,67 +161,14 @@ async fn load_cached_block_range(
     }
 
     let writer = cache_store.writer(provider.chain_id());
+    let mut filled_blocks_by_block = HashMap::new();
     if missing_count > 0 {
-        let missing_keys_by_block = plan
-            .missing_keys
-            .iter()
-            .map(|key| (key.block_number, key.clone()))
-            .collect::<HashMap<_, _>>();
-
-        let fill_started = Instant::now();
-        let mut write_wall_ms = 0u128;
-        for missing_chunk in plan.missing_keys.chunks(options.fill_batch_blocks.max(1)) {
-            let missing_blocks = missing_chunk
-                .iter()
-                .map(|key| key.block_number)
-                .collect::<Vec<_>>();
-            let processed_missing_blocks = tx_processor
-                .process_block_batch(
-                    missing_blocks,
-                    BlockBatchOptions::default()
-                        .with_max_concurrency(options.fill_concurrency.max(1)),
-                )
-                .await?;
-
-            for block in processed_missing_blocks {
-                let key = missing_keys_by_block
-                    .get(&block.header.number)
-                    .ok_or_else(|| {
-                        eyre::eyre!(
-                            "processed missing block {} was not part of the cache fill plan",
-                            block.header.number
-                        )
-                    })?;
-                if block.header.hash != key.block_hash {
-                    eyre::bail!(
-                        "processed block hash changed during processed block disk cache fill for {}: header {:?}, processed {:?}",
-                        key.block_number,
-                        key.block_hash,
-                        block.header.hash
-                    );
-                }
-                let write = writer.write_processed_block(&block)?;
-                write_wall_ms += write.write_ms;
-                if write.key != *key {
-                    eyre::bail!(
-                        "processed block disk cache writer produced unexpected key for {}: expected {:?}, wrote {:?}",
-                        key.block_number,
-                        key,
-                        write.key
-                    );
-                }
-                fill_metrics_by_block.insert(
-                    key.block_number,
-                    DiskCacheFillMetrics {
-                        disk_cache_hit: false,
-                        disk_cache_write_ms: write.write_ms,
-                        fill_ms: fill_started.elapsed().as_millis(),
-                        source: ProcessedBlockSource::Processed.as_str(),
-                    },
-                );
-            }
+        let (filled, fill_ms, write_wall_ms) =
+            fill_cache_entries(tx_processor, &writer, &plan.missing_keys, options).await?;
+        for (block_number, filled) in filled {
+            fill_metrics_by_block.insert(block_number, filled.metrics.clone());
+            filled_blocks_by_block.insert(block_number, filled);
         }
-        let fill_ms = fill_started.elapsed().as_millis();
         tracing::info!(
             start_block,
             end_block,
@@ -235,12 +188,43 @@ async fn load_cached_block_range(
         .await
         .map_err(|error| eyre::eyre!("processed block disk cache reader task failed: {error}"))??;
     let read_wall_ms = read_wall_started.elapsed().as_millis();
+    let invalid_keys = reads
+        .iter()
+        .filter(|read| read.block.is_none())
+        .map(|read| read.key.clone())
+        .collect::<Vec<_>>();
+    let invalid_count = invalid_keys.len();
+
+    if invalid_count > 0 {
+        tracing::info!(
+            start_block,
+            end_block,
+            invalid_blocks = invalid_count,
+            "rebuilding invalid processed block disk cache entries"
+        );
+        let (filled, fill_ms, write_wall_ms) =
+            fill_cache_entries(tx_processor, &writer, &invalid_keys, options).await?;
+        for (block_number, filled) in filled {
+            fill_metrics_by_block.insert(block_number, filled.metrics.clone());
+            filled_blocks_by_block.insert(block_number, filled);
+        }
+        tracing::info!(
+            start_block,
+            end_block,
+            invalid_blocks = invalid_count,
+            fill_ms,
+            write_wall_ms,
+            "rebuilt invalid processed block disk cache entries"
+        );
+    }
 
     tracing::info!(
         start_block,
         end_block,
         blocks = reads.len(),
         missing_blocks = missing_count,
+        invalid_blocks = invalid_count,
+        plan_ms = plan.plan_ms,
         read_wall_ms,
         "read processed block disk cache chunk"
     );
@@ -255,10 +239,17 @@ async fn load_cached_block_range(
                     read.key.block_number
                 )
             })?;
-        let block = read
-            .block
-            .ok_or_else(|| eyre::eyre!("cache miss after fill for {}", read.key.block_number))?;
-        let disk_cache_read_ms = ceil_ms(read.read_ms);
+        let (block, disk_cache_read_ms) = match read.block {
+            Some(block) => (block, ceil_ms(read.read_ms)),
+            None => {
+                let filled = filled_blocks_by_block
+                    .remove(&read.key.block_number)
+                    .ok_or_else(|| {
+                        eyre::eyre!("cache miss after rebuild for {}", read.key.block_number)
+                    })?;
+                (filled.block, 0)
+            }
+        };
         blocks.push(LoadedProcessedBlockWithMetrics {
             block,
             upstream_ms: fill_metrics.fill_ms + disk_cache_read_ms,
@@ -272,6 +263,72 @@ async fn load_cached_block_range(
     }
 
     Ok(blocks)
+}
+
+async fn fill_cache_entries(
+    tx_processor: &BlockProcessor,
+    writer: &crate::ProcessedBlockDiskCacheWriter,
+    keys: &[crate::ProcessedBlockDiskCacheKey],
+    options: ProcessedBlockRangeLoadOptions,
+) -> eyre::Result<(HashMap<u64, FilledCacheEntry>, u128, u128)> {
+    let keys_by_block = keys
+        .iter()
+        .map(|key| (key.block_number, key.clone()))
+        .collect::<HashMap<_, _>>();
+    let fill_started = Instant::now();
+    let mut write_wall_ms = 0u128;
+    let mut filled_blocks_by_block = HashMap::with_capacity(keys.len());
+
+    for missing_chunk in keys.chunks(options.fill_batch_blocks.max(1)) {
+        let missing_blocks = missing_chunk
+            .iter()
+            .map(|key| key.block_number)
+            .collect::<Vec<_>>();
+        let processed_missing_blocks = tx_processor
+            .process_block_batch(
+                missing_blocks,
+                BlockBatchOptions::default().with_max_concurrency(options.fill_concurrency.max(1)),
+            )
+            .await?;
+
+        for block in processed_missing_blocks {
+            let key = keys_by_block.get(&block.header.number).ok_or_else(|| {
+                eyre::eyre!(
+                    "processed missing block {} was not part of the cache fill plan",
+                    block.header.number
+                )
+            })?;
+            let write = writer.write_processed_block(&block)?;
+            write_wall_ms += write.write_ms;
+            if write.key.chain_id != key.chain_id || write.key.block_number != key.block_number {
+                eyre::bail!(
+                    "processed block disk cache writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
+                    key.block_number,
+                    key.chain_id,
+                    key.block_number,
+                    write.key
+                );
+            }
+            filled_blocks_by_block.insert(
+                key.block_number,
+                FilledCacheEntry {
+                    block,
+                    metrics: DiskCacheFillMetrics {
+                        disk_cache_hit: false,
+                        disk_cache_write_ms: write.write_ms,
+                        fill_ms: fill_started.elapsed().as_millis(),
+                        source: ProcessedBlockSource::Processed.as_str(),
+                    },
+                },
+            );
+        }
+    }
+
+    Ok((
+        filled_blocks_by_block,
+        fill_started.elapsed().as_millis(),
+        write_wall_ms,
+    ))
 }
 
 pub fn should_prune_processed_block_disk_cache(chunk_end: u64, end_block: u64) -> bool {

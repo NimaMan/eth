@@ -9,6 +9,11 @@ pub fn deserialize_i128_from_any<'de, D>(deserializer: D) -> Result<i128, D::Err
 where
     D: Deserializer<'de>,
 {
+    if !deserializer.is_human_readable() {
+        let value = String::deserialize(deserializer)?;
+        return parse_i128(&value).map_err(serde::de::Error::custom);
+    }
+
     struct I128Visitor;
 
     impl<'de> Visitor<'de> for I128Visitor {
@@ -67,6 +72,11 @@ pub fn deserialize_u128_from_any<'de, D>(deserializer: D) -> Result<u128, D::Err
 where
     D: Deserializer<'de>,
 {
+    if !deserializer.is_human_readable() {
+        let value = String::deserialize(deserializer)?;
+        return parse_u128(&value).map_err(serde::de::Error::custom);
+    }
+
     struct U128Visitor;
 
     impl<'de> Visitor<'de> for U128Visitor {

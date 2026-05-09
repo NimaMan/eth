@@ -58,22 +58,16 @@ async fn main() -> eyre::Result<()> {
             for key in &plan.missing_keys {
                 let process_started = Instant::now();
                 let block = processor.process_block(key.block_number).await?;
-                if block.header.hash != key.block_hash {
-                    eyre::bail!(
-                        "processed block hash changed during cache fill for {}: expected {:?}, got {:?}",
-                        key.block_number,
-                        key.block_hash,
-                        block.header.hash
-                    );
-                }
                 processed_ms.push(ms(process_started.elapsed()));
 
                 let write = writer.write_processed_block(&block)?;
-                if write.key != *key {
+                if write.key.chain_id != key.chain_id || write.key.block_number != key.block_number
+                {
                     eyre::bail!(
-                        "cache writer produced unexpected key for {}: expected {:?}, wrote {:?}",
+                        "cache writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
                         key.block_number,
-                        key,
+                        key.chain_id,
+                        key.block_number,
                         write.key
                     );
                 }
@@ -124,8 +118,7 @@ async fn main() -> eyre::Result<()> {
     }
 
     for block_number in args.start..=args.end {
-        let header = provider.fetch_block_header_only(block_number).await?;
-        let key = ProcessedBlockDiskCacheKey::new(provider.chain_id(), &header);
+        let key = ProcessedBlockDiskCacheKey::for_block_number(provider.chain_id(), block_number);
 
         let process_started = Instant::now();
         let block = processor.process_block(block_number).await?;

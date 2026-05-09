@@ -327,7 +327,9 @@ async fn run_cache_read_only(
 ) -> Result<()> {
     let reader = store.reader();
     for iteration in 0..args.iterations.max(1) {
+        let plan_started = Instant::now();
         let plan = reader.plan_range(provider, start, end).await?;
+        let plan_ms = ms(plan_started);
         if !plan.is_complete() {
             bail!(
                 "read-only cache is missing {} blocks in {}..={}",
@@ -345,7 +347,8 @@ async fn run_cache_read_only(
             .map_err(|error| {
                 eyre::eyre!("processed block disk cache reader task failed: {error}")
             })??;
-        let total_ms = ms(read_started);
+        let read_wall_ms = ms(read_started);
+        let total_ms = plan_ms + read_wall_ms;
         SummaryRow::from_cache_reads(
             "cache_read_only",
             "processed-block",
@@ -356,6 +359,9 @@ async fn run_cache_read_only(
             args.fill_batch_blocks,
             args.fill_concurrency,
             total_ms,
+            plan_ms,
+            read_wall_ms,
+            plan.missing_keys.len(),
             &reads,
         )?
         .print();
@@ -501,7 +507,7 @@ fn parse_u64_list(value: &str) -> Result<Vec<u64>> {
 
 fn print_header() {
     println!(
-        "scenario,profile_kind,iteration,start_block,end_block,blocks,concurrency,chunk_size,fill_batch_blocks,fill_concurrency,total_ms,avg_ms,p50_ms,p95_ms,max_ms,cache_hit_rate,cache_read_ms,cache_write_ms,evm_exec_ms,provider_read_ms,account_reads,storage_reads,code_reads,preload_ms,trace_build_ms,commit_ms,processing_errors,internal_txs"
+        "scenario,profile_kind,iteration,start_block,end_block,blocks,concurrency,chunk_size,fill_batch_blocks,fill_concurrency,total_ms,plan_ms,read_wall_ms,missing_count,invalid_count,avg_ms,p50_ms,p95_ms,max_ms,cache_hit_rate,cache_read_ms,cache_write_ms,evm_exec_ms,provider_read_ms,account_reads,storage_reads,code_reads,preload_ms,trace_build_ms,commit_ms,processing_errors,internal_txs"
     );
 }
 
@@ -526,6 +532,10 @@ struct SummaryRow {
     fill_batch_blocks: usize,
     fill_concurrency: usize,
     total_ms: f64,
+    plan_ms: f64,
+    read_wall_ms: f64,
+    missing_count: usize,
+    invalid_count: usize,
     avg_ms: f64,
     p50_ms: f64,
     p95_ms: f64,
@@ -577,6 +587,10 @@ impl SummaryRow {
             fill_batch_blocks,
             fill_concurrency,
             total_ms,
+            plan_ms: 0.0,
+            read_wall_ms: 0.0,
+            missing_count: 0,
+            invalid_count: 0,
             avg_ms: total_ms / blocks.max(1) as f64,
             p50_ms: percentile(&block_ms, 0.50),
             p95_ms: percentile(&block_ms, 0.95),
@@ -638,6 +652,13 @@ impl SummaryRow {
             fill_batch_blocks,
             fill_concurrency,
             total_ms,
+            plan_ms: 0.0,
+            read_wall_ms: 0.0,
+            missing_count: loaded
+                .iter()
+                .filter(|loaded| !loaded.disk_cache_metrics.disk_cache_hit)
+                .count(),
+            invalid_count: 0,
             avg_ms: total_ms / blocks.max(1) as f64,
             p50_ms: percentile(&block_ms, 0.50),
             p95_ms: percentile(&block_ms, 0.95),
@@ -680,6 +701,9 @@ impl SummaryRow {
         fill_batch_blocks: usize,
         fill_concurrency: usize,
         total_ms: f64,
+        plan_ms: f64,
+        read_wall_ms: f64,
+        missing_count: usize,
         reads: &[tx_processor::ProcessedBlockDiskCacheRead],
     ) -> Result<Self> {
         let mut block_ms = reads.iter().map(|read| read.read_ms).collect::<Vec<_>>();
@@ -687,12 +711,17 @@ impl SummaryRow {
         let blocks = reads.len();
         let mut processing_errors = 0;
         let mut internal_txs = 0;
+        let mut invalid_count = 0;
         for read in reads {
-            let block = read.block.as_ref().ok_or_else(|| {
-                eyre::eyre!("cache read returned miss for {}", read.key.block_number)
-            })?;
+            let Some(block) = read.block.as_ref() else {
+                invalid_count += 1;
+                continue;
+            };
             processing_errors += processing_error_count(block);
             internal_txs += internal_tx_count(block);
+        }
+        if invalid_count > 0 {
+            eyre::bail!("read-only cache returned {invalid_count} invalid blocks");
         }
         Ok(Self {
             scenario,
@@ -706,6 +735,10 @@ impl SummaryRow {
             fill_batch_blocks,
             fill_concurrency,
             total_ms,
+            plan_ms,
+            read_wall_ms,
+            missing_count,
+            invalid_count,
             avg_ms: total_ms / blocks.max(1) as f64,
             p50_ms: percentile(&block_ms, 0.50),
             p95_ms: percentile(&block_ms, 0.95),
@@ -757,6 +790,10 @@ impl SummaryRow {
             fill_batch_blocks,
             fill_concurrency,
             total_ms,
+            plan_ms: 0.0,
+            read_wall_ms: 0.0,
+            missing_count: 0,
+            invalid_count: 0,
             avg_ms: total_ms / blocks.max(1) as f64,
             p50_ms: percentile(&block_ms, 0.50),
             p95_ms: percentile(&block_ms, 0.95),
@@ -791,7 +828,7 @@ impl SummaryRow {
 
     fn print(&self) {
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.3},{},{},{},{:.3},{:.3},{:.3},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{:.3},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.3},{},{},{},{:.3},{:.3},{:.3},{},{}",
             self.scenario,
             self.profile_kind,
             self.iteration,
@@ -803,6 +840,10 @@ impl SummaryRow {
             self.fill_batch_blocks,
             self.fill_concurrency,
             self.total_ms,
+            self.plan_ms,
+            self.read_wall_ms,
+            self.missing_count,
+            self.invalid_count,
             self.avg_ms,
             self.p50_ms,
             self.p95_ms,

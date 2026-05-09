@@ -1,15 +1,12 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::ProcessedBlock;
 use eyre::{Result, WrapErr};
-use reth_chain_query::{BlockHeader, RethQueryProvider};
+use reth_chain_query::RethQueryProvider;
 
 use super::store::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
 
 const DEFAULT_MAX_PARALLEL_CACHE_READS: usize = 8;
-const HEADER_FETCH_RETRY_ATTEMPTS: usize = 5;
-const HEADER_FETCH_RETRY_DELAY: Duration = Duration::from_millis(500);
-
 #[derive(Debug, Clone)]
 pub struct ProcessedBlockDiskCacheReader {
     store: ProcessedBlockDiskCacheStore,
@@ -26,6 +23,7 @@ pub struct ProcessedBlockDiskCacheRead {
 pub struct ProcessedBlockDiskCacheRangePlan {
     pub keys: Vec<ProcessedBlockDiskCacheKey>,
     pub missing_keys: Vec<ProcessedBlockDiskCacheKey>,
+    pub plan_ms: f64,
 }
 
 impl ProcessedBlockDiskCacheReader {
@@ -53,6 +51,7 @@ impl ProcessedBlockDiskCacheReader {
         start_block: u64,
         end_block: u64,
     ) -> Result<ProcessedBlockDiskCacheRangePlan> {
+        let started = Instant::now();
         if end_block < start_block {
             eyre::bail!("end_block must be greater than or equal to start_block");
         }
@@ -60,40 +59,18 @@ impl ProcessedBlockDiskCacheReader {
         let chain_id = provider.chain_id();
         let mut keys = Vec::with_capacity((end_block - start_block + 1) as usize);
         for block_number in start_block..=end_block {
-            let key = match provider.fetch_block_header_only(block_number).await {
-                Ok(header) => ProcessedBlockDiskCacheKey::new(chain_id, &header),
-                Err(initial_error) if is_missing_header_error(&initial_error) => {
-                    match self
-                        .store
-                        .cached_key_for_block_number(chain_id, block_number)?
-                    {
-                        Some(key) => {
-                            tracing::debug!(
-                                block_number,
-                                "planned processed block disk cache key from disk cache"
-                            );
-                            key
-                        }
-                        None => {
-                            let header =
-                                fetch_header_with_tip_retry(provider, block_number).await?;
-                            ProcessedBlockDiskCacheKey::new(chain_id, &header)
-                        }
-                    }
-                }
-                Err(error) => {
-                    return Err(error).wrap_err_with(|| {
-                        format!(
-                            "failed to fetch processed block disk cache header for block={block_number}"
-                        )
-                    })
-                }
-            };
-            keys.push(key);
+            keys.push(ProcessedBlockDiskCacheKey::for_block_number(
+                chain_id,
+                block_number,
+            ));
         }
 
         let missing_keys = self.missing_keys(&keys);
-        Ok(ProcessedBlockDiskCacheRangePlan { keys, missing_keys })
+        Ok(ProcessedBlockDiskCacheRangePlan {
+            keys,
+            missing_keys,
+            plan_ms: started.elapsed().as_secs_f64() * 1000.0,
+        })
     }
 
     pub fn get_many_parallel(
@@ -133,8 +110,8 @@ impl ProcessedBlockDiskCacheReader {
                             let read_started = Instant::now();
                             let block = store.get(&key).wrap_err_with(|| {
                                 format!(
-                                    "failed to read processed block disk cache block={} hash={:?}",
-                                    key.block_number, key.block_hash
+                                    "failed to read processed block disk cache block={}",
+                                    key.block_number
                                 )
                             })?;
                             reads.push((
@@ -170,40 +147,6 @@ impl ProcessedBlockDiskCacheReader {
             })
             .collect()
     }
-}
-
-async fn fetch_header_with_tip_retry(
-    provider: &RethQueryProvider,
-    block_number: u64,
-) -> Result<BlockHeader> {
-    let mut last_error = None;
-    for attempt in 0..=HEADER_FETCH_RETRY_ATTEMPTS {
-        match provider.fetch_block_header_only(block_number).await {
-            Ok(header) => {
-                if attempt > 0 {
-                    tracing::info!(
-                        block_number,
-                        attempts = attempt + 1,
-                        "resolved processed block disk cache header after retry"
-                    );
-                }
-                return Ok(header);
-            }
-            Err(error)
-                if is_missing_header_error(&error) && attempt < HEADER_FETCH_RETRY_ATTEMPTS =>
-            {
-                last_error = Some(error);
-                tokio::time::sleep(HEADER_FETCH_RETRY_DELAY).await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| eyre::eyre!("No header for block {block_number}")))
-}
-
-fn is_missing_header_error(error: &eyre::Report) -> bool {
-    error.to_string().contains("No header for block")
 }
 
 impl ProcessedBlockDiskCacheRangePlan {

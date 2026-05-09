@@ -89,5 +89,5 @@ cargo test --manifest-path tx_processor/Cargo.toml \
   MDBX/CPU contention.
 - Cache hits must remain equivalent to fresh normalized `ProcessedBlock` output.
 - Cache layout is
-  `processed-block-cache/ethereum-mainnet/block-<block_number>/processed_block.pblock.zst`.
+  `processed-block-cache/ethereum-mainnet/<block_number>.pblock.zst`.
   Block hash and trace config hash are validation fields inside the payload.

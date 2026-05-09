@@ -10,12 +10,17 @@ use crate::{
 use alloy_primitives::B256;
 use eyre::{bail, Result, WrapErr};
 use reth_chain_query::provider::BlockHeader;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::reader::ProcessedBlockDiskCacheReader;
 use super::writer::ProcessedBlockDiskCacheWriter;
 
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
+const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
+const CACHE_ZSTD_LEVEL: i32 = 3;
+const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;
+const ETHEREUM_MAINNET_NETWORK: &str = "ethereum-mainnet";
 
 #[derive(Debug, Clone)]
 pub struct ProcessedBlockDiskCacheStore {
@@ -25,8 +30,9 @@ pub struct ProcessedBlockDiskCacheStore {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProcessedBlockDiskCacheKey {
     pub chain_id: u64,
+    pub network: String,
     pub block_number: u64,
-    pub block_hash: B256,
+    pub block_hash: Option<B256>,
     pub trace_engine: String,
     pub trace_config_hash: B256,
 }
@@ -35,9 +41,10 @@ pub struct ProcessedBlockDiskCacheKey {
 pub struct ProcessedBlockDiskCacheCoverage {
     pub root: String,
     pub chain_count: usize,
-    pub block_dir_count: usize,
+    pub block_count: usize,
     pub file_count: usize,
     pub total_bytes: u64,
+    pub average_bytes_per_block: Option<f64>,
     pub trace_engine: String,
     pub trace_config_hash: String,
     pub chains: Vec<ProcessedBlockDiskCacheChainCoverage>,
@@ -46,10 +53,12 @@ pub struct ProcessedBlockDiskCacheCoverage {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessedBlockDiskCacheChainCoverage {
     pub chain_id: u64,
+    pub network: String,
     pub path: String,
-    pub block_dir_count: usize,
+    pub block_count: usize,
     pub file_count: usize,
     pub total_bytes: u64,
+    pub average_bytes_per_block: Option<f64>,
     pub min_block: Option<u64>,
     pub max_block: Option<u64>,
     pub ranges: Vec<ProcessedBlockDiskCacheBlockRange>,
@@ -64,6 +73,7 @@ pub struct ProcessedBlockDiskCacheBlockRange {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessedBlockDiskCacheEntry {
+    cache_schema_version: u32,
     key: ProcessedBlockDiskCacheKey,
     header: BlockHeader,
     transactions: Vec<ProcessedBlockDiskCacheTransaction>,
@@ -72,6 +82,12 @@ struct ProcessedBlockDiskCacheEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessedBlockDiskCacheTransaction {
     processed: CompactProcessedTransaction,
+    signed_authorizations_json: Option<Vec<Vec<u8>>>,
+    struct_logs_json: Option<Vec<u8>>,
+    uniswap_v3_swaps_json: Option<Vec<u8>>,
+    uniswap_v4_modifies_json: Option<Vec<u8>>,
+    uniswap_v4_swaps_json: Option<Vec<u8>>,
+    uniswap_v4_balance_deltas_json: Option<Vec<u8>>,
     processing_error: Option<String>,
 }
 
@@ -79,8 +95,20 @@ impl ProcessedBlockDiskCacheKey {
     pub fn new(chain_id: u64, header: &BlockHeader) -> Self {
         Self {
             chain_id,
+            network: network_for_chain_id(chain_id),
             block_number: header.number,
-            block_hash: header.hash,
+            block_hash: Some(header.hash),
+            trace_engine: TRACE_ENGINE_ID.to_string(),
+            trace_config_hash: processed_block_trace_config_hash(true),
+        }
+    }
+
+    pub fn for_block_number(chain_id: u64, block_number: u64) -> Self {
+        Self {
+            chain_id,
+            network: network_for_chain_id(chain_id),
+            block_number,
+            block_hash: None,
             trace_engine: TRACE_ENGINE_ID.to_string(),
             trace_config_hash: processed_block_trace_config_hash(true),
         }
@@ -119,41 +147,8 @@ impl ProcessedBlockDiskCacheStore {
         chain_id: u64,
         block_number: u64,
     ) -> Result<Option<ProcessedBlockDiskCacheKey>> {
-        let dir = self.current_block_dir(chain_id, block_number);
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err.into()),
-        };
-
-        for entry in entries {
-            let entry = entry?;
-            if !entry.file_type()?.is_file() {
-                continue;
-            }
-            let path = entry.path();
-            if !is_current_cache_file_path(&path) {
-                continue;
-            }
-
-            let bytes = fs::read(&path)?;
-            let decoded = zstd::stream::decode_all(bytes.as_slice())?;
-            let entry = decode_cache_entry(&decoded)?;
-            if entry.key.chain_id != chain_id
-                || entry.key.block_number != block_number
-                || entry.key.trace_engine != TRACE_ENGINE_ID
-                || entry.key.trace_config_hash != processed_block_trace_config_hash(true)
-            {
-                eyre::bail!(
-                    "processed block disk cache key mismatch for {}: found {:?}",
-                    path.display(),
-                    entry.key
-                );
-            }
-            return Ok(Some(entry.key));
-        }
-
-        Ok(None)
+        let key = ProcessedBlockDiskCacheKey::for_block_number(chain_id, block_number);
+        Ok(self.contains(&key).then_some(key))
     }
 
     pub fn get(&self, key: &ProcessedBlockDiskCacheKey) -> Result<Option<ProcessedBlock>> {
@@ -163,17 +158,47 @@ impl ProcessedBlockDiskCacheStore {
         }
 
         let bytes = fs::read(&path)?;
-        let decoded = zstd::stream::decode_all(bytes.as_slice())?;
-        let entry = decode_cache_entry(&decoded)?;
-        if entry.key != *key {
-            bail!(
-                "processed block disk cache key mismatch for {}: expected {:?}, found {:?}",
-                path.display(),
-                key,
-                entry.key
+        let decoded = match zstd::stream::decode_all(bytes.as_slice()) {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "processed block disk cache entry is not readable; treating as cache miss"
+                );
+                return Ok(None);
+            }
+        };
+        let entry = match decode_cache_entry(&decoded) {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "processed block disk cache entry is not decodable; treating as cache miss"
+                );
+                return Ok(None);
+            }
+        };
+        if let Err(error) = validate_cache_entry(&entry, key) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "processed block disk cache entry is stale or incompatible; treating as cache miss"
             );
+            return Ok(None);
         }
-        Ok(Some(entry.into_processed_block()))
+        match entry.into_processed_block() {
+            Ok(block) => Ok(Some(block)),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "processed block disk cache entry payload is invalid; treating as cache miss"
+                );
+                Ok(None)
+            }
+        }
     }
 
     pub fn put(&self, key: &ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Result<()> {
@@ -183,11 +208,11 @@ impl ProcessedBlockDiskCacheStore {
             .ok_or_else(|| eyre::eyre!("cache path has no parent: {}", path.display()))?;
         fs::create_dir_all(parent)?;
 
-        let bytes = serde_json::to_vec(&ProcessedBlockDiskCacheEntry::from_block(
+        let bytes = encode_cache_entry(&ProcessedBlockDiskCacheEntry::from_block(
             key.clone(),
             block,
-        ))?;
-        let bytes = zstd::stream::encode_all(bytes.as_slice(), 1)?;
+        )?)?;
+        let bytes = zstd::stream::encode_all(bytes.as_slice(), CACHE_ZSTD_LEVEL)?;
         let temp_path = parent.join(format!(
             ".{}.tmp-{}-{}",
             path.file_name()
@@ -215,44 +240,53 @@ impl ProcessedBlockDiskCacheStore {
 
     pub fn prune_chain_to_recent_blocks(&self, chain_id: u64, retain_blocks: u64) -> Result<usize> {
         let retain_blocks = usize::try_from(retain_blocks).unwrap_or(usize::MAX);
-        let chain_path = self.root.join(format!("token-chain-{chain_id}"));
+        let chain_path = self.network_path(chain_id);
         let entries = match fs::read_dir(&chain_path) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
             Err(err) => return Err(err.into()),
         };
 
-        let mut block_numbers = Vec::new();
+        let mut block_files = Vec::new();
         for entry in entries {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() {
+            if !entry.file_type()?.is_file() {
                 continue;
             }
             let Some(block_number) = entry
                 .file_name()
                 .to_str()
-                .and_then(|name| name.strip_prefix("block-"))
-                .and_then(|value| value.parse::<u64>().ok())
+                .and_then(block_number_from_cache_file_name)
             else {
                 continue;
             };
-            block_numbers.push(block_number);
+            block_files.push((block_number, entry.path()));
         }
 
-        if block_numbers.len() <= retain_blocks {
+        if block_files.len() <= retain_blocks {
             return Ok(0);
         }
 
-        block_numbers.sort_unstable_by(|left, right| right.cmp(left));
+        block_files.sort_unstable_by(|left, right| right.0.cmp(&left.0));
         let mut removed = 0;
-        for block_number in block_numbers.iter().skip(retain_blocks) {
-            match fs::remove_dir_all(chain_path.join(format!("block-{block_number}"))) {
+        for (_, path) in block_files.iter().skip(retain_blocks) {
+            match fs::remove_file(path) {
                 Ok(()) => removed += 1,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
         }
         Ok(removed)
+    }
+
+    pub fn remove_block(&self, chain_id: u64, block_number: u64) -> Result<()> {
+        let key = ProcessedBlockDiskCacheKey::for_block_number(chain_id, block_number);
+        let path = self.path_for_key(&key);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn coverage(&self) -> Result<ProcessedBlockDiskCacheCoverage> {
@@ -262,9 +296,10 @@ impl ProcessedBlockDiskCacheStore {
                 return Ok(ProcessedBlockDiskCacheCoverage {
                     root: self.root.display().to_string(),
                     chain_count: 0,
-                    block_dir_count: 0,
+                    block_count: 0,
                     file_count: 0,
                     total_bytes: 0,
+                    average_bytes_per_block: None,
                     trace_engine: TRACE_ENGINE_ID.to_string(),
                     trace_config_hash: format!("{:#x}", processed_block_trace_config_hash(true)),
                     chains: Vec::new(),
@@ -279,28 +314,29 @@ impl ProcessedBlockDiskCacheStore {
             if !entry.file_type()?.is_dir() {
                 continue;
             }
-            let Some(chain_id) = entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.strip_prefix("token-chain-"))
-                .and_then(|value| value.parse::<u64>().ok())
-            else {
+            let Some(network) = entry.file_name().to_str().map(str::to_string) else {
                 continue;
             };
-            chains.push(self.coverage_for_chain(chain_id, &entry.path())?);
+            let Some(chain_id) = chain_id_for_network(&network) else {
+                continue;
+            };
+            let chain = self.coverage_for_chain(chain_id, &network, &entry.path())?;
+            chains.push(chain);
         }
 
         chains.sort_by_key(|chain| chain.chain_id);
-        let block_dir_count = chains.iter().map(|chain| chain.block_dir_count).sum();
+        let block_count = chains.iter().map(|chain| chain.block_count).sum();
         let file_count = chains.iter().map(|chain| chain.file_count).sum();
         let total_bytes = chains.iter().map(|chain| chain.total_bytes).sum();
+        let average_bytes_per_block = average_bytes(total_bytes, block_count);
 
         Ok(ProcessedBlockDiskCacheCoverage {
             root: self.root.display().to_string(),
             chain_count: chains.len(),
-            block_dir_count,
+            block_count,
             file_count,
             total_bytes,
+            average_bytes_per_block,
             trace_engine: TRACE_ENGINE_ID.to_string(),
             trace_config_hash: format!("{:#x}", processed_block_trace_config_hash(true)),
             chains,
@@ -310,6 +346,7 @@ impl ProcessedBlockDiskCacheStore {
     fn coverage_for_chain(
         &self,
         chain_id: u64,
+        network: &str,
         chain_path: &Path,
     ) -> Result<ProcessedBlockDiskCacheChainCoverage> {
         let entries = match fs::read_dir(chain_path) {
@@ -317,10 +354,12 @@ impl ProcessedBlockDiskCacheStore {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(ProcessedBlockDiskCacheChainCoverage {
                     chain_id,
+                    network: network.to_string(),
                     path: chain_path.display().to_string(),
-                    block_dir_count: 0,
+                    block_count: 0,
                     file_count: 0,
                     total_bytes: 0,
+                    average_bytes_per_block: None,
                     min_block: None,
                     max_block: None,
                     ranges: Vec::new(),
@@ -335,39 +374,36 @@ impl ProcessedBlockDiskCacheStore {
 
         for entry in entries {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() {
+            if !entry.file_type()?.is_file() {
                 continue;
             }
             let Some(block_number) = entry
                 .file_name()
                 .to_str()
-                .and_then(|name| name.strip_prefix("block-"))
-                .and_then(|value| value.parse::<u64>().ok())
+                .and_then(block_number_from_cache_file_name)
             else {
                 continue;
             };
 
-            let current_dir = self.current_block_dir(chain_id, block_number);
-            let (block_files, block_bytes) = current_cache_file_stats(&current_dir)?;
-            if block_files == 0 {
-                continue;
-            }
             block_numbers.push(block_number);
-            file_count += block_files;
-            total_bytes += block_bytes;
+            file_count += 1;
+            total_bytes += entry.metadata()?.len();
         }
 
         block_numbers.sort_unstable();
         let ranges = block_ranges(&block_numbers);
         let min_block = block_numbers.first().copied();
         let max_block = block_numbers.last().copied();
+        let average_bytes_per_block = average_bytes(total_bytes, block_numbers.len());
 
         Ok(ProcessedBlockDiskCacheChainCoverage {
             chain_id,
+            network: network.to_string(),
             path: chain_path.display().to_string(),
-            block_dir_count: block_numbers.len(),
+            block_count: block_numbers.len(),
             file_count,
             total_bytes,
+            average_bytes_per_block,
             min_block,
             max_block,
             ranges,
@@ -375,43 +411,13 @@ impl ProcessedBlockDiskCacheStore {
     }
 
     fn path_for_key(&self, key: &ProcessedBlockDiskCacheKey) -> PathBuf {
-        self.current_block_dir(key.chain_id, key.block_number)
-            .join(format!(
-                "{}.{}.json.zst",
-                b256_path_component(key.block_hash),
-                b256_path_component(key.trace_config_hash)
-            ))
+        self.network_path(key.chain_id)
+            .join(cache_file_name(key.block_number))
     }
 
-    fn current_block_dir(&self, chain_id: u64, block_number: u64) -> PathBuf {
-        self.root
-            .join(format!("token-chain-{chain_id}"))
-            .join(format!("block-{block_number}"))
+    fn network_path(&self, chain_id: u64) -> PathBuf {
+        self.root.join(network_for_chain_id(chain_id))
     }
-}
-
-fn current_cache_file_stats(path: &Path) -> Result<(usize, u64)> {
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok((0, 0)),
-        Err(err) => return Err(err.into()),
-    };
-
-    let mut file_count = 0;
-    let mut total_bytes = 0;
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let path = entry.path();
-        if !is_current_cache_file_path(&path) {
-            continue;
-        }
-        file_count += 1;
-        total_bytes += entry.metadata()?.len();
-    }
-    Ok((file_count, total_bytes))
 }
 
 fn block_ranges(block_numbers: &[u64]) -> Vec<ProcessedBlockDiskCacheBlockRange> {
@@ -443,41 +449,193 @@ fn block_ranges(block_numbers: &[u64]) -> Vec<ProcessedBlockDiskCacheBlockRange>
 }
 
 impl ProcessedBlockDiskCacheEntry {
-    fn from_block(key: ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Self {
-        Self {
+    fn from_block(key: ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Result<Self> {
+        Ok(Self {
+            cache_schema_version: CACHE_SCHEMA_VERSION,
             key,
             header: block.header.clone(),
             transactions: block
                 .transactions
                 .iter()
-                .map(|tx| ProcessedBlockDiskCacheTransaction {
-                    processed: CompactProcessedTransaction::from_processed(&tx.processed),
-                    processing_error: tx.processing_error.clone(),
-                })
-                .collect(),
-        }
+                .map(ProcessedBlockDiskCacheTransaction::from_block_transaction)
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
 
-    fn into_processed_block(self) -> ProcessedBlock {
-        ProcessedBlock {
+    fn into_processed_block(self) -> Result<ProcessedBlock> {
+        Ok(ProcessedBlock {
             header: self.header,
             transactions: self
                 .transactions
                 .into_iter()
                 .map(ProcessedBlockDiskCacheTransaction::into_block_transaction)
-                .collect(),
-        }
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
+}
+
+fn encode_cache_entry(entry: &ProcessedBlockDiskCacheEntry) -> Result<Vec<u8>> {
+    bincode::serialize(entry).wrap_err("failed to encode processed block disk cache entry")
 }
 
 fn decode_cache_entry(bytes: &[u8]) -> Result<ProcessedBlockDiskCacheEntry> {
-    serde_json::from_slice(bytes).wrap_err("failed to decode processed block disk cache JSON entry")
+    bincode::deserialize(bytes).wrap_err("failed to decode processed block disk cache entry")
+}
+
+fn validate_cache_entry(
+    entry: &ProcessedBlockDiskCacheEntry,
+    expected: &ProcessedBlockDiskCacheKey,
+) -> Result<()> {
+    if entry.cache_schema_version != CACHE_SCHEMA_VERSION {
+        bail!(
+            "cache schema mismatch: expected {}, found {}",
+            CACHE_SCHEMA_VERSION,
+            entry.cache_schema_version
+        );
+    }
+    if entry.key.chain_id != expected.chain_id
+        || entry.key.network != expected.network
+        || entry.key.block_number != expected.block_number
+        || entry.key.trace_engine != TRACE_ENGINE_ID
+        || entry.key.trace_config_hash != processed_block_trace_config_hash(true)
+    {
+        bail!(
+            "cache key mismatch: expected {:?}, found {:?}",
+            expected,
+            entry.key
+        );
+    }
+    if entry.header.number != expected.block_number {
+        bail!(
+            "cache header block number mismatch: expected {}, found {}",
+            expected.block_number,
+            entry.header.number
+        );
+    }
+    if let Some(expected_hash) = expected.block_hash {
+        if entry.header.hash != expected_hash {
+            bail!(
+                "cache header hash mismatch: expected {:?}, found {:?}",
+                expected_hash,
+                entry.header.hash
+            );
+        }
+    }
+    if let Some(entry_hash) = entry.key.block_hash {
+        if entry.header.hash != entry_hash {
+            bail!(
+                "cache key/header hash mismatch: key {:?}, header {:?}",
+                entry_hash,
+                entry.header.hash
+            );
+        }
+    }
+    Ok(())
 }
 
 impl ProcessedBlockDiskCacheTransaction {
-    fn into_block_transaction(self) -> ProcessedBlockTransactions {
-        self.processed.into_block_transaction(self.processing_error)
+    fn from_block_transaction(tx: &ProcessedBlockTransactions) -> Result<Self> {
+        let mut processed = CompactProcessedTransaction::from_processed(&tx.processed);
+        let signed_authorizations_json = processed
+            .signed_authorizations
+            .take()
+            .map(|auths| {
+                auths
+                    .into_iter()
+                    .map(|auth| serde_json::to_vec(&auth))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .wrap_err("failed to encode signed authorizations for processed block disk cache")?;
+        let struct_logs_json = processed
+            .struct_logs
+            .take()
+            .map(|logs| serde_json::to_vec(&logs))
+            .transpose()
+            .wrap_err("failed to encode struct logs for processed block disk cache")?;
+        let uniswap_v3_swaps_json =
+            take_json_vec(&mut processed.uniswap_v3_swaps, "uniswap v3 swaps")?;
+        let uniswap_v4_modifies_json = take_json_vec(
+            &mut processed.uniswap_v4_modifies,
+            "uniswap v4 modify-liquidity events",
+        )?;
+        let uniswap_v4_swaps_json =
+            take_json_vec(&mut processed.uniswap_v4_swaps, "uniswap v4 swaps")?;
+        let uniswap_v4_balance_deltas_json = take_json_vec(
+            &mut processed.uniswap_v4_balance_deltas,
+            "uniswap v4 balance deltas",
+        )?;
+        let entry = Self {
+            processed,
+            signed_authorizations_json,
+            struct_logs_json,
+            uniswap_v3_swaps_json,
+            uniswap_v4_modifies_json,
+            uniswap_v4_swaps_json,
+            uniswap_v4_balance_deltas_json,
+            processing_error: tx.processing_error.clone(),
+        };
+        Ok(entry)
     }
+
+    fn into_block_transaction(mut self) -> Result<ProcessedBlockTransactions> {
+        self.processed.signed_authorizations = self
+            .signed_authorizations_json
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|bytes| serde_json::from_slice(&bytes))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .wrap_err("failed to decode signed authorizations from processed block disk cache")?;
+        self.processed.struct_logs = self
+            .struct_logs_json
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .wrap_err("failed to decode struct logs from processed block disk cache")?;
+        restore_json_vec(
+            &mut self.processed.uniswap_v3_swaps,
+            self.uniswap_v3_swaps_json,
+            "uniswap v3 swaps",
+        )?;
+        restore_json_vec(
+            &mut self.processed.uniswap_v4_modifies,
+            self.uniswap_v4_modifies_json,
+            "uniswap v4 modify-liquidity events",
+        )?;
+        restore_json_vec(
+            &mut self.processed.uniswap_v4_swaps,
+            self.uniswap_v4_swaps_json,
+            "uniswap v4 swaps",
+        )?;
+        restore_json_vec(
+            &mut self.processed.uniswap_v4_balance_deltas,
+            self.uniswap_v4_balance_deltas_json,
+            "uniswap v4 balance deltas",
+        )?;
+        Ok(self.processed.into_block_transaction(self.processing_error))
+    }
+}
+
+fn take_json_vec<T: Serialize>(value: &mut Option<Vec<T>>, label: &str) -> Result<Option<Vec<u8>>> {
+    value
+        .take()
+        .map(|items| serde_json::to_vec(&items))
+        .transpose()
+        .wrap_err_with(|| format!("failed to encode {label} for processed block disk cache"))
+}
+
+fn restore_json_vec<T: DeserializeOwned>(
+    target: &mut Option<Vec<T>>,
+    bytes: Option<Vec<u8>>,
+    label: &str,
+) -> Result<()> {
+    *target = bytes
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .wrap_err_with(|| format!("failed to decode {label} from processed block disk cache"))?;
+    Ok(())
 }
 
 fn monotonic_nanos() -> u128 {
@@ -487,19 +645,33 @@ fn monotonic_nanos() -> u128 {
         .unwrap_or_default()
 }
 
-fn b256_path_component(value: B256) -> String {
-    format!("{value:#x}")
+fn cache_file_name(block_number: u64) -> String {
+    format!("{block_number}{CACHE_FILE_SUFFIX}")
 }
 
-fn is_current_cache_file_path(path: &Path) -> bool {
-    if path.extension().and_then(|value| value.to_str()) != Some("zst") {
-        return false;
+fn block_number_from_cache_file_name(name: &str) -> Option<u64> {
+    name.strip_suffix(CACHE_FILE_SUFFIX)
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn network_for_chain_id(chain_id: u64) -> String {
+    match chain_id {
+        ETHEREUM_MAINNET_CHAIN_ID => ETHEREUM_MAINNET_NETWORK.to_string(),
+        _ => format!("chain-{chain_id}"),
     }
-    let current_hash = b256_path_component(processed_block_trace_config_hash(true));
-    path.file_name()
-        .and_then(|value| value.to_str())
-        .map(|name| name.ends_with(".json.zst") && name.contains(&current_hash))
-        .unwrap_or(false)
+}
+
+fn chain_id_for_network(network: &str) -> Option<u64> {
+    match network {
+        ETHEREUM_MAINNET_NETWORK => Some(ETHEREUM_MAINNET_CHAIN_ID),
+        _ => network
+            .strip_prefix("chain-")
+            .and_then(|value| value.parse::<u64>().ok()),
+    }
+}
+
+fn average_bytes(total_bytes: u64, blocks: usize) -> Option<f64> {
+    (blocks > 0).then(|| total_bytes as f64 / blocks as f64)
 }
 
 #[cfg(test)]
@@ -584,6 +756,13 @@ mod tests {
             .writer(1)
             .write_processed_block(&block)
             .expect("write block");
+        assert_eq!(write.key.network, "ethereum-mainnet");
+        assert_eq!(write.key.block_hash, Some(B256::repeat_byte(0xaa)));
+        assert!(root
+            .join("ethereum-mainnet")
+            .join("42.pblock.zst")
+            .exists());
+
         let cached = store
             .get(&write.key)
             .expect("read cache")
@@ -608,6 +787,66 @@ mod tests {
             cached_tx.latest_states[&Address::repeat_byte(0x88)]["nested"]["ok"],
             true
         );
+
+        let planned_key = ProcessedBlockDiskCacheKey::for_block_number(1, 42);
+        let cached_by_block_number = store
+            .get(&planned_key)
+            .expect("read cache by block number")
+            .expect("cached block by block number");
+        assert_eq!(cached_by_block_number.header.hash, B256::repeat_byte(0xaa));
+
+        let coverage = store.coverage().expect("coverage");
+        assert_eq!(coverage.chain_count, 1);
+        assert_eq!(coverage.block_count, 1);
+        assert_eq!(coverage.file_count, 1);
+        assert_eq!(coverage.chains[0].network, "ethereum-mainnet");
+        assert_eq!(coverage.chains[0].ranges[0].start_block, 42);
+        assert_eq!(coverage.chains[0].ranges[0].end_block, 42);
+
+        std::fs::remove_dir_all(root).expect("remove temp cache");
+    }
+
+    #[test]
+    fn stale_trace_hash_is_treated_as_miss() {
+        let root = std::env::temp_dir().join(format!(
+            "processed-block-disk-cache-stale-test-{}-{}",
+            std::process::id(),
+            monotonic_nanos()
+        ));
+        let store = ProcessedBlockDiskCacheStore::open(&root).expect("open cache");
+
+        let block = ProcessedBlock {
+            header: BlockHeader {
+                number: 42,
+                hash: B256::repeat_byte(0xaa),
+                parent_hash: B256::repeat_byte(0xbb),
+                timestamp: 1_700_000_000,
+                gas_limit: 30_000_000,
+                gas_used: 1_000_000,
+                base_fee_per_gas: Some(1),
+                withdrawals_root: None,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: None,
+                requests_hash: None,
+                block_access_list_hash: None,
+                slot_number: None,
+            },
+            transactions: Vec::new(),
+        };
+
+        let key = store.key_for_block(1, &block);
+        let path = store.path_for_key(&key);
+        std::fs::create_dir_all(path.parent().expect("cache parent")).expect("create parent");
+        let mut entry =
+            ProcessedBlockDiskCacheEntry::from_block(key.clone(), &block).expect("cache entry");
+        entry.key.trace_config_hash = B256::repeat_byte(0x99);
+        let encoded = encode_cache_entry(&entry).expect("encode stale entry");
+        let encoded =
+            zstd::stream::encode_all(encoded.as_slice(), CACHE_ZSTD_LEVEL).expect("compress");
+        std::fs::write(&path, encoded).expect("write stale cache entry");
+
+        assert!(store.get(&key).expect("read stale cache").is_none());
 
         std::fs::remove_dir_all(root).expect("remove temp cache");
     }

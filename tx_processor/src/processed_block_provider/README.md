@@ -15,3 +15,32 @@ Rust pipeline.
 
 Higher-level crates should request `ProcessedBlock` data through this module
 instead of implementing Redis, disk, or direct-processing fallback logic locally.
+
+## Processed Block Disk Cache
+
+The disk cache is a hot local replay store for the latest ~1M Ethereum mainnet
+processed blocks. Its job is to let token tracking, live warmup, range builds,
+and later analysis tools load block ranges quickly without re-running EVM replay.
+
+Primary access is by block number, so the on-disk layout is intentionally
+block-number based:
+
+```text
+processed-block-cache/
+  ethereum-mainnet/
+    25050000.pblock.zst
+```
+
+The cache is not token-specific. Each `<block_number>.pblock.zst` file stores a
+single compact binary `ProcessedBlock` payload compressed with zstd. The payload
+contains the network, chain id, block number, block hash, trace engine, trace
+config hash, cache schema id, header, compact processed transactions, and
+per-transaction processing errors.
+
+The filename is stable on purpose. Block hash and trace config hash are payload
+validation fields, not lookup fields. A range read can derive every cache path
+directly from `start_block..=end_block` without fetching headers first.
+
+Only this layout is current. Older `.json.zst`, `.bin.zst`, and `token-chain-*`
+cache layouts should be removed from disk; runtime code does not read or
+migrate them.

@@ -1,17 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::{keccak256, B256};
-use eyre::{bail, Result};
+use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_simulator::block_simulation::BlockTraceEngine;
 
 use crate::block_processor::{ProcessedBlock, PROCESSED_BLOCK_SCHEMA_VERSION};
-use crate::processed_block_provider::COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION;
+use crate::processed_block_provider::{
+    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
+    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+};
 use crate::tx_processor::data_models::ProcessedTransaction;
 
 /// Default number of blocks to retain in the cache (~2 days on Ethereum mainnet).
@@ -155,140 +155,38 @@ impl ProcessedBlockCacheKey {
 /// Persistent on-disk processed block cache.
 #[derive(Debug, Clone)]
 pub struct ProcessedBlockCacheStore {
-    root: PathBuf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProcessedBlockCacheEntry {
-    key: ProcessedBlockCacheKey,
-    block_json: Vec<u8>,
+    inner: ProcessedBlockDiskCacheStore,
 }
 
 impl ProcessedBlockCacheStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        let root = root.as_ref().to_path_buf();
-        fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        Ok(Self {
+            inner: ProcessedBlockDiskCacheStore::open(root)?,
+        })
     }
 
     pub fn get(&self, key: &ProcessedBlockCacheKey) -> Result<Option<ProcessedBlock>> {
-        let path = self.path_for_key(key);
-        if !path.exists() {
+        if !is_current_disk_cache_key(key) {
             return Ok(None);
         }
-
-        let bytes = fs::read(&path)?;
-        let entry: ProcessedBlockCacheEntry = bincode::deserialize(&bytes)?;
-        if entry.key != *key {
-            bail!(
-                "processed block cache key mismatch for {}: expected {:?}, found {:?}",
-                path.display(),
-                key,
-                entry.key
-            );
-        }
-        Ok(Some(serde_json::from_slice(&entry.block_json)?))
+        self.inner.get(&disk_cache_key_from_persistent_key(key))
     }
 
     pub fn put(&self, key: &ProcessedBlockCacheKey, block: &ProcessedBlock) -> Result<()> {
-        let path = self.path_for_key(key);
-        let parent = path
-            .parent()
-            .ok_or_else(|| eyre::eyre!("cache path has no parent: {}", path.display()))?;
-        fs::create_dir_all(parent)?;
-
-        let entry = ProcessedBlockCacheEntry {
-            key: key.clone(),
-            block_json: serde_json::to_vec(block)?,
-        };
-        let bytes = bincode::serialize(&entry)?;
-        let temp_path = parent.join(format!(
-            ".{}.tmp-{}-{}",
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("processed-block"),
-            std::process::id(),
-            monotonic_nanos()
-        ));
-
-        let write_result = (|| -> Result<()> {
-            let mut file = fs::File::create(&temp_path)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            drop(file);
-            fs::rename(&temp_path, &path)?;
-            Ok(())
-        })();
-
-        if write_result.is_err() {
-            let _ = fs::remove_file(&temp_path);
+        if !is_current_disk_cache_key(key) {
+            return Ok(());
         }
-
-        write_result
+        self.inner
+            .put(&disk_cache_key_from_persistent_key(key), block)
     }
 
     pub fn remove_stale_number(&self, chain_id: u64, block_number: u64) -> Result<()> {
-        let path = self
-            .root
-            .join(format!("chain-{chain_id}"))
-            .join(format!("block-{block_number}"));
-        match fs::remove_dir_all(&path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err.into()),
-        }
+        self.inner.remove_block(chain_id, block_number)
     }
 
     pub fn prune_chain_to_recent_blocks(&self, chain_id: u64, retain_blocks: u64) -> Result<usize> {
-        let retain_blocks = usize::try_from(retain_blocks).unwrap_or(usize::MAX);
-        let chain_path = self.root.join(format!("chain-{chain_id}"));
-        let entries = match fs::read_dir(&chain_path) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(err) => return Err(err.into()),
-        };
-
-        let mut block_numbers = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-            let Some(block_number) = entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.strip_prefix("block-"))
-                .and_then(|value| value.parse::<u64>().ok())
-            else {
-                continue;
-            };
-            block_numbers.push(block_number);
-        }
-
-        if block_numbers.len() <= retain_blocks {
-            return Ok(0);
-        }
-
-        block_numbers.sort_unstable_by(|left, right| right.cmp(left));
-        let mut removed = 0;
-        for block_number in block_numbers.iter().skip(retain_blocks) {
-            self.remove_stale_number(chain_id, *block_number)?;
-            removed += 1;
-        }
-        Ok(removed)
-    }
-
-    fn path_for_key(&self, key: &ProcessedBlockCacheKey) -> PathBuf {
-        self.root
-            .join(format!("chain-{}", key.chain_id))
-            .join(format!("block-{}", key.block_number))
-            .join(format!("schema-{}", key.processor_schema_version))
-            .join(format!("engine-{}", key.trace_engine))
-            .join(format!(
-                "config-{}",
-                b256_path_component(key.trace_config_hash)
-            ))
-            .join(format!("{}.bin", b256_path_component(key.block_hash)))
+        self.inner
+            .prune_chain_to_recent_blocks(chain_id, retain_blocks)
     }
 }
 
@@ -307,11 +205,31 @@ pub fn trace_engine_id(trace_engine: BlockTraceEngine) -> &'static str {
     }
 }
 
-fn b256_path_component(value: B256) -> String {
-    format!("{value:#x}")
+fn is_current_disk_cache_key(key: &ProcessedBlockCacheKey) -> bool {
+    key.processor_schema_version == PROCESSED_BLOCK_SCHEMA_VERSION
+        && key.trace_engine == trace_engine_id(BlockTraceEngine::FreshInspector)
+        && key.trace_config_hash == processed_block_trace_config_hash(true)
 }
 
+fn disk_cache_key_from_persistent_key(key: &ProcessedBlockCacheKey) -> ProcessedBlockDiskCacheKey {
+    ProcessedBlockDiskCacheKey {
+        chain_id: key.chain_id,
+        network: if key.chain_id == 1 {
+            "ethereum-mainnet".to_string()
+        } else {
+            format!("chain-{}", key.chain_id)
+        },
+        block_number: key.block_number,
+        block_hash: Some(key.block_hash),
+        trace_engine: key.trace_engine.clone(),
+        trace_config_hash: key.trace_config_hash,
+    }
+}
+
+#[cfg(test)]
 fn monotonic_nanos() -> u128 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -451,7 +369,7 @@ mod tests {
             .remove_stale_number(key.chain_id, key.block_number)
             .expect("remove block cache");
         assert!(store.get(&key).expect("read removed cache").is_none());
-        let _ = fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -488,7 +406,7 @@ mod tests {
         assert!(store.get(&keys[2]).expect("read kept cache").is_some());
         assert!(store.get(&keys[3]).expect("read kept cache").is_some());
 
-        let _ = fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn dummy_processed_block() -> ProcessedBlock {

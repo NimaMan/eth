@@ -4,15 +4,11 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWriter};
 
-const LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR";
-const LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV: &str =
-    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS";
-const LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME: &str = "processed_block_cache";
 const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
 const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
     "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
-const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
-const DEFAULT_RETAIN_BLOCKS: u64 = 100_000;
+const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
+const DEFAULT_RETAIN_BLOCKS: u64 = 1_000_000;
 const DEFAULT_QUEUE_BLOCKS: usize = 256;
 const PRUNE_INTERVAL_WRITES: u64 = 1_000;
 
@@ -135,25 +131,16 @@ async fn run_cache_writer(
 }
 
 fn processed_block_disk_cache_dir() -> eyre::Result<PathBuf> {
-    if let Some(value) = non_empty_env(PROCESSED_BLOCK_DISK_CACHE_DIR_ENV)
-        .or_else(|| non_empty_env(LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV))
-    {
+    if let Some(value) = non_empty_env(PROCESSED_BLOCK_DISK_CACHE_DIR_ENV) {
         return Ok(PathBuf::from(value));
     }
 
     let root = PathBuf::from(tx_simulator::config::repo::eth_node_root()?);
-    let preferred = root.join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME);
-    let legacy = root.join(LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME);
-    if preferred.exists() || !legacy.exists() {
-        Ok(preferred)
-    } else {
-        Ok(legacy)
-    }
+    Ok(root.join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME))
 }
 
 fn processed_block_disk_cache_blocks() -> u64 {
     non_empty_env(PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV)
-        .or_else(|| non_empty_env(LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV))
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_RETAIN_BLOCKS)

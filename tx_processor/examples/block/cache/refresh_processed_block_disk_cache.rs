@@ -15,7 +15,7 @@ use tx_processor::{
 const DEFAULT_BLOCKS: u64 = 100_000;
 const DEFAULT_RETAIN_BLOCKS: u64 = 1_000_000;
 const DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
-const DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
+const DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 
 /// Refresh the processed-block disk cache for a block range.
 ///
@@ -28,7 +28,7 @@ struct Args {
     #[arg(long)]
     reth_datadir: Option<PathBuf>,
 
-    /// Processed-block disk cache directory. Defaults to ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR or <reth_datadir>/processed_block_disk_cache.
+    /// Processed-block disk cache directory. Defaults to ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR or <reth_datadir>/processed-block-cache.
     #[arg(long)]
     cache_dir: Option<PathBuf>,
 
