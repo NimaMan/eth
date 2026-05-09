@@ -363,6 +363,11 @@ fn extract_amount(
     use tx_processor::tx_processor::address_balance_change_calculator::get_token_symbol;
 
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&account) {
+        if token == Address::ZERO {
+            if let Some(&amount) = balance_changes.currency_net.get("ETH") {
+                return amount;
+            }
+        }
         if let Some(symbol) = get_token_symbol(&token) {
             if let Some(&amount) = balance_changes.currency_net.get(symbol) {
                 return amount;

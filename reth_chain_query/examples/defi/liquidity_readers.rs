@@ -5,7 +5,9 @@
 
 use alloy_primitives::address;
 use eyre::Result;
-use reth_chain_query::{Address, AmmSwapRoute, RethQueryProvider, B256};
+use reth_chain_query::{
+    common_addresses::uniswap_v4_pools, Address, AmmSwapRoute, RethQueryProvider, B256,
+};
 
 fn default_reth_db() -> Result<String> {
     tx_simulator::config::repo::reth_datadir()
@@ -32,7 +34,6 @@ async fn main() -> Result<()> {
     let uni_v3_weth_usdc_500: Address = address!("88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640");
     let uni_v3_weth_usdc_3000: Address = address!("8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8");
     let uni_v3_usdc_usdt_100: Address = address!("3416cF6C708Da44DB2624D63ea0AAef7113527C6");
-
     // Balancer V2 poolId: WETH/USDC weighted pool (example)
     // 0x96646936b91d6b9d7d0c47c496afbf3d6ec7b6f8000200000000000000000019
     let bal_weth_usdc_pool_id = B256::from_slice(&[
@@ -44,7 +45,7 @@ async fn main() -> Result<()> {
     // Curve V1 TriCrypto pool (USDT/WBTC/WETH)
     let curve_tricrypto_pool: Address = address!("D51a44d3FaE010294C616388b506AcdA1bfAAE46");
 
-    let routes = vec![
+    let mut routes = vec![
         AmmSwapRoute::UniswapV2 {
             pool: uni_v2_usdc_weth,
         },
@@ -78,10 +79,20 @@ async fn main() -> Result<()> {
         },
     ];
 
+    for pool in uniswap_v4_pools() {
+        routes.push(AmmSwapRoute::UniswapV4 {
+            pool_manager: pool.pool_manager,
+            pool_id: pool.pool_id,
+        });
+    }
+
     for route in routes {
         let info = provider.get_route_liquidity(&route, None).await?;
         println!("\nProtocol: {}", info.protocol);
         println!("Pool:     0x{:x}", info.pool);
+        if let Some(pool_id) = info.pool_id {
+            println!("PoolId:   0x{pool_id:x}");
+        }
         if let (Some(t0), Some(t1)) = (info.token0, info.token1) {
             println!(
                 "Tokens:   0x{:x} ({:?}) / 0x{:x} ({:?})",

@@ -596,6 +596,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
     }
 
     let mut unwrap_tx_processed: Option<ProcessedTransaction> = None;
+    let mut wrapped_denom_received_from_sell = U256::ZERO;
     if sell_call.orientation.output_currency == config.weth_address {
         let wdenom_received = extract_tokens_received_from_processed_transaction(
             &sell_processed,
@@ -603,6 +604,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             config.weth_address,
             WETH_DECIMALS,
         );
+        wrapped_denom_received_from_sell = wdenom_received;
         if wdenom_received > U256::ZERO {
             let mut withdraw_tx = build_v4_weth_withdraw_tx(
                 config.buyer_address,
@@ -677,13 +679,17 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         config.buyer_address,
     );
 
-    let eth_transfer_source = unwrap_tx_processed.as_ref().unwrap_or(&sell_processed);
-    let denom_received_u256 = extract_denom_received_from_processed_transaction(
-        eth_transfer_source,
-        config.buyer_address,
-        config.denom_address,
-    )
-    .unwrap_or(U256::ZERO);
+    let denom_received_u256 =
+        if unwrap_tx_processed.is_some() && wrapped_denom_received_from_sell > U256::ZERO {
+            wrapped_denom_received_from_sell
+        } else {
+            extract_denom_received_from_processed_transaction(
+                &sell_processed,
+                config.buyer_address,
+                config.denom_address,
+            )
+            .unwrap_or(U256::ZERO)
+        };
 
     Ok(PoolBuySellSimulationResult {
         pool_type: PoolType::UniswapV4,

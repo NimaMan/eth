@@ -34,6 +34,10 @@ impl PoolTestCase {
         )
     }
 
+    fn selected_block(&self, latest_block: u64) -> u64 {
+        self.info.block_hint.unwrap_or(latest_block)
+    }
+
     fn build_simulation_params(&self, block_number: u64) -> PoolBuySellParameters {
         let v4_config = UniswapV4PoolConfig {
             pool_manager: self.info.pool_manager,
@@ -55,31 +59,49 @@ impl PoolTestCase {
         .with_denom_address(self.info.denom_address)
         .with_denom_decimals(self.info.denom_decimals)
         .with_token_decimals(self.info.token_decimals)
-        .with_block(self.info.block_hint.unwrap_or(block_number))
+        .with_block(block_number)
         .with_uniswap_v4_config(v4_config)
     }
 }
 
-fn format_eth_amount(wei: U256) -> String {
-    if wei == U256::ZERO {
-        return "-".into();
+fn format_token_amount(amount: U256, decimals: u8) -> String {
+    if amount.is_zero() {
+        return "0".to_string();
     }
 
-    let eth_str = wei.to_string();
-    if eth_str.len() <= 18 {
-        let padded = format!("{:0>18}", eth_str);
-        return format!("0.{}E", &padded[..4]);
+    let digits = amount.to_string();
+    let decimals = decimals as usize;
+    if decimals == 0 {
+        return digits;
     }
 
-    let (whole, decimal) = eth_str.split_at(eth_str.len() - 18);
-    format!("{}.{}E", whole, &decimal[..4.min(decimal.len())])
+    if digits.len() <= decimals {
+        let padded = format!("{:0>width$}", digits, width = decimals + 1);
+        let split = padded.len() - decimals;
+        let (whole, frac) = padded.split_at(split);
+        let frac_trimmed = frac.trim_end_matches('0');
+        if frac_trimmed.is_empty() {
+            whole.to_string()
+        } else {
+            format!("{whole}.{frac_trimmed}")
+        }
+    } else {
+        let split = digits.len() - decimals;
+        let (whole, frac) = digits.split_at(split);
+        let frac_trimmed = frac.trim_end_matches('0');
+        if frac_trimmed.is_empty() {
+            whole.to_string()
+        } else {
+            format!("{whole}.{frac_trimmed}")
+        }
+    }
 }
 
 fn print_summary_table(results: &[(PoolTestCase, Result<PoolBuySellSimulationResult>)]) {
     println!("\n📊 Summary Table");
     println!("================================================================================");
     println!(
-        "Pool                               | Tradeable | Buy ✓ | Approve ✓ | Sell ✓ | Buy Tax | Sell Tax | ETH Back | Failure"
+        "Pool                               | Block    | Tradeable | Buy ✓ | Approve ✓ | Sell ✓ | Buy Tax | Sell Tax | Denom Back | Failure"
     );
     println!("--------------------------------------------------------------------------------");
 
@@ -92,7 +114,7 @@ fn print_summary_table(results: &[(PoolTestCase, Result<PoolBuySellSimulationRes
                 let can_sell = if res.can_sell { "✅" } else { "❌" };
                 let buy_tax = format!("{:.1}%", res.buy_tax_percent);
                 let sell_tax = format!("{:.1}%", res.sell_tax_percent);
-                let eth_back = format_eth_amount(res.denom_received);
+                let denom_back = format_token_amount(res.denom_received, case.info.denom_decimals);
                 let failure = res
                     .failure_reason
                     .as_deref()
@@ -102,21 +124,22 @@ fn print_summary_table(results: &[(PoolTestCase, Result<PoolBuySellSimulationRes
                     .collect::<String>();
 
                 println!(
-                    "{:<34} | {:<9} | {:<5} | {:<9} | {:<6} | {:<7} | {:<8} | {:<8} | {:<24}",
+                    "{:<34} | {:<8} | {:<9} | {:<5} | {:<9} | {:<6} | {:<7} | {:<8} | {:<10} | {:<24}",
                     case.pool_label(),
+                    res.block_number,
                     tradeable,
                     can_buy,
                     can_approve,
                     can_sell,
                     buy_tax,
                     sell_tax,
-                    eth_back,
+                    denom_back,
                     failure
                 );
             }
             Err(err) => {
                 println!(
-                    "{:<34} | ❌        | ❌    | ❌        | ❌     | -       | -        | -        | Error: {}",
+                    "{:<34} | -        | ❌        | ❌    | ❌        | ❌     | -       | -        | -          | Error: {}",
                     case.pool_label(),
                     err.to_string()
                         .chars()
@@ -161,13 +184,14 @@ async fn main() -> Result<()> {
 
     for (idx, case) in pool_cases.iter().enumerate() {
         println!(
-            "[{}/{}] Testing {}",
+            "[{}/{}] Testing {} at block {}",
             idx + 1,
             pool_cases.len(),
-            case.pool_label()
+            case.pool_label(),
+            case.selected_block(latest_block)
         );
 
-        let params = case.build_simulation_params(latest_block);
+        let params = case.build_simulation_params(case.selected_block(latest_block));
         let result = check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), params).await;
 
         match &result {
@@ -175,6 +199,16 @@ async fn main() -> Result<()> {
                 println!(
                     "    ✅ tradeable={}, buy={}, approve={}, sell={}, buy_tax={:.2}%, sell_tax={:.2}%",
                     res.is_tradeable, res.can_buy, res.can_approve, res.can_sell, res.buy_tax_percent, res.sell_tax_percent
+                );
+                println!(
+                    "    ℹ️ block={}, tokens_received={} {}, denom_spent={} {}, denom_received={} {}",
+                    res.block_number,
+                    format_token_amount(res.tokens_received, case.info.token_decimals),
+                    case.info.symbol,
+                    format_token_amount(res.denom_spent, case.info.denom_decimals),
+                    case.info.denom_symbol,
+                    format_token_amount(res.denom_received, case.info.denom_decimals),
+                    case.info.denom_symbol
                 );
                 if let Some(reason) = &res.failure_reason {
                     println!("    ⚠️ failure_reason: {reason}");

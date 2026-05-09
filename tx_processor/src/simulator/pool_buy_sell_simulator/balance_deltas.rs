@@ -11,6 +11,11 @@ pub(super) fn extract_token_balance_delta(
     token_address: Address,
 ) -> I256 {
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&account) {
+        if token_address == Address::ZERO {
+            if let Some(&amount) = balance_changes.currency_net.get("ETH") {
+                return amount;
+            }
+        }
         if let Some(symbol) = get_token_symbol(&token_address) {
             if let Some(&amount) = balance_changes.currency_net.get(symbol) {
                 return amount;
