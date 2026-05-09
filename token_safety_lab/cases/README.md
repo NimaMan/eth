@@ -16,13 +16,21 @@ sss_space_services_25041048
 biba_primary_v2_pool_25039257
 ```
 
-Cases are not just notes. A complete case should explain:
+Cases are not just notes. A complete case `README.md` should explain:
 
 - what the range builder reported;
 - what the chain actually did;
 - whether the simulator can reproduce it;
 - whether a detector or guardrail should exist before trading;
 - what code changed because of the investigation.
+
+Case folders should normally contain only:
+
+- `README.md`: the single narrative markdown file;
+- `case.toml`: machine-readable metadata;
+- `artifacts/README.md`: artifact folder instructions.
+
+Generated artifacts belong under `artifacts/` and are ignored by default.
 
 ## Candidate Ledger
 

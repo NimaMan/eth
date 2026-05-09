@@ -72,6 +72,11 @@ outputs under the case `artifacts/` folder.
 ## Folder Layout
 
 - `cases/`: one folder per concrete token or pool investigation.
+- `cases/<slug>/README.md`: the single narrative markdown file for that case.
+- `cases/<slug>/case.toml`: machine-readable token, pool, range, and key txs.
+- `cases/<slug>/artifacts/`: generated receipts, traces, screenshots, and
+  comparison outputs. Generated files are ignored by default; keep the
+  `README.md`.
 - `odd_behaviors/`: the shared catalog of suspicious patterns we want to detect.
 - `tools/chain_truth/`: tools that extract on-chain receipts, logs, balances, and reserves.
 - `tools/parity/`: tools that compare simulator replay against chain truth.
@@ -80,10 +85,14 @@ outputs under the case `artifacts/` folder.
 
 ## Case Standard
 
-Every case should include:
+Each case folder should keep one narrative markdown file:
 
-- `case.toml`: token, pool, block range, and key transactions.
-- `chain_truth.md`: what happened on chain, with block and tx references.
-- `simulator_parity.md`: what our simulator reproduced and what it failed to reproduce.
-- `findings.md`: confirmed lessons, bugs, detector candidates, and follow-up fixes.
-- `artifacts/`: generated outputs, receipts, traces, and comparison files.
+- `README.md`: what the range builder reported, what happened on chain, what
+  the simulator reproduced or failed to reproduce, confirmed findings, and open
+  work.
+- `case.toml`: token, pool, block range, key transactions, and expected odd
+  behavior flags.
+- `artifacts/README.md`: describes generated outputs for the case.
+
+Keep generated data under `artifacts/`. Do not add extra case markdown files
+unless a case becomes large enough to justify splitting it deliberately.
