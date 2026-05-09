@@ -3,8 +3,8 @@ use alloy_primitives::U256;
 ///
 /// Iterates over the canonical Uniswap V4 pool catalog defined in
 /// `reth_chain_query::common_addresses::dex_token_denom_pairs` and validates that
-/// each pool can execute a buy → approve → sell sequence using the Baygus
-/// router configuration shipped with the project.
+/// each pool can execute a buy → Permit2 approve → sell sequence using the
+/// deployed Uniswap Universal Router.
 use eyre::Result;
 use reth_chain_query::common_addresses::{uniswap_v4_pools, UniswapV4PoolInfo};
 use std::sync::Arc;
@@ -42,8 +42,8 @@ impl PoolTestCase {
         let v4_config = UniswapV4PoolConfig {
             pool_manager: self.info.pool_manager,
             pool_id: self.info.pool_id,
-            currency0: self.info.token_address,
-            currency1: self.info.denom_address,
+            currency0: self.info.currency0,
+            currency1: self.info.currency1,
             fee: self.info.fee,
             tick_spacing: self.info.tick_spacing,
             hooks: self.info.hooks,

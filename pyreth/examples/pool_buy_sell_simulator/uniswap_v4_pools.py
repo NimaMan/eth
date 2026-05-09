@@ -2,36 +2,37 @@
 """
 Uniswap V4 Pools - Buy → Approve → Sell Simulation
 
-Runs the Baygus executor powered pipeline against a known Uniswap v4 USDC/WETH pool.
+Runs the Universal Router powered pipeline against a known Uniswap v4 ETH/USDC pool.
 Prints the swap outcomes and gas metrics for each leg if the pool is tradeable.
 """
 
 from pyreth import pool_buy_sell_simulator as pyreth_pool_buy_sell_simulator
 
-WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
-WETH_DECIMALS = 18
+ETH_ADDRESS = "0x0000000000000000000000000000000000000000"
+ETH_DECIMALS = 18
 
-# Mainnet PoolManager, pool id, and currencies for the hookless USDC/WETH v4 pool.
+# Mainnet PoolManager, pool id, and currencies for the hookless ETH/USDC v4 pool.
 TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC
 POOL_MANAGER = "0x000000000004444C5DC75cB358380d2E3de08a90"
 POOL_ID = (
-    "0x11142dd4ac627021305b9349c2167d89744c4e45c92ce383c04120337f86495c"
+    "0x21c67e77068de97969ba93d4aab21826d33ca12bb9f565d8496e8fda8a82ca27"
 )
-CURRENCY0 = TOKEN
-CURRENCY1 = WETH_ADDRESS
-FEE = 490
+CURRENCY0 = ETH_ADDRESS
+CURRENCY1 = TOKEN
+FEE = 500
 TICK_SPACING = 10
 HOOKS = "0x0000000000000000000000000000000000000000"
-BLOCK_NUMBER = 23_560_197
+BLOCK_NUMBER = None
 
 
 def main():
     sim = pyreth_pool_buy_sell_simulator()
 
-    cfg = sim.default_config(6, WETH_DECIMALS)
-    cfg.denom_address = WETH_ADDRESS
+    cfg = sim.default_config(6, ETH_DECIMALS)
+    cfg.denom_address = ETH_ADDRESS
     cfg.denom_amount = 0.01
-    cfg.block_number = BLOCK_NUMBER
+    if BLOCK_NUMBER is not None:
+        cfg.block_number = BLOCK_NUMBER
     cfg.buy_gas_limit = 800_000
     cfg.approve_gas_limit = 250_000
     cfg.sell_gas_limit = 800_000
@@ -61,7 +62,7 @@ def main():
         if res.error_message:
             print("❌ Swap pipeline failed")
         else:
-            print("✅ Baygus executor v4 buy → approve → sell succeeded")
+            print("✅ Universal Router v4 buy → approve → sell succeeded")
     except Exception as e:
         print("❌ Unexpected error calling V4 check:", e)
         raise

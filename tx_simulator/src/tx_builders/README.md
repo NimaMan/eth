@@ -1,10 +1,10 @@
-Tx Builders — AMM and Executor Calldata Constructors
+Tx Builders — AMM Calldata Constructors
 
 Purpose
 - Stateless builders that construct unsigned transactions for AMM interactions:
   - V2/Sushi: swapExactETHForTokens, swapExactTokensForETH, approve
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
-  - BaygusExecutor: typed `execute(bytes,bytes[])` command plans
+  - V4: Universal Router exact-input single-hop swaps plus Permit2 allowance helpers
 - No chain reads here; callers must supply addresses and parameters.
 - Builders are where route and execution decisions should be finalized. Prefer adding off-chain
   builder logic over adding on-chain branching, discovery, or generic adapter behavior.
@@ -12,7 +12,8 @@ Purpose
 Entrypoints
 - `amm/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
 - `amm/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, `build_token_to_token_swap_v3(_with_min_out)`, `build_approve_v3`
-- `baygus_executor.rs`: `BaygusExecutionPlan`, command encoders, and `build_baygus_execute_tx`
+- `uniswap_v4.rs`: pool-key orientation, ERC20/WETH helpers, and Universal Router v4 builders
+- `permit2.rs`: Permit2 allowance approval builder
 - `mod.rs`:
   - Route-aware dispatchers: `build_buy_swap`, `build_sell_swap`, `build_approve_for_route`
   - Token→Token: `build_token_to_token_swap(_with_min_out)`
@@ -29,26 +30,12 @@ Usage
   - Strategy/training environments to generate unsigned txs for simulation
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
-- Baygus command examples should use `BaygusExecutionPlan` instead of hand-encoding ABI payloads.
-- Keep production plans narrow. If the direct router or pair/pool calldata is cheaper and no
-  atomic executor feature is needed, use the direct builder instead of Baygus.
-- Use `BaygusExecutionPlan::permit2_transfer_from(...)` when the caller has already granted Permit2
-  allowance to the deployed executor.
-- Use `BaygusExecutionPlan::permit2_signature_transfer_from(...)` when the owner has signed a
-  one-time Permit2 `PermitWitnessTransferFrom` for the deployed executor as spender. Sign the
-  witness returned by `BaygusExecutionPlan::plan_witness(executor, caller)` with
-  `BAYGUS_EXECUTION_WITNESS_TYPE`. This removes the separate Permit2 allowance setup tx, but the
-  owner still needs ERC20 approval to Permit2.
-- `BaygusExecutionPlan::coinbase_tip_with_block_guard(amount, min, max)` appends the executor
-  `CMD_COINBASE_TIP` command and increases transaction `value` by the tip amount. Prefer this for
-  bundle/private-relay execution so stale public transactions cannot pay in the wrong block.
-- Use `BaygusExecutionPlan::v2_pair_swap(...)` for V2/Sushi hot paths when the planner already knows
-  the pair and exact output amounts. Send final output directly to the buyer unless a later command
-  needs the balance inside the executor.
+- V4 flows use Uniswap's deployed Universal Router and Permit2. The tx builder does not deploy
+  local routers or custom executors.
 
 Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.
   - API sketch: `build_token_to_token_path_v2(trader, path: [Address; 3], amount_in, amount_out_min, deadline)`
   - This enables robust routing when no direct pool exists.
-- Gas-first Baygus production builders: create minimal plans for hot paths and benchmark them
-  against direct router/pool execution before any new command is considered deployable.
+- Gas-first production builders: benchmark route-specific calldata against Universal Router paths
+  before promoting new swap modes.

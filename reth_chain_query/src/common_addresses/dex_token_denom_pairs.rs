@@ -51,6 +51,8 @@ pub struct UniswapV4PoolInfo {
     pub token_address: Address,
     pub denom_address: Address,
     pub denom_symbol: &'static str,
+    pub currency0: Address,
+    pub currency1: Address,
     pub pool_manager: Address,
     pub pool_id: B256,
     pub fee: u32,
@@ -287,44 +289,27 @@ static SUSHISWAP_TOKEN_SET: Lazy<Vec<SushiSwapTokenInfo>> = Lazy::new(|| {
 });
 
 static UNISWAP_V4_POOL_SET: Lazy<Vec<UniswapV4PoolInfo>> = Lazy::new(|| {
-    let weth = resolve_token("WETH");
     let usdc = resolve_token("USDC");
     let token_decimals = resolve_decimals("USDC");
-    let denom_decimals = resolve_decimals("WETH");
-    vec![
-        UniswapV4PoolInfo {
-            symbol: "USDC",
-            token_address: usdc,
-            denom_address: weth,
-            denom_symbol: "WETH",
-            pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
-            pool_id: B256::from_slice(&hex_literal::hex!(
-                "11142dd4ac627021305b9349c2167d89744c4e45c92ce383c04120337f86495c"
-            )),
-            fee: 490,
-            tick_spacing: 10,
-            hooks: Address::ZERO,
-            token_decimals,
-            denom_decimals,
-            block_hint: Some(23560197),
-        },
-        UniswapV4PoolInfo {
-            symbol: "MOONSTR",
-            token_address: address!("7bf4C3Ea48522217446416D39dB92EBeF7848778"),
-            denom_address: address!("0000000000000000000000000000000000000000"),
-            denom_symbol: "ETH",
-            pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
-            pool_id: B256::from_slice(&hex_literal::hex!(
-                "5f8705d214f90a577483f45910165dce245b435a26e661cf757a70fd665249ce"
-            )),
-            fee: 0,
-            tick_spacing: 60,
-            hooks: address!("213F0db3d48580954471B3E69E5F486292a36844"),
-            token_decimals: 18,
-            denom_decimals: 18,
-            block_hint: Some(23583177),
-        },
-    ]
+    let denom_decimals = 18;
+    vec![UniswapV4PoolInfo {
+        symbol: "USDC",
+        token_address: usdc,
+        denom_address: Address::ZERO,
+        denom_symbol: "ETH",
+        currency0: Address::ZERO,
+        currency1: usdc,
+        pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
+        pool_id: B256::from_slice(&hex_literal::hex!(
+            "21c67e77068de97969ba93d4aab21826d33ca12bb9f565d8496e8fda8a82ca27"
+        )),
+        fee: 500,
+        tick_spacing: 10,
+        hooks: Address::ZERO,
+        token_decimals,
+        denom_decimals,
+        block_hint: None,
+    }]
 });
 
 static CURVE_POOL_SET: Lazy<Vec<CurvePoolInfo>> = Lazy::new(|| {

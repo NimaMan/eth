@@ -59,22 +59,20 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Status:** ❌ Fails - dependency issues
 **Original Function:** Tests concentrated liquidity pools and fee tiers
 
-### Upcoming Success Criteria Example (v0.5 integration)
+### V4 Pool Viability Example
 
-#### `can_buy_sell_uniswap_v4.rs`
-**Purpose:** Acceptance example for Baygus Executor wiring (buy → approve → sell routed through Solidity).
-**Status Goal:** ✅ Passes once v0.5 objective is complete.
+#### `can_buy_sell_common_tokens_uniswap_v4.rs`
+**Purpose:** Acceptance example for Universal Router V4 buy → Permit2 approve → sell simulation.
+**Status Goal:** ✅ Uses the same pool buy/sell simulator path as token tracking.
 **Success Definition:**
-- Build Uniswap v4 calldata via the Baygus Executor builder in `reth_chain_query`.
-- Deploy (or reuse) the Baygus Executor bytecode inside the simulator environment.
-- Execute buy/approve/sell through the router and persist standard tax/trace outputs.
+- Build Uniswap v4 calldata via the deployed Universal Router builder.
+- Execute buy/approve/sell through Universal Router and Permit2.
+- Persist standard tax/trace outputs.
 - Report success in the CLI output without manual patching.
 **How to run (when ready):**
 ```bash
-cargo run --example can_buy_sell_uniswap_v4 --package tx_processor -- \
-  --reth-datadir /home/nima/.local/share/reth/mainnet \
-  --pool-manager 0x000000000004444C5DC75cB358380d2E3de08a90 \
-  --pool-id 0x6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa
+RETH_DATADIR=/home/nima/.local/share/reth/mainnet \
+  cargo run --manifest-path Cargo.toml -p tx_processor --example can_buy_sell_common_tokens_uniswap_v4
 ```
 
 ## Resolution Required

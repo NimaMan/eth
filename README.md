@@ -38,7 +38,7 @@ Important adjacent code that is not currently a root workspace member:
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
 | `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
 | `node/` | Reth/Lighthouse node scripts and systemd service helpers. |
-| `solidity/` | Solidity executor/contracts, including Baygus executor work. |
+| `solidity/` | Archived Solidity executor/contracts and experiments. Current v4 simulation uses deployed Uniswap periphery. |
 | `vendor/reth/` | Vendored upstream Reth reference tree. Use for source parity and examples, not as normal application code. |
 
 ## Main Data Flow
@@ -111,7 +111,7 @@ Use this map before broad searching:
 | How is a real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
 | How do I investigate token behavior or launch strategy stats? | `token_lab/README.md` | `token_lab/cases/README.md`, `token_lab/strategy/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
 | How are node paths and services configured? | `node/README.md` | `config.env`, `node/scripts/`, `node/systemd/` |
-| How do contract/executor Solidity pieces fit? | `solidity/README.md` | `solidity/baygus-executor/README.md`, `solidity/baygus-executor/DEPLOYMENT.md` |
+| How do archived Solidity executor experiments fit? | `solidity/README.md` | current production simulation paths live in `tx_simulator/` and `tx_processor/` |
 
 When navigating as an agent, the fastest useful sequence is:
 

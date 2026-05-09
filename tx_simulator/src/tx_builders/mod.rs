@@ -1,9 +1,4 @@
 pub mod amm_swap_route;
-pub mod baygus_executor;
-#[deprecated(note = "use tx_builders::baygus_executor; Baygus is an executor, not a public router")]
-pub mod baygus_router {
-    pub use super::baygus_executor::*;
-}
 pub mod curve;
 pub mod permit2;
 pub mod processed_tx_json_unsigned_builder;

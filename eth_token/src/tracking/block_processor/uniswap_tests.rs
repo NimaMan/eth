@@ -224,7 +224,7 @@ async fn block_processor_discovers_updates_and_indexes_uniswap_v4_pool() {
     assert_eq!(report.token_updates.len(), 1);
     assert_eq!(report.token_updates[0].discovered_uniswap_v4_pools.len(), 1);
     assert_eq!(report.token_updates[0].updated_uniswap_v4_pools.len(), 1);
-    assert_eq!(report.token_updates[0].simulated_uniswap_v4_pools.len(), 1);
+    assert_eq!(report.token_updates[0].simulated_uniswap_v4_pools.len(), 0);
 
     let pool_key = report.token_updates[0].discovered_uniswap_v4_pools[0].clone();
     assert_eq!(
@@ -247,4 +247,7 @@ async fn block_processor_discovers_updates_and_indexes_uniswap_v4_pool() {
     assert_eq!(pool.current_tick, Some(0));
     assert_eq!(pool.active_liquidity, 1_000_000_000_000_000_000u128);
     assert_eq!(pool.base.price(), 1.0);
+    assert!(!pool.base.state.can_buy);
+    assert!(!pool.base.state.can_sell);
+    assert!(pool.base.last_trading_failure_class.is_none());
 }

@@ -105,7 +105,7 @@ pub async fn check_can_buy_sell_pool(
             return Err(eyre::eyre!(
                 "Pool type {:?} not yet implemented",
                 config.pool_type
-            ))
+            ));
         }
     };
 
@@ -737,7 +737,7 @@ pub async fn check_can_buy_sell_pool(
     })
 }
 
-fn block_header_hint(
+pub(super) fn block_header_hint(
     config: &PoolBuySellParameters,
     block_number: u64,
 ) -> Result<Option<SealedHeader>> {

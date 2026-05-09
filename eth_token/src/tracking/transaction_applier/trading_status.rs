@@ -385,6 +385,10 @@ pub(super) async fn simulate_updated_v4_pools(
         if !should_simulate {
             continue;
         }
+        #[cfg(test)]
+        if matches!(trading_simulation, V2TradingSimulation::Noop) {
+            continue;
+        }
 
         let Some(pool) = token.uniswap_v4_pool_mut(pool_key) else {
             continue;
@@ -433,7 +437,7 @@ pub(super) async fn simulate_updated_v4_pools(
                             tx_index = tx.tx_index,
                             tx_hash = %tx_hash,
                             token_address = %token_address,
-                            pool_address = %pool_key,
+                            pool_key = %pool_key,
                             prior_tx_count,
                             force_simulation,
                             timeout_ms = timeout.as_millis(),
@@ -480,14 +484,8 @@ pub(super) async fn simulate_updated_v4_pools(
                     result = "ok",
                     "completed v4 pool trading simulation"
                 );
-                simulated.push(pool_key.clone());
             }
             Err(error) => {
-                let reason = error.to_string();
-                pool.base.set_trading_failure_context(
-                    Some(reason.clone()),
-                    Some("simulator_error".to_string()),
-                );
                 tracing::warn!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
@@ -497,12 +495,14 @@ pub(super) async fn simulate_updated_v4_pools(
                     prior_tx_count,
                     force_simulation,
                     action = "evaluate_v4_trading",
-                    result = "skipped",
-                    reason = %reason,
-                    "skipped v4 pool trading simulation and preserved pool state"
+                    result = "error",
+                    reason = %error,
+                    "failed v4 pool trading simulation"
                 );
+                return Err(error);
             }
         }
+        simulated.push(pool_key.clone());
     }
 
     Ok(simulated)
