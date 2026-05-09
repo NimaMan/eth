@@ -7,36 +7,40 @@ Purpose
 What This Module Provides
 - Direct state access: Builds a read‑only `StateProvider` over your local Reth DB and wraps it in a cached overlay for writes during simulation.
 - Deterministic EVM setup: Derives `BlockEnv` and chain spec from canonical headers at a chosen block number.
-- Unsigned and signed simulation: Single‑call helpers, plus stateful chain simulators that persist changes between steps.
+- Unsigned and signed simulation: Single‑call helpers, plus stateful sessions/chains that persist changes between steps.
 - Geth‑compatible traces: Uses `TracingInspector::default_geth()` (with logs for trace variants) and exports geth `CallFrame`s.
 - Fast no-trace execution: Plain simulation paths avoid inspector allocation when traces are not requested.
-- Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
+- Mixed simulation sessions: `SimulationSession` keeps one warm fork for arbitrary signed/unsigned sequences, balance/nonce overrides, and read-only calls.
+- Block replay sessions: `BlockReplaySession` pins replay options for trace, profile, and execute-only lower-bound runs.
+- Trace collector reset: Block call-tracing keeps one tracing inspector alive and resets its per-tx trace buffers between transactions for Reth-style performance. Upstream Reth/REVM calls this `fuse`.
 - Live state: `live::LiveTxSimulator` uses MDBX when it is caught up, otherwise the state tracked by the live block processor.
 
 How This Compares To Reth
-- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and fuses inspectors across block tracing.
+- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and resets inspectors across block tracing. In upstream code the reset method is named `fuse`.
 - We do the same locally via Reth crates, bypassing only the RPC layer.
 
 Relevant Reth Source (for parity)
-- Block and bundle tracing use a fused inspector between txs: rust/reth/crates/rpc/rpc/src/debug.rs:124
-- Fusing pattern after each tx: rust/reth/crates/rpc/rpc/src/debug.rs:574
+- Block and bundle tracing reset the inspector between txs: rust/reth/crates/rpc/rpc/src/debug.rs:124
+- Upstream reset method (`fuse`) after each tx: rust/reth/crates/rpc/rpc/src/debug.rs:574
 - Default geth structlog tracer setup: rust/reth/crates/rpc/rpc/src/debug.rs:872
 - Lower‑level helpers that construct `TracingInspector`: rust/reth/crates/rpc/rpc-eth-api/src/helpers/trace.rs:72
 
 Key Building Blocks Here
-- TxSimulator (core): rust/tx_simulator/src/simulator.rs:1
+- TxSimulator (core): tx_simulator/src/simulator.rs:1
   - Block metadata, provider factory, fork creation, base fee, and low‑level on‑fork execution helpers.
-- Unsigned single‑call: rust/tx_simulator/src/single_tx/unsigned.rs:1
-- Signed single‑call: rust/tx_simulator/src/single_tx/signed.rs:1
-- Stateful unsigned chain: rust/tx_simulator/src/tx_chain/unsigned.rs:1
+- Unsigned single‑call: tx_simulator/src/single_tx/unsigned.rs:1
+- Signed single‑call: tx_simulator/src/single_tx/signed.rs:1
+- Stateful unsigned chain: tx_simulator/src/tx_chain/unsigned.rs:1
   - Persists state and nonces; uses the plain EVM path unless a trace is requested.
-- Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
-  - Recovers signer, persists state; fuses inspector between steps.
-- Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1
+- Stateful signed chain: tx_simulator/src/tx_chain/signed.rs:1
+  - Recovers signer, persists state; resets trace collector between steps.
+- Stateful session API: tx_simulator/src/session/:1
+  - Preferred high-level API for mixed signed/unsigned sequences and block replay/profile sessions.
+- Batch sequence (bundle): tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
-- Live simulator: rust/tx_simulator/src/live/simulator.rs:1
+- Live simulator: tx_simulator/src/live/simulator.rs:1
   - Selects persisted MDBX when caught up, otherwise tracked live state.
-- Trace decoding helpers: rust/tx_simulator/src/simulation_revert_decoder.rs:1
+- Trace decoding helpers: tx_simulator/src/simulation_revert_decoder.rs:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
@@ -50,10 +54,10 @@ Typical Uses
 - Run high‑throughput offline analyses and benchmarks.
 
 Quick Checks
-- Verify database/setup: rust/tx_simulator/examples/general/verify_database_setup.rs:1
-- Compare vs RPC: rust/tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs:1
-- Contract reads: rust/tx_simulator/examples/general/contract_method_simulation.rs:1
-- Signed chain demo: rust/tx_simulator/examples/tx_builders/signed_bundle_simulation.rs:1
+- Verify database/setup: tx_simulator/examples/general/verify_database_setup.rs:1
+- Compare vs RPC: tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs:1
+- Contract reads: tx_simulator/examples/general/contract_method_simulation.rs:1
+- Signed chain demo: tx_simulator/examples/tx_builders/signed_bundle_simulation.rs:1
 
 Setup Notes
 - Reth DB default: resolved from `RETH_DATADIR`, then `RETH_DB_PATH`, then `../../config.env` (`/home/nima/storage/samsung8tb/ethereum/reth` by default). Ensure it is synced and canonicalized to the block heights you simulate.

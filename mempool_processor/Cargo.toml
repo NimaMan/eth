@@ -86,7 +86,7 @@ tokio-tungstenite = "0.20"
 # Transaction processing with proven tax calculation
 eth_live_feed = { path = "../alpha/live/feed" }
 tx_processor = { path = "../reth/tx_processor" }
-tx_simulator = { path = "../reth/tx_simulator" }
+tx_simulator = { path = "../tx_simulator" }
 reth_chain_query = { path = "../reth/reth_chain_query" }
 # Alloy dependencies for transaction decoding
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }

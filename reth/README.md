@@ -146,7 +146,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Depends on: Reth (v1.7.0 crates), REVM, Alloy types
 - Used by: `reth_chain_query`, `tx_processor`, `eth_prices`, `mempool_processor`, `pyreth`
 - Key: `TxSimulator`, `UnsignedTransaction`, `FullSimulationResult`
-- Docs: `rust/tx_simulator/README.md`
+- Docs: `../tx_simulator/README.md`
 
 ### reth_chain_query
 - Purpose: Fast, typed blockchain queries on top of `tx_simulator` plus AMM calldata builders. Adds entity-centric indexes and PostgreSQL helpers.

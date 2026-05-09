@@ -6,7 +6,7 @@ name = "eth-rust-monorepo"
 [workspace.paths]
 reth = "rust/reth"
 reth_chain_query = "rust/reth_chain_query"
-tx_simulator = "rust/tx_simulator"
+tx_simulator = "../tx_simulator"
 tx_processor = "rust/tx_processor"
 mempool_processor = "../mempool_processor"
 pyreth = "rust/pyreth"

@@ -7,7 +7,7 @@ members = [
     "../alpha/strategies",
     "../alpha/live/state",
     "../alpha/live/feed",
-    "tx_simulator",
+    "../tx_simulator",
     "tx_processor",
     "reth_chain_query",
     "../eth_token",
