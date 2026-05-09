@@ -18,7 +18,8 @@ already completed token range run and reports possible investigation cases. It
 does not mutate token state, rerun simulations, write case artifacts, or create
 frontend-only labels.
 
-The tool should be easy for an agent to run from a shell and easy to parse:
+The tool should be easy for an agent to run from a shell and easy to parse. Run
+it from the ETH repo root:
 
 ```text
 token_safety_lab/tools/detectors/range_triage.py \

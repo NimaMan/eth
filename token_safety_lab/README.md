@@ -22,7 +22,7 @@ and simulator logs. The first artifact should be a candidate ledger, not a fix.
 Use the candidate ledger in `cases/README.md` for the working list.
 
 Use the agent-native range triage tool to turn a completed range run into
-structured candidates:
+structured candidates. Run commands from the ETH repo root:
 
 ```text
 token_safety_lab/tools/detectors/range_triage.py \

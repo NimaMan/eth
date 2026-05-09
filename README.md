@@ -10,3 +10,7 @@ Current Reth datadir:
 ```bash
 /home/nima/storage/samsung8tb/ethereum/reth
 ```
+
+## Token Safety Lab
+
+Repeatable token and pool investigations live in `token_safety_lab/`.

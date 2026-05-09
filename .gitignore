@@ -19,6 +19,10 @@ build/
 # Logs
 logs/
 
+# Token safety lab generated artifacts
+token_safety_lab/cases/*/artifacts/*
+!token_safety_lab/cases/*/artifacts/README.md
+
 # Environment
 .env
 *.local
