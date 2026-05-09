@@ -74,6 +74,26 @@ fn apply_buffer(amount: U256, bps: u128) -> Result<U256> {
         .ok_or_else(|| eyre!("overflow applying buffer"))
 }
 
+fn denom_prefund_unavailable_result(
+    config: &PoolBuySellParameters,
+    block_number: u64,
+    prior_tx_results: &[ProcessedTransaction],
+    reason: impl Into<String>,
+) -> PoolBuySellSimulationResult {
+    create_failed_result(
+        config.clone(),
+        block_number,
+        prior_tx_results.to_vec(),
+        None,
+        None,
+        None,
+        format!("Denomination top-up unavailable: {}", reason.into()),
+        false,
+        false,
+        false,
+    )
+}
+
 async fn execute_weth_deposit(
     chain: &mut UnsignedTxChainSimulation,
     config: &PoolBuySellParameters,
@@ -188,16 +208,29 @@ async fn prefund_denom_via_weth(
     };
 
     if reserve_denom.is_zero() || reserve_weth.is_zero() {
-        return Err(eyre!(
-            "pool {:#x} reserves exhausted (denom {}, weth {})",
-            pair_address,
-            reserve_denom,
-            reserve_weth
-        ));
+        return Ok(Some(denom_prefund_unavailable_result(
+            config,
+            block_number,
+            prior_tx_results,
+            format!(
+                "pool {:#x} reserves exhausted (denom {}, weth {})",
+                pair_address, reserve_denom, reserve_weth
+            ),
+        )));
     }
 
     let desired_out = config.test_amount;
-    let weth_needed = quote_in_amount(desired_out, reserve_weth, reserve_denom)?;
+    let weth_needed = match quote_in_amount(desired_out, reserve_weth, reserve_denom) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(Some(denom_prefund_unavailable_result(
+                config,
+                block_number,
+                prior_tx_results,
+                error.to_string(),
+            )));
+        }
+    };
     let weth_buffered = apply_buffer(weth_needed, PREFUND_BUFFER_BPS)?;
 
     if let Some(failure) = execute_weth_deposit(
