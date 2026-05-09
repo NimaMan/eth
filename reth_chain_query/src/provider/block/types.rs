@@ -3,6 +3,7 @@ use alloy_primitives::B256;
 use crate::provider::{StateChanges, TransactionMetadata, TransactionReceipt, TransactionTrace};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::Recovered;
+use serde::{Deserialize, Serialize};
 
 /// Complete block with all transactions
 #[derive(Debug, Clone)]
@@ -17,7 +18,7 @@ pub struct BlockTransactions {
 }
 
 /// Raw block data fetched from storage or RPC.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawBlockData {
     pub header: BlockHeader,
     pub transactions: Vec<TransactionMetadata>,
@@ -50,7 +51,7 @@ pub struct BlockTransactionOptions {
 }
 
 /// Block header information from Headers table
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHeader {
     pub number: u64,
     pub hash: B256,

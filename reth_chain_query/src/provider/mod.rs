@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
 use reth_db::DatabaseEnv;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
@@ -110,6 +110,17 @@ impl RethQueryProvider {
     /// Get the underlying TxSimulator for advanced operations
     pub fn simulator(&self) -> &Arc<TxSimulator> {
         &self.tx_simulator
+    }
+
+    /// Refresh the read-only static-file view after the live Reth node has advanced.
+    pub fn refresh_static_file_provider(&self) -> Result<()> {
+        self.provider_factory.caught_up_static_file_provider()?;
+        Ok(())
+    }
+
+    /// Return the configured chain id.
+    pub fn chain_id(&self) -> u64 {
+        self.provider_factory.chain_spec().chain_id()
     }
 
     /// Get the provider factory for direct database access

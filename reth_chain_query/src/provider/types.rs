@@ -70,7 +70,7 @@ pub struct TransactionWithTrace {
 }
 
 /// Transaction trace from simulation or RPC
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionTrace {
     pub call_frame: CallFrame,
     pub gas_used: u64,
@@ -79,7 +79,7 @@ pub struct TransactionTrace {
 }
 
 /// Call frame representing execution trace
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallFrame {
     pub from: Address,
     pub to: Option<Address>,
@@ -94,7 +94,7 @@ pub struct CallFrame {
 }
 
 /// Type of call in trace
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CallType {
     Call,
     DelegateCall,
