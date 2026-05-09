@@ -10,8 +10,14 @@ use reth_chain_query::{
     RethQueryProvider,
 };
 use serde_json::{json, Value};
-use tx_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock};
+use tx_processor::{
+    processed_block_trace_config_hash, BlockBatchOptions, BlockProcessor,
+    PersistentProcessedBlockCacheMode, ProcessedBlock, ProcessedBlockCacheKey,
+    ProcessedBlockCacheStore,
+};
 use tx_simulator::block_simulation::{BlockTraceEngine, BlockTracer};
+
+const FULL_TRACES: bool = true;
 
 #[derive(Debug, Parser)]
 #[command(about = "Rust-only processed block profiling and correctness harness")]
@@ -48,10 +54,6 @@ struct Args {
     #[arg(long, value_enum, default_value_t = TraceEngineArg::Fresh)]
     engine: TraceEngineArg,
 
-    /// Include traces for DB fetch/process modes.
-    #[arg(long, default_value_t = true)]
-    include_traces: bool,
-
     /// Number of repeated iterations per scenario.
     #[arg(long, default_value_t = 3)]
     iterations: usize,
@@ -63,6 +65,14 @@ struct Args {
     /// Comma-separated batch sizes for batch sweep.
     #[arg(long, default_value = "20,40,80,120,240")]
     batch_sizes: String,
+
+    /// Persistent processed-block cache directory.
+    #[arg(long)]
+    cache_dir: Option<String>,
+
+    /// Persistent processed-block cache mode for DB processing modes.
+    #[arg(long, value_enum, default_value_t = CacheModeArg::Off)]
+    cache_mode: CacheModeArg,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -76,6 +86,7 @@ enum Mode {
     ProcessRawOnly,
     BatchSweep,
     Correctness,
+    CacheCorrectness,
     RpcTrace,
 }
 
@@ -94,6 +105,25 @@ impl TraceEngineArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum CacheModeArg {
+    Off,
+    ReadWrite,
+    ReadOnly,
+    Refresh,
+}
+
+impl CacheModeArg {
+    fn as_persistent(self) -> Option<PersistentProcessedBlockCacheMode> {
+        match self {
+            Self::Off => None,
+            Self::ReadWrite => Some(PersistentProcessedBlockCacheMode::ReadWrite),
+            Self::ReadOnly => Some(PersistentProcessedBlockCacheMode::ReadOnly),
+            Self::Refresh => Some(PersistentProcessedBlockCacheMode::Refresh),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct TimedRow {
     scenario: &'static str,
@@ -108,6 +138,10 @@ struct TimedRow {
     trace_ms: f64,
     process_raw_ms: f64,
     stages: StageTimings,
+    cache_hit: bool,
+    cache_read_ms: f64,
+    cache_write_ms: f64,
+    source: &'static str,
     total_ms: f64,
     processing_errors: usize,
     internal_txs: usize,
@@ -138,6 +172,12 @@ async fn main() -> Result<()> {
     let blocks = selected_blocks(&args, latest)?;
     let fetcher = Arc::new(BlockDataFetcher::new(provider.clone()));
     let processor = BlockProcessor::with_block_fetcher(fetcher.clone());
+    let needs_cache = args.cache_mode != CacheModeArg::Off || args.mode == Mode::CacheCorrectness;
+    let cache_store = match (needs_cache, args.cache_dir.as_deref()) {
+        (false, _) => None,
+        (true, Some(path)) => Some(ProcessedBlockCacheStore::open(path)?),
+        (true, None) => bail!("--cache-dir is required for persistent cache modes"),
+    };
 
     print_header();
 
@@ -147,18 +187,20 @@ async fn main() -> Result<()> {
                 "db_current",
                 &processor,
                 &blocks,
-                args.include_traces,
                 BlockTraceEngine::default(),
                 args.iterations,
+                cache_store.as_ref(),
+                args.cache_mode,
             )
             .await?;
             run_db_process(
                 "db_baseline_fresh",
                 &processor,
                 &blocks,
-                args.include_traces,
                 BlockTraceEngine::FreshInspector,
                 args.iterations,
+                cache_store.as_ref(),
+                args.cache_mode,
             )
             .await?;
             run_trace_only(
@@ -177,22 +219,14 @@ async fn main() -> Result<()> {
                 args.iterations,
             )
             .await?;
-            run_fetch_only(&provider, &blocks, args.include_traces, args.iterations).await?;
-            run_process_raw_only(
-                &fetcher,
-                &processor,
-                &blocks,
-                args.include_traces,
-                args.iterations,
-            )
-            .await?;
+            run_fetch_only(&provider, &blocks, args.iterations).await?;
+            run_process_raw_only(&fetcher, &processor, &blocks, args.iterations).await?;
             run_batch_sweep(
                 &processor,
                 &blocks,
                 parse_usizes(&args.batch_sizes)?,
                 parse_usizes(&args.concurrencies)?,
                 args.iterations,
-                args.include_traces,
             )
             .await?;
             run_correctness(&processor, &blocks).await?;
@@ -205,9 +239,10 @@ async fn main() -> Result<()> {
                 "db_current",
                 &processor,
                 &blocks,
-                args.include_traces,
                 args.engine.as_engine(),
                 args.iterations,
+                cache_store.as_ref(),
+                args.cache_mode,
             )
             .await?;
         }
@@ -216,9 +251,10 @@ async fn main() -> Result<()> {
                 "db_baseline_fresh",
                 &processor,
                 &blocks,
-                args.include_traces,
                 BlockTraceEngine::FreshInspector,
                 args.iterations,
+                cache_store.as_ref(),
+                args.cache_mode,
             )
             .await?;
         }
@@ -243,17 +279,10 @@ async fn main() -> Result<()> {
             .await?;
         }
         Mode::FetchOnly => {
-            run_fetch_only(&provider, &blocks, args.include_traces, args.iterations).await?;
+            run_fetch_only(&provider, &blocks, args.iterations).await?;
         }
         Mode::ProcessRawOnly => {
-            run_process_raw_only(
-                &fetcher,
-                &processor,
-                &blocks,
-                args.include_traces,
-                args.iterations,
-            )
-            .await?;
+            run_process_raw_only(&fetcher, &processor, &blocks, args.iterations).await?;
         }
         Mode::BatchSweep => {
             run_batch_sweep(
@@ -262,12 +291,18 @@ async fn main() -> Result<()> {
                 parse_usizes(&args.batch_sizes)?,
                 parse_usizes(&args.concurrencies)?,
                 args.iterations,
-                args.include_traces,
             )
             .await?;
         }
         Mode::Correctness => {
             run_correctness(&processor, &blocks).await?;
+        }
+        Mode::CacheCorrectness => {
+            let cache_store = cache_store
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("--cache-dir is required for cache-correctness"))?;
+            run_cache_correctness(&processor, &blocks, cache_store, args.engine.as_engine())
+                .await?;
         }
         Mode::RpcTrace => {
             let Some(rpc_url) = args.rpc_url.as_deref() else {
@@ -284,17 +319,42 @@ async fn run_db_process(
     scenario: &'static str,
     processor: &BlockProcessor,
     blocks: &[u64],
-    include_traces: bool,
     engine: BlockTraceEngine,
     iterations: usize,
+    cache_store: Option<&ProcessedBlockCacheStore>,
+    cache_mode: CacheModeArg,
 ) -> Result<()> {
     let mut totals = Vec::new();
     for iteration in 0..iterations.max(1) {
         for block_number in blocks.iter().copied() {
             let started = Instant::now();
-            let processed = processor
-                .process_block_with_trace_engine(block_number, include_traces, engine)
-                .await?;
+            let mut cache_hit = false;
+            let mut cache_read_ms = 0.0;
+            let mut cache_write_ms = 0.0;
+            let mut source = "processed";
+            let processed = if let (Some(cache_store), Some(cache_mode)) =
+                (cache_store, cache_mode.as_persistent())
+            {
+                let cached = processor
+                    .process_block_cached_with_mode(
+                        block_number,
+                        FULL_TRACES,
+                        engine,
+                        cache_store,
+                        cache_mode,
+                    )
+                    .await?;
+                cache_hit = cached.cache_hit;
+                cache_read_ms = ms(cached.cache_read);
+                cache_write_ms = ms(cached.cache_write);
+                source = cached.source.as_str();
+                cached.block
+            } else {
+                processor
+                    .process_block_with_trace_engine(block_number, FULL_TRACES, engine)
+                    .await?
+            };
+            ensure_full_traces(&processed)?;
             let total = started.elapsed();
             totals.push(ms(total));
             print_row(TimedRow {
@@ -310,6 +370,10 @@ async fn run_db_process(
                 trace_ms: 0.0,
                 process_raw_ms: 0.0,
                 stages: StageTimings::default(),
+                cache_hit,
+                cache_read_ms,
+                cache_write_ms,
+                source,
                 total_ms: ms(total),
                 processing_errors: processing_error_count(&processed),
                 internal_txs: internal_tx_count(&processed),
@@ -355,6 +419,10 @@ async fn run_trace_only(
                 trace_ms: ms(elapsed),
                 process_raw_ms: 0.0,
                 stages: StageTimings::default(),
+                cache_hit: false,
+                cache_read_ms: 0.0,
+                cache_write_ms: 0.0,
+                source: "trace",
                 total_ms: ms(elapsed),
                 processing_errors: 0,
                 internal_txs: 0,
@@ -368,7 +436,6 @@ async fn run_trace_only(
 async fn run_fetch_only(
     provider: &Arc<RethQueryProvider>,
     blocks: &[u64],
-    include_traces: bool,
     iterations: usize,
 ) -> Result<()> {
     let mut totals = Vec::new();
@@ -386,33 +453,46 @@ async fn run_fetch_only(
             let receipts_started = Instant::now();
             let receipts = provider.fetch_block_receipts_only(block_number).await?;
             let receipts_ms = ms(receipts_started.elapsed());
+            if receipts.len() != metadata.len() {
+                bail!(
+                    "fetch_with_traces block {} has {} transactions but {} receipts",
+                    block_number,
+                    metadata.len(),
+                    receipts.len()
+                );
+            }
 
-            let trace_ms = if include_traces {
-                let tracer = BlockTracer::new(provider.simulator());
-                let trace_started = Instant::now();
-                let _ = tracer
-                    .trace_block_by_number_with_engine(
-                        block_number,
-                        Some(call_tracer_options()),
-                        BlockTraceEngine::default(),
-                    )
-                    .await?;
-                ms(trace_started.elapsed())
-            } else {
-                0.0
-            };
+            let tracer = BlockTracer::new(provider.simulator());
+            let trace_started = Instant::now();
+            let traces = tracer
+                .trace_block_by_number_with_engine(
+                    block_number,
+                    Some(call_tracer_options()),
+                    BlockTraceEngine::default(),
+                )
+                .await?;
+            if traces.len() != metadata.len() {
+                bail!(
+                    "fetch_with_traces block {} has {} transactions but {} traces",
+                    block_number,
+                    metadata.len(),
+                    traces.len()
+                );
+            }
+            let trace_ms = ms(trace_started.elapsed());
+            let (trace_nodes, trace_gas_used) = trace_result_stats(&traces);
 
             let total_ms = ms(total_started.elapsed());
             totals.push(total_ms);
             print_row(TimedRow {
-                scenario: "fetch_only",
+                scenario: "fetch_with_traces",
                 iteration,
                 block: Some(block_number),
                 engine: Some(BlockTraceEngine::default()),
                 blocks: 1,
                 txs: metadata.len(),
-                gas_used: header.gas_used,
-                trace_nodes: receipts.iter().map(|receipt| receipt.logs.len()).sum(),
+                gas_used: trace_gas_used.max(header.gas_used),
+                trace_nodes,
                 fetch_ms: header_ms + metadata_ms + receipts_ms,
                 trace_ms,
                 process_raw_ms: 0.0,
@@ -422,13 +502,21 @@ async fn run_fetch_only(
                     receipt_load_ms: receipts_ms,
                     ..Default::default()
                 },
+                cache_hit: false,
+                cache_read_ms: 0.0,
+                cache_write_ms: 0.0,
+                source: "fetch",
                 total_ms,
                 processing_errors: 0,
                 internal_txs: 0,
             });
         }
     }
-    print_summary("fetch_only", blocks.len() * iterations.max(1), &totals);
+    print_summary(
+        "fetch_with_traces",
+        blocks.len() * iterations.max(1),
+        &totals,
+    );
     Ok(())
 }
 
@@ -436,14 +524,13 @@ async fn run_process_raw_only(
     fetcher: &Arc<BlockDataFetcher>,
     processor: &BlockProcessor,
     blocks: &[u64],
-    include_traces: bool,
     iterations: usize,
 ) -> Result<()> {
     let mut raw_blocks = Vec::with_capacity(blocks.len());
     for block_number in blocks.iter().copied() {
         raw_blocks.push(
             fetcher
-                .fetch_db_block_with_traces(block_number, include_traces)
+                .fetch_db_block_with_traces(block_number, FULL_TRACES)
                 .await?,
         );
     }
@@ -454,10 +541,11 @@ async fn run_process_raw_only(
             let block_number = raw.header.number;
             let started = Instant::now();
             let (processed, profile) = processor.process_raw_block_profiled(raw).await?;
+            ensure_full_traces(&processed)?;
             let elapsed = started.elapsed();
             totals.push(ms(elapsed));
             print_row(TimedRow {
-                scenario: "process_raw_only",
+                scenario: "process_raw_with_traces",
                 iteration,
                 block: Some(block_number),
                 engine: None,
@@ -475,6 +563,10 @@ async fn run_process_raw_only(
                     balance_calc_ms: ms(profile.balance_calculation),
                     ..Default::default()
                 },
+                cache_hit: false,
+                cache_read_ms: 0.0,
+                cache_write_ms: 0.0,
+                source: "raw",
                 total_ms: ms(elapsed),
                 processing_errors: processing_error_count(&processed),
                 internal_txs: internal_tx_count(&processed),
@@ -482,7 +574,7 @@ async fn run_process_raw_only(
         }
     }
     print_summary(
-        "process_raw_only",
+        "process_raw_with_traces",
         blocks.len() * iterations.max(1),
         &totals,
     );
@@ -495,7 +587,6 @@ async fn run_batch_sweep(
     batch_sizes: Vec<usize>,
     concurrencies: Vec<usize>,
     iterations: usize,
-    include_traces: bool,
 ) -> Result<()> {
     for iteration in 0..iterations.max(1) {
         for batch_size in batch_sizes.iter().copied().filter(|value| *value > 0) {
@@ -511,12 +602,13 @@ async fn run_batch_sweep(
                         .process_block_batch(
                             chunk.iter().copied(),
                             BlockBatchOptions::default()
-                                .with_traces(include_traces)
+                                .with_traces(FULL_TRACES)
                                 .with_trace_engine(BlockTraceEngine::default())
                                 .with_max_concurrency(concurrency),
                         )
                         .await?;
                     for block in &processed {
+                        ensure_full_traces(block)?;
                         txs += block.transactions.len();
                         gas_used += block.header.gas_used;
                         trace_nodes += processed_block_trace_nodes(block);
@@ -538,6 +630,10 @@ async fn run_batch_sweep(
                     trace_ms: 0.0,
                     process_raw_ms: 0.0,
                     stages: StageTimings::default(),
+                    cache_hit: false,
+                    cache_read_ms: 0.0,
+                    cache_write_ms: 0.0,
+                    source: "processed",
                     total_ms: ms(elapsed),
                     processing_errors,
                     internal_txs,
@@ -560,15 +656,21 @@ async fn run_batch_sweep(
 async fn run_correctness(processor: &BlockProcessor, blocks: &[u64]) -> Result<()> {
     for block_number in blocks.iter().copied() {
         let baseline = processor
-            .process_block_with_trace_engine(block_number, true, BlockTraceEngine::FreshInspector)
+            .process_block_with_trace_engine(
+                block_number,
+                FULL_TRACES,
+                BlockTraceEngine::FreshInspector,
+            )
             .await?;
         let candidate = processor
             .process_block_with_trace_engine(
                 block_number,
-                true,
+                FULL_TRACES,
                 BlockTraceEngine::RethFusedCallTracer,
             )
             .await?;
+        ensure_full_traces(&baseline)?;
+        ensure_full_traces(&candidate)?;
         let baseline_norm = normalize_processed_block(&baseline)?;
         let candidate_norm = normalize_processed_block(&candidate)?;
         if baseline_norm != candidate_norm {
@@ -582,6 +684,58 @@ async fn run_correctness(processor: &BlockProcessor, blocks: &[u64]) -> Result<(
             candidate.transactions.len(),
             processed_block_trace_nodes(&candidate),
             internal_tx_count(&candidate),
+        );
+    }
+    Ok(())
+}
+
+async fn run_cache_correctness(
+    processor: &BlockProcessor,
+    blocks: &[u64],
+    cache_store: &ProcessedBlockCacheStore,
+    trace_engine: BlockTraceEngine,
+) -> Result<()> {
+    let provider = processor
+        .provider()
+        .ok_or_else(|| eyre::eyre!("cache correctness requires MDBX provider access"))?;
+    let chain_id = provider.chain_id();
+    let trace_config_hash = processed_block_trace_config_hash(FULL_TRACES);
+
+    for block_number in blocks.iter().copied() {
+        let fresh = processor
+            .process_block_with_trace_engine(block_number, FULL_TRACES, trace_engine)
+            .await?;
+        ensure_full_traces(&fresh)?;
+        let key = ProcessedBlockCacheKey::new(
+            chain_id,
+            fresh.header.number,
+            fresh.header.hash,
+            trace_engine,
+            trace_config_hash,
+        );
+        cache_store.put(&key, &fresh)?;
+        let cached = cache_store
+            .get(&key)?
+            .ok_or_else(|| eyre::eyre!("cache miss immediately after write for {block_number}"))?;
+        ensure_full_traces(&cached)?;
+
+        let fresh_norm = normalize_processed_block(&fresh)?;
+        let cached_norm = normalize_processed_block(&cached)?;
+        if fresh_norm != cached_norm {
+            let diff = first_json_diff("$", &fresh_norm, &cached_norm)
+                .unwrap_or_else(|| "values differ but no focused diff was found".to_string());
+            bail!(
+                "cache correctness mismatch for block {}: {}",
+                block_number,
+                diff
+            );
+        }
+        println!(
+            "# cache_correctness block={} ok txs={} trace_nodes={} internal_txs={}",
+            block_number,
+            cached.transactions.len(),
+            processed_block_trace_nodes(&cached),
+            internal_tx_count(&cached),
         );
     }
     Ok(())
@@ -609,6 +763,10 @@ async fn run_rpc_trace(rpc_url: &str, blocks: &[u64], iterations: usize) -> Resu
                 trace_ms: ms(elapsed),
                 process_raw_ms: 0.0,
                 stages: StageTimings::default(),
+                cache_hit: false,
+                cache_read_ms: 0.0,
+                cache_write_ms: 0.0,
+                source: "rpc",
                 total_ms: ms(elapsed),
                 processing_errors: 0,
                 internal_txs: 0,
@@ -703,6 +861,23 @@ fn processing_error_count(block: &ProcessedBlock) -> usize {
         .iter()
         .filter(|tx| tx.processing_error.is_some())
         .count()
+}
+
+fn ensure_full_traces(block: &ProcessedBlock) -> Result<()> {
+    let trace_count = block
+        .transactions
+        .iter()
+        .filter(|tx| tx.trace.is_some())
+        .count();
+    if trace_count != block.transactions.len() {
+        bail!(
+            "processed block {} has {} transactions but {} traces",
+            block.header.number,
+            block.transactions.len(),
+            trace_count
+        );
+    }
+    Ok(())
 }
 
 fn trace_result_stats(traces: &[TraceResult]) -> (usize, u64) {
@@ -872,13 +1047,13 @@ fn first_json_diff(path: &str, left: &Value, right: &Value) -> Option<String> {
 
 fn print_header() {
     println!(
-        "scenario,iteration,block,engine,blocks,txs,gas_used,trace_nodes,fetch_ms,trace_ms,process_raw_ms,block_load_ms,tx_load_ms,receipt_load_ms,raw_tx_process_ms,trace_convert_ms,internal_extract_ms,balance_calc_ms,total_ms,avg_block_ms,processing_errors,internal_txs"
+        "scenario,iteration,block,engine,blocks,txs,gas_used,trace_nodes,fetch_ms,trace_ms,process_raw_ms,block_load_ms,tx_load_ms,receipt_load_ms,raw_tx_process_ms,trace_convert_ms,internal_extract_ms,balance_calc_ms,cache_hit,cache_read_ms,cache_write_ms,source,total_ms,avg_block_ms,processing_errors,internal_txs"
     );
 }
 
 fn print_row(row: TimedRow) {
     println!(
-        "{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{}",
+        "{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{:.3},{:.3},{},{:.3},{:.3},{},{}",
         row.scenario,
         row.iteration,
         row.block
@@ -901,6 +1076,10 @@ fn print_row(row: TimedRow) {
         row.stages.trace_convert_ms,
         row.stages.internal_extract_ms,
         row.stages.balance_calc_ms,
+        row.cache_hit,
+        row.cache_read_ms,
+        row.cache_write_ms,
+        row.source,
         row.total_ms,
         row.total_ms / row.blocks.max(1) as f64,
         row.processing_errors,
