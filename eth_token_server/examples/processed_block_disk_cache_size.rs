@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
-use eth_token::manager::BlockTokenProcessor;
+use eth_token::tracking::BlockTokenProcessor;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{
     BlockProcessor, PoolBuySellSimulator, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,

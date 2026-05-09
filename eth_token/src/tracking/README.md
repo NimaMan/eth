@@ -38,6 +38,3 @@ decisions, and live retention.
 - `builders/` rebuilds single-token state from processed history.
 - `replay_context/` owns token-control trigger policy for deciding when to
   refresh all known pools.
-
-`eth_token::manager` is now only a compatibility facade. New code should import
-from `eth_token::tracking`.

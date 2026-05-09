@@ -12,7 +12,6 @@ transaction/block facts and should not recreate tracing or decoding logic.
 | `state/` | Token transfer state, control-address tracking, and pool-state bridges. |
 | `health/` | Scam, volume, and trading-health scoring. |
 | `network/` | Token address activity, graph construction, and snapshots. |
-| `manager/` | Compatibility facade for older imports. |
 | `tracking/` | Token registry state, tracked-token indexing, block update loop, and token update routing. |
 | `chain_metadata/` | Chain metadata lookup and cache helpers. |
 | `utils/` | Generic helpers with no domain ownership. |

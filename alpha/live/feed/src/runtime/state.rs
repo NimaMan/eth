@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use eth_token::live::LiveBlockTokenProcessor;
-use eth_token::manager::LiveTokenRetentionReport;
+use eth_token::tracking::LiveTokenRetentionReport;
 
 use super::progress::{LiveTokenError, LiveTokenProgress};
 use super::time::now_unix_secs;

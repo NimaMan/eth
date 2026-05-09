@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
-use eth_token::manager::{BlockTokenProcessor, TrackedTokenStatus};
+use eth_token::tracking::{BlockTokenProcessor, TrackedTokenStatus};
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};

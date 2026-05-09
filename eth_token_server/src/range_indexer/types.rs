@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use eth_token::manager::BlockTokenProcessor;
+use eth_token::tracking::BlockTokenProcessor;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 

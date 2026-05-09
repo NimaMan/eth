@@ -1,4 +1,4 @@
-use eth_token::manager::{BlockTokenProcessor, TokenBlockUpdateReport};
+use eth_token::tracking::{BlockTokenProcessor, TokenBlockUpdateReport};
 
 use crate::range_indexer::progress::{now_unix_secs, RangeIndexStatus};
 use crate::range_indexer::{RangeIndexError, RangeIndexJob, RangeIndexState};

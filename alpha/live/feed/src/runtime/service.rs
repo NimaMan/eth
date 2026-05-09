@@ -9,7 +9,7 @@ use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
 use eth_token::live::LiveBlockTokenProcessor;
-use eth_token::manager::TokenBlockUpdateReport;
+use eth_token::tracking::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
@@ -667,7 +667,7 @@ impl LiveTokenRuntime {
         &self,
         processor: LiveBlockTokenProcessor,
         report: TokenBlockUpdateReport,
-        retention_report: Option<eth_token::manager::LiveTokenRetentionReport>,
+        retention_report: Option<eth_token::tracking::LiveTokenRetentionReport>,
         loaded: LiveBlockLoad,
         token_apply_ms: u128,
         is_live_tail: bool,
@@ -843,7 +843,7 @@ impl LiveTokenReader for LiveTokenRuntime {
 fn apply_report(
     state: &mut LiveTokenState,
     report: TokenBlockUpdateReport,
-    retention_report: Option<eth_token::manager::LiveTokenRetentionReport>,
+    retention_report: Option<eth_token::tracking::LiveTokenRetentionReport>,
     loaded: LiveBlockLoad,
     token_apply_ms: u128,
     is_live_tail: bool,

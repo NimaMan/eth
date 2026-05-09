@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use eth_token::contract_analysis::{analyze_erc20_token, ContractAnalysisReport};
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
-use eth_token::manager::TrackedTokenStatus;
+use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
 use crate::range_indexer::{RangeIndexJob, RangeIndexState};

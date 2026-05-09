@@ -1,5 +1,5 @@
 use eth_token::erc20::{ERC20Token, TokenSummary};
-use eth_token::manager::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
+use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
 use serde::Serialize;
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
