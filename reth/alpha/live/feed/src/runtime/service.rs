@@ -30,6 +30,8 @@ use super::snapshot::LiveTokenSnapshot;
 use super::state::LiveTokenState;
 use super::time::now_unix_secs;
 
+const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
+
 #[derive(Clone)]
 pub struct LiveTokenRuntime {
     inner: Arc<LiveTokenRuntimeInner>,
@@ -192,20 +194,53 @@ impl LiveTokenRuntime {
         }
 
         let latest_cached_block = self.latest_cached_block()?;
+        let provider_latest_block = self.inner.provider.get_latest_block().ok();
+        let latest_provider_readable_block = match (latest_cached_block, provider_latest_block) {
+            (Some(cached), Some(provider_latest)) => {
+                let readable = cached.min(provider_latest);
+                if cached > provider_latest {
+                    tracing::warn!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        latest_cached_block = cached,
+                        provider_latest_block = provider_latest,
+                        resolved_latest_block = readable,
+                        "clamped live token warmup to provider-readable block"
+                    );
+                }
+                Some(readable)
+            }
+            (Some(cached), None) => Some(cached),
+            (None, Some(provider_latest)) => Some(provider_latest),
+            (None, None) => None,
+        };
         let latest_block = if request.start_block.is_none() || request.end_block.is_none() {
             Some(
-                latest_cached_block
-                    .or_else(|| self.inner.provider.get_latest_block().ok())
+                latest_provider_readable_block
                     .ok_or_else(|| eyre::eyre!("could not resolve latest block"))?,
             )
         } else {
             None
         };
 
-        let end_block = request
+        let requested_end_block = request
             .end_block
             .or(latest_block)
             .ok_or_else(|| eyre::eyre!("could not resolve end block"))?;
+        let end_block = if let Some(provider_latest_block) = provider_latest_block {
+            let clamped = requested_end_block.min(provider_latest_block);
+            if requested_end_block > provider_latest_block {
+                tracing::warn!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    requested_end_block,
+                    provider_latest_block,
+                    resolved_end_block = clamped,
+                    "clamped live token warmup end block to provider-readable state"
+                );
+            }
+            clamped
+        } else {
+            requested_end_block
+        };
         let start_block = match request.start_block {
             Some(start_block) => start_block,
             None => end_block
@@ -242,9 +277,11 @@ impl LiveTokenRuntime {
 
     async fn run(&self, request: ResolvedLiveTokenRuntimeRequest) {
         tracing::info!(
+            target: LIVE_TOKEN_TRACKER_LOG_TARGET,
             live_id = %request.id,
             start_block = request.start_block,
             end_block = request.end_block,
+            warmup_blocks = request.warmup_blocks,
             "starting live token runtime warmup"
         );
 
@@ -273,6 +310,13 @@ impl LiveTokenRuntime {
                 )
                 .await
             {
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    live_id = %request.id,
+                    block_number,
+                    error = %error,
+                    "live token runtime warmup block failed"
+                );
                 self.mark_failed(LiveTokenError {
                     block_number: Some(block_number),
                     tx_index: None,
@@ -295,6 +339,12 @@ impl LiveTokenRuntime {
         ) {
             Ok(stream) => stream,
             Err(error) => {
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    live_id = %request.id,
+                    error = %error,
+                    "live token runtime failed to initialize redis stream"
+                );
                 self.mark_failed(LiveTokenError {
                     block_number: None,
                     tx_index: None,
@@ -317,6 +367,12 @@ impl LiveTokenRuntime {
         ) {
             Ok(provider) => provider,
             Err(error) => {
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    live_id = %request.id,
+                    error = %error,
+                    "live token runtime failed to initialize live processed block provider"
+                );
                 self.mark_failed(LiveTokenError {
                     block_number: None,
                     tx_index: None,
@@ -344,6 +400,12 @@ impl LiveTokenRuntime {
                 )
                 .await
             {
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    live_id = %request.id,
+                    error = %error,
+                    "live token runtime live-tail catch-up failed"
+                );
                 self.mark_failed(LiveTokenError {
                     block_number: None,
                     tx_index: None,
@@ -357,6 +419,13 @@ impl LiveTokenRuntime {
             let events = match stream.read_after(&last_stream_id).await {
                 Ok(events) => events,
                 Err(error) => {
+                    tracing::error!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        live_id = %request.id,
+                        last_stream_id = %last_stream_id,
+                        error = %error,
+                        "live token runtime failed to read redis stream"
+                    );
                     self.mark_failed(LiveTokenError {
                         block_number: None,
                         tx_index: None,
@@ -387,6 +456,12 @@ impl LiveTokenRuntime {
                 )
                 .await
             {
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    live_id = %request.id,
+                    error = %error,
+                    "live token runtime live-tail catch-up failed after stream event"
+                );
                 self.mark_failed(LiveTokenError {
                     block_number: None,
                     tx_index: None,
@@ -529,7 +604,7 @@ impl LiveTokenRuntime {
         {
             Ok(report) => report,
             Err(_) => {
-                bail!(
+                let message = format!(
                     "live token block apply timed out after {} ms at block {} source={} txs={} tracked_tokens_before={} tracked_v2_pools_before={}",
                     self.inner.config.block_apply_timeout_ms,
                     block_number,
@@ -538,6 +613,23 @@ impl LiveTokenRuntime {
                     tracked_tokens_before,
                     tracked_v2_pools_before
                 );
+                tracing::error!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    block_number,
+                    is_live_tail,
+                    source = block_source,
+                    txs = block_transaction_count,
+                    tracked_tokens_before,
+                    tracked_v2_pools_before,
+                    timeout_ms = self.inner.config.block_apply_timeout_ms,
+                    upstream_ms = loaded.upstream_ms,
+                    disk_cache_hit = loaded.disk_cache_hit,
+                    disk_cache_read_ms = loaded.disk_cache_read_ms,
+                    disk_cache_write_ms = loaded.disk_cache_write_ms,
+                    error = %message,
+                    "live token block apply timed out"
+                );
+                bail!("{message}");
             }
         };
         let retention_report = processor.apply_index_retention_policy(block_number);
@@ -585,6 +677,7 @@ impl LiveTokenRuntime {
         );
         if should_log_block_apply(&state.progress, is_live_tail) {
             tracing::info!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                 status = ?state.progress.status,
                 current_block = ?state.progress.current_block,
                 blocks_processed = state.progress.blocks_processed,
@@ -614,6 +707,7 @@ impl LiveTokenRuntime {
             current_block: state.progress.current_block,
         };
         tracing::info!(
+            target: LIVE_TOKEN_TRACKER_LOG_TARGET,
             live_id = ?state.progress.id,
             tracked_tokens = state.progress.tracked_tokens,
             tracked_v2_pools = state.progress.tracked_v2_pools,
@@ -647,6 +741,31 @@ impl LiveTokenRuntime {
             block_number: error.block_number,
             message: error.message.clone(),
         };
+        tracing::error!(
+            target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+            live_id = ?state.progress.id,
+            status = ?state.progress.status,
+            current_block = ?state.progress.current_block,
+            warmup_start_block = ?state.progress.warmup_start_block,
+            warmup_end_block = ?state.progress.warmup_end_block,
+            blocks_processed = state.progress.blocks_processed,
+            warmup_total_blocks = state.progress.warmup_total_blocks,
+            live_blocks_processed = state.progress.live_blocks_processed,
+            txs_processed = state.progress.txs_processed,
+            tx_failures = state.progress.tx_failures,
+            tracked_tokens = state.progress.tracked_tokens,
+            tracked_v2_pools = state.progress.tracked_v2_pools,
+            block_source = ?state.progress.last_block_source,
+            last_block_upstream_ms = ?state.progress.last_block_upstream_ms,
+            last_block_token_apply_ms = ?state.progress.last_block_token_apply_ms,
+            last_block_disk_cache_read_ms = ?state.progress.last_block_disk_cache_read_ms,
+            last_block_disk_cache_write_ms = ?state.progress.last_block_disk_cache_write_ms,
+            error_block_number = ?error.block_number,
+            error_tx_index = ?error.tx_index,
+            error_tx_hash = ?error.tx_hash,
+            error = %error.message,
+            "live token tracker failed"
+        );
         state.errors.push(error);
         drop(state);
         let _ = self.inner.event_tx.send(event);

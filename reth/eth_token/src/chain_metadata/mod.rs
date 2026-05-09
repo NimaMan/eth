@@ -1,5 +1,6 @@
 //! Chain-backed metadata providers used by token indexing pipelines.
 
+mod cache;
 mod reth;
 mod static_provider;
 mod types;

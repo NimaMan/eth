@@ -4,7 +4,7 @@ use tx_processor::{LivePoolBuySellSimulator, ProcessedBlock};
 use crate::chain_metadata::{
     TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolMetadataProvider,
 };
-use crate::manager::{
+use crate::tracking::{
     BlockTokenProcessor, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
     ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
 };
@@ -149,7 +149,7 @@ mod tests {
 
     use crate::chain_metadata::{TokenMetadataLookup, TokenMetadataProvider};
     use crate::erc20::ERC20TokenMetadata;
-    use crate::manager::TokenRegistry;
+    use crate::tracking::TokenRegistry;
 
     use super::LiveBlockTokenProcessor;
 

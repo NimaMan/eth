@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use alloy_primitives::B256;
 use eyre::Result;
@@ -7,6 +8,7 @@ use reth_chain_query::RethQueryProvider;
 
 use crate::erc20::ERC20TokenMetadata;
 
+use super::cache::RethChainMetadataCache;
 use super::types::{
     address_string, TokenMetadataLookup, TokenMetadataProvider, UniswapV2PoolMetadata,
     UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
@@ -38,11 +40,15 @@ impl RethMetadataMode {
 
 pub struct RethChainMetadataProvider<'a> {
     provider: &'a RethQueryProvider,
+    cache: Arc<RethChainMetadataCache>,
 }
 
 impl<'a> RethChainMetadataProvider<'a> {
     pub fn new(provider: &'a RethQueryProvider) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            cache: Arc::new(RethChainMetadataCache::default()),
+        }
     }
 }
 
@@ -62,17 +68,21 @@ impl UniswapV2PoolMetadataProvider for RethChainMetadataProvider<'_> {
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
-        Box::pin(async move { uniswap_v2_pool_metadata(self.provider, lookup).await })
+        Box::pin(async move { uniswap_v2_pool_metadata(self.provider, &self.cache, lookup).await })
     }
 }
 
 pub struct LiveRethChainMetadataProvider<'a> {
     provider: &'a RethQueryProvider,
+    cache: Arc<RethChainMetadataCache>,
 }
 
 impl<'a> LiveRethChainMetadataProvider<'a> {
     pub fn new(provider: &'a RethQueryProvider) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            cache: Arc::new(RethChainMetadataCache::default()),
+        }
     }
 }
 
@@ -92,7 +102,7 @@ impl UniswapV2PoolMetadataProvider for LiveRethChainMetadataProvider<'_> {
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
-        Box::pin(async move { uniswap_v2_pool_metadata(self.provider, lookup).await })
+        Box::pin(async move { uniswap_v2_pool_metadata(self.provider, &self.cache, lookup).await })
     }
 }
 
@@ -125,34 +135,72 @@ async fn token_metadata_with_mode(
 
 async fn uniswap_v2_pool_metadata(
     provider: &RethQueryProvider,
+    cache: &RethChainMetadataCache,
     lookup: &UniswapV2PoolMetadataLookup,
 ) -> Result<Option<UniswapV2PoolMetadata>> {
+    if let Some(metadata) = cache.v2_pool_metadata(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_metadata(
+            metadata,
+            lookup.tracked_token_address,
+        ));
+    }
+
     let (token0, token1) = provider
         .uni_v2_get_tokens(lookup.pool_address, Some(lookup.block_number))
         .await?;
 
     if is_native_eth_sentinel(&token0) || is_native_eth_sentinel(&token1) {
+        cache.remember_v2_pool_metadata(lookup.pool_address, None);
         return Ok(None);
     }
 
-    if let Some(tracked_token_address) = lookup.tracked_token_address {
-        if token0 != tracked_token_address && token1 != tracked_token_address {
-            return Ok(None);
-        }
-    }
-
     let (token0_decimals, token1_decimals) = tokio::try_join!(
-        provider.get_token_decimals(token0, Some(lookup.block_number)),
-        provider.get_token_decimals(token1, Some(lookup.block_number)),
+        cached_token_decimals(provider, cache, token0, lookup.block_number),
+        cached_token_decimals(provider, cache, token1, lookup.block_number),
     )?;
 
-    Ok(Some(UniswapV2PoolMetadata::new(
+    let metadata = UniswapV2PoolMetadata::new(
         address_string(&lookup.pool_address),
         address_string(&token0),
         address_string(&token1),
         token0_decimals,
         token1_decimals,
-    )))
+    );
+    cache.remember_v2_pool_metadata(lookup.pool_address, Some(metadata.clone()));
+
+    Ok(filter_uniswap_v2_pool_metadata(
+        Some(metadata),
+        lookup.tracked_token_address,
+    ))
+}
+
+async fn cached_token_decimals(
+    provider: &RethQueryProvider,
+    cache: &RethChainMetadataCache,
+    token_address: alloy_primitives::Address,
+    block_number: u64,
+) -> Result<u8> {
+    if let Some(decimals) = cache.token_decimals(token_address) {
+        return Ok(decimals);
+    }
+    let decimals = provider
+        .get_token_decimals(token_address, Some(block_number))
+        .await?;
+    cache.remember_token_decimals(token_address, decimals);
+    Ok(decimals)
+}
+
+fn filter_uniswap_v2_pool_metadata(
+    metadata: Option<UniswapV2PoolMetadata>,
+    tracked_token_address: Option<alloy_primitives::Address>,
+) -> Option<UniswapV2PoolMetadata> {
+    let Some(tracked_token_address) = tracked_token_address else {
+        return metadata;
+    };
+    metadata.filter(|metadata| {
+        metadata.token0 == address_string(&tracked_token_address)
+            || metadata.token1 == address_string(&tracked_token_address)
+    })
 }
 
 fn is_native_eth_sentinel(address: &alloy_primitives::Address) -> bool {

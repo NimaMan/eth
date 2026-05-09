@@ -1,28 +1,8 @@
 # manager
 
-Block-level token orchestration.
+Compatibility facade for the old `eth_token::manager` module path.
 
-This folder corresponds to Python modules under `token_manager` and `token_builder`.
+The implementation moved to `eth_token::tracking`. Keep this facade until all
+callers have been migrated, then remove it in a later cleanup.
 
-## Responsibilities
-
-- Consume processed Rust blocks and update tracked token state.
-- Route events to token, pool, state, health, and network modules.
-- Maintain live token indexes.
-- Provide a stable API for future PyReth bindings.
-
-## Boundaries
-
-- This module must not process raw blocks or raw transactions.
-- Historical and live inputs should come from Rust `tx_processor` / `pyreth.block_processor`.
-- Redis subscriptions and publication should remain separate from core token state transitions.
-
-## Port Status
-
-1. `BlockTokenProcessor` consumes `tx_processor::ProcessedBlock`, applies transactions in block order, and reports token/pool updates.
-2. `TokenRegistry` owns tracked token storage and lookup.
-3. `ProcessedTokenUpdateRouter` uses `TrackedTokenIndex` to route processed transaction events into token and Uniswap V2 pool state.
-4. Chain metadata providers under `eth_token::chain_metadata` hydrate token and pool metadata when direct chain reads are needed.
-5. `TrackedTokenIndex` owns token/pool address indexing and tracking status.
-6. `TokenStateBuilder` rebuilds a token from processed Rust transactions or processed blocks.
-7. Live token processor orchestration should be added after historical parity is established.
+New code should import from `eth_token::tracking`.

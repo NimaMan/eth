@@ -7,6 +7,7 @@ pub mod data_models;
 pub mod reserves;
 pub mod sushiswap;
 pub mod tax;
+pub(crate) mod trading_failure;
 pub mod uniswap;
 
 pub use balancer::{BalancerPool, BalancerPoolToken, BALANCER_V2_PROTOCOL};
