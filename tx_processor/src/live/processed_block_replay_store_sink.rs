@@ -92,26 +92,56 @@ async fn run_replay_store_writer(
     while let Some(block) = receiver.recv().await {
         let block_number = block.header.number;
         let writer = writer.clone();
-        let should_prune = (successful_writes + 1) % PRUNE_INTERVAL_WRITES == 0;
-
-        let result = tokio::task::spawn_blocking(move || -> eyre::Result<(u128, usize)> {
-            let write = writer.write_processed_block(&block)?;
-            let pruned = if should_prune {
-                writer.prune_disk_cache_to_recent_blocks(chain_id, retain_blocks)?
-            } else {
-                0
-            };
-            Ok((write.total_write_ms(), pruned))
-        })
-        .await;
+        let result =
+            tokio::task::spawn_blocking(move || -> eyre::Result<ReplayStoreSinkWriteResult> {
+                let Some(write) = writer.write_processed_block_if_missing(&block)? else {
+                    return Ok(ReplayStoreSinkWriteResult {
+                        write_ms: 0,
+                        address_index_inserted: 0,
+                        skipped_existing_cache: true,
+                        pruned: 0,
+                    });
+                };
+                let pruned = if (successful_writes + 1) % PRUNE_INTERVAL_WRITES == 0 {
+                    writer.prune_disk_cache_to_recent_blocks(chain_id, retain_blocks)?
+                } else {
+                    0
+                };
+                Ok(ReplayStoreSinkWriteResult {
+                    write_ms: write.total_write_ms(),
+                    address_index_inserted: write
+                        .address_block_index
+                        .as_ref()
+                        .map(|index| index.inserted)
+                        .unwrap_or(0),
+                    skipped_existing_cache: false,
+                    pruned,
+                })
+            })
+            .await;
 
         match result {
-            Ok(Ok((_write_ms, pruned))) => {
-                successful_writes += 1;
-                if pruned > 0 {
+            Ok(Ok(write_result)) => {
+                if write_result.skipped_existing_cache {
                     tracing::info!(
                         block_number,
-                        pruned,
+                        "skipped live processed block replay-store write; disk cache already has block"
+                    );
+                    continue;
+                }
+
+                successful_writes += 1;
+                tracing::info!(
+                    block_number,
+                    write_ms = write_result.write_ms,
+                    address_index_inserted = write_result.address_index_inserted,
+                    successful_writes,
+                    "wrote live processed block replay store"
+                );
+                if write_result.pruned > 0 {
+                    tracing::info!(
+                        block_number,
+                        pruned = write_result.pruned,
                         "pruned live processed block replay store"
                     );
                 }
@@ -132,6 +162,13 @@ async fn run_replay_store_writer(
             }
         }
     }
+}
+
+struct ReplayStoreSinkWriteResult {
+    write_ms: u128,
+    address_index_inserted: usize,
+    skipped_existing_cache: bool,
+    pruned: usize,
 }
 
 fn processed_block_disk_cache_dir() -> eyre::Result<PathBuf> {

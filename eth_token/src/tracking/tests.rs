@@ -5,7 +5,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use alloy_primitives::{address, b256, Bytes, U256};
+use alloy_primitives::{address, b256, Address, Bytes, U256};
+use reth_chain_query::common_addresses::KnownV2Protocol;
 use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
 use tx_processor::tx_processor::data_models::{
     ContractCreationEvent, ERC20TransferEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent,
@@ -21,7 +22,7 @@ use crate::chain_metadata::{
 };
 use crate::pools::SUSHISWAP_V2_PROTOCOL;
 
-fn metadata() -> ERC20TokenMetadata {
+pub(crate) fn metadata() -> ERC20TokenMetadata {
     ERC20TokenMetadata::new(
         "0x1111111111111111111111111111111111111111",
         "Token",
@@ -31,7 +32,7 @@ fn metadata() -> ERC20TokenMetadata {
     )
 }
 
-fn tx() -> ProcessedTransaction {
+pub(crate) fn tx() -> ProcessedTransaction {
     ProcessedTransaction::new(
         b256!("0000000000000000000000000000000000000000000000000000000000000001"),
         100,
@@ -184,7 +185,65 @@ async fn pair_created_discovery_does_not_call_v2_pool_metadata_provider() {
 
     assert_eq!(*lookups.borrow(), 0);
     assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+}
+
+#[tokio::test]
+async fn pair_created_discovery_uses_metadata_when_factory_is_missing() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    tx.uniswap_v2_pair_created_events
+        .push(UniswapV2PairCreatedEvent {
+            pair_address: address!("3333333333333333333333333333333333333333"),
+            token0: address!("2222222222222222222222222222222222222222"),
+            token1: address!("1111111111111111111111111111111111111111"),
+            factory_address: Address::ZERO,
+            log_index: 1,
+        });
+    tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        reserve0: U256::from(2_000_000_u64),
+        reserve1: U256::from(100_000_000_000_000_000_000_u128),
+        log_index: 2,
+    });
+
+    let pool_metadata =
+        StaticUniswapV2PoolMetadataProvider::new([UniswapV2PoolMetadata::new_with_protocol(
+            KnownV2Protocol::PancakeSwapV2,
+            "0x3333333333333333333333333333333333333333",
+            "0x2222222222222222222222222222222222222222",
+            "0x1111111111111111111111111111111111111111",
+            6,
+            18,
+        )]);
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    let reports = update_router
+        .update_registry_from_processed_transaction_with_discovery(
+            &mut registry,
+            &token_index,
+            &tx,
+            &pool_metadata,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(
+        pool.base.identity.protocol,
+        KnownV2Protocol::PancakeSwapV2.label()
+    );
+    assert_eq!(pool.base.config.denom_decimals, Some(6));
+    assert_eq!(pool.base.config.token1_is_denom, Some(false));
 }
 
 #[test]
@@ -215,8 +274,8 @@ fn discovers_and_updates_uniswap_v2_pool_for_tracked_token() {
 
     assert_eq!(reports.len(), 1);
     assert!(!reports[0].token_state_updated);
-    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
-    assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
     let token = registry
         .token("0x1111111111111111111111111111111111111111")
         .unwrap();
@@ -254,8 +313,8 @@ fn discovers_and_updates_sushiswap_v2_pool_for_tracked_token() {
         .unwrap();
 
     assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
-    assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
     let token = registry
         .token("0x1111111111111111111111111111111111111111")
         .unwrap();
@@ -263,6 +322,49 @@ fn discovers_and_updates_sushiswap_v2_pool_for_tracked_token() {
         .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
         .unwrap();
     assert_eq!(pool.base.identity.protocol, SUSHISWAP_V2_PROTOCOL);
+    assert_eq!(pool.base.token_reserve(), 100.0);
+    assert_eq!(pool.base.denom_reserve(), 2.0);
+}
+
+#[test]
+fn discovers_and_updates_pancakeswap_v2_pool_for_tracked_token() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    tx.uniswap_v2_pair_created_events
+        .push(UniswapV2PairCreatedEvent {
+            pair_address: address!("3333333333333333333333333333333333333333"),
+            token0: address!("1111111111111111111111111111111111111111"),
+            token1: address!("2222222222222222222222222222222222222222"),
+            factory_address: KnownV2Protocol::PancakeSwapV2.factory(),
+            log_index: 1,
+        });
+    tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        reserve0: U256::from(100_000_000_000_000_000_000_u128),
+        reserve1: U256::from(2_000_000_000_000_000_000_u128),
+        log_index: 2,
+    });
+
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    let reports = update_router
+        .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(
+        pool.base.identity.protocol,
+        KnownV2Protocol::PancakeSwapV2.label()
+    );
     assert_eq!(pool.base.token_reserve(), 100.0);
     assert_eq!(pool.base.denom_reserve(), 2.0);
 }
@@ -433,8 +535,8 @@ async fn discovers_uniswap_v2_pool_from_swap_metadata_for_tracked_token() {
         .unwrap();
 
     assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
-    assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
     let token = registry
         .token("0x1111111111111111111111111111111111111111")
         .unwrap();
@@ -446,6 +548,111 @@ async fn discovers_uniswap_v2_pool_from_swap_metadata_for_tracked_token() {
     assert_eq!(pool.base.token_reserve(), 100.0);
     assert_eq!(pool.base.denom_reserve(), 2.0);
     assert_eq!(pool.base.creation_block, Some(100));
+}
+
+#[tokio::test]
+async fn discovers_pancakeswap_v2_pool_from_swap_metadata_for_tracked_token() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    tx.uniswap_v2_swaps.push(UniswapV2SwapEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        to: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        amount0_in: U256::from(2_000_000_u64),
+        amount1_in: U256::ZERO,
+        amount0_out: U256::ZERO,
+        amount1_out: U256::from(50_000_000_000_000_000_000_u128),
+        log_index: 1,
+    });
+    tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        reserve0: U256::from(2_000_000_u64),
+        reserve1: U256::from(100_000_000_000_000_000_000_u128),
+        log_index: 2,
+    });
+
+    let pool_metadata =
+        StaticUniswapV2PoolMetadataProvider::new([UniswapV2PoolMetadata::new_with_protocol(
+            KnownV2Protocol::PancakeSwapV2,
+            "0x3333333333333333333333333333333333333333",
+            "0x2222222222222222222222222222222222222222",
+            "0x1111111111111111111111111111111111111111",
+            6,
+            18,
+        )]);
+
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    let reports = update_router
+        .update_registry_from_processed_transaction_with_discovery(
+            &mut registry,
+            &token_index,
+            &tx,
+            &pool_metadata,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(
+        pool.base.identity.protocol,
+        KnownV2Protocol::PancakeSwapV2.label()
+    );
+    assert_eq!(pool.base.config.denom_decimals, Some(6));
+    assert_eq!(pool.base.config.token1_is_denom, Some(false));
+}
+
+#[tokio::test]
+async fn ignores_uniswap_v2_shaped_pool_event_when_metadata_provider_skips_pool() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    tx.uniswap_v2_swaps.push(UniswapV2SwapEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        to: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        amount0_in: U256::from(2_000_000_u64),
+        amount1_in: U256::ZERO,
+        amount0_out: U256::ZERO,
+        amount1_out: U256::from(50_000_000_000_000_000_000_u128),
+        log_index: 1,
+    });
+    tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+        pair_address: address!("3333333333333333333333333333333333333333"),
+        reserve0: U256::from(2_000_000_u64),
+        reserve1: U256::from(100_000_000_000_000_000_000_u128),
+        log_index: 2,
+    });
+
+    let pool_metadata = StaticUniswapV2PoolMetadataProvider::default();
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    let reports = update_router
+        .update_registry_from_processed_transaction_with_discovery(
+            &mut registry,
+            &token_index,
+            &tx,
+            &pool_metadata,
+        )
+        .await
+        .unwrap();
+
+    assert!(reports.is_empty());
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    assert!(token
+        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
+        .is_none());
 }
 
 #[tokio::test]
@@ -502,8 +709,8 @@ async fn discovers_uniswap_v2_pool_from_liquidity_metadata_for_tracked_token() {
         .unwrap();
 
     assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
-    assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
+    assert_eq!(reports[0].discovered_known_v2_pools.len(), 1);
+    assert_eq!(reports[0].updated_known_v2_pools.len(), 1);
     let token = registry
         .token("0x1111111111111111111111111111111111111111")
         .unwrap();
@@ -782,75 +989,4 @@ async fn block_processor_ignores_false_positive_v2_mint_metadata_miss() {
     assert_eq!(report.failed_transaction_count, 0);
     assert!(report.transaction_errors.is_empty());
     assert!(processor.registry.tokens.is_empty());
-}
-
-#[test]
-fn tracked_token_index_indexes_pool_to_token_mapping() {
-    let mut registry = TokenRegistry::new();
-    let update_router = ProcessedTokenUpdateRouter::new(100);
-    registry.add_token(metadata());
-    let mut tx = tx();
-    tx.uniswap_v2_pair_created_events
-        .push(UniswapV2PairCreatedEvent {
-            pair_address: address!("3333333333333333333333333333333333333333"),
-            token0: address!("1111111111111111111111111111111111111111"),
-            token1: address!("2222222222222222222222222222222222222222"),
-            factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
-            log_index: 1,
-        });
-    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
-    update_router
-        .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
-        .unwrap();
-
-    let index = TrackedTokenIndex::from_registry(&registry, 100);
-
-    assert_eq!(
-        index.token_for_pool("0x3333333333333333333333333333333333333333"),
-        Some("0x1111111111111111111111111111111111111111")
-    );
-    assert_eq!(
-        index.resolve_token_address("0x3333333333333333333333333333333333333333"),
-        Some("0x1111111111111111111111111111111111111111")
-    );
-}
-
-#[test]
-fn token_state_builder_replays_processed_transactions_in_order() {
-    let builder = TokenStateBuilder::new(metadata(), 100);
-    let mut creation_tx = tx();
-    creation_tx.tx_index = 0;
-    creation_tx.contract_address = Some(address!("1111111111111111111111111111111111111111"));
-
-    let mut pair_tx = tx();
-    pair_tx.tx_index = 1;
-    pair_tx
-        .uniswap_v2_pair_created_events
-        .push(UniswapV2PairCreatedEvent {
-            pair_address: address!("3333333333333333333333333333333333333333"),
-            token0: address!("1111111111111111111111111111111111111111"),
-            token1: address!("2222222222222222222222222222222222222222"),
-            factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
-            log_index: 1,
-        });
-
-    let mut sync_tx = tx();
-    sync_tx.tx_index = 2;
-    sync_tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
-        pair_address: address!("3333333333333333333333333333333333333333"),
-        reserve0: U256::from(100_000_000_000_000_000_000_u128),
-        reserve1: U256::from(2_000_000_000_000_000_000_u128),
-        log_index: 2,
-    });
-
-    let token = builder
-        .build_from_processed_transactions([sync_tx, creation_tx, pair_tx])
-        .unwrap();
-
-    assert_eq!(token.creation_block, Some(100));
-    let pool = token
-        .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
-        .unwrap();
-    assert_eq!(pool.base.token_reserve(), 100.0);
-    assert_eq!(pool.base.denom_reserve(), 2.0);
 }

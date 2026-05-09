@@ -5,6 +5,7 @@ use alloy_primitives::{Address, Bytes, U256};
 pub enum Router {
     UniswapV2,
     SushiswapV2,
+    Custom(Address),
 }
 
 fn router_address(router: Router) -> Address {
@@ -17,6 +18,7 @@ fn router_address(router: Router) -> Address {
             0xd9, 0xe1, 0xcE, 0x17, 0xf2, 0x64, 0x1f, 0x24, 0xaE, 0x83, 0x63, 0x7a, 0xb6, 0x6a,
             0x2c, 0xca, 0x9C, 0x37, 0x8B, 0x9F,
         ]),
+        Router::Custom(router) => router,
     }
 }
 

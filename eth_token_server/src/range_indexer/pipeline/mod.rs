@@ -11,6 +11,9 @@ use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlockReplaySto
 use crate::memory;
 use crate::range_indexer::{RangeIndexError, RangeIndexJob};
 
+const TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH: u64 = 25;
+const TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY: usize = 1;
+
 pub async fn run_range_index(
     run: Arc<RangeIndexJob>,
     provider: Arc<RethQueryProvider>,
@@ -32,8 +35,11 @@ pub async fn run_range_index(
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
-    let processed_block_load_options =
-        cache::ProcessedBlockRangeLoadOptions::default().with_retry(processed_block_retry);
+    let processed_block_load_options = cache::ProcessedBlockRangeLoadOptions::default()
+        .with_fill_batch_blocks(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH as usize)
+        .with_fill_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
+        .with_read_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
+        .with_retry(processed_block_retry);
     if let Some(replay_store) = processed_block_replay_store.as_deref() {
         cache::prune_processed_block_disk_cache(
             replay_store.disk_cache_store(),
@@ -46,12 +52,13 @@ pub async fn run_range_index(
     while next_block <= run.request.end_block {
         if run.stop_requested() {
             state::mark_stopped(&run).await;
+            let _ = memory::trim_allocator();
             return;
         }
 
         let chunk_end = if processed_block_replay_store.is_some() {
             next_block
-                .saturating_add(cache::PROCESSED_BLOCK_DISK_CACHE_READ_BATCH - 1)
+                .saturating_add(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH - 1)
                 .min(run.request.end_block)
         } else {
             next_block
@@ -94,6 +101,7 @@ pub async fn run_range_index(
                         },
                     )
                     .await;
+                    let _ = memory::trim_allocator();
                     return;
                 }
             };
@@ -112,6 +120,7 @@ pub async fn run_range_index(
             for processed in processed_blocks {
                 if run.stop_requested() {
                     state::mark_stopped(&run).await;
+                    let _ = memory::trim_allocator();
                     return;
                 }
 
@@ -123,6 +132,7 @@ pub async fn run_range_index(
                 )
                 .await;
                 if !applied {
+                    let _ = memory::trim_allocator();
                     return;
                 }
             }

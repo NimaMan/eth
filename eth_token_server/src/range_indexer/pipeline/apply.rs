@@ -14,6 +14,7 @@ use super::cache::ProcessedBlockWithMetrics;
 use super::state;
 
 const TOKEN_APPLY_TIMEOUT: Duration = Duration::from_secs(180);
+const TOKEN_RANGE_APPLY_PROFILE_LOG_TARGET: &str = "token_range_apply_profile";
 
 pub(super) async fn apply_processed_block(
     run: &Arc<RangeIndexJob>,
@@ -21,8 +22,11 @@ pub(super) async fn apply_processed_block(
     discovery_provider: &RethChainMetadataProvider<'_>,
     pool_simulator: &PoolBuySellSimulator,
 ) -> bool {
+    let apply_processed_block_started = Instant::now();
     let block_number = processed.block.header.number;
+    let take_processor_started = Instant::now();
     let mut processor = state::take_processor_for_apply(run, block_number).await;
+    let take_processor_ms = take_processor_started.elapsed().as_millis();
     let token_apply_started = Instant::now();
     let apply_span = tracing::info_span!(
         "range_block_apply",
@@ -84,6 +88,7 @@ pub(super) async fn apply_processed_block(
         );
     }
 
+    let state_update_started = Instant::now();
     let mut run_state = run.state.write().await;
     run_state.processor = processor;
     state::apply_report(
@@ -93,6 +98,24 @@ pub(super) async fn apply_processed_block(
         processed.upstream_ms,
         token_apply_ms,
         &processed.disk_cache_metrics,
+    );
+    let state_update_ms = state_update_started.elapsed().as_millis();
+    let block_apply_wall_ms = apply_processed_block_started.elapsed().as_millis();
+    let measured_ms = take_processor_ms
+        .saturating_add(token_apply_ms)
+        .saturating_add(state_update_ms);
+    let unaccounted_ms = block_apply_wall_ms.saturating_sub(measured_ms);
+    tracing::info!(
+        target: TOKEN_RANGE_APPLY_PROFILE_LOG_TARGET,
+        run_id = %run.id,
+        block_number,
+        block_apply_wall_ms,
+        unaccounted_ms,
+        take_processor_ms,
+        token_apply_ms,
+        state_update_ms,
+        disk_cache_read_ms = processed.disk_cache_metrics.disk_cache_read_ms,
+        "range block apply profile"
     );
     true
 }

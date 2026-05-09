@@ -9,7 +9,7 @@ use crate::chain_metadata::{UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataPr
 use crate::pools::uniswap::v4_event_display_key;
 use crate::tracking::{address_string, normalize_address, TokenRegistry, TrackedTokenIndex};
 
-use super::metadata::optional_uniswap_v2_pool_metadata;
+use super::pool_metadata_lookup::optional_uniswap_v2_pool_metadata;
 
 pub(super) fn candidate_token_addresses(
     registry: &TokenRegistry,

@@ -133,8 +133,8 @@ async fn main() -> Result<()> {
                 .record(report.block_number, error.tx_index, error.tx_hash);
         }
         for update in report.token_updates {
-            unique_discovered_v2_pools.extend(update.discovered_uniswap_v2_pools);
-            unique_updated_v2_pools.extend(update.updated_uniswap_v2_pools);
+            unique_discovered_v2_pools.extend(update.discovered_known_v2_pools);
+            unique_updated_v2_pools.extend(update.updated_known_v2_pools);
         }
 
         if blocks_processed == 1

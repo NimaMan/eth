@@ -2,11 +2,11 @@ use crate::erc20::ERC20Token;
 use crate::pools::BasePoolConfig;
 use tx_processor::ProcessedTransaction;
 
-use super::super::known_tokens::known_decimals_for_address;
-use super::super::TokenTransactionApplier;
+use super::super::known_token_metadata::known_decimals_for_address;
+use super::super::ProcessedTokenUpdateRouter;
 use crate::tracking::{address_string, hash_string, same_address_str};
 
-impl TokenTransactionApplier {
+impl ProcessedTokenUpdateRouter {
     pub(crate) fn discover_uniswap_v3_pools_for_token(
         &self,
         token: &mut ERC20Token,

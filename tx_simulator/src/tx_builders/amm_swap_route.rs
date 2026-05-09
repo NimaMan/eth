@@ -10,6 +10,8 @@ pub enum AmmSwapRoute {
     UniswapV2 { pool: Address },
     /// SushiSwap V2-style pool (router-based swap)
     SushiswapV2 { pool: Address },
+    /// Generic Uniswap V2-style pool with an explicit router address.
+    V2Router { pool: Address, router: Address },
     /// Uniswap V3 pool with fee tier (router-based exactInputSingle)
     UniswapV3 { pool: Address, fee_tier: u32 },
     /// Uniswap V4 via PoolManager (not yet supported by builders)

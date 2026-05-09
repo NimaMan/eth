@@ -21,11 +21,11 @@ decisions, and live retention.
 ## Layout
 
 - `block_processor/` applies ordered processed blocks into the token registry.
-- `transaction_applier/` applies one processed transaction into tracked token and
+- `token_update_router/` applies one processed transaction into tracked token and
   pool state.
-- `transaction_applier/discovery/` discovers V2/V3/V4 pools from processed
-  events.
-- `transaction_applier/trading_status.rs` decides when to refresh pool
+- `token_update_router/pool_discovery/` discovers known V2-router-compatible,
+  Uniswap V3, and Uniswap V4 pools from processed events.
+- `token_update_router/trading_status_update/` decides when to refresh pool
   trading-status checks and calls the existing simulator/pool APIs.
 - `index/` and `retention.rs` own live tracked-token indexing and retention.
 - `builders/` rebuilds single-token state from processed history.

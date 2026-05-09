@@ -98,6 +98,7 @@ pub(super) fn is_optional_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
     // should skip discovery for this pool, not fail block application.
     message.contains("token0() view call failed")
         || message.contains("token1() view call failed")
+        || message.contains("factory() view call failed")
         || message.contains("Failed to get token decimals")
         || message.contains("Token decimals call")
         || message.contains("missing live block header")

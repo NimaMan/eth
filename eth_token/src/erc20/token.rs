@@ -3,6 +3,7 @@ mod events;
 use std::collections::{HashMap, HashSet};
 
 use eyre::{eyre, Result};
+use reth_chain_query::common_addresses::KnownV2Protocol;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
@@ -127,6 +128,30 @@ impl ERC20Token {
             pool_address,
             self.contract_address.clone(),
             denom_address,
+            config,
+            known_routers,
+        );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_uniswap_v2_pool(pool);
+        self.v2_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
+    }
+
+    pub fn create_known_v2_pool(
+        &mut self,
+        protocol: KnownV2Protocol,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        mut config: BasePoolConfig,
+        known_routers: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> &mut UniswapV2Pool {
+        config.token_decimals = self.decimals;
+        let pool = UniswapV2Pool::new_with_protocol(
+            pool_address,
+            self.contract_address.clone(),
+            denom_address,
+            protocol.label(),
             config,
             known_routers,
         );

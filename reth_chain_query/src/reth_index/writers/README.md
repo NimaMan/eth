@@ -24,9 +24,9 @@ sink writes both the `.pblock.zst` file and this index on a background task so
 these writes cannot delay live block publication.
 
 For historical ranges, `tx_processor`'s
-`refresh_processed_block_disk_cache` example writes this index while it fills or
-reads the processed-block disk cache. That keeps the replay cache and
-`address_to_blocks` synchronized from the same block data.
+`refresh_processed_block_disk_cache` example writes this index only when it
+fills missing or invalid processed-block disk cache entries. Cache hits are read
+without rewriting `address_to_blocks`.
 
 ## Why Blocks, Not Tx Numbers
 

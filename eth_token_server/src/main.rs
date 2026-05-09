@@ -12,6 +12,9 @@ const DEFAULT_SIMULATOR_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/
 const TOKEN_SERVER_LOG_DIR_CONFIG: &str = "TOKEN_SERVER_LOG_DIR";
 const SIMULATOR_LOG_DIR_CONFIG: &str = "SIMULATOR_LOG_DIR";
 const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
+const TOKEN_RANGE_APPLY_PROFILE_LOG_TARGET: &str = "token_range_apply_profile";
+const TOKEN_BLOCK_PROCESSOR_PROFILE_LOG_TARGET: &str = "token_block_processor_profile";
+const TOKEN_SIM_SESSION_PROFILE_LOG_TARGET: &str = "token_sim_session_profile";
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -26,6 +29,7 @@ struct LogGuards {
     _live_token_tracker: tracing_appender::non_blocking::WorkerGuard,
     _simulator: tracing_appender::non_blocking::WorkerGuard,
     _simulation_errors: tracing_appender::non_blocking::WorkerGuard,
+    _token_pipeline_profile: tracing_appender::non_blocking::WorkerGuard,
 }
 
 fn init_logging() -> eyre::Result<LogGuards> {
@@ -49,17 +53,25 @@ fn init_logging() -> eyre::Result<LogGuards> {
         tracing_appender::rolling::daily(&simulator_log_dir, "simulation_errors.log");
     let (simulation_errors_writer, simulation_errors_guard) =
         tracing_appender::non_blocking(simulation_errors_appender);
+    let token_pipeline_profile_appender =
+        tracing_appender::rolling::daily(&log_dir, "token_pipeline_profile.log");
+    let (token_pipeline_profile_writer, token_pipeline_profile_guard) =
+        tracing_appender::non_blocking(token_pipeline_profile_appender);
 
     let stdout_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_ansi(false)
         .with_writer(std::io::stdout)
-        .with_filter(filter_fn(|metadata| !is_simulator_target(metadata)));
+        .with_filter(filter_fn(|metadata| {
+            !is_simulator_target(metadata) && !is_token_pipeline_profile_metadata(metadata)
+        }));
     let file_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_ansi(false)
         .with_writer(file_writer)
-        .with_filter(filter_fn(|metadata| !is_simulator_target(metadata)));
+        .with_filter(filter_fn(|metadata| {
+            !is_simulator_target(metadata) && !is_token_pipeline_profile_metadata(metadata)
+        }));
     let live_token_tracker_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_target(true)
@@ -88,6 +100,14 @@ fn init_logging() -> eyre::Result<LogGuards> {
                 || (is_simulator_target(metadata)
                     && matches!(*metadata.level(), Level::WARN | Level::ERROR))
         }));
+    let token_pipeline_profile_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_target(true)
+        .with_current_span(true)
+        .with_span_list(true)
+        .with_ansi(false)
+        .with_writer(token_pipeline_profile_writer)
+        .with_filter(filter_fn(is_token_pipeline_profile_metadata));
 
     tracing_subscriber::registry()
         .with(filter)
@@ -96,6 +116,7 @@ fn init_logging() -> eyre::Result<LogGuards> {
         .with(live_token_tracker_layer)
         .with(simulator_layer)
         .with(simulation_errors_layer)
+        .with(token_pipeline_profile_layer)
         .init();
 
     tracing::info!(
@@ -108,6 +129,7 @@ fn init_logging() -> eyre::Result<LogGuards> {
         _live_token_tracker: live_token_tracker_guard,
         _simulator: simulator_guard,
         _simulation_errors: simulation_errors_guard,
+        _token_pipeline_profile: token_pipeline_profile_guard,
     })
 }
 
@@ -131,4 +153,13 @@ fn is_simulator_log_metadata(metadata: &Metadata<'_>) -> bool {
 fn is_live_token_tracker_metadata(metadata: &Metadata<'_>) -> bool {
     metadata.target() == LIVE_TOKEN_TRACKER_LOG_TARGET
         || metadata.target().starts_with("eth_live_feed::runtime")
+}
+
+fn is_token_pipeline_profile_metadata(metadata: &Metadata<'_>) -> bool {
+    matches!(
+        metadata.target(),
+        TOKEN_RANGE_APPLY_PROFILE_LOG_TARGET
+            | TOKEN_BLOCK_PROCESSOR_PROFILE_LOG_TARGET
+            | TOKEN_SIM_SESSION_PROFILE_LOG_TARGET
+    )
 }

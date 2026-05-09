@@ -3,11 +3,11 @@ use crate::pools::uniswap::{display_denom_for_v4_currency, v4_event_display_key}
 use crate::pools::{BasePoolConfig, UniswapV4Pool};
 use tx_processor::ProcessedTransaction;
 
-use super::super::known_tokens::known_decimals_for_address_or_native;
-use super::super::TokenTransactionApplier;
+use super::super::known_token_metadata::known_decimals_for_address_or_native;
+use super::super::ProcessedTokenUpdateRouter;
 use crate::tracking::{hash_string, same_address_str};
 
-impl TokenTransactionApplier {
+impl ProcessedTokenUpdateRouter {
     pub(crate) fn discover_uniswap_v4_pools_for_token(
         &self,
         token: &mut ERC20Token,

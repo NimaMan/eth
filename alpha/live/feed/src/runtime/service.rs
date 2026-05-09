@@ -1,6 +1,6 @@
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -10,13 +10,13 @@ use eth_token::chain_metadata::{
 };
 use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::manager::TokenBlockUpdateReport;
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard, broadcast};
+use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
-    BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
+    load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
     LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockProviderRetry,
-    ProcessedBlockReplayStoreWriter, load_processed_block,
+    ProcessedBlockReplayStoreWriter,
 };
 
 use super::config::LiveTokenRuntimeConfig;
@@ -28,7 +28,7 @@ use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
 };
-use super::redis_stream::{RedisBlockStream, missing_blocks_after};
+use super::redis_stream::{missing_blocks_after, RedisBlockStream};
 use super::snapshot::LiveTokenSnapshot;
 use super::state::LiveTokenState;
 use super::time::now_unix_secs;
@@ -883,11 +883,9 @@ fn apply_report(
     for update in report.token_updates {
         state
             .discovered_v2_pools
-            .extend(update.discovered_uniswap_v2_pools);
-        updated_v2_pools.extend(update.updated_uniswap_v2_pools.clone());
-        state
-            .updated_v2_pools
-            .extend(update.updated_uniswap_v2_pools);
+            .extend(update.discovered_known_v2_pools);
+        updated_v2_pools.extend(update.updated_known_v2_pools.clone());
+        state.updated_v2_pools.extend(update.updated_known_v2_pools);
         state
             .discovered_v3_pools
             .extend(update.discovered_uniswap_v3_pools);

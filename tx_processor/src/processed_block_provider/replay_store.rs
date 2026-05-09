@@ -14,6 +14,7 @@ use crate::{
 pub struct ProcessedBlockReplayStoreWriter {
     disk_cache_store: ProcessedBlockDiskCacheStore,
     disk_cache_writer: ProcessedBlockDiskCacheWriter,
+    chain_id: u64,
     address_block_index: Option<AddressBlockParticipationWriter>,
 }
 
@@ -40,6 +41,7 @@ impl ProcessedBlockReplayStoreWriter {
         Self {
             disk_cache_store,
             disk_cache_writer,
+            chain_id,
             address_block_index,
         }
     }
@@ -83,6 +85,18 @@ impl ProcessedBlockReplayStoreWriter {
             disk_cache,
             address_block_index,
         })
+    }
+
+    pub fn write_processed_block_if_missing(
+        &self,
+        block: &ProcessedBlock,
+    ) -> Result<Option<ProcessedBlockReplayStoreWrite>> {
+        let key = self.disk_cache_store.key_for_block(self.chain_id, block);
+        if self.disk_cache_store.contains(&key) {
+            return Ok(None);
+        }
+
+        self.write_processed_block(block).map(Some)
     }
 
     pub fn index_processed_block(

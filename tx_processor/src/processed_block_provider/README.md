@@ -55,7 +55,7 @@ migrate them.
 The historical backfill entrypoint is
 `tx_processor/examples/block/cache/refresh_processed_block_disk_cache.rs`.
 It fills missing processed-block cache files through
-`ProcessedBlockReplayStoreWriter` and, by default, repairs
-`reth_index/address_to_blocks` for cached blocks that were written before the
-index existed. Use `--skip-address-block-index` only for a deliberate cache-only
-refresh.
+`ProcessedBlockReplayStoreWriter`. When a block is already present in the disk
+cache, the normal backfill path reads it and does not rewrite
+`reth_index/address_to_blocks`. Use `--skip-address-block-index` only for a
+deliberate cache-only refresh of missing blocks.

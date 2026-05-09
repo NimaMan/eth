@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
+use reth_chain_query::common_addresses::KnownV2Protocol;
 use reth_chain_query::provider::BlockHeader;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
@@ -10,14 +11,13 @@ use tx_processor::{
 };
 
 use crate::pools::base::DEFAULT_TEST_BUY_ETH;
-use crate::pools::sushiswap::SUSHISWAP_V2_PROTOCOL;
 
-use super::v2::{UniswapV2Pool, UniswapV2TxContext};
-use super::v3::UniswapV3Pool;
-use super::v4::UniswapV4Pool;
+use super::uniswap::v2::{UniswapV2Pool, UniswapV2TxContext};
+use super::uniswap::v3::UniswapV3Pool;
+use super::uniswap::v4::UniswapV4Pool;
 
 #[derive(Clone, Debug, Default)]
-pub struct UniswapV2TradingSimulationConfig {
+pub struct PoolTradingSimulationConfig {
     pub test_amount: Option<U256>,
     pub buyer_address: Option<Address>,
     pub block_number: Option<u64>,
@@ -33,7 +33,7 @@ pub struct UniswapV2TradingSimulationConfig {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct UniswapV2TradingSimulationOutcome {
+pub struct PoolTradingSimulationOutcome {
     pub can_buy: bool,
     pub can_approve: bool,
     pub can_sell: bool,
@@ -44,10 +44,7 @@ pub struct UniswapV2TradingSimulationOutcome {
     pub simulation_block_number: u64,
 }
 
-pub type PoolTradingSimulationConfig = UniswapV2TradingSimulationConfig;
-pub type PoolTradingSimulationOutcome = UniswapV2TradingSimulationOutcome;
-
-impl From<&PoolBuySellSimulationResult> for UniswapV2TradingSimulationOutcome {
+impl From<&PoolBuySellSimulationResult> for PoolTradingSimulationOutcome {
     fn from(result: &PoolBuySellSimulationResult) -> Self {
         Self {
             can_buy: result.can_buy,
@@ -65,7 +62,7 @@ impl From<&PoolBuySellSimulationResult> for UniswapV2TradingSimulationOutcome {
 impl UniswapV2Pool {
     pub fn build_buy_sell_parameters(
         &self,
-        config: &UniswapV2TradingSimulationConfig,
+        config: &PoolTradingSimulationConfig,
     ) -> Result<PoolBuySellParameters> {
         let token_address = parse_address(&self.base.identity.token_address)?;
         let pool_address = parse_address(&self.base.identity.pool_address)?;
@@ -84,11 +81,9 @@ impl UniswapV2Pool {
             .test_amount
             .unwrap_or(scaled_decimal_amount(denom_amount, denom_decimals)?);
 
-        let pool_type = if self.base.identity.protocol == SUSHISWAP_V2_PROTOCOL {
-            PoolType::SushiSwap
-        } else {
-            PoolType::UniswapV2
-        };
+        let protocol = KnownV2Protocol::from_label(&self.base.identity.protocol)
+            .unwrap_or(KnownV2Protocol::UniswapV2);
+        let pool_type = PoolType::from_known_v2_protocol(protocol);
         let mut params = PoolBuySellParameters::new(token_address, pool_address, pool_type)
             .with_test_amount(test_amount)
             .with_denom_address(denom_address)
@@ -137,7 +132,7 @@ impl UniswapV2Pool {
         simulator: Arc<TxSimulator>,
         tx_processor: Arc<TxProcessor>,
         tx: &UniswapV2TxContext,
-        config: UniswapV2TradingSimulationConfig,
+        config: PoolTradingSimulationConfig,
     ) -> Result<PoolBuySellSimulationResult> {
         let pool_simulator = PoolBuySellSimulator::new(simulator, tx_processor);
         self.evaluate_trading_status_v2_with_pool_simulator(&pool_simulator, tx, config)
@@ -148,7 +143,7 @@ impl UniswapV2Pool {
         &mut self,
         pool_simulator: &PoolBuySellSimulator,
         tx: &UniswapV2TxContext,
-        mut config: UniswapV2TradingSimulationConfig,
+        mut config: PoolTradingSimulationConfig,
     ) -> Result<PoolBuySellSimulationResult> {
         if config.block_number.is_none() {
             config.block_number = Some(tx.block_number.saturating_sub(1));
@@ -156,10 +151,7 @@ impl UniswapV2Pool {
 
         let params = self.build_buy_sell_parameters(&config)?;
         let result = pool_simulator.check_pool(params).await?;
-        self.apply_trading_simulation_outcome(
-            tx,
-            &UniswapV2TradingSimulationOutcome::from(&result),
-        );
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
         Ok(result)
     }
 
@@ -167,7 +159,7 @@ impl UniswapV2Pool {
         &mut self,
         pool_simulator: &PoolBuySellSimulator,
         tx: &UniswapV2TxContext,
-        mut config: UniswapV2TradingSimulationConfig,
+        mut config: PoolTradingSimulationConfig,
         chain: UnsignedTxChainSimulation,
     ) -> Result<PoolBuySellSimulationResult> {
         if config.block_number.is_none() {
@@ -176,10 +168,7 @@ impl UniswapV2Pool {
 
         let params = self.build_buy_sell_parameters(&config)?;
         let result = pool_simulator.check_pool_with_chain(params, chain).await?;
-        self.apply_trading_simulation_outcome(
-            tx,
-            &UniswapV2TradingSimulationOutcome::from(&result),
-        );
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
         Ok(result)
     }
 
@@ -187,7 +176,7 @@ impl UniswapV2Pool {
         &mut self,
         pool_simulator: &LivePoolBuySellSimulator,
         tx: &UniswapV2TxContext,
-        config: UniswapV2TradingSimulationConfig,
+        config: PoolTradingSimulationConfig,
     ) -> Result<PoolBuySellSimulationResult> {
         let params = self.build_buy_sell_parameters(&config)?;
         let result = if let Some(block_number) = config.block_number {
@@ -199,10 +188,7 @@ impl UniswapV2Pool {
                 .check_pool_before_live_block(params, tx.block_number)
                 .await?
         };
-        self.apply_trading_simulation_outcome(
-            tx,
-            &UniswapV2TradingSimulationOutcome::from(&result),
-        );
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
         Ok(result)
     }
 
@@ -210,7 +196,7 @@ impl UniswapV2Pool {
         &mut self,
         pool_simulator: &LivePoolBuySellSimulator,
         tx: &UniswapV2TxContext,
-        mut config: UniswapV2TradingSimulationConfig,
+        mut config: PoolTradingSimulationConfig,
         chain: UnsignedTxChainSimulation,
     ) -> Result<PoolBuySellSimulationResult> {
         if config.block_number.is_none() {
@@ -219,17 +205,14 @@ impl UniswapV2Pool {
 
         let params = self.build_buy_sell_parameters(&config)?;
         let result = pool_simulator.check_pool_with_chain(params, chain).await?;
-        self.apply_trading_simulation_outcome(
-            tx,
-            &UniswapV2TradingSimulationOutcome::from(&result),
-        );
+        self.apply_trading_simulation_outcome(tx, &PoolTradingSimulationOutcome::from(&result));
         Ok(result)
     }
 
     pub fn apply_trading_simulation_outcome(
         &mut self,
         tx: &UniswapV2TxContext,
-        outcome: &UniswapV2TradingSimulationOutcome,
+        outcome: &PoolTradingSimulationOutcome,
     ) {
         self.base.set_simulated_buy_status(
             outcome.can_buy,
@@ -588,7 +571,7 @@ mod tests {
     #[test]
     fn builds_v2_buy_sell_parameters_from_pool_identity() {
         let params = pool()
-            .build_buy_sell_parameters(&UniswapV2TradingSimulationConfig {
+            .build_buy_sell_parameters(&PoolTradingSimulationConfig {
                 block_number: Some(100),
                 slippage_tolerance: Some(2.5),
                 ..Default::default()
@@ -614,7 +597,7 @@ mod tests {
     fn applies_trading_outcome_to_pool_state() {
         let mut pool = pool();
         let tx = UniswapV2TxContext::new(200, 1_700, "0xTX");
-        let outcome = UniswapV2TradingSimulationOutcome {
+        let outcome = PoolTradingSimulationOutcome {
             can_buy: true,
             can_approve: true,
             can_sell: true,
@@ -639,7 +622,7 @@ mod tests {
     fn later_failed_buy_outcome_clears_current_buy_status() {
         let mut pool = pool();
         let first_tx = UniswapV2TxContext::new(200, 1_700, "0xBUY");
-        let success = UniswapV2TradingSimulationOutcome {
+        let success = PoolTradingSimulationOutcome {
             can_buy: true,
             can_approve: true,
             can_sell: true,
@@ -652,7 +635,7 @@ mod tests {
         pool.apply_trading_simulation_outcome(&first_tx, &success);
 
         let later_tx = UniswapV2TxContext::new(210, 1_800, "0xFAIL");
-        let failure = UniswapV2TradingSimulationOutcome {
+        let failure = PoolTradingSimulationOutcome {
             can_buy: false,
             can_approve: false,
             can_sell: false,

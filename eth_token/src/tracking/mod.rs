@@ -3,13 +3,15 @@
 pub(crate) mod address;
 pub mod block_processor;
 pub mod builders;
-pub mod index;
+pub mod live_token_retention;
 pub mod registry;
 pub(crate) mod replay_context;
 pub mod reports;
-pub mod retention;
-pub mod transaction_applier;
+pub mod token_update_router;
+pub mod tracked_token_index;
 
+#[cfg(test)]
+mod state_replay_tests;
 #[cfg(test)]
 mod tests;
 
@@ -19,13 +21,13 @@ pub(crate) use address::{
 };
 pub use block_processor::{BlockTokenProcessor, DEFAULT_TRACKED_TOKEN_INDEX_SIZE};
 pub use builders::TokenStateBuilder;
-pub use index::{
-    TrackedTokenIndex, TrackedTokenIndexEntry, TrackedTokenIndexUpdate, TrackedTokenStatus,
-};
-pub use registry::TokenRegistry;
-pub use reports::{TokenBlockUpdateReport, TokenStateUpdateReport, TokenTransactionUpdateError};
-pub use retention::{
+pub use live_token_retention::{
     LivePoolDenomClass, LivePoolRetentionDecision, LiveTokenRetentionDecision,
     LiveTokenRetentionPolicy, LiveTokenRetentionReport, PoolDropReason, TokenDropReason,
 };
-pub use transaction_applier::{ProcessedTokenUpdateRouter, TokenTransactionApplier};
+pub use registry::TokenRegistry;
+pub use reports::{TokenBlockUpdateReport, TokenStateUpdateReport, TokenTransactionUpdateError};
+pub use token_update_router::ProcessedTokenUpdateRouter;
+pub use tracked_token_index::{
+    TrackedTokenIndex, TrackedTokenIndexEntry, TrackedTokenIndexUpdate, TrackedTokenStatus,
+};

@@ -36,6 +36,86 @@ processed-block disk cache + Redis eth/live/blocks
   -> HTTP/SSE clients, mempool context, alpha polling
 ```
 
+## Range Run Performance Path
+
+Historical range builds are split into three distinct costs:
+
+```text
+processed-block disk cache read
+  -> token block apply
+  -> in-memory view materialization for HTTP clients
+```
+
+When the processed-block disk cache is hot, cache reads are usually only a few
+milliseconds per block. Slow range builds should therefore be profiled around
+`range_indexer/pipeline/apply.rs` and `range_indexer/pipeline/state.rs`, not
+only around cache loading.
+
+The token block apply path already uses block-scoped simulator sessions through
+`eth_token`: one historical `BlockTxStateSession` is opened lazily per block
+that needs pool simulation, and all pool checks in that block branch from that
+session. If a block with `simulations_attempted=0` is slow, the bottleneck is
+not simulation pre-state loading.
+
+The current range state keeps `BlockTokenProcessor` inside `RangeIndexState`
+behind one `RwLock`. This has two performance consequences:
+
+- `take_processor_for_apply` clones the full processor before each block apply.
+  As a run accumulates tokens, pools, indexes, and network graphs, that clone
+  can become a hidden per-block cost.
+- View endpoints such as `GET /runs/:id/tokens`, `GET /runs/:id/pools`, and
+  `GET /runs/:id/strategy/launch-stats` read the same state and materialize
+  large DTOs. Polling those endpoints during an active build competes with the
+  writer that restores the processor and updates progress.
+
+Preferred fixes are:
+
+- Move the mutable `BlockTokenProcessor` out of the progress/view lock, for
+  example into a dedicated processor owner or mutex, and expose lightweight
+  progress snapshots separately.
+- Cache token/pool/strategy view DTO snapshots or refresh them on a slower
+  cadence while the build is running.
+- Keep `/runs/active` cheap and poll it frequently; fetch the heavy token/pool
+  lists only periodically, on manual refresh, or when the run reaches a terminal
+  status.
+
+Useful profiling checks:
+
+```bash
+cargo run --manifest-path blockchains/eth/Cargo.toml -p tx_simulator --release \
+  --example profile_block_tx_session -- \
+  --datadir /home/nima/storage/samsung8tb/ethereum/reth \
+  --block 25057078 --iterations 2 --warmup-iterations 1
+
+cargo run --manifest-path blockchains/eth/Cargo.toml -p tx_simulator --release \
+  --example profile_replay_engines -- \
+  --datadir /home/nima/storage/samsung8tb/ethereum/reth \
+  --blocks 25057078 --iterations 1 --mode feasibility
+```
+
+The server writes token pipeline measurements to a dedicated daily JSON log:
+
+```bash
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/token_pipeline_profile.log.YYYY-MM-DD
+```
+
+It contains three targets:
+
+- `token_range_apply_profile`: range-runner wall time around processor take,
+  token apply, state update, and processed-block disk cache read.
+- `token_block_processor_profile`: block-token-processor phase totals and
+  token-applier aggregate totals for the block.
+- `token_sim_session_profile`: one row per pool simulation branch, including
+  whether a historical/live simulator session was created or reused.
+
+Summarize a captured profile log:
+
+```bash
+python3 eth_token_server/scripts/token_pipeline_profile_summary.py \
+  /home/nima/code/crypto/blockchains/eth/logs/eth_token_server/token_pipeline_profile.log.YYYY-MM-DD \
+  --csv /tmp/token_pipeline_profile.csv
+```
+
 ## Where To Look First
 
 | Need | Start here |

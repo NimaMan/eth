@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -157,7 +157,7 @@ impl ProcessedBlockDiskCacheStore {
             return Ok(None);
         }
 
-        let bytes = fs::read(&path)?;
+        let bytes = read_cache_file(&path)?;
         let decoded = match zstd::stream::decode_all(bytes.as_slice()) {
             Ok(decoded) => decoded,
             Err(error) => {
@@ -419,6 +419,41 @@ impl ProcessedBlockDiskCacheStore {
         self.root.join(network_for_chain_id(chain_id))
     }
 }
+
+fn read_cache_file(path: &Path) -> Result<Vec<u8>> {
+    let mut file = fs::File::open(path)?;
+    advise_sequential(&file);
+
+    let capacity = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| usize::try_from(metadata.len()).ok())
+        .unwrap_or(0);
+    let mut bytes = Vec::with_capacity(capacity);
+    file.read_to_end(&mut bytes)?;
+    advise_dontneed(&file);
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn advise_sequential(file: &fs::File) {
+    use std::os::fd::AsRawFd;
+
+    let _ = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_SEQUENTIAL) };
+}
+
+#[cfg(not(unix))]
+fn advise_sequential(_file: &fs::File) {}
+
+#[cfg(unix)]
+fn advise_dontneed(file: &fs::File) {
+    use std::os::fd::AsRawFd;
+
+    let _ = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+}
+
+#[cfg(not(unix))]
+fn advise_dontneed(_file: &fs::File) {}
 
 fn block_ranges(block_numbers: &[u64]) -> Vec<ProcessedBlockDiskCacheBlockRange> {
     let mut ranges = Vec::new();

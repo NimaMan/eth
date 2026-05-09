@@ -2,8 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use eyre::Result;
+use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::dex::fetch_uniswap_v2_pair_address;
 use reth_chain_query::RethQueryProvider;
 
 use crate::erc20::ERC20TokenMetadata;
@@ -154,12 +156,56 @@ async fn uniswap_v2_pool_metadata(
         return Ok(None);
     }
 
+    let factory = provider
+        .uni_v2_get_factory(lookup.pool_address, Some(lookup.block_number))
+        .await?;
+    let Some(protocol) = KnownV2Protocol::from_factory(factory) else {
+        tracing::debug!(
+            pool_address = %lookup.pool_address,
+            factory = %factory,
+            token0 = %token0,
+            token1 = %token1,
+            block_number = lookup.block_number,
+            tx_index = lookup.tx_index,
+            tx_hash = %lookup.transaction_hash,
+            "skipped unknown v2-style pool factory"
+        );
+        cache.remember_v2_pool_metadata(lookup.pool_address, None);
+        return Ok(None);
+    };
+
+    let resolved_pair = fetch_uniswap_v2_pair_address(
+        provider.simulator().as_ref(),
+        protocol.factory(),
+        token0,
+        token1,
+        Some(lookup.block_number),
+    )
+    .await?;
+    if !is_known_v2_protocol_pool(lookup.pool_address, resolved_pair) {
+        tracing::debug!(
+            pool_address = %lookup.pool_address,
+            protocol = protocol.label(),
+            factory = %factory,
+            token0 = %token0,
+            token1 = %token1,
+            resolved_pair = %resolved_pair,
+            block_number = lookup.block_number,
+            tx_index = lookup.tx_index,
+            tx_hash = %lookup.transaction_hash,
+            "skipped mismatched known v2 pool"
+        );
+        cache.remember_v2_pool_metadata(lookup.pool_address, None);
+        return Ok(None);
+    }
+
     let (token0_decimals, token1_decimals) = tokio::try_join!(
         cached_token_decimals(provider, cache, token0, lookup.block_number),
         cached_token_decimals(provider, cache, token1, lookup.block_number),
     )?;
 
-    let metadata = UniswapV2PoolMetadata::new(
+    let metadata = UniswapV2PoolMetadata::new_with_protocol(
+        protocol,
         address_string(&lookup.pool_address),
         address_string(&token0),
         address_string(&token1),
@@ -205,6 +251,10 @@ fn filter_uniswap_v2_pool_metadata(
 
 fn is_native_eth_sentinel(address: &alloy_primitives::Address) -> bool {
     address_string(address).eq_ignore_ascii_case("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+}
+
+fn is_known_v2_protocol_pool(pool_address: Address, resolved_pair: Address) -> bool {
+    !resolved_pair.is_zero() && resolved_pair == pool_address
 }
 
 fn is_optional_token_metadata_read_error(message: &str) -> bool {
@@ -271,6 +321,18 @@ mod tests {
         assert!(is_native_eth_sentinel(&address!(
             "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         )));
+    }
+
+    #[test]
+    fn known_v2_protocol_pool_requires_factory_match() {
+        let pool = address!("3333333333333333333333333333333333333333");
+
+        assert!(is_known_v2_protocol_pool(pool, pool));
+        assert!(!is_known_v2_protocol_pool(pool, Address::ZERO));
+        assert!(!is_known_v2_protocol_pool(
+            pool,
+            address!("4444444444444444444444444444444444444444")
+        ));
     }
 
     #[test]

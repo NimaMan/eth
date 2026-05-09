@@ -1,8 +1,8 @@
-use super::metadata::is_optional_uniswap_v2_pool_metadata_miss;
-use super::trading_status::{
+use super::pool_metadata_lookup::is_optional_uniswap_v2_pool_metadata_miss;
+use super::trading_status_update::{
     current_block_simulation_pool_addresses, should_simulate_at_current_block,
 };
-use super::V2TradingSimulation;
+use super::PoolTradingSimulationMode;
 
 #[test]
 fn discovered_current_block_pool_uses_current_block_state() {
@@ -11,7 +11,7 @@ fn discovered_current_block_pool_uses_current_block_state() {
     assert!(should_simulate_at_current_block(
         pool,
         &[pool.to_string()],
-        V2TradingSimulation::Noop
+        PoolTradingSimulationMode::Noop
     ));
 }
 
@@ -20,7 +20,7 @@ fn existing_pool_without_current_discovery_uses_parent_replay() {
     assert!(!should_simulate_at_current_block(
         "0xb80b6c2453b82996950a81c42db446e95a3fa2d5",
         &[],
-        V2TradingSimulation::Noop
+        PoolTradingSimulationMode::Noop
     ));
 }
 
@@ -64,4 +64,7 @@ fn token_decimals_failures_are_optional_pool_metadata_misses() {
     assert!(is_optional_uniswap_v2_pool_metadata_miss(
             "Token decimals call for 0xe0b7927c4af23765cb51314a0e0521a9645f0e2a returned 0 bytes (expected >= 32)"
         ));
+    assert!(is_optional_uniswap_v2_pool_metadata_miss(
+        "factory() view call failed or empty output"
+    ));
 }

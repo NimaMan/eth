@@ -184,23 +184,6 @@ async fn main() -> Result<()> {
             }
         }
 
-        if address_index_dir.is_some() {
-            let index_started = Instant::now();
-            for loaded_block in &loaded {
-                if !loaded_block.disk_cache_metrics.disk_cache_hit {
-                    continue;
-                }
-                if let Some(write) =
-                    replay_store_writer.index_processed_block(&loaded_block.block)?
-                {
-                    chunk.address_index_blocks += 1;
-                    chunk.address_index_participating_txs += write.participating_txs as u64;
-                    chunk.address_index_inserted += write.inserted as u64;
-                    chunk.address_index_write_ms += write.write_ms;
-                }
-            }
-            chunk.address_index_write_ms += index_started.elapsed().as_millis();
-        }
         totals.add(&chunk);
 
         println!(

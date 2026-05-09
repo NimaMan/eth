@@ -50,18 +50,23 @@ pub async fn simulate_buy_swap(
     };
 
     // Build route
-    let route = match pool_type {
-        PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 { pool: pool_address },
-        PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 { pool: pool_address },
-        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+    let route = if let Some(protocol) = pool_type.known_v2_protocol() {
+        AmmSwapRoute::V2Router {
             pool: pool_address,
-            fee_tier,
-        },
-        _ => {
-            return Err(eyre::eyre!(
-                "Pool type {:?} not yet supported for buy-only simulation",
-                pool_type
-            ));
+            router: protocol.router(),
+        }
+    } else {
+        match pool_type {
+            PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+                pool: pool_address,
+                fee_tier,
+            },
+            _ => {
+                return Err(eyre::eyre!(
+                    "Pool type {:?} not yet supported for buy-only simulation",
+                    pool_type
+                ));
+            }
         }
     };
 

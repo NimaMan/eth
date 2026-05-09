@@ -32,9 +32,39 @@ tx_processor::ProcessedBlock
   -> eth_token_server view DTOs
 ```
 
+## Block Simulation State Reuse
+
+Trading simulation is block-scoped in the token pipeline. The range runner calls
+`BlockTokenProcessor::process_block_with_discovery_provider`, which creates one
+`PoolTradingSimulationMode::HistoricalBlockSession` per processed block. The first
+pool simulation in that block opens a `BlockTxStateSession`; later V2/V3/V4
+pool simulations in the same block reuse that session and branch from its
+warmed prefix state.
+
+```text
+ProcessedBlock
+  -> BlockTokenProcessor::process_block_with_discovery_provider
+  -> ProcessedTokenUpdateRouter
+  -> simulate_updated_v2/v3/v4_pools
+  -> PoolTradingSimulationMode::HistoricalBlockSession
+  -> TxSimulator::block_tx_state_session(block)
+  -> advance one canonical tx prefix, then clone branches per pool simulation
+```
+
+Live token processing follows the same ownership rule, but uses
+`LiveBlockSession` with a per-block `BTreeMap<u64, BlockStateSession>`.
+The map is keyed by the effective simulation block number, so a live block can
+reuse both parent-state and current-state sessions within that block.
+
+The important invariant is that token/pool code should not call direct
+per-pool historical simulation helpers when block-scoped session variants are
+available. Historical range simulation should pay at most one block tx session
+open per processed block, plus monotonic prefix replay to the highest simulated
+tx index and cheap branch clones for individual pool checks.
+
 ## Current Focus
 
-- Active parity path: ERC-20 plus Uniswap V2 token/pool tracking.
+- Active parity path: ERC-20 plus known V2-router-compatible token/pool tracking.
 - Highest-traffic modules: `erc20`, `pools::uniswap::v2`, `state`,
   `tracking`, and `manager`.
 - `health` and `network` should consume stabilized token/pool facts; do not

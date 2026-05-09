@@ -1,6 +1,7 @@
 use crate::tx_processor::data_models::ProcessedTransaction;
 /// Type definitions for trading viability analysis
 use alloy_primitives::{Address, B256, U256};
+use reth_chain_query::common_addresses::KnownV2Protocol;
 use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 
@@ -171,9 +172,35 @@ pub enum PoolType {
     UniswapV2,
     UniswapV3 { fee_tier: u32 }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
     SushiSwap,
+    PancakeSwapV2,
+    ShibaSwapV2,
+    FraxswapV2,
     Curve,
     Balancer,
     UniswapV4,
+}
+
+impl PoolType {
+    pub fn known_v2_protocol(self) -> Option<KnownV2Protocol> {
+        match self {
+            Self::UniswapV2 => Some(KnownV2Protocol::UniswapV2),
+            Self::SushiSwap => Some(KnownV2Protocol::SushiSwapV2),
+            Self::PancakeSwapV2 => Some(KnownV2Protocol::PancakeSwapV2),
+            Self::ShibaSwapV2 => Some(KnownV2Protocol::ShibaSwapV2),
+            Self::FraxswapV2 => Some(KnownV2Protocol::FraxswapV2),
+            _ => None,
+        }
+    }
+
+    pub fn from_known_v2_protocol(protocol: KnownV2Protocol) -> Self {
+        match protocol {
+            KnownV2Protocol::UniswapV2 => Self::UniswapV2,
+            KnownV2Protocol::SushiSwapV2 => Self::SushiSwap,
+            KnownV2Protocol::PancakeSwapV2 => Self::PancakeSwapV2,
+            KnownV2Protocol::ShibaSwapV2 => Self::ShibaSwapV2,
+            KnownV2Protocol::FraxswapV2 => Self::FraxswapV2,
+        }
+    }
 }
 
 /// Aggregated outcome from the pool buy/sell simulation pipeline
@@ -218,6 +245,20 @@ pub struct TradingSequenceResult {
     pub total_gas_used: u64,
     pub simulation_block_number: u64,
     pub failure_reason: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_type_round_trips_known_v2_protocols() {
+        for protocol in KnownV2Protocol::ALL {
+            let pool_type = PoolType::from_known_v2_protocol(protocol);
+
+            assert_eq!(pool_type.known_v2_protocol(), Some(protocol));
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -83,9 +83,9 @@ Observations from the 2025-10-28 Live Run
 - Prior-transaction replays:
   * 114× `TransferHelper: TRANSFER_FROM_FAILED`, 35× `ERC20: transfer amount exceeds allowance`, plus various custom errors when we attempted to replay a user’s “enable trading” or approval tx without mirroring their original allowances. Actions pulled into `PoolBuySellParameters.prior_txs` must either include all prerequisite approvals or be skipped (otherwise the simulator starts from a clean account and the replay fails deterministically).
 - Live-state caveat: even though we now fetch sealed headers from the RPC node for the block we are replaying, the local Reth datadir must be caught up to the same height. When the DB was still indexing 236722xx, brand-new pools produced the router reverts above. If we observe the same pattern again:
-  1. Call `simulate_view_function(UNISWAP_V2_FACTORY, getPair(token, denom), block)` to verify the pool address exists at the target block before building swap calldata.
+  1. Call `getPair(token, denom)` on the selected known V2 protocol factory to verify the pool address exists at the target block before building swap calldata.
   2. Query `getReserves()` on the resolved pool to rule out rugs (zero liquidity) versus missing state.
-  3. For sell reverts, inspect `erc20.allowance(buyer, router)` at the replayed block to confirm whether an enable transaction is required.
+  3. For sell reverts, inspect `erc20.allowance(buyer, router)` against that protocol's router at the replayed block to confirm whether an enable transaction is required.
 - Historical regression: FL0KI (token `0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E`) previously hit the 0x7a250… router revert in this log. After enforcing denom addresses and validating pairs, the current simulator reports the pool as missing instead of queuing a failing swap, which is the expected behaviour.
 
 Design split (by crate)

@@ -9,11 +9,11 @@ pub mod block_processor {
 }
 
 pub mod index {
-    pub use crate::tracking::index::*;
+    pub use crate::tracking::tracked_token_index::*;
 }
 
 pub mod retention {
-    pub use crate::tracking::retention::*;
+    pub use crate::tracking::live_token_retention::*;
 }
 
 pub mod token_builder {
@@ -21,7 +21,7 @@ pub mod token_builder {
 }
 
 pub mod update_router {
-    pub use crate::tracking::transaction_applier::*;
+    pub use crate::tracking::token_update_router::*;
 }
 
 #[allow(unused_imports)]

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
 
-use super::retention::{
+use super::live_token_retention::{
     LiveTokenRetentionDecision, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
 };
 use super::TokenRegistry;
@@ -378,7 +378,7 @@ mod tests {
 
     use crate::erc20::ERC20TokenMetadata;
     use crate::pools::{BasePoolConfig, UniswapV2Pool};
-    use crate::tracking::retention::WETH_ADDRESS;
+    use crate::tracking::live_token_retention::WETH_ADDRESS;
 
     const TOKEN_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
     const SECOND_TOKEN_ADDRESS: &str = "0x2222222222222222222222222222222222222222";

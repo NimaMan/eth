@@ -5,11 +5,11 @@ pub struct TokenStateUpdateReport {
     pub token_address: String,
     pub token_state_updated: bool,
     #[serde(default)]
-    pub discovered_uniswap_v2_pools: Vec<String>,
+    pub discovered_known_v2_pools: Vec<String>,
     #[serde(default)]
-    pub updated_uniswap_v2_pools: Vec<String>,
+    pub updated_known_v2_pools: Vec<String>,
     #[serde(default)]
-    pub simulated_uniswap_v2_pools: Vec<String>,
+    pub simulated_known_v2_pools: Vec<String>,
     #[serde(default)]
     pub discovered_uniswap_v3_pools: Vec<String>,
     #[serde(default)]

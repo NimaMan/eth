@@ -27,7 +27,8 @@ pub use dex_token_denom_pairs::{
 };
 pub use etf::{ADDRESSES_BY_PROVIDER, ETF_ADDRESSES, ETF_ADDRESS_SET};
 pub use pool_addresses::{
-    get_pool_protocol, is_known_factory, is_v4_pool_manager, POOL_FACTORIES, ROUTERS,
+    get_pool_protocol, is_known_factory, is_v4_pool_manager, KnownV2Protocol,
+    KnownV2ProtocolDescriptor, POOL_FACTORIES, ROUTERS,
 };
 pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
 pub use validators::{is_bribe, is_fee_recipient, FEE_RECIPIENTS, FEE_RECIPIENT_LIST};

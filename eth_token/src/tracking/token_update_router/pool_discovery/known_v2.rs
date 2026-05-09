@@ -2,23 +2,24 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use eyre::Result;
+use reth_chain_query::common_addresses::KnownV2Protocol;
 
 use crate::chain_metadata::{
     UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 use crate::erc20::ERC20Token;
-use crate::pools::{BasePoolConfig, SUSHISWAP_V2_FACTORY};
+use crate::pools::BasePoolConfig;
 use tx_processor::ProcessedTransaction;
 
-use super::super::known_tokens::known_decimals_for_address;
-use super::super::metadata::optional_uniswap_v2_pool_metadata;
-use super::super::{TokenTransactionApplier, UNISWAP_V2_FACTORY};
+use super::super::known_token_metadata::known_decimals_for_address;
+use super::super::pool_metadata_lookup::optional_uniswap_v2_pool_metadata;
+use super::super::ProcessedTokenUpdateRouter;
 use crate::tracking::{
     address_string, hash_string, normalize_address, parse_address_lossy, same_address_str,
 };
 
-impl TokenTransactionApplier {
-    pub(crate) fn discover_uniswap_v2_pools_for_token(
+impl ProcessedTokenUpdateRouter {
+    pub(crate) fn discover_known_v2_pools_for_token(
         &self,
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
@@ -27,9 +28,9 @@ impl TokenTransactionApplier {
         let mut discovered = Vec::new();
 
         for event in &tx.uniswap_v2_pair_created_events {
-            if !is_uniswap_v2_pair_created_event(event) {
+            let Some(protocol) = known_v2_protocol_for_pair_created_event(event) else {
                 continue;
-            }
+            };
             let token_is_token0 = same_address_str(event.token0, &token_address);
             let token_is_token1 = same_address_str(event.token1, &token_address);
             if !token_is_token0 && !token_is_token1 {
@@ -46,7 +47,8 @@ impl TokenTransactionApplier {
             } else {
                 event.token0
             };
-            let pool = token.create_uniswap_v2_pool(
+            let pool = token.create_known_v2_pool(
+                protocol,
                 pool_address.clone(),
                 address_string(&denom_address),
                 BasePoolConfig {
@@ -69,58 +71,7 @@ impl TokenTransactionApplier {
         discovered
     }
 
-    pub(crate) fn discover_sushiswap_v2_pools_for_token(
-        &self,
-        token: &mut ERC20Token,
-        tx: &ProcessedTransaction,
-    ) -> Vec<String> {
-        let token_address = token.contract_address.clone();
-        let mut discovered = Vec::new();
-
-        for event in &tx.uniswap_v2_pair_created_events {
-            if !is_sushiswap_v2_pair_created_event(event) {
-                continue;
-            }
-            let token_is_token0 = same_address_str(event.token0, &token_address);
-            let token_is_token1 = same_address_str(event.token1, &token_address);
-            if !token_is_token0 && !token_is_token1 {
-                continue;
-            }
-
-            let pool_address = address_string(&event.pair_address);
-            if token.uniswap_v2_pool(&pool_address).is_some() {
-                continue;
-            }
-
-            let denom_address = if token_is_token0 {
-                event.token1
-            } else {
-                event.token0
-            };
-            let pool = token.create_sushiswap_v2_pool(
-                pool_address.clone(),
-                address_string(&denom_address),
-                BasePoolConfig {
-                    token_decimals: token.decimals,
-                    denom_decimals: None,
-                    token1_is_denom: Some(token_is_token0),
-                    history_limit: self.history_limit,
-                    denom_threshold: 0.0,
-                    threshold_unit: None,
-                    test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
-                },
-                &self.known_routers,
-            );
-            pool.base.creation_block = Some(tx.block_number);
-            pool.base.creation_tx = Some(hash_string(&tx.hash));
-            pool.base.creation_timestamp = Some(tx.block_timestamp);
-            discovered.push(pool_address);
-        }
-
-        discovered
-    }
-
-    pub(crate) async fn discover_uniswap_v2_pools_for_token_with_metadata<P>(
+    pub(crate) async fn discover_known_v2_pools_for_token_with_metadata<P>(
         &self,
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
@@ -134,9 +85,9 @@ impl TokenTransactionApplier {
         let mut discovered = Vec::new();
 
         for event in &tx.uniswap_v2_pair_created_events {
-            if !is_uniswap_v2_pair_created_event(event) {
+            let Some(protocol) = known_v2_protocol_for_pair_created_event(event) else {
                 continue;
-            }
+            };
             let token_is_token0 = same_address_str(event.token0, &token_address);
             let token_is_token1 = same_address_str(event.token1, &token_address);
             if !token_is_token0 && !token_is_token1 {
@@ -168,7 +119,8 @@ impl TokenTransactionApplier {
                 test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
             };
 
-            let pool = token.create_uniswap_v2_pool(
+            let pool = token.create_known_v2_pool(
+                protocol,
                 pool_address.clone(),
                 denom_address,
                 config,
@@ -183,7 +135,7 @@ impl TokenTransactionApplier {
         Ok(discovered)
     }
 
-    pub(crate) async fn discover_uniswap_v2_pools_from_events_for_token<P>(
+    pub(crate) async fn discover_known_v2_pools_from_events_for_token<P>(
         &self,
         token: &mut ERC20Token,
         tx: &ProcessedTransaction,
@@ -219,12 +171,14 @@ impl TokenTransactionApplier {
                 continue;
             };
 
-            let Some((denom_address, config)) = self.v2_pool_config_from_metadata(token, &metadata)
+            let Some((protocol, denom_address, config)) =
+                self.v2_pool_config_from_metadata(token, &metadata)
             else {
                 continue;
             };
 
-            let pool = token.create_uniswap_v2_pool(
+            let pool = token.create_known_v2_pool(
+                protocol,
                 pool_address.clone(),
                 denom_address,
                 config,
@@ -243,7 +197,7 @@ impl TokenTransactionApplier {
         &self,
         token: &ERC20Token,
         metadata: &UniswapV2PoolMetadata,
-    ) -> Option<(String, BasePoolConfig)> {
+    ) -> Option<(KnownV2Protocol, String, BasePoolConfig)> {
         let token_address = normalize_address(&token.contract_address);
         let token_is_token0 = normalize_address(&metadata.token0) == token_address;
         let token_is_token1 = normalize_address(&metadata.token1) == token_address;
@@ -258,6 +212,7 @@ impl TokenTransactionApplier {
         };
 
         Some((
+            metadata.protocol,
             denom_address,
             BasePoolConfig {
                 token_decimals: token.decimals,
@@ -272,20 +227,20 @@ impl TokenTransactionApplier {
     }
 }
 
-fn is_uniswap_v2_pair_created_event(
+fn known_v2_protocol_for_pair_created_event(
     event: &tx_processor::tx_processor::data_models::UniswapV2PairCreatedEvent,
-) -> bool {
-    event.factory_address.is_zero() || same_address_str(event.factory_address, UNISWAP_V2_FACTORY)
-}
-
-fn is_sushiswap_v2_pair_created_event(
-    event: &tx_processor::tx_processor::data_models::UniswapV2PairCreatedEvent,
-) -> bool {
-    same_address_str(event.factory_address, SUSHISWAP_V2_FACTORY)
+) -> Option<KnownV2Protocol> {
+    if event.factory_address.is_zero() {
+        return None;
+    }
+    KnownV2Protocol::from_factory(event.factory_address)
 }
 
 fn v2_pool_addresses_from_events(tx: &ProcessedTransaction) -> BTreeSet<String> {
     let mut addresses = BTreeSet::new();
+    for event in &tx.uniswap_v2_pair_created_events {
+        addresses.insert(address_string(&event.pair_address));
+    }
     for event in &tx.uniswap_v2_syncs {
         addresses.insert(address_string(&event.pair_address));
     }

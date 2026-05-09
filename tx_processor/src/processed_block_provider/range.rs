@@ -16,11 +16,13 @@ pub const DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH: u64 = 250;
 pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS: usize =
     DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH as usize;
 pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
+pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessedBlockRangeLoadOptions {
     pub fill_batch_blocks: usize,
     pub fill_concurrency: usize,
+    pub read_concurrency: usize,
     pub retry: ProcessedBlockProviderRetry,
 }
 
@@ -29,6 +31,7 @@ impl Default for ProcessedBlockRangeLoadOptions {
         Self {
             fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
             fill_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+            read_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY,
             retry: ProcessedBlockProviderRetry::none(),
         }
     }
@@ -45,6 +48,13 @@ impl ProcessedBlockRangeLoadOptions {
     pub fn with_fill_concurrency(mut self, value: usize) -> Self {
         if value > 0 {
             self.fill_concurrency = value;
+        }
+        self
+    }
+
+    pub fn with_read_concurrency(mut self, value: usize) -> Self {
+        if value > 0 {
+            self.read_concurrency = value;
         }
         self
     }
@@ -205,6 +215,7 @@ async fn load_cached_block_range(
             write_wall_ms,
             fill_batch_blocks = options.fill_batch_blocks.max(1),
             fill_concurrency = options.fill_concurrency.max(1),
+            read_concurrency = options.read_concurrency.max(1),
             "filled missing processed block disk cache entries"
         );
     }
@@ -212,9 +223,12 @@ async fn load_cached_block_range(
     let read_wall_started = Instant::now();
     let read_keys = plan.keys.clone();
     let reader_for_task = reader.clone();
-    let reads = tokio::task::spawn_blocking(move || reader_for_task.get_many_parallel(&read_keys))
-        .await
-        .map_err(|error| eyre::eyre!("processed block disk cache reader task failed: {error}"))??;
+    let read_concurrency = options.read_concurrency.max(1);
+    let reads = tokio::task::spawn_blocking(move || {
+        reader_for_task.get_many_parallel_with_limit(&read_keys, read_concurrency)
+    })
+    .await
+    .map_err(|error| eyre::eyre!("processed block disk cache reader task failed: {error}"))??;
     let read_wall_ms = read_wall_started.elapsed().as_millis();
     let invalid_keys = reads
         .iter()
@@ -254,6 +268,7 @@ async fn load_cached_block_range(
         invalid_blocks = invalid_count,
         plan_ms = plan.plan_ms,
         read_wall_ms,
+        read_concurrency,
         "read processed block disk cache chunk"
     );
 

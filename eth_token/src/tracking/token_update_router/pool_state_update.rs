@@ -3,7 +3,7 @@ use tx_processor::ProcessedTransaction;
 
 use crate::erc20::ERC20Token;
 
-use super::touches::{touches_v2_pool, touches_v3_pool, touches_v4_pool};
+use super::token_state_update::{touches_v2_pool, touches_v3_pool, touches_v4_pool};
 
 pub(super) fn update_touched_v2_pools(
     token: &mut ERC20Token,

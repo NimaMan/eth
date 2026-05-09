@@ -3,6 +3,7 @@ use std::pin::Pin;
 
 use alloy_primitives::{Address, B256};
 use eyre::Result;
+use reth_chain_query::common_addresses::KnownV2Protocol;
 
 use crate::erc20::ERC20TokenMetadata;
 
@@ -37,6 +38,7 @@ pub struct UniswapV2PoolMetadataLookup {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniswapV2PoolMetadata {
+    pub protocol: KnownV2Protocol,
     pub pool_address: String,
     pub token0: String,
     pub token1: String,
@@ -52,7 +54,26 @@ impl UniswapV2PoolMetadata {
         token0_decimals: u8,
         token1_decimals: u8,
     ) -> Self {
+        Self::new_with_protocol(
+            KnownV2Protocol::UniswapV2,
+            pool_address,
+            token0,
+            token1,
+            token0_decimals,
+            token1_decimals,
+        )
+    }
+
+    pub fn new_with_protocol(
+        protocol: KnownV2Protocol,
+        pool_address: impl Into<String>,
+        token0: impl Into<String>,
+        token1: impl Into<String>,
+        token0_decimals: u8,
+        token1_decimals: u8,
+    ) -> Self {
         Self {
+            protocol,
             pool_address: normalize_address(pool_address.into()),
             token0: normalize_address(token0.into()),
             token1: normalize_address(token1.into()),

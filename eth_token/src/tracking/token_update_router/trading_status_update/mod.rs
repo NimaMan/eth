@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eyre::{eyre, Result};
 use reth_chain_query::provider::BlockHeader;
@@ -11,21 +11,23 @@ use tx_processor::{
 
 use crate::erc20::ERC20Token;
 use crate::pools::trading_failure::classify_v2_trading_failure;
-use crate::pools::uniswap::{
-    v4_event_display_key, PoolTradingSimulationConfig, UniswapV2TxContext,
-};
-use crate::pools::{UniswapV2Pool, UniswapV3Pool, UniswapV4Pool};
+use crate::pools::uniswap::{v4_event_display_key, UniswapV2TxContext};
+use crate::pools::{PoolTradingSimulationConfig, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool};
 use crate::tracking::{address_string, hash_string, same_address_str};
 
-use super::touches::tx_control_addresses;
-use super::{V2TradingSimulation, LIVE_POOL_SIMULATION_TIMEOUT_MS, LIVE_TOKEN_TRACKER_LOG_TARGET};
+use super::token_state_update::tx_control_addresses;
+use super::{
+    PoolTradingSimulationMode, LIVE_POOL_SIMULATION_TIMEOUT_MS, LIVE_TOKEN_TRACKER_LOG_TARGET,
+};
+
+const TOKEN_SIM_SESSION_PROFILE_LOG_TARGET: &str = "token_sim_session_profile";
 
 pub(super) async fn simulate_updated_v2_pools(
     token: &mut ERC20Token,
     tx: &ProcessedTransaction,
     pool_addresses: &[String],
     current_block_pool_addresses: &[String],
-    trading_simulation: V2TradingSimulation<'_>,
+    trading_simulation: PoolTradingSimulationMode<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
 ) -> Result<Vec<String>> {
@@ -86,7 +88,7 @@ pub(super) async fn simulate_updated_v2_pools(
         );
 
         let simulation_result = match trading_simulation {
-            V2TradingSimulation::Historical(pool_simulator) => pool
+            PoolTradingSimulationMode::Historical(pool_simulator) => pool
                 .evaluate_trading_status_v2_with_pool_simulator(
                     pool_simulator,
                     &tx_context,
@@ -94,7 +96,7 @@ pub(super) async fn simulate_updated_v2_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
-            V2TradingSimulation::HistoricalBlockSession {
+            PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
             } => {
@@ -116,7 +118,7 @@ pub(super) async fn simulate_updated_v2_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::LiveBlockSession {
+            PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
             } => {
@@ -172,7 +174,7 @@ pub(super) async fn simulate_updated_v2_pools(
                 }
             }
             #[cfg(test)]
-            V2TradingSimulation::Noop => Ok(None),
+            PoolTradingSimulationMode::Noop => Ok(None),
         };
 
         match simulation_result {
@@ -232,7 +234,7 @@ pub(super) async fn simulate_updated_v3_pools(
     tx: &ProcessedTransaction,
     pool_addresses: &[String],
     current_block_pool_addresses: &[String],
-    trading_simulation: V2TradingSimulation<'_>,
+    trading_simulation: PoolTradingSimulationMode<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
 ) -> Result<Vec<String>> {
@@ -282,7 +284,7 @@ pub(super) async fn simulate_updated_v3_pools(
         let tx_hash = hash_string(&tx.hash);
 
         let simulation_result = match trading_simulation {
-            V2TradingSimulation::Historical(pool_simulator) => pool
+            PoolTradingSimulationMode::Historical(pool_simulator) => pool
                 .evaluate_trading_status_v3_with_pool_simulator(
                     pool_simulator,
                     &tx_context,
@@ -290,7 +292,7 @@ pub(super) async fn simulate_updated_v3_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
-            V2TradingSimulation::HistoricalBlockSession {
+            PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
             } => {
@@ -312,7 +314,7 @@ pub(super) async fn simulate_updated_v3_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::LiveBlockSession {
+            PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
             } => {
@@ -368,7 +370,7 @@ pub(super) async fn simulate_updated_v3_pools(
                 }
             }
             #[cfg(test)]
-            V2TradingSimulation::Noop => Ok(None),
+            PoolTradingSimulationMode::Noop => Ok(None),
         };
 
         match simulation_result {
@@ -419,7 +421,7 @@ pub(super) async fn simulate_updated_v4_pools(
     tx: &ProcessedTransaction,
     pool_keys: &[String],
     current_block_pool_keys: &[String],
-    trading_simulation: V2TradingSimulation<'_>,
+    trading_simulation: PoolTradingSimulationMode<'_>,
     force_simulation: bool,
     block_header: Option<&BlockHeader>,
 ) -> Result<Vec<String>> {
@@ -449,7 +451,7 @@ pub(super) async fn simulate_updated_v4_pools(
             continue;
         }
         #[cfg(test)]
-        if matches!(trading_simulation, V2TradingSimulation::Noop) {
+        if matches!(trading_simulation, PoolTradingSimulationMode::Noop) {
             continue;
         }
 
@@ -473,7 +475,7 @@ pub(super) async fn simulate_updated_v4_pools(
         let tx_hash = hash_string(&tx.hash);
 
         let simulation_result = match trading_simulation {
-            V2TradingSimulation::Historical(pool_simulator) => pool
+            PoolTradingSimulationMode::Historical(pool_simulator) => pool
                 .evaluate_trading_status_v4_with_pool_simulator(
                     pool_simulator,
                     &tx_context,
@@ -481,7 +483,7 @@ pub(super) async fn simulate_updated_v4_pools(
                 )
                 .await
                 .map(|result| result.failure_reason.clone()),
-            V2TradingSimulation::HistoricalBlockSession {
+            PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
             } => {
@@ -498,7 +500,7 @@ pub(super) async fn simulate_updated_v4_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
-            V2TradingSimulation::LiveBlockSession {
+            PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
             } => {
@@ -554,7 +556,7 @@ pub(super) async fn simulate_updated_v4_pools(
                 }
             }
             #[cfg(test)]
-            V2TradingSimulation::Noop => Ok(None),
+            PoolTradingSimulationMode::Noop => Ok(None),
         };
 
         match simulation_result {
@@ -603,7 +605,7 @@ pub(super) async fn simulate_updated_v4_pools(
 pub(super) fn should_simulate_at_current_block(
     pool_address: &str,
     current_block_pool_addresses: &[String],
-    _trading_simulation: V2TradingSimulation<'_>,
+    _trading_simulation: PoolTradingSimulationMode<'_>,
 ) -> bool {
     current_block_pool_addresses
         .iter()
@@ -656,7 +658,10 @@ async fn block_session_chain_after_tx(
         .lock()
         .map_err(|err| eyre!("block tx state session lock poisoned: {err}"))?
         .is_none();
+    let mut session_create_ms = 0;
+    let mut session_created = false;
     if needs_session {
+        let session_create_started = Instant::now();
         let session = pool_simulator
             .simulator()
             .block_tx_state_session(tx.block_number)
@@ -670,11 +675,13 @@ async fn block_session_chain_after_tx(
                     err
                 )
             })?;
+        session_create_ms = elapsed_millis(session_create_started);
         let mut guard = block_session
             .lock()
             .map_err(|err| eyre!("block tx state session lock poisoned: {err}"))?;
         if guard.is_none() {
             *guard = Some(session);
+            session_created = true;
         }
     }
 
@@ -684,7 +691,8 @@ async fn block_session_chain_after_tx(
     let session = guard
         .as_mut()
         .ok_or_else(|| eyre!("block tx state session was not initialized"))?;
-    session.simulation_chain_after_tx(tx_index).map_err(|err| {
+    let branch_started = Instant::now();
+    let chain = session.simulation_chain_after_tx(tx_index).map_err(|err| {
         eyre!(
             "failed to create {} session branch block={} tx_index={} pool={}: {}",
             pool_kind,
@@ -693,7 +701,22 @@ async fn block_session_chain_after_tx(
             pool_id,
             err
         )
-    })
+    })?;
+    let branch_ms = elapsed_millis(branch_started);
+    tracing::info!(
+        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+        mode = "historical",
+        block_number = tx.block_number,
+        tx_index = tx.tx_index,
+        pool_kind,
+        pool_id = %pool_id,
+        session_needed = needs_session,
+        session_created,
+        session_create_ms,
+        branch_ms,
+        "token simulation session profile"
+    );
+    Ok(chain)
 }
 
 fn pool_config_for_block_session(
@@ -717,8 +740,11 @@ async fn live_block_state_session_chain(
         .lock()
         .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?
         .contains_key(&block_number);
+    let mut session_create_ms = 0;
+    let mut session_created = false;
 
     if needs_session {
+        let session_create_started = Instant::now();
         let session = pool_simulator
             .simulator()
             .block_state_session(block_number)
@@ -732,10 +758,14 @@ async fn live_block_state_session_chain(
                     err
                 )
             })?;
+        session_create_ms = elapsed_millis(session_create_started);
         let mut guard = block_sessions
             .lock()
             .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?;
-        guard.entry(block_number).or_insert(session);
+        if !guard.contains_key(&block_number) {
+            guard.insert(block_number, session);
+            session_created = true;
+        }
     }
 
     let guard = block_sessions
@@ -747,7 +777,29 @@ async fn live_block_state_session_chain(
             block_number
         )
     })?;
-    Ok(session.simulation_chain())
+    let branch_started = Instant::now();
+    let chain = session.simulation_chain();
+    let branch_ms = elapsed_millis(branch_started);
+    tracing::info!(
+        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+        mode = "live",
+        block_number = tx.block_number,
+        state_session_block_number = block_number,
+        tx_index = tx.tx_index,
+        pool_kind,
+        pool_id = %pool_id,
+        session_needed = needs_session,
+        session_created,
+        session_create_ms,
+        branch_ms,
+        session_cache_size = guard.len(),
+        "token simulation session profile"
+    );
+    Ok(chain)
+}
+
+fn elapsed_millis(started: Instant) -> u128 {
+    started.elapsed().as_millis()
 }
 
 fn pool_config_for_state_session(

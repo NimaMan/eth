@@ -5,6 +5,7 @@ use eyre::Result;
 /// Function selectors used by Uniswap V2 pair contract
 const SELECTOR_TOKEN0: [u8; 4] = [0x0d, 0xfe, 0x16, 0x81]; // token0()
 const SELECTOR_TOKEN1: [u8; 4] = [0xd2, 0x12, 0x20, 0xa7]; // token1()
+const SELECTOR_FACTORY: [u8; 4] = [0xc4, 0x5a, 0x01, 0x55]; // factory()
 const SELECTOR_GET_RESERVES: [u8; 4] = [0x09, 0x02, 0xf1, 0xac]; // getReserves()
 
 impl RethQueryProvider {
@@ -36,6 +37,20 @@ impl RethQueryProvider {
         let token1 = Address::from_slice(&token1_res.output[12..32]);
 
         Ok((token0, token1))
+    }
+
+    /// Read a V2-style pair's factory at a given block using a local view call.
+    pub async fn uni_v2_get_factory(&self, pair: Address, block: Option<u64>) -> Result<Address> {
+        let factory_res = self
+            .simulator()
+            .simulate_view_function(pair, Bytes::from(SELECTOR_FACTORY.to_vec()), block)
+            .await?;
+
+        if !factory_res.success || factory_res.output.len() < 32 {
+            return Err(eyre::eyre!("factory() view call failed or empty output"));
+        }
+
+        Ok(Address::from_slice(&factory_res.output[12..32]))
     }
 
     /// Read Uniswap V2 pair reserves at a given block using a local view call.

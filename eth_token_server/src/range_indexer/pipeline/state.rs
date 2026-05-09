@@ -12,7 +12,7 @@ pub(super) async fn take_processor_for_apply(
     let mut state = run.state.write().await;
     state.progress.current_block = Some(block_number);
     state.progress.updated_at_unix_secs = now_unix_secs();
-    state.processor.clone()
+    std::mem::replace(&mut state.processor, run.request.block_token_processor())
 }
 
 pub(super) async fn restore_processor_after_apply(
@@ -100,10 +100,8 @@ pub(super) fn apply_report(
     for update in report.token_updates {
         state
             .discovered_v2_pools
-            .extend(update.discovered_uniswap_v2_pools);
-        state
-            .updated_v2_pools
-            .extend(update.updated_uniswap_v2_pools);
+            .extend(update.discovered_known_v2_pools);
+        state.updated_v2_pools.extend(update.updated_known_v2_pools);
         state
             .discovered_v3_pools
             .extend(update.discovered_uniswap_v3_pools);
@@ -199,7 +197,7 @@ fn simulation_summary(
     };
 
     for update in &report.token_updates {
-        let simulated_pool_count = update.simulated_uniswap_v2_pools.len()
+        let simulated_pool_count = update.simulated_known_v2_pools.len()
             + update.simulated_uniswap_v3_pools.len()
             + update.simulated_uniswap_v4_pools.len();
         summary.attempted += simulated_pool_count;
@@ -209,7 +207,7 @@ fn simulation_summary(
             continue;
         };
         for pool_address in update
-            .simulated_uniswap_v2_pools
+            .simulated_known_v2_pools
             .iter()
             .chain(update.simulated_uniswap_v3_pools.iter())
             .chain(update.simulated_uniswap_v4_pools.iter())

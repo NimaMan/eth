@@ -2,7 +2,7 @@ use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
 use reth_chain_query::dex::{
     encoding::{encode_function_call, encode_two_addresses, encode_two_addresses_and_uint256},
-    SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
+    UNISWAP_V3_FACTORY,
 };
 use tx_simulator::{UnsignedTxChainSimulation, ViewFunctionResult};
 
@@ -17,7 +17,7 @@ pub(super) fn validate_pool_registration(
     block_number: u64,
 ) -> Result<()> {
     match config.pool_type {
-        PoolType::UniswapV2 | PoolType::SushiSwap => {
+        pool_type if pool_type.known_v2_protocol().is_some() => {
             let denom = config.denom_address;
             if denom.is_zero() {
                 return Err(eyre!(
@@ -25,14 +25,12 @@ pub(super) fn validate_pool_registration(
                     config.pool_type
                 ));
             }
-            let factory = match config.pool_type {
-                PoolType::UniswapV2 => UNISWAP_V2_FACTORY,
-                PoolType::SushiSwap => SUSHISWAP_FACTORY,
-                _ => unreachable!(),
-            };
+            let protocol = pool_type
+                .known_v2_protocol()
+                .expect("checked known v2 protocol");
             let resolved = fetch_uniswap_v2_pair_address_on_chain(
                 chain,
-                factory,
+                protocol.factory(),
                 config.token_address,
                 denom,
                 block_number,

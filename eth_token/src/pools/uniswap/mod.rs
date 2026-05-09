@@ -1,15 +1,10 @@
 //! Uniswap protocol pool implementations.
 
 pub mod concentrated;
-pub mod trading_simulation;
 pub mod v2;
 pub mod v3;
 pub mod v4;
 
-pub use trading_simulation::{
-    PoolTradingSimulationConfig, PoolTradingSimulationOutcome, UniswapV2TradingSimulationConfig,
-    UniswapV2TradingSimulationOutcome,
-};
 pub use v2::{
     ApprovalInfo, LPApprovalEvent, LPApprovalSnapshot, LPHolderInfo, LPHolderSnapshot,
     LPTokenTracker, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,

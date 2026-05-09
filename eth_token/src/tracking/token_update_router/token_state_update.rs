@@ -1,6 +1,6 @@
 use tx_processor::ProcessedTransaction;
 
-use super::candidates::v4_pool_event_keys;
+use super::token_candidates::v4_pool_event_keys;
 use crate::tracking::{address_string, same_address_str};
 
 pub(super) fn tx_control_addresses(tx: &ProcessedTransaction) -> Vec<String> {

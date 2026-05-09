@@ -5,9 +5,7 @@ use alloy_primitives::{Address, U256};
 /// trading sequence (buy -> approve -> sell) while maintaining blockchain state
 /// between each transaction for accurate tax calculation.
 use eyre::Result;
-use reth_chain_query::dex::{
-    compute_sushiswap_pool, compute_uniswap_v2_pool, SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY,
-};
+use reth_chain_query::dex::{compute_sushiswap_pool, compute_uniswap_v2_pool};
 use std::sync::Arc;
 use tx_processor::simulator::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
@@ -191,9 +189,7 @@ async fn test_single_token(
                 // Print detailed results for this token
                 print_token_result_with_block_delay(config, &result, duration, *block_delay);
 
-                if !result.can_buy
-                    && matches!(config.pool_type, PoolType::UniswapV2 | PoolType::SushiSwap)
-                {
+                if !result.can_buy && config.pool_type.known_v2_protocol().is_some() {
                     if let Some(diag) = diagnose_v2_pool(
                         simulator,
                         config.pool_type.clone(),
@@ -221,7 +217,7 @@ async fn test_single_token(
             }
             Err(e) => {
                 let mut error_msg = format!("Analysis failed: {}", e);
-                if matches!(config.pool_type, PoolType::UniswapV2 | PoolType::SushiSwap) {
+                if config.pool_type.known_v2_protocol().is_some() {
                     if let Some(diag) = diagnose_v2_pool(
                         simulator,
                         config.pool_type.clone(),
@@ -273,7 +269,7 @@ fn resolve_pool_address(config: &TokenConfig) -> Result<Address, String> {
             config.token_address,
             config.denom_address,
         )),
-        PoolType::SushiSwap => Ok(reth_chain_query::dex::compute_sushiswap_pool(
+        PoolType::SushiSwap => Ok(compute_sushiswap_pool(
             config.token_address,
             config.denom_address,
         )),
@@ -599,11 +595,7 @@ async fn diagnose_v2_pool(
     pool_address: Address,
     block: u64,
 ) -> Option<String> {
-    let factory = match pool_type {
-        PoolType::UniswapV2 => UNISWAP_V2_FACTORY,
-        PoolType::SushiSwap => SUSHISWAP_FACTORY,
-        _ => return None,
-    };
+    let factory = pool_type.known_v2_protocol()?.factory();
 
     let mut notes = Vec::new();
     let mut token0_addr = None;

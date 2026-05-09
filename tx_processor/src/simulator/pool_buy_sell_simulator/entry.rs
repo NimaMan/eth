@@ -49,10 +49,9 @@ pub async fn check_can_buy_sell_pool(
         ));
     }
 
-    if matches!(
-        config.pool_type,
-        PoolType::UniswapV2 | PoolType::SushiSwap | PoolType::UniswapV3 { .. }
-    ) && config.denom_address.is_zero()
+    if (config.pool_type.known_v2_protocol().is_some()
+        || matches!(config.pool_type, PoolType::UniswapV3 { .. }))
+        && config.denom_address.is_zero()
     {
         return Err(eyre!(
             "denom_address must be provided via PoolBuySellParameters::with_denom_address() for {:?} pools",
@@ -153,37 +152,38 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     base_fee: Option<u128>,
     mut chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
-    let route = match config.pool_type {
-        PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 {
+    let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
+        AmmSwapRoute::V2Router {
             pool: config.pool_address,
-        },
-        PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 {
-            pool: config.pool_address,
-        },
-        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
-            pool: config.pool_address,
-            fee_tier,
-        },
-        PoolType::UniswapV4 => {
-            // Return a well-formed failure result to callers with a clear reason
-            return Ok(create_failed_result(
-                config,
-                block_number,
-                Vec::new(),
-                None,
-                None,
-                None,
-                "Uniswap V4 swap simulation not yet implemented (PoolManager lock/Router integration required)".to_string(),
-                false,
-                false,
-                false,
-            ));
+            router: protocol.router(),
         }
-        _ => {
-            return Err(eyre::eyre!(
-                "Pool type {:?} not yet implemented",
-                config.pool_type
-            ));
+    } else {
+        match config.pool_type {
+            PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+                pool: config.pool_address,
+                fee_tier,
+            },
+            PoolType::UniswapV4 => {
+                // Return a well-formed failure result to callers with a clear reason
+                return Ok(create_failed_result(
+                    config,
+                    block_number,
+                    Vec::new(),
+                    None,
+                    None,
+                    None,
+                    "Uniswap V4 swap simulation not yet implemented (PoolManager lock/Router integration required)".to_string(),
+                    false,
+                    false,
+                    false,
+                ));
+            }
+            _ => {
+                return Err(eyre::eyre!(
+                    "Pool type {:?} not yet implemented",
+                    config.pool_type
+                ));
+            }
         }
     };
 
@@ -373,26 +373,24 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     }
 
     let mut denom_approve_tx_for_delay: Option<UnsignedTransaction> = None;
-    if let Some(mut denom_approve_tx) = match config.pool_type {
-        PoolType::UniswapV2 => Some(build_approve_v2(
-            UniswapV2Router::UniswapV2,
+    let denom_approve_tx = if let Some(protocol) = config.pool_type.known_v2_protocol() {
+        Some(build_approve_v2(
+            UniswapV2Router::Custom(protocol.router()),
             config.buyer_address,
             config.denom_address,
             config.test_amount,
-        )),
-        PoolType::SushiSwap => Some(build_approve_v2(
-            UniswapV2Router::SushiswapV2,
-            config.buyer_address,
-            config.denom_address,
-            config.test_amount,
-        )),
-        PoolType::UniswapV3 { .. } => Some(build_approve_v3(
-            config.buyer_address,
-            config.denom_address,
-            config.test_amount,
-        )),
-        _ => None,
-    } {
+        ))
+    } else {
+        match config.pool_type {
+            PoolType::UniswapV3 { .. } => Some(build_approve_v3(
+                config.buyer_address,
+                config.denom_address,
+                config.test_amount,
+            )),
+            _ => None,
+        }
+    };
+    if let Some(mut denom_approve_tx) = denom_approve_tx {
         denom_approve_tx.gas = Some(config.approve_gas_limit);
         apply_fee_policy(&mut denom_approve_tx, &config, base_fee);
         let denom_approve_sim = chain
