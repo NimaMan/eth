@@ -1,101 +1,78 @@
-# Reth Chain Query
-**High-performance blockchain data queries using direct Reth database access**
+# reth_chain_query
 
-`reth_chain_query` provides lightning-fast blockchain data retrieval by querying Reth's MDBX database directly. Includes RethIndex, a complementary indexing layer that adds entity-centric queries missing from Reth's sequential storage.
+Agent operating map for direct Reth database queries, typed chain reads,
+entity/DEX helpers, and lightweight indexes.
 
-## 📊 Architecture
+## Purpose
 
+- Read Ethereum chain data directly from local Reth MDBX.
+- Provide typed provider APIs for accounts, blocks, transactions, receipts,
+  balances, tokens, entities, DEX state, and time conversion.
+- Host RethIndex tables/writers for query shapes missing from Reth's canonical
+  sequential storage.
+
+## Owns
+
+- `RethQueryProvider` and provider factories in `src/provider/`.
+- Legacy `ChainQuery` compatibility in `src/query_engine.rs`.
+- Entity/address catalogs in `src/entities/` and `src/common_addresses/`.
+- DEX readers/helpers in `src/dex/`.
+- Stateless AMM calldata builders in `src/tx_builders.rs`.
+- PostgreSQL helpers and RethIndex tables/writers in `src/postgres_db/` and
+  `src/reth_index/`.
+- Block/time utilities in `src/utils/time_utils/`.
+
+## Does Not Own
+
+- Transaction simulation orchestration; use `tx_simulator`.
+- Processed transaction semantics, decoded events, tax math, or block cache
+  schemas; use `tx_processor`.
+- Token lifecycle state; use `eth_token`.
+- Mempool signal decisions or strategy policy.
+
+## Data Flow
+
+```text
+Reth MDBX
+  -> tx_simulator provider factory
+  -> RethQueryProvider / ChainQuery
+  -> typed reads, DEX/entity helpers, optional RethIndex/Postgres writes
+  -> tx_processor, eth_token, eth_token_server, mempool_processor, pyreth
 ```
-┌─────────────────┐
-│   Application   │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   ChainQuery    │  ← Main interface
-├─────────────────┤
-│ - balance       │  ← ETH + Token balances
-│ - storage       │  ← Direct slot access
-│ - block         │  ← Block metadata
-│ - transaction   │  ← Transaction queries
-│ - reth_index    │  ← Analytics indexes
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  TxSimulator    │  ← Database gateway
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  Reth Provider  │  ← State abstraction
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   MDBX Database │  ← Reth's blockchain data
-│   (B+ Tree)     │  ← Memory-mapped I/O
-└─────────────────┘
+
+Builders are stateless: callers supply route/token/amount/deadline data, and
+the builder returns calldata/spender information without DB mutation.
+
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Public API and exports | `src/lib.rs` |
+| Account/block/tx/receipt reads | `src/provider/` |
+| RethIndex schemas and writers | `src/reth_index/` |
+| PostgreSQL query helpers | `src/postgres_db/` |
+| DEX state readers | `src/dex/` |
+| AMM swap builders | `src/tx_builders.rs` |
+| Address/entity catalogs | `src/common_addresses/`, `src/entities/` |
+| Examples by query family | `examples/README.md` |
+
+## Tests And Commands
+
+```bash
+cargo run -p reth_chain_query --example balances
+cargo run -p reth_chain_query --example fetch_transaction_by_number
+cargo run -p reth_chain_query --example verify_block_rpc_equivalence
+cargo run -p reth_chain_query --example tx_arrival_index_smoke
+cargo test -p reth_chain_query
 ```
 
-## 📚 Complete Reth Database Tables Reference
+## Current Hazards
 
-Understanding Reth's database structure is crucial for optimizing queries. Reth uses MDBX with B+ trees for logarithmic lookups and memory-mapped I/O for zero-copy access.
-
-### Block and Header Tables (7 tables)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **Headers** | `BlockNumber` → `Header` | Complete block headers with metadata |
-| **CanonicalHeaders** | `BlockNumber` → `HeaderHash` | Canonical chain mapping |
-| **HeaderNumbers** | `BlockHash` → `BlockNumber` | Reverse hash lookup |
-| **HeaderTerminalDifficulties** | `BlockNumber` → `CompactU256` | PoW→PoS transition data |
-| **BlockBodyIndices** | `BlockNumber` → `{first_tx_num, tx_count}` | Transaction ranges per block |
-| **BlockOmmers** | `BlockNumber` → `Vec<Header>` | Uncle blocks (pre-merge) |
-| **BlockWithdrawals** | `BlockNumber` → `Vec<Withdrawal>` | Validator withdrawals (post-merge) |
-
-### Transaction Tables (5 tables)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **Transactions** | `txumber` → `TransactionSigned` | Full transaction data |
-| **TransactionHashNumbers** | `TxHash` → `txumber` | Hash to sequential ID mapping |
-| **TransactionBlocks** | `txumber` → `BlockNumber` | Transaction to block mapping* |
-| **TransactionSenders** | `txumber` → `Address` | Cached sender addresses |
-| **Receipts** | `txumber` → `Receipt` | Logs, gas used, status |
-
-*Note: Key is the highest txumber in the block
-
-### Current State Tables (4 tables)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **PlainAccountState** | `Address` → `{nonce, balance, code_hash}` | Current ETH balances |
-| **PlainStorageState** | `(Address, StorageKey)` → `Value` | Current storage values** |
-| **Bytecodes** | `CodeHash` → `Bytecode` | Contract code |
-| **HashedAccounts** | `Keccak(Address)` → `Account` | For state root calculation |
-
-**Includes all token balances, DEX states, contract storage
-
-### Historical State Tables (4 tables - Archive Node Only)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **AccountsHistory** | `ShardedKey<Address>` → `BlockNumberList` | When ETH balance changed |
-| **StoragesHistory** | `StorageShardedKey` → `BlockNumberList` | When storage changed |
-| **AccountChangeSets** | `(BlockNumber, Address)` → `Account` | ETH balance before change |
-| **StorageChangeSets** | `(BlockNumber, Address, Key)` → `Value` | Storage before change |
-
-### Merkle Trie Tables (4 tables)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **HashedStorages** | `(Keccak(Address), Keccak(Key))` → `Value` | Hashed storage for tries |
-| **AccountsTrie** | `StoredNibbles` → `BranchNode` | Account trie nodes |
-| **StoragesTrie** | `(B256, StoredNibblesSubKey)` → `Node` | Storage trie nodes |
-
-### System Tables (3 tables)
-
-| Table | Key → Value | Purpose |
-|-------|-------------|---------|
-| **StageCheckpoints** | `StageId` → `StageCheckpoint` | Sync progress tracking |
-| **StageCheckpointProgresses** | `StageId` → `Vec<u8>` | Detailed stage progress |
-| **PruneCheckpoints** | `PruneSegment` → `PruneCheckpoint` | Pruning progress |
-
-## 🏗️ Module Structure
+- Keep DB reads typed and narrow. Do not turn query helpers into processing or
+  simulation code.
+- Historical account/storage reads need archive data; pruned nodes will fail or
+  return incomplete history.
+- RethIndex/Postgres helpers are optional side indexes. Do not make core direct
+  reads depend on them unless the API explicitly says so.
+- If adding a new AMM route, put route/spender/calldata builders here first,
+  then call them from `tx_processor` or strategies.

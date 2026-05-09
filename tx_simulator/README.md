@@ -1,63 +1,79 @@
-tx_simulator/src — Reth‑Backed Local EVM Simulation
+# tx_simulator
 
-Purpose
-- Bypass RPC completely and simulate transactions against a local Reth database (MDBX) with the same execution environment and tracers that Reth uses internally.
-- Produce geth‑compatible traces and results that are equivalent to Reth’s debug RPC, while avoiding network and JSON overhead.
+Agent operating map for local Reth-backed EVM execution. This crate is the
+lowest-level execution and tracing layer in the ETH workspace.
 
-What This Module Provides
-- Direct state access: Builds a read‑only `StateProvider` over your local Reth DB and wraps it in a cached overlay for writes during simulation.
-- Deterministic EVM setup: Derives `BlockEnv` and chain spec from canonical headers at a chosen block number.
-- Unsigned and signed simulation: Single‑call helpers, plus stateful chain simulators that persist changes between steps.
-- Geth‑compatible traces: Uses `TracingInspector::default_geth()` (with logs for trace variants) and exports geth `CallFrame`s.
-- Fast no-trace execution: Plain simulation paths avoid inspector allocation when traces are not requested.
-- Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
-- Live state: `live::LiveTxSimulator` uses MDBX when it is caught up, otherwise the state tracked by the live block processor.
+## Purpose
 
-How This Compares To Reth
-- Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and fuses inspectors across block tracing.
-- We do the same locally via Reth crates, bypassing only the RPC layer.
+- Simulate signed and unsigned Ethereum transactions against a local Reth MDBX
+  database.
+- Replay transaction chains, bundles, blocks, and live-head state without RPC
+  overhead.
+- Produce raw execution results and geth-compatible traces for higher layers.
 
-Relevant Reth Source (for parity)
-- Block and bundle tracing use a fused inspector between txs: rust/reth/crates/rpc/rpc/src/debug.rs:124
-- Fusing pattern after each tx: rust/reth/crates/rpc/rpc/src/debug.rs:574
-- Default geth structlog tracer setup: rust/reth/crates/rpc/rpc/src/debug.rs:872
-- Lower‑level helpers that construct `TracingInspector`: rust/reth/crates/rpc/rpc-eth-api/src/helpers/trace.rs:72
+## Owns
 
-Key Building Blocks Here
-- TxSimulator (core): tx_simulator/src/simulator.rs:1
-  - Block metadata, provider factory, fork creation, base fee, and low‑level on‑fork execution helpers.
-- Unsigned single‑call: tx_simulator/src/single_tx/unsigned.rs:1
-- Signed single‑call: tx_simulator/src/single_tx/signed.rs:1
-- Stateful unsigned chain: tx_simulator/src/tx_chain/unsigned.rs:1
-  - Persists state and nonces; uses the plain EVM path unless a trace is requested.
-- Stateful signed chain: tx_simulator/src/tx_chain/signed.rs:1
-  - Recovers signer, persists state; fuses inspector between steps.
-- Batch sequence (bundle): tx_simulator/src/tx_chain/sequential.rs:1
-  - Creates a fork and uses the plain EVM path for fast no-trace execution.
-- Live simulator: tx_simulator/src/live/simulator.rs:1
-  - Selects persisted MDBX when caught up, otherwise tracked live state.
-- Trace decoding helpers: tx_simulator/src/simulation_revert_decoder.rs:1
+- `TxSimulator` / `RethTxSimulator` provider setup, forks, EVM env, base fee,
+  block context, and execution helpers.
+- Single-tx simulation in `src/single_tx/`.
+- Sequential signed/unsigned transaction chains in `src/tx_chain/`.
+- Block tracing and replay in `src/block_trace/`.
+- Live-head replay using the shared live chain cache in `src/live/` and
+  `src/block_context/`.
+- Revert decoding, trace shape conversion, and low-level tx builders needed for
+  simulator examples.
 
-Equivalence Guarantees and Caveats
-- Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
-- Fees and gas: For signed txs we use tx‑provided gas and fees; for unsigned we allow EIP‑1559 or legacy fee fields and can derive safe defaults with base fee when needed.
-- Trace format: Exported via geth builders; shape is intended to match `debug_*` RPC traces (including `withLog` when enabled).
-- Live state: For blocks ahead of persisted MDBX, live APIs require tracked live state from the live block processor.
+## Does Not Own
 
-Typical Uses
-- Replace `debug_traceCall`/`debug_traceBlockByNumber` with local, zero‑RPC equivalents.
-- Evaluate multi‑tx workflows (buy → approve → sell) interactively with persisted state.
-- Run high‑throughput offline analyses and benchmarks.
+- Protocol/business decoding, tax math, or balance-delta interpretation; use
+  `tx_processor`.
+- High-level chain/entity queries and DEX state readers; use
+  `reth_chain_query`.
+- Token/pool lifecycle state; use `eth_token`.
+- Mempool routing, signals, or strategy decisions.
 
-Quick Checks
-- Verify database/setup: tx_simulator/examples/general/verify_database_setup.rs:1
-- Compare vs RPC: tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs:1
-- Contract reads: tx_simulator/examples/general/contract_method_simulation.rs:1
-- Signed chain demo: tx_simulator/examples/tx_builders/signed_bundle_simulation.rs:1
+## Data Flow
 
-Setup Notes
-- Reth DB default: resolved from `RETH_DATADIR`, then `RETH_DB_PATH`, then `../../config.env` (`/home/nima/storage/samsung8tb/ethereum/reth` by default). Ensure it is synced and canonicalized to the block heights you simulate.
-- Safe for concurrent use: We operate read‑only on MDBX; writes happen in an in‑memory overlay.
+```text
+Reth MDBX + canonical headers
+  -> TxSimulator creates a read-only provider/fork
+  -> REVM executes tx/call/block with optional tracers
+  -> FullSimulationResult / CallFrame / chain state output
+  -> tx_processor, reth_chain_query, mempool_processor, pyreth
+```
 
-Scope
-- tx_simulator focuses on fast and faithful execution/tracing only. Any higher‑level enrichment (log decoding, balance deltas, tax logic) lives in sibling crates like `tx_processor`.
+Live simulation uses persisted MDBX when it is caught up. For heads ahead of
+MDBX, `LiveTxSimulator` hydrates from the live chain cache.
+
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Public API and re-exports | `src/lib.rs` |
+| Core provider/fork helpers | `src/simulator.rs` |
+| Unsigned call simulation | `src/single_tx/unsigned.rs` |
+| Signed tx simulation | `src/single_tx/signed.rs` |
+| Stateful tx chains | `src/tx_chain/unsigned.rs`, `src/tx_chain/signed.rs` |
+| Block traces and parity | `src/block_trace/`, `examples/block/` |
+| Live state replay | `src/live/`, `src/block_context/` |
+| Revert/debug helpers | `src/simulation_revert_decoder.rs`, `src/tracers/` |
+
+## Tests And Commands
+
+```bash
+cargo run -p tx_simulator --example verify_database_setup
+cargo run -p tx_simulator --example unsigned_transaction_example
+cargo run -p tx_simulator --example verify_block_trace_rpc_equivalence
+cargo test -p tx_simulator
+```
+
+## Current Hazards
+
+- At-block methods depend on canonical headers; immediately after import there
+  can be a short canonicalization window.
+- Full call traces are expensive. If a caller only needs success/gas/output, use
+  no-trace paths.
+- Do not add decoded event semantics here. Return raw traces/results and let
+  `tx_processor` interpret them.
+- Keep Reth/Alloy type versions aligned with dependent crates before changing
+  public simulator types.

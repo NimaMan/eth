@@ -1,132 +1,73 @@
-# Ethereum Node Deployment
+# Node
 
-Deploy-only files for the local Ethereum mainnet node live here. Runtime data,
-downloaded binaries, logs, and secrets stay outside the repo on the 8 TB SSD.
+Agent operating map for local Ethereum mainnet node deployment files.
 
-## Current Profile
+## Purpose
 
-- Execution client: Reth
-- Consensus client: Lighthouse beacon node
-- Node type: archive Reth node
-- Service manager: user systemd
-- Runtime root: `/home/nima/storage/samsung8tb/ethereum`
-- Shared config: `../config.env`
-- Reth datadir: `/home/nima/storage/samsung8tb/ethereum/reth`
-- Lighthouse datadir: `/home/nima/.lighthouse`
-- JWT secret: `/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex`
+- Manage local Reth execution and Lighthouse consensus services.
+- Keep deploy scripts and user-systemd units versioned while chain data,
+  binaries, logs, and secrets stay outside the repo.
+- Provide health and bootstrap commands used by the Rust ETH stack.
 
-The `/home/nima/.lighthouse` path is a bind mount to
-`/home/nima/storage/samsung8tb/lighthouse`, so it already lives on the 8 TB SSD.
-Do not remove the mount point; keep it as the stable Lighthouse datadir.
+## Owns
 
-## Files
+- User-systemd units under `systemd/user/`.
+- Node install/bootstrap/health scripts under `scripts/`.
+- Runtime path conventions sourced from `../config.env`.
 
-| Path | Purpose |
-|------|---------|
-| `systemd/user/reth.service` | User-systemd unit for the Reth execution client. |
-| `systemd/user/lighthouse-beacon.service` | User-systemd unit for the Lighthouse beacon node. |
-| `scripts/install-latest-clients.sh` | Downloads latest GitHub release binaries and verifies SHA-256 digests. |
-| `scripts/prepare-dirs.sh` | Creates runtime directories and a shared JWT secret outside the repo. |
-| `scripts/install-user-services.sh` | Links the checked-in unit files into `~/.config/systemd/user`. |
-| `scripts/download-reth-archive-snapshot.sh` | Starts a resumable Reth archive snapshot download as a transient user-systemd service. |
-| `scripts/healthcheck.sh` | Checks local Reth and Lighthouse RPC/health endpoints. |
-| `scripts/load-config.sh` | Sources the repository-level `config.env` for node scripts. |
+## Does Not Own
 
-## Ports
+- Chain data, JWT secrets, release tarballs, logs, or downloaded binaries.
+- Application services beyond their systemd unit definitions.
+- Reth/RPC query logic used by Rust crates.
 
-Reth:
+## Data Flow
 
-- HTTP RPC: `127.0.0.1:8545`
-- WebSocket RPC: `127.0.0.1:8546`
-- Engine API: `127.0.0.1:8551`
-- P2P: `30303/tcp` and `30303/udp`
-- Prometheus metrics: `127.0.0.1:9001`
+```text
+config.env
+  -> node/scripts/load-config.sh
+  -> Reth + Lighthouse user-systemd units
+  -> local RPC/WS/IPC/engine endpoints
+  -> tx_simulator, reth_chain_query, tx_processor, mempool_processor
+```
 
-Lighthouse:
+## Where To Look First
 
-- HTTP API: `127.0.0.1:5052`
-- Prometheus metrics: `127.0.0.1:5054`
-- P2P: `9000/tcp`, `9000/udp`, and QUIC on `9001/udp`
+| Need | Start here |
+| --- | --- |
+| Runtime paths and URLs | `../config.env` |
+| Reth service | `systemd/user/reth.service` |
+| Lighthouse service | `systemd/user/lighthouse-beacon.service` |
+| App service units | `systemd/user/eth-*.service` |
+| Install clients | `scripts/install-latest-clients.sh` |
+| Prepare runtime dirs/JWT | `scripts/prepare-dirs.sh` |
+| Link systemd units | `scripts/install-user-services.sh` |
+| Archive snapshot bootstrap | `scripts/download-reth-archive-snapshot.sh` |
+| Health checks | `scripts/healthcheck.sh` |
 
-## Archive Bootstrap
-
-From this directory:
+## Tests And Commands
 
 ```bash
 ./scripts/prepare-dirs.sh
 ./scripts/install-latest-clients.sh
 ENABLE_NODE_SERVICES=0 ./scripts/install-user-services.sh
-./scripts/download-reth-archive-snapshot.sh
-```
-
-The snapshot helper stops `reth.service` and `lighthouse-beacon.service` before
-starting `reth download --archive`. By default it asks Reth for the latest
-mainnet archive snapshot. To pin a specific manifest, set:
-
-```bash
-RETH_ARCHIVE_SNAPSHOT_MANIFEST_URL=https://.../manifest.json \
-  ./scripts/download-reth-archive-snapshot.sh
-```
-
-Follow the active snapshot download:
-
-```bash
-XDG_RUNTIME_DIR=/run/user/$(id -u) journalctl --user -u reth-archive-download.service -f
-```
-
-After the archive snapshot completes, start and enable the node services:
-
-```bash
-XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user enable --now reth.service
-XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user enable --now lighthouse-beacon.service
-```
-
-The service files are linked from this repo into user systemd, so edits here are
-picked up after:
-
-```bash
-XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user daemon-reload
-XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart reth.service lighthouse-beacon.service
-```
-
-## Validation
-
-```bash
 ./scripts/healthcheck.sh
+```
 
+Useful service commands:
+
+```bash
 XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status reth.service
 XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status lighthouse-beacon.service
-```
-
-Follow logs:
-
-```bash
 XDG_RUNTIME_DIR=/run/user/$(id -u) journalctl --user -u reth.service -f
-XDG_RUNTIME_DIR=/run/user/$(id -u) journalctl --user -u lighthouse-beacon.service -f
 ```
 
-Reth sync state:
+## Current Hazards
 
-```bash
-curl -s http://127.0.0.1:8545 \
-  -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"eth_syncing","params":[]}'
-```
-
-Lighthouse sync state:
-
-```bash
-curl -s http://127.0.0.1:5052/eth/v1/node/syncing
-```
-
-## Operating Notes
-
-- Keep RPC and WS bound to localhost unless there is an explicit auth and
-  network exposure plan.
-- Reth defaults to archive mode; this deployment does not pass `--full`.
-- Keep Reth and Lighthouse stopped while a snapshot download is still running
-  against the Reth datadir.
-- If replacing a bad Reth database, stop Reth/Lighthouse first, remove only
-  `RETH_DATADIR`, recreate it, then run `scripts/download-reth-archive-snapshot.sh`.
-- The old Polygon Bor database was removed to provide SSD headroom for ETH.
-- Do not commit `jwt.hex`, chain data, release tarballs, or generated logs here.
+- Keep RPC/WS bound to localhost unless there is an explicit exposure plan.
+- Stop Reth and Lighthouse before mutating the Reth datadir or downloading an
+  archive snapshot into it.
+- Do not commit `jwt.hex`, chain data, release tarballs, generated logs, or
+  runtime databases.
+- `/home/nima/.lighthouse` is a stable bind-mounted datadir path; do not remove
+  the mount point.

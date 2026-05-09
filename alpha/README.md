@@ -1,81 +1,97 @@
 # Alpha
 
-`alpha/` is the Ethereum decision layer above the confirmed live feed, mempool risk, simulation, and transaction execution.
+Agent operating map for the Ethereum decision layer. `alpha/` consumes confirmed
+live token state plus speculative mempool risk, turns those into strategy
+events, and persists decisions before execution.
 
-This area should not become another copy of the Python `eth_portfolio_manager`. The Python module proved the product shape, but it also mixed token projection, strategy logic, position lifecycle, persistence, ZMQ publishing, backtesting, and live execution into one package. The Rust design keeps those responsibilities explicit.
+## Purpose
 
-## Target Crates
+- Run trading strategy state machines over `MarketEvent`, `RiskEvent`, and
+  `ExecutionReport`.
+- Keep strategy decisions auditable in Postgres before trusting PnL.
+- Keep paper/live/backtest logic behind the same core domain contracts.
 
-| Folder | Crate name | Role |
+## Owns
+
+| Folder | Crate | Owns |
 | --- | --- | --- |
-| `core/` | `eth_alpha_core` | Pure trading domain types and traits. |
-| `engine/` | `eth_alpha_engine` | Live trading runtime, portfolio/order state, strategy scheduling, risk gating. |
-| `strategies/` | `eth_alpha_strategies` | Built-in strategy implementations. |
-| `store/` | `eth_alpha_store` | Durable run, decision, position, order, execution, and risk event records. |
-| `backtest/` | `eth_alpha_backtest` | Historical replay and simulated execution using the same core traits. |
-| `live/state/` | `eth_live_state` | Shared Redis live-state protocol and schemas. |
-| `live/feed/` | `eth_live_feed` | Live confirmed-chain feed over processed blocks and token updates. |
-| `mempool_risk/` | `eth_mempool_risk` | Pending-transaction simulation and speculative risk signals. |
+| `core/` | `eth_alpha_core` | Domain types, traits, IDs, portfolio/order/position/risk models. |
+| `engine/` | `eth_alpha_engine` | Runtime state machine, order/position transitions, risk gating, execution adapter boundary. |
+| `strategies/` | `eth_strategies` | Concrete strategy rules such as `SnipeAllStrategy`. |
+| `store/` | `eth_alpha_store` | Durable run, observation, order, execution, position, and risk records. |
+| `live/state/` | `eth_live_state` | Redis live-state schemas and protocol types. |
+| `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
+| `backtest/` | planned | Historical replay over the same core strategy contracts. |
+| `mempool_risk/` | planned | Future crate boundary for pending-risk events; current service is `mempool_processor`. |
 
-Crates that are already compileable should stay small and explicit. New Cargo members should be added only when the boundary is stable enough to compile independently.
+## Does Not Own
 
-## Runtime Shape
+- Raw simulation, traces, or calldata building; use `tx_simulator`,
+  `tx_processor`, and `reth_chain_query`.
+- Canonical token/pool state mutation; use `eth_token` and `eth_token_server`.
+- Signing, nonce management, gas policy, or broadcast; use `tx_executor`.
+- Mempool ingestion or signal persistence; use `mempool_processor`.
+
+## Data Flow
 
 ```text
-eth_live_feed
-  -> writes canonical confirmed state to eth_live_state
-  -> emits LiveFeedEvent
-
-eth_mempool_risk
-  -> reads eth_live_state
-  -> simulates pending txs
-  -> emits RiskEvent
-
-eth_alpha_engine
-  -> consumes LiveFeedEvent, RiskEvent, ExecutionReport
-  -> runs eth_alpha_strategies
-  -> submits approved orders to tx_executor
-
-tx_executor
-  -> signs, manages nonce/gas, broadcasts
-  -> emits ExecutionReport
+tx_processor live_block_processor
+  -> Redis eth/live/blocks + processed-block disk cache
+  -> eth_token_server live token/pool views
+  -> eth_alpha_trader polls /live/status, /live/pools, /mempool/signals
+  -> strategy_observations + orders + reports + positions + risk events
 ```
+
+`eth_alpha_trader` is paper-only right now. It must not become decision-active
+until `/live/status` is `live`; while warming, it records heartbeats and primes
+watermarks only.
+
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Event and domain type ownership | `core/src/` and `core/src/README.md` |
+| Strategy runtime and execution adapter behavior | `engine/README.md`, `engine/src/lib.rs` |
+| Durable decision ledger | `store/README.md`, Postgres `alpha_trading.*` tables |
+| Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/snipe_all/` |
+| Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
+| Redis live-state contract | `live/state/README.md`, `live/state/src/` |
+| Service wiring | `engine/src/bin/eth_alpha_trader.rs` |
 
 ## Current Bottlenecks And Focus Order
 
-The purpose of `alpha/` is to make the bottleneck visible, then move it. A strategy run should tell us whether the limiting factor is state freshness, mempool signal recall, decision quality, fill modeling, or execution. Decisions that affect positions must be written to the alpha store, not only logged.
+The goal of `alpha/` is to make the current bottleneck measurable, then move it. A run is not useful unless it tells us whether the limit is live-state freshness, signal recall, decision quality, fill modeling, or execution.
 
 | Order | Bottleneck | Owner | What To Watch | Next Focus |
 | --- | --- | --- | --- | --- |
-| 1 | Live readiness and restart recovery | `live/feed`, `live/state`, `eth_token_server` | live status, warmup progress, block source, block apply time, cache misses | After restart, verify warmup completes and live tail switches from `processed_block_disk_cache` to `live_redis_processed_block`; later add persisted live snapshots or faster warm resume. |
-| 2 | Mempool signal recall and timing | `mempool_risk`, `mempool_signal_detector` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals | Improve early liquidity-removal risk detection across pool types; LP approval, removal intent, token, pool, and first-seen time must be persisted before the trader consumes them. |
-| 3 | Decision ledger quality | `engine`, `store` | every position has the market input, signal input, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make the Postgres store the audit trail for all strategy decisions. In-memory watermarks are acceptable only for polling mechanics, not for decision facts. |
-| 4 | Paper fill realism | `engine` | synthetic execution reports versus worst achievable block price | Replace placeholder paper fills with worst-case block fill modeling before trusting PnL. This belongs in `PaperExecutionAdapter`, not `mempool_risk`. |
-| 5 | Strategy policy quality | `strategies` | Snipe All v1 entries, exits, risk reactions, skipped candidates | Keep `Snipe All v1` as the baseline: buy eligible pools above the liquidity floor, then exit on liquidity-removal risk. Extend with LP approval response, creator public/private labels, tax/honeypot response, position sizing, and pool filters. |
-| 6 | Backtest and replay alignment | `backtest`, `engine` | same strategy state machine in historical and live paper runs | Historical replay should use confirmed blocks only unless recorded mempool arrivals/signals exist. Compare historical lower-bound PnL to live paper behavior. |
-| 7 | Real execution handoff | `engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures | Only replace the paper adapter with a `tx_executor` adapter after live state, signal recall, decision persistence, and fill modeling are measurable. |
+| 1 | Live feed readiness and failure isolation | `live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, warmup progress, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Make live token apply resilient: optional pool metadata and buy/sell simulation failures must be recorded on the affected pool and must not fail the whole live tracker. |
+| 2 | Mempool signal recall and timing | `mempool_processor`, future `mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
+| 3 | Trader decision ledger completeness | `engine`, `store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Token-scoped pool identity is now the key path; next make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior. |
+| 4 | Paper fill realism | `engine` | synthetic execution reports versus worst achievable block price | Replace placeholder paper fills with worst-case block fill modeling before trusting PnL. This belongs in `PaperExecutionAdapter`, not mempool risk. |
+| 5 | Strategy policy quality | `strategies` | Snipe All v1 entries, exits, risk reactions, skipped candidates, V3/V4 behavior | Keep `Snipe All v1` as the baseline and extend it with LP approval response, creator public/private labels, tax/honeypot response, position sizing, and pool filters. |
+| 6 | Backtest and replay alignment | `backtest`, `engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching | Historical replay should use confirmed blocks only unless recorded mempool arrivals/signals exist. Compare historical lower-bound PnL to live paper behavior. |
+| 7 | Real execution handoff | `engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping | Only replace the paper adapter with a `tx_executor` adapter after live state, signal recall, decision persistence, and fill modeling are measurable. |
 
-Focus order is strict when diagnosing the live trader:
+The next major bottleneck is live feed readiness and failure isolation. The current live tracker can fail warmup from a simulation validation path, such as insufficient simulated funds. That should become a pool-level trading-status failure, not a runtime failure. Until the tracker reliably reaches `live`, paper trading cannot produce dependable strategy measurements.
 
-1. If the live feed is not `live`, fix live readiness first.
-2. If the feed is live but exits are late or missing, fix signal recall and timing.
-3. If signals are present but trades are confusing, fix the decision ledger.
-4. If the ledger is complete but PnL is not credible, fix paper fills.
-5. If fills are credible, iterate the strategy policy.
+## Tests And Commands
 
-## Design Rules
+```bash
+cargo test -p eth_alpha_core
+cargo test -p eth_alpha_engine
+cargo test -p eth_alpha_store
+cargo test -p eth_strategies
+cargo run -p eth_alpha_engine --bin eth_alpha_trader
+```
 
-1. Confirmed state and speculative state stay separate.
-2. Strategies emit intent; they do not submit transactions.
-3. Position transitions happen from execution reports, not from "next update" assumptions.
-4. Redis live state is a read model, not the owner of trading decisions.
-5. Signing authority stays behind `tx_executor`.
-6. Backtest and live trading share the same strategy and portfolio state machine.
+## Current Hazards
 
-## Lessons From Python
-
-- `LiveTokenTracker` became too broad. In Rust, live feed, strategy runtime, risk, and execution are separate services/crates.
-- `TokenPosition` mixed token market state with our portfolio state. In Rust, `MarketState`, `PortfolioState`, `OrderState`, and `ExecutionState` are separate.
-- Live and backtest engines duplicated state transitions. In Rust, live and backtest both feed `ExecutionReport` into the same engine logic.
-- ZMQ address notifications plus Redis snapshots worked well as an invalidation/state-hydration pattern. Keep that, but move shared schemas into `eth_live_state`.
-- Mempool simulation should read confirmed Redis overlays but should not mutate canonical token or chain state.
+- `eth_alpha_trader` uses paper execution only; do not route it to
+  `tx_executor` without an explicit adapter and persistence plan.
+- `strategy_observations` is the durable input log. In-memory watermarks are
+  polling mechanics and must be recoverable from Postgres.
+- Fix order for live issues: live feed readiness and failure isolation, mempool
+  signal recall, decision ledger completeness, paper fill realism, then
+  strategy policy.
+- Keep confirmed state and speculative mempool risk separate. Strategies consume
+  both but do not mutate either.

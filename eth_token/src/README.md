@@ -1,19 +1,41 @@
-# src
+# eth_token/src
 
-Source tree for the Rust token-state implementation.
+Local operating map for token-state modules. This crate consumes processed Rust
+transaction/block facts and should not recreate tracing or decoding logic.
 
-The module layout mirrors the current Python package at `pyeth/eth_token/eth_token`, but the Rust crate should use Rust ownership boundaries rather than copying Python file-by-file. Shared event decoding and transaction models should be imported from existing Rust crates instead of recreated here.
+## Owns
 
-## Module Boundaries
+| Module | Owns |
+| --- | --- |
+| `erc20/` | Token metadata, token snapshots, and token-level chain data helpers. |
+| `pools/` | AMM pool state machines and pool-specific calculations. |
+| `state/` | Token transfer state, control-address tracking, and pool-state bridges. |
+| `health/` | Scam, volume, and trading-health scoring. |
+| `network/` | Token address activity, graph construction, and snapshots. |
+| `manager/` | Block-level orchestration over processed Rust transactions. |
+| `tracking/` | Replay contexts, builders, and transaction application. |
+| `chain_metadata/` | Chain metadata lookup and cache helpers. |
+| `utils/` | Generic helpers with no domain ownership. |
 
-- `erc20`: token metadata, token snapshots, and token-level chain data helpers.
-- `pools`: AMM pool state machines and pool-specific calculations.
-- `state`: token transfer state, control-address tracking, and pool-state bridges.
-- `health`: scam/volume/trading-health scoring.
-- `network`: token address activity and graph construction.
-- `manager`: block-level orchestration over processed Rust transactions.
-- `utils`: generic helpers with no domain ownership.
+## Does Not Own
 
-## Rule
+- Receipt/log/trace decoding. Add decoded facts to `tx_processor` first.
+- Direct Reth DB queries except through owner crate APIs.
+- HTTP DTOs or runtime hosting; use `eth_token_server`.
 
-If a module needs receipt logs, traces, or decoded transaction fields, it should consume `tx_processor` data structures. It should not fetch, trace, or decode raw Ethereum transactions itself.
+## Data Flow
+
+```text
+tx_processor::ProcessedBlock
+  -> manager/tracking applies txs in block order
+  -> erc20 + pools + state + health + network updates
+  -> eth_token_server view DTOs
+```
+
+## Current Focus
+
+- Active parity path: ERC-20 plus Uniswap V2 token/pool tracking.
+- Highest-traffic modules: `erc20`, `pools::uniswap::v2`, `state`,
+  `tracking`, and `manager`.
+- `health` and `network` should consume stabilized token/pool facts; do not
+  move core pool lifecycle logic there.

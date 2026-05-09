@@ -1,29 +1,74 @@
 # eth_token
 
-Rust token-state crate for ERC-20 token tracking, pool state, token health, and block-level token updates.
+Agent operating map for ERC-20 token state, AMM pool state, token health, and
+block-level token updates.
 
-This crate is the Rust replacement target for `pyeth/eth_token`. It must not own block or transaction processing. Its input boundary is the canonical Rust `tx_processor` output: processed blocks and processed transactions. Token logic starts after block/tx decoding is complete.
+## Purpose
 
-## Ownership
+- Consume `tx_processor::ProcessedBlock` and `ProcessedTransaction` output.
+- Maintain token, pool, lifecycle, LP, approval, activity, health, and network
+  state for historical range builds and live token tracking.
+- Provide the canonical Rust token/pool state used by `eth_token_server`,
+  mempool context, and alpha reads.
 
-- Track ERC-20 token state from processed transaction events.
-- Maintain AMM pool state for supported DEX pool types.
-- Detect token trading state, volume, control-address activity, and health signals.
-- Build token network/activity views from processed events.
-- Provide a block-level token processor that consumes processed Rust blocks.
+## Owns
 
-## Non-Goals
+- ERC-20 token metadata, snapshots, transfer/control-address state, and
+  lifecycle state.
+- AMM pool state machines, currently strongest on Uniswap V2.
+- Token health/scam/trading status derived from processed facts.
+- Token network/activity views built from processed events.
+- Block-level token update orchestration in `manager` and `tracking`.
 
-- No direct RPC tracing.
-- No Python block processor or Python transaction processor behavior.
-- No duplicate log decoding already owned by `tx_processor`.
-- No live block publication; Rust live block processing remains in `tx_processor`.
+## Does Not Own
 
-## Migration Plan
+- Raw RPC tracing, Reth DB access, or transaction/block decoding; use
+  `tx_processor`, `tx_simulator`, and `reth_chain_query`.
+- Live process hosting, HTTP/SSE views, or endpoint DTOs; use
+  `eth_token_server`.
+- Strategy decisions or mempool signal decisions.
+- Python compatibility layers; expose stable Rust APIs first, then bind through
+  `pyreth` only when needed.
 
-1. Define Rust data models that match the current Python-facing snapshots.
-2. Port pool state machines first: base pool, Uniswap V2, V3, and V4.
-3. Port token transfer/control-address state.
-4. Port block-level token orchestration from processed transactions.
-5. Add PyO3 bindings through `pyreth` after the Rust API is stable.
-6. Retire the corresponding Python modules once parity tests pass.
+## Data Flow
+
+```text
+ProcessedBlock / ProcessedTransaction
+  -> BlockTokenProcessor applies txs in block/index order
+  -> token registry + tracked token index + pool state + health/network state
+  -> eth_token_server live/range views
+  -> mempool_processor context and alpha market events
+```
+
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Public module map | `src/lib.rs`, `src/README.md` |
+| Block-level token application | `src/manager/`, `src/tracking/` |
+| ERC-20 state and metadata | `src/erc20/` |
+| Pool state machines | `src/pools/`, especially `src/pools/uniswap/v2.rs` |
+| Chain metadata lookup/cache | `src/chain_metadata/` |
+| Health/scam status | `src/health/` |
+| Network/activity views | `src/network/` |
+| Range and parity examples | `examples/README.md` |
+
+## Tests And Commands
+
+```bash
+cargo test -p eth_token
+cargo run -p eth_token --example token_tracking_range
+cargo run -p eth_token --example uniswap_v2_lp_tracker_parity
+cargo run -p eth_token --example uniswap_v2_pool_replay_reserves
+```
+
+## Current Hazards
+
+- V2 tracking is the active parity surface; V3/V4 pool state and discovery are
+  incomplete compared with V2.
+- Same-block complex deployments can require exact metadata/pool replay; avoid
+  assuming token metadata is stable before the processed block is fully applied.
+- UI/API callers should use explicit view DTOs from `eth_token_server`, not raw
+  internal token structs.
+- Do not recreate log decoding here. If a field needs receipt/log/trace truth,
+  add it to `tx_processor` first and consume the processed fact here.

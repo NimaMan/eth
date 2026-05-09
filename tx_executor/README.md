@@ -1,62 +1,70 @@
-# Tx Executor
+# tx_executor
 
-`tx_executor` is the gas-first Ethereum transaction execution core that Kartal will use for real
-submission.
+Agent operating map for gas-first Ethereum transaction submission.
 
-The executor does not choose routes, discover pools, quote trades, or decide strategy. Those jobs
-belong in the simulator/planner. This crate receives a prepared direct transaction, validates it,
-assigns a nonce when needed, applies priority-fee bribe policy, signs, broadcasts, and records the
-result.
+## Purpose
 
-## Default Execution Rule
+- Receive prepared direct transactions from planners/strategies.
+- Validate request shape, reserve nonce, apply gas/priority-fee policy, sign,
+  broadcast, and record the result.
+- Provide the execution boundary that alpha can eventually call through an
+  adapter.
 
-Use the cheapest direct transaction that satisfies the strategy:
+## Owns
 
-- direct Uniswap V2/Sushi/V3 router calldata for normal one-hop swaps;
-- direct raw calldata from the planner for custom routes;
-- Baygus or another on-chain executor only when atomic multi-step behavior, guarded coinbase tips,
-  Permit2 witness binding, v4 unlock flows, or other contract-only behavior is required.
+- `DirectRawTransactionRequest`, `SimulationReference`, bribe request metadata,
+  and submit results.
+- Nonce reservation, signer integration, validation, gas policy, broadcast mode,
+  and optional event recording.
+- Mempool position estimation from local Reth `txpool_content`.
 
-For normal direct EOA transactions, the validator/builder bribe is the priority fee. Explicit
-`block.coinbase` payments require contract calldata and are not part of direct raw mode.
+## Does Not Own
 
-## Current Surface
+- Route discovery, quoting, slippage math, pool discovery, or strategy policy.
+- Calldata construction except validating a prepared direct transaction.
+- Token/mempool analysis or risk decisions.
 
-- `DirectRawTransactionRequest`: prepared EIP-1559 transaction request.
-- `EthTxExecutor::submit_direct_raw`: validate -> reserve nonce -> sign -> broadcast.
-- `MempoolPositionEstimator`: estimates gas before this transaction in the pending block by reading
-  local Reth `txpool_content` and comparing effective priority fee.
-- `JsonlRecorder`: optional append-only event journal for standalone runs.
+## Data Flow
 
-## Example
-
-Dry run only:
-
-```bash
-cargo run --example submit_direct_raw -- \
-  --rpc-url http://127.0.0.1:8545 \
-  --private-key-env ETH_EXECUTOR_PRIVATE_KEY \
-  --to 0x0000000000000000000000000000000000000000 \
-  --dry-run
+```text
+planner/strategy adapter
+  -> DirectRawTransactionRequest + simulation reference
+  -> EthTxExecutor::submit_direct_raw
+  -> validate -> reserve nonce -> sign -> broadcast/dry-run
+  -> SubmitDirectRawResult / execution record
 ```
 
-Live broadcast is intentionally explicit:
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Public API and exports | `src/lib.rs` |
+| Submit flow | `src/executor.rs`, `src/service.rs` |
+| Request/response types | `src/request.rs`, `src/types.rs` |
+| Validation | `src/validation.rs` |
+| Gas and mempool position | `src/gas.rs`, `src/position.rs` |
+| Nonce/signing/broadcast | `src/nonce.rs`, `src/signer.rs`, `src/broadcast.rs` |
+| Standalone example | `examples/submit_direct_raw.rs` |
+
+## Tests And Commands
 
 ```bash
-cargo run --example submit_direct_raw -- \
-  --rpc-url http://127.0.0.1:8545 \
-  --private-key-env ETH_EXECUTOR_PRIVATE_KEY \
-  --to 0x0000000000000000000000000000000000000000 \
-  --broadcast
+cargo run --manifest-path tx_executor/Cargo.toml --example submit_direct_raw -- --dry-run
+cargo test --manifest-path tx_executor/Cargo.toml
 ```
 
-## Integration Direction
+Live broadcast must be explicit:
 
-Kartal should wrap this library with HTTP routes and Postgres persistence:
+```bash
+cargo run --manifest-path tx_executor/Cargo.toml --example submit_direct_raw -- --broadcast
+```
 
-- `POST /eth/tx/submit`
-- `GET /eth/tx/submissions`
-- `GET /eth/tx/submissions/{attempt_id}`
+## Current Hazards
 
-The submitted payload should include the simulator block/hash and expected/min output metadata so a
-real transaction can be traced back to the exact off-chain decision that produced it.
+- This crate starts from prepared calldata. If route/quote/slippage decisions
+  are missing, fix the planner or strategy adapter, not the executor.
+- Direct EOA priority fee is the normal validator/builder payment. Explicit
+  `block.coinbase` payments require contract calldata and are not direct raw
+  mode.
+- A submitted payload should include simulator block/hash and expected/min
+  output metadata so execution can be traced back to the off-chain decision.

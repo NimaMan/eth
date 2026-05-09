@@ -1,98 +1,71 @@
 # Token Safety Lab
 
-This folder is for repeatable investigations of token and pool behavior that may
-affect trading safety.
+Agent operating map for repeatable token and pool behavior investigations that
+may affect trading safety.
 
-The workflow is intentionally iterative:
+## Purpose
 
-1. Run the token range builder over a block range.
-2. Find odd behavior, unsafe behavior, or suspicious numerical output.
-3. Create a case with the chain truth and simulator parity checks.
-4. Fix the indexer, simulator, or display logic when it disagrees with chain behavior.
-5. Promote confirmed patterns into detectors and trading guardrails.
-6. Run the range again and repeat.
+- Turn suspicious token/pool behavior into reproducible cases.
+- Compare range-builder output, chain truth, simulator replay, and trading
+  guardrail expectations.
+- Promote confirmed patterns into production detectors or strategy safeguards.
 
-The objective is to trust the first numbers we see. A number is trusted only
-after it either matches chain behavior or the mismatch is explained and tracked.
+## Owns
 
-## Triage First
+- Case folders with the narrative, machine-readable facts, and generated
+  artifacts for one concrete investigation.
+- Read-only triage and detector prototype tools.
+- Chain-truth, parity, and trading comparison scripts.
+- Shared catalog of odd behavior patterns.
 
-Before deep case work, run a triage pass over the active range-builder output
-and simulator logs. The first artifact should be a candidate ledger, not a fix.
-Use the candidate ledger in `cases/README.md` for the working list.
+## Does Not Own
 
-Use the agent-native range triage tool to turn a completed range run into
-structured candidates. Run commands from the ETH repo root:
+- Production token state logic; fix confirmed state bugs in `eth_token`.
+- Simulation internals; fix replay mismatches in `tx_simulator` or
+  `tx_processor`.
+- Live mempool signal emission; promote detectors into `mempool_processor`.
+- Strategy policy; promote guardrails into `alpha`.
+
+## Data Flow
 
 ```text
+token range/server output + simulator logs
+  -> read-only triage ledger
+  -> case folder with chain truth and parity artifacts
+  -> confirmed finding
+  -> fix in owner crate or promote detector/guardrail
+```
+
+## Where To Look First
+
+| Need | Start here |
+| --- | --- |
+| Working candidate ledger | `cases/README.md` |
+| One concrete investigation | `cases/<slug>/README.md` |
+| Case metadata shape | `cases/<slug>/case.toml` |
+| Triage candidate generation | `tools/detectors/README.md`, `tools/detectors/range_triage.py` |
+| Receipts/logs/balances/reserves truth | `tools/chain_truth/` |
+| Simulator parity checks | `tools/parity/` |
+| Observed trading comparison | `tools/trading/` |
+| Shared suspicious patterns | `odd_behaviors/README.md` |
+
+## Tests And Commands
+
+Run from the ETH repo root:
+
+```bash
 token_safety_lab/tools/detectors/range_triage.py \
   --api http://127.0.0.1:8765 \
   --run active \
   --format markdown
 ```
 
-The tool is read-only. It inspects the token server run cache and emits
-candidate issues for review; it does not create cases or change token state.
+## Current Hazards
 
-Each candidate row should capture:
-
-- token address and symbol
-- pool address, when the issue is pool-specific
-- block range and important block or tx hash
-- visible symptom
-- why it matters for trading safety
-- current status: `new`, `investigating`, `confirmed`, `explained`, `fixed`, or `ignored`
-- linked case folder once promoted
-
-Candidate buckets to collect:
-
-- Huge `price / initial` ratios, especially when liquidity is low or token
-  supply in pool is tiny.
-- `can_buy=yes` with `can_sell=no`.
-- Scam or risk rows, especially `CANNOT_SELL`, liquidity drain, denom removal,
-  hidden mint, high tax, and trading-state flips.
-- Tax buckets from `eth_token::pools::TaxBucket`: `no_tax`, `low_tax`
-  (`0 < tax < 10%`), `moderate_tax` (`10-20%`), `high_tax` (`20-40%`),
-  and `extreme_tax` (`>40%`).
-- Tokens without pools that appear to have trading enabled or other pool-derived
-  state.
-- Impossible or suspicious numbers: supply in pool over 100%, LP holder shares
-  over 100%, zero LP supply with reserves, liquidity/FDV near zero with
-  meaningful WETH, or FDV driven by dust reserves.
-- Simulator warnings and errors from
-  `/home/nima/code/crypto/blockchains/eth/logs/simulators/`.
-- Chain-vs-simulator mismatches, including cases where on-chain sells exist but
-  the simulator cannot reproduce a sell at the same pre-state.
-
-Promote a candidate into `cases/<slug>/` when it affects trading decisions,
-suggests a pipeline bug, or should become a detector or guardrail. Do not write
-safety-lab artifacts from normal range builds; case tools should write generated
-outputs under the case `artifacts/` folder.
-
-## Folder Layout
-
-- `cases/`: one folder per concrete token or pool investigation.
-- `cases/<slug>/README.md`: the single narrative markdown file for that case.
-- `cases/<slug>/case.toml`: machine-readable token, pool, range, and key txs.
-- `cases/<slug>/artifacts/`: generated receipts, traces, screenshots, and
-  comparison outputs. Generated files are ignored by default; keep the
-  `README.md`.
-- `odd_behaviors/`: the shared catalog of suspicious patterns we want to detect.
-- `tools/chain_truth/`: tools that extract on-chain receipts, logs, balances, and reserves.
-- `tools/parity/`: tools that compare simulator replay against chain truth.
-- `tools/trading/`: tools that compare observed on-chain buys and sells against our simulated trades.
-- `tools/detectors/`: prototype detectors before promotion into production code.
-
-## Case Standard
-
-Each case folder should keep one narrative markdown file:
-
-- `README.md`: what the range builder reported, what happened on chain, what
-  the simulator reproduced or failed to reproduce, confirmed findings, and open
-  work.
-- `case.toml`: token, pool, block range, key transactions, and expected odd
-  behavior flags.
-- `artifacts/README.md`: describes generated outputs for the case.
-
-Keep generated data under `artifacts/`. Do not add extra case markdown files
-unless a case becomes large enough to justify splitting it deliberately.
+- The first artifact should be a candidate ledger, not a fix.
+- Do not write generated safety-lab artifacts from normal range builds. Case
+  tools should write under `cases/<slug>/artifacts/`.
+- Promote a case only when it affects trading decisions, suggests a pipeline
+  bug, or should become a detector/guardrail.
+- A number is trusted only after it matches chain behavior or the mismatch is
+  explained and tracked.
