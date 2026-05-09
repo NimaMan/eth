@@ -1,4 +1,5 @@
 use alloy_primitives::Address;
+use eth_price::liquidity::{assess_denom_liquidity, LiquidityReference, PoolLiquidityLevel};
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
     BalancerPool, BasePool, CurvePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState,
@@ -7,6 +8,7 @@ use eth_token::pools::{
 use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
 use serde_json::Value;
+use std::cmp::Ordering;
 
 use crate::range_indexer::RangeIndexJob;
 
@@ -40,15 +42,6 @@ pub enum PoolRiskLevel {
     Honeypot,
     HighTax,
     ExtremeTax,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PoolLiquidityLevel {
-    Liquid,
-    Dust,
-    Drained,
-    Unknown,
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +93,11 @@ pub struct PoolView {
     pub total_liquidity: f64,
     pub liquidity_level: PoolLiquidityLevel,
     pub liquidity_label: String,
+    pub liquidity_rank: u8,
+    pub liquidity_rank_score: f64,
+    pub liquidity_eth: Option<f64>,
+    pub liquidity_usd: Option<f64>,
+    pub liquidity_denom_class: String,
     pub token_total_supply_scaled: Option<f64>,
     pub fully_diluted_value_denom: Option<f64>,
     pub pooled_token_supply_ratio: Option<f64>,
@@ -252,10 +250,18 @@ impl PoolView {
     }
 
     pub fn from_v4_pool(token: &ERC20Token, pool: &UniswapV4Pool) -> Self {
+        let lp_holders = pool.lp_holders();
+        let lp_holder_count = lp_holders.len();
         Self::from_base(
             token,
             &pool.base,
-            LpPoolViewFields::default(),
+            LpPoolViewFields {
+                lp_total_supply: pool.lp_total_supply(),
+                lp_holder_count,
+                lp_holders,
+                lp_transfer_count: pool.liquidity_position_events.len(),
+                ..LpPoolViewFields::default()
+            },
             ConcentratedPoolViewFields {
                 pool_id: Some(pool.pool_id.clone()),
                 pool_manager_address: Some(pool.pool_manager_address.clone()),
@@ -267,6 +273,7 @@ impl PoolView {
                 current_tick: pool.current_tick,
                 sqrt_price_x96: pool.sqrt_price_x96.clone(),
                 active_liquidity: Some(pool.active_liquidity.to_string()),
+                lp_token_address: pool.position_manager_address.clone(),
                 virtual_reserves: pool
                     .last_virtual_reserves
                     .map(|reserves| VirtualReserveView {
@@ -362,7 +369,7 @@ impl PoolView {
                 .values()
                 .map(|pool| Self::from_balancer_pool(token, pool)),
         );
-        pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
+        sort_pools_by_liquidity(&mut pools);
         pools
     }
 
@@ -392,10 +399,16 @@ impl PoolView {
         let currency = denom_symbol
             .clone()
             .unwrap_or_else(|| base.identity.denom_address.clone());
+        let liquidity_assessment = assess_denom_liquidity(
+            base.denom_reserve(),
+            denom_symbol.as_deref(),
+            Some(&base.identity.denom_address),
+            LiquidityReference::default(),
+        );
         let fully_diluted_value_denom =
             total_supply.and_then(|supply| base.fully_diluted_value_denom(supply));
         let liquidity_history = liquidity_history(base);
-        let liquidity_level = pool_liquidity_level(base.denom_reserve(), &currency);
+        let liquidity_level = liquidity_assessment.level;
         let raw_price_ratio_to_initial = base.price_ratio_to_initial();
         let price_ratio_to_initial =
             display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
@@ -454,7 +467,12 @@ impl PoolView {
             liquidity_history,
             total_liquidity: base.state.total_liquidity,
             liquidity_level,
-            liquidity_label: liquidity_level_label(liquidity_level).to_string(),
+            liquidity_label: liquidity_level.label().to_string(),
+            liquidity_rank: liquidity_level.rank(),
+            liquidity_rank_score: liquidity_assessment.rank_score,
+            liquidity_eth: liquidity_assessment.value_eth,
+            liquidity_usd: liquidity_assessment.value_usd,
+            liquidity_denom_class: liquidity_assessment.denom_class.label().to_string(),
             token_total_supply_scaled: total_supply,
             fully_diluted_value_denom,
             pooled_token_supply_ratio: supply_ratio.pooled_token_supply_ratio,
@@ -510,10 +528,6 @@ impl PoolView {
     }
 }
 
-const DUST_WETH_LIQUIDITY: f64 = 0.01;
-const DRAINED_WETH_LIQUIDITY: f64 = 0.000001;
-const DUST_STABLE_LIQUIDITY: f64 = 10.0;
-const DRAINED_STABLE_LIQUIDITY: f64 = 0.01;
 const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
 
 #[derive(Clone, Debug)]
@@ -628,56 +642,6 @@ fn display_supply_ratio(value: Option<f64>) -> DisplaySupplyRatio {
     }
 }
 
-fn pool_liquidity_level(liquidity: f64, currency: &str) -> PoolLiquidityLevel {
-    if !liquidity.is_finite() || liquidity <= drained_liquidity_threshold(currency) {
-        return PoolLiquidityLevel::Drained;
-    }
-    if !is_liquidity_currency(currency) {
-        return PoolLiquidityLevel::Unknown;
-    }
-    if liquidity <= dust_liquidity_threshold(currency) {
-        return PoolLiquidityLevel::Dust;
-    }
-    PoolLiquidityLevel::Liquid
-}
-
-fn liquidity_level_label(level: PoolLiquidityLevel) -> &'static str {
-    match level {
-        PoolLiquidityLevel::Liquid => "liquid",
-        PoolLiquidityLevel::Dust => "dust",
-        PoolLiquidityLevel::Drained => "drained",
-        PoolLiquidityLevel::Unknown => "unknown_quote",
-    }
-}
-
-fn is_liquidity_currency(currency: &str) -> bool {
-    let currency = currency.to_ascii_uppercase();
-    currency == "WETH" || is_stable_currency(&currency)
-}
-
-fn dust_liquidity_threshold(currency: &str) -> f64 {
-    if is_stable_currency(currency) {
-        DUST_STABLE_LIQUIDITY
-    } else {
-        DUST_WETH_LIQUIDITY
-    }
-}
-
-fn drained_liquidity_threshold(currency: &str) -> f64 {
-    if is_stable_currency(currency) {
-        DRAINED_STABLE_LIQUIDITY
-    } else {
-        DRAINED_WETH_LIQUIDITY
-    }
-}
-
-fn is_stable_currency(currency: &str) -> bool {
-    matches!(
-        currency.to_ascii_uppercase().as_str(),
-        "USDC" | "USDT" | "DAI"
-    )
-}
-
 fn liquidity_history(base: &BasePool) -> Vec<LiquidityPoint> {
     base.reserve_tracker
         .reserve_history
@@ -749,6 +713,26 @@ fn nonzero_block(block: u64) -> Option<u64> {
     (block > 0).then_some(block)
 }
 
+fn sort_pools_by_liquidity(pools: &mut [PoolView]) {
+    pools.sort_by(|left, right| {
+        pool_liquidity_cmp(left, right)
+            .then_with(|| left.token_address.cmp(&right.token_address))
+            .then_with(|| left.pool_address.cmp(&right.pool_address))
+    });
+}
+
+fn pool_liquidity_cmp(left: &PoolView, right: &PoolView) -> Ordering {
+    right
+        .liquidity_rank
+        .cmp(&left.liquidity_rank)
+        .then_with(|| {
+            right
+                .liquidity_rank_score
+                .partial_cmp(&left.liquidity_rank_score)
+                .unwrap_or(Ordering::Equal)
+        })
+}
+
 pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let state = run.state.read().await;
     let mut pools = Vec::new();
@@ -757,11 +741,7 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
         pools.extend(PoolView::from_token_pool_summaries(token));
     }
 
-    pools.sort_by(|left, right| {
-        left.token_address
-            .cmp(&right.token_address)
-            .then(left.pool_address.cmp(&right.pool_address))
-    });
+    sort_pools_by_liquidity(&mut pools);
 
     PoolListResponse {
         run_id: run.id.clone(),
@@ -772,6 +752,7 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
 
 #[cfg(test)]
 mod tests {
+    use eth_price::liquidity::{USDC_ADDRESS, WETH_ADDRESS};
     use eth_token::erc20::{ERC20Token, ERC20TokenMetadata};
     use eth_token::pools::BasePoolConfig;
 
@@ -802,13 +783,69 @@ mod tests {
     #[test]
     fn liquidity_level_marks_unknown_quote_assets() {
         assert_eq!(
-            pool_liquidity_level(1_000.0, "WETH"),
+            assess_denom_liquidity(1_000.0, Some("WETH"), None, LiquidityReference::default())
+                .level,
             PoolLiquidityLevel::Liquid
         );
         assert_eq!(
-            pool_liquidity_level(1_000_000.0, "0xunknown"),
+            assess_denom_liquidity(
+                1_000_000.0,
+                None,
+                Some("0xunknown"),
+                LiquidityReference::default()
+            )
+            .level,
             PoolLiquidityLevel::Unknown
         );
+    }
+
+    #[test]
+    fn token_pools_are_ranked_by_normalized_liquidity() {
+        let token_address = "0x1111111111111111111111111111111111111111";
+        let weth_pool_address = "0x2222222222222222222222222222222222222222";
+        let usdc_pool_address = "0x3333333333333333333333333333333333333333";
+        let mut token = ERC20Token::new(ERC20TokenMetadata::new(
+            token_address,
+            "Token",
+            "TOK",
+            18,
+            "1000000000000000000000000",
+        ));
+
+        let mut usdc_pool = UniswapV2Pool::new(
+            usdc_pool_address,
+            token_address,
+            USDC_ADDRESS,
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        usdc_pool
+            .base
+            .update_reserves(1_000.0, 2_000.0, 10, 100, "0xtx1");
+        token
+            .v2_pools
+            .insert(usdc_pool_address.to_string(), usdc_pool);
+
+        let mut weth_pool = UniswapV2Pool::new(
+            weth_pool_address,
+            token_address,
+            WETH_ADDRESS,
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        weth_pool
+            .base
+            .update_reserves(1_000.0, 1.0, 11, 112, "0xtx2");
+        token
+            .v2_pools
+            .insert(weth_pool_address.to_string(), weth_pool);
+
+        let pools = PoolView::from_token_pools(&token);
+
+        assert_eq!(pools[0].pool_address, weth_pool_address);
+        assert_eq!(pools[0].liquidity_usd, Some(3_000.0));
+        assert_eq!(pools[1].pool_address, usdc_pool_address);
+        assert_eq!(pools[1].liquidity_usd, Some(2_000.0));
     }
 
     #[test]
