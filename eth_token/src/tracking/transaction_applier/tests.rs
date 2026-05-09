@@ -1,4 +1,4 @@
-use super::metadata::is_not_uniswap_v2_pool_metadata_miss;
+use super::metadata::is_optional_uniswap_v2_pool_metadata_miss;
 use super::trading_status::{
     current_block_simulation_pool_addresses, should_simulate_at_current_block,
 };
@@ -51,17 +51,17 @@ fn forced_token_control_simulates_all_pools_at_current_block() {
 
 #[test]
 fn live_header_gap_is_optional_pool_metadata_miss() {
-    assert!(is_not_uniswap_v2_pool_metadata_miss(
+    assert!(is_optional_uniswap_v2_pool_metadata_miss(
         "missing live block header for 25050934"
     ));
 }
 
 #[test]
 fn token_decimals_failures_are_optional_pool_metadata_misses() {
-    assert!(is_not_uniswap_v2_pool_metadata_miss(
+    assert!(is_optional_uniswap_v2_pool_metadata_miss(
         "Failed to get token decimals for 0x38c6a68304cdefb9bec48bbfaaba5c5b47818bb2"
     ));
-    assert!(is_not_uniswap_v2_pool_metadata_miss(
+    assert!(is_optional_uniswap_v2_pool_metadata_miss(
             "Token decimals call for 0xe0b7927c4af23765cb51314a0e0521a9645f0e2a returned 0 bytes (expected >= 32)"
         ));
 }

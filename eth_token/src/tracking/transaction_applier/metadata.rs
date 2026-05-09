@@ -73,7 +73,7 @@ where
             );
             Ok(metadata)
         }
-        Err(error) if is_not_uniswap_v2_pool_metadata_miss(&error.to_string()) => {
+        Err(error) if is_optional_uniswap_v2_pool_metadata_miss(&error.to_string()) => {
             tracing::debug!(
                 target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                 block_number = lookup.block_number,
@@ -92,7 +92,10 @@ where
     }
 }
 
-pub(super) fn is_not_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
+pub(super) fn is_optional_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
+    // Pool metadata is a discovery aid. Non-pair contracts, nonstandard ERC-20
+    // denom tokens, incomplete metadata methods, and short live header windows
+    // should skip discovery for this pool, not fail block application.
     message.contains("token0() view call failed")
         || message.contains("token1() view call failed")
         || message.contains("Failed to get token decimals")

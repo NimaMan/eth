@@ -208,6 +208,8 @@ fn is_native_eth_sentinel(address: &alloy_primitives::Address) -> bool {
 }
 
 fn is_optional_token_metadata_read_error(message: &str) -> bool {
+    // Token metadata is optional for discovery. Contracts that do not fully
+    // implement ERC-20 metadata should not make block application fail.
     message.contains("Failed to get token name")
         || message.contains("Failed to get token symbol")
         || message.contains("Failed to get token decimals")
