@@ -52,8 +52,7 @@ pub async fn load_processed_block(
         }
 
         let started = Instant::now();
-        let block = tx_processor
-            .process_block(block_number)
+        let block = process_uncached_block_with_retry(tx_processor, block_number, retry)
             .await
             .wrap_err_with(|| format!("failed to process uncached block {block_number}"))?;
         let mut disk_cache_write_ms = 0;
@@ -84,8 +83,7 @@ pub async fn load_processed_block(
     }
 
     let started = Instant::now();
-    let block = tx_processor
-        .process_block(block_number)
+    let block = process_uncached_block_with_retry(tx_processor, block_number, retry)
         .await
         .wrap_err_with(|| format!("failed to process block {block_number}"))?;
     Ok(LoadedProcessedBlock {
@@ -156,4 +154,81 @@ async fn read_cached_block(
         disk_cache_write_ms: 0,
         source: ProcessedBlockSource::Cache.as_str(),
     }))
+}
+
+async fn process_uncached_block_with_retry(
+    tx_processor: &BlockProcessor,
+    block_number: u64,
+    retry: ProcessedBlockProviderRetry,
+) -> Result<ProcessedBlock> {
+    for attempt in 0..=retry.attempts {
+        match tx_processor.process_block(block_number).await {
+            Ok(block) => return Ok(block),
+            Err(error) if attempt < retry.attempts && is_transient_reth_state_lag_error(&error) => {
+                tracing::warn!(
+                    block_number,
+                    attempt = attempt + 1,
+                    max_attempts = retry.attempts + 1,
+                    error = %error,
+                    "processed block replay failed while Reth state may still be catching up"
+                );
+                if retry.delay_ms > 0 {
+                    sleep(Duration::from_millis(retry.delay_ms)).await;
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("retry loop always returns before exhausting attempts")
+}
+
+fn is_transient_reth_state_lag_error(error: &eyre::Report) -> bool {
+    let error_chain = error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ");
+
+    error_chain.contains("failed to trace block transaction")
+        && error_chain.contains("transaction validation error")
+        && (error_chain.contains("lack of funds") || error_chain.contains("nonce"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(message: &str) -> eyre::Report {
+        eyre::eyre!("{message}")
+    }
+
+    #[test]
+    fn classifies_trace_validation_lack_of_funds_as_transient_state_lag() {
+        let error = report(
+            "failed to trace block transaction block_number=25056257 tx_index=5: \
+             transaction validation error: lack of funds (60968524683211705390) \
+             for max fee (60968613646342838366)",
+        );
+
+        assert!(is_transient_reth_state_lag_error(&error));
+    }
+
+    #[test]
+    fn does_not_retry_unrelated_processing_errors() {
+        let error = report("failed to decode receipt for block 10");
+
+        assert!(!is_transient_reth_state_lag_error(&error));
+    }
+
+    #[test]
+    fn classifies_wrapped_trace_validation_error() {
+        let error = report(
+            "failed to trace block transaction block_number=25056257 tx_index=5: \
+             transaction validation error: nonce too low",
+        )
+        .wrap_err("failed to process block 25056257");
+
+        assert!(is_transient_reth_state_lag_error(&error));
+    }
 }

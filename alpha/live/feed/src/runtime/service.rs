@@ -303,7 +303,7 @@ impl LiveTokenRuntime {
                 .apply_block(
                     block_number,
                     false,
-                    ProcessedBlockProviderRetry::none(),
+                    self.processed_block_retry(),
                     &tx_processor,
                     &warmup_discovery_provider,
                     &pool_simulator,
@@ -360,10 +360,7 @@ impl LiveTokenRuntime {
             tx_processor.clone(),
             self.inner.provider.clone(),
             self.inner.processed_block_disk_cache.clone(),
-            ProcessedBlockProviderRetry {
-                attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
-                delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
-            },
+            self.processed_block_retry(),
         ) {
             Ok(provider) => provider,
             Err(error) => {
@@ -471,6 +468,13 @@ impl LiveTokenRuntime {
                 .await;
                 return;
             }
+        }
+    }
+
+    fn processed_block_retry(&self) -> ProcessedBlockProviderRetry {
+        ProcessedBlockProviderRetry {
+            attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
+            delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
         }
     }
 

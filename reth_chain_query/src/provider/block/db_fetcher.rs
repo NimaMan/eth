@@ -435,6 +435,15 @@ impl RethQueryProvider {
             .trace_block_by_number_with_engine(block_number, Some(trace_options), trace_engine)
             .await?;
 
+        if trace_results.len() != tx_metadata.len() {
+            return Err(eyre::eyre!(
+                "partial block trace for block {}: traced {} of {} transactions",
+                block_number,
+                trace_results.len(),
+                tx_metadata.len()
+            ));
+        }
+
         let mut traces = Vec::with_capacity(trace_results.len());
 
         for (idx, trace) in trace_results.into_iter().enumerate() {
