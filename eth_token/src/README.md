@@ -12,8 +12,8 @@ transaction/block facts and should not recreate tracing or decoding logic.
 | `state/` | Token transfer state, control-address tracking, and pool-state bridges. |
 | `health/` | Scam, volume, and trading-health scoring. |
 | `network/` | Token address activity, graph construction, and snapshots. |
-| `manager/` | Block-level orchestration over processed Rust transactions. |
-| `tracking/` | Replay contexts, builders, and transaction application. |
+| `manager/` | Compatibility facade for older imports. |
+| `tracking/` | Token registry state, tracked-token indexing, block update loop, and token update routing. |
 | `chain_metadata/` | Chain metadata lookup and cache helpers. |
 | `utils/` | Generic helpers with no domain ownership. |
 
@@ -27,7 +27,7 @@ transaction/block facts and should not recreate tracing or decoding logic.
 
 ```text
 tx_processor::ProcessedBlock
-  -> manager/tracking applies txs in block order
+  -> tracking::block_processor applies txs in block order
   -> erc20 + pools + state + health + network updates
   -> eth_token_server view DTOs
 ```
@@ -66,6 +66,6 @@ tx index and cheap branch clones for individual pool checks.
 
 - Active parity path: ERC-20 plus known V2-router-compatible token/pool tracking.
 - Highest-traffic modules: `erc20`, `pools::uniswap::v2`, `state`,
-  `tracking`, and `manager`.
+  and `tracking`.
 - `health` and `network` should consume stabilized token/pool facts; do not
   move core pool lifecycle logic there.

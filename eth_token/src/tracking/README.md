@@ -25,9 +25,16 @@ decisions, and live retention.
   pool state.
 - `token_update_router/pool_discovery/` discovers known V2-router-compatible,
   Uniswap V3, and Uniswap V4 pools from processed events.
+- `token_update_router/pool_discovery/known_v2.rs` is protocol-aware through
+  `KnownV2Protocol`; it classifies Uniswap V2, SushiSwap V2, PancakeSwap V2,
+  ShibaSwap V2, and Fraxswap V2 instead of treating every V2-shaped pool as
+  Uniswap.
+- `token_update_router/pool_discovery/uniswap_v3.rs` and
+  `token_update_router/pool_discovery/uniswap_v4.rs` stay Uniswap-specific.
 - `token_update_router/trading_status_update/` decides when to refresh pool
   trading-status checks and calls the existing simulator/pool APIs.
-- `index/` and `retention.rs` own live tracked-token indexing and retention.
+- `tracked_token_index.rs` and `live_token_retention.rs` own live tracked-token
+  indexing and retention.
 - `builders/` rebuilds single-token state from processed history.
 - `replay_context/` owns token-control trigger policy for deciding when to
   refresh all known pools.
