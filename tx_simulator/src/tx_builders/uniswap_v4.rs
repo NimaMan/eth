@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 mod artifacts;
 mod encoding;
+mod universal_router;
 
 #[allow(deprecated)]
 pub use self::artifacts::baygus_router_artifact_path;
@@ -12,6 +13,10 @@ pub use self::artifacts::{
     mock_pool_manager_artifact_path, solidity_baygus_executor_dir,
 };
 pub use self::encoding::compute_contract_address;
+pub use self::universal_router::{
+    build_universal_router_v4_exact_input_single_tx, UniversalRouterV4ExactInputSingleRequest,
+    UniversalRouterV4InputPayment,
+};
 
 use self::artifacts::{read_foundry_artifact_bytecode, read_raw_bytecode_file};
 use self::encoding::{
