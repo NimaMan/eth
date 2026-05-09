@@ -36,7 +36,7 @@ from range_triage_utils import (
     compact_text,
     contract_analysis_metrics,
     contract_analysis_next_step,
-    eligibility_label,
+    classification_label,
     finite_number,
     is_burn_address,
     is_eligible_liquidity,
@@ -325,7 +325,7 @@ class SimulatorParityDetector(IssueDetector):
                 f"view_can_buy={view_can_buy}",
                 f"view_can_sell={view_can_sell}",
                 f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
-                f"eligibility={eligibility_label(pool)}",
+                f"classification={classification_label(pool)}",
             ]
             if failure_class:
                 evidence.append(f"failure_class={failure_class}")
@@ -403,7 +403,7 @@ class RouteMismatchDetector(IssueDetector):
                             "observed token sell volume exists",
                             "classic simulator failed with transfer-from failure",
                             f"protocol={pool.get('protocol')}",
-                            f"eligibility={eligibility_label(pool)}",
+                            f"classification={classification_label(pool)}",
                         ],
                         metrics=pool_metrics(pool)
                         | {
@@ -493,7 +493,7 @@ class PriceAndSupplyDetector(IssueDetector):
                                 f"display_price_ratio_to_initial={metric_number(displayed_ratio)}",
                                 f"liquidity={metric_number(pool.get('denom_reserve'))} {pool.get('currency') or ''}".strip(),
                                 f"supply_in_pool_percent={metric_number(supply_percent)}",
-                                f"eligibility={eligibility_label(pool)}",
+                                f"classification={classification_label(pool)}",
                             ],
                             metrics=pool_metrics(pool),
                             suggested_next_step=(
@@ -517,7 +517,7 @@ class PriceAndSupplyDetector(IssueDetector):
                             f"supply_ratio_status={supply_status}",
                             f"supply_ratio_label={supply_label or 'missing'}",
                             f"supply_in_pool_percent={metric_number(supply_percent)}",
-                            f"eligibility={eligibility_label(pool)}",
+                            f"classification={classification_label(pool)}",
                         ],
                         metrics=pool_metrics(pool),
                         suggested_next_step=(
@@ -535,7 +535,7 @@ class PriceAndSupplyDetector(IssueDetector):
                         pool=pool,
                         evidence=[
                             f"supply_in_pool_percent={metric_number(supply_percent)}",
-                            f"eligibility={eligibility_label(pool)}",
+                            f"classification={classification_label(pool)}",
                         ],
                         metrics=pool_metrics(pool),
                         suggested_next_step=(
@@ -624,7 +624,7 @@ class LiquidityHealthDetector(IssueDetector):
                             f"lp_total_supply={metric_number(lp_supply)}",
                             f"lp_supply_status={pool.get('lp_supply_status') or 'unknown'}",
                             f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
-                            f"eligibility={eligibility_label(pool)}",
+                            f"classification={classification_label(pool)}",
                         ],
                         metrics=pool_metrics(pool) | {"lp_total_supply": lp_supply},
                         suggested_next_step=(

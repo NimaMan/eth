@@ -1,4 +1,8 @@
 use alloy_primitives::Address;
+use eth_pool_classification::{
+    classify_pool_with_config, PoolClassification, PoolClassificationConfig,
+    PoolClassificationInput,
+};
 use eth_price::liquidity::{assess_denom_liquidity, LiquidityReference, PoolLiquidityLevel};
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
@@ -125,6 +129,8 @@ pub struct PoolView {
     pub liquidity_removal_tx_hash: Option<String>,
     pub risk_level: PoolRiskLevel,
     pub risk_label: Option<String>,
+    pub pool_classification: PoolClassification,
+    pub strategy_classification: PoolClassification,
     pub creation_block: Option<u64>,
     pub creation_timestamp: Option<u64>,
     pub can_buy_block: Option<u64>,
@@ -464,6 +470,33 @@ impl PoolView {
         let risk = pool_risk(base, current_trading);
         let stage = current_lifecycle_view(base, current_trading);
         let liquidity_removal = base.has_liquidity_removal();
+        let max_denom_reserve = max_denom_reserve(&liquidity_history, base.denom_reserve());
+        let classification_input = PoolClassificationInput {
+            quote_symbol: Some(currency.clone()),
+            denom_reserve: Some(base.denom_reserve()),
+            max_denom_reserve: Some(max_denom_reserve),
+            token_reserve: Some(base.token_reserve()),
+            can_buy: current_trading.can_buy,
+            can_sell: current_trading.can_sell,
+            cohort_can_buy: Some(base.state.can_buy || base.has_observed_buy()),
+            cohort_can_sell: Some(base.state.can_sell || base.has_observed_sell()),
+            is_scam: token.is_scam()
+                || liquidity_removal
+                || matches!(risk.level, PoolRiskLevel::Honeypot),
+            hidden_mint: token.hidden_mint_detected(),
+            liquidity_removed: liquidity_removal,
+            honeypot: matches!(risk.level, PoolRiskLevel::Honeypot),
+            tax_bucket: Some(tax_bucket_key(tax_bucket).to_string()),
+            creation_block: base.creation_block,
+            creation_timestamp: base.creation_timestamp,
+            has_price_history: !base.price_history.is_empty(),
+        };
+        let pool_classification =
+            classify_pool_with_config(&classification_input, &PoolClassificationConfig::default());
+        let strategy_classification = classify_pool_with_config(
+            &classification_input,
+            &PoolClassificationConfig::strategy_stats(),
+        );
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -540,6 +573,8 @@ impl PoolView {
             liquidity_removal_tx_hash: base.scam_tx_hash.clone(),
             risk_level: risk.level,
             risk_label: risk.label,
+            pool_classification,
+            strategy_classification,
             creation_block: base.creation_block,
             creation_timestamp: base.creation_timestamp,
             can_buy_block: base.can_buy_block,
@@ -563,6 +598,26 @@ impl PoolView {
 }
 
 const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
+
+fn max_denom_reserve(history: &[LiquidityPoint], current: f64) -> f64 {
+    history
+        .iter()
+        .map(|point| point.denom_reserve)
+        .chain(std::iter::once(current))
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .fold(0.0, f64::max)
+}
+
+fn tax_bucket_key(bucket: TaxBucket) -> &'static str {
+    match bucket {
+        TaxBucket::Unknown => "unknown",
+        TaxBucket::NoTax => "no_tax",
+        TaxBucket::LowTax => "low_tax",
+        TaxBucket::ModerateTax => "moderate_tax",
+        TaxBucket::HighTax => "high_tax",
+        TaxBucket::ExtremeTax => "extreme_tax",
+    }
+}
 
 #[derive(Clone, Debug)]
 struct DisplaySupplyRatio {

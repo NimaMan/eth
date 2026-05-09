@@ -47,20 +47,27 @@ production policy. Once a detector is proven by investigations and regression
 coverage, promote the stable part into Rust crate logic, an `eth_token_server`
 triage endpoint, or a strategy-analysis endpoint.
 
-## Eligibility
+## Pool Classification
 
-Token-lab severity uses the same first eligibility split as the strategy
-analysis contract: `ETH/WETH >= 0.5` quote liquidity and `USDC/USDT >= 500`
-quote liquidity. Pools below that threshold are still useful as evidence, but
-they should not dominate critical output unless the issue is token-level rather
-than pool-liquidity-specific.
+Token-lab severity uses the same pool classification contract as the strategy
+analysis backend. The first split is `eligible` versus `ineligible`: `ETH/WETH
+>= 0.5` quote liquidity and `USDC/USDT >= 500` quote liquidity, supported
+currency, creation data, price history, and buy/sell viability for the cohort.
+Pools below that threshold are still useful as evidence, but they should not
+dominate critical output unless the issue is token-level rather than
+pool-liquidity-specific.
 
-The canonical implementation lives in `alpha/token_eligibility`. For batch
+The canonical implementation lives in `alpha/pool_classification`. For batch
 parity checks from token_lab, feed pool JSON into:
 
 ```text
-cargo run -q -p eth_token_eligibility --bin token_eligibility
+cargo run -q -p eth_pool_classification --bin pool_classification
 ```
+
+Eligible pools then receive a current category from the same crate:
+`eligible_active` or `eligible_risk`. Risk outcomes such as liquidity removal,
+hidden mint, honeypot, high tax, or later sell failure stay inside the eligible
+cohort so strategy analysis can measure what happened after entry.
 
 LP supply has a separate coverage status. A V2 pool discovered mid-range can
 have reserves while the LP mint happened before the observed window; token lab

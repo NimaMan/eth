@@ -26,29 +26,29 @@ Initial contract:
   Non-eligible pools are an exclusion summary, not part of winner, scam-after-
   entry, or strategy outcome denominators.
 
-## Eligibility Filter
+## Pool Classification
 
 The first layer is a strict split between eligible and non-eligible pools.
 Eligibility is the set of pools we would have considered trading at the time of
-analysis.
+analysis. After that first split, the same classifier assigns the current pool
+category: eligible active, eligible risk, or ineligible.
 
 The source of truth for this split is the Rust crate
-`alpha/token_eligibility`. Token-lab tools can call its JSON CLI for parity
+`alpha/pool_classification`. Token-lab tools can call its JSON CLI for parity
 checks:
 
 ```text
-cargo run -q -p eth_token_eligibility --bin token_eligibility <<'JSON'
+cargo run -q -p eth_pool_classification --bin pool_classification <<'JSON'
 {"currency":"WETH","denom_reserve":0.5,"can_buy":true,"can_sell":true}
 JSON
 ```
 
-Initial eligible pool rules:
+Initial eligible cohort rules:
 
 - quote currency is one of `ETH`, `WETH`, `USDC`, or `USDT`;
 - ETH/WETH-denominated pools have at least `0.5` quote liquidity;
 - USDC/USDT-denominated pools have at least `500` quote liquidity;
-- simulator says the pool can be bought and sold;
-- pool is not flagged as scam by token/pool state;
+- the cohort-level simulator evidence says the pool could be bought and sold;
 - block-only historical stats have price-ratio history.
 
 `DAI` remains unsupported for Snipe All and launch-strategy stats unless we
@@ -60,7 +60,6 @@ Initial non-eligible reasons:
 - dust/test liquidity below the threshold;
 - buyable but not sellable;
 - not buyable;
-- current scam flag;
 - unsupported or unknown currency;
 - missing price-ratio history for block-only stats;
 - missing protocol-specific data needed for strategy stats.
@@ -70,7 +69,7 @@ cohort. They are outcomes of the eligible cohort and should be measured as
 strategy risks. Examples include liquidity removal, hidden mint/rebase behavior,
 tax changes, ownership/control actions, or later sell failure.
 
-Eligibility rules can expand later as we learn from the non-eligible pool
+Classification rules can expand later as we learn from the non-eligible pool
 summary and add support for more currencies, protocols, or simulator paths.
 
 Keep this contract aligned with the `/eth/trade/` eligibility table and
@@ -80,7 +79,7 @@ own the production strategy implementation.
 The first implementation computes time windows from block distance using a
 `12s` Ethereum block-time estimate because the current price-ratio history is
 block-number based. It also uses the current run snapshot for buy/sell
-eligibility until we add per-block pool eligibility snapshots.
+classification until we add per-block pool classification snapshots.
 
 The first backend contract should expose enough pool-level data to answer:
 

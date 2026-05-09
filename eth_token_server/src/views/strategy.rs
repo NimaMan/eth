@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
-use eth_token::pools::TaxBucket;
-use eth_token_eligibility::{
-    evaluate_pool_with_config, EligibilityConfig, NonEligibleReason, PoolEligibilityInput,
-    ETH_ELIGIBLE_LIQUIDITY, STABLE_ELIGIBLE_LIQUIDITY,
+use eth_pool_classification::{
+    EligiblePoolOutcome, NonEligibleReason, PoolClassification, PoolClassificationConfig,
+    PoolCohort, ETH_ELIGIBLE_LIQUIDITY, STABLE_ELIGIBLE_LIQUIDITY,
 };
+use eth_token::pools::TaxBucket;
 use serde::Serialize;
 
 use crate::range_indexer::progress::now_unix_secs;
 use crate::range_indexer::RangeIndexJob;
-use crate::views::pool::{PoolRiskLevel, PoolView};
+use crate::views::pool::PoolView;
 
 const ETH_BLOCK_SECONDS: u64 = 12;
 const WINNER_THRESHOLDS: [f64; 6] = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
@@ -124,15 +124,6 @@ pub struct CohortCount {
     pub eligible_percent: Option<f64>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum RiskOutcome {
-    LiquidityRemoval,
-    HoneypotFlag,
-    HighTax,
-    ExtremeTax,
-    LpApprovalExposure,
-}
-
 #[derive(Clone, Copy, Debug)]
 struct WindowSpec {
     label: &'static str,
@@ -150,14 +141,17 @@ struct PoolStatsRecord {
     protocol: String,
     currency: String,
     liquidity: f64,
+    #[cfg(test)]
     can_buy: bool,
+    #[cfg(test)]
     can_sell: bool,
     creation_block: Option<u64>,
     creation_timestamp: Option<u64>,
     price_ratio_history: Vec<(u64, f64)>,
-    risk_level: PoolRiskLevel,
     tax_bucket: TaxBucket,
     lp_approved_percentage: f64,
+    pool_classification: PoolClassification,
+    strategy_classification: PoolClassification,
 }
 
 impl From<&PoolView> for PoolStatsRecord {
@@ -166,7 +160,9 @@ impl From<&PoolView> for PoolStatsRecord {
             protocol: pool.protocol.clone(),
             currency: pool.currency.clone(),
             liquidity: normalized_liquidity(pool),
+            #[cfg(test)]
             can_buy: pool.can_buy,
+            #[cfg(test)]
             can_sell: pool.can_sell,
             creation_block: pool.creation_block,
             creation_timestamp: pool.creation_timestamp,
@@ -175,9 +171,10 @@ impl From<&PoolView> for PoolStatsRecord {
                 .iter()
                 .map(|point| (point.block_number, point.ratio))
                 .collect(),
-            risk_level: pool.risk_level,
             tax_bucket: pool.tax_bucket,
             lp_approved_percentage: pool.lp_approved_percentage,
+            pool_classification: pool.pool_classification.clone(),
+            strategy_classification: pool.strategy_classification.clone(),
         }
     }
 }
@@ -198,14 +195,18 @@ pub async fn launch_stats(run: &RangeIndexJob) -> LaunchStatsResponse {
 fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsResponse {
     let mut non_eligible_counts = BTreeMap::new();
     let mut eligible_records = Vec::new();
-    let eligibility_config = EligibilityConfig::strategy_stats();
+    let classification_config = PoolClassificationConfig::strategy_stats();
 
     for record in records {
-        match eligibility_reason(record, &eligibility_config) {
-            Some(reason) => {
+        match record.strategy_classification.cohort {
+            PoolCohort::Ineligible => {
+                let reason = record
+                    .strategy_classification
+                    .reason
+                    .unwrap_or(NonEligibleReason::LowLiquidity);
                 *non_eligible_counts.entry(reason).or_insert(0usize) += 1;
             }
-            None => eligible_records.push(record),
+            PoolCohort::Eligible => eligible_records.push(record),
         }
     }
 
@@ -223,8 +224,8 @@ fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsR
             launch_definition: "pool_creation",
             min_liquidity_eth: ETH_ELIGIBLE_LIQUIDITY,
             min_liquidity_usd: STABLE_ELIGIBLE_LIQUIDITY,
-            supported_currencies: eligibility_config.supported_quote_symbols.clone(),
-            eligibility_basis: "current_snapshot",
+            supported_currencies: classification_config.supported_quote_symbols.clone(),
+            eligibility_basis: "ever_seen_liquidity_current_outcome",
         },
         totals: LaunchStatsTotals {
             launched_pools,
@@ -239,26 +240,6 @@ fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsR
         risk_outcomes: risk_outcomes(&eligible_records),
         breakdowns: breakdowns(&eligible_records),
     }
-}
-
-fn eligibility_reason(
-    record: &PoolStatsRecord,
-    config: &EligibilityConfig,
-) -> Option<NonEligibleReason> {
-    let is_risk_blocked = matches!(
-        record.risk_level,
-        PoolRiskLevel::LiquidityRemoval | PoolRiskLevel::Honeypot
-    );
-    let input = PoolEligibilityInput::new(
-        Some(record.currency.clone()),
-        Some(record.liquidity),
-        record.can_buy,
-        record.can_sell,
-        is_risk_blocked,
-    )
-    .with_creation_data(record.creation_block, record.creation_timestamp)
-    .with_price_history(!record.price_ratio_history.is_empty());
-    evaluate_pool_with_config(&input, config).reason
 }
 
 fn normalized_liquidity(pool: &PoolView) -> f64 {
@@ -359,34 +340,23 @@ fn crossed_threshold(record: &PoolStatsRecord, threshold: f64, window_seconds: u
 }
 
 fn risk_outcomes(eligible_records: &[&PoolStatsRecord]) -> Vec<ReasonCount> {
-    let mut counts = BTreeMap::new();
+    let mut counts: BTreeMap<String, (String, usize)> = BTreeMap::new();
     for record in eligible_records {
-        if matches!(record.risk_level, PoolRiskLevel::LiquidityRemoval) {
-            *counts
-                .entry(RiskOutcome::LiquidityRemoval)
-                .or_insert(0usize) += 1;
-        }
-        if matches!(record.risk_level, PoolRiskLevel::Honeypot) {
-            *counts.entry(RiskOutcome::HoneypotFlag).or_insert(0usize) += 1;
-        }
-        if matches!(record.tax_bucket, TaxBucket::HighTax) {
-            *counts.entry(RiskOutcome::HighTax).or_insert(0usize) += 1;
-        }
-        if matches!(record.tax_bucket, TaxBucket::ExtremeTax) {
-            *counts.entry(RiskOutcome::ExtremeTax).or_insert(0usize) += 1;
+        if let Some(outcome) = record.pool_classification.eligible_outcome {
+            if outcome != EligiblePoolOutcome::Active {
+                add_count(&mut counts, outcome.key(), outcome.label());
+            }
         }
         if record.lp_approved_percentage.is_finite() && record.lp_approved_percentage > 0.0 {
-            *counts
-                .entry(RiskOutcome::LpApprovalExposure)
-                .or_insert(0usize) += 1;
+            add_count(&mut counts, "lp_approval_exposure", "LP approval exposure");
         }
     }
 
     counts
         .into_iter()
-        .map(|(reason, count)| ReasonCount {
-            reason: reason.key().to_string(),
-            label: reason.label().to_string(),
+        .map(|(reason, (label, count))| ReasonCount {
+            reason,
+            label,
             count,
             share_percent: percent(count, eligible_records.len()),
         })
@@ -529,31 +499,10 @@ fn tax_bucket_label(bucket: TaxBucket) -> &'static str {
     }
 }
 
-impl RiskOutcome {
-    fn key(self) -> &'static str {
-        match self {
-            Self::LiquidityRemoval => "liquidity_removal",
-            Self::HoneypotFlag => "honeypot_flag",
-            Self::HighTax => "high_tax",
-            Self::ExtremeTax => "extreme_tax",
-            Self::LpApprovalExposure => "lp_approval_exposure",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::LiquidityRemoval => "Liquidity removal",
-            Self::HoneypotFlag => "Honeypot flag",
-            Self::HighTax => "High tax",
-            Self::ExtremeTax => "Extreme tax",
-            Self::LpApprovalExposure => "LP approval exposure",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eth_pool_classification::{classify_pool_with_config, PoolClassificationInput};
 
     fn record() -> PoolStatsRecord {
         PoolStatsRecord {
@@ -565,66 +514,96 @@ mod tests {
             creation_block: Some(100),
             creation_timestamp: Some(1_700_000_000),
             price_ratio_history: vec![(100, 1.0), (150, 2.1), (500, 10.0)],
-            risk_level: PoolRiskLevel::Clear,
             tax_bucket: TaxBucket::NoTax,
             lp_approved_percentage: 0.0,
+            pool_classification: classify_test_pool("WETH", 1.0, true, true),
+            strategy_classification: classify_test_pool("WETH", 1.0, true, true),
         }
     }
 
-    fn test_eligibility_reason(record: &PoolStatsRecord) -> Option<NonEligibleReason> {
-        eligibility_reason(record, &EligibilityConfig::strategy_stats())
+    fn classify_test_pool(
+        currency: &str,
+        liquidity: f64,
+        can_buy: bool,
+        can_sell: bool,
+    ) -> PoolClassification {
+        let input = PoolClassificationInput::new(
+            Some(currency.to_string()),
+            Some(liquidity),
+            can_buy,
+            can_sell,
+            false,
+        )
+        .with_creation_data(Some(100), Some(1_700_000_000))
+        .with_price_history(true);
+        classify_pool_with_config(&input, &PoolClassificationConfig::strategy_stats())
+    }
+
+    fn refresh_classification(record: &mut PoolStatsRecord) {
+        record.pool_classification = classify_test_pool(
+            &record.currency,
+            record.liquidity,
+            record.can_buy,
+            record.can_sell,
+        );
+        record.strategy_classification = record.pool_classification.clone();
+    }
+
+    fn test_classification_reason(record: &mut PoolStatsRecord) -> Option<NonEligibleReason> {
+        refresh_classification(record);
+        record.pool_classification.reason
     }
 
     #[test]
-    fn eligibility_accepts_usd_stables_with_stable_liquidity_floor() {
+    fn classification_accepts_usd_stables_with_stable_liquidity_floor() {
         let mut record = record();
         record.currency = "USDC".to_string();
         record.liquidity = STABLE_ELIGIBLE_LIQUIDITY;
 
-        assert_eq!(test_eligibility_reason(&record), None);
+        assert_eq!(test_classification_reason(&mut record), None);
     }
 
     #[test]
-    fn eligibility_rejects_usd_stables_below_stable_liquidity_floor() {
+    fn classification_rejects_usd_stables_below_stable_liquidity_floor() {
         let mut record = record();
         record.currency = "USDT".to_string();
         record.liquidity = STABLE_ELIGIBLE_LIQUIDITY - 0.01;
 
         assert_eq!(
-            test_eligibility_reason(&record),
+            test_classification_reason(&mut record),
             Some(NonEligibleReason::LowLiquidity)
         );
     }
 
     #[test]
-    fn eligibility_requires_supported_currency() {
+    fn classification_requires_supported_currency() {
         let mut record = record();
         record.currency = "DAI".to_string();
 
         assert_eq!(
-            test_eligibility_reason(&record),
+            test_classification_reason(&mut record),
             Some(NonEligibleReason::UnsupportedCurrency)
         );
     }
 
     #[test]
-    fn eligibility_rejects_low_liquidity() {
+    fn classification_rejects_low_liquidity() {
         let mut record = record();
         record.liquidity = 0.49;
 
         assert_eq!(
-            test_eligibility_reason(&record),
+            test_classification_reason(&mut record),
             Some(NonEligibleReason::LowLiquidity)
         );
     }
 
     #[test]
-    fn eligibility_rejects_unsellable_pools() {
+    fn classification_rejects_unsellable_pools() {
         let mut record = record();
         record.can_sell = false;
 
         assert_eq!(
-            test_eligibility_reason(&record),
+            test_classification_reason(&mut record),
             Some(NonEligibleReason::CannotSell)
         );
     }

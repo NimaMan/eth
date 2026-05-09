@@ -3,15 +3,16 @@ use std::{
     process,
 };
 
-use eth_token_eligibility::{
-    evaluate_pool_with_config, EligibilityConfig, EligibilityDecision, PoolEligibilityInput,
+use eth_pool_classification::{
+    classify_pool_with_config, PoolClassification, PoolClassificationConfig,
+    PoolClassificationInput,
 };
 use serde::Serialize;
 use serde_json::Value;
 
 #[derive(Debug, Serialize)]
 struct BatchResponse {
-    decisions: Vec<EligibilityDecision>,
+    decisions: Vec<PoolClassification>,
 }
 
 fn main() {
@@ -28,7 +29,7 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("failed to read stdin: {error}"))?;
     let value: Value =
         serde_json::from_str(&raw).map_err(|error| format!("invalid JSON input: {error}"))?;
-    let config = EligibilityConfig::default();
+    let config = PoolClassificationConfig::default();
 
     if let Some(pools) = value.get("pools").and_then(Value::as_array) {
         return write_batch(pools, &config);
@@ -37,21 +38,21 @@ fn run() -> Result<(), String> {
         return write_batch(items, &config);
     }
 
-    let input = PoolEligibilityInput::from_json_value(&value)
-        .map_err(|error| format!("invalid pool eligibility object: {error}"))?;
-    let decision = evaluate_pool_with_config(&input, &config);
+    let input = PoolClassificationInput::from_json_value(&value)
+        .map_err(|error| format!("invalid pool classification object: {error}"))?;
+    let decision = classify_pool_with_config(&input, &config);
     serde_json::to_writer_pretty(io::stdout(), &decision)
         .map_err(|error| format!("failed to write JSON output: {error}"))?;
     println!();
     Ok(())
 }
 
-fn write_batch(items: &[Value], config: &EligibilityConfig) -> Result<(), String> {
+fn write_batch(items: &[Value], config: &PoolClassificationConfig) -> Result<(), String> {
     let mut decisions = Vec::with_capacity(items.len());
     for item in items {
-        let input = PoolEligibilityInput::from_json_value(item)
-            .map_err(|error| format!("invalid pool eligibility object: {error}"))?;
-        decisions.push(evaluate_pool_with_config(&input, config));
+        let input = PoolClassificationInput::from_json_value(item)
+            .map_err(|error| format!("invalid pool classification object: {error}"))?;
+        decisions.push(classify_pool_with_config(&input, config));
     }
     serde_json::to_writer_pretty(io::stdout(), &BatchResponse { decisions })
         .map_err(|error| format!("failed to write JSON output: {error}"))?;

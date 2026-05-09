@@ -12,9 +12,16 @@ pub fn evaluate(
     if state.has_bought(&pool.address) {
         return RuleDecision::hold(RULE_NAME, "pool already bought");
     }
-    let decision = config.eligibility_decision(pool);
+    let decision = config.classification_decision(pool);
     if let Some(reason) = decision.reason {
         return RuleDecision::hold(RULE_NAME, reason.key());
+    }
+    if !decision.tradable_now {
+        let reason = decision
+            .eligible_outcome
+            .map(|outcome| outcome.key())
+            .unwrap_or_else(|| decision.category.key());
+        return RuleDecision::hold(RULE_NAME, reason);
     }
 
     RuleDecision::Enter { rule: RULE_NAME }

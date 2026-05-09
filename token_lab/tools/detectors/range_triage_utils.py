@@ -66,6 +66,10 @@ def pool_metrics(pool: Mapping[str, Any]) -> dict[str, Any]:
         "risk_level": pool.get("risk_level"),
         "risk_label": pool.get("risk_label"),
         "stage": pool.get("stage"),
+        "pool_cohort": classification_value(pool, "cohort"),
+        "pool_category": classification_value(pool, "category"),
+        "eligible_outcome": classification_value(pool, "eligible_outcome"),
+        "non_eligible_reason": classification_value(pool, "reason_key"),
     }
 
 
@@ -136,7 +140,20 @@ def is_supported_eligibility_currency(pool: Mapping[str, Any]) -> bool:
     return str(pool.get("currency") or "").upper() in ELIGIBLE_CURRENCIES
 
 
-def eligibility_label(pool: Mapping[str, Any]) -> str:
+def classification_label(pool: Mapping[str, Any]) -> str:
+    reason = classification_value(pool, "reason_key")
+    if reason:
+        return reason
+    outcome = classification_value(pool, "eligible_outcome")
+    if outcome:
+        return outcome
+    category = classification_value(pool, "category")
+    if category:
+        return category
+    cohort = classification_value(pool, "cohort")
+    if cohort:
+        return cohort
+
     if not is_supported_eligibility_currency(pool):
         return "unsupported_currency"
     if not is_eligible_liquidity(pool):
@@ -148,6 +165,28 @@ def eligibility_label(pool: Mapping[str, Any]) -> str:
     if str(pool.get("risk_level") or "").lower() in {"liquidity_removal", "honeypot"}:
         return "risk_blocked"
     return "eligible"
+
+
+def pool_classification(pool: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = pool.get("pool_classification") or pool.get("poolClassification") or {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def classification_value(pool: Mapping[str, Any], key: str) -> str:
+    classification = pool_classification(pool)
+    camel_key = snake_to_camel(key)
+    value = (
+        classification.get(key)
+        or classification.get(camel_key)
+        or pool.get(key)
+        or pool.get(camel_key)
+    )
+    return str(value or "").strip()
+
+
+def snake_to_camel(value: str) -> str:
+    parts = value.split("_")
+    return parts[0] + "".join(part.title() for part in parts[1:])
 
 
 def looks_like_liquidity_drain(

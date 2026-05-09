@@ -4,8 +4,9 @@ use eth_alpha_core::{
     ids::{PortfolioId, WalletId},
     market::PoolSnapshot,
 };
-use eth_token_eligibility::{
-    evaluate_pool_with_config, EligibilityConfig, EligibilityDecision, PoolEligibilityInput,
+use eth_pool_classification::{
+    classify_pool_with_config, PoolClassification, PoolClassificationConfig,
+    PoolClassificationInput,
 };
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
@@ -48,17 +49,17 @@ impl Default for SnipeAllConfig {
 }
 
 impl SnipeAllConfig {
-    pub fn eligibility_config(&self) -> EligibilityConfig {
-        EligibilityConfig {
+    pub fn classification_config(&self) -> PoolClassificationConfig {
+        PoolClassificationConfig {
             supported_quote_symbols: self.supported_denom_symbols.clone(),
             min_eth_liquidity: self.min_denom_reserve.to_f64().unwrap_or(0.0),
             min_stable_liquidity: self.min_stable_denom_reserve.to_f64().unwrap_or(0.0),
-            ..EligibilityConfig::default()
+            ..PoolClassificationConfig::default()
         }
     }
 
-    pub fn eligibility_input(&self, pool: &PoolSnapshot) -> PoolEligibilityInput {
-        PoolEligibilityInput::new(
+    pub fn classification_input(&self, pool: &PoolSnapshot) -> PoolClassificationInput {
+        PoolClassificationInput::new(
             normalized_denom_symbol(pool),
             pool.denom_reserve.to_f64(),
             pool.can_buy,
@@ -67,8 +68,11 @@ impl SnipeAllConfig {
         )
     }
 
-    pub fn eligibility_decision(&self, pool: &PoolSnapshot) -> EligibilityDecision {
-        evaluate_pool_with_config(&self.eligibility_input(pool), &self.eligibility_config())
+    pub fn classification_decision(&self, pool: &PoolSnapshot) -> PoolClassification {
+        classify_pool_with_config(
+            &self.classification_input(pool),
+            &self.classification_config(),
+        )
     }
 }
 

@@ -1,5 +1,5 @@
 [package]
-name = "eth_token_eligibility"
+name = "eth_pool_classification"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
