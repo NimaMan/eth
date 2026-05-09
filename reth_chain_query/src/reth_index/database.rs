@@ -328,6 +328,33 @@ impl RethIndexDB {
         }
         Ok(count)
     }
+
+    /// Return all `(tx_number, first_seen_ms)` arrival entries ordered by `tx_number`.
+    pub fn tx_arrival_entries(&self) -> Result<Vec<(u64, u64)>> {
+        let tx: Transaction<RO> = self.env.begin_ro_txn()?;
+        let cursor = tx.cursor(self.tx_arrival_dbi.dbi())?;
+        let mut entries = Vec::new();
+        for entry in cursor.into_iter::<[u8; 8], [u8; 8]>() {
+            let (key, value) = entry?;
+            entries.push((
+                MempoolTxArrivalTable::decode_key(&key)?,
+                MempoolTxArrivalTable::decode_value(&value)?,
+            ));
+        }
+        entries.sort_by_key(|(tx_number, _)| *tx_number);
+        Ok(entries)
+    }
+
+    /// Return the min/max transaction numbers that have recorded mempool arrivals.
+    pub fn tx_arrival_tx_number_bounds(&self) -> Result<Option<(u64, u64)>> {
+        let entries = self.tx_arrival_entries()?;
+        if entries.is_empty() {
+            return Ok(None);
+        }
+        let first = entries[0].0;
+        let last = entries[entries.len() - 1].0;
+        Ok(Some((first, last)))
+    }
 }
 
 /// Lightweight database stats placeholder.

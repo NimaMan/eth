@@ -61,6 +61,11 @@ This directory contains working examples demonstrating the usage of the RethChai
 
 ### Transaction Examples
 
+#### `tx_arrival_coverage`
+- **Purpose**: Measure public mempool visibility for mined transactions
+- **What it does**: Reads the `mempool_tx_arrival_times` index, maps the first and last recorded arrival tx numbers back to blocks, and reports how many mined transactions in that block range were seen before inclusion
+- **Use case**: Mempool coverage diagnostics and public/private flow measurement
+
 #### `fetch_transaction_data_receipts_and_traces`
 - **Purpose**: Fetch complete transaction data
 - **What it does**: Retrieves transaction details, receipts, and execution traces
