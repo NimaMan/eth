@@ -35,25 +35,35 @@ impl ServerState {
             config.reth_index_dir.as_deref(),
         );
         let provider = Arc::new(provider);
-        let (processed_block_disk_cache, processed_block_replay_store) =
-            match config.processed_block_disk_cache_dir.as_ref() {
-                Some(path) => {
-                    let store = ProcessedBlockDiskCacheStore::open(path)?;
-                    let address_index = match config.reth_index_dir.as_ref() {
-                        Some(index_dir) => Some(AddressBlockParticipationWriter::new(Arc::new(
-                            RethIndexDB::open(index_dir)?,
-                        ))),
-                        None => None,
-                    };
-                    let writer = ProcessedBlockReplayStoreWriter::new(
-                        store.clone(),
-                        provider.chain_id(),
-                        address_index,
-                    );
-                    (Some(Arc::new(store)), Some(Arc::new(writer)))
-                }
-                None => (None, None),
-            };
+        let (processed_block_disk_cache, processed_block_replay_store) = match config
+            .processed_block_disk_cache_dir
+            .as_ref()
+        {
+            Some(path) => {
+                let store = ProcessedBlockDiskCacheStore::open(path)?;
+                let address_index = match config.reth_index_dir.as_ref() {
+                    Some(index_dir) => match RethIndexDB::open(index_dir) {
+                        Ok(db) => Some(AddressBlockParticipationWriter::new(Arc::new(db))),
+                        Err(error) => {
+                            tracing::warn!(
+                                reth_index_dir = %index_dir.display(),
+                                error = %error,
+                                "processed block replay store address index writer unavailable; continuing with disk cache only"
+                            );
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                let writer = ProcessedBlockReplayStoreWriter::new(
+                    store.clone(),
+                    provider.chain_id(),
+                    address_index,
+                );
+                (Some(Arc::new(store)), Some(Arc::new(writer)))
+            }
+            None => (None, None),
+        };
         let range_indexer = RangeIndexManager::new(
             config.clone(),
             provider.clone(),
