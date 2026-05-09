@@ -2,7 +2,7 @@ use std::{env, path::PathBuf};
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWriter};
+use crate::{ProcessedBlock, ProcessedBlockReplayStoreWriter};
 
 const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
 const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
@@ -13,30 +13,36 @@ const DEFAULT_QUEUE_BLOCKS: usize = 256;
 const PRUNE_INTERVAL_WRITES: u64 = 1_000;
 
 /// Non-blocking background sink for writing live processed blocks into the
-/// processed block disk cache after Redis publication has succeeded.
-pub struct LiveProcessedBlockDiskCacheSink {
+/// replay store after Redis publication has succeeded.
+pub struct LiveProcessedBlockReplayStoreSink {
     sender: mpsc::Sender<ProcessedBlock>,
     _worker: JoinHandle<()>,
 }
 
-impl LiveProcessedBlockDiskCacheSink {
-    pub fn from_config(chain_id: u64) -> eyre::Result<Self> {
+impl LiveProcessedBlockReplayStoreSink {
+    pub fn from_config(chain_id: u64, reth_datadir: PathBuf) -> eyre::Result<Self> {
         let cache_dir = processed_block_disk_cache_dir()?;
         let retain_blocks = processed_block_disk_cache_blocks();
-        Self::new(cache_dir, chain_id, retain_blocks, DEFAULT_QUEUE_BLOCKS)
+        Self::new(
+            cache_dir,
+            chain_id,
+            reth_datadir,
+            retain_blocks,
+            DEFAULT_QUEUE_BLOCKS,
+        )
     }
 
     pub fn new(
         cache_dir: PathBuf,
         chain_id: u64,
+        reth_datadir: PathBuf,
         retain_blocks: u64,
         queue_blocks: usize,
     ) -> eyre::Result<Self> {
-        let store = ProcessedBlockDiskCacheStore::open(&cache_dir)?;
-        let writer = store.writer(chain_id);
+        let writer =
+            ProcessedBlockReplayStoreWriter::from_reth_datadir(&cache_dir, chain_id, reth_datadir)?;
         let (sender, receiver) = mpsc::channel(queue_blocks.max(1));
-        let worker = tokio::spawn(run_cache_writer(
-            store,
+        let worker = tokio::spawn(run_replay_store_writer(
             writer,
             receiver,
             chain_id,
@@ -47,7 +53,7 @@ impl LiveProcessedBlockDiskCacheSink {
             cache_dir = %cache_dir.display(),
             retain_blocks,
             queue_blocks = queue_blocks.max(1),
-            "enabled live processed block disk cache writer"
+            "enabled live processed block replay store writer"
         );
 
         Ok(Self {
@@ -63,22 +69,21 @@ impl LiveProcessedBlockDiskCacheSink {
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
                     block_number,
-                    "live processed block disk cache queue is full; dropping cache write"
+                    "live processed block replay store queue is full; dropping replay-store write"
                 );
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 tracing::warn!(
                     block_number,
-                    "live processed block disk cache writer is closed; dropping cache write"
+                    "live processed block replay store writer is closed; dropping replay-store write"
                 );
             }
         }
     }
 }
 
-async fn run_cache_writer(
-    store: ProcessedBlockDiskCacheStore,
-    writer: ProcessedBlockDiskCacheWriter,
+async fn run_replay_store_writer(
+    writer: ProcessedBlockReplayStoreWriter,
     mut receiver: mpsc::Receiver<ProcessedBlock>,
     chain_id: u64,
     retain_blocks: u64,
@@ -86,18 +91,17 @@ async fn run_cache_writer(
     let mut successful_writes = 0_u64;
     while let Some(block) = receiver.recv().await {
         let block_number = block.header.number;
-        let store = store.clone();
         let writer = writer.clone();
         let should_prune = (successful_writes + 1) % PRUNE_INTERVAL_WRITES == 0;
 
         let result = tokio::task::spawn_blocking(move || -> eyre::Result<(u128, usize)> {
             let write = writer.write_processed_block(&block)?;
             let pruned = if should_prune {
-                store.prune_chain_to_recent_blocks(chain_id, retain_blocks)?
+                writer.prune_disk_cache_to_recent_blocks(chain_id, retain_blocks)?
             } else {
                 0
             };
-            Ok((write.write_ms, pruned))
+            Ok((write.total_write_ms(), pruned))
         })
         .await;
 
@@ -108,7 +112,7 @@ async fn run_cache_writer(
                     tracing::info!(
                         block_number,
                         pruned,
-                        "pruned live processed block disk cache"
+                        "pruned live processed block replay store"
                     );
                 }
             }
@@ -116,14 +120,14 @@ async fn run_cache_writer(
                 tracing::warn!(
                     block_number,
                     error = %error,
-                    "failed to write live processed block to disk cache"
+                    "failed to write live processed block to replay store"
                 );
             }
             Err(error) => {
                 tracing::warn!(
                     block_number,
                     error = %error,
-                    "live processed block disk cache writer task failed"
+                    "live processed block replay store writer task failed"
                 );
             }
         }

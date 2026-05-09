@@ -3,18 +3,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
-use eyre::{bail, Result};
-use futures::{stream, StreamExt, TryStreamExt};
-use reth_chain_query::{provider::BlockDataFetcher, RethQueryProvider};
+use eyre::{Result, bail};
+use futures::{StreamExt, TryStreamExt, stream};
+use reth_chain_query::{RethQueryProvider, provider::BlockDataFetcher};
 use tx_processor::{
-    load_processed_block_range_with_options, BlockProcessor, ProcessedBlock,
-    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
-    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    BlockProcessor, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
+    ProcessedBlockReplayStoreWriter, load_processed_block_range_with_options,
 };
 use tx_simulator::{
-    block_simulation::{BlockReplayProfile, BlockTraceEngine, ReplayProfileConfig},
     TxSimulator,
+    block_simulation::{BlockReplayProfile, BlockTraceEngine, ReplayProfileConfig},
 };
 
 #[derive(Debug, Parser)]
@@ -139,6 +139,9 @@ async fn main() -> Result<()> {
         .as_ref()
         .map(ProcessedBlockDiskCacheStore::open)
         .transpose()?;
+    let cache_replay_store = cache_store.as_ref().map(|store| {
+        ProcessedBlockReplayStoreWriter::new(store.clone(), provider.chain_id(), None)
+    });
 
     print_header();
     match args.mode {
@@ -146,9 +149,18 @@ async fn main() -> Result<()> {
             let ranges = matrix_ranges(&args, latest)?;
             for (start, end) in ranges {
                 run_cold_sweep(&args, &processor, start, end).await?;
+                if let Some(replay_store) = cache_replay_store.as_ref() {
+                    run_cache_refresh(
+                        &args,
+                        &processor,
+                        provider.as_ref(),
+                        replay_store,
+                        start,
+                        end,
+                    )
+                    .await?;
+                }
                 if let Some(store) = cache_store.as_ref() {
-                    run_cache_refresh(&args, &processor, provider.as_ref(), store, start, end)
-                        .await?;
                     run_cache_read_only(&args, provider.as_ref(), store, start, end).await?;
                 }
                 if !args.skip_replay_only {
@@ -161,7 +173,7 @@ async fn main() -> Result<()> {
             run_cold_sweep(&args, &processor, start, end).await?;
         }
         Mode::CacheRefresh => {
-            let store = required_cache_store(cache_store.as_ref(), args.mode)?;
+            let store = required_cache_replay_store(cache_replay_store.as_ref(), args.mode)?;
             let (start, end) = selected_range(&args, latest)?;
             run_cache_refresh(&args, &processor, provider.as_ref(), store, start, end).await?;
         }
@@ -273,7 +285,7 @@ async fn run_cache_refresh(
     args: &Args,
     processor: &BlockProcessor,
     provider: &RethQueryProvider,
-    store: &ProcessedBlockDiskCacheStore,
+    store: &ProcessedBlockReplayStoreWriter,
     start: u64,
     end: u64,
 ) -> Result<()> {
@@ -437,6 +449,13 @@ fn required_cache_store<'a>(
     store: Option<&'a ProcessedBlockDiskCacheStore>,
     mode: Mode,
 ) -> Result<&'a ProcessedBlockDiskCacheStore> {
+    store.ok_or_else(|| eyre::eyre!("--cache-dir is required for {mode:?}"))
+}
+
+fn required_cache_replay_store<'a>(
+    store: Option<&'a ProcessedBlockReplayStoreWriter>,
+    mode: Mode,
+) -> Result<&'a ProcessedBlockReplayStoreWriter> {
     store.ok_or_else(|| eyre::eyre!("--cache-dir is required for {mode:?}"))
 }
 

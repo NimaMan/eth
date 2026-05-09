@@ -6,23 +6,22 @@ use std::sync::Arc;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use reth_chain_query::RethQueryProvider;
-use tx_processor::{BlockProcessor, PoolBuySellSimulator};
+use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlockReplayStoreWriter};
 
 use crate::memory;
 use crate::range_indexer::{RangeIndexError, RangeIndexJob};
-use tx_processor::ProcessedBlockDiskCacheStore;
 
 pub async fn run_range_index(
     run: Arc<RangeIndexJob>,
     provider: Arc<RethQueryProvider>,
-    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     processed_block_disk_cache_blocks: u64,
 ) {
     tracing::info!(
         run_id = %run.id,
         start_block = run.request.start_block,
         end_block = run.request.end_block,
-        processed_block_disk_cache = processed_block_disk_cache.is_some(),
+        processed_block_replay_store = processed_block_replay_store.is_some(),
         "starting token tracking run"
     );
 
@@ -32,9 +31,9 @@ pub async fn run_range_index(
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
-    if let Some(cache_store) = processed_block_disk_cache.as_deref() {
+    if let Some(replay_store) = processed_block_replay_store.as_deref() {
         cache::prune_processed_block_disk_cache(
-            cache_store,
+            replay_store.disk_cache_store(),
             chain_id,
             processed_block_disk_cache_blocks,
         );
@@ -47,7 +46,7 @@ pub async fn run_range_index(
             return;
         }
 
-        let chunk_end = if processed_block_disk_cache.is_some() {
+        let chunk_end = if processed_block_replay_store.is_some() {
             next_block
                 .saturating_add(cache::PROCESSED_BLOCK_DISK_CACHE_READ_BATCH - 1)
                 .min(run.request.end_block)
@@ -75,7 +74,7 @@ pub async fn run_range_index(
                 provider.as_ref(),
                 next_block,
                 chunk_end,
-                processed_block_disk_cache.as_deref(),
+                processed_block_replay_store.as_deref(),
             )
             .await
             {
@@ -95,11 +94,11 @@ pub async fn run_range_index(
                 }
             };
 
-            if let Some(cache_store) = processed_block_disk_cache.as_deref() {
+            if let Some(replay_store) = processed_block_replay_store.as_deref() {
                 if cache::should_prune_processed_block_disk_cache(chunk_end, run.request.end_block)
                 {
                     cache::prune_processed_block_disk_cache(
-                        cache_store,
+                        replay_store.disk_cache_store(),
                         chain_id,
                         processed_block_disk_cache_blocks,
                     );

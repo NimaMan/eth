@@ -7,6 +7,7 @@ use eth_token::manager::BlockTokenProcessor;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{
     BlockProcessor, PoolBuySellSimulator, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
+    ProcessedBlockReplayStoreWriter,
 };
 
 #[tokio::main]
@@ -15,6 +16,8 @@ async fn main() -> eyre::Result<()> {
     let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
     let processor = BlockProcessor::new(provider.clone());
     let store = ProcessedBlockDiskCacheStore::open(&args.cache_dir)?;
+    let replay_store_writer =
+        ProcessedBlockReplayStoreWriter::new(store.clone(), provider.chain_id(), None);
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut full_token_processor = BlockTokenProcessor::new(args.history_limit);
@@ -54,24 +57,24 @@ async fn main() -> eyre::Result<()> {
             );
         }
         if args.fill_missing_then_read && !plan.is_complete() {
-            let writer = store.writer(provider.chain_id());
             for key in &plan.missing_keys {
                 let process_started = Instant::now();
                 let block = processor.process_block(key.block_number).await?;
                 processed_ms.push(ms(process_started.elapsed()));
 
-                let write = writer.write_processed_block(&block)?;
-                if write.key.chain_id != key.chain_id || write.key.block_number != key.block_number
+                let write = replay_store_writer.write_processed_block(&block)?;
+                if write.disk_cache.key.chain_id != key.chain_id
+                    || write.disk_cache.key.block_number != key.block_number
                 {
                     eyre::bail!(
-                        "cache writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
+                        "replay store writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
                         key.block_number,
                         key.chain_id,
                         key.block_number,
-                        write.key
+                        write.disk_cache.key
                     );
                 }
-                write_ms.push(write.write_ms as f64);
+                write_ms.push(write.total_write_ms() as f64);
 
                 println!(
                     "filled block={} txs={} process_ms={:.3} write_ms={:.3}",

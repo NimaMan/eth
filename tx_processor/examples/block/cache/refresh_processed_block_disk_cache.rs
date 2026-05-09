@@ -5,14 +5,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
-use eyre::{bail, Result};
-use reth_chain_query::reth_index::{AddressBlockParticipationWriter, RethIndexDB};
+use eyre::{Result, bail};
 use tx_processor::{
-    address_participations_from_processed_block, load_processed_block_range_with_options,
-    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache, BlockProcessor,
-    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
-    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    BlockProcessor, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    ProcessedBlockRangeLoadOptions, ProcessedBlockReplayStoreWriter,
+    load_processed_block_range_with_options, prune_processed_block_disk_cache,
+    should_prune_processed_block_disk_cache,
 };
 
 const DEFAULT_BLOCKS: u64 = 100_000;
@@ -111,15 +110,20 @@ async fn main() -> Result<()> {
         .saturating_sub(args.latest_offset);
     let (start_block, end_block) = resolve_range(&args, latest)?;
     let cache_dir = resolve_cache_dir(args.cache_dir.as_deref())?;
-    let store = ProcessedBlockDiskCacheStore::open(&cache_dir)?;
     let processor = BlockProcessor::new(provider.clone());
-    let address_index = if args.skip_address_block_index {
+    let address_index_dir = if args.skip_address_block_index {
         None
     } else {
-        let index_dir = resolve_reth_index_dir(args.reth_index_dir.as_deref(), &reth_datadir);
-        let db = Arc::new(RethIndexDB::open(&index_dir)?);
-        Some((index_dir, AddressBlockParticipationWriter::new(db)))
+        Some(resolve_reth_index_dir(
+            args.reth_index_dir.as_deref(),
+            &reth_datadir,
+        ))
     };
+    let replay_store_writer = Arc::new(ProcessedBlockReplayStoreWriter::from_dirs(
+        &cache_dir,
+        provider.chain_id(),
+        address_index_dir.as_deref(),
+    )?);
 
     println!(
         "Refreshing processed-block disk cache: chain_id={} range={}..={} blocks={} chunk_size={} fill_batch_blocks={} fill_concurrency={} cache_dir={} address_block_index={}",
@@ -131,9 +135,9 @@ async fn main() -> Result<()> {
         args.fill_batch_blocks,
         args.fill_concurrency,
         cache_dir.display(),
-        address_index
+        address_index_dir
             .as_ref()
-            .map(|(index_dir, _)| index_dir.display().to_string())
+            .map(|index_dir| index_dir.display().to_string())
             .unwrap_or_else(|| "disabled".to_string())
     );
 
@@ -154,7 +158,7 @@ async fn main() -> Result<()> {
             provider.as_ref(),
             cursor,
             chunk_end,
-            Some(&store),
+            Some(replay_store_writer.as_ref()),
             load_options,
         )
         .await?;
@@ -167,24 +171,35 @@ async fn main() -> Result<()> {
             chunk.cache_writes += u64::from(!loaded_block.disk_cache_metrics.disk_cache_hit);
             chunk.disk_read_ms += loaded_block.disk_cache_metrics.disk_cache_read_ms;
             chunk.disk_write_ms += loaded_block.disk_cache_metrics.disk_cache_write_ms;
+            chunk.address_index_participating_txs += loaded_block
+                .disk_cache_metrics
+                .address_index_participating_txs;
+            chunk.address_index_inserted += loaded_block.disk_cache_metrics.address_index_inserted;
+            chunk.address_index_write_ms += loaded_block.disk_cache_metrics.address_index_write_ms;
+            if loaded_block
+                .disk_cache_metrics
+                .address_index_participating_txs
+                > 0
+            {
+                chunk.address_index_blocks += 1;
+            }
         }
 
-        if let Some((_, address_index_writer)) = &address_index {
+        if address_index_dir.is_some() {
             let index_started = Instant::now();
-            let mut index_blocks = Vec::with_capacity(loaded.len());
             for loaded_block in &loaded {
-                let participations =
-                    address_participations_from_processed_block(&loaded_block.block);
-                chunk.address_index_participating_txs += participations.len() as u64;
-                index_blocks.push((loaded_block.block.header.number, participations));
+                if !loaded_block.disk_cache_metrics.disk_cache_hit {
+                    continue;
+                }
+                if let Some(write) =
+                    replay_store_writer.index_processed_block(&loaded_block.block)?
+                {
+                    chunk.address_index_blocks += 1;
+                    chunk.address_index_participating_txs += write.participating_txs as u64;
+                    chunk.address_index_inserted += write.inserted as u64;
+                    chunk.address_index_write_ms += write.write_ms;
+                }
             }
-            let inserted_by_block =
-                address_index_writer.ingest_block_participation_batch(index_blocks)?;
-            chunk.address_index_blocks += inserted_by_block.len() as u64;
-            chunk.address_index_inserted += inserted_by_block
-                .into_iter()
-                .map(|inserted| inserted as u64)
-                .sum::<u64>();
             chunk.address_index_write_ms += index_started.elapsed().as_millis();
         }
         totals.add(&chunk);
@@ -207,7 +222,11 @@ async fn main() -> Result<()> {
         );
 
         if !args.no_prune && should_prune_processed_block_disk_cache(chunk_end, end_block) {
-            prune_processed_block_disk_cache(&store, provider.chain_id(), args.retain_blocks);
+            prune_processed_block_disk_cache(
+                replay_store_writer.disk_cache_store(),
+                provider.chain_id(),
+                args.retain_blocks,
+            );
         }
 
         if chunk_end == u64::MAX {
@@ -216,7 +235,7 @@ async fn main() -> Result<()> {
         cursor = chunk_end + 1;
     }
 
-    let coverage = store.coverage()?;
+    let coverage = replay_store_writer.disk_cache_store().coverage()?;
     println!(
         "done blocks={} hits={} writes={} txs={} elapsed_ms={} cache_files={} cache_bytes={} trace_hash={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={}",
         totals.blocks,

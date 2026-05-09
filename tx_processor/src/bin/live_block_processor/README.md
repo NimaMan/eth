@@ -6,17 +6,15 @@ Agent operating map for the Rust live processed-block publisher.
 
 - Watch Ethereum head updates, process each live block through `tx_processor`,
   and publish a compact processed-block snapshot to Redis.
-- Emit stream/pubsub notifications and enqueue background side effects for the
-  address-block index and processed-block disk cache.
+- Emit stream/pubsub notifications and enqueue a background replay-store write
+  for the processed-block disk cache and address-block index.
 
 ## Owns
 
 - Binary `live_block_processor`.
 - Live block polling/subscription, block processing, Redis snapshot writes, and
   compact block log output.
-- Background sinks:
-  `LiveAddressBlockParticipationIndexWorker` and
-  `LiveProcessedBlockDiskCacheSink`.
+- Background sink: `LiveProcessedBlockReplayStoreSink`.
 
 ## Does Not Own
 
@@ -33,7 +31,8 @@ Reth head update
   -> Redis block snapshot keys
   -> Redis stream eth/live/blocks
   -> Pub/Sub eth/live/block_notifications
-  -> background address_to_blocks index + processed-block disk cache
+  -> background ProcessedBlockReplayStoreWriter
+  -> processed-block disk cache + address_to_blocks
 ```
 
 ## Where To Look First
@@ -42,8 +41,7 @@ Reth head update
 | --- | --- |
 | Binary entrypoint | `main.rs` |
 | Live processor types | `tx_processor/src/live/` |
-| Processed block cache sink | `tx_processor/src/processed_block_provider/` |
-| Address participation index | `tx_processor/src/live/` |
+| Replay-store writer | `tx_processor/src/processed_block_provider/replay_store.rs` |
 | Service units | `node/systemd/user/eth-rust-live-block-processor.service` |
 | Runtime config | `config.env` |
 

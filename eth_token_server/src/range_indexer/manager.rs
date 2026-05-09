@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::config::TokenServerConfig;
 use crate::views::run::RunSummaryView;
-use tx_processor::ProcessedBlockDiskCacheStore;
+use tx_processor::ProcessedBlockReplayStoreWriter;
 
-use super::pipeline;
 use super::RangeIndexStatus;
+use super::pipeline;
 use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
 
 const DEFAULT_HISTORICAL_END_BLOCK_LAG: u64 = 256;
@@ -25,7 +25,7 @@ pub struct RangeIndexManager {
 struct RangeIndexManagerInner {
     config: TokenServerConfig,
     provider: Arc<RethQueryProvider>,
-    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     runs: RwLock<HashMap<String, Arc<RangeIndexJob>>>,
     active_run_id: RwLock<Option<String>>,
     next_id: AtomicU64,
@@ -60,13 +60,13 @@ impl RangeIndexManager {
     pub fn new(
         config: TokenServerConfig,
         provider: Arc<RethQueryProvider>,
-        processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+        processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     ) -> Self {
         Self {
             inner: Arc::new(RangeIndexManagerInner {
                 config,
                 provider,
-                processed_block_disk_cache,
+                processed_block_replay_store,
                 runs: RwLock::new(HashMap::new()),
                 active_run_id: RwLock::new(None),
                 next_id: AtomicU64::new(1),
@@ -115,7 +115,7 @@ impl RangeIndexManager {
 
         let task_run = run.clone();
         let task_provider = self.inner.provider.clone();
-        let task_processed_block_disk_cache = self.inner.processed_block_disk_cache.clone();
+        let task_processed_block_replay_store = self.inner.processed_block_replay_store.clone();
         let processed_block_disk_cache_blocks = self.inner.config.processed_block_disk_cache_blocks;
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -126,7 +126,7 @@ impl RangeIndexManager {
             runtime.block_on(pipeline::run_range_index(
                 task_run,
                 task_provider,
-                task_processed_block_disk_cache,
+                task_processed_block_replay_store,
                 processed_block_disk_cache_blocks,
             ));
         });

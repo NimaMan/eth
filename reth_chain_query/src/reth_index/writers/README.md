@@ -17,11 +17,11 @@ The address index stores candidate processed blocks, not transaction numbers:
 all addresses across that block, and writes each address once for the block. MDBX
 `NO_DUP_DATA` makes the write idempotent if a block is replayed.
 
-In the live system this writer is hosted by
-`tx_processor::live::LiveAddressBlockParticipationIndexWorker`. The live block
-processor enqueues processed blocks after Redis publication succeeds; the worker
-does extraction and MDBX writes on a background task so index writes cannot
-delay live block publication.
+In the live system this writer is hosted inside
+`tx_processor::ProcessedBlockReplayStoreWriter`. The live block processor
+enqueues processed blocks after Redis publication succeeds; the replay-store
+sink writes both the `.pblock.zst` file and this index on a background task so
+these writes cannot delay live block publication.
 
 For historical ranges, `tx_processor`'s
 `refresh_processed_block_disk_cache` example writes this index while it fills or

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use alloy_primitives::B256;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use reth_chain_query::provider::BlockHeader;
@@ -12,9 +12,9 @@ use serde::Deserialize;
 use tx_simulator::live_chain_data::live_data_registry::keys;
 
 use crate::{
-    load_processed_block, BlockProcessor, CompactProcessedTransaction, LoadedProcessedBlock,
-    ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockProviderRetry,
-    ProcessedBlockSource, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+    BlockProcessor, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION, CompactProcessedTransaction,
+    LoadedProcessedBlock, ProcessedBlock, ProcessedBlockProviderRetry,
+    ProcessedBlockReplayStoreWriter, ProcessedBlockSource, load_processed_block,
 };
 
 #[derive(Clone)]
@@ -22,7 +22,7 @@ pub struct LiveProcessedBlockProvider {
     redis: RedisLiveProcessedBlockProvider,
     tx_processor: BlockProcessor,
     provider: Arc<reth_chain_query::RethQueryProvider>,
-    disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     retry: ProcessedBlockProviderRetry,
 }
 
@@ -31,14 +31,14 @@ impl LiveProcessedBlockProvider {
         redis_url: impl AsRef<str>,
         tx_processor: BlockProcessor,
         provider: Arc<reth_chain_query::RethQueryProvider>,
-        disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+        replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
         retry: ProcessedBlockProviderRetry,
     ) -> Result<Self> {
         Ok(Self {
             redis: RedisLiveProcessedBlockProvider::new(redis_url)?,
             tx_processor,
             provider,
-            disk_cache,
+            replay_store_writer,
             retry,
         })
     }
@@ -59,7 +59,7 @@ impl LiveProcessedBlockProvider {
         load_processed_block(
             &self.tx_processor,
             self.provider.as_ref(),
-            self.disk_cache.clone(),
+            self.replay_store_writer.clone(),
             block_number,
             self.retry,
         )

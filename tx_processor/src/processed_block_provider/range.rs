@@ -5,7 +5,7 @@ use reth_chain_query::RethQueryProvider;
 
 use crate::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore,
-    ProcessedBlockSource,
+    ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
 };
 
 const PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
@@ -55,6 +55,9 @@ pub struct LoadedProcessedBlockWithMetrics {
 struct DiskCacheFillMetrics {
     disk_cache_hit: bool,
     disk_cache_write_ms: u128,
+    address_index_participating_txs: u64,
+    address_index_inserted: u64,
+    address_index_write_ms: u128,
     fill_ms: u128,
     source: &'static str,
 }
@@ -68,6 +71,9 @@ pub struct ProcessedBlockLoadMetrics {
     pub disk_cache_hit: bool,
     pub disk_cache_read_ms: u128,
     pub disk_cache_write_ms: u128,
+    pub address_index_participating_txs: u64,
+    pub address_index_inserted: u64,
+    pub address_index_write_ms: u128,
     pub source: &'static str,
 }
 
@@ -76,14 +82,14 @@ pub async fn load_processed_block_range(
     provider: &RethQueryProvider,
     start_block: u64,
     end_block: u64,
-    processed_block_disk_cache: Option<&ProcessedBlockDiskCacheStore>,
+    processed_block_replay_store: Option<&ProcessedBlockReplayStoreWriter>,
 ) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
     load_processed_block_range_with_options(
         tx_processor,
         provider,
         start_block,
         end_block,
-        processed_block_disk_cache,
+        processed_block_replay_store,
         ProcessedBlockRangeLoadOptions::default(),
     )
     .await
@@ -94,16 +100,16 @@ pub async fn load_processed_block_range_with_options(
     provider: &RethQueryProvider,
     start_block: u64,
     end_block: u64,
-    processed_block_disk_cache: Option<&ProcessedBlockDiskCacheStore>,
+    processed_block_replay_store: Option<&ProcessedBlockReplayStoreWriter>,
     options: ProcessedBlockRangeLoadOptions,
 ) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
-    if let Some(cache_store) = processed_block_disk_cache {
+    if let Some(replay_store_writer) = processed_block_replay_store {
         return load_cached_block_range(
             tx_processor,
             provider,
             start_block,
             end_block,
-            cache_store,
+            replay_store_writer,
             options,
         )
         .await;
@@ -120,6 +126,9 @@ pub async fn load_processed_block_range_with_options(
                 disk_cache_hit: false,
                 disk_cache_read_ms: 0,
                 disk_cache_write_ms: 0,
+                address_index_participating_txs: 0,
+                address_index_inserted: 0,
+                address_index_write_ms: 0,
                 source: ProcessedBlockSource::Processed.as_str(),
             },
         });
@@ -132,9 +141,10 @@ async fn load_cached_block_range(
     provider: &RethQueryProvider,
     start_block: u64,
     end_block: u64,
-    cache_store: &ProcessedBlockDiskCacheStore,
+    replay_store_writer: &ProcessedBlockReplayStoreWriter,
     options: ProcessedBlockRangeLoadOptions,
 ) -> eyre::Result<Vec<LoadedProcessedBlockWithMetrics>> {
+    let cache_store = replay_store_writer.disk_cache_store();
     let reader = cache_store.reader();
     let plan = reader.plan_range(provider, start_block, end_block).await?;
     let missing_count = plan.missing_keys.len();
@@ -145,6 +155,9 @@ async fn load_cached_block_range(
             DiskCacheFillMetrics {
                 disk_cache_hit: true,
                 disk_cache_write_ms: 0,
+                address_index_participating_txs: 0,
+                address_index_inserted: 0,
+                address_index_write_ms: 0,
                 fill_ms: 0,
                 source: ProcessedBlockSource::Cache.as_str(),
             },
@@ -160,11 +173,15 @@ async fn load_cached_block_range(
         );
     }
 
-    let writer = cache_store.writer(provider.chain_id());
     let mut filled_blocks_by_block = HashMap::new();
     if missing_count > 0 {
-        let (filled, fill_ms, write_wall_ms) =
-            fill_cache_entries(tx_processor, &writer, &plan.missing_keys, options).await?;
+        let (filled, fill_ms, write_wall_ms) = fill_cache_entries(
+            tx_processor,
+            replay_store_writer,
+            &plan.missing_keys,
+            options,
+        )
+        .await?;
         for (block_number, filled) in filled {
             fill_metrics_by_block.insert(block_number, filled.metrics.clone());
             filled_blocks_by_block.insert(block_number, filled);
@@ -203,7 +220,7 @@ async fn load_cached_block_range(
             "rebuilding invalid processed block disk cache entries"
         );
         let (filled, fill_ms, write_wall_ms) =
-            fill_cache_entries(tx_processor, &writer, &invalid_keys, options).await?;
+            fill_cache_entries(tx_processor, replay_store_writer, &invalid_keys, options).await?;
         for (block_number, filled) in filled {
             fill_metrics_by_block.insert(block_number, filled.metrics.clone());
             filled_blocks_by_block.insert(block_number, filled);
@@ -257,6 +274,9 @@ async fn load_cached_block_range(
                 disk_cache_hit: fill_metrics.disk_cache_hit,
                 disk_cache_read_ms,
                 disk_cache_write_ms: fill_metrics.disk_cache_write_ms,
+                address_index_participating_txs: fill_metrics.address_index_participating_txs,
+                address_index_inserted: fill_metrics.address_index_inserted,
+                address_index_write_ms: fill_metrics.address_index_write_ms,
                 source: fill_metrics.source,
             },
         });
@@ -267,7 +287,7 @@ async fn load_cached_block_range(
 
 async fn fill_cache_entries(
     tx_processor: &BlockProcessor,
-    writer: &crate::ProcessedBlockDiskCacheWriter,
+    writer: &ProcessedBlockReplayStoreWriter,
     keys: &[crate::ProcessedBlockDiskCacheKey],
     options: ProcessedBlockRangeLoadOptions,
 ) -> eyre::Result<(HashMap<u64, FilledCacheEntry>, u128, u128)> {
@@ -299,14 +319,17 @@ async fn fill_cache_entries(
                 )
             })?;
             let write = writer.write_processed_block(&block)?;
-            write_wall_ms += write.write_ms;
-            if write.key.chain_id != key.chain_id || write.key.block_number != key.block_number {
+            write_wall_ms += write.total_write_ms();
+            let address_index_write = write.address_block_index.as_ref();
+            if write.disk_cache.key.chain_id != key.chain_id
+                || write.disk_cache.key.block_number != key.block_number
+            {
                 eyre::bail!(
-                    "processed block disk cache writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
+                    "processed block replay store writer produced unexpected key for {}: expected chain={} block={}, wrote {:?}",
                     key.block_number,
                     key.chain_id,
                     key.block_number,
-                    write.key
+                    write.disk_cache.key
                 );
             }
             filled_blocks_by_block.insert(
@@ -315,7 +338,16 @@ async fn fill_cache_entries(
                     block,
                     metrics: DiskCacheFillMetrics {
                         disk_cache_hit: false,
-                        disk_cache_write_ms: write.write_ms,
+                        disk_cache_write_ms: write.disk_cache.write_ms,
+                        address_index_participating_txs: address_index_write
+                            .map(|write| write.participating_txs as u64)
+                            .unwrap_or(0),
+                        address_index_inserted: address_index_write
+                            .map(|write| write.inserted as u64)
+                            .unwrap_or(0),
+                        address_index_write_ms: address_index_write
+                            .map(|write| write.write_ms)
+                            .unwrap_or(0),
                         fill_ms: fill_started.elapsed().as_millis(),
                         source: ProcessedBlockSource::Processed.as_str(),
                     },

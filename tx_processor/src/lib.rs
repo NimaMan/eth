@@ -28,38 +28,39 @@ pub mod tx_processor;
 // Re-export data models from tx_processor
 pub use address_block_participation::address_participations_from_processed_block;
 pub use block_processor::{
-    BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
-    ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
-    PROCESSED_BLOCK_SCHEMA_VERSION,
+    BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PROCESSED_BLOCK_SCHEMA_VERSION,
+    PersistentProcessedBlockCacheMode, ProcessedBlock, ProcessedBlockSource,
+    ProcessedBlockTransactions,
 };
 pub use live::{
-    LiveAddressBlockParticipationIndexWorker, LiveBlockProcessor, LiveBlockProcessorConfig,
-    LiveBlockService, LiveProcessedBlock,
+    LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
+    LiveProcessedBlockReplayStoreSink,
 };
 pub use processed_block_provider::{
-    load_cached_processed_block_with_retry, load_processed_block, load_processed_block_range,
-    load_processed_block_range_with_options, prune_processed_block_disk_cache,
-    should_prune_processed_block_disk_cache, CompactProcessedTransaction,
-    LiveProcessedBlockProvider, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
-    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
-    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
-    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
-    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics,
-    ProcessedBlockProviderRetry, ProcessedBlockRangeLoadOptions,
-    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION, CompactProcessedTransaction,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
+    LiveProcessedBlockProvider, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
+    ProcessedBlockAddressIndexWrite, ProcessedBlockDiskCacheBlockRange,
+    ProcessedBlockDiskCacheChainCoverage, ProcessedBlockDiskCacheCoverage,
+    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
+    ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
+    ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
+    ProcessedBlockRangeLoadOptions, ProcessedBlockReplayStoreWrite,
+    ProcessedBlockReplayStoreWriter, load_cached_processed_block_with_retry, load_processed_block,
+    load_processed_block_range, load_processed_block_range_with_options,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
 };
 pub use processed_tx_provider::{
-    processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,
-    ProcessedBlockCacheStore, ProcessedTxProvider, TokenProcessedTxProvider,
+    AddressProcessedTxProvider, ProcessedBlockCacheKey, ProcessedBlockCacheStore,
+    ProcessedTxProvider, TokenProcessedTxProvider, processed_block_trace_config_hash,
 };
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 // Export ERC20 token buy-approve-sell simulator through simulator module
 pub use simulator::{
-    check_can_buy_sell_pool, simulate_buy_swap, simulate_sell_swap, BuySwapResult,
-    LivePoolBuySellSimulator, OptionalSetupBuyApproveSellResult, PoolBuySellParameters,
-    PoolBuySellSimulationResult, PoolBuySellSimulator, PoolType, SellSwapResult,
+    BuySwapResult, LivePoolBuySellSimulator, OptionalSetupBuyApproveSellResult,
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolBuySellSimulator, PoolType,
+    SellSwapResult, check_can_buy_sell_pool, simulate_buy_swap, simulate_sell_swap,
 };
 pub use tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 

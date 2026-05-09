@@ -1,6 +1,6 @@
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -10,13 +10,13 @@ use eth_token::chain_metadata::{
 };
 use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::manager::TokenBlockUpdateReport;
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use reth_chain_query::RethQueryProvider;
-use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard, broadcast};
 use tx_processor::{
-    load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
-    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockDiskCacheStore,
-    ProcessedBlockProviderRetry,
+    BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
+    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockProviderRetry,
+    ProcessedBlockReplayStoreWriter, load_processed_block,
 };
 
 use super::config::LiveTokenRuntimeConfig;
@@ -28,7 +28,7 @@ use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
 };
-use super::redis_stream::{missing_blocks_after, RedisBlockStream};
+use super::redis_stream::{RedisBlockStream, missing_blocks_after};
 use super::snapshot::LiveTokenSnapshot;
 use super::state::LiveTokenState;
 use super::time::now_unix_secs;
@@ -43,7 +43,7 @@ pub struct LiveTokenRuntime {
 struct LiveTokenRuntimeInner {
     config: LiveTokenRuntimeConfig,
     provider: Arc<RethQueryProvider>,
-    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     state: RwLock<LiveTokenState>,
     stop_requested: AtomicBool,
     next_id: AtomicU64,
@@ -63,7 +63,7 @@ impl LiveTokenRuntime {
     pub fn new(
         config: LiveTokenRuntimeConfig,
         provider: Arc<RethQueryProvider>,
-        processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+        processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     ) -> Self {
         let history_limit = config.history_limit;
         let (event_tx, _) = broadcast::channel(1024);
@@ -71,7 +71,7 @@ impl LiveTokenRuntime {
             inner: Arc::new(LiveTokenRuntimeInner {
                 config,
                 provider,
-                processed_block_disk_cache,
+                processed_block_replay_store,
                 state: RwLock::new(LiveTokenState::idle(history_limit)),
                 stop_requested: AtomicBool::new(false),
                 next_id: AtomicU64::new(1),
@@ -266,10 +266,10 @@ impl LiveTokenRuntime {
     }
 
     fn latest_cached_block(&self) -> Result<Option<u64>> {
-        let Some(cache_store) = self.inner.processed_block_disk_cache.as_deref() else {
+        let Some(replay_store_writer) = self.inner.processed_block_replay_store.as_deref() else {
             return Ok(None);
         };
-        let coverage = cache_store.coverage()?;
+        let coverage = replay_store_writer.disk_cache_store().coverage()?;
         let chain_id = self.inner.provider.chain_id();
         Ok(coverage
             .chains
@@ -362,7 +362,7 @@ impl LiveTokenRuntime {
             &self.inner.config.redis_url,
             tx_processor.clone(),
             self.inner.provider.clone(),
-            self.inner.processed_block_disk_cache.clone(),
+            self.inner.processed_block_replay_store.clone(),
             self.processed_block_retry(),
         ) {
             Ok(provider) => provider,
@@ -560,7 +560,7 @@ impl LiveTokenRuntime {
         let loaded = load_processed_block(
             tx_processor,
             self.inner.provider.as_ref(),
-            self.inner.processed_block_disk_cache.clone(),
+            self.inner.processed_block_replay_store.clone(),
             block_number,
             retry,
         )

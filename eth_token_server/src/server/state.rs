@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
 use eth_live_feed::LiveTokenRuntimeConfig;
-use eyre::{eyre, Result};
-use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
+use eyre::{Result, eyre};
+use reth_chain_query::{RethQueryProvider, reth_index::RethIndexDB};
 
 use crate::alpha_trading::AlphaTradingStore;
 use crate::config::TokenServerConfig;
 use crate::live::LiveTracker;
 use crate::mempool_signals::MempoolSignalStore;
 use crate::range_indexer::RangeIndexManager;
-use tx_processor::ProcessedBlockDiskCacheStore;
+use reth_chain_query::reth_index::AddressBlockParticipationWriter;
+use tx_processor::{ProcessedBlockDiskCacheStore, ProcessedBlockReplayStoreWriter};
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -18,6 +19,7 @@ pub struct ServerState {
     pub range_indexer: RangeIndexManager,
     pub live_tracker: LiveTracker,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    pub processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     pub mempool_signals: MempoolSignalStore,
     pub alpha_trading: AlphaTradingStore,
 }
@@ -33,19 +35,34 @@ impl ServerState {
             config.reth_index_dir.as_deref(),
         );
         let provider = Arc::new(provider);
-        let processed_block_disk_cache = match config.processed_block_disk_cache_dir.as_ref() {
-            Some(path) => Some(Arc::new(ProcessedBlockDiskCacheStore::open(path)?)),
-            None => None,
-        };
+        let (processed_block_disk_cache, processed_block_replay_store) =
+            match config.processed_block_disk_cache_dir.as_ref() {
+                Some(path) => {
+                    let store = ProcessedBlockDiskCacheStore::open(path)?;
+                    let address_index = match config.reth_index_dir.as_ref() {
+                        Some(index_dir) => Some(AddressBlockParticipationWriter::new(Arc::new(
+                            RethIndexDB::open(index_dir)?,
+                        ))),
+                        None => None,
+                    };
+                    let writer = ProcessedBlockReplayStoreWriter::new(
+                        store.clone(),
+                        provider.chain_id(),
+                        address_index,
+                    );
+                    (Some(Arc::new(store)), Some(Arc::new(writer)))
+                }
+                None => (None, None),
+            };
         let range_indexer = RangeIndexManager::new(
             config.clone(),
             provider.clone(),
-            processed_block_disk_cache.clone(),
+            processed_block_replay_store.clone(),
         );
         let live_tracker = LiveTracker::new(
             live_runtime_config(&config),
             provider.clone(),
-            processed_block_disk_cache.clone(),
+            processed_block_replay_store.clone(),
         );
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
@@ -57,6 +74,7 @@ impl ServerState {
             range_indexer,
             live_tracker,
             processed_block_disk_cache,
+            processed_block_replay_store,
             mempool_signals,
             alpha_trading,
         })

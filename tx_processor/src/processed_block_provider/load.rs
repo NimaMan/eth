@@ -3,9 +3,11 @@ use std::time::Instant;
 
 use eyre::{Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
-use crate::{BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockSource};
+use crate::{
+    BlockProcessor, ProcessedBlock, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
+};
 
 #[derive(Debug)]
 pub struct LoadedProcessedBlock {
@@ -35,14 +37,14 @@ impl ProcessedBlockProviderRetry {
 pub async fn load_processed_block(
     tx_processor: &BlockProcessor,
     provider: &RethQueryProvider,
-    cache_store: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     block_number: u64,
     retry: ProcessedBlockProviderRetry,
 ) -> Result<LoadedProcessedBlock> {
-    if let Some(cache_store) = cache_store {
+    if let Some(replay_store_writer) = replay_store_writer {
         if let Some(cached) = load_cached_processed_block_with_retry(
             provider,
-            cache_store.clone(),
+            replay_store_writer.clone(),
             block_number,
             retry,
         )
@@ -56,18 +58,15 @@ pub async fn load_processed_block(
             .await
             .wrap_err_with(|| format!("failed to process uncached block {block_number}"))?;
         let mut disk_cache_write_ms = 0;
-        match cache_store
-            .writer(provider.chain_id())
-            .write_processed_block(&block)
-        {
+        match replay_store_writer.write_processed_block(&block) {
             Ok(write) => {
-                disk_cache_write_ms = write.write_ms;
+                disk_cache_write_ms = write.disk_cache.write_ms;
             }
             Err(error) => {
                 tracing::warn!(
                     block_number,
                     error = %error,
-                    "failed to write processed block disk cache entry"
+                    "failed to write processed block replay store entry"
                 );
             }
         }
@@ -98,13 +97,17 @@ pub async fn load_processed_block(
 
 pub async fn load_cached_processed_block_with_retry(
     provider: &RethQueryProvider,
-    cache_store: Arc<ProcessedBlockDiskCacheStore>,
+    replay_store_writer: Arc<ProcessedBlockReplayStoreWriter>,
     block_number: u64,
     retry: ProcessedBlockProviderRetry,
 ) -> Result<Option<LoadedProcessedBlock>> {
     for attempt in 0..=retry.attempts {
-        if let Some(cached) =
-            read_cached_block(cache_store.clone(), provider.chain_id(), block_number).await?
+        if let Some(cached) = read_cached_block(
+            replay_store_writer.clone(),
+            provider.chain_id(),
+            block_number,
+        )
+        .await?
         {
             return Ok(Some(cached));
         }
@@ -117,14 +120,18 @@ pub async fn load_cached_processed_block_with_retry(
 }
 
 async fn read_cached_block(
-    cache_store: Arc<ProcessedBlockDiskCacheStore>,
+    replay_store_writer: Arc<ProcessedBlockReplayStoreWriter>,
     chain_id: u64,
     block_number: u64,
 ) -> Result<Option<LoadedProcessedBlock>> {
     let read_started = Instant::now();
     let key = tokio::task::spawn_blocking({
-        let cache_store = cache_store.clone();
-        move || cache_store.cached_key_for_block_number(chain_id, block_number)
+        let replay_store_writer = replay_store_writer.clone();
+        move || {
+            replay_store_writer
+                .disk_cache_store()
+                .cached_key_for_block_number(chain_id, block_number)
+        }
     })
     .await
     .wrap_err("processed block disk cache key task failed")??;
@@ -134,9 +141,9 @@ async fn read_cached_block(
     };
 
     let block = tokio::task::spawn_blocking({
-        let cache_store = cache_store.clone();
+        let replay_store_writer = replay_store_writer.clone();
         let key = key.clone();
-        move || cache_store.get(&key)
+        move || replay_store_writer.disk_cache_store().get(&key)
     })
     .await
     .wrap_err("processed block disk cache read task failed")??;

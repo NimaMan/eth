@@ -8,6 +8,8 @@ Rust pipeline.
 - `live.rs` provides `LiveProcessedBlockProvider`, which hydrates live
   processed blocks from Redis first and falls back to disk/direct processing.
 - `range.rs` loads historical block ranges and fills missing disk-cache entries.
+- `replay_store.rs` owns the canonical write path for the replay store:
+  processed-block disk cache plus derived block-level indexes.
 - `disk_cache/` owns the on-disk processed block cache.
 - `compact.rs` defines the compact processed transaction representation used by
   provider storage so empty collections and zero-only optional values are not
@@ -15,6 +17,11 @@ Rust pipeline.
 
 Higher-level crates should request `ProcessedBlock` data through this module
 instead of implementing Redis, disk, or direct-processing fallback logic locally.
+
+`ProcessedBlockDiskCacheStore` is intentionally a raw storage primitive.
+Callers that persist processed blocks should use
+`ProcessedBlockReplayStoreWriter` so the `.pblock.zst` file and derived indexes
+such as `reth_index/address_to_blocks` stay in sync.
 
 ## Processed Block Disk Cache
 
@@ -47,7 +54,8 @@ migrate them.
 
 The historical backfill entrypoint is
 `tx_processor/examples/block/cache/refresh_processed_block_disk_cache.rs`.
-It fills missing processed-block cache files and, by default, updates derived
-block-level indexes such as `reth_index/address_to_blocks` from the same
-`ProcessedBlock` values. Use `--skip-address-block-index` only for a deliberate
-cache-only refresh.
+It fills missing processed-block cache files through
+`ProcessedBlockReplayStoreWriter` and, by default, repairs
+`reth_index/address_to_blocks` for cached blocks that were written before the
+index existed. Use `--skip-address-block-index` only for a deliberate cache-only
+refresh.

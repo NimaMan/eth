@@ -5,15 +5,14 @@ use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 use std::str::FromStr;
-use tx_simulator::{live_chain_data::ChainStateSnapshot, TxSimulator};
+use tx_simulator::{TxSimulator, live_chain_data::ChainStateSnapshot};
 
 use crate::live::{
-    address_block_participation_index_worker::LiveAddressBlockParticipationIndexWorker,
     block_logger::BlockProcessingLogger,
     block_notifier::RedisBlockNotifier,
-    block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
+    block_snapshot::{LiveBlockSnapshot, build_live_block_snapshot},
     live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig},
-    processed_block_disk_cache_sink::LiveProcessedBlockDiskCacheSink,
+    processed_block_replay_store_sink::LiveProcessedBlockReplayStoreSink,
     redis_block_publisher::RedisBlockPublisher,
 };
 
@@ -24,8 +23,7 @@ pub struct LiveBlockService {
     state_simulator: Option<Arc<TxSimulator>>,
     notifier: Option<RedisBlockNotifier>,
     logger: Option<BlockProcessingLogger>,
-    processed_block_disk_cache: Option<LiveProcessedBlockDiskCacheSink>,
-    address_block_participation_index: Option<LiveAddressBlockParticipationIndexWorker>,
+    processed_block_replay_store: Option<LiveProcessedBlockReplayStoreSink>,
 }
 
 impl LiveBlockService {
@@ -62,24 +60,13 @@ impl LiveBlockService {
                 .join("live_block_processor.log")
         });
         let logger = Some(BlockProcessingLogger::new(logger_path)?);
-        let processed_block_disk_cache =
-            match LiveProcessedBlockDiskCacheSink::from_config(chain_id) {
+        let processed_block_replay_store =
+            match LiveProcessedBlockReplayStoreSink::from_config(chain_id, reth_datadir) {
                 Ok(sink) => Some(sink),
                 Err(err) => {
                     tracing::warn!(
                         error = %err,
-                        "failed to initialize live processed block disk cache writer"
-                    );
-                    None
-                }
-            };
-        let address_block_participation_index =
-            match LiveAddressBlockParticipationIndexWorker::from_reth_datadir(&reth_datadir) {
-                Ok(worker) => Some(worker),
-                Err(err) => {
-                    tracing::warn!(
-                        error = %err,
-                        "failed to initialize live address block participation index worker"
+                        "failed to initialize live processed block replay store writer"
                     );
                     None
                 }
@@ -91,8 +78,7 @@ impl LiveBlockService {
             state_simulator,
             notifier,
             logger,
-            processed_block_disk_cache,
-            address_block_participation_index,
+            processed_block_replay_store,
         })
     }
 
@@ -226,11 +212,8 @@ impl LiveBlockService {
         }
 
         if redis_published {
-            if let Some(index_worker) = &self.address_block_participation_index {
-                index_worker.try_enqueue(processed.processed_block.clone());
-            }
-            if let Some(cache) = &self.processed_block_disk_cache {
-                cache.try_enqueue(processed.processed_block);
+            if let Some(replay_store) = &self.processed_block_replay_store {
+                replay_store.try_enqueue(processed.processed_block);
             }
         }
     }

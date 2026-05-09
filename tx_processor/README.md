@@ -46,7 +46,8 @@ Live path:
 ```text
 live_block_processor
   -> compact ProcessedBlock schema
-  -> processed-block disk cache
+  -> ProcessedBlockReplayStoreWriter
+  -> processed-block disk cache + address_to_blocks
   -> Redis stream eth/live/blocks
 ```
 
@@ -55,8 +56,8 @@ Backfill path:
 ```text
 refresh_processed_block_disk_cache
   -> load existing ProcessedBlock cache or process missing blocks
-  -> write processed-block disk cache
-  -> write derived address_to_blocks index
+  -> ProcessedBlockReplayStoreWriter
+  -> processed-block disk cache + address_to_blocks
 ```
 
 ## Where To Look First
