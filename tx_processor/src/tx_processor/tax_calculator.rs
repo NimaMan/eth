@@ -79,7 +79,7 @@ pub fn calculate_buy_tax_from_processed_transaction(
         None => {
             return TaxCalculationResult::InvalidSimulation {
                 reason: "Pool has no token balance change".to_string(),
-            }
+            };
         }
     };
 
@@ -88,7 +88,7 @@ pub fn calculate_buy_tax_from_processed_transaction(
         None => {
             return TaxCalculationResult::InvalidSimulation {
                 reason: "Buyer has no token balance change".to_string(),
-            }
+            };
         }
     };
 
@@ -160,7 +160,7 @@ pub fn calculate_sell_tax_from_processed_transaction(
         None => {
             return TaxCalculationResult::InvalidSimulation {
                 reason: "Seller has no balance changes".to_string(),
-            }
+            };
         }
     };
     let pool_changes = match processed_tx.address_balance_changes.get(&pool_address) {
@@ -168,7 +168,7 @@ pub fn calculate_sell_tax_from_processed_transaction(
         None => {
             return TaxCalculationResult::InvalidSimulation {
                 reason: "Pool has no balance changes".to_string(),
-            }
+            };
         }
     };
 
@@ -222,7 +222,7 @@ pub fn calculate_sell_tax_from_processed_transaction(
         None => {
             return TaxCalculationResult::InvalidSimulation {
                 reason: "Could not identify sold token from balance changes".to_string(),
-            }
+            };
         }
     };
 

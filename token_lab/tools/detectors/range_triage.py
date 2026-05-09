@@ -515,7 +515,12 @@ class LiquidityHealthDetector(IssueDetector):
                 [finite_number(point.get("denom_reserve")) or 0.0 for point in history] + [current_liquidity]
             )
 
-            if level in {"dust", "drained"} and (bool(pool.get("can_buy")) or bool(pool.get("trading_enabled"))):
+            has_trading_flag = (
+                bool(pool.get("can_buy"))
+                or bool(pool.get("can_sell"))
+                or bool(pool.get("trading_enabled"))
+            )
+            if level in {"dust", "drained"} and has_trading_flag:
                 candidates.append(
                     issue(
                         snapshot,
@@ -525,6 +530,7 @@ class LiquidityHealthDetector(IssueDetector):
                         evidence=[
                             f"liquidity_level={level}",
                             f"can_buy={pool.get('can_buy')}",
+                            f"can_sell={pool.get('can_sell')}",
                             f"trading_enabled={pool.get('trading_enabled')}",
                             f"current_liquidity={metric_number(current_liquidity)} {pool.get('currency') or ''}".strip(),
                         ],

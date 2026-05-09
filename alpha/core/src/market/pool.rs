@@ -17,6 +17,8 @@ pub struct PoolSnapshot {
     pub address: PoolAddress,
     pub token_address: TokenAddress,
     pub protocol: PoolProtocol,
+    pub denom_address: Option<TokenAddress>,
+    pub denom_symbol: Option<String>,
     pub denom_reserve: DecimalAmount,
     pub token_reserve: DecimalAmount,
     pub price_denom_per_token: Option<DecimalAmount>,

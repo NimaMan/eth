@@ -46,6 +46,10 @@ tx_processor live_block_processor
 until `/live/status` is `live`; while warming, it records heartbeats and primes
 watermarks only.
 
+Snipe All currently supports ETH/WETH and USD-stable quote pools. Use separate
+floors for each family: WETH-denominated pools are not comparable to USDC/USDT
+pools by raw reserve amount.
+
 ## Where To Look First
 
 | Need | Start here |
@@ -58,21 +62,11 @@ watermarks only.
 | Redis live-state contract | `live/state/README.md`, `live/state/src/` |
 | Service wiring | `engine/src/bin/eth_alpha_trader.rs` |
 
-## Current Bottlenecks And Focus Order
+## Bottleneck Management
 
-The goal of `alpha/` is to make the current bottleneck measurable, then move it. A run is not useful unless it tells us whether the limit is live-state freshness, signal recall, decision quality, fill modeling, or execution.
-
-| Order | Bottleneck | Owner | What To Watch | Next Focus |
-| --- | --- | --- | --- | --- |
-| 1 | Live feed readiness and failure isolation | `live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, warmup progress, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Make live token apply resilient: optional pool metadata and buy/sell simulation failures must be recorded on the affected pool and must not fail the whole live tracker. |
-| 2 | Mempool signal recall and timing | `mempool_processor`, future `mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
-| 3 | Trader decision ledger completeness | `engine`, `store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Token-scoped pool identity is now the key path; next make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior. |
-| 4 | Paper fill realism | `engine` | synthetic execution reports versus worst achievable block price | Replace placeholder paper fills with worst-case block fill modeling before trusting PnL. This belongs in `PaperExecutionAdapter`, not mempool risk. |
-| 5 | Strategy policy quality | `strategies` | Snipe All v1 entries, exits, risk reactions, skipped candidates, V3/V4 behavior | Keep `Snipe All v1` as the baseline and extend it with LP approval response, creator public/private labels, tax/honeypot response, position sizing, and pool filters. |
-| 6 | Backtest and replay alignment | `backtest`, `engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching | Historical replay should use confirmed blocks only unless recorded mempool arrivals/signals exist. Compare historical lower-bound PnL to live paper behavior. |
-| 7 | Real execution handoff | `engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping | Only replace the paper adapter with a `tx_executor` adapter after live state, signal recall, decision persistence, and fill modeling are measurable. |
-
-The next major bottleneck is live feed readiness and failure isolation. The current live tracker can fail warmup from a simulation validation path, such as insufficient simulated funds. That should become a pool-level trading-status failure, not a runtime failure. Until the tracker reliably reaches `live`, paper trading cannot produce dependable strategy measurements.
+The shared bottleneck ledger lives at `../bogaz.md`. Keep alpha architecture and
+runtime ownership notes here; move bottleneck measurements, focus order, and
+operational mitigation notes to `bogaz.md`.
 
 ## Tests And Commands
 
@@ -90,8 +84,6 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader
   `tx_executor` without an explicit adapter and persistence plan.
 - `strategy_observations` is the durable input log. In-memory watermarks are
   polling mechanics and must be recoverable from Postgres.
-- Fix order for live issues: live feed readiness and failure isolation, mempool
-  signal recall, decision ledger completeness, paper fill realism, then
-  strategy policy.
+- Fix order for live issues is tracked in `../bogaz.md`.
 - Keep confirmed state and speculative mempool risk separate. Strategies consume
   both but do not mutate either.

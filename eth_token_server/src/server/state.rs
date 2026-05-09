@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eth_live_feed::LiveTokenRuntimeConfig;
 use eyre::{eyre, Result};
-use reth_chain_query::RethQueryProvider;
+use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
 use crate::alpha_trading::AlphaTradingStore;
 use crate::config::TokenServerConfig;
@@ -14,6 +14,7 @@ use tx_processor::ProcessedBlockDiskCacheStore;
 #[derive(Clone)]
 pub struct ServerState {
     pub config: TokenServerConfig,
+    pub provider: Arc<RethQueryProvider>,
     pub range_indexer: RangeIndexManager,
     pub live_tracker: LiveTracker,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
@@ -27,7 +28,11 @@ impl ServerState {
             .reth_datadir
             .to_str()
             .ok_or_else(|| eyre!("RETH_DATADIR is not valid UTF-8"))?;
-        let provider = Arc::new(RethQueryProvider::new(datadir)?);
+        let provider = attach_reth_index(
+            RethQueryProvider::new(datadir)?,
+            config.reth_index_dir.as_deref(),
+        );
+        let provider = Arc::new(provider);
         let processed_block_disk_cache = match config.processed_block_disk_cache_dir.as_ref() {
             Some(path) => Some(Arc::new(ProcessedBlockDiskCacheStore::open(path)?)),
             None => None,
@@ -39,7 +44,7 @@ impl ServerState {
         );
         let live_tracker = LiveTracker::new(
             live_runtime_config(&config),
-            provider,
+            provider.clone(),
             processed_block_disk_cache.clone(),
         );
         let mempool_signals =
@@ -48,12 +53,34 @@ impl ServerState {
 
         Ok(Self {
             config,
+            provider,
             range_indexer,
             live_tracker,
             processed_block_disk_cache,
             mempool_signals,
             alpha_trading,
         })
+    }
+}
+
+fn attach_reth_index(
+    provider: RethQueryProvider,
+    reth_index_dir: Option<&std::path::Path>,
+) -> RethQueryProvider {
+    let Some(reth_index_dir) = reth_index_dir else {
+        return provider;
+    };
+
+    match RethIndexDB::open_read_only(reth_index_dir) {
+        Ok(db) => provider.with_reth_index_db(Arc::new(db)),
+        Err(error) => {
+            tracing::warn!(
+                reth_index_dir = %reth_index_dir.display(),
+                error = %error,
+                "reth_index unavailable; token activity block lookup disabled"
+            );
+            provider
+        }
     }
 }
 

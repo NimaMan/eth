@@ -7,5 +7,6 @@ pub mod manager;
 pub mod network;
 pub mod pools;
 pub mod state;
+pub mod token_activity;
 pub mod tracking;
 pub mod utils;

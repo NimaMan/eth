@@ -170,6 +170,8 @@ mod tests {
             address: TokenPoolId::new(token_address, Address::repeat_byte(0x22).to_string()),
             token_address,
             protocol: PoolProtocol::UniswapV2,
+            denom_address: Some(Address::repeat_byte(0x33)),
+            denom_symbol: Some("WETH".to_string()),
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
             price_denom_per_token: None,

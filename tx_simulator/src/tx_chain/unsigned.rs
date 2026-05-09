@@ -15,7 +15,7 @@ use crate::{
     types::{FullSimulationResult, SimulationResult, ViewFunctionResult},
 };
 use alloy_primitives::{Address, Bytes, U256};
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use reth_primitives_traits::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
@@ -242,11 +242,23 @@ impl UnsignedTxChainSimulation {
 
         // Use simulate_on_fork_with_trace to get full details
         let block_number = self.forked_state.block_number;
-        let result = self.simulator.simulate_on_fork_with_trace(
-            &mut self.forked_state,
-            unsigned_tx.clone(),
-            block_number,
-        )?;
+        let result = self
+            .simulator
+            .simulate_on_fork_with_trace(&mut self.forked_state, unsigned_tx.clone(), block_number)
+            .wrap_err_with(|| {
+                format!(
+                    "unsigned chain step_with_trace failed block_number={} from={:?} to={:?} nonce={:?} value={:?} gas={:?} gas_price={:?} max_fee={:?} max_priority={:?}",
+                    block_number,
+                    unsigned_tx.from,
+                    unsigned_tx.to,
+                    unsigned_tx.nonce,
+                    unsigned_tx.value,
+                    unsigned_tx.gas,
+                    unsigned_tx.gas_price,
+                    unsigned_tx.max_fee_per_gas,
+                    unsigned_tx.max_priority_fee_per_gas
+                )
+            })?;
 
         let summary = SimulationResult {
             success: result.success,

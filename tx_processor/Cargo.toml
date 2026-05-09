@@ -96,6 +96,10 @@ name = "usdc_to_dai_uniswap_v3"
 path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
 
 [[example]]
+name = "check_token_server_uniswap_v3_pools"
+path = "examples/pool_analysis/check_token_server_uniswap_v3_pools.rs"
+
+[[example]]
 name = "token_metadata_with_prior_tx"
 path = "examples/token_parameter_extraction/token_metadata_with_prior_tx.rs"
 

@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 pub mod alpha_trading;
 pub mod config;
 pub mod error;

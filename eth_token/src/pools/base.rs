@@ -268,6 +268,22 @@ impl BasePool {
         self.refresh_lifecycle();
     }
 
+    pub fn set_buy_status(
+        &mut self,
+        can_buy: bool,
+        block_number: u64,
+        tx_hash: impl Into<String>,
+        timestamp: u64,
+    ) {
+        self.state.can_buy = can_buy;
+        if can_buy && self.can_buy_block.is_none() {
+            self.can_buy_block = Some(block_number);
+            self.can_buy_tx = Some(tx_hash.into());
+            self.can_buy_timestamp = Some(timestamp);
+        }
+        self.refresh_lifecycle();
+    }
+
     pub fn set_sell_status(
         &mut self,
         can_sell: bool,
@@ -381,6 +397,7 @@ impl BasePool {
             self.scam_label = self.reserve_tracker.scam_label.clone();
             self.scam_block = self.reserve_tracker.scam_block;
             self.scam_tx_hash = self.reserve_tracker.scam_tx_hash.clone();
+            self.clear_current_trading_status();
             self.state.lifecycle = PoolLifecycle::Scam;
         } else {
             self.scam_label = None;
@@ -392,6 +409,7 @@ impl BasePool {
 
     fn refresh_lifecycle(&mut self) {
         if self.reserve_tracker.is_scam {
+            self.clear_current_trading_status();
             self.state.lifecycle = PoolLifecycle::Scam;
             return;
         }
@@ -409,11 +427,13 @@ impl BasePool {
         }
 
         if self.state.denom_reserve <= 0.0 || self.state.token_reserve <= 0.0 {
+            self.clear_current_trading_status();
             self.state.lifecycle = PoolLifecycle::Drained;
             return;
         }
 
         if !self.has_meaningful_liquidity() {
+            self.clear_current_trading_status();
             self.state.lifecycle = PoolLifecycle::Dust;
             return;
         }
@@ -432,6 +452,11 @@ impl BasePool {
         let display_threshold = meaningful_liquidity_threshold(&self.identity.denom_address);
         self.state.denom_reserve >= configured_threshold.max(display_threshold)
             && self.state.token_reserve > 0.0
+    }
+
+    fn clear_current_trading_status(&mut self) {
+        self.state.can_buy = false;
+        self.state.can_sell = false;
     }
 }
 
@@ -561,6 +586,44 @@ mod tests {
         pool.update_reserves(0.0, 0.0, 10, 1_700, "0xSYNC");
 
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Drained);
+    }
+
+    #[test]
+    fn depleted_reserves_clear_current_trading_status_but_keep_first_buy_metadata() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        pool.set_buy_status(true, 11, "0xBUY", 1_710);
+        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+        assert!(pool.trading_enabled());
+        assert!(pool.can_buy_and_sell());
+
+        pool.update_reserves(0.0, 0.0, 13, 1_730, "0xDRAIN");
+
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Drained);
+        assert!(!pool.state.can_buy);
+        assert!(!pool.state.can_sell);
+        assert!(!pool.trading_enabled());
+        assert!(!pool.can_buy_and_sell());
+        assert_eq!(pool.can_buy_block, Some(11));
+        assert_eq!(pool.can_buy_tx.as_deref(), Some("0xBUY"));
+        assert_eq!(pool.can_buy_timestamp, Some(1_710));
+    }
+
+    #[test]
+    fn dust_reserves_clear_current_trading_status() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
+        pool.set_buy_status(true, 11, "0xBUY", 1_710);
+        pool.set_sell_status(true, Some(0.0), Some(0.0), 12, "0xSELL");
+
+        pool.update_reserves(100.0, 0.001, 13, 1_730, "0xDUST");
+
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
+        assert!(!pool.state.can_buy);
+        assert!(!pool.state.can_sell);
+        assert_eq!(pool.can_buy_block, Some(11));
     }
 
     #[test]

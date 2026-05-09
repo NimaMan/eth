@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use reth_chain_query::reth_index::{AddressBlockParticipationWriter, RethIndexDB};
 use tx_processor::{
-    BlockProcessor, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
-    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
-    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
     address_participations_from_processed_block, load_processed_block_range_with_options,
-    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache, BlockProcessor,
+    ProcessedBlockDiskCacheStore, ProcessedBlockRangeLoadOptions,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 
 const DEFAULT_BLOCKS: u64 = 100_000;

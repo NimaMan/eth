@@ -53,6 +53,9 @@ struct Args {
     #[arg(long, default_value = "0")]
     min_liquidity_eth: String,
 
+    #[arg(long, default_value = "500")]
+    min_liquidity_usd: String,
+
     #[arg(long, env = "ALPHA_DATABASE_URL")]
     database_url: Option<String>,
 
@@ -110,6 +113,9 @@ struct PoolWire {
     token_address: String,
     pool_address: String,
     protocol: String,
+    denom_address: Option<String>,
+    denom_symbol: Option<String>,
+    currency: Option<String>,
     denom_reserve: Option<f64>,
     token_reserve: Option<f64>,
     price: Option<f64>,
@@ -196,6 +202,8 @@ async fn main() -> Result<()> {
     let paper_buy_wei = parse_u256_decimal(&args.paper_buy_wei)?;
     let min_liquidity_eth = Decimal::from_str(&args.min_liquidity_eth)
         .wrap_err("invalid --min-liquidity-eth decimal")?;
+    let min_liquidity_usd = Decimal::from_str(&args.min_liquidity_usd)
+        .wrap_err("invalid --min-liquidity-usd decimal")?;
     let database_url = resolve_database_url(&args)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
 
@@ -214,6 +222,7 @@ async fn main() -> Result<()> {
                 "signal_limit": args.signal_limit,
                 "paper_buy_wei": &args.paper_buy_wei,
                 "min_liquidity_eth": &args.min_liquidity_eth,
+                "min_liquidity_usd": &args.min_liquidity_usd,
                 "replay_current": args.replay_current,
             }),
         )
@@ -249,6 +258,7 @@ async fn main() -> Result<()> {
             decimals: 18,
         },
         min_denom_reserve: min_liquidity_eth,
+        min_stable_denom_reserve: min_liquidity_usd,
         ..SnipeAllConfig::default()
     })));
 
@@ -726,6 +736,11 @@ impl PoolWire {
             address: pool_id,
             token_address,
             protocol: parse_protocol(&self.protocol),
+            denom_address: self
+                .denom_address
+                .as_deref()
+                .and_then(parse_optional_address),
+            denom_symbol: self.denom_symbol(),
             denom_reserve: decimal_from_f64(denom_reserve),
             token_reserve: decimal_from_f64(token_reserve),
             price_denom_per_token: self.price.map(decimal_from_f64),
@@ -734,6 +749,15 @@ impl PoolWire {
             can_sell: self.can_sell,
             is_scam: self.is_scam,
         })
+    }
+
+    fn denom_symbol(&self) -> Option<String> {
+        self.denom_symbol
+            .as_deref()
+            .or(self.currency.as_deref())
+            .map(str::trim)
+            .filter(|symbol| !symbol.is_empty() && !symbol.starts_with("0x"))
+            .map(str::to_ascii_uppercase)
     }
 }
 
@@ -825,6 +849,10 @@ fn parse_protocol(value: &str) -> PoolProtocol {
 
 fn parse_address(value: &str) -> Result<Address> {
     Address::from_str(value).map_err(|error| eyre!("invalid address {value}: {error}"))
+}
+
+fn parse_optional_address(value: &str) -> Option<Address> {
+    Address::from_str(value).ok()
 }
 
 fn required_pool_float(value: Option<f64>, field: &str, pool: &PoolWire) -> Result<f64> {

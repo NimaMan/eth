@@ -147,7 +147,16 @@ impl<'a> BlockTracer<'a> {
                 evm_env.clone(),
                 &mut inspector,
             );
-            let res = evm.transact(tx_env)?;
+            let res = evm.transact(tx_env).map_err(|err| {
+                eyre::eyre!(
+                    "failed to trace block transaction block_number={} tx_index={} tx_hash={:?} sender={:?}: {}",
+                    block.header.number,
+                    index,
+                    tx_hash,
+                    sender,
+                    err
+                )
+            })?;
 
             inspector.set_transaction_gas_limit(tx.gas_limit());
             inspector.set_transaction_caller(sender);

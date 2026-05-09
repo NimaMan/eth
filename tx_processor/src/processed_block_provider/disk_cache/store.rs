@@ -758,10 +758,7 @@ mod tests {
             .expect("write block");
         assert_eq!(write.key.network, "ethereum-mainnet");
         assert_eq!(write.key.block_hash, Some(B256::repeat_byte(0xaa)));
-        assert!(root
-            .join("ethereum-mainnet")
-            .join("42.pblock.zst")
-            .exists());
+        assert!(root.join("ethereum-mainnet").join("42.pblock.zst").exists());
 
         let cached = store
             .get(&write.key)

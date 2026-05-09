@@ -294,8 +294,6 @@ impl UniswapV4Pool {
             (-denom_amount).max(0.0),
             (-token_amount).max(0.0),
         );
-        self.base
-            .mark_can_buy_from_event(tx.block_number, tx.tx_hash.clone(), tx.block_timestamp);
         append_with_history_limit(
             &mut self.base.swap_events,
             event_json(event, tx),

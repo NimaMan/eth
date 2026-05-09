@@ -57,6 +57,12 @@ struct PoolRiskView {
     label: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CurrentTradingView {
+    can_buy: bool,
+    can_sell: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolView {
     pub token_address: String,
@@ -377,7 +383,6 @@ impl PoolView {
         lp_fields: LpPoolViewFields,
         concentrated: ConcentratedPoolViewFields,
     ) -> Self {
-        let trading_status = base.trading_status();
         let total_supply = token.total_supply_scaled();
         let denom_symbol = denom_symbol(&base.identity.denom_address);
         let currency = denom_symbol
@@ -402,7 +407,13 @@ impl PoolView {
         let buy_tax_bucket = TaxBucket::from_percent(buy_tax);
         let sell_tax_bucket = TaxBucket::from_percent(sell_tax);
         let tax_bucket = TaxBucket::combined(buy_tax, sell_tax);
-        let risk = pool_risk(base);
+        let current_trading = current_trading_view(base, liquidity_level);
+        let mut trading_status = base.trading_status();
+        trading_status.can_buy = current_trading.can_buy;
+        trading_status.can_sell = current_trading.can_sell;
+        trading_status.trading_enabled = current_trading.can_buy;
+        trading_status.can_buy_and_sell = current_trading.can_buy && current_trading.can_sell;
+        let risk = pool_risk(base, current_trading);
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -447,9 +458,9 @@ impl PoolView {
             liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
             supply_ratio_status: supply_ratio.status.to_string(),
             supply_ratio_label: supply_ratio.label,
-            can_buy: base.state.can_buy,
-            can_sell: base.state.can_sell,
-            trading_enabled: base.trading_enabled(),
+            can_buy: current_trading.can_buy,
+            can_sell: current_trading.can_sell,
+            trading_enabled: current_trading.can_buy,
             stage: base.state.lifecycle,
             buy_tax,
             sell_tax,
@@ -495,7 +506,24 @@ struct DisplaySupplyRatio {
     label: Option<String>,
 }
 
-fn pool_risk(base: &BasePool) -> PoolRiskView {
+fn current_trading_view(
+    base: &BasePool,
+    liquidity_level: PoolLiquidityLevel,
+) -> CurrentTradingView {
+    let liquidity_allows_trading = matches!(
+        liquidity_level,
+        PoolLiquidityLevel::Liquid | PoolLiquidityLevel::Unknown
+    ) && !matches!(
+        base.state.lifecycle,
+        PoolLifecycle::Dust | PoolLifecycle::Drained | PoolLifecycle::Scam | PoolLifecycle::Evicted
+    );
+    CurrentTradingView {
+        can_buy: liquidity_allows_trading && base.state.can_buy,
+        can_sell: liquidity_allows_trading && base.state.can_sell,
+    }
+}
+
+fn pool_risk(base: &BasePool, current_trading: CurrentTradingView) -> PoolRiskView {
     if base.is_scam() {
         return PoolRiskView {
             level: PoolRiskLevel::Scam,
@@ -503,7 +531,7 @@ fn pool_risk(base: &BasePool) -> PoolRiskView {
         };
     }
 
-    if base.state.can_buy && !base.state.can_sell {
+    if current_trading.can_buy && !current_trading.can_sell {
         return PoolRiskView {
             level: PoolRiskLevel::Honeypot,
             label: Some("cannot_sell".to_string()),
@@ -758,6 +786,33 @@ mod tests {
             pool_liquidity_level(1_000_000.0, "0xunknown"),
             PoolLiquidityLevel::Unknown
         );
+    }
+
+    #[test]
+    fn current_trading_view_masks_dust_or_drained_pool_flags() {
+        let mut pool = UniswapV2Pool::new(
+            "0xpool",
+            "0xtoken",
+            "0xdenom",
+            BasePoolConfig::new(18),
+            std::iter::empty::<&str>(),
+        );
+        pool.base.state.can_buy = true;
+        pool.base.state.can_sell = true;
+
+        let liquid = current_trading_view(&pool.base, PoolLiquidityLevel::Liquid);
+        assert!(liquid.can_buy);
+        assert!(liquid.can_sell);
+
+        pool.base.state.lifecycle = PoolLifecycle::Dust;
+        let dust = current_trading_view(&pool.base, PoolLiquidityLevel::Dust);
+        assert!(!dust.can_buy);
+        assert!(!dust.can_sell);
+
+        pool.base.state.lifecycle = PoolLifecycle::Drained;
+        let drained = current_trading_view(&pool.base, PoolLiquidityLevel::Drained);
+        assert!(!drained.can_buy);
+        assert!(!drained.can_sell);
     }
 
     #[test]

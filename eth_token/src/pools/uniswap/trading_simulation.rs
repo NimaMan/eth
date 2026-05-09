@@ -193,13 +193,12 @@ impl UniswapV2Pool {
         tx: &UniswapV2TxContext,
         outcome: &UniswapV2TradingSimulationOutcome,
     ) {
-        if outcome.can_buy && !self.base.state.can_buy {
-            self.base.mark_can_buy_from_event(
-                tx.block_number,
-                tx.tx_hash.clone(),
-                tx.block_timestamp,
-            );
-        }
+        self.base.set_buy_status(
+            outcome.can_buy,
+            tx.block_number,
+            tx.tx_hash.clone(),
+            tx.block_timestamp,
+        );
 
         self.base.set_sell_status(
             outcome.can_sell,
@@ -291,13 +290,12 @@ impl UniswapV3Pool {
         tx: &UniswapV2TxContext,
         outcome: &PoolTradingSimulationOutcome,
     ) {
-        if outcome.can_buy && !self.base.state.can_buy {
-            self.base.mark_can_buy_from_event(
-                tx.block_number,
-                tx.tx_hash.clone(),
-                tx.block_timestamp,
-            );
-        }
+        self.base.set_buy_status(
+            outcome.can_buy,
+            tx.block_number,
+            tx.tx_hash.clone(),
+            tx.block_timestamp,
+        );
 
         self.base.set_sell_status(
             outcome.can_sell,
@@ -385,13 +383,12 @@ impl UniswapV4Pool {
         tx: &UniswapV2TxContext,
         outcome: &PoolTradingSimulationOutcome,
     ) {
-        if outcome.can_buy && !self.base.state.can_buy {
-            self.base.mark_can_buy_from_event(
-                tx.block_number,
-                tx.tx_hash.clone(),
-                tx.block_timestamp,
-            );
-        }
+        self.base.set_buy_status(
+            outcome.can_buy,
+            tx.block_number,
+            tx.tx_hash.clone(),
+            tx.block_timestamp,
+        );
 
         self.base.set_sell_status(
             outcome.can_sell,
@@ -532,5 +529,41 @@ mod tests {
         assert_eq!(pool.base.tax_check_block, Some(200));
         assert_eq!(pool.base.buy_tax, Some(1.0));
         assert_eq!(pool.base.sell_tax, Some(2.5));
+    }
+
+    #[test]
+    fn later_failed_buy_outcome_clears_current_buy_status() {
+        let mut pool = pool();
+        let first_tx = UniswapV2TxContext::new(200, 1_700, "0xBUY");
+        let success = UniswapV2TradingSimulationOutcome {
+            can_buy: true,
+            can_approve: true,
+            can_sell: true,
+            is_tradeable: true,
+            buy_tax_percent: 0.0,
+            sell_tax_percent: 0.0,
+            failure_reason: None,
+            simulation_block_number: 199,
+        };
+        pool.apply_trading_simulation_outcome(&first_tx, &success);
+
+        let later_tx = UniswapV2TxContext::new(210, 1_800, "0xFAIL");
+        let failure = UniswapV2TradingSimulationOutcome {
+            can_buy: false,
+            can_approve: false,
+            can_sell: false,
+            is_tradeable: false,
+            buy_tax_percent: 0.0,
+            sell_tax_percent: 0.0,
+            failure_reason: Some("buy failed".to_string()),
+            simulation_block_number: 209,
+        };
+        pool.apply_trading_simulation_outcome(&later_tx, &failure);
+
+        assert!(!pool.base.state.can_buy);
+        assert!(!pool.base.state.can_sell);
+        assert_eq!(pool.base.can_buy_block, Some(200));
+        assert_eq!(pool.base.can_buy_tx.as_deref(), Some("0xBUY"));
+        assert_eq!(pool.base.tax_check_block, Some(210));
     }
 }

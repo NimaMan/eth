@@ -21,7 +21,10 @@ pub fn evaluate(
     if pool.is_scam {
         return RuleDecision::hold(RULE_NAME, "pool is flagged as scam");
     }
-    if pool.denom_reserve < config.min_denom_reserve {
+    if !config.is_supported_denom(pool) {
+        return RuleDecision::hold(RULE_NAME, "unsupported pool denomination");
+    }
+    if pool.denom_reserve < config.min_reserve_for_pool(pool) {
         return RuleDecision::hold(RULE_NAME, "denom reserve below threshold");
     }
 

@@ -5,6 +5,7 @@ use serde_json::json;
 use warp::http::StatusCode;
 use warp::{Filter, Reply};
 
+use crate::alpha_trading::AlphaStrategyResetRequest;
 use crate::error::ApiError;
 use crate::live::StartLiveTrackerRequest;
 use crate::mempool_signals::{MempoolSignalKind, MempoolSignalQuery};
@@ -12,6 +13,7 @@ use crate::range_indexer::{StartRangeIndexError, StartRangeIndexRequest};
 use crate::server::sse;
 use crate::server::ServerState;
 use crate::views;
+use crate::views::activity::{TokenActivityBlocksQuery, TokenActivityError};
 
 pub fn routes(
     state: ServerState,
@@ -50,6 +52,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::post())
         .and(with_state(state.clone()))
         .and_then(stop_active_run);
+
+    let active_run_launch_stats = warp::path!("runs" / "active" / "strategy" / "launch-stats")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(active_run_launch_stats);
 
     let processed_block_disk_cache_coverage = warp::path!("cache" / "coverage")
         .and(warp::get())
@@ -104,6 +111,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(mempool_signals_by_type);
 
+    let token_activity_blocks = warp::path!("tokens" / String / "activity-blocks")
+        .and(warp::get())
+        .and(warp::query::<TokenActivityBlocksQuery>())
+        .and(with_state(state.clone()))
+        .and_then(token_activity_blocks);
+
     let alpha_strategies = warp::path!("alpha" / "strategies")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -113,6 +126,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(alpha_strategy_detail);
+
+    let alpha_strategy_reset = warp::path!("alpha" / "strategies" / String / "reset-paper-state")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(alpha_strategy_reset);
 
     let progress = warp::path!("runs" / String / "progress")
         .and(warp::get())
@@ -134,6 +153,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(run_pools);
 
+    let launch_stats = warp::path!("runs" / String / "strategy" / "launch-stats")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(run_launch_stats);
+
     let errors = warp::path!("runs" / String / "errors")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -154,6 +178,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(start_run)
         .or(active_run)
         .or(stop_active_run)
+        .or(active_run_launch_stats)
         .or(processed_block_disk_cache_coverage)
         .or(live_status)
         .or(live_start)
@@ -164,12 +189,15 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_retention)
         .or(mempool_signals_by_type)
         .or(mempool_signals)
+        .or(token_activity_blocks)
+        .or(alpha_strategy_reset)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)
         .or(token_detail)
         .or(tokens)
         .or(progress)
         .or(pools)
+        .or(launch_stats)
         .or(errors)
         .or(stream)
         .or(stop)
@@ -187,6 +215,8 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "status": "ok",
             "bind": state.config.bind.to_string(),
             "reth_datadir": state.config.reth_datadir,
+            "reth_index_dir": state.config.reth_index_dir,
+            "auto_start_live": state.config.auto_start_live,
             "history_limit": state.config.history_limit,
             "default_blocks": state.config.default_blocks,
             "live_warmup_blocks": state.config.live_warmup_blocks,
@@ -300,6 +330,25 @@ async fn mempool_signals_by_type(
     }
 }
 
+async fn token_activity_blocks(
+    token_address: String,
+    query: TokenActivityBlocksQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match views::activity::token_activity_blocks(state.provider.as_ref(), &token_address, query) {
+        Ok(response) => Ok(json_response(&response, StatusCode::OK)),
+        Err(TokenActivityError::InvalidAddress(message)) => {
+            Ok(error_response(message, StatusCode::BAD_REQUEST))
+        }
+        Err(TokenActivityError::IndexUnavailable(message)) => {
+            Ok(error_response(message, StatusCode::SERVICE_UNAVAILABLE))
+        }
+        Err(TokenActivityError::Lookup(message)) => {
+            Ok(error_response(message, StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
+}
+
 async fn alpha_strategies(state: ServerState) -> Result<warp::reply::Response, Infallible> {
     match state.alpha_trading.list_strategies().await {
         Ok(strategies) => Ok(json_response(&strategies, StatusCode::OK)),
@@ -322,6 +371,28 @@ async fn alpha_strategy_detail(
         )),
         Err(error) => Ok(error_response(
             format!("failed to load alpha strategy: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+async fn alpha_strategy_reset(
+    strategy_id: String,
+    request: AlphaStrategyResetRequest,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .reset_strategy_state(&strategy_id, request)
+        .await
+    {
+        Ok(Some(reset)) => Ok(json_response(&reset, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "alpha strategy not found",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to reset alpha strategy state: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }
@@ -371,6 +442,19 @@ async fn stop_active_run(state: ServerState) -> Result<warp::reply::Response, In
     match state.range_indexer.stop_active_run().await {
         Some(run) => Ok(json_response(
             &views::run::progress(&run).await,
+            StatusCode::OK,
+        )),
+        None => Ok(error_response(
+            "active run not found",
+            StatusCode::NOT_FOUND,
+        )),
+    }
+}
+
+async fn active_run_launch_stats(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match state.range_indexer.active_run().await {
+        Some(run) => Ok(json_response(
+            &views::strategy::launch_stats(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response(
@@ -446,6 +530,19 @@ async fn run_pools(
     match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::pool::pool_list(&run).await,
+            StatusCode::OK,
+        )),
+        None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+async fn run_launch_stats(
+    run_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.range_indexer.get_run(&run_id).await {
+        Some(run) => Ok(json_response(
+            &views::strategy::launch_stats(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),

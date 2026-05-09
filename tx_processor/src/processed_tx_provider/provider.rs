@@ -367,14 +367,14 @@ impl ProcessedTxProvider {
                     "Unsupported tracer result for {:?}: {:?}",
                     tx_hash,
                     result
-                ))
+                ));
             }
             TraceResult::Error { error, .. } => {
                 return Err(eyre::eyre!(
                     "Tracing transaction {:?} failed: {}",
                     tx_hash,
                     error
-                ))
+                ));
             }
         };
 

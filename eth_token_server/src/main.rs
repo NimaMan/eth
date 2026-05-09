@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use eth_token_server::{config::shared_config_value, server, TokenServerConfig};
 use std::path::PathBuf;
 use tracing::{Level, Metadata};
@@ -28,9 +30,7 @@ struct LogGuards {
 
 fn init_logging() -> eyre::Result<LogGuards> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(
-            "info,pool_buy_sell_sim=debug,replay_parity_sim=debug,token_lab=debug",
-        )
+        EnvFilter::new("info,pool_buy_sell_sim=debug,replay_parity_sim=debug,token_lab=debug")
     });
     let log_dir = config_path(TOKEN_SERVER_LOG_DIR_CONFIG, DEFAULT_LOG_DIR)?;
     let simulator_log_dir = config_path(SIMULATOR_LOG_DIR_CONFIG, DEFAULT_SIMULATOR_LOG_DIR)?;

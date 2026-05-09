@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use alloy_primitives::Address;
 use eyre::{eyre, Result};
@@ -10,12 +10,14 @@ use crate::pools::balancer::{BalancerPool, BalancerPoolToken};
 use crate::pools::base::{BasePool, BasePoolConfig};
 use crate::pools::curve::{CurvePool, CurvePoolToken};
 use crate::pools::sushiswap::new_sushiswap_v2_pool;
+use crate::pools::uniswap::concentrated::scale_i128;
 use crate::pools::uniswap::v2::{
     LPApprovalEvent, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
 };
-use crate::pools::uniswap::{UniswapV3Pool, UniswapV4Pool};
+use crate::pools::uniswap::{v4_event_display_key, UniswapV3Pool, UniswapV4Pool};
 use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
+use crate::token_activity::{TokenActivityTracker, TokenBlockActivity};
 use crate::utils::scale_raw_units;
 
 pub const DEFAULT_TOKEN_HISTORY_LIMIT: usize = 1000;
@@ -126,6 +128,11 @@ pub struct TokenSummary {
     pub pool_count: usize,
     pub protocols: Vec<String>,
     pub total_transactions: usize,
+    pub activity_block_count: usize,
+    pub total_buy_volume_by_denom: BTreeMap<String, f64>,
+    pub total_sell_volume_by_denom: BTreeMap<String, f64>,
+    pub total_bribe_eth: f64,
+    pub recent_block_activity: Vec<TokenBlockActivity>,
     pub latest_block: Option<u64>,
     pub latest_timestamp: Option<u64>,
     pub total_liquidity_by_denom: HashMap<String, f64>,
@@ -148,6 +155,8 @@ pub struct ERC20Token {
     pub creator_address: Option<String>,
     pub creator_nonce: Option<u64>,
     pub token_life_cycle_status: Option<TokenLifecycleState>,
+    #[serde(default)]
+    pub activity: TokenActivityTracker,
     pub tx_hashes_to_makers: HashMap<String, String>,
     pub transaction_fees: Vec<Value>,
     pub latest_block_number: Option<u64>,
@@ -191,6 +200,7 @@ impl ERC20Token {
             creator_address: None,
             creator_nonce: None,
             token_life_cycle_status: None,
+            activity: TokenActivityTracker::default(),
             tx_hashes_to_makers: HashMap::new(),
             transaction_fees: Vec::new(),
             latest_block_number: None,
@@ -271,6 +281,7 @@ impl ERC20Token {
             tx.block_number,
             tx.block_timestamp,
         );
+        self.record_v2_swap_activity(&pool_address, events, tx)?;
         let pool = self
             .uniswap_v2_pool_mut(&pool_address)
             .ok_or_else(|| eyre!("unknown Uniswap V2 pool {pool_address}"))?;
@@ -299,6 +310,8 @@ impl ERC20Token {
             tx_context.block_number,
             tx_context.block_timestamp,
         );
+        self.record_bribe_activity_from_processed_transaction(transaction)?;
+        self.record_v2_swap_activity(&pool_address, &events, &tx_context)?;
         let pool = self
             .uniswap_v2_pool_mut(&pool_address)
             .ok_or_else(|| eyre!("unknown Uniswap V2 pool {pool_address}"))?;
@@ -402,6 +415,8 @@ impl ERC20Token {
             tx_context.block_number,
             tx_context.block_timestamp,
         );
+        self.record_bribe_activity_from_processed_transaction(transaction)?;
+        self.record_v3_swap_activity(&pool_address, transaction, &tx_context)?;
         let pool = self
             .uniswap_v3_pool_mut(&pool_address)
             .ok_or_else(|| eyre!("unknown Uniswap V3 pool {pool_address}"))?;
@@ -446,6 +461,8 @@ impl ERC20Token {
             tx_context.block_number,
             tx_context.block_timestamp,
         );
+        self.record_bribe_activity_from_processed_transaction(transaction)?;
+        self.record_v4_swap_activity(&pool_key, transaction, &tx_context)?;
         let pool = self
             .uniswap_v4_pool_mut(&pool_key)
             .ok_or_else(|| eyre!("unknown Uniswap V4 pool {pool_key}"))?;
@@ -542,6 +559,7 @@ impl ERC20Token {
             transaction.block_number,
             transaction.block_timestamp,
         );
+        self.record_bribe_activity_from_processed_transaction(transaction)?;
         self.transfer_tracker
             .update_from_processed_transaction(transaction)?;
         self.status_manager.update_from_processed_transaction(
@@ -589,6 +607,12 @@ impl ERC20Token {
         block_number: u64,
         block_timestamp: u64,
     ) {
+        self.activity.record_transaction(
+            tx_hash.as_ref(),
+            from_address,
+            block_number,
+            Some(block_timestamp),
+        );
         if let Some(from_address) = from_address {
             self.tx_hashes_to_makers.insert(
                 tx_hash.as_ref().to_string(),
@@ -597,6 +621,172 @@ impl ERC20Token {
         }
         self.latest_block_number = Some(block_number);
         self.latest_block_timestamp = Some(block_timestamp);
+    }
+
+    fn record_bribe_activity_from_processed_transaction(
+        &mut self,
+        transaction: &ProcessedTransaction,
+    ) -> Result<()> {
+        if transaction.bribe_amount.is_zero() {
+            return Ok(());
+        }
+
+        let amount_eth = scale_raw_units(transaction.bribe_amount.to_string(), 18)?;
+        self.activity.record_bribe_eth(
+            hash_string(&transaction.hash),
+            transaction.block_number,
+            Some(transaction.block_timestamp),
+            amount_eth,
+        );
+        Ok(())
+    }
+
+    fn record_v2_swap_activity(
+        &mut self,
+        pool_address: &str,
+        events: &UniswapV2TransactionEvents,
+        tx: &UniswapV2TxContext,
+    ) -> Result<()> {
+        let pool = self
+            .uniswap_v2_pool(pool_address)
+            .ok_or_else(|| eyre!("unknown Uniswap V2 pool {pool_address}"))?;
+        let denom_address = pool.base.identity.denom_address.clone();
+        let denom_decimals = pool.base.config.denom_decimals.unwrap_or(18);
+        let token1_is_denom = pool.base.config.token1_is_denom.unwrap_or(false);
+
+        for swap in &events.swaps {
+            if !same_address(&parse_address_lossy(pool_address), &swap.pair_address) {
+                continue;
+            }
+
+            let denom_in = if token1_is_denom {
+                scale_raw_units(&swap.amount1_in, denom_decimals)?
+            } else {
+                scale_raw_units(&swap.amount0_in, denom_decimals)?
+            };
+            let denom_out = if token1_is_denom {
+                scale_raw_units(&swap.amount1_out, denom_decimals)?
+            } else {
+                scale_raw_units(&swap.amount0_out, denom_decimals)?
+            };
+            self.record_swap_activity(
+                &tx.tx_hash,
+                tx.block_number,
+                tx.block_timestamp,
+                &denom_address,
+                denom_in,
+                denom_out,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn record_v3_swap_activity(
+        &mut self,
+        pool_address: &str,
+        transaction: &ProcessedTransaction,
+        tx: &UniswapV2TxContext,
+    ) -> Result<()> {
+        let pool = self
+            .uniswap_v3_pool(pool_address)
+            .ok_or_else(|| eyre!("unknown Uniswap V3 pool {pool_address}"))?;
+        let denom_address = pool.base.identity.denom_address.clone();
+        let denom_decimals = pool.base.config.denom_decimals.unwrap_or(18);
+        let token1_is_denom = pool.base.config.token1_is_denom.unwrap_or(false);
+
+        for event in &transaction.uniswap_v3_swaps {
+            if !same_address(&event.pool_address, pool_address) {
+                continue;
+            }
+            let (denom_in, denom_out) = signed_denom_swap_amounts(
+                event.amount0,
+                event.amount1,
+                self.decimals,
+                denom_decimals,
+                token1_is_denom,
+            );
+            self.record_swap_activity(
+                &tx.tx_hash,
+                tx.block_number,
+                tx.block_timestamp,
+                &denom_address,
+                denom_in,
+                denom_out,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn record_v4_swap_activity(
+        &mut self,
+        pool_key: &str,
+        transaction: &ProcessedTransaction,
+        tx: &UniswapV2TxContext,
+    ) -> Result<()> {
+        let pool = self
+            .uniswap_v4_pool(pool_key)
+            .ok_or_else(|| eyre!("unknown Uniswap V4 pool {pool_key}"))?;
+        let denom_address = pool.base.identity.denom_address.clone();
+        let denom_decimals = pool.base.config.denom_decimals.unwrap_or(18);
+        let token1_is_denom = pool.base.config.token1_is_denom.unwrap_or(false);
+
+        for event in &transaction.uniswap_v4_swaps {
+            if normalize_address(v4_event_display_key(
+                event.pool_manager_address,
+                event.event_id,
+            )) != normalize_address(pool_key)
+            {
+                continue;
+            }
+            let (denom_in, denom_out) = signed_denom_swap_amounts(
+                event.amount0,
+                event.amount1,
+                self.decimals,
+                denom_decimals,
+                token1_is_denom,
+            );
+            self.record_swap_activity(
+                &tx.tx_hash,
+                tx.block_number,
+                tx.block_timestamp,
+                &denom_address,
+                denom_in,
+                denom_out,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn record_swap_activity(
+        &mut self,
+        tx_hash: &str,
+        block_number: u64,
+        block_timestamp: u64,
+        denom_address: &str,
+        denom_in: f64,
+        denom_out: f64,
+    ) {
+        if denom_in > 0.0 {
+            self.activity.record_buy(
+                tx_hash,
+                block_number,
+                Some(block_timestamp),
+                denom_address,
+                denom_in,
+            );
+        }
+        if denom_out > 0.0 {
+            self.activity.record_sell(
+                tx_hash,
+                block_number,
+                Some(block_timestamp),
+                denom_address,
+                denom_out,
+            );
+        }
     }
 
     pub fn pool_addresses(&self) -> Vec<String> {
@@ -788,6 +978,11 @@ impl ERC20Token {
             pool_count: self.pool_count(),
             protocols,
             total_transactions: self.tx_hashes_to_makers.len(),
+            activity_block_count: self.activity.blocks.len(),
+            total_buy_volume_by_denom: self.activity.total_buy_volume_by_denom(),
+            total_sell_volume_by_denom: self.activity.total_sell_volume_by_denom(),
+            total_bribe_eth: self.activity.total_bribe_eth(),
+            recent_block_activity: self.activity.recent_blocks(50),
             latest_block: self.latest_block_number,
             latest_timestamp: self.latest_block_timestamp,
             total_liquidity_by_denom: self.total_liquidity_by_denom(),
@@ -972,6 +1167,34 @@ fn normalize_address_string(value: impl Into<String>) -> String {
     value.into().trim().to_ascii_lowercase()
 }
 
+fn signed_denom_swap_amounts(
+    amount0: i128,
+    amount1: i128,
+    token_decimals: u8,
+    denom_decimals: u8,
+    token1_is_denom: bool,
+) -> (f64, f64) {
+    let token0_decimals = if token1_is_denom {
+        token_decimals
+    } else {
+        denom_decimals
+    };
+    let token1_decimals = if token1_is_denom {
+        denom_decimals
+    } else {
+        token_decimals
+    };
+    let token0_amount = scale_i128(amount0, token0_decimals);
+    let token1_amount = scale_i128(amount1, token1_decimals);
+    let denom_amount = if token1_is_denom {
+        token1_amount
+    } else {
+        token0_amount
+    };
+
+    (denom_amount.max(0.0), (-denom_amount).max(0.0))
+}
+
 fn parse_address_lossy(value: &str) -> Address {
     value.parse().unwrap_or(Address::ZERO)
 }
@@ -980,7 +1203,7 @@ fn parse_address_lossy(value: &str) -> Address {
 mod tests {
     use super::*;
     use crate::pools::uniswap::v2::{
-        UniswapV2SyncEvent, UniswapV2TransactionEvents, UNISWAP_V2_PROTOCOL,
+        UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UNISWAP_V2_PROTOCOL,
     };
     use crate::pools::{
         BalancerPoolToken, CurvePoolToken, BALANCER_V2_PROTOCOL, CURVE_V1_PROTOCOL,
@@ -1167,6 +1390,15 @@ mod tests {
                 reserve0: "100000000000000000000".to_string(),
                 reserve1: "2000000000000000000".to_string(),
             }],
+            swaps: vec![UniswapV2SwapEvent {
+                pair_address: pool_address.to_string(),
+                sender: Some("0x0000000000000000000000000000000000000004".to_string()),
+                to: Some("0x0000000000000000000000000000000000000005".to_string()),
+                amount0_in: "0".to_string(),
+                amount1_in: "1000000000000000000".to_string(),
+                amount0_out: "50000000000000000000".to_string(),
+                amount1_out: "0".to_string(),
+            }],
             ..Default::default()
         };
 
@@ -1178,5 +1410,50 @@ mod tests {
         assert_eq!(pool.base.token_reserve(), 100.0);
         assert_eq!(pool.base.denom_reserve(), 2.0);
         assert_eq!(token.latest_block_number, Some(10));
+
+        let block = token.activity.blocks.get(&10).unwrap();
+        assert_eq!(block.num_tx, 1);
+        assert_eq!(
+            block.buy_volume_by_denom["0x0000000000000000000000000000000000000003"],
+            1.0
+        );
+        let summary = token.get_token_summary();
+        assert_eq!(summary.activity_block_count, 1);
+        assert_eq!(summary.total_transactions, 1);
+        assert_eq!(
+            summary.total_buy_volume_by_denom["0x0000000000000000000000000000000000000003"],
+            1.0
+        );
+    }
+
+    #[test]
+    fn token_activity_tracks_eth_bribe_without_double_counting_tx() {
+        let mut token = token();
+        let mut tx = ProcessedTransaction::new(
+            alloy_primitives::B256::repeat_byte(0x42),
+            12,
+            1_712,
+            0,
+            Address::repeat_byte(0x11),
+            None,
+            alloy_primitives::U256::ZERO,
+            true,
+            0,
+            0,
+            Vec::new(),
+        );
+        tx.bribe_amount = alloy_primitives::U256::from(25_000_000_000_000_000_u128);
+
+        token
+            .update_token_state_from_processed_transaction(&tx)
+            .unwrap();
+        token
+            .update_token_state_from_processed_transaction(&tx)
+            .unwrap();
+
+        let block = token.activity.blocks.get(&12).unwrap();
+        assert_eq!(block.num_tx, 1);
+        assert_eq!(block.total_bribe_eth, 0.025);
+        assert_eq!(token.activity.total_bribe_eth(), 0.025);
     }
 }

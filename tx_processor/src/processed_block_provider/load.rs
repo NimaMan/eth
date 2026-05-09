@@ -52,7 +52,10 @@ pub async fn load_processed_block(
         }
 
         let started = Instant::now();
-        let block = tx_processor.process_block(block_number).await?;
+        let block = tx_processor
+            .process_block(block_number)
+            .await
+            .wrap_err_with(|| format!("failed to process uncached block {block_number}"))?;
         let mut disk_cache_write_ms = 0;
         match cache_store
             .writer(provider.chain_id())
@@ -81,7 +84,10 @@ pub async fn load_processed_block(
     }
 
     let started = Instant::now();
-    let block = tx_processor.process_block(block_number).await?;
+    let block = tx_processor
+        .process_block(block_number)
+        .await
+        .wrap_err_with(|| format!("failed to process block {block_number}"))?;
     Ok(LoadedProcessedBlock {
         block,
         upstream_ms: started.elapsed().as_millis(),

@@ -8,6 +8,7 @@ Confirmed-chain market facts consumed by the alpha engine.
 - `TokenSnapshot`
 - `PoolSnapshot`
 - block-scoped market update metadata
+- denomination address/symbol metadata needed by strategies that use different liquidity floors for ETH/WETH and USD-stable pools
 
 ## Does Not Own
 

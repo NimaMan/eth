@@ -188,6 +188,9 @@ impl BlockTokenProcessor {
                 });
                 continue;
             }
+            if !should_apply_transaction_to_token_state(&tx.processed) {
+                continue;
+            }
 
             let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
@@ -351,7 +354,6 @@ impl BlockTokenProcessor {
         let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
-            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
             if let Some(error) = &tx.processing_error {
                 self.last_block_failure_count += 1;
                 transaction_errors.push(TokenTransactionUpdateError {
@@ -361,6 +363,10 @@ impl BlockTokenProcessor {
                 });
                 continue;
             }
+            if !should_apply_transaction_to_token_state(&tx.processed) {
+                continue;
+            }
+            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
 
             let pending_tx_hashes = pending_metadata_tx_hashes(&metadata_tx_index, &tx.processed);
             match self
@@ -599,7 +605,6 @@ impl BlockTokenProcessor {
         let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
-            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
             if let Some(error) = &tx.processing_error {
                 self.last_block_failure_count += 1;
                 transaction_errors.push(TokenTransactionUpdateError {
@@ -609,6 +614,10 @@ impl BlockTokenProcessor {
                 });
                 continue;
             }
+            if !should_apply_transaction_to_token_state(&tx.processed) {
+                continue;
+            }
+            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
 
             let pending_tx_hashes = pending_metadata_tx_hashes(&metadata_tx_index, &tx.processed);
             match self
@@ -925,6 +934,10 @@ fn token_index_with_limit(limit: Option<usize>) -> TrackedTokenIndex {
 }
 
 fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<Address> {
+    if !should_apply_transaction_to_token_state(tx) {
+        return Vec::new();
+    }
+
     let mut addresses = Vec::new();
     if let Some(address) = tx.contract_address {
         addresses.push(address);
@@ -937,6 +950,10 @@ fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<Address> {
     addresses.sort();
     addresses.dedup();
     addresses
+}
+
+fn should_apply_transaction_to_token_state(tx: &ProcessedTransaction) -> bool {
+    tx.status
 }
 
 fn index_metadata_transaction(index: &mut HashMap<Address, Vec<B256>>, tx: &ProcessedTransaction) {

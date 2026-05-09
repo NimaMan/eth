@@ -9,7 +9,9 @@ use eyre::{eyre, Result};
 const ETH_CONFIG_PATH_ENV: &str = "ETH_CONFIG_PATH";
 const ETH_NODE_ROOT_CONFIG: &str = "ETH_NODE_ROOT";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
+const RETH_INDEX_DIR_CONFIG: &str = "RETH_INDEX_DIR";
 const TOKEN_SERVER_BIND_CONFIG: &str = "TOKEN_SERVER_BIND";
+const TOKEN_SERVER_AUTO_START_LIVE_CONFIG: &str = "TOKEN_SERVER_AUTO_START_LIVE";
 const TOKEN_SERVER_HISTORY_LIMIT_CONFIG: &str = "TOKEN_SERVER_HISTORY_LIMIT";
 const TOKEN_SERVER_DEFAULT_BLOCKS_CONFIG: &str = "TOKEN_SERVER_DEFAULT_BLOCKS";
 const LIVE_TOKEN_TRACKER_WARMUP_BLOCKS_CONFIG: &str = "LIVE_TOKEN_TRACKER_WARMUP_BLOCKS";
@@ -32,6 +34,7 @@ const MEMPOOL_SIGNAL_LIMIT_CONFIG: &str = "MEMPOOL_SIGNAL_LIMIT";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
+const DEFAULT_AUTO_START_LIVE: bool = true;
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
@@ -50,6 +53,8 @@ const DEFAULT_MEMPOOL_SIGNAL_LIMIT: i64 = 200;
 pub struct TokenServerConfig {
     pub bind: SocketAddr,
     pub reth_datadir: PathBuf,
+    pub reth_index_dir: Option<PathBuf>,
+    pub auto_start_live: bool,
     pub history_limit: usize,
     pub default_blocks: u64,
     pub live_warmup_blocks: u64,
@@ -80,6 +85,13 @@ impl TokenServerConfig {
             RETH_DATADIR_CONFIG,
             DEFAULT_RETH_DATADIR,
         ));
+        let reth_index_dir = config_optional_path(config, RETH_INDEX_DIR_CONFIG)
+            .or_else(|| default_reth_index_dir(&reth_datadir));
+        let auto_start_live = config_parse(
+            config,
+            TOKEN_SERVER_AUTO_START_LIVE_CONFIG,
+            DEFAULT_AUTO_START_LIVE,
+        )?;
         let history_limit = config_parse(
             config,
             TOKEN_SERVER_HISTORY_LIMIT_CONFIG,
@@ -211,6 +223,8 @@ impl TokenServerConfig {
         Ok(Self {
             bind,
             reth_datadir,
+            reth_index_dir,
+            auto_start_live,
             history_limit,
             default_blocks,
             live_warmup_blocks,
@@ -248,12 +262,17 @@ fn default_processed_block_disk_cache_dir(config: &HashMap<String, String>) -> O
     }
 }
 
+fn default_reth_index_dir(reth_datadir: &std::path::Path) -> Option<PathBuf> {
+    let path = reth_datadir.join("reth_index");
+    path.exists().then_some(path)
+}
+
 fn eth_config_path() -> PathBuf {
     env::var_os(ETH_CONFIG_PATH_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
+                .join("..")
                 .join("config.env")
         })
 }
@@ -378,5 +397,14 @@ mod tests {
 
         assert_eq!(config.bind.to_string(), "127.0.0.1:9999");
         assert_eq!(config.live_warmup_blocks, 123);
+    }
+
+    #[test]
+    fn reads_auto_start_live_flag() {
+        let values = parse_env_config("TOKEN_SERVER_AUTO_START_LIVE=false");
+
+        let config = TokenServerConfig::from_config_values(&values).unwrap();
+
+        assert!(!config.auto_start_live);
     }
 }

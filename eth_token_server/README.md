@@ -45,6 +45,7 @@ processed-block disk cache + Redis eth/live/blocks
 | Live token tracker host | `src/live.rs` |
 | HTTP routes/server | `src/server/`, `src/main.rs` |
 | Token/pool DTOs | `src/views/token.rs`, `src/views/pool.rs`, `src/views/live.rs` |
+| Token active-block lookup | `src/views/activity.rs` |
 | Mempool signal endpoint | `src/mempool_signals.rs` |
 | Processed-block cache sizing | `examples/processed_block_disk_cache_size.rs` |
 
@@ -61,7 +62,9 @@ Key config defaults come from `config.env`:
 
 ```bash
 RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth
+RETH_INDEX_DIR=/home/nima/storage/samsung8tb/ethereum/reth/reth_index
 TOKEN_SERVER_BIND=127.0.0.1:8765
+TOKEN_SERVER_AUTO_START_LIVE=true
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
 LIVE_BLOCKCHAIN_DATA_REDIS_URL=redis://localhost:6379/0
 ETH_PROCESSED_BLOCK_STREAM=eth/live/blocks
@@ -77,3 +80,9 @@ MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
   debugging; production UI should prefer explicit summary/pool DTOs.
 - V4 pools use a composite `pool_address` of `pool_manager#pool_id` because V4
   pools are not ERC-20-style pool contracts.
+- `GET /tokens/:address/activity-blocks` uses the custom RethIndex
+  address-participation table. It expects an ERC-20 token address; a Uniswap v4
+  pool id from Dexscreener is a 32-byte identifier and is not queryable as an
+  address.
+- Set `TOKEN_SERVER_AUTO_START_LIVE=false` for range/detail API work when live
+  tailing is not needed.

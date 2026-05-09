@@ -53,7 +53,7 @@ pub async fn simulate_sell_swap(
             return Err(eyre::eyre!(
                 "Pool type {:?} not yet supported for sell-only simulation",
                 pool_type
-            ))
+            ));
         }
     };
 

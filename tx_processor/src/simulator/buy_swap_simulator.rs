@@ -61,7 +61,7 @@ pub async fn simulate_buy_swap(
             return Err(eyre::eyre!(
                 "Pool type {:?} not yet supported for buy-only simulation",
                 pool_type
-            ))
+            ));
         }
     };
 

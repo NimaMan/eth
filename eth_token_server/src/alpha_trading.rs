@@ -1,5 +1,5 @@
 use eyre::{eyre, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -27,6 +27,48 @@ pub struct AlphaStrategyDetailResponse {
     pub orders: Vec<OrderIntentView>,
     pub execution_reports: Vec<ExecutionReportView>,
     pub risk_events: Vec<RiskEventView>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlphaStrategyResetScope {
+    Positions,
+    RunState,
+}
+
+impl Default for AlphaStrategyResetScope {
+    fn default() -> Self {
+        Self::Positions
+    }
+}
+
+impl AlphaStrategyResetScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Positions => "positions",
+            Self::RunState => "run_state",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AlphaStrategyResetRequest {
+    #[serde(default)]
+    pub scope: AlphaStrategyResetScope,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlphaStrategyResetResponse {
+    pub strategy_id: String,
+    pub run_id: Option<String>,
+    pub scope: AlphaStrategyResetScope,
+    pub positions_deleted: u64,
+    pub position_snapshots_deleted: u64,
+    pub order_intents_deleted: u64,
+    pub execution_reports_deleted: u64,
+    pub risk_events_deleted: u64,
+    pub strategy_observations_deleted: u64,
+    pub requires_trader_restart: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,6 +233,146 @@ impl AlphaTradingStore {
             orders: self.orders(&run_id, strategy_id, 100).await?,
             execution_reports: self.execution_reports(&run_id, 100).await?,
             risk_events: self.risk_events(&run_id, 100).await?,
+        }))
+    }
+
+    pub async fn reset_strategy_state(
+        &self,
+        strategy_id: &str,
+        request: AlphaStrategyResetRequest,
+    ) -> Result<Option<AlphaStrategyResetResponse>> {
+        if strategy_id != STRATEGY_ID {
+            return Ok(None);
+        }
+
+        let Some(run) = self.latest_run().await? else {
+            return Ok(Some(AlphaStrategyResetResponse {
+                strategy_id: STRATEGY_ID.to_string(),
+                run_id: None,
+                scope: request.scope,
+                positions_deleted: 0,
+                position_snapshots_deleted: 0,
+                order_intents_deleted: 0,
+                execution_reports_deleted: 0,
+                risk_events_deleted: 0,
+                strategy_observations_deleted: 0,
+                requires_trader_restart: true,
+            }));
+        };
+
+        let mut transaction = self.pool.begin().await?;
+        let position_snapshots_deleted = sqlx::query(
+            r#"
+            DELETE FROM alpha_trading.position_snapshots
+            WHERE run_id = $1
+              AND position_id IN (
+                  SELECT position_id
+                  FROM alpha_trading.positions
+                  WHERE run_id = $1 AND strategy_name = $2
+              )
+            "#,
+        )
+        .bind(&run.run_id)
+        .bind(strategy_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+        let positions_deleted = sqlx::query(
+            r#"
+            DELETE FROM alpha_trading.positions
+            WHERE run_id = $1 AND strategy_name = $2
+            "#,
+        )
+        .bind(&run.run_id)
+        .bind(strategy_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+        let mut order_intents_deleted = 0;
+        let mut execution_reports_deleted = 0;
+        let mut risk_events_deleted = 0;
+        let mut strategy_observations_deleted = 0;
+
+        if matches!(request.scope, AlphaStrategyResetScope::RunState) {
+            order_intents_deleted = sqlx::query(
+                r#"
+                DELETE FROM alpha_trading.order_intents
+                WHERE run_id = $1 AND strategy_name = $2
+                "#,
+            )
+            .bind(&run.run_id)
+            .bind(strategy_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+
+            execution_reports_deleted = sqlx::query(
+                r#"
+                DELETE FROM alpha_trading.execution_reports
+                WHERE run_id = $1
+                "#,
+            )
+            .bind(&run.run_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+
+            risk_events_deleted = sqlx::query(
+                r#"
+                DELETE FROM alpha_trading.risk_events
+                WHERE run_id = $1
+                "#,
+            )
+            .bind(&run.run_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+
+            strategy_observations_deleted = sqlx::query(
+                r#"
+                DELETE FROM alpha_trading.strategy_observations
+                WHERE run_id = $1 AND strategy_name = $2
+                "#,
+            )
+            .bind(&run.run_id)
+            .bind(strategy_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET metadata = metadata || jsonb_build_object(
+                    'last_reset_at', NOW()::text,
+                    'last_reset_scope', $2::text,
+                    'reset_requires_trader_restart', true,
+                    'positions', 0
+                )
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(&run.run_id)
+        .bind(request.scope.as_str())
+        .execute(&mut *transaction)
+        .await?;
+
+        transaction.commit().await?;
+
+        Ok(Some(AlphaStrategyResetResponse {
+            strategy_id: STRATEGY_ID.to_string(),
+            run_id: Some(run.run_id),
+            scope: request.scope,
+            positions_deleted,
+            position_snapshots_deleted,
+            order_intents_deleted,
+            execution_reports_deleted,
+            risk_events_deleted,
+            strategy_observations_deleted,
+            requires_trader_restart: true,
         }))
     }
 

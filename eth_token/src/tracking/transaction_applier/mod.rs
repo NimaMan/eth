@@ -86,6 +86,10 @@ impl TokenTransactionApplier {
         token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
     ) -> Result<Vec<TokenStateUpdateReport>> {
+        if !tx.status {
+            return Ok(Vec::new());
+        }
+
         let token_addresses = candidate_token_addresses(registry, token_index, tx);
         let mut reports = Vec::new();
 
@@ -181,6 +185,10 @@ impl TokenTransactionApplier {
         prior_txs: &[ProcessedTransaction],
         block_header: Option<&BlockHeader>,
     ) -> Result<Vec<TokenStateUpdateReport>> {
+        if !tx.status {
+            return Ok(Vec::new());
+        }
+
         let token_addresses = candidate_token_addresses(registry, token_index, tx);
         let mut reports = Vec::new();
 
@@ -452,6 +460,10 @@ impl TokenTransactionApplier {
     where
         P: UniswapV2PoolMetadataProvider,
     {
+        if !tx.status {
+            return Ok(Vec::new());
+        }
+
         let pool_metadata_timeout = if trading_simulation.is_live() {
             Some(Duration::from_millis(LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS))
         } else {
