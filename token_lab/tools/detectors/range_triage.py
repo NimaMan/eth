@@ -1190,7 +1190,7 @@ def counts(candidates: Iterable[IssueCandidate]) -> dict[str, Any]:
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Find token-safety investigation candidates in an existing range run.",
+        description="Find token-lab investigation candidates in an existing range run.",
     )
     parser.add_argument(
         "--api",

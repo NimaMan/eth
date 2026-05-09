@@ -1,6 +1,6 @@
 # Odd Behavior Catalog
 
-This catalog lists behavior that should be reviewed by the safety lab. Some
+This catalog lists behavior that should be reviewed by the token lab. Some
 items are scams, some are numerical traps, and some are simulator/indexer parity
 risks. Each confirmed item should eventually become a detector, a guardrail, or
 a display rule.

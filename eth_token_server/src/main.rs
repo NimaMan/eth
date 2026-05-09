@@ -29,7 +29,7 @@ struct LogGuards {
 fn init_logging() -> eyre::Result<LogGuards> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(
-            "info,pool_buy_sell_sim=debug,replay_parity_sim=debug,token_safety_lab=debug",
+            "info,pool_buy_sell_sim=debug,replay_parity_sim=debug,token_lab=debug",
         )
     });
     let log_dir = config_path(TOKEN_SERVER_LOG_DIR_CONFIG, DEFAULT_LOG_DIR)?;
@@ -120,7 +120,7 @@ fn config_path(key: &str, default: &str) -> eyre::Result<PathBuf> {
 fn is_simulator_target(metadata: &Metadata<'_>) -> bool {
     matches!(
         metadata.target(),
-        "pool_buy_sell_sim" | "replay_parity_sim" | "token_safety_lab"
+        "pool_buy_sell_sim" | "replay_parity_sim" | "token_lab"
     )
 }
 

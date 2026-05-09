@@ -22,7 +22,7 @@ The tool should be easy for an agent to run from a shell and easy to parse. Run
 it from the ETH repo root:
 
 ```text
-token_safety_lab/tools/detectors/range_triage.py \
+token_lab/tools/detectors/range_triage.py \
   --api http://127.0.0.1:8765 \
   --run active \
   --format markdown
@@ -43,9 +43,9 @@ Implementation shape:
   terminal table.
 
 The code lives under this folder because the rules are investigation rules, not
-production safety rules. Once a detector is proven by cases and regression
-coverage, promote the stable part into Rust crate logic or an `eth_token_server`
-triage endpoint.
+production policy. Once a detector is proven by cases and regression coverage,
+promote the stable part into Rust crate logic, an `eth_token_server` triage
+endpoint, or a strategy-analysis endpoint.
 
 ## Candidate Issue Families
 

@@ -36,7 +36,7 @@ Important adjacent code that is not currently a root workspace member:
 | --- | --- |
 | `tx_executor/` | Gas-first direct transaction submission core. Receives prepared transactions; does not choose strategy or routes. |
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
-| `token_safety_lab/` | Repeatable token and pool safety investigations, parity checks, and detector prototypes. |
+| `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
 | `node/` | Reth/Lighthouse node scripts and systemd service helpers. |
 | `solidity/` | Solidity executor/contracts, including Baygus executor work. |
 | `vendor/reth/` | Vendored upstream Reth reference tree. Use for source parity and examples, not as normal application code. |
@@ -106,9 +106,10 @@ Use this map before broad searching:
 | How is live token state served to tools and alpha? | `eth_token_server/README.md` | `eth_token_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
 | How are pending transactions detected and converted to signals? | `mempool_processor/README.md` | `mempool_processor/src/function_detector.rs`, `src/tx_router/`, `src/simulator/`, `src/signal_detector/`, `src/db_writers/` |
 | How does the paper/live alpha loop work? | `alpha/README.md` | `alpha/core/README.md`, `alpha/engine/README.md`, `alpha/store/README.md`, `alpha/strategies/README.md`, `alpha/live/*/README.md` |
+| Where are current pipeline bottlenecks tracked? | `bogaz.md` | service memory, cache fill/read metrics, live readiness, mempool timing, alpha decision bottlenecks |
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
 | How is a real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
-| How do I investigate suspicious token behavior? | `token_safety_lab/README.md` | `token_safety_lab/cases/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
+| How do I investigate token behavior or launch strategy stats? | `token_lab/README.md` | `token_lab/cases/README.md`, `token_lab/strategy/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
 | How are node paths and services configured? | `node/README.md` | `config.env`, `node/scripts/`, `node/systemd/` |
 | How do contract/executor Solidity pieces fit? | `solidity/README.md` | `solidity/baygus-executor/README.md`, `solidity/baygus-executor/DEPLOYMENT.md` |
 
@@ -191,7 +192,7 @@ Use focused tests/examples near the owner crate:
 | Live token server | `eth_token_server/README.md`, `logs/eth_token_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
-| Safety anomalies | `token_safety_lab/README.md` and one case folder under `token_safety_lab/cases/` |
+| Token lab cases and strategy cohorts | `token_lab/README.md`, `token_lab/strategy/README.md`, and one case folder under `token_lab/cases/` |
 
 Generated output and heavy directories are not orientation sources. Avoid
 starting from `target/`, `logs/`, `.pytest_cache/`, or `vendor/reth/` unless the
