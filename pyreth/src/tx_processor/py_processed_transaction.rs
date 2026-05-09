@@ -7,6 +7,7 @@ use pyo3::types::{PyDict, PyFloat, PyList, PyLong, PySet};
 use reth_chain_query::common_addresses::denom_tokens::ERC20_TOKEN_DECIMALS;
 use reth_chain_query::to_checksum_address;
 use serde_json::Value as JsonValue;
+use tx_processor::tx_processor::data_models::TokenMovements;
 use tx_processor::{ProcessedBlockTransactions, ProcessedTransaction};
 
 /// Convert serde_json::Value to Python object
@@ -451,6 +452,10 @@ impl PyProcessedTransaction {
                 tnet.set_item(tok, amount.to_string())?;
             }
             entry.set_item("token_net", tnet)?;
+            entry.set_item(
+                "movements",
+                token_movements_to_python(py, &changes.movements)?,
+            )?;
             sc.set_item(addr_str, entry)?;
         }
         dict.set_item("address_balance_changes", sc)?;
@@ -1037,6 +1042,10 @@ impl PyProcessedTransaction {
                 }
             }
             change_dict.set_item("currency_net", currency_net_dict)?;
+            change_dict.set_item(
+                "movements",
+                token_movements_to_python(py, &balance_change.movements)?,
+            )?;
 
             dict.set_item(addr_str, change_dict)?;
         }
@@ -1076,6 +1085,51 @@ impl PyProcessedTransaction {
         )
     }
 }
+
+fn token_movements_to_python(py: Python, movements: &TokenMovements) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new_bound(py);
+
+    let tokens = PyDict::new_bound(py);
+    for (token, movement) in &movements.tokens {
+        let movement_dict = PyDict::new_bound(py);
+        let incoming = movement_amounts_to_python(py, &movement.incoming)?;
+        let outgoing = movement_amounts_to_python(py, &movement.outgoing)?;
+        movement_dict.set_item("incoming", incoming.bind(py))?;
+        movement_dict.set_item("outgoing", outgoing.bind(py))?;
+        // Compatibility for older Python consumers that looked for "in"/"out".
+        movement_dict.set_item("in", incoming.bind(py))?;
+        movement_dict.set_item("out", outgoing.bind(py))?;
+        tokens.set_item(token, movement_dict)?;
+    }
+    dict.set_item("tokens", tokens)?;
+
+    let currencies = PyDict::new_bound(py);
+    for (symbol, movement) in &movements.currencies {
+        let movement_dict = PyDict::new_bound(py);
+        let incoming = movement_amounts_to_python(py, &movement.incoming)?;
+        let outgoing = movement_amounts_to_python(py, &movement.outgoing)?;
+        movement_dict.set_item("incoming", incoming.bind(py))?;
+        movement_dict.set_item("outgoing", outgoing.bind(py))?;
+        movement_dict.set_item("in", incoming.bind(py))?;
+        movement_dict.set_item("out", outgoing.bind(py))?;
+        currencies.set_item(symbol, movement_dict)?;
+    }
+    dict.set_item("currencies", currencies)?;
+
+    Ok(dict.unbind())
+}
+
+fn movement_amounts_to_python(
+    py: Python,
+    amounts: &std::collections::HashMap<String, U256>,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new_bound(py);
+    for (transfer_id, amount) in amounts {
+        dict.set_item(transfer_id, u256_to_py(py, amount)?)?;
+    }
+    Ok(dict.unbind())
+}
+
 fn convert_currency_amount(py: Python, symbol: &str, amount: &I256) -> PyResult<Option<PyObject>> {
     let decimals: Option<i32> = if symbol == "ETH" {
         Some(18)

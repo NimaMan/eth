@@ -110,8 +110,10 @@ pub struct ProcessedTransaction {
     pub trading_disabled_events: Vec<TradingDisabledEvent>,
 
     // Generic events and state
+    #[serde(with = "super::serde_helpers::json_value_vec_map_binary")]
     pub other_events: Vec<HashMap<String, serde_json::Value>>,
     pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
+    #[serde(with = "super::serde_helpers::json_value_address_map_binary")]
     pub latest_states: HashMap<Address, serde_json::Value>,
     pub input: Vec<u8>,
     pub struct_logs: Option<Vec<StructLog>>,

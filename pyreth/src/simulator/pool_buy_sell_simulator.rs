@@ -475,6 +475,7 @@ impl PyPoolBuySellParameters {
             buyer_address: buyer,
             prior_txs: self.prior_txs.clone(),
             block_number: self.block_number,
+            block_header: None,
             slippage_tolerance: self.slippage_tolerance,
             gas_price,
             max_fee_per_gas: max_fee,

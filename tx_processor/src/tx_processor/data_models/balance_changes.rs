@@ -18,13 +18,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddressBalanceChange {
     /// Net token changes for unknown tokens (checksum address -> raw amount with decimals)
+    #[serde(default)]
     pub token_net: HashMap<String, I256>,
 
     /// Net currency changes for known tokens (symbol -> amount)
     /// ETH is in wei, USDC/USDT have decimals applied
+    #[serde(default)]
     pub currency_net: HashMap<String, I256>,
 
     /// Detailed movement information
+    #[serde(default)]
     pub movements: TokenMovements,
 }
 
@@ -32,9 +35,11 @@ pub struct AddressBalanceChange {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenMovements {
     /// Token movements by checksum address
+    #[serde(default)]
     pub tokens: HashMap<String, TokenMovement>,
 
     /// Currency movements by symbol
+    #[serde(default)]
     pub currencies: HashMap<String, TokenMovement>,
 }
 
@@ -42,9 +47,11 @@ pub struct TokenMovements {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenMovement {
     /// Incoming transfers (transfer_id -> amount)
+    #[serde(default)]
     pub incoming: HashMap<String, U256>,
 
     /// Outgoing transfers (transfer_id -> amount)
+    #[serde(default)]
     pub outgoing: HashMap<String, U256>,
 }
 
