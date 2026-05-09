@@ -42,7 +42,10 @@ pub(super) fn update_touched_v4_pools(
     let pool_keys = token.uniswap_v4_pool_keys();
     let mut updated = Vec::new();
     for pool_key in pool_keys {
-        if touches_v4_pool(tx, &pool_key) {
+        let touches_position_transfer = token
+            .uniswap_v4_pool(&pool_key)
+            .is_some_and(|pool| pool.touches_position_transfer(tx));
+        if touches_v4_pool(tx, &pool_key) || touches_position_transfer {
             token.update_uniswap_v4_pool_from_processed_transaction(&pool_key, tx)?;
             updated.push(pool_key);
         }
