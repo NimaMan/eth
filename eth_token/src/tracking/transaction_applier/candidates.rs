@@ -23,7 +23,9 @@ pub(super) fn candidate_token_addresses(
     for pool_key in v4_pool_event_keys(tx) {
         insert_resolved_token_address_str(registry, token_index, &mut candidates, &pool_key);
     }
+    insert_v3_position_transfer_candidates(registry, tx, &mut candidates);
     insert_v4_position_transfer_candidates(registry, tx, &mut candidates);
+    insert_v4_position_approval_candidates(registry, tx, &mut candidates);
     candidates.into_iter().collect()
 }
 
@@ -44,7 +46,9 @@ where
     for pool_key in v4_pool_event_keys(tx) {
         insert_resolved_token_address_str(registry, token_index, &mut candidates, &pool_key);
     }
+    insert_v3_position_transfer_candidates(registry, tx, &mut candidates);
     insert_v4_position_transfer_candidates(registry, tx, &mut candidates);
+    insert_v4_position_approval_candidates(registry, tx, &mut candidates);
 
     for pool_address in v2_pool_event_addresses(tx) {
         let pool_address_string = address_string(&pool_address);
@@ -78,6 +82,26 @@ where
     Ok(candidates.into_iter().collect())
 }
 
+fn insert_v3_position_transfer_candidates(
+    registry: &TokenRegistry,
+    tx: &ProcessedTransaction,
+    candidates: &mut BTreeSet<String>,
+) {
+    if tx.erc721_transfers.is_empty() {
+        return;
+    }
+
+    for (token_address, token) in &registry.tokens {
+        if token
+            .v3_pools
+            .values()
+            .any(|pool| pool.touches_position_transfer(tx))
+        {
+            candidates.insert(token_address.clone());
+        }
+    }
+}
+
 fn insert_v4_position_transfer_candidates(
     registry: &TokenRegistry,
     tx: &ProcessedTransaction,
@@ -92,6 +116,26 @@ fn insert_v4_position_transfer_candidates(
             .v4_pools
             .values()
             .any(|pool| pool.touches_position_transfer(tx))
+        {
+            candidates.insert(token_address.clone());
+        }
+    }
+}
+
+fn insert_v4_position_approval_candidates(
+    registry: &TokenRegistry,
+    tx: &ProcessedTransaction,
+    candidates: &mut BTreeSet<String>,
+) {
+    if tx.erc721_approval_events.is_empty() && tx.approval_for_all_events.is_empty() {
+        return;
+    }
+
+    for (token_address, token) in &registry.tokens {
+        if token
+            .v4_pools
+            .values()
+            .any(|pool| pool.touches_position_approval(tx))
         {
             candidates.insert(token_address.clone());
         }

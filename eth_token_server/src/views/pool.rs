@@ -224,10 +224,18 @@ impl PoolView {
     }
 
     pub fn from_v3_pool(token: &ERC20Token, pool: &UniswapV3Pool) -> Self {
+        let lp_holders = pool.lp_holders();
+        let lp_holder_count = lp_holders.len();
         Self::from_base(
             token,
             &pool.base,
-            LpPoolViewFields::default(),
+            LpPoolViewFields {
+                lp_total_supply: pool.lp_total_supply(),
+                lp_holder_count,
+                lp_holders,
+                lp_transfer_count: pool.liquidity_position_events.len(),
+                ..LpPoolViewFields::default()
+            },
             ConcentratedPoolViewFields {
                 currency0: Some(pool.token0.clone()),
                 currency1: Some(pool.token1.clone()),
@@ -236,6 +244,7 @@ impl PoolView {
                 current_tick: pool.current_tick,
                 sqrt_price_x96: pool.sqrt_price_x96.clone(),
                 active_liquidity: Some(pool.active_liquidity.to_string()),
+                lp_token_address: pool.position_manager_address.clone(),
                 virtual_reserves: pool
                     .last_virtual_reserves
                     .map(|reserves| VirtualReserveView {
@@ -259,7 +268,13 @@ impl PoolView {
                 lp_total_supply: pool.lp_total_supply(),
                 lp_holder_count,
                 lp_holders,
+                lp_total_approved_to_routers: pool.total_approved_to_routers(),
+                lp_approved_percentage: pool.lp_approved_percentage(),
+                lp_last_approval_block: pool.last_lp_approval_block(),
+                lp_last_approval: pool.last_lp_approval_event(),
+                lp_holders_with_approvals: pool.holders_with_approvals(),
                 lp_transfer_count: pool.liquidity_position_events.len(),
+                lp_approval_count: pool.lp_approval_events.len(),
                 ..LpPoolViewFields::default()
             },
             ConcentratedPoolViewFields {

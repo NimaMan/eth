@@ -27,7 +27,10 @@ pub(super) fn update_touched_v3_pools(
     let pool_addresses = token.uniswap_v3_pool_addresses();
     let mut updated = Vec::new();
     for pool_address in pool_addresses {
-        if touches_v3_pool(tx, &pool_address) {
+        let touches_position_transfer = token
+            .uniswap_v3_pool(&pool_address)
+            .is_some_and(|pool| pool.touches_position_transfer(tx));
+        if touches_v3_pool(tx, &pool_address) || touches_position_transfer {
             token.update_uniswap_v3_pool_from_processed_transaction(&pool_address, tx)?;
             updated.push(pool_address);
         }
@@ -45,7 +48,11 @@ pub(super) fn update_touched_v4_pools(
         let touches_position_transfer = token
             .uniswap_v4_pool(&pool_key)
             .is_some_and(|pool| pool.touches_position_transfer(tx));
-        if touches_v4_pool(tx, &pool_key) || touches_position_transfer {
+        let touches_position_approval = token
+            .uniswap_v4_pool(&pool_key)
+            .is_some_and(|pool| pool.touches_position_approval(tx));
+        if touches_v4_pool(tx, &pool_key) || touches_position_transfer || touches_position_approval
+        {
             token.update_uniswap_v4_pool_from_processed_transaction(&pool_key, tx)?;
             updated.push(pool_key);
         }
