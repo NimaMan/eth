@@ -368,30 +368,34 @@ impl<'a> BlockContextLoader<'a> {
             .ok_or_else(|| eyre!("cannot build live state snapshot for genesis block"))?;
         let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
 
-        if parent_block <= latest_historical_context {
-            let fork = self.simulator.create_forked_state(parent_block)?;
-            return Ok((fork, parent_block));
-        }
-
-        if let Some(cache) = self.simulator.live_chain_cache() {
+        let live_cache = self.simulator.live_chain_cache();
+        if let Some(cache) = live_cache.as_ref() {
             if let Some(snapshot) = cache.fetch_chain_state_snapshot(parent_block).await? {
                 if snapshot.block_hash == parent_hash {
-                    if snapshot.base_block_number != latest_historical_context {
-                        debug!(
-                            block_number,
-                            parent_block,
-                            snapshot_base_block_number = snapshot.base_block_number,
-                            latest_historical_context,
-                            "using parent tracked live state with older historical context base"
-                        );
-                    }
+                    debug!(
+                        block_number,
+                        parent_block,
+                        snapshot_base_block_number = snapshot.base_block_number,
+                        latest_historical_context,
+                        "using parent tracked live state as base for next live state snapshot"
+                    );
 
                     let header = self.load_block_header(parent_block, None).await?;
                     let base_block_number = snapshot.base_block_number;
-                    return Ok((
-                        self.forked_state_from_snapshot(&snapshot, header).await?,
-                        base_block_number,
-                    ));
+                    match self.forked_state_from_snapshot(&snapshot, header).await {
+                        Ok(fork_state) => return Ok((fork_state, base_block_number)),
+                        Err(err) if parent_block <= latest_historical_context => {
+                            warn!(
+                                block_number,
+                                parent_block,
+                                snapshot_base_block_number = base_block_number,
+                                latest_historical_context,
+                                error = %err,
+                                "ignoring parent tracked live state; falling back to local historical parent state"
+                            );
+                        }
+                        Err(err) => return Err(err),
+                    }
                 } else {
                     warn!(
                         block_number,
@@ -402,7 +406,14 @@ impl<'a> BlockContextLoader<'a> {
                     );
                 }
             }
+        }
 
+        if parent_block <= latest_historical_context {
+            let fork = self.simulator.create_forked_state(parent_block)?;
+            return Ok((fork, parent_block));
+        }
+
+        if live_cache.is_some() {
             return Err(eyre!(
                 "cannot build live state snapshot for block {}: exact parent snapshot for {} is unavailable",
                 block_number,
@@ -430,8 +441,7 @@ impl<'a> BlockContextLoader<'a> {
                 snapshot.block_number
             ));
         }
-        self.simulator
-            .assert_block_available(snapshot.base_block_number)?;
+        self.assert_snapshot_base_available(snapshot)?;
 
         let mut fork_state = self
             .simulator
@@ -441,6 +451,23 @@ impl<'a> BlockContextLoader<'a> {
         fork_state.block_header = header;
         fork_state.nonces.clear();
         Ok(fork_state)
+    }
+
+    fn assert_snapshot_base_available(&self, snapshot: &ChainStateSnapshot) -> Result<()> {
+        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
+        if snapshot.base_block_number > latest_historical_context {
+            let latest_reth_finished = self.simulator.get_latest_block().ok();
+            let latest_static_header = self.simulator.latest_static_header_block_number().ok();
+            return Err(eyre!(
+                "cannot restore live state snapshot for block {}: snapshot base block {} is ahead of local historical context block {} (latest reth finished {:?}, latest static header {:?})",
+                snapshot.block_number,
+                snapshot.base_block_number,
+                latest_historical_context,
+                latest_reth_finished,
+                latest_static_header
+            ));
+        }
+        Ok(())
     }
 }
 

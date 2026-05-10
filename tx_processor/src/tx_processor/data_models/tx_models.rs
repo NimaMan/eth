@@ -24,6 +24,7 @@ pub struct ContractCreationEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedAccessListItem {
     pub address: Address,
+    #[serde(default)]
     pub storage_keys: Vec<B256>,
 }
 

@@ -724,6 +724,7 @@ impl LiveTokenRuntime {
         let mut state = self.inner.state.write().await;
         state.progress.status = LiveTokenStatus::Live;
         state.progress.live_at_unix_secs = Some(now_unix_secs());
+        state.progress.last_error = None;
         state.progress.updated_at_unix_secs = now_unix_secs();
         let event = LiveTokenEvent::RuntimeLive {
             id: state.progress.id.clone().unwrap_or_default(),
@@ -880,6 +881,7 @@ fn apply_report(
     state.progress.last_block_disk_cache_read_ms = Some(loaded.disk_cache_read_ms);
     state.progress.last_block_disk_cache_write_ms = Some(loaded.disk_cache_write_ms);
     state.progress.last_block_source = Some(loaded.source.to_string());
+    state.progress.last_error = None;
     if loaded.disk_cache_hit {
         state.progress.processed_block_disk_cache_hits += 1;
     } else {

@@ -430,8 +430,8 @@ mod tests {
 
     use crate::tx_processor::data_models::{
         AddressBalanceChange, ApprovalForAllEvent, ERC1155TransferEvent, ERC20ApprovalEvent,
-        ERC20TransferEvent, ERC721ApprovalEvent, ERC721TransferEvent, TokenMovement,
-        TokenMovements, UniswapV3PoolCreatedEvent, UniswapV4InitializeEvent,
+        ERC20TransferEvent, ERC721ApprovalEvent, ERC721TransferEvent, ProcessedAccessListItem,
+        TokenMovement, TokenMovements, UniswapV3PoolCreatedEvent, UniswapV4InitializeEvent,
     };
 
     #[test]
@@ -466,6 +466,46 @@ mod tests {
         assert!(!object.contains_key("unique_addresses"));
         assert!(!object.contains_key("bribe_amount"));
         assert_no_empty_json_fields(&value);
+    }
+
+    #[test]
+    fn sparse_json_decodes_access_list_items_with_pruned_storage_keys() {
+        let mut tx = ProcessedTransaction::new(
+            B256::repeat_byte(0x01),
+            1,
+            1_700_000_000,
+            0,
+            Address::repeat_byte(0x02),
+            None,
+            U256::ZERO,
+            true,
+            0,
+            2,
+            Vec::new(),
+        );
+        let access_list_address = Address::repeat_byte(0x03);
+        tx.access_list.push(ProcessedAccessListItem {
+            address: access_list_address,
+            storage_keys: Vec::new(),
+        });
+
+        let value = CompactProcessedTransaction::from_processed(&tx)
+            .to_sparse_json_value()
+            .expect("serialize compact tx");
+        let access_list = value
+            .get("access_list")
+            .and_then(Value::as_array)
+            .expect("access list");
+        let item = access_list[0].as_object().expect("access list item");
+        assert!(item.contains_key("address"));
+        assert!(!item.contains_key("storage_keys"));
+
+        let decoded: CompactProcessedTransaction =
+            serde_json::from_value(value).expect("decode compact tx");
+        let processed = decoded.into_processed();
+        assert_eq!(processed.access_list.len(), 1);
+        assert_eq!(processed.access_list[0].address, access_list_address);
+        assert!(processed.access_list[0].storage_keys.is_empty());
     }
 
     #[test]
