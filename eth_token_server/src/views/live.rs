@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
 use eth_token::erc20::{ERC20Token, TokenSummary};
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
 use serde::Serialize;
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
-use crate::views::token::TokenView;
+use crate::views::token::{TokenActivitySummary, TokenView};
 use crate::views::{network::TokenNetworkView, pool::PoolView};
 
 #[derive(Clone, Debug, Serialize)]
@@ -27,6 +29,8 @@ pub struct LiveTokenDetailResponse {
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
     pub network: TokenNetworkView,
+    pub denom_symbols: BTreeMap<String, String>,
+    pub activity_summary: TokenActivitySummary,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -91,7 +95,10 @@ pub async fn token_detail(
             .network_graphs
             .get(&address),
     );
-    let pools = PoolView::from_token_pools(token);
+    let recent_activity = token.activity.recent_blocks(50);
+    let pools = PoolView::from_token_pools_with_activity(token, &recent_activity);
+    let denom_symbols = crate::views::token::build_denom_symbols(token);
+    let activity_summary = crate::views::token::build_activity_summary(token);
 
     Some(LiveTokenDetailResponse {
         progress: state.progress.clone(),
@@ -100,6 +107,8 @@ pub async fn token_detail(
         index_status,
         pools,
         network,
+        denom_symbols,
+        activity_summary,
     })
 }
 

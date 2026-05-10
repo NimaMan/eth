@@ -9,6 +9,7 @@ use eth_token::pools::{
     BalancerPool, BasePool, CurvePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState,
     TaxBucket, TradingStatus, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
 };
+use eth_token::token_activity::TokenBlockActivity;
 use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
 use serde_json::Value;
@@ -149,6 +150,7 @@ pub struct PoolView {
     pub lp_holders_with_approvals: Vec<String>,
     pub lp_transfer_count: usize,
     pub lp_approval_count: usize,
+    pub recent_denom_activity: Vec<TokenBlockActivity>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -211,6 +213,14 @@ impl PoolView {
     }
 
     pub fn from_v2_pool(token: &ERC20Token, pool: &UniswapV2Pool) -> Self {
+        Self::from_v2_pool_with_activity(token, pool, &[])
+    }
+
+    pub fn from_v2_pool_with_activity(
+        token: &ERC20Token,
+        pool: &UniswapV2Pool,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Self {
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
         let lp_supply_known =
@@ -238,10 +248,19 @@ impl PoolView {
             &pool.base,
             lp_fields,
             ConcentratedPoolViewFields::default(),
+            recent_activity,
         )
     }
 
     pub fn from_v3_pool(token: &ERC20Token, pool: &UniswapV3Pool) -> Self {
+        Self::from_v3_pool_with_activity(token, pool, &[])
+    }
+
+    pub fn from_v3_pool_with_activity(
+        token: &ERC20Token,
+        pool: &UniswapV3Pool,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Self {
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
         Self::from_base(
@@ -275,10 +294,19 @@ impl PoolView {
                     }),
                 ..ConcentratedPoolViewFields::default()
             },
+            recent_activity,
         )
     }
 
     pub fn from_v4_pool(token: &ERC20Token, pool: &UniswapV4Pool) -> Self {
+        Self::from_v4_pool_with_activity(token, pool, &[])
+    }
+
+    pub fn from_v4_pool_with_activity(
+        token: &ERC20Token,
+        pool: &UniswapV4Pool,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Self {
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
         Self::from_base(
@@ -321,10 +349,19 @@ impl PoolView {
                     }),
                 ..ConcentratedPoolViewFields::default()
             },
+            recent_activity,
         )
     }
 
     pub fn from_curve_pool(token: &ERC20Token, pool: &CurvePool) -> Self {
+        Self::from_curve_pool_with_activity(token, pool, &[])
+    }
+
+    pub fn from_curve_pool_with_activity(
+        token: &ERC20Token,
+        pool: &CurvePool,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Self {
         Self::from_base(
             token,
             &pool.base,
@@ -346,10 +383,19 @@ impl PoolView {
                     .collect(),
                 ..ConcentratedPoolViewFields::default()
             },
+            recent_activity,
         )
     }
 
     pub fn from_balancer_pool(token: &ERC20Token, pool: &BalancerPool) -> Self {
+        Self::from_balancer_pool_with_activity(token, pool, &[])
+    }
+
+    pub fn from_balancer_pool_with_activity(
+        token: &ERC20Token,
+        pool: &BalancerPool,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Self {
         Self::from_base(
             token,
             &pool.base,
@@ -371,40 +417,48 @@ impl PoolView {
                     .collect(),
                 ..ConcentratedPoolViewFields::default()
             },
+            recent_activity,
         )
     }
 
     pub fn from_token_pools(token: &ERC20Token) -> Vec<Self> {
+        Self::from_token_pools_with_activity(token, &[])
+    }
+
+    pub fn from_token_pools_with_activity(
+        token: &ERC20Token,
+        recent_activity: &[TokenBlockActivity],
+    ) -> Vec<Self> {
         let mut pools = Vec::with_capacity(token.pool_count());
         pools.extend(
             token
                 .v2_pools
                 .values()
-                .map(|pool| Self::from_v2_pool(token, pool)),
+                .map(|pool| Self::from_v2_pool_with_activity(token, pool, recent_activity)),
         );
         pools.extend(
             token
                 .v3_pools
                 .values()
-                .map(|pool| Self::from_v3_pool(token, pool)),
+                .map(|pool| Self::from_v3_pool_with_activity(token, pool, recent_activity)),
         );
         pools.extend(
             token
                 .v4_pools
                 .values()
-                .map(|pool| Self::from_v4_pool(token, pool)),
+                .map(|pool| Self::from_v4_pool_with_activity(token, pool, recent_activity)),
         );
         pools.extend(
             token
                 .curve_pools
                 .values()
-                .map(|pool| Self::from_curve_pool(token, pool)),
+                .map(|pool| Self::from_curve_pool_with_activity(token, pool, recent_activity)),
         );
         pools.extend(
             token
                 .balancer_pools
                 .values()
-                .map(|pool| Self::from_balancer_pool(token, pool)),
+                .map(|pool| Self::from_balancer_pool_with_activity(token, pool, recent_activity)),
         );
         sort_pools_by_liquidity(&mut pools);
         pools
@@ -422,6 +476,7 @@ impl PoolView {
         self.liquidity_history.clear();
         self.lp_holders.clear();
         self.lp_last_approval = None;
+        self.recent_denom_activity.clear();
         self
     }
 
@@ -430,6 +485,7 @@ impl PoolView {
         base: &BasePool,
         lp_fields: LpPoolViewFields,
         concentrated: ConcentratedPoolViewFields,
+        recent_activity: &[TokenBlockActivity],
     ) -> Self {
         let total_supply = token.total_supply_scaled();
         let denom_symbol = denom_symbol(&base.identity.denom_address);
@@ -593,8 +649,34 @@ impl PoolView {
             lp_holders_with_approvals: lp_fields.lp_holders_with_approvals,
             lp_transfer_count: lp_fields.lp_transfer_count,
             lp_approval_count: lp_fields.lp_approval_count,
+            recent_denom_activity: filter_activity_by_denom(
+                recent_activity,
+                &base.identity.denom_address,
+            ),
         }
     }
+}
+
+fn filter_activity_by_denom(
+    activity: &[TokenBlockActivity],
+    denom_address: &str,
+) -> Vec<TokenBlockActivity> {
+    let denom = denom_address.to_lowercase();
+    activity
+        .iter()
+        .filter(|block| {
+            block
+                .buy_volume_by_denom
+                .keys()
+                .any(|k| k.to_lowercase() == denom)
+                || block
+                    .sell_volume_by_denom
+                    .keys()
+                    .any(|k| k.to_lowercase() == denom)
+                || block.total_bribe_eth > 0.0
+        })
+        .cloned()
+        .collect()
 }
 
 const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
@@ -794,7 +876,7 @@ fn ratio_percent(value: Option<f64>) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
-fn denom_symbol(address: &str) -> Option<String> {
+pub fn denom_symbol(address: &str) -> Option<String> {
     address
         .parse::<Address>()
         .ok()
