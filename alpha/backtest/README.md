@@ -1,16 +1,16 @@
 # Backtest
 
-Planned crate: `eth_alpha_backtest`
+Crate: `eth_alpha_backtest`
 
 This crate replays historical market data through the same trading core used by live trading.
 
 ## Responsibilities
 
-- Load historical blocks or precomputed market events.
+- Replay existing live/paper runs from `alpha_trading.strategy_observations`.
 - Feed events into `eth_alpha_engine`.
 - Provide a simulated execution adapter.
 - Define fill models, slippage models, gas models, and latency assumptions.
-- Produce reports, metrics, and snapshots.
+- Produce reports, metrics, and snapshots in Postgres.
 
 ## Non-Responsibilities
 
@@ -18,6 +18,7 @@ This crate replays historical market data through the same trading core used by 
 - No separate position state machine.
 - No live signing or broadcasting.
 - No mutation of canonical live Redis state.
+- No external file formats (JSONL, Parquet, etc.).  Events are read directly from Postgres.
 
 ## Core Principle
 
@@ -33,7 +34,7 @@ StrategyDecision
   -> Engine position update
 ```
 
-The Python version had separate `BacktestStrategyEngine` and `LiveStrategyEngine` paths with duplicated state transitions. This crate should remove that duplication.
+The Python version had separate `BacktestStrategyEngine` and `LiveStrategyEngine` paths with duplicated state transitions. This crate removes that duplication.
 
 ## Block-Level Execution Model
 
@@ -78,3 +79,54 @@ Make assumptions explicit and configurable:
 - whether fills are block-snapshot based or transaction-order based
 
 Backtest reports should include the assumptions used for a run.
+
+## Usage
+
+### CLI
+
+```bash
+cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --database-url "$ALPHA_DATABASE_URL" \
+  --replay-run-id "alpha-trader-1715350000-12345" \
+  --buy-amount-wei 10000000000000000 \
+  --min-liquidity-eth 0.5 \
+  --min-liquidity-usd 1000 \
+  --slippage-bps 100 \
+  --gas-cost-wei 150000 \
+  --failure-rate-bps 0
+```
+
+### Required arguments
+
+| Flag | Description |
+|------|-------------|
+| `--database-url` | Postgres connection string |
+| `--replay-run-id` | Existing live/paper run to replay from `strategy_observations` |
+
+### Simulation flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--slippage-bps` | Additional slippage on sell fills | 100 |
+| `--gas-cost-wei` | Gas charged per transaction | 150_000 |
+| `--failure-rate-bps` | Random failure probability | 0 |
+| `--allow-scam` | Allow trades on scam pools | false |
+| `--ignore-liquidity` | Skip liquidity checks | false |
+| `--best-case-fill` | Disable worst-case fill reduction | false |
+
+## Architecture
+
+| Module | Purpose |
+|--------|---------|
+| `config` | `BacktestConfig`, `SimulationConfig` |
+| `execution` | `SimulatedExecutionAdapter` implementing `EngineExecutionAdapter` |
+| `runner` | `BacktestRunner` that drives events through `AlphaEngine` |
+| `bin/eth_alpha_backtest` | CLI binary — reads observations from Postgres, persists results to Postgres |
+
+## Integration with Asena
+
+Backtest runs write to the same Postgres `alpha_trading` schema as live trading:
+- `trader_runs` with `mode = 'backtest'`
+- `positions`, `order_intents`, `execution_reports`, `risk_events`
+
+Asena's existing performance endpoints (`/alpha/strategies/<id>/performance`) can query these rows by `run_id` and display backtest results alongside live paper-trading results.

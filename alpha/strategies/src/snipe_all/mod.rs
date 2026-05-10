@@ -1,5 +1,5 @@
 mod config;
-mod rule;
+pub mod rule;
 mod state;
 mod strategy;
 

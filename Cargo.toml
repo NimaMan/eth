@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "alpha/core",
     "alpha/engine",
+    "alpha/backtest",
     "alpha/pool_classification",
     "alpha/store",
     "alpha/strategies",

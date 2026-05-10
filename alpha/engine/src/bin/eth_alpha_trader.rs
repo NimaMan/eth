@@ -3,23 +3,25 @@ use std::env;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::U256;
 use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
     execution::ExecutionReport,
     ids::TokenPoolId,
-    market::{MarketEvent, PoolProtocol, PoolSnapshot},
+    market::{MarketEvent, PoolSnapshot},
     portfolio::PortfolioState,
-    risk::{RiskEvent, RiskKind, RiskSeverity},
 };
-use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, PaperExecutionAdapter};
+use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, ExecutionAdapterKind, ModeledExecutionAdapter, ModeledExecutionConfig, PaperExecutionAdapter};
+use eth_alpha_engine::wire::{
+    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalsResponse,
+    MempoolSignalWire, PoolWire,
+};
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{eyre, Result, WrapErr};
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
@@ -62,6 +64,7 @@ struct Args {
     #[arg(long, env = "ALPHA_TRADER_RUN_ID")]
     run_id: Option<String>,
 
+    /// Execution mode: `paper` (perfect fills) or `modeled` (worst-case fills).
     #[arg(long, env = "ALPHA_TRADER_MODE", default_value = "paper")]
     mode: String,
 
@@ -79,77 +82,6 @@ struct TokenServerClient {
     http: reqwest::Client,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct LiveStatusResponse {
-    progress: LiveProgressWire,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct LivePoolListResponse {
-    count: usize,
-    pools: Vec<PoolWire>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct LiveProgressWire {
-    status: String,
-    current_block: Option<u64>,
-    blocks_processed: u64,
-    warmup_total_blocks: u64,
-    tracked_tokens: usize,
-    #[serde(default)]
-    tracked_pools: usize,
-    #[serde(default)]
-    tracked_v2_pools: usize,
-    #[serde(default)]
-    tracked_v3_pools: usize,
-    #[serde(default)]
-    tracked_v4_pools: usize,
-    last_error: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct PoolWire {
-    token_address: String,
-    pool_address: String,
-    protocol: String,
-    denom_address: Option<String>,
-    denom_symbol: Option<String>,
-    currency: Option<String>,
-    denom_reserve: Option<f64>,
-    token_reserve: Option<f64>,
-    price: Option<f64>,
-    creation_block: Option<u64>,
-    latest_block_number: Option<u64>,
-    runtime_state: Option<PoolRuntimeStateWire>,
-    can_buy: bool,
-    can_sell: bool,
-    is_scam: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct PoolRuntimeStateWire {
-    last_update_block: Option<u64>,
-    last_sync_block: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct MempoolSignalsResponse {
-    count: usize,
-    signals: Vec<MempoolSignalWire>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct MempoolSignalWire {
-    signal_id: String,
-    signal_type: String,
-    detection_timestamp: Option<String>,
-    detection_tx_hash: Option<String>,
-    token_address: Option<String>,
-    pool_address: Option<String>,
-    headline: Option<String>,
-    flag: Option<String>,
-}
 
 impl TokenServerClient {
     fn new(base_url: impl Into<String>) -> Self {
@@ -242,10 +174,21 @@ async fn main() -> Result<()> {
     }
     let restored_position_count = portfolio.active_position_count();
 
+    let (adapter, pool_updates) = match args.mode.as_str() {
+        "modeled" => {
+            let adapter = ModeledExecutionAdapter::new(ModeledExecutionConfig::default());
+            let pools = adapter.pools();
+            (ExecutionAdapterKind::Modeled(adapter), Some(pools))
+        }
+        _ => {
+            (ExecutionAdapterKind::Paper(PaperExecutionAdapter::new()), None)
+        }
+    };
+
     let mut engine = AlphaEngine::new(
         BlockCriticalRiskPolicy,
         store.clone(),
-        PaperExecutionAdapter::new(),
+        adapter,
     )
     .with_portfolio(portfolio);
     engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
@@ -353,6 +296,10 @@ async fn main() -> Result<()> {
                 continue;
             }
             seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
+
+            if let Some(ref pools) = pool_updates {
+                pools.lock().expect("pool lock").insert(pool.address.clone(), pool.clone());
+            }
 
             if suppress_events || (first_poll && !args.replay_current) {
                 record_pool_observation(
@@ -701,179 +648,8 @@ fn reports_payload(reports: &[ExecutionReport]) -> Vec<Value> {
         .collect()
 }
 
-impl PoolWire {
-    fn latest_block_number(&self) -> Option<u64> {
-        self.latest_block_number
-            .filter(|block| *block > 0)
-            .or_else(|| {
-                self.runtime_state.as_ref().and_then(|state| {
-                    state
-                        .last_update_block
-                        .filter(|block| *block > 0)
-                        .or_else(|| state.last_sync_block.filter(|block| *block > 0))
-                })
-            })
-            .or_else(|| self.creation_block.filter(|block| *block > 0))
-    }
-
-    fn pool_identity(&self) -> String {
-        self.pool_address.clone()
-    }
-
-    fn to_pool_snapshot(&self) -> Result<PoolSnapshot> {
-        let token_address = parse_address(&self.token_address)?;
-        let pool_id = TokenPoolId::new(token_address, self.pool_identity());
-        let denom_reserve = required_pool_float(self.denom_reserve, "denom_reserve", self)?;
-        let token_reserve = self.token_reserve.unwrap_or_default();
-        let Some(latest_block) = self.latest_block_number() else {
-            return Err(eyre!(
-                "pool {} for token {} has no latest block",
-                self.pool_address,
-                self.token_address
-            ));
-        };
-        Ok(PoolSnapshot {
-            address: pool_id,
-            token_address,
-            protocol: parse_protocol(&self.protocol),
-            denom_address: self
-                .denom_address
-                .as_deref()
-                .and_then(parse_optional_address),
-            denom_symbol: self.denom_symbol(),
-            denom_reserve: decimal_from_f64(denom_reserve),
-            token_reserve: decimal_from_f64(token_reserve),
-            price_denom_per_token: self.price.map(decimal_from_f64),
-            latest_block,
-            can_buy: self.can_buy,
-            can_sell: self.can_sell,
-            is_scam: self.is_scam,
-        })
-    }
-
-    fn denom_symbol(&self) -> Option<String> {
-        self.denom_symbol
-            .as_deref()
-            .or(self.currency.as_deref())
-            .map(str::trim)
-            .filter(|symbol| !symbol.is_empty() && !symbol.starts_with("0x"))
-            .map(str::to_ascii_uppercase)
-    }
-}
-
-impl LiveProgressWire {
-    fn tracked_pool_count(&self) -> usize {
-        if self.tracked_pools > 0 {
-            self.tracked_pools
-        } else {
-            self.tracked_v2_pools + self.tracked_v3_pools + self.tracked_v4_pools
-        }
-    }
-}
-
-impl MempoolSignalWire {
-    fn to_risk_event(&self) -> Result<Option<RiskEvent>> {
-        let Some(token_address) = self.token_address.as_ref() else {
-            return Ok(None);
-        };
-        let token_address = parse_address(token_address)?;
-        let pool_address = self
-            .pool_address
-            .as_ref()
-            .map(|value| TokenPoolId::new(token_address, value));
-        let pending_tx_hash = self
-            .detection_tx_hash
-            .as_ref()
-            .map(|value| B256::from_str(value))
-            .transpose()
-            .map_err(|error| eyre!("invalid tx hash: {error}"))?;
-        let (kind, severity) = signal_kind_and_severity(self);
-        Ok(Some(RiskEvent {
-            kind,
-            severity,
-            token_address,
-            pool_address,
-            pending_tx_hash,
-            observed_block: None,
-            message: self.message(),
-        }))
-    }
-
-    fn message(&self) -> String {
-        match (&self.detection_timestamp, &self.headline) {
-            (Some(ts), Some(headline)) => format!("{headline} at {ts}"),
-            (Some(ts), None) => format!("{} at {ts}", self.signal_type),
-            (None, Some(headline)) => headline.clone(),
-            (None, None) => self.signal_type.clone(),
-        }
-    }
-}
-
-fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSeverity) {
-    match signal.signal_type.as_str() {
-        "trading_enabled" => (RiskKind::TradingEnabled, RiskSeverity::Info),
-        "liquidity_removal" => (RiskKind::LiquidityRemoval, RiskSeverity::Critical),
-        "lp_approval" => (RiskKind::LpApproval, RiskSeverity::Warning),
-        "honeypot_signal" | "sell_blocked_signal" => (RiskKind::Honeypot, RiskSeverity::Critical),
-        "tax_signal" => {
-            let critical = signal
-                .flag
-                .as_deref()
-                .map(is_critical_tax_bucket)
-                .unwrap_or(false);
-            (
-                RiskKind::TaxChange,
-                if critical {
-                    RiskSeverity::Critical
-                } else {
-                    RiskSeverity::Warning
-                },
-            )
-        }
-        other => (RiskKind::Custom(other.to_string()), RiskSeverity::Warning),
-    }
-}
-
-fn is_critical_tax_bucket(bucket: &str) -> bool {
-    matches!(
-        bucket.trim().to_ascii_lowercase().as_str(),
-        "high_tax" | "extreme_tax" | "high" | "extreme"
-    )
-}
-
-fn parse_protocol(value: &str) -> PoolProtocol {
-    match value.to_ascii_lowercase().as_str() {
-        "uniswapv2" | "uniswap_v2" | "v2" => PoolProtocol::UniswapV2,
-        "uniswapv3" | "uniswap_v3" | "v3" => PoolProtocol::UniswapV3,
-        "uniswapv4" | "uniswap_v4" | "v4" => PoolProtocol::UniswapV4,
-        other => PoolProtocol::Unknown(other.to_string()),
-    }
-}
-
-fn parse_address(value: &str) -> Result<Address> {
-    Address::from_str(value).map_err(|error| eyre!("invalid address {value}: {error}"))
-}
-
-fn parse_optional_address(value: &str) -> Option<Address> {
-    Address::from_str(value).ok()
-}
-
-fn required_pool_float(value: Option<f64>, field: &str, pool: &PoolWire) -> Result<f64> {
-    value.ok_or_else(|| {
-        eyre!(
-            "pool {} for token {} is missing {field}",
-            pool.pool_address,
-            pool.token_address
-        )
-    })
-}
-
 fn parse_u256_decimal(value: &str) -> Result<U256> {
     U256::from_str_radix(value, 10).map_err(|error| eyre!("invalid decimal U256 {value}: {error}"))
-}
-
-fn decimal_from_f64(value: f64) -> Decimal {
-    Decimal::from_f64(value).unwrap_or(Decimal::ZERO)
 }
 
 fn resolve_database_url(args: &Args) -> Result<String> {

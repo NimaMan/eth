@@ -9,7 +9,8 @@ use eth_alpha_core::{
     risk::{RiskEvent, RiskKind, RiskSeverity},
     AlphaCoreError, Result, Strategy, StrategyContext, StrategyDecision,
 };
-use rust_decimal::Decimal;
+use eth_pool_classification::PoolClassificationConfig;
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 
 #[derive(Clone, Debug)]
 pub struct MarketTrackerConfig {
@@ -17,6 +18,8 @@ pub struct MarketTrackerConfig {
     pub wallet_id: WalletId,
     pub buy_amount: Amount,
     pub min_denom_reserve: DecimalAmount,
+    pub min_stable_denom_reserve: DecimalAmount,
+    pub supported_denom_symbols: Vec<String>,
     pub max_slippage_bps: u32,
     pub deadline_secs: u64,
 }
@@ -31,8 +34,24 @@ impl Default for MarketTrackerConfig {
                 decimals: 18,
             },
             min_denom_reserve: Decimal::ZERO,
+            min_stable_denom_reserve: Decimal::from(1_000u64),
+            supported_denom_symbols: ["ETH", "WETH", "USDC", "USDT", "DAI"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
             max_slippage_bps: 500,
             deadline_secs: 30,
+        }
+    }
+}
+
+impl MarketTrackerConfig {
+    pub fn classification_config(&self) -> PoolClassificationConfig {
+        PoolClassificationConfig {
+            supported_quote_symbols: self.supported_denom_symbols.clone(),
+            min_eth_liquidity: self.min_denom_reserve.to_f64().unwrap_or(0.0),
+            min_stable_liquidity: self.min_stable_denom_reserve.to_f64().unwrap_or(0.0),
+            ..PoolClassificationConfig::default()
         }
     }
 }
@@ -59,11 +78,13 @@ impl MarketTrackerStrategy {
         if self.submitted_pools.contains(&pool.address) {
             return Ok(StrategyDecision::Hold);
         }
-        if !pool.can_buy || !pool.can_sell || pool.is_scam {
-            return Ok(StrategyDecision::Hold);
-        }
-        if pool.denom_reserve < self.config.min_denom_reserve {
-            return Ok(StrategyDecision::Hold);
+
+        // Shared eligibility gate: reject ineligible pools first.
+        use crate::shared_rules;
+        use crate::snipe_all::rule::RuleDecision;
+        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config()) {
+            RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
+            _ => {}
         }
 
         self.submit_buy(pool.token_address, pool.address.clone())

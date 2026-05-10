@@ -12,16 +12,20 @@ auditing, fill modeling, strategy quality, or execution.
 
 ## Focus Order
 
+> **North star**: The pipeline must produce a profitable strategy on paper with
+> realistic fills before real capital is deployed. Infrastructure is no longer
+> the dominant limit; strategy quality and fill realism are.
+
 | Order | Bottleneck | Owner | What To Watch | Next Focus |
 | --- | --- | --- | --- | --- |
-| 1 | Live feed readiness and failure isolation | `alpha/live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, warmup progress, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Make live token apply resilient: optional pool metadata and buy/sell simulation failures must be recorded on the affected pool and must not fail the whole live tracker. |
-| 2 | Live warmup memory pressure while filling processed-block cache | `eth_token_server`, `alpha/live/feed`, `tx_processor`, Reth static files | systemd cgroup memory, RSS, cgroup `anon`/`file`, disk-cache hits/misses, cache write time, Reth file mappings | Add allocator trimming to the live warmup path and avoid running large backfills while token-server warmup is filling missing cache entries. |
-| 3 | Mempool signal recall and timing | `mempool_processor`, future `alpha/mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
-| 4 | Trader decision ledger completeness | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior. |
-| 5 | Paper fill realism | `alpha/engine` | synthetic execution reports versus worst achievable block price | Replace placeholder paper fills with worst-case block fill modeling before trusting PnL. This belongs in `PaperExecutionAdapter`, not mempool risk. |
-| 6 | Strategy policy quality | `alpha/strategies` | Snipe All v1 entries, exits, risk reactions, skipped candidates, V2/V3/V4 behavior | Keep `Snipe All v1` as the baseline and extend it with LP approval response, creator public/private labels, tax/honeypot response, position sizing, and pool filters. |
-| 7 | Backtest and replay alignment | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching | Historical replay should use confirmed blocks only unless recorded mempool arrivals/signals exist. Compare historical lower-bound PnL to live paper behavior. |
-| 8 | Real execution handoff | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping | Only replace the paper adapter with a `tx_executor` adapter after live state, signal recall, decision persistence, and fill modeling are measurable. |
+| 1 | **Strategy policy quality** | `alpha/strategies` | entry selectivity, exit coverage, risk reaction latency, skipped vs taken ratio, V2/V3/V4 behavior, PnL per pool | Replace `Snipe All v1` with a selective strategy: add pool-quality scoring, activate tax/honeypot/LP-approval exits, add position sizing, and filter low-expectation pools. |
+| 2 | **Paper fill realism** | `alpha/engine` | synthetic execution reports versus worst achievable block price, slippage model, gas cost model | Replace perfect paper fills with worst-case block fill modeling in `PaperExecutionAdapter`. PnL must reflect what a real fill would have achieved. |
+| 3 | **Trader decision ledger completeness** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior and we can train filters from losers. |
+| 4 | **Backtest and replay alignment** | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching, historical lower-bound PnL | Run historical replays with the new selective strategy + worst-case fills. Compare backtest lower-bound PnL to live paper behavior. Iterate on rules offline. |
+| 5 | **Mempool signal recall and timing** | `mempool_processor`, future `alpha/mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
+| 6 | **Live feed readiness and failure isolation** | `alpha/live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Make live token apply resilient: optional pool metadata and buy/sell simulation failures must be recorded on the affected pool and must not fail the whole live tracker. |
+| 7 | **Live warmup memory pressure while filling processed-block cache** | `eth_token_server`, `alpha/live/feed`, `tx_processor`, Reth static files | systemd cgroup memory, RSS, cgroup `anon`/`file`, disk-cache hits/misses, cache write time | Add allocator trimming to the live warmup path and avoid running large backfills while token-server warmup is filling missing cache entries. |
+| 8 | **Real execution handoff** | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping, receipt polling | Only replace the paper adapter with a `tx_executor` adapter after live paper PnL is consistently positive with worst-case fills and decision auditing is complete. |
 
 ## Frontend Alignment
 
@@ -50,6 +54,12 @@ Frontend status semantics:
 
 If this file changes the focus order, stage names, or monitored fields, update
 `interface/asena/eth/static/bogaz.js` in the same change.
+
+> **Note (May 10, 2026)**: The focus order above was inverted. Infrastructure
+> stages 1/2 are now 6/7. Strategy quality (was 6) is now 1. If you update the
+> frontend `bogaz.js` trust-domain order, match this new priority: Strategy
+> Policy → Paper Fill → Decision Ledger → Backtest → Mempool Signals → Live
+> Feed → Memory → Execution Handoff.
 
 ## Token Detail Page Improvement Backlog
 
@@ -521,76 +531,87 @@ Frontend: `interface/asena/eth/tokens/static/js/tokens/network/`.
   - Block number, timestamp, gas used
 - This turns the graph from "pretty picture" into "auditable evidence".
 
-## Active Bottleneck: Live Warmup Memory Pressure While Filling Processed-Block Cache
+## Active Bottleneck: Strategy Policy Quality + Paper Fill Realism
 
-Observed on May 9, 2026 while `eth-token-server.service` was warming live token
-state and filling missing processed-block disk-cache entries.
+Observed on May 10, 2026. The live pipeline is stable and the paper trader has
+been running for ~2 days. The dominant limit is no longer infrastructure; it is
+that the strategy loses money on paper and the paper fills are unrealistically
+perfect.
 
-Measured service state:
+### Latest State Snapshot (May 10, 2026 15:27 UTC)
 
+Live pipeline:
 ```text
-eth-token-server.service
-  status: warming
-  progress: 2525 / 7000 warmup blocks
-  current block: 25045525
-  processed txs: 686,908
-  tracked tokens: 186
-  tracked pools: 27
-  cache hits: 0
-  cache misses: 2525
+eth-token-server
+  status:               live
+  current block:        25065005
+  warmup:               complete (7000 blocks)
+  live blocks processed: 96
+  txs scanned:          1,913,402
+  txs processed:        1,870,809
+  tx failures:          794
+  tracked tokens:       648
+  tracked pools:        405 (V2: 277, V3: 4, V4: 124)
+  cache hits:           7094
+  cache misses:         2
+  last block apply:     39 ms
+  last cache read:      13 ms
 ```
 
-Memory accounting:
-
+Paper strategy (`snipe-all-v1`):
 ```text
-systemd Memory:      ~7.9G / 8G
-process RSS:         ~3.4G
-cgroup memory.current: ~8.6G
-cgroup anon:         ~2.2G
-cgroup file:         ~5.8G
-cgroup inactive_file: ~5.6G
-cgroup pagetables:   ~454M
-cgroup kernel/slab:  ~587M
+mode:                 paper
+status:               running since 2026-05-08 14:37 UTC
+positions:            167 (open: 70, closed: 97)
+orders:               282
+execution reports:    264 confirmed, 0 failed
+risk events:          144 (103 critical)
+buy volume:           1.85 ETH
+sell volume:          0.97 ETH
+realized PnL:         0.00 ETH
+ROI:                  0.0%
 ```
 
-Interpretation:
+### Interpretation
 
-- The dominant cgroup charge is file cache, not canonical token registry size.
-- The service maps and reads large Reth static files, RocksDB/MDBX files, and
-  processed-block cache files while cache misses are being filled.
-- `inactive_file` is mostly reclaimable by the kernel, but it still counts
-  against the service cgroup `MemoryMax=8G`.
-- The anonymous/heap side is still meaningful at roughly `2.2G`.
-- No historical range run was active when measured; `/runs` returned empty.
-- Current tracked token/pool counts were too small to explain the 8G cgroup
-  footprint by themselves.
+- **Live infrastructure is healthy**: Cache hit rate is ~99.97%, block apply is
+  ~39 ms, tracked set is 648 tokens / 405 pools. The pipeline can sustain live
+  paper trading.
+- **The strategy is not selective**: It buys every eligible pool. 167 buys in ~2
+  days with 0.01 ETH each = 1.85 ETH deployed. 70 positions are still open.
+- **Paper fills hide losses**: `PaperExecutionAdapter` reports perfect fills
+  (`filled_amount = intent.amount`). Realized PnL is reported as exactly 0.0,
+  which is mathematically implausible for 97 closed positions unless the fill
+  model is perfect and gas/slippage are ignored.
+- **Exits are incomplete**: Only `liquidity_removal` exits are active. Tax,
+  honeypot, and LP-approval exits are scaffolded but hold. 103 critical risk
+  events fired; many of those should have triggered sells but did not.
+- **Mempool simulation context lag**: The token-server error log shows repeated
+  "State for block X not yet available as local historical context" where X is
+  3–20 blocks behind the live head. This means the `mempool_processor` is
+  trying to simulate pending txs against a live context that has not caught up.
+  This does not block paper trading but it degrades signal quality.
 
-Relevant code paths:
+### Immediate Operating Rule
 
-- Live warmup loads or fills one processed block in
-  `alpha/live/feed/src/runtime/service.rs`.
-- The live runtime clones `LiveBlockTokenProcessor` before applying each block,
-  then restores it after apply. At the current token count this is not the main
-  consumer, but it can amplify allocator retention as the tracked set grows.
-- Historical range runs call `eth_token_server::memory::trim_allocator()` after
-  chunks. The live warmup path does not currently trim the allocator.
+- **Do not add real capital until paper PnL is positive with worst-case fills.**
+- The next engineering block is `alpha/strategies` + `alpha/engine`, not
+  `tx_executor` or live feed tuning.
+- Backfill and large cache work can run freely; live warmup is complete and
+  memory is stable.
 
-Immediate operating rule:
-
-- Do not run a large processed-block backfill while `eth-token-server` warmup is
-  filling cache misses under the current `8G` service cap.
-- Prefer waiting for warmup to finish, stopping live tracking, or temporarily
-  increasing the service memory cap before large cache-fill work.
-
-Next actions:
+### Next Actions
 
 | Priority | Action | Owner | Validation |
 | --- | --- | --- | --- |
-| 1 | Add allocator trimming to the live warmup path after block apply or every N warmup blocks. | `alpha/live/feed`, `eth_token_server` | Compare process RSS/anon before and after 500 warmup blocks. |
-| 2 | Add memory diagnostics to the token-server cache page or `/live/status`: process RSS, cgroup current, anon, file, inactive_file. | `eth_token_server`, Asena | Cache page shows why MemoryMax is high without shell access. |
-| 3 | Run a controlled 1K cached-read warmup after cache is already populated. | `eth_token_server` | Cache hits should dominate and cgroup file growth should be lower than miss/fill warmup. |
-| 4 | Measure whether `LiveBlockTokenProcessor` cloning becomes significant at larger tracked token counts. | `alpha/live/feed`, `eth_token` | Record clone/apply/restore time and heap/RSS deltas as tokens grow. |
-| 5 | Decide whether token-server warmup and bulk cache backfill should run in separate service profiles with different `MemoryMax`. | systemd config | Backfill cannot OOM or starve the live token server. |
+| 1 | Implement worst-case paper fill modeling in `PaperExecutionAdapter`: use block-level price impact, apply slippage, deduct gas, and record fill divergence vs intent. | `alpha/engine` | Paper PnL on closed positions becomes negative (reflecting reality) instead of exactly zero. |
+| 2 | Activate tax/honeypot exit rule in `snipe_all/rules/tax.rs`: sell on `RiskKind::TaxChange` or `Honeypot` when an open position exists. | `alpha/strategies` | Frontend risk table shows sells tied to tax/honeypot events; closed-position count rises. |
+| 3 | Activate LP-approval exit rule in `snipe_all/rules/lp_approval.rs`: sell on `RiskKind::LpApproval` for private creators. | `alpha/strategies` | Same as above for LP-approval events. |
+| 4 | Add pool-quality entry filter to `snipe_all/rules/entry.rs`: score pools by creator history, network cluster risk, holder concentration, and mempool signal density. Reject below threshold. | `alpha/strategies`, `eth_token` | Entry count drops; taken/total ratio is visible in decision ledger; PnL per pool improves. |
+| 5 | Add position sizing to `SnipeAllConfig`: dynamic buy amount based on pool score, portfolio heat, and recent win rate. | `alpha/strategies`, `alpha/core` | Config exposes `min_buy`, `max_buy`, `score_multiplier`; buy amounts vary across positions. |
+| 6 | Wire decision-audit rows for every skip so the frontend can show *why* a pool was rejected. | `alpha/engine`, `alpha/store` | `strategy_observations` table has skip rows with rule id, score, and reason. |
+| 7 | Run a 7-day historical backtest with the new selective strategy + worst-case fills. | `alpha/backtest` | Backtest PnL is comparable to live paper PnL; rules iterate offline. |
+| 8 | Build `TxExecutorAdapter` implementing `EngineExecutionAdapter` only after paper PnL is positive for 3 consecutive days. | `alpha/engine`, `tx_executor` | Real-submission mode is gated by a config flag and requires explicit operator enable. |
 
 ## Processed-Block Cache Baseline
 
@@ -658,3 +679,115 @@ Target behavior:
   reserves fall sharply from above the live retention floor to below it, then
   pruned as before. Token Lab case:
   `token_lab/investigations/mothman_live_retention_liquidity_removal_25063339/`.
+
+## Path to Profitable Deployment
+
+This section is a concise roadmap from the current state (live paper, zero
+selectivity, perfect fills) to a deployed strategy that makes money.
+
+### Stage 0 — Current State (COMPLETE)
+
+- [x] Live token tracker reaches `live` reliably
+- [x] Processed-block cache fills and reads fast (>99% hit rate)
+- [x] Paper trader binary runs continuously against live state
+- [x] Postgres decision ledger persists positions, orders, reports, risks
+- [x] Mempool signals (liquidity removal, tax, honeypot, LP approval) are
+  detected and published
+- [x] Frontend renders live status, strategy detail, and pipeline bottlenecks
+
+### Stage 1 — Make Paper Honest (NEXT)
+
+Goal: Paper PnL must reflect reality. If the strategy loses money, paper must
+show a loss.
+
+- [ ] `PaperExecutionAdapter` models worst-case fill: block-level price impact,
+  configured slippage bps, gas cost deduction.
+- [ ] `SimulatedExecutionAdapter` in backtest uses the same worst-case rule so
+  backtest and live paper are aligned.
+- [ ] Front-end performance chart shows "modeled PnL" separately from "perfect
+  PnL" during the transition.
+
+Acceptance: Running the current `Snipe All v1` against 7 days of historical data
+produces negative PnL (because buying everything with realistic fills is
+unprofitable).
+
+### Stage 2 — Activate Exits
+
+Goal: Stop holding bags. Every critical risk event should trigger a sell.
+
+- [ ] `rules/tax.rs`: sell on `TaxChange` / `Honeypot` when position is open.
+- [ ] `rules/lp_approval.rs`: sell on `LpApproval` for private creators.
+- [ ] `rules/creator_label.rs`: label creators public/private; wire label into
+  LP-approval rule logic.
+- [ ] Add a "scam" exit: if `RiskKind::Scam` or critical risk fires, exit
+  immediately even if it means a 100% loss.
+
+Acceptance: Closed-position count rises; average hold time for bad tokens
+drops; risk-event-to-sell latency is < 1 poll cycle (2s).
+
+### Stage 3 — Selective Entry
+
+Goal: Do not buy every pool. Buy only pools with positive expected value.
+
+- [ ] Add `PoolScore` to `eth_pool_classification` or `alpha/strategies`:
+  combine creator history, network cluster risk score, holder concentration,
+  liquidity depth, denom quality, and mempool signal density.
+- [ ] `rules/entry.rs` rejects pools below a configurable `min_score`.
+- [ ] Decision audit rows record score + reason for every skip.
+- [ ] Frontend strategy detail shows "evaluated / skipped / entered" counts.
+
+Acceptance: Entry rate drops by > 50% (from ~80/day to < 40/day) while
+maintaining or improving the win rate of closed positions.
+
+### Stage 4 — Position Sizing
+
+Goal: Bet more on high-conviction pools, less on marginal ones.
+
+- [ ] `SnipeAllConfig` adds `min_buy`, `max_buy`, `score_multiplier`.
+- [ ] `PortfolioLimits` enforces max open positions, max exposure per denom,
+  max daily drawdown.
+- [ ] Engine rejects buy intents that would breach portfolio limits.
+
+Acceptance: Buy amounts vary across positions; portfolio heat metric is
+visible in frontend.
+
+### Stage 5 — Backtest-Driven Iteration
+
+Goal: Iterate on rules offline without waiting for live days.
+
+- [ ] Run 30-day historical replay with selective strategy + worst-case fills.
+- [ ] Compare backtest PnL curve to live paper PnL curve.
+- [ ] Tune `min_score`, slippage model, and exit thresholds in backtest.
+- [ ] Re-run live paper with tuned parameters.
+
+Acceptance: A rule change can be validated in backtest within hours and
+redeployed to live paper with confidence.
+
+### Stage 6 — Live Execution Adapter
+
+Goal: Submit real transactions. ONLY after paper is profitable.
+
+- [ ] Build `TxExecutorAdapter` implementing `EngineExecutionAdapter`.
+- [ ] Convert `OrderIntent` → swap calldata (V2/V3/V4 route + slippage).
+- [ ] Submit to `tx_executor`, poll for receipt, map real tx hash to
+  `TokenPoolId`.
+- [ ] Add a manual "enable real trading" flag with capital limit and circuit
+  breaker.
+
+Acceptance: The same strategy that was profitable on paper produces real fills
+with tracked PnL. Real capital is limited to a small test amount until 30 days
+of positive real PnL are recorded.
+
+### Gate Criteria Summary
+
+| Gate | Requirement | Current |
+| --- | --- | --- |
+| G1: Honest paper | Paper PnL reflects worst-case fills | ❌ Perfect fills |
+| G2: Active exits | All critical risks trigger sells | ❌ Only liquidity removal |
+| G3: Selective entry | < 50% of eligible pools entered | ❌ 100% entered |
+| G4: Sized bets | Variable position sizing | ❌ Fixed 0.01 ETH |
+| G5: Backtest parity | Backtest PnL ≈ live paper PnL | ❌ Not validated |
+| G6: Real money | Paper PnL positive for 7+ days | ❌ 0.0 ETH on 97 closes |
+
+Do not proceed to the next stage until the current stage's acceptance criteria
+are met and recorded in this file with a dated measurement.

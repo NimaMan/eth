@@ -5,15 +5,16 @@
 //! routes approved intents to an execution adapter. The first runtime mode is
 //! paper execution, so this crate deliberately does not talk to `tx_executor`.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+pub mod execution;
+pub mod wire;
+
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
+    amount::DecimalAmount,
     error::Result,
-    execution::{ExecutionReport, ExecutionStatus},
-    ids::OrderId,
+    execution::ExecutionReport,
     market::{MarketEvent, MarketSnapshotRef},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
@@ -22,6 +23,9 @@ use eth_alpha_core::{
     store::TradingStore,
     strategy::{Strategy, StrategyContext, StrategyDecision},
 };
+
+// Re-export adapters at crate root for convenience.
+pub use execution::{ExecutionAdapterKind, ModeledExecutionAdapter, ModeledExecutionConfig, PaperExecutionAdapter};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {
@@ -154,7 +158,44 @@ where
         for strategy in &mut self.strategies {
             decisions.push(strategy.on_market_event(&ctx, event)?);
         }
-        self.apply_decisions(decisions).await
+        let reports = self.apply_decisions(decisions).await?;
+        self.snapshot_open_positions_for_pool(event).await?;
+        Ok(reports)
+    }
+
+    async fn snapshot_open_positions_for_pool(&mut self, event: &MarketEvent) -> Result<()> {
+        let MarketEvent::PoolUpdated { pool, block_number } = event else {
+            return Ok(());
+        };
+        for position in self.portfolio.positions.values_mut() {
+            if position.key.pool_address != pool.address {
+                continue;
+            }
+            if !position.is_open() {
+                continue;
+            }
+            let (current_value, unrealized) = position.unrealized_pnl(pool);
+            let snapshot = PositionSnapshot {
+                position_id: position.id.clone(),
+                state: position.state.clone(),
+                block_number: *block_number,
+                current_value_eth: current_value,
+                realized_profit_eth: position.realized_pnl(),
+                unrealized_profit_eth: unrealized,
+                roi: if let Some(cost) = position.entry_cost_basis {
+                    if !cost.is_zero() {
+                        ((current_value + position.realized_pnl()) / cost)
+                            - DecimalAmount::from(1)
+                    } else {
+                        DecimalAmount::ZERO
+                    }
+                } else {
+                    DecimalAmount::ZERO
+                },
+            };
+            self.store.append_position_snapshot(&snapshot).await?;
+        }
+        Ok(())
     }
 
     async fn run_risk_strategies(&mut self, event: &RiskEvent) -> Result<Vec<ExecutionReport>> {
@@ -209,15 +250,38 @@ where
 
     async fn execute_if_allowed(&mut self, intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
         self.store.record_order_intent(&intent).await?;
+        let fill_price = self.market.as_ref().and_then(|m| {
+            m.pool.as_ref().and_then(|p| p.price_denom_per_token)
+        });
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
                 let mut position = self.position_for_intent(&intent);
                 position.mark_intent_created(intent.side)?;
                 let report = self.execution.execute(intent.clone()).await?;
                 position.mark_order_submitted(report.order_id.clone(), intent.side)?;
-                position.apply_execution_report(&report)?;
+                position.apply_execution_report_with_price(&report, fill_price)?;
                 self.store.upsert_position(&position).await?;
                 self.store.record_execution_report(&report).await?;
+                if position.is_closed() {
+                    let snapshot = PositionSnapshot {
+                        position_id: position.id.clone(),
+                        state: position.state.clone(),
+                        block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
+                        current_value_eth: DecimalAmount::ZERO,
+                        realized_profit_eth: position.realized_pnl(),
+                        unrealized_profit_eth: DecimalAmount::ZERO,
+                        roi: if let Some(cost) = position.entry_cost_basis {
+                            if !cost.is_zero() {
+                                (position.realized_pnl() / cost)
+                            } else {
+                                DecimalAmount::ZERO
+                            }
+                        } else {
+                            DecimalAmount::ZERO
+                        },
+                    };
+                    self.store.append_position_snapshot(&snapshot).await?;
+                }
                 self.portfolio
                     .positions
                     .insert(position.id.clone(), position);
@@ -229,9 +293,29 @@ where
                 position.mark_intent_created(intent.side)?;
                 let report = self.execution.execute(intent.clone()).await?;
                 position.mark_order_submitted(report.order_id.clone(), intent.side)?;
-                position.apply_execution_report(&report)?;
+                position.apply_execution_report_with_price(&report, fill_price)?;
                 self.store.upsert_position(&position).await?;
                 self.store.record_execution_report(&report).await?;
+                if position.is_closed() {
+                    let snapshot = PositionSnapshot {
+                        position_id: position.id.clone(),
+                        state: position.state.clone(),
+                        block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
+                        current_value_eth: DecimalAmount::ZERO,
+                        realized_profit_eth: position.realized_pnl(),
+                        unrealized_profit_eth: DecimalAmount::ZERO,
+                        roi: if let Some(cost) = position.entry_cost_basis {
+                            if !cost.is_zero() {
+                                (position.realized_pnl() / cost)
+                            } else {
+                                DecimalAmount::ZERO
+                            }
+                        } else {
+                            DecimalAmount::ZERO
+                        },
+                    };
+                    self.store.append_position_snapshot(&snapshot).await?;
+                }
                 self.portfolio
                     .positions
                     .insert(position.id.clone(), position);
@@ -256,49 +340,6 @@ where
             .cloned()
             .unwrap_or_else(|| Position::new(id, key))
     }
-}
-
-#[derive(Clone)]
-pub struct PaperExecutionAdapter {
-    order_prefix: Arc<str>,
-    next_order_id: Arc<AtomicU64>,
-}
-
-impl PaperExecutionAdapter {
-    pub fn new() -> Self {
-        Self::with_order_prefix(unique_paper_order_prefix())
-    }
-
-    pub fn with_order_prefix(prefix: impl Into<String>) -> Self {
-        Self {
-            order_prefix: Arc::<str>::from(prefix.into()),
-            next_order_id: Arc::new(AtomicU64::new(0)),
-        }
-    }
-}
-
-#[async_trait]
-impl EngineExecutionAdapter for PaperExecutionAdapter {
-    async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
-        let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
-        Ok(ExecutionReport {
-            order_id: OrderId(format!("{}-{order_seq}", self.order_prefix)),
-            status: ExecutionStatus::Confirmed,
-            tx_hash: None,
-            block_number: None,
-            filled_amount: Some(intent.amount),
-            gas_used: Some(0),
-            error: None,
-        })
-    }
-}
-
-fn unique_paper_order_prefix() -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-    format!("paper-{}-{millis}", std::process::id())
 }
 
 #[derive(Clone, Debug, Default)]
@@ -422,6 +463,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use eth_alpha_core::{
         amount::Amount,
+        execution::ExecutionStatus,
         ids::{PortfolioId, StrategyName, TokenPoolId, WalletId},
         market::{PoolProtocol, PoolSnapshot},
         order::{OrderIntent, OrderSide},

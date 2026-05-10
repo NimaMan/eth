@@ -1,307 +1,257 @@
-# network
+# Token Network Visualization Design
 
-Token-centric relationship graph construction.
+> Objective: build an interface that helps understand anything shady that might be going on with a token — hidden connections between addresses, coordinated trading, control structures, and financial anomalies.
 
-This module is the Rust home for the "token network" concept from the old Python
-`erc20_token/network` package. The goal is not to recreate a dashboard here. Asena
-owns presentation. This crate should own the compact state and snapshots needed
-to explain how addresses, pools, control actors, and fund flows relate to a
-tracked token.
+---
 
-## Status
+## 1. What Questions Must This Answer?
 
-Concept and folder skeleton are in place. The `model` layer now defines the
-stable serializable IDs, node/edge kinds, labels, confidence, observations, and
-evidence summaries. The `activity` layer now defines per-address movements,
-totals, fee/bribe costs, and lightweight PnL summaries. The `ingest` layer now
-converts `ProcessedTransaction` data into typed activity, label, and edge update
-batches. The `graph` layer now applies those batches into persistent raw
-node/edge/activity state. The cluster and snapshot layers are still
-placeholders.
+### A. Ownership & Control ("Who really owns this?")
+1. Who created the token? Are they still involved?
+2. Was ownership renounced? If so, are there hidden admin roles still active?
+3. Who controls the proxy admin? Who can upgrade the contract?
+4. Is there a tax wallet? Where do the taxes go?
+5. Are control actors (creator, owner, admin) also trading the token?
+6. Are control actors connected to each other through funding or shared intermediaries?
 
-## Folder Layout
+### B. Clustering & Coordination ("Are these wallets working together?")
+7. Do multiple buyer wallets share the same funding source?
+8. Do multiple wallets send funds to the same deposit address?
+9. Were many wallets created/funded in the same block or time window?
+10. Is there a hub-and-spoke pattern — one address funding many buyers?
+11. Are there circular token transfers with no net balance change (wash trading)?
+12. Do addresses in a cluster sell at the same time (coordinated dump)?
 
-```text
-network/
-  README.md
-  mod.rs
-  config.rs
+### C. Trading Behavior ("Who is making money and how?")
+13. Which addresses bought early and sold at peaks (insiders)?
+14. Which addresses are still holding large bags?
+15. Which addresses have massive unrealized losses (sacrifice wallets / exit liquidity)?
+16. Is there fake volume — high trade count but no net movement?
+17. Are there snipers who bought in the same block as pool creation?
+18. Which addresses pay unusually high bribes?
 
-  model/
-    README.md
-    mod.rs
-    ids.rs
-    nodes.rs
-    edges.rs
-    labels.rs
-    evidence.rs
+### D. Liquidity & Pool Health ("Can I actually sell?")
+19. Who controls the LP tokens? Is liquidity concentrated in one cluster?
+20. Has liquidity been removed? By whom? Were they also control actors?
+21. Are LP approvals granted to routers by addresses that also hold large token balances?
+22. Is there a pattern of add-then-remove liquidity around pump events?
 
-  activity/
-    README.md
-    mod.rs
-    address.rs
-    movement.rs
-    pnl.rs
+### E. External Connections ("Where does the money go?")
+23. Do token flows lead to known CEX deposit addresses?
+24. Are funds bridged to other chains?
+25. Are there connections to known scam/mixer addresses?
+26. Do profit-taking wallets have ENS names or other identities?
 
-  ingest/
-    README.md
-    mod.rs
-    transaction.rs
-    transfers.rs
-    pools.rs
-    authority.rs
+---
 
-  graph/
-    README.md
-    mod.rs
-    raw.rs
-    index.rs
-    simplified.rs
+## 2. Shady Patterns to Detect
 
-  clusters/
-    README.md
-    mod.rs
-    components.rs
-    intermediaries.rs
-    time_windows.rs
-    scoring.rs
+### Control Structure Red Flags
+| Pattern | Signals |
+|---------|---------|
+| **Shadow Owner** | Owner renounced → ZeroAddress label, but Admin/ProxyAdmin labels still active on other addresses |
+| **Creator Still Trading** | Creator label + PoolTrade edges on the same node |
+| **Tax Wallet Drain** | TaxWallet label + high DenomTransfer outflows to addresses outside the token ecosystem |
+| **Multi-sig Theater** | Ownership transferred to a Gnosis Safe or similar, but original owner still has Admin role |
+| **Upgrade Trap** | ProxyAdmin label on an EOA (not a multisig) with PoolTrade activity |
 
-  snapshots/
-    README.md
-    mod.rs
-    token.rs
-    address.rs
-    edge.rs
-    cluster.rs
-    pool.rs
-    risk.rs
-```
+### Coordination Red Flags
+| Pattern | Signals |
+|---------|---------|
+| **Launch Group** | 5+ addresses with FeeSourceTouches to the same funder, all buying within 3 blocks of pool creation |
+| **Same-Funder Network** | Addresses with Funding edges from a common source + TokenTransfer between them |
+| **Deposit Cluster** | 3+ addresses sending DenomTransfer to the same intermediary (non-holder) address |
+| **Wash Ring** | Closed loop of TokenTransfer edges (A→B→C→A) with near-zero net balance change |
+| **Coordinated Dump** | Addresses in same connected component all selling in same 5-block window |
+| **Bot Swarm** | One fee source touching 10+ addresses that each buy once and never sell |
 
-## Why This Exists
+### Trading Red Flags
+| Pattern | Signals |
+|---------|---------|
+| **Insider Snipe** | First PoolTrade block = PoolCreation block + high token inflow + realized profit > 10x |
+| **Sacrifice Wallet** | High token inflow + high denom outflow + negative realized profit > $1k |
+| **Fake Volume** | High PoolTrade edge weight but token balance ≈ 0 and denom balance ≈ 0 (round-tripper) |
+| **MEV Sandwich** | Address with PoolTrade edges where the same fee source has PoolTrade immediately before and after |
+| **Bribe Launch** | PoolCreation block + fee source with bribe_amount > 0.5 ETH + immediate buy |
+| **Gradual Rug** | ControlActor with LiquidityEvent (remove) edges + no corresponding add edges |
 
-A token is not just a contract plus a list of pools. For launch tokens and live
-trading, we care about the relationships around the token:
+### Graph Structure Red Flags
+| Pattern | Signals |
+|---------|---------|
+| **Supernode** | Single address with in-degree + out-degree > 50% of total edges |
+| **Disconnected Profit** | Address with high realized profit but zero edges to any control actor or pool (self-sufficient bot?) |
+| **Time-Window Cluster** | TemporalCoactivity edges linking 5+ addresses through the same hub in a single block |
+| **Bridge/CEX Washing** | TokenTransfer → DenomTransfer → Cex/Bridge labeled node → DenomTransfer back to token buyer |
 
-- who funded or controlled early buyers,
-- which holders are connected by token, ETH, stablecoin, or fee-source flows,
-- which pools and LP positions mediate activity,
-- whether a set of wallets behaves like one coordinated actor,
-- whether liquidity, tax, bribe, and control-address behavior point to a higher
-  risk token.
+---
 
-The network module should turn processed block data into graph-ready analytical
-state. The UI can then render holder maps, cluster tables, pool relationship
-views, or time-window views without recomputing the graph from raw transactions.
+## 3. What Existing Tools Do (Benchmark)
 
-## Existing Python Concept
+### Bubblemaps (bubblemaps.io)
+- **Visualization**: Bubble chart where bubble size = wallet holdings, proximity = transfer connections, color = cluster
+- **Key insight**: Immediate visual clustering — "are 5 wallets holding 80% of supply?"
+- **Weakness**: No time dimension, no PnL, no control structure, no edge detail
+- **What to borrow**: The bubble/cluster metaphor is intuitive for supply concentration
 
-The old Python code had three useful ideas:
+### Arkham Intelligence
+- **Visualization**: Force-directed graph with entity attribution ("This wallet belongs to Wintermute")
+- **Key insight**: "Who is behind the wallet?" — entity labels from proprietary databases
+- **Weakness**: Entity attribution is often wrong or missing for smaller tokens
+- **What to borrow**: Entity grouping — collapse known clusters into single nodes
 
-- `LiveTokenNetworkBuilder` consumed each processed transaction, read
-  `address_balance_changes`, created address nodes, updated per-address movement
-  counters, and linked the fee source to addresses touched by the transaction.
-- `AddressTokenActivityTracker` kept per-address token in/out, denomination
-  in/out, fee spend, bribe exposure, balance, buy/sell counts, and rough
-  realized/unrealized PnL features.
-- `NetworkSubgraphAnalyzer` simplified noisy graphs by removing the token
-  contract, pools, burn/zero addresses, and high-degree nodes; it then produced
-  connected components and aggregate component metrics.
+### Nansen Token God Mode
+- **Visualization**: Dashboard with Smart Money labels, wallet tags, PnL rankings
+- **Key insight**: "Are smart money wallets accumulating or dumping?"
+- **Weakness**: Requires proprietary labeling; no interactive graph exploration
+- **What to borrow**: PnL-centric address ranking with clear buy/sell signals
 
-That is a good starting point, but too narrow for the Rust side. It treated the
-network mostly as an address-activity graph. The Rust version should be a
-token-centric relationship graph that can also represent pools, LP ownership,
-control addresses, launch-time coordination, and non-holder intermediaries.
+### Chainalysis Reactor / TRM Labs
+- **Visualization**: Forensic graph with risk scoring, exposure wheel, cross-chain tracing
+- **Key insight**: "Where did the money come from and where did it go?"
+- **Weakness**: Enterprise-only, no real-time token-specific view
+- **What to borrow**: Path tracing — click an address and see full fund flow history
 
-## External Context
+### MetaSleuth / Breadcrumbs
+- **Visualization**: Auto-pathfinding graph with fast investigation canvas
+- **Key insight**: "Show me the path from Address A to Address B"
+- **Weakness**: Manual investigation tool, not token-scoped
+- **What to borrow**: Path highlighting and address search
 
-Public tools and research point to several design constraints:
+### Etherscan
+- **Visualization**: Raw tables and transaction logs
+- **Key insight**: Ground truth for every transaction
+- **Weakness**: No clustering, no visualization, no pattern detection
+- **What to borrow**: Always provide a link back to raw transaction evidence
 
-- Bubblemaps starts from top holders, sizes nodes by current holdings, and draws
-  links when holders have on-chain transfers. It also hides noisy contracts or
-  exchange nodes by default and treats very high-volume "Supernodes" specially
-  for performance.
-- Bubblemaps "Magic Nodes" adds non-holder intermediaries that connect current
-  holders, such as shared gas funders or shared deposit addresses. This matters
-  because an address can connect holders even if it currently holds zero token.
-- Bubblemaps "Time Nodes" splits noisy hubs like exchanges or DEXs into
-  time-window nodes so wallets can be clustered by coordinated timing instead of
-  direct transfers.
-- ERC20 token-network research defines token networks as address graphs whose
-  edges are token transfers, and finds many individual ERC20 networks dominated
-  by hub-and-spoke structures rather than rich social-style communities.
-- Ethereum address-clustering research is careful about account-model limits:
-  Bitcoin-style multi-input heuristics do not directly apply, so Ethereum
-  clustering must be heuristic, labeled, and confidence-aware.
-- Ethereum phishing and fraud-detection papers repeatedly model the chain as a
-  directed multigraph with temporal, frequency, amount, and interaction features.
-  We should preserve multiedge evidence internally even if Asena receives a
-  simplified view.
+---
 
-## Core Model
+## 4. What Our Backend Already Supports
 
-The network should maintain several related views over the same block-level
-facts. These are views, not separate sources of truth.
+### Token Network (`eth_token/src/network/`)
+- **Rich graph model**: 10 node kinds, 14 edge kinds, 25 label kinds with confidence scoring
+- **Per-address activity tracking**: PnL, balances, buy/sell counts, fee history, bribes
+- **Multi-layered edge evidence**: Each edge has examples, amounts, confidence, direction
+- **Token-scoped pipeline**: Every transaction is analyzed in context of the tracked token
+- **Weak edge detection**: `FeeSourceTouches`, `SharedIntermediary`, `TemporalCoactivity` are already flagged
+- **View scoring**: Nodes are already ranked by importance (profit + balance + activity)
 
-### Nodes
+### Fund Flow (`tx_fund_flow/src/fundflownetwork/`)
+- **Generic fund flow extraction** from `ProcessedTransaction` → ETH + token movements
+- **Network builder**: Aggregates flows into `FundFlowNetwork` with nodes/edges
+- **Graph discovery**: BFS exploration from seed addresses via Postgres `eth_db`
+- **Visualization exporters**: Cytoscape.js, Vis.js, GraphML already implemented
+- **Tx processor integration**: Converts `ProcessedTransaction` directly to fund flows
 
-- `Token`: the tracked ERC20 contract.
-- `Address`: wallets and contracts observed around the token.
-- `Pool`: liquidity pools associated with the token, across V2/V3/V4 when those
-  pool implementations exist.
-- `ControlActor`: owner, pending owner, admin role, proxy admin, creator, tax
-  wallet, or another address inferred by the authority/state modules.
-- `LiquidityActor`: LP holder, router approver, pool creator, mint/burn actor.
-- `Intermediary`: non-holder address that links holders, such as funders,
-  deposit addresses, bridges, exchanges, routers, or routers/contracts that pass
-  through value.
-- `TimeWindow`: synthetic node for coordinated activity through a noisy hub in a
-  bounded block or timestamp window.
+### Index Infrastructure (`reth_chain_query/src/reth_index/`)
+- **Address block participation index**: MDBX database mapping address → blocks
+- **Trade data table**: Per-address-token trading history and PnL
+- **Address metrics table**: Aggregated address metrics
+- **Token/pool tables**: Token metadata and pool data caching
 
-Each node should carry labels and confidence separately from identity. An address
-can be a wallet, contract, known CEX address, pool, control actor, or unknown,
-and that classification can improve over time.
+### Processed Block Cache (`tx_processor/src/tx_processor/cache.rs`)
+- Flat binary `.pblock.zst` files
+- ~0.57ms/block read when cached
+- Used by live tracker and range runs
 
-### Edges
+### Gaps
+- **Cluster analysis is NOT implemented**: The `clusters/` module has empty placeholder files
+- **No temporal analysis**: We store block numbers but don't analyze ordering patterns ("funded then bought")
+- **No external address book**: `Cex`, `Bridge`, `Router` labels exist but are not populated from external data
+- **No pathfinding in token network**: Can't answer "show me how Address A funded Address B" (but `tx_fund_flow` has this!)
+- **No cross-token view**: A multi-token operator appears as disconnected graphs
+- **No nonce/gas analysis**: Can't detect fresh wallets or MEV bundles
+- **No approval tracking**: ERC20 Approval events for the token itself are not ingested
+- **No flash loan detection**: No analysis of flash loan initiators or cascading pool interactions
+- **Token network and fund flow are NOT integrated**: Two separate pipelines with no bridge
 
-- `TokenTransfer`: ERC20 transfer from one address to another.
-- `DenomTransfer`: ETH/WETH/stable/known-denom flow involving an observed
-  address.
-- `PoolTrade`: address traded against a pool, with side, token amount, denom
-  amount, price, block, tx index, and pool protocol when known.
-- `LpTransfer`: LP token transfer or LP balance movement.
-- `LpApproval`: LP approval, especially router approval percentage.
-- `FeeSourceTouches`: transaction fee payer touched another address in the same
-  processed transaction. This preserves the old Python fee-source relationship.
-- `Funding`: one address funded another with ETH or a known denom before or
-  during the relevant token activity.
-- `ControlRelation`: owner/admin/role/proxy/creator relationship to the token or
-  pool.
-- `SharedIntermediary`: two addresses are linked through a non-holder
-  intermediary.
-- `TemporalCoactivity`: addresses acted through the same noisy hub or pool in the
-  same configured time/block window.
+---
 
-Edges should keep raw evidence counts and representative examples. A simplified
-graph can collapse multiple edges, but the stored state should know direction,
-amount buckets, first/last seen block, tx counts, and source evidence.
+## 5. Proposed Visualization Layers
 
-## Inputs
+### Layer 1: Overview ("Should I even look closer?")
+- **Token + Pool nodes** prominently displayed
+- **Control actors** highlighted with badges (Creator, Owner, Admin, TaxWallet)
+- **Cluster coloring** — addresses in the same connected component share a color
+- **Red flags as annotation chips** above the graph: "Creator trading", "Same funder cluster", "Tax wallet draining"
+- **Supply concentration bubbles** (Bubblemaps-style) overlaid or adjacent
 
-The network module should consume state already produced by this crate and by
-`tx_processor`; it should not fetch blocks itself.
+### Layer 2: Control Structure ("Who owns what?")
+- **Hierarchical or radial layout** with Token at center, Control actors in inner ring, traders in outer ring
+- **ControlRelation edges** emphasized with thick red lines
+- **Ownership timeline** — when did Owner change? When was trading enabled?
+- **Admin role table** — list of all addresses with Admin/ProxyAdmin labels and their current balances
 
-- `ProcessedBlock` / `ProcessedTransaction` from the manager loop.
-- `ERC20Token.transfer_tracker` for token, ETH, WETH, denom transfers, approvals,
-  bribes, and address counters.
-- `ERC20Token.authority_tracker` and `status_manager` for control and policy
-  relationships.
-- Pool updates from `pools`, starting with V2 and later extending to V3/V4.
-- Chain metadata and known-address classification from `reth_chain_query` or a
-  later label provider.
+### Layer 3: Trading Clusters ("Who is working together?")
+- **Community detection layout** — force-directed but with detected clusters visually grouped
+- **Funding flow overlay** — show DenomTransfer inflows as animated arrows
+- **Synchronized activity timeline** — when did addresses in Cluster X trade together?
+- **Cluster summary cards**: "Cluster A: 12 addresses, $45k realized profit, funded by 0xabc..."
 
-## Outputs
+### Layer 4: Financial Flow ("Where did the money go?")
+- **Sankey diagram** or **path-tracing graph** showing token → denom → CEX/mixer flows
+- **PnL heatmap** on nodes (green/red intensity)
+- **Edge amount labels** — show "$12.5k" on DenomTransfer edges
+- **Time-filtered view** — slider to show only activity in a specific block range
 
-The crate should expose compact snapshots, not UI-specific layouts:
+### Layer 5: Evidence ("Prove it.")
+- **Click any edge** → show the actual transactions that created it (with Etherscan links)
+- **Click any node** → show full address activity: all movements, all costs, all labels with confidence
+- **Export graph** as PNG or structured JSON for external analysis
 
-- `TokenNetworkSnapshot`: graph summary for one token at a block.
-- `AddressActivitySnapshot`: per-address balances, volume, fees, bribes, PnL
-  proxies, buy/sell counts, first/last seen block, and labels.
-- `NetworkEdgeSnapshot`: collapsed edge with evidence counts, amount totals,
-  first/last seen block, and edge type.
-- `ClusterSnapshot`: connected component or heuristic entity cluster with member
-  addresses, aggregate holdings, denom spent/received, realized/unrealized PnL
-  proxy, bribes, fees, pool interactions, and confidence.
-- `PoolNetworkSnapshot`: pool-centric view of traders, LP holders, liquidity
-  changes, and links to control actors.
-- `NetworkRiskSnapshot`: bounded set of explainable signals such as concentrated
-  supply, linked holders, shared funders, launch snipers, coordinated exits,
-  control actor trading, LP concentration, and supernode dependence.
+---
 
-Asena can choose how to render these snapshots: bubble maps, tables, timelines,
-cluster cards, or pool relationship panels.
+## 6. Open Questions (for discussion)
 
-## Simplification Rules
+### Q1: Scope — One token or cross-token?
+> Should the network view be strictly scoped to one token, or should we have a mode where we can trace an address across multiple tokens the operator has touched? This is critical for detecting repeat scammers.
 
-The raw graph will be noisy. Simplification should be explicit and reversible
-where possible.
+### Q2: Clustering — Should we implement it in Rust or compute in JS?
+> The `clusters/` module is empty. We can either:
+> - Implement community detection in Rust (e.g., Louvain algorithm) and send pre-computed clusters to the frontend
+> - Send the full graph to the frontend and compute clusters there (limited by the 80-node cap)
+> - Hybrid: compute coarse clusters in Rust, let the user explore sub-clusters interactively
 
-- Always remove or suppress the token contract, zero address, burn address, and
-  tracked pools from holder-cluster views.
-- Treat known CEX hot wallets, bridges, routers, DEX pools, and other high-degree
-  contracts as hubs, not as normal holder evidence.
-- Do not discard hubs completely. Keep them as suppressed nodes, shared
-  intermediaries, or time-window nodes.
-- Detect high-degree or high-frequency nodes per token and per rolling window.
-- Keep fee-source links distinct from actual value transfers.
-- Keep direct holder-transfer clusters separate from inferred clusters created by
-  funders, deposit addresses, or time-window coactivity.
-- Every inferred cluster needs an explanation and confidence. We should avoid
-  presenting "same entity" as fact unless the evidence is very strong.
+### Q3: Real-time vs. post-hoc
+> The live tracker has network graphs too. Should the visualization support real-time updates (new nodes/edges appearing as transactions happen), or is a static "analyze this snapshot" view sufficient?
 
-## Risk Signals
+### Q4: Address enrichment — do we want to integrate external label databases?
+> We have the `KnownAddressBook` label source but no actual data. Options:
+> - Integrate Arkham API, Etherscan labelcloud, or Nansen labels
+> - Maintain our own growing address book (CEX hot wallets, known bridges, etc.)
+> - Use heuristics only (Router, Contract, Wallet) without external attribution
 
-Initial signals should be explainable and block-local enough for live use:
+### Q5: What is the primary "aha" moment we want?
+> Different tools optimize for different insights:
+> - Bubblemaps: "5 wallets own 80%" (supply concentration)
+> - Arkham: "This is a Wintermute wallet" (entity attribution)
+> - Nansen: "Smart money is dumping" (behavioral signal)
+> - Chainalysis: "The money went to Binance" (fund tracing)
+> 
+> **What is the single most important insight we want a user to get in 10 seconds of looking at our graph?**
 
-- large share of supply held by one cluster,
-- many top holders connected through a shared funder or shared deposit address,
-- many fresh holders funded shortly before launch,
-- many addresses buying in the same first blocks through the same pool,
-- control addresses buying, selling, funding buyers, or receiving taxes,
-- LP tokens concentrated in a small cluster,
-- pool reserve or LP actions linked to owner/admin wallets,
-- cluster realized profit while the token remains broadly illiquid,
-- bribe-heavy launches or repeated same-fee-source activity,
-- hidden-mint or tax/max-buy events connected to trading clusters.
+### Q6: Interaction depth — power user vs. quick scan
+> Should the default view be simple (like Bubblemaps) with an "expert mode" toggle, or should we surface everything at once?
 
-These are features, not automatic verdicts. Scam/risk labeling should remain
-separate from the evidence graph.
+### Q7: Mobile
+> Network graphs are inherently desktop experiences. Do we need a simplified mobile view (e.g., red flag list + key metrics), or is desktop-only acceptable?
 
-## Implementation Phases
+### Q8: What patterns have you personally seen that we MUST catch?
+> You have experience watching tokens launch, trading them, and analyzing the alpha engine's signals. What specific patterns have you seen that we should prioritize? Examples:
+> - "The same 3 EOA addresses fund 20 sniper wallets every launch"
+> - "The creator removes liquidity exactly 24 hours after enabling trading"
+> - "A contract that looks like a token but is actually a honeypot"
 
-1. Data model only:
-   - node identifiers, node labels, edge types, activity counters, cluster
-     summaries, and snapshot structs.
-2. Address activity tracker:
-   - port the useful Python counters using existing Rust `TokenTransferTracker`
-     data.
-3. Raw graph builder:
-   - update incrementally from `ProcessedTransaction` inside the token manager
-     flow, preserving multiedge evidence.
-4. Simplified holder graph:
-   - build the first Asena-facing snapshot: holders, balances, direct links,
-     suppressed hubs, and connected components.
-5. Intermediary discovery:
-   - add Magic-Node-style non-holder connectors for shared funders, deposit
-     addresses, and pass-through addresses.
-6. Time-window clustering:
-   - add Time-Node-style synthetic nodes for CEX/bridge/DEX/pool coactivity in
-     configurable block or timestamp windows.
-7. Pool network:
-   - connect traders, LP holders, pools, control actors, and liquidity events.
-8. Risk snapshot:
-   - expose explainable network signals for the strategy and Asena layers.
+---
 
-## Non-Goals
+## 7. Immediate Next Steps (Proposed)
 
-- No dashboard code in this crate.
-- No direct historical block fetching from this module.
-- No machine-learning model in the first implementation.
-- No claim that a heuristic cluster is a confirmed real-world entity.
-- No requirement to match the Python JSON shape exactly.
+1. **Answer the open questions above** → finalize scope
+2. **Implement cluster detection in Rust** (fill the `clusters/` placeholders with Louvain or connected-component analysis)
+3. **Expose cluster IDs + confidence in `TokenNetworkView`**
+4. **Build the Layer 1 + Layer 2 frontend** (control structure + basic cluster coloring)
+5. **Add edge-click evidence panel** (show actual transactions)
+6. **Iterate** based on real token analysis
 
-## References
+---
 
-- Bubblemaps V2 overview: https://wiki.bubblemaps.io/bubblemaps-v2/how-does-it-work
-- Bubblemaps Magic Nodes: https://wiki.bubblemaps.io/bubblemaps-v2/magic-nodes
-- Bubblemaps Time Nodes: https://wiki.bubblemaps.io/bubblemaps-v2/time-nodes
-- Bubblemaps Time Travel: https://wiki.bubblemaps.io/bubblemaps-v2/time-travel
-- Victor and Luders, "Measuring Ethereum-based ERC20 Token Networks":
-  https://fc19.ifca.ai/preproceedings/130-preproceedings.pdf
-- Victor, "Address clustering heuristics for Ethereum":
-  https://fc20.ifca.ai/preproceedings/31.pdf
-- Zhang et al., "Phishing Node Detection in Ethereum Transaction Network Using
-  Graph Convolutional Networks": https://www.mdpi.com/2076-3417/13/11/6430
-- Li et al., "TTAGN: Temporal Transaction Aggregation Graph Network for Ethereum
-  Phishing Scams Detection": https://arxiv.org/abs/2204.13442
-- Josenhans et al., "Characterizing Transfer Graphs of Suspicious ERC-20
-  Tokens": https://www.researchgate.net/publication/388232639_Characterizing_Transfer_Graphs_of_Suspicious_ERC-20_Tokens
+*This document is a living design spec. Update it as decisions are made.*

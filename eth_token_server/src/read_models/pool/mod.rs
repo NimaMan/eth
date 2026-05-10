@@ -527,6 +527,11 @@ impl PoolView {
         let stage = current_lifecycle_view(base, current_trading);
         let liquidity_removal = base.has_liquidity_removal();
         let max_denom_reserve = max_denom_reserve(&liquidity_history, base.denom_reserve());
+        let lp_max_holder_share = lp_fields
+            .lp_holders
+            .iter()
+            .map(|holder| holder.share)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
         let classification_input = PoolClassificationInput {
             quote_symbol: Some(currency.clone()),
             denom_reserve: Some(base.denom_reserve()),
@@ -536,8 +541,7 @@ impl PoolView {
             can_sell: current_trading.can_sell,
             cohort_can_buy: Some(base.state.can_buy || base.has_observed_buy()),
             cohort_can_sell: Some(base.state.can_sell || base.has_observed_sell()),
-            is_scam: token.is_scam()
-                || liquidity_removal
+            is_scam: liquidity_removal
                 || matches!(risk.level, PoolRiskLevel::Honeypot),
             hidden_mint: token.hidden_mint_detected(),
             liquidity_removed: liquidity_removal,
@@ -546,6 +550,11 @@ impl PoolView {
             creation_block: base.creation_block,
             creation_timestamp: base.creation_timestamp,
             has_price_history: !base.price_history.is_empty(),
+            lp_approved_percentage: Some(lp_fields.lp_approved_percentage)
+                .filter(|v| v.is_finite()),
+            lp_max_holder_share: lp_max_holder_share.filter(|v| v.is_finite()),
+            supply_ratio_status: Some(supply_ratio.status.to_string()),
+            ownership_renounced: Some(token.ownership_renounced()),
         };
         let pool_classification =
             classify_pool_with_config(&classification_input, &PoolClassificationConfig::default());
