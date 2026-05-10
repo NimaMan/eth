@@ -633,6 +633,7 @@ impl LiquidityRemovalSimulator {
         let message = err.to_string();
         message.contains("Provider did not return header for block")
             || message.contains("No header for block")
+            || message.contains("missing live block header")
     }
 
     fn is_base_fee_error(err: &eyre::Report) -> bool {

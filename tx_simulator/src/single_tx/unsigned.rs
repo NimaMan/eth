@@ -96,7 +96,7 @@ impl TxSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
     ) -> Result<SimulationResult> {
-        let block_number = self.get_latest_block()?;
+        let block_number = self.latest_historical_context_block_number()?;
         self.simulate_unsigned_transaction_at_block(unsigned_tx, block_number)
             .await
     }
@@ -156,7 +156,7 @@ impl TxSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
     ) -> Result<FullSimulationResult> {
-        let block_number = block_number.unwrap_or(self.get_latest_block()?);
+        let block_number = block_number.unwrap_or(self.latest_historical_context_block_number()?);
         let context = self.prepare_block_context(block_number).await?;
         self.execute_with_block_context(
             unsigned_tx,

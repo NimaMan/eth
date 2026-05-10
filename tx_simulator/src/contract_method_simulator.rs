@@ -34,7 +34,7 @@ impl TxSimulator {
             .resolve(&self.defaults.view_call);
 
         // Determine block we will query and derive the base fee for fee fields
-        let block = block_number.unwrap_or(self.get_latest_block()?);
+        let block = block_number.unwrap_or(self.latest_historical_context_block_number()?);
         let base_fee = self.get_base_fee_at_block(block).unwrap_or(1);
 
         // Build a call request for the view function

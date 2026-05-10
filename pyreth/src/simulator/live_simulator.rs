@@ -47,7 +47,7 @@ impl PyLiveTxSimulator {
         })
     }
 
-    /// Latest block with state: MDBX when caught up, otherwise tracked live state.
+    /// Latest block with state: local historical context when caught up, otherwise tracked live state.
     pub fn latest_state_block_number(&self) -> PyResult<u64> {
         self.runtime
             .block_on(self.simulator.latest_state_block_number())
@@ -61,7 +61,21 @@ impl PyLiveTxSimulator {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
-    /// Latest block persisted in MDBX.
+    /// Latest block reported by Reth's Finish stage.
+    pub fn latest_reth_finished_block_number(&self) -> PyResult<u64> {
+        self.simulator
+            .latest_reth_finished_block_number()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Latest block that can be simulated from local historical Reth context without Redis.
+    pub fn latest_historical_context_block_number(&self) -> PyResult<u64> {
+        self.simulator
+            .latest_historical_context_block_number()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Compatibility alias for raw Reth Finish-stage progress.
     pub fn latest_persisted_block_number(&self) -> PyResult<u64> {
         self.simulator
             .latest_persisted_block_number()

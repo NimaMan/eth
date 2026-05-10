@@ -71,7 +71,7 @@ pub async fn check_can_buy_sell_pool(
 
     let block_number = match config.block_number {
         Some(b) => b,
-        None => simulator.get_latest_block()?,
+        None => simulator.latest_historical_context_block_number()?,
     };
 
     let header_hint = block_header_hint(&config, block_number)?;
@@ -119,7 +119,7 @@ pub async fn check_can_buy_sell_pool_with_chain(
 
     let block_number = match config.block_number {
         Some(b) => b,
-        None => simulator.get_latest_block()?,
+        None => simulator.latest_historical_context_block_number()?,
     };
     let header_hint = block_header_hint(&config, block_number)?;
     let header = match header_hint {
@@ -626,7 +626,7 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
         let latest = simulator
             .live_latest_block_number()
             .await?
-            .unwrap_or(simulator.get_latest_block()?);
+            .unwrap_or(simulator.latest_historical_context_block_number()?);
         let latest = latest.max(block_number);
         let sell_block = if requested_sell_block > latest {
             latest
@@ -808,10 +808,10 @@ pub(super) fn block_header_hint(
             block_number
         ));
     }
-    Ok(Some(sealed_header_from_block_header(header)))
+    Ok(Some(sealed_header_from_processed_block_header(header)))
 }
 
-fn sealed_header_from_block_header(header: &BlockHeader) -> SealedHeader {
+pub fn sealed_header_from_processed_block_header(header: &BlockHeader) -> SealedHeader {
     let sparse_header = AlloyHeader {
         parent_hash: header.parent_hash,
         ommers_hash: EMPTY_OMMER_ROOT_HASH,

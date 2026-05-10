@@ -8,7 +8,8 @@ pub mod types;
 /// Contains tx_simulator support functionality for the tx_processor core
 // Re-export the main components for convenience
 pub use pool_buy_sell_simulator::{
-    check_can_buy_sell_pool, LivePoolBuySellSimulator, PoolBuySellSimulator,
+    check_can_buy_sell_pool, sealed_header_from_processed_block_header, LivePoolBuySellSimulator,
+    PoolBuySellSimulator,
 };
 pub use types::{
     OptionalSetupBuyApproveSellResult, PoolBuySellParameters, PoolBuySellSimulationResult,

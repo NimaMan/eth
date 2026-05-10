@@ -13,7 +13,7 @@ the same fork loading behavior behind one API.
 
 1. **Resolve fork context** – reuse a caller-supplied `SealedHeader`/state snapshot when
    available or let the simulator fetch canonical header/state (including tracked live state when
-   MDBX lags). Headers are only required when callers inject their own fork material.
+   local historical context lags). Headers are only required when callers inject their own fork material.
 2. **Maintain forked state** – every call reads base state from Reth’s MDBX or tracked live
    state and writes into an in-memory `CacheDB`. Executed transactions persist their changes
    for subsequent steps, including reverting transactions that still consume nonce and gas.

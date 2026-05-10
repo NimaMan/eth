@@ -46,7 +46,7 @@ pub async fn simulate_buy_swap(
     // Resolve block
     let block = match block_number {
         Some(b) => b,
-        None => simulator.get_latest_block()?,
+        None => simulator.latest_historical_context_block_number()?,
     };
 
     // Build route

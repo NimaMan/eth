@@ -71,7 +71,7 @@ impl TxSimulator {
         &self,
         tx: &TransactionSigned,
     ) -> Result<SimulationResult> {
-        let latest_block = self.get_latest_block()?;
+        let latest_block = self.latest_historical_context_block_number()?;
         self.simulate_signed_transaction_at_block(tx, latest_block)
             .await
     }
@@ -136,7 +136,7 @@ impl TxSimulator {
         tx: &TransactionSigned,
         block_number: Option<u64>,
     ) -> Result<FullSimulationResult> {
-        let block = block_number.unwrap_or(self.get_latest_block()?);
+        let block = block_number.unwrap_or(self.latest_historical_context_block_number()?);
         let tx = tx.clone();
         let simulator = self.clone();
 

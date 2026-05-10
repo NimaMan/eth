@@ -1,7 +1,7 @@
 # Block Context Loader
 
-Shared logic for reconstructing block headers and state when MDBX has not yet
-indexed the requested block.
+Shared logic for reconstructing block headers and state when local Reth context
+has not yet exposed the requested block.
 
 This module should expose helper functions used by every component that needs
 block data (headers, state providers, etc.). The goal is to centralize the logic
@@ -17,8 +17,8 @@ live feed.
 
 2. **load_state_for_block(block)**
    * Attempt `provider.history_by_block_number(block)` with the current retry
-     loop when the block is persisted.
-   * If the block is ahead of MDBX:
+     loop when the block is available through local historical context.
+   * If the block is ahead of local historical context:
      - Fetch the exact `ChainStateSnapshot` written by the live block processor.
      - Restore a `ForkedState` by opening the snapshot's persisted base block
        and applying the serialized REVM cache overlay.
@@ -35,4 +35,5 @@ live feed.
   results, so the simulator restores post-block state without replaying a Redis
   window on every call.
 - `LiveTxSimulator::latest_state_status()` should be used by latency-sensitive
-  callers to confirm whether a request is using tracked live state or persisted MDBX.
+  callers to confirm whether a request is using tracked live state or local
+  historical context.

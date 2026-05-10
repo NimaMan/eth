@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 use eyre::{eyre, Result};
 use reth_chain_query::provider::BlockHeader;
 use tx_processor::{
-    BlockStateSession, BlockTxStateSession, LivePoolBuySellSimulator, PoolBuySellSimulator,
-    ProcessedTransaction, UnsignedTxChainSimulation,
+    sealed_header_from_processed_block_header, BlockStateSession, BlockTxStateSession,
+    LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction,
+    UnsignedTxChainSimulation,
 };
 
 use crate::erc20::ERC20Token;
@@ -842,19 +843,35 @@ async fn live_block_state_session_chain(
 
     if needs_session {
         let session_create_started = Instant::now();
-        let session = pool_simulator
-            .simulator()
-            .block_state_session(block_number)
-            .await
-            .map_err(|err| {
-                eyre!(
-                    "failed to create live block state session block={} for {} pool={}: {}",
-                    block_number,
+        let simulator = pool_simulator.simulator();
+        let session = if let Some(block_header) = pool_config.block_header.as_ref() {
+            if block_header.number != block_number {
+                return Err(eyre!(
+                    "live block state session header mismatch for {} pool={}: header={}, requested={}",
                     pool_kind,
                     pool_id,
-                    err
+                    block_header.number,
+                    block_number
+                ));
+            }
+            simulator
+                .block_state_session_with_header(
+                    block_number,
+                    sealed_header_from_processed_block_header(block_header),
                 )
-            })?;
+                .await
+        } else {
+            simulator.block_state_session(block_number).await
+        }
+        .map_err(|err| {
+            eyre!(
+                "failed to create live block state session block={} for {} pool={}: {}",
+                block_number,
+                pool_kind,
+                pool_id,
+                err
+            )
+        })?;
         session_create_us = elapsed_micros(session_create_started);
         let mut guard = block_sessions
             .lock()

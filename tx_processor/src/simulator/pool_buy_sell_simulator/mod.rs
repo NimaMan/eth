@@ -10,6 +10,6 @@ mod simulator;
 mod uniswap_v4;
 mod validation;
 
-pub use entry::check_can_buy_sell_pool;
+pub use entry::{check_can_buy_sell_pool, sealed_header_from_processed_block_header};
 pub use live_simulator::LivePoolBuySellSimulator;
 pub use simulator::PoolBuySellSimulator;

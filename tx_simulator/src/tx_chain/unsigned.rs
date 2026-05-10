@@ -312,7 +312,7 @@ impl TxSimulator {
             ));
         }
 
-        let latest = self.get_latest_block()?;
+        let latest = self.latest_historical_context_block_number()?;
         if at_block > latest {
             if let Some(forked_state) = self
                 .block_context_loader()
@@ -345,7 +345,7 @@ impl TxSimulator {
         at_block: Option<u64>,
         gas_block_number: Option<u64>,
     ) -> Result<UnsignedTxChainSimulation> {
-        let latest = self.get_latest_block()?;
+        let latest = self.latest_historical_context_block_number()?;
         let block_number = at_block.unwrap_or(latest);
 
         if block_number > latest {

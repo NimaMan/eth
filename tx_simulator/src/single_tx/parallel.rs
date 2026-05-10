@@ -63,7 +63,7 @@ impl TxSimulator {
         // Get block number for simulation
         let block_number = match options.block_number {
             Some(n) => n,
-            None => self.get_latest_block()?,
+            None => self.latest_historical_context_block_number()?,
         };
 
         // Create semaphore for concurrency control
@@ -168,7 +168,7 @@ impl TxSimulator {
         // Get block number for simulation
         let block_number = match options.block_number {
             Some(n) => n,
-            None => self.get_latest_block()?,
+            None => self.latest_historical_context_block_number()?,
         };
 
         // Create semaphore for concurrency control

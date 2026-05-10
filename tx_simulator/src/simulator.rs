@@ -120,12 +120,37 @@ impl TxSimulator {
         self
     }
 
-    /// Get latest block number from local database
+    /// Get the latest block number reported by Reth's Finish stage.
+    ///
+    /// This is raw node progress. During live runs the Finish checkpoint can be
+    /// one block ahead of the read-only static-file header view, so callers that
+    /// need to build a full simulation context should prefer
+    /// [`TxSimulator::latest_historical_context_block_number`].
     pub fn get_latest_block(&self) -> Result<u64> {
         self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
         let block_number = provider.best_block_number()?;
         Ok(block_number)
+    }
+
+    /// Latest block whose header is readable from Reth static files.
+    pub fn latest_static_header_block_number(&self) -> Result<u64> {
+        self.refresh_static_file_provider()?;
+        Ok(self.provider_factory.last_block_number()?)
+    }
+
+    /// Latest block for which the simulator can build context directly from
+    /// local Reth providers without Redis live data.
+    ///
+    /// Historical simulation needs both executed state and the block header. In
+    /// live mode those two views do not always advance at the same instant:
+    /// `best_block_number()` follows the Finish stage, while headers are read
+    /// through static files. The minimum is the highest DB-backed block that is
+    /// safe to select without falling back to Redis.
+    pub fn latest_historical_context_block_number(&self) -> Result<u64> {
+        let latest_reth_finished = self.get_latest_block()?;
+        let latest_static_header = self.latest_static_header_block_number()?;
+        Ok(latest_reth_finished.min(latest_static_header))
     }
 
     /// Get the provider factory for direct database access
@@ -139,12 +164,12 @@ impl TxSimulator {
         Ok(())
     }
 
-    /// Ensure the requested block is already persisted in the local database
+    /// Ensure the requested block can be used as local historical simulation context.
     pub fn assert_block_available(&self, block_number: u64) -> Result<()> {
-        let latest = self.get_latest_block()?;
+        let latest = self.latest_historical_context_block_number()?;
         if block_number > latest {
             return Err(eyre::eyre!(
-                "State for block {} not yet available (latest persisted block {})",
+                "State for block {} not yet available as local historical context (latest historical context block {})",
                 block_number,
                 latest
             ));

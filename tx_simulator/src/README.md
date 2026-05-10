@@ -39,14 +39,14 @@ Key Building Blocks Here
 - Batch sequence (bundle): tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
 - Live simulator: tx_simulator/src/live/simulator.rs:1
-  - Selects persisted MDBX when caught up, otherwise tracked live state.
+  - Selects local historical context when caught up, otherwise tracked live state.
 - Trace decoding helpers: tx_simulator/src/simulation_revert_decoder.rs:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
 - Fees and gas: For signed txs we use tx‑provided gas and fees; for unsigned we allow EIP‑1559 or legacy fee fields and can derive safe defaults with base fee when needed.
 - Trace format: Exported via geth builders; shape is intended to match `debug_*` RPC traces (including `withLog` when enabled).
-- Live state: For blocks ahead of persisted MDBX, live APIs require tracked live state from the live block processor.
+- Live state: For blocks ahead of local historical context, live APIs require tracked live state from the live block processor.
 
 Typical Uses
 - Replace `debug_traceCall`/`debug_traceBlockByNumber` with local, zero‑RPC equivalents.

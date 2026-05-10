@@ -67,16 +67,16 @@ impl<'a> BlockContextLoader<'a> {
         Self { simulator }
     }
 
-    /// Load block header + state, replaying live data when MDBX lags the requested block.
+    /// Load block header + state, replaying live data when local historical context lags.
     pub(crate) async fn load_block_context(
         &self,
         block_number: u64,
         header_hint: Option<SealedHeader>,
     ) -> Result<BlockContext> {
         let header = self.load_block_header(block_number, header_hint).await?;
-        let latest_persisted = self.simulator.get_latest_block()?;
+        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
 
-        if block_number <= latest_persisted {
+        if block_number <= latest_historical_context {
             let state = self.load_historical_state(block_number).await?;
             return Ok(BlockContext {
                 header,
@@ -114,8 +114,8 @@ impl<'a> BlockContextLoader<'a> {
         }
 
         let header = self.load_block_header(block_number, header_hint).await?;
-        let persisted = self.simulator.get_latest_block()?;
-        if block_number <= persisted {
+        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
+        if block_number <= latest_historical_context {
             return Ok(None);
         }
 
@@ -181,13 +181,16 @@ impl<'a> BlockContextLoader<'a> {
                 }
                 let latest_live = cache.latest_block_number().await.ok().flatten();
                 let available_blocks = cache.recent_block_numbers(5).await.unwrap_or_default();
-                let latest_persisted = self.simulator.get_latest_block().ok();
+                let latest_reth_finished = self.simulator.get_latest_block().ok();
+                let latest_historical_context =
+                    self.simulator.latest_historical_context_block_number().ok();
                 return Err(eyre!(
-                    "missing live block header for {} (latest live {:?}, available {:?}, latest persisted {:?})",
+                    "missing live block header for {} (latest live {:?}, available {:?}, latest reth finished {:?}, latest historical context {:?})",
                     block_number,
                     latest_live,
                     available_blocks,
-                    latest_persisted
+                    latest_reth_finished,
+                    latest_historical_context
                 ));
             }
         };
@@ -363,9 +366,9 @@ impl<'a> BlockContextLoader<'a> {
         let parent_block = block_number
             .checked_sub(1)
             .ok_or_else(|| eyre!("cannot build live state snapshot for genesis block"))?;
-        let persisted = self.simulator.get_latest_block()?;
+        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
 
-        if parent_block <= persisted {
+        if parent_block <= latest_historical_context {
             let fork = self.simulator.create_forked_state(parent_block)?;
             return Ok((fork, parent_block));
         }
@@ -373,13 +376,13 @@ impl<'a> BlockContextLoader<'a> {
         if let Some(cache) = self.simulator.live_chain_cache() {
             if let Some(snapshot) = cache.fetch_chain_state_snapshot(parent_block).await? {
                 if snapshot.block_hash == parent_hash {
-                    if snapshot.base_block_number != persisted {
+                    if snapshot.base_block_number != latest_historical_context {
                         debug!(
                             block_number,
                             parent_block,
                             snapshot_base_block_number = snapshot.base_block_number,
-                            persisted,
-                            "using parent tracked live state with older persisted base"
+                            latest_historical_context,
+                            "using parent tracked live state with older historical context base"
                         );
                     }
 
@@ -408,10 +411,10 @@ impl<'a> BlockContextLoader<'a> {
         }
 
         Err(eyre!(
-            "cannot build live state snapshot for block {}: parent {} is ahead of persisted block {} and live cache is unavailable",
+            "cannot build live state snapshot for block {}: parent {} is ahead of latest historical context block {} and live cache is unavailable",
             block_number,
             parent_block,
-            persisted
+            latest_historical_context
         ))
     }
 

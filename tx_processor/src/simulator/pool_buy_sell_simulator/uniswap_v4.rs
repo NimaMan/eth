@@ -51,7 +51,9 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         return Err(eyre!("Uniswap V4 target token must be an ERC20 address"));
     }
 
-    let block_number = config.block_number.unwrap_or(simulator.get_latest_block()?);
+    let block_number = config
+        .block_number
+        .unwrap_or(simulator.latest_historical_context_block_number()?);
     let header_hint = block_header_hint(&config, block_number)?;
     let header = match header_hint.clone() {
         Some(header) => header,
@@ -99,7 +101,9 @@ pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
         return Err(eyre!("Uniswap V4 target token must be an ERC20 address"));
     }
 
-    let block_number = config.block_number.unwrap_or(simulator.get_latest_block()?);
+    let block_number = config
+        .block_number
+        .unwrap_or(simulator.latest_historical_context_block_number()?);
     let header_hint = block_header_hint(&config, block_number)?;
     let header = match header_hint {
         Some(header) => header,

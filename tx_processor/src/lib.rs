@@ -58,9 +58,10 @@ pub use processed_tx_provider::{
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 // Export ERC20 token buy-approve-sell simulator through simulator module
 pub use simulator::{
-    check_can_buy_sell_pool, simulate_buy_swap, simulate_sell_swap, BuySwapResult,
-    LivePoolBuySellSimulator, OptionalSetupBuyApproveSellResult, PoolBuySellParameters,
-    PoolBuySellSimulationResult, PoolBuySellSimulator, PoolType, SellSwapResult,
+    check_can_buy_sell_pool, sealed_header_from_processed_block_header, simulate_buy_swap,
+    simulate_sell_swap, BuySwapResult, LivePoolBuySellSimulator, OptionalSetupBuyApproveSellResult,
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolBuySellSimulator, PoolType,
+    SellSwapResult,
 };
 pub use tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 

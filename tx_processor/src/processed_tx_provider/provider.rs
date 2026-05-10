@@ -193,7 +193,7 @@ impl ProcessedTxProvider {
         // Use latest block if not specified
         let block_number = match block_number {
             Some(block) => block,
-            None => self.simulator.get_latest_block()?,
+            None => self.simulator.latest_historical_context_block_number()?,
         };
 
         // Simulate the transaction with full trace to get logs and internal txs
@@ -412,14 +412,14 @@ impl ProcessedTxProvider {
         Arc::new(self.provider_factory.clone())
     }
 
-    /// Get the latest block number using NEW simulator
+    /// Get the latest block number reported by Reth's Finish stage.
     pub async fn get_latest_block(&self) -> Result<u64> {
         self.simulator.get_latest_block()
     }
 
-    /// Get the base fee for the latest block using NEW simulator
+    /// Get the base fee for the latest local historical context block.
     pub async fn get_latest_base_fee(&self) -> Result<u128> {
-        let latest_block = self.simulator.get_latest_block()?;
+        let latest_block = self.simulator.latest_historical_context_block_number()?;
         self.simulator.get_base_fee_at_block(latest_block)
     }
 

@@ -8,8 +8,8 @@ use std::sync::Arc;
 /// Source selected for live-first state.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LiveStateSource {
-    /// State comes from the latest block persisted in Reth MDBX.
-    PersistedMdbx,
+    /// State comes from local Reth providers without Redis live replay.
+    LocalHistoricalContext,
     /// State comes from the live block processor's tracked state.
     TrackedLiveState,
 }
@@ -19,7 +19,8 @@ pub enum LiveStateSource {
 pub struct LiveStateStatus {
     pub selected_block_number: u64,
     pub source: LiveStateSource,
-    pub latest_persisted_block_number: u64,
+    pub latest_reth_finished_block_number: u64,
+    pub latest_historical_context_block_number: u64,
     pub latest_live_block_number: Option<u64>,
     pub latest_tracked_state_block_number: Option<u64>,
 }
@@ -29,7 +30,7 @@ impl LiveStateStatus {
         matches!(self.source, LiveStateSource::TrackedLiveState)
     }
 
-    pub const fn mdbx_lags_selected_state(&self) -> bool {
+    pub const fn local_context_lags_selected_state(&self) -> bool {
         self.uses_tracked_live_state()
     }
 }
@@ -67,14 +68,25 @@ impl LiveTxSimulator {
 
     /// Full state-selection diagnostics for live simulation.
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
-        let latest_persisted = self.latest_persisted_block_number()?;
+        let latest_reth_finished = self.latest_reth_finished_block_number()?;
+        let latest_historical_context = self.latest_historical_context_block_number()?;
         let Some(cache) = self.simulator.live_chain_cache() else {
-            return select_state_status(latest_persisted, None, None);
+            return select_state_status(
+                latest_reth_finished,
+                latest_historical_context,
+                None,
+                None,
+            );
         };
 
         let latest_live = cache.latest_block_number().await?;
         let latest_tracked_state = cache.latest_chain_state_block_number().await?;
-        select_state_status(latest_persisted, latest_live, latest_tracked_state)
+        select_state_status(
+            latest_reth_finished,
+            latest_historical_context,
+            latest_live,
+            latest_tracked_state,
+        )
     }
 
     /// Latest block announced in the live Redis cache, if any.
@@ -82,9 +94,22 @@ impl LiveTxSimulator {
         self.simulator.live_latest_block_number().await
     }
 
-    /// Latest block persisted in local MDBX.
-    pub fn latest_persisted_block_number(&self) -> Result<u64> {
+    /// Latest block reported by Reth's Finish stage.
+    pub fn latest_reth_finished_block_number(&self) -> Result<u64> {
         self.simulator.get_latest_block()
+    }
+
+    /// Compatibility alias for callers that still use the old name.
+    ///
+    /// This is raw Reth Finish-stage progress, not necessarily the latest block
+    /// whose header/state context is readable without Redis.
+    pub fn latest_persisted_block_number(&self) -> Result<u64> {
+        self.latest_reth_finished_block_number()
+    }
+
+    /// Latest block that can be simulated entirely from local historical Reth context.
+    pub fn latest_historical_context_block_number(&self) -> Result<u64> {
+        self.simulator.latest_historical_context_block_number()
     }
 
     /// Start a stateful simulation chain at the latest tracked state block.
@@ -164,21 +189,24 @@ impl LiveTxSimulator {
 }
 
 fn select_state_status(
-    latest_persisted: u64,
+    latest_reth_finished: u64,
+    latest_historical_context: u64,
     latest_live: Option<u64>,
     latest_tracked_state: Option<u64>,
 ) -> Result<LiveStateStatus> {
     let Some(live_head) = latest_live else {
-        return Ok(persisted_state_status(
-            latest_persisted,
+        return Ok(local_historical_context_state_status(
+            latest_reth_finished,
+            latest_historical_context,
             latest_live,
             latest_tracked_state,
         ));
     };
 
-    if latest_persisted >= live_head {
-        return Ok(persisted_state_status(
-            latest_persisted,
+    if latest_historical_context >= live_head {
+        return Ok(local_historical_context_state_status(
+            latest_reth_finished,
+            latest_historical_context,
             latest_live,
             latest_tracked_state,
         ));
@@ -188,26 +216,29 @@ fn select_state_status(
         return Ok(LiveStateStatus {
             selected_block_number: tracked_state,
             source: LiveStateSource::TrackedLiveState,
-            latest_persisted_block_number: latest_persisted,
+            latest_reth_finished_block_number: latest_reth_finished,
+            latest_historical_context_block_number: latest_historical_context,
             latest_live_block_number: latest_live,
             latest_tracked_state_block_number: latest_tracked_state,
         });
     }
 
     Err(eyre!(
-        "live tracked state is behind live head: latest_live={live_head}, latest_persisted={latest_persisted}, latest_tracked_state={latest_tracked_state:?}"
+        "live tracked state is behind live head: latest_live={live_head}, latest_historical_context={latest_historical_context}, latest_reth_finished={latest_reth_finished}, latest_tracked_state={latest_tracked_state:?}"
     ))
 }
 
-fn persisted_state_status(
-    latest_persisted: u64,
+fn local_historical_context_state_status(
+    latest_reth_finished: u64,
+    latest_historical_context: u64,
     latest_live: Option<u64>,
     latest_tracked_state: Option<u64>,
 ) -> LiveStateStatus {
     LiveStateStatus {
-        selected_block_number: latest_persisted,
-        source: LiveStateSource::PersistedMdbx,
-        latest_persisted_block_number: latest_persisted,
+        selected_block_number: latest_historical_context,
+        source: LiveStateSource::LocalHistoricalContext,
+        latest_reth_finished_block_number: latest_reth_finished,
+        latest_historical_context_block_number: latest_historical_context,
         latest_live_block_number: latest_live,
         latest_tracked_state_block_number: latest_tracked_state,
     }
@@ -218,36 +249,45 @@ mod tests {
     use super::{select_state_status, LiveStateSource};
 
     #[test]
-    fn uses_persisted_when_no_live_state_exists() {
-        let status = select_state_status(100, None, None).unwrap();
+    fn uses_local_historical_context_when_no_live_state_exists() {
+        let status = select_state_status(100, 100, None, None).unwrap();
         assert_eq!(status.selected_block_number, 100);
-        assert_eq!(status.source, LiveStateSource::PersistedMdbx);
-        assert!(!status.mdbx_lags_selected_state());
+        assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
+        assert!(!status.local_context_lags_selected_state());
     }
 
     #[test]
-    fn uses_persisted_when_mdbx_is_caught_up() {
-        let status = select_state_status(105, Some(105), Some(105)).unwrap();
+    fn uses_local_historical_context_when_it_is_caught_up() {
+        let status = select_state_status(105, 105, Some(105), Some(105)).unwrap();
         assert_eq!(status.selected_block_number, 105);
-        assert_eq!(status.source, LiveStateSource::PersistedMdbx);
+        assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
     }
 
     #[test]
-    fn uses_tracked_live_state_when_it_is_ahead_of_mdbx() {
-        let status = select_state_status(100, Some(102), Some(102)).unwrap();
+    fn uses_historical_context_when_reth_finished_is_ahead_of_static_headers() {
+        let status = select_state_status(106, 105, Some(105), Some(105)).unwrap();
+        assert_eq!(status.selected_block_number, 105);
+        assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
+        assert_eq!(status.latest_reth_finished_block_number, 106);
+        assert_eq!(status.latest_historical_context_block_number, 105);
+    }
+
+    #[test]
+    fn uses_tracked_live_state_when_it_is_ahead_of_local_context() {
+        let status = select_state_status(100, 100, Some(102), Some(102)).unwrap();
         assert_eq!(status.selected_block_number, 102);
         assert_eq!(status.source, LiveStateSource::TrackedLiveState);
         assert!(status.uses_tracked_live_state());
-        assert!(status.mdbx_lags_selected_state());
+        assert!(status.local_context_lags_selected_state());
     }
 
     #[test]
     fn fails_when_live_head_is_ahead_but_tracked_state_is_missing() {
-        assert!(select_state_status(100, Some(102), None).is_err());
+        assert!(select_state_status(100, 100, Some(102), None).is_err());
     }
 
     #[test]
     fn fails_when_live_head_is_ahead_but_tracked_state_is_stale() {
-        assert!(select_state_status(100, Some(102), Some(101)).is_err());
+        assert!(select_state_status(100, 100, Some(102), Some(101)).is_err());
     }
 }

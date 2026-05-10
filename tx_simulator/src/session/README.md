@@ -9,7 +9,7 @@ After creation, each `step_*` call executes synchronously on that warm fork and 
 the in-memory overlay.
 
 Live pipelines should usually call `LiveTxSimulator::start_latest_session()` instead. That
-selects persisted MDBX when caught up, otherwise the live block processor's tracked state.
+selects local historical context when caught up, otherwise the live block processor's tracked state.
 
 Use it when a workflow can contain any sequence of:
 

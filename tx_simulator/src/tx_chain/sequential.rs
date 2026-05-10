@@ -125,8 +125,8 @@ impl TxSimulator {
         let simulator = self.clone();
 
         task::spawn_blocking(move || {
-            // Determine the forked context (historical MDBX or live replay via cache).
-            let latest = simulator.get_latest_block()?;
+            // Determine the forked context (local historical context or live replay via cache).
+            let latest = simulator.latest_historical_context_block_number()?;
             let block_number = options.at_block.unwrap_or(latest);
 
             let mut forked_state = simulator.create_forked_state(block_number)?;

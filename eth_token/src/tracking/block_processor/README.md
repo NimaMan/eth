@@ -61,8 +61,8 @@ final state after block `n`.
 Live processing has the same semantic target: post-block state for the block
 being applied. The source can differ:
 
-- use a tracked live state snapshot for block `n` when MDBX has not persisted it;
-- use persisted MDBX state for block `n` once available;
+- use a tracked live state snapshot for block `n` when local historical context is not ready;
+- use local historical context for block `n` once available;
 - make any fallback to intra-block replay explicit and measurable.
 
 The live path must not silently downgrade to repeated per-transaction simulation

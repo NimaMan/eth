@@ -248,7 +248,7 @@ impl TxSimulator {
 impl TxSimulator {
     /// Start a signed-tx chain simulator at optional block
     pub fn start_signed_chain(&self, at_block: Option<u64>) -> Result<SignedTxChainSimulation> {
-        let block = at_block.unwrap_or(self.get_latest_block()?);
+        let block = at_block.unwrap_or(self.latest_historical_context_block_number()?);
         let fork = self.create_forked_state(block)?;
         Ok(SignedTxChainSimulation::new(Arc::new(self.clone()), fork))
     }

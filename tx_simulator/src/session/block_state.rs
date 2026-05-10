@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use eyre::Result;
+use eyre::{eyre, Result};
 use reth_primitives_traits::SealedHeader;
 
 use crate::{
@@ -31,6 +31,13 @@ impl BlockStateSession {
         block_number: u64,
         block_header: SealedHeader,
     ) -> Result<Self> {
+        if block_header.number != block_number {
+            return Err(eyre!(
+                "block state session header mismatch: header={}, requested={}",
+                block_header.number,
+                block_number
+            ));
+        }
         let forked_state = simulator.create_forked_state_with_header(block_number, block_header)?;
         Ok(Self {
             simulator,

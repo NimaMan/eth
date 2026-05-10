@@ -61,7 +61,7 @@ Keeping these helpers separate lets downstream callers opt into the heavier step
 ### Internal Helpers
 
 * `prepare_block_context` – orchestrates header/state resolution through `BlockContextLoader`,
-  including tracked live state for blocks ahead of persisted MDBX.
+  including tracked live state for blocks ahead of local historical context.
 * `create_tx_env` – fills in missing nonce / gas / fee data and builds the revm transaction
   environment.
 * `run_unsigned_transaction` / `run_unsigned_transaction_with_trace` – the shared execution paths

@@ -42,8 +42,8 @@ Reth MDBX + canonical headers
   -> tx_processor, reth_chain_query, mempool_processor, pyreth
 ```
 
-Live simulation uses persisted MDBX when it is caught up. For heads ahead of
-MDBX, `LiveTxSimulator` hydrates from the live chain cache.
+Live simulation uses local historical context when it is caught up. For heads
+ahead of that context, `LiveTxSimulator` hydrates from the live chain cache.
 
 ## Where To Look First
 

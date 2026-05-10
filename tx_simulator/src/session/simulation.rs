@@ -20,7 +20,7 @@ use crate::{
 /// Fork selection for a stateful simulation session.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationSessionOptions {
-    /// State block to fork. `None` means latest persisted block, or live cache if requested ahead.
+    /// State block to fork. `None` means latest local historical context, or live cache if requested ahead.
     pub at_block: Option<u64>,
     /// Optional block whose gas/base-fee fields should be used for tx environment construction.
     pub gas_block_number: Option<u64>,
