@@ -1,7 +1,6 @@
 mod reply;
 pub mod routes;
 pub mod sse;
-pub mod assets;
 
 pub use crate::app::state::ServerState;
 

@@ -2,7 +2,7 @@ use crate::{
     amount::{Amount, DecimalAmount},
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
-    ids::{OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress, WalletId},
+    ids::{BlockNumber, OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress, WalletId},
     order::OrderSide,
     position::PositionState,
 };
@@ -34,8 +34,13 @@ pub struct Position {
     /// Stored as DecimalAmount to avoid token-decimal ambiguity.
     /// Needed for accurate sell sizing since tokens may have taxes, max limits, etc.
     pub entry_token_amount: Option<DecimalAmount>,
+    /// Block number at which the buy was confirmed.
+    /// Used for time-based exits (e.g., max hold duration).
+    #[serde(default)]
+    pub entry_block: Option<BlockNumber>,
     /// True if the pool was drained/scammed while position was open.
     /// Used for honest baseline PnL even when no exit is attempted.
+    #[serde(default)]
     pub drained: bool,
 }
 
@@ -51,6 +56,7 @@ impl Position {
             exit_proceeds: None,
             entry_price: None,
             entry_token_amount: None,
+            entry_block: None,
             drained: false,
         }
     }
@@ -137,6 +143,7 @@ impl Position {
                 self.entry_price = Some(price);
             }
             self.entry_token_amount = report.token_amount.as_ref().map(|a| a.to_decimal());
+            self.entry_block = report.block_number;
             return Ok(());
         }
 

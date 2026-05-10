@@ -93,6 +93,61 @@ impl SnipeAllStrategy {
         })
     }
 
+    /// Evaluate proactive price-ratio and time-based exits for an open position.
+    /// Returns Some(decision) if an exit should be triggered, None otherwise.
+    fn evaluate_proactive_exit(
+        &mut self,
+        ctx: &StrategyContext<'_>,
+        position: &eth_alpha_core::position::Position,
+        pool: &PoolSnapshot,
+        current_block: u64,
+    ) -> Option<StrategyDecision> {
+        // Already exiting?
+        if self.state.is_exiting(&pool.address) {
+            return None;
+        }
+
+        // Time-based exit: max hold duration exceeded.
+        if let Some(max_hold) = self.config.max_hold_blocks {
+            if let Some(entry_block) = position.entry_block {
+                if current_block > entry_block + max_hold {
+                    return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+                }
+            }
+        }
+
+        // Price-ratio exits require entry_price.
+        let Some(entry_price) = position.entry_price else {
+            return None;
+        };
+        if entry_price.is_zero() {
+            return None;
+        }
+
+        let current_price = pool.price_denom_per_token.unwrap_or_default();
+        if current_price.is_zero() {
+            return None;
+        }
+
+        let price_ratio = current_price / entry_price;
+
+        // Stop-loss: price fell below threshold ratio.
+        if let Some(sl_ratio) = self.config.stop_loss_ratio {
+            if price_ratio <= sl_ratio {
+                return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+            }
+        }
+
+        // Take-profit: price rose above threshold ratio.
+        if let Some(tp_ratio) = self.config.take_profit_ratio {
+            if price_ratio >= tp_ratio {
+                return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+            }
+        }
+
+        None
+    }
+
     fn has_blocking_entry_risk(
         ctx: &StrategyContext<'_>,
         token_address: TokenAddress,
@@ -135,9 +190,28 @@ impl Strategy for SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         event: &MarketEvent,
     ) -> Result<StrategyDecision> {
-        let MarketEvent::PoolUpdated { pool, .. } = event else {
+        let MarketEvent::PoolUpdated { pool, block_number, .. } = event else {
             return Ok(StrategyDecision::Hold);
         };
+
+        let strategy_name = self.name();
+
+        // Check if we have an active position for this pool.
+        if let Some(position) = ctx.portfolio.positions.values().find(|p| {
+            p.key.strategy_name == strategy_name
+                && p.key.token_address == pool.token_address
+                && p.key.pool_address == pool.address
+                && p.is_open()
+        }) {
+            self.state.mark_bought(pool.address.clone());
+
+            // Evaluate proactive price-ratio / time-based exits.
+            if let Some(decision) = self.evaluate_proactive_exit(ctx, position, pool, *block_number) {
+                return Ok(decision);
+            }
+
+            return Ok(StrategyDecision::Hold);
+        }
 
         // 1. Shared eligibility gate: reject ineligible pools first.
         match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config()) {
@@ -146,11 +220,6 @@ impl Strategy for SnipeAllStrategy {
         }
 
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
-            return Ok(StrategyDecision::Hold);
-        }
-        let strategy_name = self.name();
-        if Self::has_active_position(ctx, &strategy_name, pool.token_address, &pool.address) {
-            self.state.mark_bought(pool.address.clone());
             return Ok(StrategyDecision::Hold);
         }
 

@@ -22,158 +22,158 @@ pub fn routes(
         .allow_headers(["content-type"])
         .allow_methods(["GET", "POST", "OPTIONS"]);
 
-    api(state).or(crate::http::assets::static_routes()).with(cors)
+    api(state).with(cors)
 }
 
 fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Rejection> + Clone {
-    let health = warp::path!("health")
+    let health = warp::path!("eth" / "tokens" / "api" / "health")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(health::health);
 
-    let list_runs = warp::path!("runs")
+    let list_runs = warp::path!("eth" / "tokens" / "api" / "runs")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::list_runs);
 
-    let start_run = warp::path!("runs")
+    let start_run = warp::path!("eth" / "tokens" / "api" / "runs")
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(range::start_run);
 
-    let active_run = warp::path!("runs" / "active")
+    let active_run = warp::path!("eth" / "tokens" / "api" / "runs" / "active")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::active_run);
 
-    let stop_active_run = warp::path!("runs" / "active" / "stop")
+    let stop_active_run = warp::path!("eth" / "tokens" / "api" / "runs" / "active" / "stop")
         .and(warp::post())
         .and(with_state(state.clone()))
         .and_then(range::stop_active_run);
 
-    let active_run_launch_stats = warp::path!("runs" / "active" / "strategy" / "launch-stats")
+    let active_run_launch_stats = warp::path!("eth" / "tokens" / "api" / "runs" / "active" / "strategy" / "launch-stats")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::active_run_launch_stats);
 
-    let processed_block_disk_cache_coverage = warp::path!("cache" / "coverage")
+    let processed_block_disk_cache_coverage = warp::path!("eth" / "tokens" / "api" / "cache" / "coverage")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::processed_block_disk_cache_coverage);
 
-    let live_status = warp::path!("live" / "status")
+    let live_status = warp::path!("eth" / "tokens" / "api" / "live" / "status")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::status);
 
-    let live_start = warp::path!("live" / "start")
+    let live_start = warp::path!("eth" / "tokens" / "api" / "live" / "start")
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(live::start);
 
-    let live_stop = warp::path!("live" / "stop")
+    let live_stop = warp::path!("eth" / "tokens" / "api" / "live" / "stop")
         .and(warp::post())
         .and(with_state(state.clone()))
         .and_then(live::stop);
 
-    let live_tokens = warp::path!("live" / "tokens")
+    let live_tokens = warp::path!("eth" / "tokens" / "api" / "live" / "tokens")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::tokens);
 
-    let live_pools = warp::path!("live" / "pools")
+    let live_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::pools);
 
-    let live_token_detail = warp::path!("live" / "tokens" / String)
+    let live_token_detail = warp::path!("eth" / "tokens" / "api" / "live" / "tokens" / String)
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::token_detail);
 
-    let live_retention = warp::path!("live" / "retention")
+    let live_retention = warp::path!("eth" / "tokens" / "api" / "live" / "retention")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::retention);
 
-    let mempool_signals = warp::path!("mempool" / "signals")
+    let mempool_signals = warp::path!("eth" / "tokens" / "api" / "mempool" / "signals")
         .and(warp::get())
         .and(warp::query::<MempoolSignalQuery>())
         .and(with_state(state.clone()))
         .and_then(mempool::signals);
 
-    let mempool_signals_by_type = warp::path!("mempool" / "signals" / String)
+    let mempool_signals_by_type = warp::path!("eth" / "tokens" / "api" / "mempool" / "signals" / String)
         .and(warp::get())
         .and(warp::query::<MempoolSignalQuery>())
         .and(with_state(state.clone()))
         .and_then(mempool::signals_by_type);
 
-    let token_activity_blocks = warp::path!("tokens" / String / "activity-blocks")
+    let token_activity_blocks = warp::path!("eth" / "tokens" / "api" / "tokens" / String / "activity-blocks")
         .and(warp::get())
         .and(warp::query::<TokenActivityBlocksQuery>())
         .and(with_state(state.clone()))
         .and_then(token_activity::activity_blocks);
 
-    let alpha_strategies = warp::path!("alpha" / "strategies")
+    let alpha_strategies = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(alpha::strategies);
 
-    let alpha_strategy_detail = warp::path!("alpha" / "strategies" / String)
+    let alpha_strategy_detail = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies" / String)
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(alpha::strategy_detail);
 
-    let alpha_strategy_performance = warp::path!("alpha" / "strategies" / String / "performance")
+    let alpha_strategy_performance = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies" / String / "performance")
         .and(warp::get())
         .and(warp::query::<StrategyPerformanceQuery>())
         .and(with_state(state.clone()))
         .and_then(alpha::strategy_performance);
 
-    let alpha_strategy_reset = warp::path!("alpha" / "strategies" / String / "reset-paper-state")
+    let alpha_strategy_reset = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies" / String / "reset-paper-state")
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(alpha::strategy_reset);
 
-    let progress = warp::path!("runs" / String / "progress")
+    let progress = warp::path!("eth" / "tokens" / "api" / "runs" / String / "progress")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::progress);
 
-    let tokens = warp::path!("runs" / String / "tokens")
+    let tokens = warp::path!("eth" / "tokens" / "api" / "runs" / String / "tokens")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::tokens);
 
-    let token_detail = warp::path!("runs" / String / "tokens" / String)
+    let token_detail = warp::path!("eth" / "tokens" / "api" / "runs" / String / "tokens" / String)
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::token_detail);
 
-    let pools = warp::path!("runs" / String / "pools")
+    let pools = warp::path!("eth" / "tokens" / "api" / "runs" / String / "pools")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::pools);
 
-    let launch_stats = warp::path!("runs" / String / "strategy" / "launch-stats")
+    let launch_stats = warp::path!("eth" / "tokens" / "api" / "runs" / String / "strategy" / "launch-stats")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::launch_stats);
 
-    let errors = warp::path!("runs" / String / "errors")
+    let errors = warp::path!("eth" / "tokens" / "api" / "runs" / String / "errors")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::errors);
 
-    let stream = warp::path!("runs" / String / "stream")
+    let stream = warp::path!("eth" / "tokens" / "api" / "runs" / String / "stream")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::stream);
 
-    let stop = warp::path!("runs" / String / "stop")
+    let stop = warp::path!("eth" / "tokens" / "api" / "runs" / String / "stop")
         .and(warp::post())
         .and(with_state(state))
         .and_then(range::stop_run);

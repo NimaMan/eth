@@ -74,6 +74,21 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     once: bool,
+
+    /// Max hold blocks: force sell after this many blocks regardless of price.
+    /// Disabled by default.
+    #[arg(long)]
+    max_hold_blocks: Option<u64>,
+
+    /// Stop-loss ratio: sell if price drops to this fraction of entry price.
+    /// E.g., 0.7 = sell at -30% loss. Disabled by default.
+    #[arg(long)]
+    stop_loss_ratio: Option<String>,
+
+    /// Take-profit ratio: sell if price rises to this multiple of entry price.
+    /// E.g., 3.0 = sell at +200% profit. Disabled by default.
+    #[arg(long)]
+    take_profit_ratio: Option<String>,
 }
 
 #[derive(Clone)]
@@ -92,15 +107,15 @@ impl TokenServerClient {
     }
 
     async fn status(&self) -> Result<LiveStatusResponse> {
-        self.get_json("/live/status").await
+        self.get_json("/eth/tokens/api/live/status").await
     }
 
     async fn pools(&self) -> Result<LivePoolListResponse> {
-        self.get_json("/live/pools").await
+        self.get_json("/eth/tokens/api/live/pools").await
     }
 
     async fn mempool_signals(&self, limit: i64, since_days: i64) -> Result<MempoolSignalsResponse> {
-        let path = format!("/mempool/signals?limit={limit}&since_days={since_days}");
+        let path = format!("/eth/tokens/api/mempool/signals?limit={limit}&since_days={since_days}");
         self.get_json(&path).await
     }
 
@@ -181,7 +196,9 @@ async fn main() -> Result<()> {
             (ExecutionAdapterKind::Modeled(adapter), Some(pools))
         }
         _ => {
-            (ExecutionAdapterKind::Paper(PaperExecutionAdapter::new()), None)
+            let adapter = PaperExecutionAdapter::new();
+            let pools = adapter.pools();
+            (ExecutionAdapterKind::Paper(adapter), Some(pools))
         }
     };
 
@@ -191,6 +208,15 @@ async fn main() -> Result<()> {
         adapter,
     )
     .with_portfolio(portfolio);
+    let stop_loss_ratio = args
+        .stop_loss_ratio
+        .as_deref()
+        .and_then(|s| Decimal::from_str(s).ok());
+    let take_profit_ratio = args
+        .take_profit_ratio
+        .as_deref()
+        .and_then(|s| Decimal::from_str(s).ok());
+
     engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
         buy_amount: Amount {
             raw: paper_buy_wei,
@@ -199,6 +225,9 @@ async fn main() -> Result<()> {
         sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
         min_denom_reserve: min_liquidity_eth,
         min_stable_denom_reserve: min_liquidity_usd,
+        stop_loss_ratio,
+        take_profit_ratio,
+        max_hold_blocks: args.max_hold_blocks,
         ..SnipeAllConfig::default()
     })));
 

@@ -9,6 +9,6 @@ workspace = "../.."
 alloy-primitives = { version = "1.5.7", features = ["serde"] }
 async-trait = "0.1"
 eyre = "0.6"
-rust_decimal = { version = "1.36", features = ["serde"] }
+rust_decimal = { version = "1.36", features = ["serde", "serde-float", "serde-arbitrary-precision"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"

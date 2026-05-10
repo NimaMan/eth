@@ -26,6 +26,16 @@ pub struct SnipeAllConfig {
     pub exit_on_tax: bool,
     pub exit_on_lp_approval: bool,
     pub exit_on_scam: bool,
+    /// Asymmetric price-ratio exits.
+    /// Sell if price drops to this ratio of entry price (e.g., 0.7 = -30% stop-loss).
+    /// None = disabled.
+    pub stop_loss_ratio: Option<DecimalAmount>,
+    /// Sell if price rises to this multiple of entry price (e.g., 3.0 = +200% take-profit).
+    /// None = disabled (let winners run).
+    pub take_profit_ratio: Option<DecimalAmount>,
+    /// Force sell after this many blocks regardless of price.
+    /// None = disabled (hold indefinitely).
+    pub max_hold_blocks: Option<u64>,
 }
 
 impl Default for SnipeAllConfig {
@@ -51,6 +61,9 @@ impl Default for SnipeAllConfig {
             exit_on_tax: true,
             exit_on_lp_approval: true,
             exit_on_scam: true,
+            stop_loss_ratio: None,
+            take_profit_ratio: None,
+            max_hold_blocks: None,
         }
     }
 }
