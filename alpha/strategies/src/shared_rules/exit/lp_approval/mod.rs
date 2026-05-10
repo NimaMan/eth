@@ -4,7 +4,7 @@ use eth_alpha_core::{
     StrategyContext,
 };
 
-use crate::snipe_all::rule::RuleDecision;
+use crate::baseline::snipe_all::rule::RuleDecision;
 
 pub const RULE_NAME: &str = "exit.lp_approval";
 

@@ -1,6 +1,6 @@
 use eth_alpha_core::{risk::RiskEvent, StrategyContext};
 
-use crate::snipe_all::{config::SnipeAllConfig, rule::RuleDecision};
+use crate::baseline::snipe_all::{config::SnipeAllConfig, rule::RuleDecision};
 
 pub const RULE_NAME: &str = "label.creator_flow";
 

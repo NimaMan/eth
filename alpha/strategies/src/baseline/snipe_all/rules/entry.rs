@@ -1,6 +1,6 @@
 use eth_alpha_core::market::PoolSnapshot;
 
-use crate::snipe_all::{rule::RuleDecision, state::SnipeAllState};
+use crate::baseline::snipe_all::{rule::RuleDecision, state::SnipeAllState};
 
 pub const RULE_NAME: &str = "entry.buy_eligible_pool_once";
 

@@ -81,7 +81,7 @@ impl MarketTrackerStrategy {
 
         // Shared eligibility gate: reject ineligible pools first.
         use crate::shared_rules;
-        use crate::snipe_all::rule::RuleDecision;
+        use crate::baseline::snipe_all::rule::RuleDecision;
         match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config()) {
             RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
             _ => {}

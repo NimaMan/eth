@@ -2,7 +2,7 @@ use eth_alpha_core::market::PoolSnapshot;
 use eth_pool_classification::{classify_pool_with_config, PoolClassificationConfig, PoolClassificationInput};
 use rust_decimal::prelude::ToPrimitive;
 
-use crate::snipe_all::rule::RuleDecision;
+use crate::baseline::snipe_all::rule::RuleDecision;
 
 pub const RULE_NAME: &str = "entry.eligibility";
 
