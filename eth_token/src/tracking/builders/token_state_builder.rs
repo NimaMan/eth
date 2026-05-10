@@ -117,8 +117,10 @@ fn refresh_token_index(
     let Some(token) = registry.token(token_address) else {
         return;
     };
-    let status = if token.is_scam() {
+    let status = if token.hidden_mint_detected() {
         TrackedTokenStatus::InactiveHiddenMint
+    } else if token.liquidity_removal_pool_count() > 0 {
+        TrackedTokenStatus::InactiveOther
     } else if token.trading_enabled() {
         TrackedTokenStatus::Active
     } else {

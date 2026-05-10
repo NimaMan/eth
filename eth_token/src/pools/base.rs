@@ -357,6 +357,19 @@ impl BasePool {
         self.reserve_tracker.is_scam
     }
 
+    pub fn mark_liquidity_removal(
+        &mut self,
+        label: impl Into<String>,
+        block_number: Option<u64>,
+        tx_hash: Option<String>,
+    ) {
+        self.reserve_tracker.is_scam = true;
+        self.reserve_tracker.scam_label = Some(label.into());
+        self.reserve_tracker.scam_block = block_number;
+        self.reserve_tracker.scam_tx_hash = tx_hash;
+        self.sync_liquidity_removal_state_from_reserve_tracker();
+    }
+
     pub fn register_token_control_addresses(
         &mut self,
         addresses: impl IntoIterator<Item = impl AsRef<str>>,

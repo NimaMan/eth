@@ -752,11 +752,18 @@ impl ERC20Token {
     }
 
     pub fn is_scam(&self) -> bool {
-        self.hidden_mint_detected()
+        self.hidden_mint_detected() || self.liquidity_removal_pool_count() > 0
     }
 
     pub fn scam_label(&self) -> Option<String> {
-        self.status_manager.scam_label.clone()
+        self.status_manager.scam_label.clone().or_else(|| {
+            self.all_pool_bases().into_iter().find_map(|pool| {
+                pool.scam_label.clone().or_else(|| {
+                    pool.has_liquidity_removal()
+                        .then(|| "liquidity_removal".to_string())
+                })
+            })
+        })
     }
 
     pub fn hidden_mint_detected(&self) -> bool {
@@ -939,13 +946,19 @@ impl ERC20Token {
         })
     }
 
-    fn refresh_lifecycle_status(&mut self) {
-        if self.is_scam() {
+    pub(crate) fn refresh_lifecycle_status(&mut self) {
+        if self.hidden_mint_detected() {
             self.token_life_cycle_status = Some(TokenLifecycleState::InactiveHiddenMint);
+        } else if self.liquidity_removal_pool_count() > 0 {
+            self.token_life_cycle_status = Some(TokenLifecycleState::InactiveOther);
         } else if self.trading_enabled() {
             self.token_life_cycle_status = Some(TokenLifecycleState::TradingEnabled);
         } else if self.has_pool() {
             self.token_life_cycle_status = Some(TokenLifecycleState::PairCreation);
+        } else if self.creation_block.is_some() {
+            self.token_life_cycle_status = Some(TokenLifecycleState::ContractCreation);
+        } else {
+            self.token_life_cycle_status = None;
         }
     }
 

@@ -12,8 +12,10 @@ impl BlockTokenProcessor {
         current_block: u64,
     ) {
         let Some(status) = self.registry.token(token_address).map(|token| {
-            if token.is_scam() {
+            if token.hidden_mint_detected() {
                 TrackedTokenStatus::InactiveHiddenMint
+            } else if token.liquidity_removal_pool_count() > 0 {
+                TrackedTokenStatus::InactiveOther
             } else if token.trading_enabled() {
                 TrackedTokenStatus::Active
             } else {

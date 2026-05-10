@@ -171,6 +171,11 @@ Known failure class:
 
 - Simulation validation errors, such as insufficient simulated funds, can fail
   runtime warmup if treated as block-level errors.
+- Immediate live retention pruning of newly scammed pools keeps the live set
+  small but leaves no inspection window. Example: MOTH
+  `0xec402ba62e9d67650359ba859ddc1ae22a84840f` had a `DRAINING` mempool
+  liquidity-removal signal at block `25,063,350`, but the token detail showed
+  `pools=0` after the pool fell below the `0.1 ETH` live WETH floor.
 
 Target behavior:
 
@@ -179,3 +184,7 @@ Target behavior:
 - They should not fail the whole live tracker.
 - Runtime failure should be reserved for unrecoverable processed-block loading,
   ordering, or state corruption errors.
+- Risk-bearing depleted pools should be retained for `15,000` blocks when
+  reserves fall sharply from above the live retention floor to below it, then
+  pruned as before. Token Lab case:
+  `token_lab/investigations/mothman_live_retention_liquidity_removal_25063339/`.
