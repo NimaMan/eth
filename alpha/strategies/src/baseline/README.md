@@ -12,8 +12,9 @@ reference against which selective strategies are measured.
 
 ## Backtest Validation Findings
 
-All measurements below use the honest backtest with `--skip-primed` (excludes
-warmup observations) and modeled fills (500 bps slippage, 150k gas).
+All measurements below use the EVM-backed backtest with `--skip-primed`
+(excludes warmup observations). Fills are produced by running actual swap
+calldata through the EVM at the historical block.
 
 ### Baseline: Buy All Eligible, Hold Forever (No Exits)
 
@@ -37,12 +38,12 @@ The average winner returns +180% ROI.
 | Bought at later block | 35 / 205 (17%) |
 | Average delay for late entries | ~1,558 blocks (~5.2 hours) |
 
-**Price accuracy**: Our `entry_price` matches the pool's `price_denom_per_token`
-at the buy block exactly (0.0000% difference across all positions).
+**Price accuracy**: `entry_price` is computed as `cost_basis / token_amount`
+from the EVM simulation result, not from the pool snapshot. This captures
+real slippage, taxes, and price impact.
 
-**Token quantity**: `implied_tokens = cost_basis / entry_price`. For small
-buys (0.01 ETH) against 1+ ETH liquidity pools, the approximation error is
-<1% vs true Uniswap V2 swap math.
+**Token quantity**: `token_amount` comes directly from EVM simulation
+(`simulate_buy_swap`). No approximation.
 
 **Post-block state**: Pool updates in `strategy_observations` reflect the
 post-block state (after all txs in the block are processed). The strategy

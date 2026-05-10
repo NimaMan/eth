@@ -301,12 +301,33 @@ where
     async fn execute_intent(
         &mut self,
         intent: OrderIntent,
-        fill_price: Option<DecimalAmount>,
+        snapshot_price: Option<DecimalAmount>,
     ) -> Result<ExecutionReport> {
         let mut position = self.position_for_intent(&intent);
         position.mark_intent_created(intent.side)?;
         let report = self.execution.execute(intent.clone()).await?;
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+
+        // When the execution adapter provides both cost basis and token amount,
+        // compute the actual fill price from the report rather than using the
+        // pool snapshot price. This gives chain-parity pricing that accounts
+        // for real slippage, taxes, and price impact.
+        let fill_price = match intent.side {
+            OrderSide::Buy => {
+                if let (Some(cost), Some(tokens)) = (&report.filled_amount, &report.token_amount) {
+                    let cost_dec = cost.to_decimal();
+                    let token_dec = tokens.to_decimal();
+                    if !token_dec.is_zero() {
+                        Some(cost_dec / token_dec)
+                    } else {
+                        snapshot_price
+                    }
+                } else {
+                    snapshot_price
+                }
+            }
+            OrderSide::Sell => snapshot_price,
+        };
         position.apply_execution_report_with_price(&report, fill_price)?;
 
         self.store.upsert_position(&position).await?;
