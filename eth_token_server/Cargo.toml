@@ -28,10 +28,10 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 warp = "0.3"
-mime_guess = { version = "2", optional = true }
+mime_guess = "2"
 
 rust-embed = { version = "8", features = ["include-exclude"], optional = true }
 
 [features]
 default = []
-embed-static = ["dep:rust-embed", "dep:mime_guess"]
+embed-static = ["dep:rust-embed"]
