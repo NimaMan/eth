@@ -24,7 +24,7 @@ pub struct BuySwapResult {
     pub failure_reason: Option<String>,
 }
 
-/// Simulate a single buy swap with a default amount of 1 ETH.
+/// Simulate a single buy swap with a configurable ETH amount.
 /// - Reuses the same default buyer address as the buy/approve/sell simulator.
 /// - Supports Uniswap V2/V3 adapters (more can be added later).
 pub async fn simulate_buy_swap(
@@ -34,9 +34,8 @@ pub async fn simulate_buy_swap(
     pool_address: Address,
     pool_type: PoolType,
     block_number: Option<u64>,
+    eth_amount: U256,
 ) -> Result<BuySwapResult> {
-    // Default constants
-    let eth_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
     let slippage_tolerance = 0.5_f64;
 
     // Reuse buyer address from existing config default to stay consistent

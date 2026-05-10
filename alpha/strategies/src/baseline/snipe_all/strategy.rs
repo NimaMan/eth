@@ -51,10 +51,34 @@ impl SnipeAllStrategy {
 
     fn sell_pool(
         &mut self,
+        ctx: &StrategyContext<'_>,
         token_address: TokenAddress,
         pool_address: PoolAddress,
     ) -> StrategyDecision {
         self.state.mark_exiting(pool_address.clone());
+
+        // Look up the open position to determine how many tokens to sell.
+        let position = ctx.portfolio.positions.values().find(|p| {
+            p.key.strategy_name == self.name()
+                && p.key.token_address == token_address
+                && p.key.pool_address == pool_address
+                && p.is_open()
+        });
+
+        let token_amount = match position.and_then(|p| p.entry_token_amount) {
+            Some(entry_qty) => {
+                let sell_qty = entry_qty * self.config.sell_fraction;
+                let decimals = ctx
+                    .market
+                    .pool
+                    .as_ref()
+                    .and_then(|p| p.token_decimals)
+                    .unwrap_or(18);
+                eth_alpha_core::amount::Amount::from_decimal(sell_qty, decimals)
+            }
+            None => eth_alpha_core::amount::Amount::zero(18),
+        };
+
         StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
             wallet_id: self.config.wallet_id.clone(),
@@ -62,7 +86,7 @@ impl SnipeAllStrategy {
             side: OrderSide::Sell,
             token_address,
             pool_address,
-            amount: self.config.sell_amount.clone(),
+            amount: token_amount,
             route: None,
             max_slippage_bps: self.config.max_slippage_bps,
             deadline_secs: self.config.deadline_secs,
@@ -157,7 +181,7 @@ impl Strategy for SnipeAllStrategy {
                     .or_else(|| ctx.market.pool_address.clone())
                 {
                     if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(event.token_address, pool_address));
+                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                     }
                 }
             }
@@ -173,7 +197,7 @@ impl Strategy for SnipeAllStrategy {
                     .or_else(|| ctx.market.pool_address.clone())
                 {
                     if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(event.token_address, pool_address));
+                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                     }
                 }
             }
@@ -189,7 +213,7 @@ impl Strategy for SnipeAllStrategy {
                     .or_else(|| ctx.market.pool_address.clone())
                 {
                     if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(event.token_address, pool_address));
+                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                     }
                 }
             }
@@ -205,7 +229,7 @@ impl Strategy for SnipeAllStrategy {
                     .or_else(|| ctx.market.pool_address.clone())
                 {
                     if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(event.token_address, pool_address));
+                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                     }
                 }
             }
@@ -242,6 +266,7 @@ mod tests {
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
             price_denom_per_token: None,
+            token_decimals: None,
             latest_block: 1,
             can_buy: true,
             can_sell: true,
@@ -286,10 +311,13 @@ mod tests {
                     raw: Default::default(),
                     decimals: 18,
                 }),
+                token_amount: None,
                 gas_used: Some(0),
                 error: None,
             })
             .unwrap();
+        // Set entry_token_amount so sell_pool can compute token quantity.
+        position.entry_token_amount = Some(eth_alpha_core::amount::DecimalAmount::from(1_000_000i64));
         position
     }
 

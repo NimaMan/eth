@@ -16,6 +16,9 @@ pub enum AlphaCoreError {
     #[error("execution adapter error: {0}")]
     Execution(String),
 
+    #[error("invalid pool address: {0}")]
+    InvalidPoolAddress(String),
+
     #[error("store error: {0}")]
     Store(String),
 }

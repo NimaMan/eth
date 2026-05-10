@@ -111,15 +111,22 @@ impl EngineExecutionAdapter for ModeledExecutionAdapter {
                 Some(intent.amount.clone())
             }
             OrderSide::Sell => {
-                // Sell: compute worst-case denom received.
-                let mut out = intent.amount.clone();
+                // Sell: intent.amount is tokens to sell.
+                // Compute worst-case denom received.
+                let token_qty = intent.amount.to_decimal();
+                let price = pool.price_denom_per_token.unwrap_or_default();
+                let mut eth = token_qty * price;
 
                 // Apply slippage.
                 if self.config.slippage_bps > 0 {
-                    out = apply_bps_reduction(&out, self.config.slippage_bps);
+                    let factor = DecimalAmount::from(
+                        10_000i64 - i64::from(self.config.slippage_bps),
+                    ) / DecimalAmount::from(10_000i64);
+                    eth = eth * factor;
                 }
 
-                // Deduct gas.
+                // Convert to Amount and deduct gas.
+                let mut out = Amount::from_decimal(eth, 18);
                 if out.raw > gas {
                     out.raw -= gas;
                 } else {
@@ -136,6 +143,7 @@ impl EngineExecutionAdapter for ModeledExecutionAdapter {
             tx_hash: None,
             block_number: None,
             filled_amount,
+            token_amount: None,
             gas_used: Some(self.config.gas_cost_wei),
             error: None,
         })
@@ -149,6 +157,7 @@ fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionRepor
         tx_hash: None,
         block_number: None,
         filled_amount: None,
+        token_amount: None,
         gas_used: None,
         error: Some(reason.into()),
     }
@@ -192,6 +201,7 @@ mod tests {
             denom_reserve: DecimalAmount::from_str("10.0").unwrap(),
             token_reserve: DecimalAmount::from_str("1000000.0").unwrap(),
             price_denom_per_token: None,
+            token_decimals: None,
             latest_block: 1,
             can_buy: true,
             can_sell: true,
@@ -199,7 +209,7 @@ mod tests {
         }
     }
 
-    fn test_intent(side: OrderSide, amount_raw: u64) -> OrderIntent {
+    fn test_intent(side: OrderSide, amount_raw: U256) -> OrderIntent {
         OrderIntent {
             portfolio_id: eth_alpha_core::ids::PortfolioId("test".to_string()),
             wallet_id: eth_alpha_core::ids::WalletId("test".to_string()),
@@ -242,7 +252,7 @@ mod tests {
         let adapter = ModeledExecutionAdapter::new(ModeledExecutionConfig::default());
         adapter.pools().lock().unwrap().insert(test_pool().address.clone(), test_pool());
 
-        let intent = test_intent(OrderSide::Buy, 1_000_000_000_000_000_000u64); // 1 ETH
+        let intent = test_intent(OrderSide::Buy, U256::from(1_000_000_000_000_000_000u64)); // 1 ETH
         let report = adapter.execute(intent).await.unwrap();
 
         assert_eq!(report.status, ExecutionStatus::Confirmed);
@@ -253,14 +263,19 @@ mod tests {
     #[tokio::test]
     async fn sell_reduces_by_slippage_and_gas() {
         let adapter = ModeledExecutionAdapter::new(ModeledExecutionConfig::default());
-        adapter.pools().lock().unwrap().insert(test_pool().address.clone(), test_pool());
+        let mut pool = test_pool();
+        // Price: 1 token = 0.00001 ETH (so 1_000_000 tokens = 10 ETH)
+        pool.price_denom_per_token = Some(DecimalAmount::from_str("0.00001").unwrap());
+        adapter.pools().lock().unwrap().insert(pool.address.clone(), pool);
 
-        let intent = test_intent(OrderSide::Sell, 1_000_000_000_000_000_000u64); // 1 ETH
+        // Sell 1_000_000 tokens (with 18 decimals)
+        let intent = test_intent(OrderSide::Sell, U256::from_str_radix("1000000000000000000000000", 10).unwrap()); // 1_000_000 tokens
         let report = adapter.execute(intent).await.unwrap();
 
         assert_eq!(report.status, ExecutionStatus::Confirmed);
-        // 1 ETH * 0.95 (5% slippage) - 150_000 gas
-        let expected = U256::from(1_000_000_000_000_000_000u64) * U256::from(9_500) / U256::from(10_000)
+        // 1_000_000 tokens * 0.00001 ETH/token = 10 ETH
+        // 10 ETH * 0.95 (5% slippage) - 150_000 gas
+        let expected = U256::from(10_000_000_000_000_000_000u64) * U256::from(9_500) / U256::from(10_000)
             - U256::from(150_000);
         assert_eq!(report.filled_amount.unwrap().raw, expected);
     }
@@ -272,7 +287,7 @@ mod tests {
         pool.is_scam = true;
         adapter.pools().lock().unwrap().insert(pool.address.clone(), pool);
 
-        let intent = test_intent(OrderSide::Buy, 1_000_000_000_000_000_000u64);
+        let intent = test_intent(OrderSide::Buy, U256::from(1_000_000_000_000_000_000u64));
         let report = adapter.execute(intent).await.unwrap();
 
         assert_eq!(report.status, ExecutionStatus::Failed);
@@ -284,7 +299,7 @@ mod tests {
         let adapter = ModeledExecutionAdapter::new(ModeledExecutionConfig::default());
         // do not insert pool
 
-        let intent = test_intent(OrderSide::Buy, 1_000_000_000_000_000_000u64);
+        let intent = test_intent(OrderSide::Buy, U256::from(1_000_000_000_000_000_000u64));
         let report = adapter.execute(intent).await.unwrap();
 
         assert_eq!(report.status, ExecutionStatus::Failed);

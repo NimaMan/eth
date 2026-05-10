@@ -287,74 +287,64 @@ where
         });
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
-                let mut position = self.position_for_intent(&intent);
-                position.mark_intent_created(intent.side)?;
-                let report = self.execution.execute(intent.clone()).await?;
-                position.mark_order_submitted(report.order_id.clone(), intent.side)?;
-                position.apply_execution_report_with_price(&report, fill_price)?;
-                self.store.upsert_position(&position).await?;
-                self.store.record_execution_report(&report).await?;
-                if position.is_closed() {
-                    let snapshot = PositionSnapshot {
-                        position_id: position.id.clone(),
-                        state: position.state.clone(),
-                        block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
-                        current_value_eth: DecimalAmount::ZERO,
-                        realized_profit_eth: position.realized_pnl(),
-                        unrealized_profit_eth: DecimalAmount::ZERO,
-                        roi: if let Some(cost) = position.entry_cost_basis {
-                            if !cost.is_zero() {
-                                (position.realized_pnl() / cost)
-                            } else {
-                                DecimalAmount::ZERO
-                            }
-                        } else {
-                            DecimalAmount::ZERO
-                        },
-                    };
-                    self.store.append_position_snapshot(&snapshot).await?;
-                }
-                self.portfolio
-                    .positions
-                    .insert(position.id.clone(), position);
+                let report = self.execute_intent(intent, fill_price).await?;
                 Ok(vec![report])
             }
             RiskDecision::ForceExit { intent, .. } => {
-                let intent = *intent;
-                let mut position = self.position_for_intent(&intent);
-                position.mark_intent_created(intent.side)?;
-                let report = self.execution.execute(intent.clone()).await?;
-                position.mark_order_submitted(report.order_id.clone(), intent.side)?;
-                position.apply_execution_report_with_price(&report, fill_price)?;
-                self.store.upsert_position(&position).await?;
-                self.store.record_execution_report(&report).await?;
-                if position.is_closed() {
-                    let snapshot = PositionSnapshot {
-                        position_id: position.id.clone(),
-                        state: position.state.clone(),
-                        block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
-                        current_value_eth: DecimalAmount::ZERO,
-                        realized_profit_eth: position.realized_pnl(),
-                        unrealized_profit_eth: DecimalAmount::ZERO,
-                        roi: if let Some(cost) = position.entry_cost_basis {
-                            if !cost.is_zero() {
-                                (position.realized_pnl() / cost)
-                            } else {
-                                DecimalAmount::ZERO
-                            }
-                        } else {
-                            DecimalAmount::ZERO
-                        },
-                    };
-                    self.store.append_position_snapshot(&snapshot).await?;
-                }
-                self.portfolio
-                    .positions
-                    .insert(position.id.clone(), position);
+                let report = self.execute_intent(*intent, fill_price).await?;
                 Ok(vec![report])
             }
             RiskDecision::Reject { .. } | RiskDecision::CancelOpenOrders { .. } => Ok(Vec::new()),
         }
+    }
+
+    async fn execute_intent(
+        &mut self,
+        intent: OrderIntent,
+        fill_price: Option<DecimalAmount>,
+    ) -> Result<ExecutionReport> {
+        let mut position = self.position_for_intent(&intent);
+        position.mark_intent_created(intent.side)?;
+        let report = self.execution.execute(intent.clone()).await?;
+        position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+        position.apply_execution_report_with_price(&report, fill_price)?;
+
+        // Fallback: compute entry_token_amount from cost_basis / entry_price
+        // if the execution adapter did not provide it (e.g. backtest).
+        if position.entry_token_amount.is_none() {
+            if let (Some(cost_basis), Some(price)) = (position.entry_cost_basis, position.entry_price) {
+                if !price.is_zero() {
+                    position.entry_token_amount = Some(cost_basis / price);
+                }
+            }
+        }
+
+        self.store.upsert_position(&position).await?;
+        self.store.record_execution_report(&report).await?;
+        if position.is_closed() {
+            let snapshot = PositionSnapshot {
+                position_id: position.id.clone(),
+                state: position.state.clone(),
+                block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
+                current_value_eth: DecimalAmount::ZERO,
+                realized_profit_eth: position.realized_pnl(),
+                unrealized_profit_eth: DecimalAmount::ZERO,
+                roi: if let Some(cost) = position.entry_cost_basis {
+                    if !cost.is_zero() {
+                        position.realized_pnl() / cost
+                    } else {
+                        DecimalAmount::ZERO
+                    }
+                } else {
+                    DecimalAmount::ZERO
+                },
+            };
+            self.store.append_position_snapshot(&snapshot).await?;
+        }
+        self.portfolio
+            .positions
+            .insert(position.id.clone(), position);
+        Ok(report)
     }
 
     fn position_for_intent(&self, intent: &OrderIntent) -> Position {
@@ -561,6 +551,7 @@ mod tests {
                     denom_reserve: Default::default(),
                     token_reserve: Default::default(),
                     price_denom_per_token: None,
+                    token_decimals: None,
                     latest_block: 1,
                     can_buy: true,
                     can_sell: true,
@@ -647,6 +638,7 @@ mod tests {
                     denom_reserve: Default::default(),
                     token_reserve: Default::default(),
                     price_denom_per_token: None,
+                    token_decimals: None,
                     latest_block: 1,
                     can_buy: true,
                     can_sell: true,

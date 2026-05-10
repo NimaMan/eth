@@ -22,6 +22,7 @@ pub struct PoolSnapshot {
     pub denom_reserve: DecimalAmount,
     pub token_reserve: DecimalAmount,
     pub price_denom_per_token: Option<DecimalAmount>,
+    pub token_decimals: Option<u8>,
     pub latest_block: BlockNumber,
     pub can_buy: bool,
     pub can_sell: bool,

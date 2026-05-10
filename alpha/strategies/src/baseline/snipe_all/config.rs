@@ -15,7 +15,8 @@ pub struct SnipeAllConfig {
     pub portfolio_id: PortfolioId,
     pub wallet_id: WalletId,
     pub buy_amount: Amount,
-    pub sell_amount: Amount,
+    /// Fraction of token holdings to sell on exit (1.0 = 100%).
+    pub sell_fraction: DecimalAmount,
     pub min_denom_reserve: DecimalAmount,
     pub min_stable_denom_reserve: DecimalAmount,
     pub supported_denom_symbols: Vec<String>,
@@ -36,7 +37,7 @@ impl Default for SnipeAllConfig {
         Self {
             portfolio_id: PortfolioId("paper".to_string()),
             wallet_id: WalletId("paper-wallet".to_string()),
-            sell_amount: buy_amount.clone(),
+            sell_fraction: DecimalAmount::from(1),
             buy_amount,
             min_denom_reserve: Decimal::new(5, 1),
             min_stable_denom_reserve: Decimal::from(1_000u64),

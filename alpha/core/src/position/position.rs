@@ -30,6 +30,10 @@ pub struct Position {
     pub exit_proceeds: Option<DecimalAmount>,
     /// Pool price at time of buy (denom per token).
     pub entry_price: Option<DecimalAmount>,
+    /// Actual tokens received from the buy (from simulation or on-chain).
+    /// Stored as DecimalAmount to avoid token-decimal ambiguity.
+    /// Needed for accurate sell sizing since tokens may have taxes, max limits, etc.
+    pub entry_token_amount: Option<DecimalAmount>,
     /// True if the pool was drained/scammed while position was open.
     /// Used for honest baseline PnL even when no exit is attempted.
     pub drained: bool,
@@ -46,6 +50,7 @@ impl Position {
             entry_cost_basis: None,
             exit_proceeds: None,
             entry_price: None,
+            entry_token_amount: None,
             drained: false,
         }
     }
@@ -131,6 +136,7 @@ impl Position {
             if let Some(price) = fill_price {
                 self.entry_price = Some(price);
             }
+            self.entry_token_amount = report.token_amount.as_ref().map(|a| a.to_decimal());
             return Ok(());
         }
 

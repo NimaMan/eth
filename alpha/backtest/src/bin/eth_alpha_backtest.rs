@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
         "snipe-all-v1" => {
             engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
                 buy_amount: buy_amount.clone(),
-                sell_amount: buy_amount,
+                sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
                 min_denom_reserve: min_liquidity_eth,
                 min_stable_denom_reserve: min_liquidity_usd,
                 exit_on_liquidity_removal: args.exit_liquidity_removal,

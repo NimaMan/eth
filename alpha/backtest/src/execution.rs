@@ -91,12 +91,21 @@ impl EngineExecutionAdapter for SimulatedExecutionAdapter {
                 Some(intent.amount.clone())
             }
             OrderSide::Sell => {
-                // Worst-case sell: less ETH is received back.
+                // Sell: intent.amount is tokens to sell.
+                // Compute ETH received = tokens * price, then apply slippage.
+                let token_qty = intent.amount.to_decimal();
+                let price = pool.price_denom_per_token.unwrap_or_default();
+                let mut eth = token_qty * price;
+
                 if self.config.worst_case_fill && self.config.slippage_bps > 0 {
-                    Some(apply_slippage(&intent.amount, self.config.slippage_bps))
-                } else {
-                    Some(intent.amount.clone())
+                    let factor = eth_alpha_core::amount::DecimalAmount::from(
+                        10_000i64 - i64::from(self.config.slippage_bps),
+                    ) / eth_alpha_core::amount::DecimalAmount::from(10_000i64);
+                    eth = eth * factor;
                 }
+
+                let eth_amount = eth_alpha_core::amount::Amount::from_decimal(eth, 18);
+                Some(eth_amount)
             }
         };
 
@@ -106,6 +115,7 @@ impl EngineExecutionAdapter for SimulatedExecutionAdapter {
             tx_hash: None,
             block_number: Some(self.current_block.load(Ordering::Relaxed)),
             filled_amount,
+            token_amount: None,
             gas_used: Some(self.config.gas_cost_wei),
             error: None,
         })
@@ -119,6 +129,7 @@ fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionRepor
         tx_hash: None,
         block_number: None,
         filled_amount: None,
+        token_amount: None,
         gas_used: None,
         error: Some(reason.into()),
     }

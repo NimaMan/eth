@@ -131,6 +131,7 @@ impl PoolWire {
             denom_reserve: decimal_from_f64(denom_reserve),
             token_reserve: decimal_from_f64(token_reserve),
             price_denom_per_token: self.price.map(decimal_from_f64),
+            token_decimals: None,
             latest_block,
             can_buy: self.can_buy,
             can_sell: self.can_sell,

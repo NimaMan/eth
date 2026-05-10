@@ -26,6 +26,7 @@ fn buy_must_submit_before_confirm() {
         tx_hash: Some(B256::ZERO),
         block_number: Some(1),
         filled_amount: Some(Amount::zero(18)),
+        token_amount: None,
         gas_used: Some(21_000),
         error: None,
     };
@@ -50,6 +51,7 @@ fn buy_submit_confirm_flow_reaches_buy_confirmed() {
             tx_hash: Some(B256::ZERO),
             block_number: Some(1),
             filled_amount: Some(Amount::zero(18)),
+            token_amount: None,
             gas_used: Some(21_000),
             error: None,
         })

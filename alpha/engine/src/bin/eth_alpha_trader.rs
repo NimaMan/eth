@@ -196,10 +196,7 @@ async fn main() -> Result<()> {
             raw: paper_buy_wei,
             decimals: 18,
         },
-        sell_amount: Amount {
-            raw: paper_buy_wei,
-            decimals: 18,
-        },
+        sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
         min_denom_reserve: min_liquidity_eth,
         min_stable_denom_reserve: min_liquidity_usd,
         ..SnipeAllConfig::default()

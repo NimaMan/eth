@@ -196,6 +196,7 @@ mod tests {
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
             price_denom_per_token: None,
+            token_decimals: None,
             latest_block: 1,
             can_buy: true,
             can_sell: true,

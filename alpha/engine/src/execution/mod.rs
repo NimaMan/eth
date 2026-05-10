@@ -18,6 +18,7 @@ mod simulated;
 
 pub use modeled::{ModeledExecutionAdapter, ModeledExecutionConfig};
 pub use paper::PaperExecutionAdapter;
+pub use simulated::{LiveSimulatedExecutionAdapter, SimulatedExecutionAdapter};
 
 use async_trait::async_trait;
 use eth_alpha_core::{error::Result, execution::ExecutionReport, order::OrderIntent};

@@ -11,6 +11,7 @@ fn failed_execution_status_is_terminal() {
         tx_hash: None,
         block_number: None,
         filled_amount: None,
+        token_amount: None,
         gas_used: None,
         error: Some("reverted".to_string()),
     };
