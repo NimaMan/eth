@@ -333,6 +333,194 @@ Validation:
 - Playwright against the missing live URL shows the compact not-found state and
   does not show `RISK unknown`, `STAGE unknown`, or the bottom card headings.
 
+## Token Network & Fund Flow Infrastructure Backlog
+
+These tasks build the backend analysis modules and frontend visualization for
+token network investigation, fund flow tracing, and shady-pattern detection.
+They depend on the existing `eth_token/src/network/` graph pipeline, the
+`reth_chain_query/src/reth_index/` address-block-participation index, and the
+processed-block cache.
+
+### Existing modules (what we have)
+
+| Module | Path | State | Purpose |
+|--------|------|-------|---------|
+| Graph model | `eth_token/src/network/model/` | Implemented | Node kinds, edge kinds, labels, evidence |
+| Graph ingest | `eth_token/src/network/ingest/` | Implemented | Tx → batch → graph (transfers, authority, pools) |
+| Graph raw | `eth_token/src/network/graph/raw.rs` | Implemented | `RawTokenNetworkGraph` with merge logic |
+| Graph simplified | `eth_token/src/network/graph/simplified.rs` | Implemented | View-scoring, node selection (80 nodes / 160 edges) |
+| Address activity | `eth_token/src/network/activity/` | Implemented | Per-address PnL, balances, costs, movements |
+| Address block index | `reth_chain_query/src/reth_index/` | Implemented | MDBX: address → blocks, trades, metrics, tokens, pools |
+| Processed block cache | `tx_processor/src/tx_processor/cache.rs` | Implemented | Flat binary `.pblock.zst` files |
+| Network view | `eth_token_server/src/views/network.rs` | Implemented | `TokenNetworkView` with PnL + graph subsets |
+| Fund flow (generic) | `tx_fund_flow/src/fundflownetwork/` | Implemented | Generic ETH/token flow extraction, BFS discovery, Cytoscape export |
+| Fund flow (eth_db) | `tx_fund_flow/src/eth_db_fetcher/` | Implemented | Postgres-backed address/tx/participant queries |
+| Clusters | `eth_token/src/network/clusters/` | **Empty** | Placeholder `.rs` files with module comments only |
+| Cluster snapshots | `eth_token/src/network/snapshots/cluster.rs` | **Empty** | Placeholder comment only |
+| Cross-token | *(none)* | **Missing** | No module for tracing operators across multiple tokens |
+| Enrichment | *(none)* | **Missing** | No module for populating known address labels |
+| Temporal | *(none)* | **Missing** | No module for block-internal ordering analysis |
+| Token↔FundFlow bridge | `eth_token/src/network/flow/` | **New stubs** | Integration layer between token graph and `tx_fund_flow` |
+
+### Proposed new folder structure
+
+```
+eth_token/src/network/
+  clusters/
+    components.rs          # Connected-component detection (fill existing)
+    intermediaries.rs      # Shared-intermediary discovery (fill existing)
+    time_windows.rs        # Temporal coactivity clustering (fill existing)
+    scoring.rs             # Cluster confidence + risk-feature scoring (fill existing)
+  flow/                    # NEW: Fund flow tracing
+    mod.rs
+    trace.rs               # Trace denom/token flows between addresses
+    path.rs                # Shortest-path / multi-hop path finding
+    timeline.rs            # Block-by-block fund flow timeline
+    README.md
+  cross_token/             # NEW: Cross-token operator tracing
+    mod.rs
+    operator.rs            # Detect repeat operators across tokens
+    overlap.rs             # Address overlap between token networks
+    README.md
+  enrichment/              # NEW: Address label enrichment
+    mod.rs
+    known_book.rs          # Integrate external known-address databases
+    heuristics.rs          # Contract, router, fresh-wallet heuristics
+    README.md
+  temporal/                # NEW: Temporal analysis
+    mod.rs
+    ordering.rs            # Tx ordering within blocks (funded-then-bought)
+    windows.rs             # Sliding window coactivity detection
+    README.md
+```
+
+### TN-1: Connected-component clustering
+
+Fill `eth_token/src/network/clusters/components.rs`.
+
+- Input: `RawTokenNetworkGraph` or `TokenNetworkGraphView`
+- Output: `BTreeMap<NetworkNodeId, ComponentId>` mapping each node to a component
+- Exclude weak edges (`FeeSourceTouches`, `SharedIntermediary`, `TemporalCoactivity`) from the default component graph, but provide a flag to include them.
+- Components should be sorted by total PnL (sum of address profits) or by member count.
+
+### TN-2: Shared-intermediary clustering
+
+Fill `eth_token/src/network/clusters/intermediaries.rs`.
+
+- Detect addresses that receive funds from multiple token holders but do not hold the token themselves.
+- Output: list of intermediary nodes with in-degree (number of funders) and total denom received.
+- Flag intermediaries that are also labeled `Cex`, `Bridge`, `Router`, or `Contract`.
+
+### TN-3: Time-window coactivity clustering
+
+Fill `eth_token/src/network/clusters/time_windows.rs`.
+
+- Group addresses that trade the token in the same block window (e.g., 1 block, 3 blocks, 10 blocks).
+- Output: coactivity clusters with block range, member addresses, and shared activity kind (buy, sell, add liquidity, remove liquidity).
+- This is the backend for the "coordinated dump" and "launch group" patterns.
+
+### TN-4: Cluster scoring and risk features
+
+Fill `eth_token/src/network/clusters/scoring.rs`.
+
+- Compute a risk score per cluster based on:
+  - Control actor overlap (does the cluster contain Creator/Owner/Admin/TaxWallet?)
+  - Profit concentration (what % of total token profit is in this cluster?)
+  - Funding homogeneity (were all members funded by the same 1-3 addresses?)
+  - Timing synchrony (how tight is the buy/sell window?)
+  - Liquidity event correlation (did the cluster remove liquidity together?)
+- Output: `ClusterRiskScore` struct with score, reasons, and confidence.
+
+### TN-5: Wire cluster IDs into TokenNetworkView
+
+Update `eth_token_server/src/views/network.rs`.
+
+- Run cluster detection during `TokenNetworkView::from_graph`.
+- Add `clusters: Vec<NetworkClusterView>` to `TokenNetworkView`.
+- Each cluster view: id, member node ids, total profit, risk score, primary labels.
+- Add `cluster_id: Option<String>` to `TokenNetworkNodeView` so the frontend can color by cluster.
+
+### TN-6: Fund flow tracing (bridge to `tx_fund_flow`)
+
+`tx_fund_flow/src/fundflownetwork/` already implements generic fund flow extraction,
+BFS graph discovery, and Cytoscape export. **Do not duplicate it.**
+
+Instead, build the integration bridge in `eth_token/src/network/flow/`:
+
+- Take addresses of interest from the token network graph (e.g., a suspicious cluster)
+- Delegate actual flow extraction to `tx_fund_flow::FundFlowAnalyzer` or `GraphExplorer`
+- Use `RethIndexReader::get_address_participation_blocks` to narrow the block range
+- Use the processed-block cache to load specific blocks for evidence
+- Format results as `FundFlowTrace` compatible with `TokenNetworkView`
+- Expose via server API: `/tokens/:address/fund-flow?target=:address&max_hops=3`
+- Frontend: clicking "Trace Funds" on a graph node opens the `tx_fund_flow` Cytoscape view
+  scoped to the token's address set
+
+### TN-7: Cross-token operator tracing
+
+Create `eth_token/src/network/cross_token/`.
+
+- Input: multiple `RawTokenNetworkGraph`s for different tokens.
+- Detect addresses that appear in multiple token graphs with similar patterns (e.g., same funder, same intermediary, snipe-then-dump behavior).
+- Output: `CrossTokenOperatorView` with operator address, tokens touched, repeated patterns, total cross-token profit.
+- This requires the server to either keep multiple token graphs in memory or query a shared operator index.
+
+### TN-8: Address enrichment
+
+Create `eth_token/src/network/enrichment/`.
+
+- Populate `Cex`, `Bridge`, `Router` labels from external data or heuristics.
+- Heuristic: high out-degree + no token holdings + `FeeSourceTouches` to many addresses = likely Router.
+- Heuristic: receives from many addresses + sends to few large balances + labeled by community = likely CEX deposit.
+- Maintain a local known-address book JSON/DB that grows over time.
+
+### TN-9: Temporal analysis
+
+Create `eth_token/src/network/temporal/`.
+
+- For a given address pair, analyze block-level ordering:
+  - "Address A sent 0.5 ETH to Address B in tx 5, then Address B bought TOKEN in tx 6"
+- Use `log_index` within blocks for sub-block ordering.
+- Detect patterns: fund-then-buy, buy-then-transfer, remove-then-dump.
+- Output: `TemporalPattern` with sequence of events, block ranges, and confidence.
+
+### TN-10: Layer 1 frontend — Overview + Control Structure
+
+Frontend: `interface/asena/eth/tokens/static/js/tokens/network/`.
+
+- Cluster-colored force-directed graph (Cytoscape).
+- Control actor badges (Creator, Owner, Admin, TaxWallet) on nodes.
+- Red-flag annotation strip above graph.
+- Summary: visible clusters, hidden nodes, total represented PnL.
+
+### TN-11: Layer 2 frontend — Trading Clusters
+
+- Community-detection layout with cluster grouping.
+- Cluster summary cards (member count, total profit, risk score).
+- Click cluster → highlight all members, dim rest.
+- Cross-highlight with Address PnL table.
+
+### TN-12: Layer 3 frontend — Financial Flow
+
+- Sankey or path-tracing view for token → denom → CEX flows.
+- PnL heatmap on nodes.
+- Edge amount labels.
+- Time slider to filter by block range.
+
+### TN-13: Frontend graph ↔ PnL table integration
+
+- Click PnL table row → pan/zoom graph to node and highlight neighborhood.
+- Click graph node → scroll PnL table to row and highlight.
+- Hover either → highlight both.
+
+### TN-14: Edge evidence panel
+
+- Click any graph edge → slide-out panel showing:
+  - Edge kind, weight, amount
+  - Actual transaction hashes with Etherscan links
+  - Block number, timestamp, gas used
+- This turns the graph from "pretty picture" into "auditable evidence".
+
 ## Active Bottleneck: Live Warmup Memory Pressure While Filling Processed-Block Cache
 
 Observed on May 9, 2026 while `eth-token-server.service` was warming live token

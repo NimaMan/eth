@@ -127,7 +127,7 @@
 
 ## 4. What Our Backend Already Supports
 
-### Strengths
+### Token Network (`eth_token/src/network/`)
 - **Rich graph model**: 10 node kinds, 14 edge kinds, 25 label kinds with confidence scoring
 - **Per-address activity tracking**: PnL, balances, buy/sell counts, fee history, bribes
 - **Multi-layered edge evidence**: Each edge has examples, amounts, confidence, direction
@@ -135,15 +135,34 @@
 - **Weak edge detection**: `FeeSourceTouches`, `SharedIntermediary`, `TemporalCoactivity` are already flagged
 - **View scoring**: Nodes are already ranked by importance (profit + balance + activity)
 
+### Fund Flow (`tx_fund_flow/src/fundflownetwork/`)
+- **Generic fund flow extraction** from `ProcessedTransaction` → ETH + token movements
+- **Network builder**: Aggregates flows into `FundFlowNetwork` with nodes/edges
+- **Graph discovery**: BFS exploration from seed addresses via Postgres `eth_db`
+- **Visualization exporters**: Cytoscape.js, Vis.js, GraphML already implemented
+- **Tx processor integration**: Converts `ProcessedTransaction` directly to fund flows
+
+### Index Infrastructure (`reth_chain_query/src/reth_index/`)
+- **Address block participation index**: MDBX database mapping address → blocks
+- **Trade data table**: Per-address-token trading history and PnL
+- **Address metrics table**: Aggregated address metrics
+- **Token/pool tables**: Token metadata and pool data caching
+
+### Processed Block Cache (`tx_processor/src/tx_processor/cache.rs`)
+- Flat binary `.pblock.zst` files
+- ~0.57ms/block read when cached
+- Used by live tracker and range runs
+
 ### Gaps
 - **Cluster analysis is NOT implemented**: The `clusters/` module has empty placeholder files
 - **No temporal analysis**: We store block numbers but don't analyze ordering patterns ("funded then bought")
 - **No external address book**: `Cex`, `Bridge`, `Router` labels exist but are not populated from external data
-- **No pathfinding**: Can't answer "show me how Address A funded Address B"
+- **No pathfinding in token network**: Can't answer "show me how Address A funded Address B" (but `tx_fund_flow` has this!)
 - **No cross-token view**: A multi-token operator appears as disconnected graphs
 - **No nonce/gas analysis**: Can't detect fresh wallets or MEV bundles
 - **No approval tracking**: ERC20 Approval events for the token itself are not ingested
-- **No flash loan detection**: No analysis of cascading pool interactions
+- **No flash loan detection**: No analysis of flash loan initiators or cascading pool interactions
+- **Token network and fund flow are NOT integrated**: Two separate pipelines with no bridge
 
 ---
 
