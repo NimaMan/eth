@@ -92,6 +92,14 @@ struct Args {
     /// Enable scam/critical-risk exits (default: disabled for quantification).
     #[arg(long, default_value_t = false)]
     exit_scam: bool,
+
+    /// Start block (inclusive). If not set, starts from first observation.
+    #[arg(long)]
+    from_block: Option<u64>,
+
+    /// End block (inclusive). If not set, runs to last observation.
+    #[arg(long)]
+    to_block: Option<u64>,
 }
 
 #[tokio::main]
@@ -144,9 +152,15 @@ async fn main() -> Result<()> {
         .await
         .wrap_err("failed to start backtest run")?;
 
-    let events = load_events_from_observations(store.pool(), &args.replay_run_id, args.skip_primed)
-        .await
-        .wrap_err_with(|| format!("failed to load observations for run {}", args.replay_run_id))?;
+    let events = load_events_from_observations(
+        store.pool(),
+        &args.replay_run_id,
+        args.skip_primed,
+        args.from_block,
+        args.to_block,
+    )
+    .await
+    .wrap_err_with(|| format!("failed to load observations for run {}", args.replay_run_id))?;
 
     if events.is_empty() {
         return Err(eyre::eyre!(
@@ -225,19 +239,31 @@ async fn load_events_from_observations(
     pool: &sqlx::PgPool,
     replay_run_id: &str,
     skip_primed: bool,
+    from_block: Option<u64>,
+    to_block: Option<u64>,
 ) -> Result<Vec<eth_alpha_engine::EngineEvent>> {
-    let rows = sqlx::query(
-        r#"
-        SELECT event_source, event_key, block_number, payload
-        FROM alpha_trading.strategy_observations
-        WHERE run_id = $1
-        ORDER BY block_number ASC NULLS LAST, first_seen_at ASC
-        "#,
-    )
-    .bind(replay_run_id)
-    .fetch_all(pool)
-    .await
-    .wrap_err("failed to query strategy_observations")?;
+    let mut query = String::from(
+        "SELECT event_source, event_key, block_number, payload
+         FROM alpha_trading.strategy_observations
+         WHERE run_id = $1"
+    );
+    if from_block.is_some() {
+        query.push_str(" AND block_number >= $2");
+    }
+    if to_block.is_some() {
+        query.push_str(&format!(" AND block_number <= ${}",
+            if from_block.is_some() { 3 } else { 2 }));
+    }
+    query.push_str(" ORDER BY block_number ASC NULLS LAST, first_seen_at ASC");
+
+    let mut q = sqlx::query(&query).bind(replay_run_id);
+    if let Some(b) = from_block {
+        q = q.bind(b as i64);
+    }
+    if let Some(b) = to_block {
+        q = q.bind(b as i64);
+    }
+    let rows = q.fetch_all(pool).await.wrap_err("failed to query strategy_observations")?;
 
     let mut events = Vec::with_capacity(rows.len());
     let mut skipped = 0usize;
