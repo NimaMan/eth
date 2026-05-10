@@ -26,7 +26,7 @@ pub(super) async fn apply_processed_block(
     let block_number = processed.block.header.number;
     let take_processor_started = Instant::now();
     let mut processor = state::take_processor_for_apply(run, block_number).await;
-    let take_processor_ms = take_processor_started.elapsed().as_millis();
+    let take_processor_us = take_processor_started.elapsed().as_micros();
     let token_apply_started = Instant::now();
     let apply_span = tracing::info_span!(
         "range_block_apply",
@@ -34,7 +34,12 @@ pub(super) async fn apply_processed_block(
         block_number
     );
     let apply_future = processor
-        .process_block_with_discovery_provider(&processed.block, discovery_provider, pool_simulator)
+        .process_block_with_discovery_provider_and_profile_run_id(
+            &processed.block,
+            discovery_provider,
+            pool_simulator,
+            Some(run.id.as_str()),
+        )
         .instrument(apply_span);
     let report = match timeout(
         TOKEN_APPLY_TIMEOUT,
@@ -79,7 +84,8 @@ pub(super) async fn apply_processed_block(
         }
     };
 
-    let token_apply_ms = token_apply_started.elapsed().as_millis();
+    let token_apply_us = token_apply_started.elapsed().as_micros();
+    let token_apply_ms = token_apply_us / 1_000;
     if token_apply_ms > 10_000 {
         tracing::warn!(
             block_number,
@@ -99,21 +105,27 @@ pub(super) async fn apply_processed_block(
         token_apply_ms,
         &processed.disk_cache_metrics,
     );
-    let state_update_ms = state_update_started.elapsed().as_millis();
-    let block_apply_wall_ms = apply_processed_block_started.elapsed().as_millis();
-    let measured_ms = take_processor_ms
-        .saturating_add(token_apply_ms)
-        .saturating_add(state_update_ms);
-    let unaccounted_ms = block_apply_wall_ms.saturating_sub(measured_ms);
+    let state_update_us = state_update_started.elapsed().as_micros();
+    let block_apply_wall_us = apply_processed_block_started.elapsed().as_micros();
+    let measured_us = take_processor_us
+        .saturating_add(token_apply_us)
+        .saturating_add(state_update_us);
+    let unaccounted_us = block_apply_wall_us.saturating_sub(measured_us);
     tracing::info!(
         target: TOKEN_RANGE_APPLY_PROFILE_LOG_TARGET,
         run_id = %run.id,
         block_number,
-        block_apply_wall_ms,
-        unaccounted_ms,
-        take_processor_ms,
-        token_apply_ms,
-        state_update_ms,
+        block_apply_wall_us,
+        unaccounted_us,
+        take_processor_us,
+        token_apply_us,
+        state_update_us,
+        disk_cache_read_us = processed.disk_cache_metrics.disk_cache_read_ms.saturating_mul(1_000),
+        block_apply_wall_ms = block_apply_wall_us / 1_000,
+        unaccounted_ms = unaccounted_us / 1_000,
+        take_processor_ms = take_processor_us / 1_000,
+        token_apply_ms = token_apply_us / 1_000,
+        state_update_ms = state_update_us / 1_000,
         disk_cache_read_ms = processed.disk_cache_metrics.disk_cache_read_ms,
         "range block apply profile"
     );

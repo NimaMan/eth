@@ -33,27 +33,60 @@ use pool_state_update::{
 use token_candidates::{candidate_token_addresses, candidate_token_addresses_with_pool_discovery};
 use token_state_update::touches_token_state;
 use trading_status_update::{
-    current_block_simulation_pool_addresses, simulate_updated_v2_pools, simulate_updated_v3_pools,
-    simulate_updated_v4_pools, simulation_pool_addresses,
+    current_block_simulation_pool_addresses, should_simulate_v2_trading,
+    should_simulate_v3_trading, should_simulate_v4_trading, simulate_updated_v2_pools,
+    simulate_updated_v3_pools, simulate_updated_v4_pools, simulation_pool_addresses,
 };
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProcessedTokenUpdateProfile {
-    pub candidate_ms: u128,
-    pub token_state_ms: u128,
-    pub pool_discovery_ms: u128,
-    pub pool_update_ms: u128,
-    pub simulation_v2_ms: u128,
-    pub simulation_v3_ms: u128,
-    pub simulation_v4_ms: u128,
-    pub report_ms: u128,
+    pub candidate_us: u128,
+    pub token_state_us: u128,
+    pub pool_discovery_us: u128,
+    pub pool_update_us: u128,
+    pub simulation_v2_us: u128,
+    pub simulation_v3_us: u128,
+    pub simulation_v4_us: u128,
+    pub report_us: u128,
+    pub candidate_tx_count: usize,
     pub candidate_tokens: usize,
     pub visited_tokens: usize,
+    pub token_state_updates: usize,
+    pub token_control_replays: usize,
     pub update_reports: usize,
+    pub simulation_v2_candidate_pools: usize,
+    pub simulation_v3_candidate_pools: usize,
+    pub simulation_v4_candidate_pools: usize,
+    pub simulation_v2_current_block_pools: usize,
+    pub simulation_v3_current_block_pools: usize,
+    pub simulation_v4_current_block_pools: usize,
     pub simulated_v2_pools: usize,
     pub simulated_v3_pools: usize,
     pub simulated_v4_pools: usize,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum PendingPoolSimulationKind {
+    V2,
+    V3,
+    V4,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct PendingPoolSimulationKey {
+    pub token_address: String,
+    pub pool_kind: PendingPoolSimulationKind,
+    pub pool_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingPoolSimulation {
+    pub key: PendingPoolSimulationKey,
+    pub trigger_tx: ProcessedTransaction,
+}
+
+pub(crate) type PendingPoolSimulationMap =
+    BTreeMap<PendingPoolSimulationKey, PendingPoolSimulation>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessedTokenUpdateRouter {
@@ -67,18 +100,36 @@ pub(crate) enum PoolTradingSimulationMode<'a> {
     HistoricalBlockSession {
         pool_simulator: &'a PoolBuySellSimulator,
         block_session: &'a Mutex<Option<BlockTxStateSession>>,
+        profile_run_id: Option<&'a str>,
+    },
+    HistoricalPostBlockSession {
+        pool_simulator: &'a PoolBuySellSimulator,
+        block_sessions: &'a Mutex<BTreeMap<u64, BlockStateSession>>,
+        profile_run_id: Option<&'a str>,
     },
     LiveBlockSession {
         pool_simulator: &'a LivePoolBuySellSimulator,
         block_sessions: &'a Mutex<BTreeMap<u64, BlockStateSession>>,
+        profile_run_id: Option<&'a str>,
     },
     #[cfg(test)]
     Noop,
 }
 
-impl PoolTradingSimulationMode<'_> {
+impl<'a> PoolTradingSimulationMode<'a> {
     fn is_live(self) -> bool {
         matches!(self, Self::LiveBlockSession { .. })
+    }
+
+    pub(crate) fn profile_run_id(self) -> Option<&'a str> {
+        match self {
+            Self::HistoricalBlockSession { profile_run_id, .. }
+            | Self::HistoricalPostBlockSession { profile_run_id, .. }
+            | Self::LiveBlockSession { profile_run_id, .. } => profile_run_id,
+            Self::Historical(_) => None,
+            #[cfg(test)]
+            Self::Noop => None,
+        }
     }
 }
 
@@ -177,6 +228,7 @@ impl ProcessedTokenUpdateRouter {
             tx,
             PoolTradingSimulationMode::Historical(pool_simulator),
             None,
+            None,
         )
         .await
     }
@@ -196,7 +248,9 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                profile_run_id: Some("live"),
             },
+            None,
             None,
         )
         .await
@@ -209,6 +263,7 @@ impl ProcessedTokenUpdateRouter {
         tx: &ProcessedTransaction,
         trading_simulation: PoolTradingSimulationMode<'_>,
         block_header: Option<&BlockHeader>,
+        mut pending_simulations: Option<&mut PendingPoolSimulationMap>,
     ) -> Result<Vec<TokenStateUpdateReport>> {
         if !tx.status {
             return Ok(Vec::new());
@@ -246,16 +301,29 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v2,
                 token_control_replay,
             );
-            let simulated_v2 = simulate_updated_v2_pools(
-                token,
-                tx,
-                &simulation_v2_pool_addresses,
-                &current_block_v2_pool_addresses,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
+            let simulated_v2 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v2_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v2_pool_addresses,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                simulate_updated_v2_pools(
+                    token,
+                    tx,
+                    &simulation_v2_pool_addresses,
+                    &current_block_v2_pool_addresses,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?
+            };
             let simulation_v3_pool_addresses = simulation_pool_addresses(
                 token.uniswap_v3_pool_addresses(),
                 &updated_v3,
@@ -267,16 +335,29 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v3,
                 token_control_replay,
             );
-            let simulated_v3 = simulate_updated_v3_pools(
-                token,
-                tx,
-                &simulation_v3_pool_addresses,
-                &current_block_v3_pool_addresses,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
+            let simulated_v3 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v3_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v3_pool_addresses,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                simulate_updated_v3_pools(
+                    token,
+                    tx,
+                    &simulation_v3_pool_addresses,
+                    &current_block_v3_pool_addresses,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?
+            };
             let simulation_v4_pool_keys = simulation_pool_addresses(
                 token.uniswap_v4_pool_keys(),
                 &updated_v4,
@@ -288,16 +369,29 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v4,
                 token_control_replay,
             );
-            let simulated_v4 = simulate_updated_v4_pools(
-                token,
-                tx,
-                &simulation_v4_pool_keys,
-                &current_block_v4_pool_keys,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
+            let simulated_v4 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v4_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v4_pool_keys,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                simulate_updated_v4_pools(
+                    token,
+                    tx,
+                    &simulation_v4_pool_keys,
+                    &current_block_v4_pool_keys,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?
+            };
 
             if token_state_updated
                 || has_protocol_pool_changes(&[
@@ -433,6 +527,7 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::Historical(pool_simulator),
             None,
             None,
+            None,
         )
         .await
     }
@@ -459,7 +554,9 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                profile_run_id: Some("live"),
             },
+            None,
             None,
             None,
         )
@@ -477,6 +574,7 @@ impl ProcessedTokenUpdateRouter {
         trading_simulation: PoolTradingSimulationMode<'_>,
         block_header: Option<&BlockHeader>,
         mut profile: Option<&mut ProcessedTokenUpdateProfile>,
+        mut pending_simulations: Option<&mut PendingPoolSimulationMap>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
         P: UniswapV2PoolMetadataProvider,
@@ -500,7 +598,8 @@ impl ProcessedTokenUpdateRouter {
         )
         .await?;
         if let Some(profile) = profile.as_deref_mut() {
-            profile.candidate_ms += elapsed_millis(candidate_started);
+            profile.candidate_us += elapsed_micros(candidate_started);
+            profile.candidate_tx_count += 1;
             profile.candidate_tokens += token_addresses.len();
         }
         let mut reports = Vec::new();
@@ -519,7 +618,10 @@ impl ProcessedTokenUpdateRouter {
                 token.update_token_state_from_processed_transaction(tx)?;
             }
             if let Some(profile) = profile.as_deref_mut() {
-                profile.token_state_ms += elapsed_millis(token_state_started);
+                profile.token_state_us += elapsed_micros(token_state_started);
+                if token_state_updated {
+                    profile.token_state_updates += 1;
+                }
             }
 
             let pool_discovery_started = Instant::now();
@@ -543,7 +645,7 @@ impl ProcessedTokenUpdateRouter {
             let discovered_v3 = self.discover_uniswap_v3_pools_for_token(token, tx);
             let discovered_v4 = self.discover_uniswap_v4_pools_for_token(token, tx);
             if let Some(profile) = profile.as_deref_mut() {
-                profile.pool_discovery_ms += elapsed_millis(pool_discovery_started);
+                profile.pool_discovery_us += elapsed_micros(pool_discovery_started);
             }
 
             let pool_update_started = Instant::now();
@@ -551,11 +653,16 @@ impl ProcessedTokenUpdateRouter {
             let updated_v3 = update_touched_v3_pools(token, tx)?;
             let updated_v4 = update_touched_v4_pools(token, tx)?;
             if let Some(profile) = profile.as_deref_mut() {
-                profile.pool_update_ms += elapsed_millis(pool_update_started);
+                profile.pool_update_us += elapsed_micros(pool_update_started);
             }
 
             let token_control_replay =
                 token_state_updated && tx_is_token_control_replay_candidate(token, tx);
+            if let Some(profile) = profile.as_deref_mut() {
+                if token_control_replay {
+                    profile.token_control_replays += 1;
+                }
+            }
             let simulation_v2_pool_addresses = simulation_pool_addresses(
                 token.uniswap_v2_pool_addresses(),
                 &updated_v2,
@@ -567,21 +674,39 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v2,
                 token_control_replay,
             );
-            let simulation_v2_started = Instant::now();
-            let simulated_v2 = simulate_updated_v2_pools(
-                token,
-                tx,
-                &simulation_v2_pool_addresses,
-                &current_block_v2_pool_addresses,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
             if let Some(profile) = profile.as_deref_mut() {
-                profile.simulation_v2_ms += elapsed_millis(simulation_v2_started);
-                profile.simulated_v2_pools += simulated_v2.len();
+                profile.simulation_v2_candidate_pools += simulation_v2_pool_addresses.len();
+                profile.simulation_v2_current_block_pools += current_block_v2_pool_addresses.len();
             }
+            let simulated_v2 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v2_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v2_pool_addresses,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                let simulation_v2_started = Instant::now();
+                let simulated_v2 = simulate_updated_v2_pools(
+                    token,
+                    tx,
+                    &simulation_v2_pool_addresses,
+                    &current_block_v2_pool_addresses,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.simulation_v2_us += elapsed_micros(simulation_v2_started);
+                    profile.simulated_v2_pools += simulated_v2.len();
+                }
+                simulated_v2
+            };
             let simulation_v3_pool_addresses = simulation_pool_addresses(
                 token.uniswap_v3_pool_addresses(),
                 &updated_v3,
@@ -593,21 +718,39 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v3,
                 token_control_replay,
             );
-            let simulation_v3_started = Instant::now();
-            let simulated_v3 = simulate_updated_v3_pools(
-                token,
-                tx,
-                &simulation_v3_pool_addresses,
-                &current_block_v3_pool_addresses,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
             if let Some(profile) = profile.as_deref_mut() {
-                profile.simulation_v3_ms += elapsed_millis(simulation_v3_started);
-                profile.simulated_v3_pools += simulated_v3.len();
+                profile.simulation_v3_candidate_pools += simulation_v3_pool_addresses.len();
+                profile.simulation_v3_current_block_pools += current_block_v3_pool_addresses.len();
             }
+            let simulated_v3 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v3_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v3_pool_addresses,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                let simulation_v3_started = Instant::now();
+                let simulated_v3 = simulate_updated_v3_pools(
+                    token,
+                    tx,
+                    &simulation_v3_pool_addresses,
+                    &current_block_v3_pool_addresses,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.simulation_v3_us += elapsed_micros(simulation_v3_started);
+                    profile.simulated_v3_pools += simulated_v3.len();
+                }
+                simulated_v3
+            };
             let simulation_v4_pool_keys = simulation_pool_addresses(
                 token.uniswap_v4_pool_keys(),
                 &updated_v4,
@@ -619,21 +762,39 @@ impl ProcessedTokenUpdateRouter {
                 &discovered_v4,
                 token_control_replay,
             );
-            let simulation_v4_started = Instant::now();
-            let simulated_v4 = simulate_updated_v4_pools(
-                token,
-                tx,
-                &simulation_v4_pool_keys,
-                &current_block_v4_pool_keys,
-                trading_simulation,
-                token_control_replay,
-                block_header,
-            )
-            .await?;
             if let Some(profile) = profile.as_deref_mut() {
-                profile.simulation_v4_ms += elapsed_millis(simulation_v4_started);
-                profile.simulated_v4_pools += simulated_v4.len();
+                profile.simulation_v4_candidate_pools += simulation_v4_pool_keys.len();
+                profile.simulation_v4_current_block_pools += current_block_v4_pool_keys.len();
             }
+            let simulated_v4 = if let Some(pending_simulations) = pending_simulations.as_deref_mut()
+            {
+                collect_pending_v4_pool_simulations(
+                    pending_simulations,
+                    &token_address,
+                    token,
+                    tx,
+                    &simulation_v4_pool_keys,
+                    token_control_replay,
+                );
+                Vec::new()
+            } else {
+                let simulation_v4_started = Instant::now();
+                let simulated_v4 = simulate_updated_v4_pools(
+                    token,
+                    tx,
+                    &simulation_v4_pool_keys,
+                    &current_block_v4_pool_keys,
+                    trading_simulation,
+                    token_control_replay,
+                    block_header,
+                )
+                .await?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.simulation_v4_us += elapsed_micros(simulation_v4_started);
+                    profile.simulated_v4_pools += simulated_v4.len();
+                }
+                simulated_v4
+            };
 
             let report_started = Instant::now();
             if token_state_updated
@@ -669,14 +830,247 @@ impl ProcessedTokenUpdateRouter {
                 }
             }
             if let Some(profile) = profile.as_deref_mut() {
-                profile.report_ms += elapsed_millis(report_started);
+                profile.report_us += elapsed_micros(report_started);
             }
         }
 
         Ok(reports)
     }
+
+    pub(crate) async fn simulate_pending_pools_after_block(
+        &self,
+        registry: &mut TokenRegistry,
+        pending_simulations: &PendingPoolSimulationMap,
+        pool_simulator: &PoolBuySellSimulator,
+        block_header: &BlockHeader,
+        mut profile: Option<&mut ProcessedTokenUpdateProfile>,
+        profile_run_id: Option<&str>,
+    ) -> Result<Vec<TokenStateUpdateReport>> {
+        if pending_simulations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
+        let trading_simulation = PoolTradingSimulationMode::HistoricalPostBlockSession {
+            pool_simulator,
+            block_sessions: &block_sessions,
+            profile_run_id,
+        };
+        let mut reports: BTreeMap<String, TokenStateUpdateReport> = BTreeMap::new();
+
+        for pending in pending_simulations.values() {
+            let token_address = pending.key.token_address.clone();
+            let pool_id = pending.key.pool_id.clone();
+            let Some(token) = registry.token_mut(&token_address) else {
+                continue;
+            };
+
+            match pending.key.pool_kind {
+                PendingPoolSimulationKind::V2 => {
+                    let simulation_started = Instant::now();
+                    let simulated = simulate_updated_v2_pools(
+                        token,
+                        &pending.trigger_tx,
+                        std::slice::from_ref(&pool_id),
+                        std::slice::from_ref(&pool_id),
+                        trading_simulation,
+                        true,
+                        Some(block_header),
+                    )
+                    .await?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.simulation_v2_us += elapsed_micros(simulation_started);
+                        profile.simulated_v2_pools += simulated.len();
+                    }
+                    if !simulated.is_empty() {
+                        reports
+                            .entry(token_address.clone())
+                            .or_insert_with(|| TokenStateUpdateReport {
+                                token_address: token_address.clone(),
+                                ..Default::default()
+                            })
+                            .simulated_known_v2_pools
+                            .extend(simulated);
+                    }
+                }
+                PendingPoolSimulationKind::V3 => {
+                    let simulation_started = Instant::now();
+                    let simulated = simulate_updated_v3_pools(
+                        token,
+                        &pending.trigger_tx,
+                        std::slice::from_ref(&pool_id),
+                        std::slice::from_ref(&pool_id),
+                        trading_simulation,
+                        true,
+                        Some(block_header),
+                    )
+                    .await?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.simulation_v3_us += elapsed_micros(simulation_started);
+                        profile.simulated_v3_pools += simulated.len();
+                    }
+                    if !simulated.is_empty() {
+                        reports
+                            .entry(token_address.clone())
+                            .or_insert_with(|| TokenStateUpdateReport {
+                                token_address: token_address.clone(),
+                                ..Default::default()
+                            })
+                            .simulated_uniswap_v3_pools
+                            .extend(simulated);
+                    }
+                }
+                PendingPoolSimulationKind::V4 => {
+                    let simulation_started = Instant::now();
+                    let simulated = simulate_updated_v4_pools(
+                        token,
+                        &pending.trigger_tx,
+                        std::slice::from_ref(&pool_id),
+                        std::slice::from_ref(&pool_id),
+                        trading_simulation,
+                        true,
+                        Some(block_header),
+                    )
+                    .await?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.simulation_v4_us += elapsed_micros(simulation_started);
+                        profile.simulated_v4_pools += simulated.len();
+                    }
+                    if !simulated.is_empty() {
+                        reports
+                            .entry(token_address.clone())
+                            .or_insert_with(|| TokenStateUpdateReport {
+                                token_address: token_address.clone(),
+                                ..Default::default()
+                            })
+                            .simulated_uniswap_v4_pools
+                            .extend(simulated);
+                    }
+                }
+            }
+        }
+
+        let mut reports: Vec<_> = reports.into_values().collect();
+        for report in &mut reports {
+            report.simulated_known_v2_pools.sort();
+            report.simulated_known_v2_pools.dedup();
+            report.simulated_uniswap_v3_pools.sort();
+            report.simulated_uniswap_v3_pools.dedup();
+            report.simulated_uniswap_v4_pools.sort();
+            report.simulated_uniswap_v4_pools.dedup();
+        }
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.update_reports += reports.len();
+        }
+        Ok(reports)
+    }
 }
 
-fn elapsed_millis(started: Instant) -> u128 {
-    started.elapsed().as_millis()
+fn collect_pending_v2_pool_simulations(
+    pending_simulations: &mut PendingPoolSimulationMap,
+    token_address: &str,
+    token: &crate::erc20::ERC20Token,
+    tx: &ProcessedTransaction,
+    pool_addresses: &[String],
+    force_simulation: bool,
+) {
+    for pool_address in pool_addresses {
+        let should_simulate = token
+            .uniswap_v2_pool(pool_address)
+            .map(|pool| {
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v2_trading(pool, tx))
+            })
+            .unwrap_or(false);
+        if should_simulate {
+            collect_pending_pool_simulation(
+                pending_simulations,
+                token_address,
+                PendingPoolSimulationKind::V2,
+                pool_address,
+                tx,
+            );
+        }
+    }
+}
+
+fn collect_pending_v3_pool_simulations(
+    pending_simulations: &mut PendingPoolSimulationMap,
+    token_address: &str,
+    token: &crate::erc20::ERC20Token,
+    tx: &ProcessedTransaction,
+    pool_addresses: &[String],
+    force_simulation: bool,
+) {
+    for pool_address in pool_addresses {
+        let should_simulate = token
+            .uniswap_v3_pool(pool_address)
+            .map(|pool| {
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v3_trading(pool, tx))
+            })
+            .unwrap_or(false);
+        if should_simulate {
+            collect_pending_pool_simulation(
+                pending_simulations,
+                token_address,
+                PendingPoolSimulationKind::V3,
+                pool_address,
+                tx,
+            );
+        }
+    }
+}
+
+fn collect_pending_v4_pool_simulations(
+    pending_simulations: &mut PendingPoolSimulationMap,
+    token_address: &str,
+    token: &crate::erc20::ERC20Token,
+    tx: &ProcessedTransaction,
+    pool_keys: &[String],
+    force_simulation: bool,
+) {
+    for pool_key in pool_keys {
+        let should_simulate = token
+            .uniswap_v4_pool(pool_key)
+            .map(|pool| {
+                !pool.base.has_liquidity_removal()
+                    && (force_simulation || should_simulate_v4_trading(pool, tx))
+            })
+            .unwrap_or(false);
+        if should_simulate {
+            collect_pending_pool_simulation(
+                pending_simulations,
+                token_address,
+                PendingPoolSimulationKind::V4,
+                pool_key,
+                tx,
+            );
+        }
+    }
+}
+
+fn collect_pending_pool_simulation(
+    pending_simulations: &mut PendingPoolSimulationMap,
+    token_address: &str,
+    pool_kind: PendingPoolSimulationKind,
+    pool_id: &str,
+    tx: &ProcessedTransaction,
+) {
+    let key = PendingPoolSimulationKey {
+        token_address: normalize_address_string(token_address),
+        pool_kind,
+        pool_id: normalize_address_string(pool_id),
+    };
+    pending_simulations.insert(
+        key.clone(),
+        PendingPoolSimulation {
+            key,
+            trigger_tx: tx.clone(),
+        },
+    );
+}
+
+fn elapsed_micros(started: Instant) -> u128 {
+    started.elapsed().as_micros()
 }

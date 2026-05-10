@@ -21,6 +21,8 @@ decisions, and live retention.
 ## Layout
 
 - `block_processor/` applies ordered processed blocks into the token registry.
+  Its README documents the current intra-block simulation path and the target
+  post-block simulation design for historical range indexing.
 - `token_update_router/` applies one processed transaction into tracked token and
   pool state.
 - `token_update_router/pool_discovery/` discovers known V2-router-compatible,

@@ -52,10 +52,11 @@ milliseconds per block. Slow range builds should therefore be profiled around
 only around cache loading.
 
 The token block apply path already uses block-scoped simulator sessions through
-`eth_token`: one historical `BlockTxStateSession` is opened lazily per block
-that needs pool simulation, and all pool checks in that block branch from that
-session. If a block with `simulations_attempted=0` is slow, the bottleneck is
-not simulation pre-state loading.
+`eth_token`: token and pool facts are applied for the whole mined block first,
+simulation requests are coalesced by `(token, pool_kind, pool_id)`, and one
+historical post-block `BlockStateSession` is opened lazily per block that needs
+pool simulation. If a block with `simulations_attempted=0` is slow, the
+bottleneck is not simulation state loading.
 
 The current range state keeps `BlockTokenProcessor` inside `RangeIndexState`
 behind one `RwLock`. This has two performance consequences:
@@ -104,15 +105,22 @@ It contains three targets:
 - `token_range_apply_profile`: range-runner wall time around processor take,
   token apply, state update, and processed-block disk cache read.
 - `token_block_processor_profile`: block-token-processor phase totals and
-  token-applier aggregate totals for the block.
+  token-applier aggregate totals for the block, including candidate-token
+  counts, candidate simulation-pool counts, actual simulated-pool counts, and
+  the range `run_id` when the block was processed by a range run.
 - `token_sim_session_profile`: one row per pool simulation branch, including
-  whether a historical/live simulator session was created or reused.
+  whether a historical/live simulator session was created or reused. These rows
+  also carry the range `run_id` or `live` for live processing.
+
+Timing fields are emitted in microseconds as `*_us`; matching `*_ms` fields are
+kept for quick inspection and older tooling.
 
 Summarize a captured profile log:
 
 ```bash
 python3 eth_token_server/scripts/token_pipeline_profile_summary.py \
   /home/nima/code/crypto/blockchains/eth/logs/eth_token_server/token_pipeline_profile.log.YYYY-MM-DD \
+  --run-id run-1 \
   --csv /tmp/token_pipeline_profile.csv
 ```
 

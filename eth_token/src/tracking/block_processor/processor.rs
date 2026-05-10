@@ -112,6 +112,7 @@ impl BlockTokenProcessor {
         let trading_simulation = PoolTradingSimulationMode::HistoricalBlockSession {
             pool_simulator,
             block_session: &block_session,
+            profile_run_id: None,
         };
 
         self.process_block_with_trading_simulation(block, trading_simulation)
@@ -129,6 +130,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                profile_run_id: Some("live"),
             },
         )
         .await
@@ -163,6 +165,7 @@ impl BlockTokenProcessor {
         let trading_simulation = PoolTradingSimulationMode::HistoricalBlockSession {
             pool_simulator,
             block_session: &block_session,
+            profile_run_id: None,
         };
 
         self.process_block_with_metadata_provider_and_trading_simulation(
@@ -189,6 +192,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                profile_run_id: Some("live"),
             },
         )
         .await
@@ -219,6 +223,25 @@ impl BlockTokenProcessor {
     where
         P: TokenDiscoveryProvider,
     {
+        self.process_block_with_discovery_provider_and_profile_run_id(
+            block,
+            discovery_provider,
+            pool_simulator,
+            None,
+        )
+        .await
+    }
+
+    pub async fn process_block_with_discovery_provider_and_profile_run_id<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+        pool_simulator: &PoolBuySellSimulator,
+        profile_run_id: Option<&str>,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
         if self.is_live_mode {
             return self.live_mode_historical_simulator_report(
                 block,
@@ -226,11 +249,18 @@ impl BlockTokenProcessor {
             );
         }
 
-        self.process_block_with_token_and_pool_discovery_providers(
+        let block_session = Mutex::new(None);
+        let trading_simulation = PoolTradingSimulationMode::HistoricalBlockSession {
+            pool_simulator,
+            block_session: &block_session,
+            profile_run_id,
+        };
+
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             discovery_provider,
             discovery_provider,
-            pool_simulator,
+            trading_simulation,
         )
         .await
     }
@@ -252,6 +282,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                profile_run_id: Some("live"),
             },
         )
         .await
@@ -279,6 +310,7 @@ impl BlockTokenProcessor {
         let trading_simulation = PoolTradingSimulationMode::HistoricalBlockSession {
             pool_simulator,
             block_session: &block_session,
+            profile_run_id: None,
         };
 
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
@@ -312,6 +344,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                profile_run_id: Some("live"),
             },
         )
         .await

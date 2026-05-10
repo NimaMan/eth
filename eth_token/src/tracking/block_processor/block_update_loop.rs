@@ -4,11 +4,11 @@ use std::time::Instant;
 use tx_processor::ProcessedBlock;
 
 use crate::chain_metadata::{TokenMetadataProvider, UniswapV2PoolMetadataProvider};
-use crate::tracking::token_update_router::PoolTradingSimulationMode;
+use crate::tracking::token_update_router::{PendingPoolSimulationMap, PoolTradingSimulationMode};
 use crate::tracking::{hash_string, TokenBlockUpdateReport, TokenTransactionUpdateError};
 
 use super::block_update_profile::{
-    elapsed_millis, log_block_token_processor_profile, BlockTokenProcessorProfile,
+    elapsed_micros, log_block_token_processor_profile, BlockTokenProcessorProfile,
 };
 use super::processor::BlockTokenProcessor;
 use super::token_creation_update::{
@@ -49,6 +49,15 @@ impl BlockTokenProcessor {
         let created_token_addresses = Vec::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
+        let post_block_historical_simulation = match trading_simulation {
+            PoolTradingSimulationMode::HistoricalBlockSession {
+                pool_simulator,
+                profile_run_id,
+                ..
+            } => Some((pool_simulator, profile_run_id)),
+            _ => None,
+        };
+        let mut pending_simulations = PendingPoolSimulationMap::new();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -64,6 +73,9 @@ impl BlockTokenProcessor {
                 continue;
             }
 
+            let pending_simulations_arg = post_block_historical_simulation
+                .is_some()
+                .then_some(&mut pending_simulations);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -72,6 +84,7 @@ impl BlockTokenProcessor {
                     &tx.processed,
                     trading_simulation,
                     Some(&block.header),
+                    pending_simulations_arg,
                 )
                 .await
             {
@@ -96,6 +109,38 @@ impl BlockTokenProcessor {
                         tx_hash: hash_string(&tx.processed.hash),
                         tx_index: tx.processed.tx_index,
                         message: error.to_string(),
+                    });
+                }
+            }
+        }
+
+        if let Some((pool_simulator, profile_run_id)) = post_block_historical_simulation {
+            let simulation_result = self
+                .update_router
+                .simulate_pending_pools_after_block(
+                    &mut self.registry,
+                    &pending_simulations,
+                    pool_simulator,
+                    &block.header,
+                    None,
+                    profile_run_id,
+                )
+                .await;
+            match simulation_result {
+                Ok(reports) => {
+                    for report in reports {
+                        let token_address = report.token_address.clone();
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
+                        token_updates.push(report);
+                    }
+                }
+                Err(error) => {
+                    self.last_block_failure_count += 1;
+                    transaction_errors.push(TokenTransactionUpdateError {
+                        tx_hash: hash_string(&block.header.hash),
+                        tx_index: 0,
+                        message: format!("post-block pool simulation failed: {error}"),
                     });
                 }
             }
@@ -163,6 +208,15 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
+        let post_block_historical_simulation = match trading_simulation {
+            PoolTradingSimulationMode::HistoricalBlockSession {
+                pool_simulator,
+                profile_run_id,
+                ..
+            } => Some((pool_simulator, profile_run_id)),
+            _ => None,
+        };
+        let mut pending_simulations = PendingPoolSimulationMap::new();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -197,6 +251,9 @@ impl BlockTokenProcessor {
                 }
             }
 
+            let pending_simulations_arg = post_block_historical_simulation
+                .is_some()
+                .then_some(&mut pending_simulations);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -205,6 +262,7 @@ impl BlockTokenProcessor {
                     &tx.processed,
                     trading_simulation,
                     Some(&block.header),
+                    pending_simulations_arg,
                 )
                 .await
             {
@@ -229,6 +287,38 @@ impl BlockTokenProcessor {
                         tx_hash: hash_string(&tx.processed.hash),
                         tx_index: tx.processed.tx_index,
                         message: error.to_string(),
+                    });
+                }
+            }
+        }
+
+        if let Some((pool_simulator, profile_run_id)) = post_block_historical_simulation {
+            let simulation_result = self
+                .update_router
+                .simulate_pending_pools_after_block(
+                    &mut self.registry,
+                    &pending_simulations,
+                    pool_simulator,
+                    &block.header,
+                    None,
+                    profile_run_id,
+                )
+                .await;
+            match simulation_result {
+                Ok(reports) => {
+                    for report in reports {
+                        let token_address = report.token_address.clone();
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
+                        token_updates.push(report);
+                    }
+                }
+                Err(error) => {
+                    self.last_block_failure_count += 1;
+                    transaction_errors.push(TokenTransactionUpdateError {
+                        tx_hash: hash_string(&block.header.hash),
+                        tx_index: 0,
+                        message: format!("post-block pool simulation failed: {error}"),
                     });
                 }
             }
@@ -293,10 +383,19 @@ impl BlockTokenProcessor {
         self.last_block_failure_count = 0;
 
         let mut profile = BlockTokenProcessorProfile::default();
+        let post_block_historical_simulation = match trading_simulation {
+            PoolTradingSimulationMode::HistoricalBlockSession {
+                pool_simulator,
+                profile_run_id,
+                ..
+            } => Some((pool_simulator, profile_run_id)),
+            _ => None,
+        };
+        let mut pending_simulations = PendingPoolSimulationMap::new();
         let sort_started = Instant::now();
         let mut transactions: Vec<_> = block.transactions.iter().collect();
         transactions.sort_by_key(|tx| tx.processed.tx_index);
-        profile.sort_ms = elapsed_millis(sort_started);
+        profile.sort_us = elapsed_micros(sort_started);
 
         let mut token_updates = Vec::new();
         let mut transaction_errors = Vec::new();
@@ -329,7 +428,7 @@ impl BlockTokenProcessor {
             let created_result = self
                 .discover_created_tokens(&tx.processed, &pending_tx_hashes, metadata_provider)
                 .await;
-            profile.token_metadata_ms += elapsed_millis(token_metadata_started);
+            profile.token_metadata_us += elapsed_micros(token_metadata_started);
             match created_result {
                 Ok(created) => {
                     created_token_addresses.extend(created);
@@ -345,6 +444,9 @@ impl BlockTokenProcessor {
             }
 
             let router_started = Instant::now();
+            let pending_simulations_arg = post_block_historical_simulation
+                .is_some()
+                .then_some(&mut pending_simulations);
             let update_result = self
                 .update_router
                 .update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
@@ -355,9 +457,10 @@ impl BlockTokenProcessor {
                     trading_simulation,
                     Some(&block.header),
                     Some(&mut profile.applier),
+                    pending_simulations_arg,
                 )
                 .await;
-            profile.router_ms += elapsed_millis(router_started);
+            profile.router_us += elapsed_micros(router_started);
             match update_result {
                 Ok(reports) => {
                     processed_transaction_count += 1;
@@ -370,13 +473,13 @@ impl BlockTokenProcessor {
                         self.refresh_token_index(&token_address, block_number);
                         token_updates.push(report);
                     }
-                    profile.index_refresh_ms += elapsed_millis(index_refresh_started);
+                    profile.index_refresh_us += elapsed_micros(index_refresh_started);
                     let network_update_started = Instant::now();
                     self.apply_network_updates_for_transaction(
                         &tx.processed,
                         transaction_token_addresses,
                     );
-                    profile.network_update_ms += elapsed_millis(network_update_started);
+                    profile.network_update_us += elapsed_micros(network_update_started);
                 }
                 Err(error) => {
                     self.last_block_failure_count += 1;
@@ -384,6 +487,38 @@ impl BlockTokenProcessor {
                         tx_hash: hash_string(&tx.processed.hash),
                         tx_index: tx.processed.tx_index,
                         message: error.to_string(),
+                    });
+                }
+            }
+        }
+
+        if let Some((pool_simulator, profile_run_id)) = post_block_historical_simulation {
+            let simulation_result = self
+                .update_router
+                .simulate_pending_pools_after_block(
+                    &mut self.registry,
+                    &pending_simulations,
+                    pool_simulator,
+                    &block.header,
+                    Some(&mut profile.applier),
+                    profile_run_id,
+                )
+                .await;
+            match simulation_result {
+                Ok(reports) => {
+                    for report in reports {
+                        let token_address = report.token_address.clone();
+                        updated_token_addresses.insert(token_address.clone());
+                        self.refresh_token_index(&token_address, block_number);
+                        token_updates.push(report);
+                    }
+                }
+                Err(error) => {
+                    self.last_block_failure_count += 1;
+                    transaction_errors.push(TokenTransactionUpdateError {
+                        tx_hash: hash_string(&block.header.hash),
+                        tx_index: 0,
+                        message: format!("post-block pool simulation failed: {error}"),
                     });
                 }
             }
@@ -397,7 +532,7 @@ impl BlockTokenProcessor {
         self.processed_blocks.insert(block_number, true);
 
         self.updated_token_addresses = updated_token_addresses.into_iter().collect();
-        profile.finalize_ms = elapsed_millis(finalize_started);
+        profile.finalize_us = elapsed_micros(finalize_started);
 
         let created_token_count = created_token_addresses.len();
         let updated_token_count = self.updated_token_addresses.len();
@@ -405,6 +540,7 @@ impl BlockTokenProcessor {
         let transaction_error_count = transaction_errors.len();
         log_block_token_processor_profile(
             self,
+            trading_simulation.profile_run_id(),
             block_number,
             block.transactions.len(),
             processed_transaction_count,

@@ -99,6 +99,7 @@ pub(super) async fn simulate_updated_v2_pools(
             PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
+                profile_run_id,
             } => {
                 let chain = block_session_chain_after_tx(
                     block_session,
@@ -106,6 +107,7 @@ pub(super) async fn simulate_updated_v2_pools(
                     tx,
                     "v2",
                     pool_address,
+                    profile_run_id,
                 )
                 .await?;
                 let pool_config = pool_config_for_block_session(pool_config, tx);
@@ -118,9 +120,35 @@ pub(super) async fn simulate_updated_v2_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
+            PoolTradingSimulationMode::HistoricalPostBlockSession {
+                pool_simulator,
+                block_sessions,
+                profile_run_id,
+            } => {
+                let chain = historical_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v2",
+                    pool_address,
+                    profile_run_id,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
+                pool.evaluate_trading_status_v2_with_pool_simulator_and_chain(
+                    pool_simulator,
+                    &tx_context,
+                    pool_config,
+                    chain,
+                )
+                .await
+                .map(|result| result.failure_reason.clone())
+            }
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
                     block_sessions,
@@ -129,6 +157,7 @@ pub(super) async fn simulate_updated_v2_pools(
                     tx,
                     "v2",
                     pool_address,
+                    profile_run_id,
                 )
                 .await?;
                 let pool_config = pool_config_for_state_session(pool_config, tx);
@@ -295,6 +324,7 @@ pub(super) async fn simulate_updated_v3_pools(
             PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
+                profile_run_id,
             } => {
                 let chain = block_session_chain_after_tx(
                     block_session,
@@ -302,6 +332,7 @@ pub(super) async fn simulate_updated_v3_pools(
                     tx,
                     "v3",
                     pool_address,
+                    profile_run_id,
                 )
                 .await?;
                 let pool_config = pool_config_for_block_session(pool_config, tx);
@@ -314,9 +345,35 @@ pub(super) async fn simulate_updated_v3_pools(
                 .await
                 .map(|result| result.failure_reason.clone())
             }
+            PoolTradingSimulationMode::HistoricalPostBlockSession {
+                pool_simulator,
+                block_sessions,
+                profile_run_id,
+            } => {
+                let chain = historical_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v3",
+                    pool_address,
+                    profile_run_id,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
+                pool.evaluate_trading_status_v3_with_pool_simulator_and_chain(
+                    pool_simulator,
+                    &tx_context,
+                    pool_config,
+                    chain,
+                )
+                .await
+                .map(|result| result.failure_reason.clone())
+            }
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
                     block_sessions,
@@ -325,6 +382,7 @@ pub(super) async fn simulate_updated_v3_pools(
                     tx,
                     "v3",
                     pool_address,
+                    profile_run_id,
                 )
                 .await?;
                 let pool_config = pool_config_for_state_session(pool_config, tx);
@@ -486,11 +544,43 @@ pub(super) async fn simulate_updated_v4_pools(
             PoolTradingSimulationMode::HistoricalBlockSession {
                 pool_simulator,
                 block_session,
+                profile_run_id,
             } => {
-                let chain =
-                    block_session_chain_after_tx(block_session, pool_simulator, tx, "v4", pool_key)
-                        .await?;
+                let chain = block_session_chain_after_tx(
+                    block_session,
+                    pool_simulator,
+                    tx,
+                    "v4",
+                    pool_key,
+                    profile_run_id,
+                )
+                .await?;
                 let pool_config = pool_config_for_block_session(pool_config, tx);
+                pool.evaluate_trading_status_v4_with_pool_simulator_and_chain(
+                    pool_simulator,
+                    &tx_context,
+                    pool_config,
+                    chain,
+                )
+                .await
+                .map(|result| result.failure_reason.clone())
+            }
+            PoolTradingSimulationMode::HistoricalPostBlockSession {
+                pool_simulator,
+                block_sessions,
+                profile_run_id,
+            } => {
+                let chain = historical_block_state_session_chain(
+                    block_sessions,
+                    pool_simulator,
+                    &pool_config,
+                    tx,
+                    "v4",
+                    pool_key,
+                    profile_run_id,
+                )
+                .await?;
+                let pool_config = pool_config_for_state_session(pool_config, tx);
                 pool.evaluate_trading_status_v4_with_pool_simulator_and_chain(
                     pool_simulator,
                     &tx_context,
@@ -503,6 +593,7 @@ pub(super) async fn simulate_updated_v4_pools(
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
                     block_sessions,
@@ -511,6 +602,7 @@ pub(super) async fn simulate_updated_v4_pools(
                     tx,
                     "v4",
                     pool_key,
+                    profile_run_id,
                 )
                 .await?;
                 let pool_config = pool_config_for_state_session(pool_config, tx);
@@ -650,6 +742,7 @@ async fn block_session_chain_after_tx(
     tx: &ProcessedTransaction,
     pool_kind: &'static str,
     pool_id: &str,
+    profile_run_id: Option<&str>,
 ) -> Result<UnsignedTxChainSimulation> {
     let tx_index = usize::try_from(tx.tx_index)
         .map_err(|_| eyre!("tx index {} does not fit usize", tx.tx_index))?;
@@ -658,7 +751,7 @@ async fn block_session_chain_after_tx(
         .lock()
         .map_err(|err| eyre!("block tx state session lock poisoned: {err}"))?
         .is_none();
-    let mut session_create_ms = 0;
+    let mut session_create_us = 0;
     let mut session_created = false;
     if needs_session {
         let session_create_started = Instant::now();
@@ -675,7 +768,7 @@ async fn block_session_chain_after_tx(
                     err
                 )
             })?;
-        session_create_ms = elapsed_millis(session_create_started);
+        session_create_us = elapsed_micros(session_create_started);
         let mut guard = block_session
             .lock()
             .map_err(|err| eyre!("block tx state session lock poisoned: {err}"))?;
@@ -702,9 +795,10 @@ async fn block_session_chain_after_tx(
             err
         )
     })?;
-    let branch_ms = elapsed_millis(branch_started);
+    let branch_us = elapsed_micros(branch_started);
     tracing::info!(
         target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+        run_id = profile_run_id.unwrap_or(""),
         mode = "historical",
         block_number = tx.block_number,
         tx_index = tx.tx_index,
@@ -712,8 +806,10 @@ async fn block_session_chain_after_tx(
         pool_id = %pool_id,
         session_needed = needs_session,
         session_created,
-        session_create_ms,
-        branch_ms,
+        session_create_us,
+        session_create_ms = session_create_us / 1_000,
+        branch_us,
+        branch_ms = branch_us / 1_000,
         "token simulation session profile"
     );
     Ok(chain)
@@ -734,13 +830,14 @@ async fn live_block_state_session_chain(
     tx: &ProcessedTransaction,
     pool_kind: &'static str,
     pool_id: &str,
+    profile_run_id: Option<&str>,
 ) -> Result<UnsignedTxChainSimulation> {
     let block_number = state_session_block_number(pool_config, tx);
     let needs_session = !block_sessions
         .lock()
         .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?
         .contains_key(&block_number);
-    let mut session_create_ms = 0;
+    let mut session_create_us = 0;
     let mut session_created = false;
 
     if needs_session {
@@ -758,7 +855,7 @@ async fn live_block_state_session_chain(
                     err
                 )
             })?;
-        session_create_ms = elapsed_millis(session_create_started);
+        session_create_us = elapsed_micros(session_create_started);
         let mut guard = block_sessions
             .lock()
             .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?;
@@ -779,9 +876,10 @@ async fn live_block_state_session_chain(
     })?;
     let branch_started = Instant::now();
     let chain = session.simulation_chain();
-    let branch_ms = elapsed_millis(branch_started);
+    let branch_us = elapsed_micros(branch_started);
     tracing::info!(
         target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+        run_id = profile_run_id.unwrap_or(""),
         mode = "live",
         block_number = tx.block_number,
         state_session_block_number = block_number,
@@ -790,16 +888,93 @@ async fn live_block_state_session_chain(
         pool_id = %pool_id,
         session_needed = needs_session,
         session_created,
-        session_create_ms,
-        branch_ms,
+        session_create_us,
+        session_create_ms = session_create_us / 1_000,
+        branch_us,
+        branch_ms = branch_us / 1_000,
         session_cache_size = guard.len(),
         "token simulation session profile"
     );
     Ok(chain)
 }
 
-fn elapsed_millis(started: Instant) -> u128 {
-    started.elapsed().as_millis()
+async fn historical_block_state_session_chain(
+    block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
+    pool_simulator: &PoolBuySellSimulator,
+    pool_config: &PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+    pool_kind: &'static str,
+    pool_id: &str,
+    profile_run_id: Option<&str>,
+) -> Result<UnsignedTxChainSimulation> {
+    let block_number = state_session_block_number(pool_config, tx);
+    let needs_session = !block_sessions
+        .lock()
+        .map_err(|err| eyre!("historical block state session lock poisoned: {err}"))?
+        .contains_key(&block_number);
+    let mut session_create_us = 0;
+    let mut session_created = false;
+
+    if needs_session {
+        let session_create_started = Instant::now();
+        let session = pool_simulator
+            .simulator()
+            .block_state_session(block_number)
+            .await
+            .map_err(|err| {
+                eyre!(
+                    "failed to create historical block state session block={} for {} pool={}: {}",
+                    block_number,
+                    pool_kind,
+                    pool_id,
+                    err
+                )
+            })?;
+        session_create_us = elapsed_micros(session_create_started);
+        let mut guard = block_sessions
+            .lock()
+            .map_err(|err| eyre!("historical block state session lock poisoned: {err}"))?;
+        if !guard.contains_key(&block_number) {
+            guard.insert(block_number, session);
+            session_created = true;
+        }
+    }
+
+    let guard = block_sessions
+        .lock()
+        .map_err(|err| eyre!("historical block state session lock poisoned: {err}"))?;
+    let session = guard.get(&block_number).ok_or_else(|| {
+        eyre!(
+            "historical block state session was not initialized for block {}",
+            block_number
+        )
+    })?;
+    let branch_started = Instant::now();
+    let chain = session.simulation_chain();
+    let branch_us = elapsed_micros(branch_started);
+    tracing::info!(
+        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+        run_id = profile_run_id.unwrap_or(""),
+        mode = "historical_post_block",
+        block_number = tx.block_number,
+        state_session_block_number = block_number,
+        tx_index = tx.tx_index,
+        pool_kind,
+        pool_id = %pool_id,
+        session_needed = needs_session,
+        session_created,
+        session_create_us,
+        session_create_ms = session_create_us / 1_000,
+        branch_us,
+        branch_ms = branch_us / 1_000,
+        session_cache_size = guard.len(),
+        "token simulation session profile"
+    );
+    Ok(chain)
+}
+
+fn elapsed_micros(started: Instant) -> u128 {
+    started.elapsed().as_micros()
 }
 
 fn pool_config_for_state_session(
@@ -819,7 +994,7 @@ fn state_session_block_number(
         .unwrap_or_else(|| tx.block_number.saturating_sub(1))
 }
 
-fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
+pub(super) fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
     if pool.base.has_liquidity_removal() {
         return false;
     }
@@ -829,7 +1004,7 @@ fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -
         || (!pool.base.can_buy_and_sell() && has_v2_trading_simulation_trigger(tx, pool_address))
 }
 
-fn should_simulate_v3_trading(pool: &UniswapV3Pool, tx: &ProcessedTransaction) -> bool {
+pub(super) fn should_simulate_v3_trading(pool: &UniswapV3Pool, tx: &ProcessedTransaction) -> bool {
     if pool.base.has_liquidity_removal() {
         return false;
     }
@@ -839,7 +1014,7 @@ fn should_simulate_v3_trading(pool: &UniswapV3Pool, tx: &ProcessedTransaction) -
         || (!pool.base.can_buy_and_sell() && has_v3_trading_simulation_trigger(tx, pool_address))
 }
 
-fn should_simulate_v4_trading(pool: &UniswapV4Pool, tx: &ProcessedTransaction) -> bool {
+pub(super) fn should_simulate_v4_trading(pool: &UniswapV4Pool, tx: &ProcessedTransaction) -> bool {
     if pool.base.has_liquidity_removal() {
         return false;
     }
