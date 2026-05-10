@@ -22,7 +22,7 @@ pub fn routes(
         .allow_headers(["content-type"])
         .allow_methods(["GET", "POST", "OPTIONS"]);
 
-    api(state).with(cors)
+    api(state).or(crate::http::assets::static_routes()).with(cors)
 }
 
 fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Rejection> + Clone {
