@@ -229,7 +229,39 @@ where
         for strategy in &mut self.strategies {
             decisions.push(strategy.on_risk_event(&ctx, event)?);
         }
-        self.apply_decisions(decisions).await
+        let reports = self.apply_decisions(decisions).await?;
+
+        // Worst-case baseline: mark open positions as drained on
+        // liquidity removal or scam confirmation, even if strategy does not exit.
+        if matches!(event.kind, RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed) {
+            if let Some(ref pool_address) = event.pool_address {
+                for position in self.portfolio.positions.values_mut() {
+                    if position.key.pool_address == *pool_address
+                        && position.is_open()
+                        && !position.drained
+                    {
+                        position.mark_drained();
+                        let _ = self.store.upsert_position(position).await;
+                        // Snapshot the drained state so baseline PnL is honest
+                        // even when no pool update follows the signal.
+                        // Use a high block number so this snapshot is picked as
+                        // the latest by DISTINCT ON ... ORDER BY block_number DESC.
+                        let snapshot = PositionSnapshot {
+                            position_id: position.id.clone(),
+                            state: position.state.clone(),
+                            block_number: event.observed_block.unwrap_or(u64::MAX - 1),
+                            current_value_eth: DecimalAmount::ZERO,
+                            realized_profit_eth: position.realized_pnl(),
+                            unrealized_profit_eth: -position.entry_cost_basis.unwrap_or_default(),
+                            roi: DecimalAmount::from(-1),
+                        };
+                        let _ = self.store.append_position_snapshot(&snapshot).await;
+                    }
+                }
+            }
+        }
+
+        Ok(reports)
     }
 
     async fn apply_decisions(

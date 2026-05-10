@@ -146,7 +146,8 @@ impl Strategy for SnipeAllStrategy {
 
         // Shared exit rules: any strategy with an open position should exit on
         // these signals. The strategy config controls which ones are enabled.
-        if self.config.sell_on_liquidity_removal {
+        // Each rule is evaluated independently so we can quantify per-rule effect.
+        if self.config.exit_on_liquidity_removal {
             if let RuleDecision::Exit { .. } =
                 shared_rules::exit::liquidity_removal::evaluate(ctx, &strategy_name, event)
             {
@@ -162,44 +163,50 @@ impl Strategy for SnipeAllStrategy {
             }
         }
 
-        if let RuleDecision::Exit { .. } =
-            shared_rules::exit::tax::evaluate(ctx, &strategy_name, event)
-        {
-            if let Some(pool_address) = event
-                .pool_address
-                .clone()
-                .or_else(|| ctx.market.pool_address.clone())
+        if self.config.exit_on_tax {
+            if let RuleDecision::Exit { .. } =
+                shared_rules::exit::tax::evaluate(ctx, &strategy_name, event)
             {
-                if !self.state.is_exiting(&pool_address) {
-                    return Ok(self.sell_pool(event.token_address, pool_address));
+                if let Some(pool_address) = event
+                    .pool_address
+                    .clone()
+                    .or_else(|| ctx.market.pool_address.clone())
+                {
+                    if !self.state.is_exiting(&pool_address) {
+                        return Ok(self.sell_pool(event.token_address, pool_address));
+                    }
                 }
             }
         }
 
-        if let RuleDecision::Exit { .. } =
-            shared_rules::exit::lp_approval::evaluate(ctx, &strategy_name, event)
-        {
-            if let Some(pool_address) = event
-                .pool_address
-                .clone()
-                .or_else(|| ctx.market.pool_address.clone())
+        if self.config.exit_on_lp_approval {
+            if let RuleDecision::Exit { .. } =
+                shared_rules::exit::lp_approval::evaluate(ctx, &strategy_name, event)
             {
-                if !self.state.is_exiting(&pool_address) {
-                    return Ok(self.sell_pool(event.token_address, pool_address));
+                if let Some(pool_address) = event
+                    .pool_address
+                    .clone()
+                    .or_else(|| ctx.market.pool_address.clone())
+                {
+                    if !self.state.is_exiting(&pool_address) {
+                        return Ok(self.sell_pool(event.token_address, pool_address));
+                    }
                 }
             }
         }
 
-        if let RuleDecision::Exit { .. } =
-            shared_rules::exit::scam::evaluate(ctx, &strategy_name, event)
-        {
-            if let Some(pool_address) = event
-                .pool_address
-                .clone()
-                .or_else(|| ctx.market.pool_address.clone())
+        if self.config.exit_on_scam {
+            if let RuleDecision::Exit { .. } =
+                shared_rules::exit::scam::evaluate(ctx, &strategy_name, event)
             {
-                if !self.state.is_exiting(&pool_address) {
-                    return Ok(self.sell_pool(event.token_address, pool_address));
+                if let Some(pool_address) = event
+                    .pool_address
+                    .clone()
+                    .or_else(|| ctx.market.pool_address.clone())
+                {
+                    if !self.state.is_exiting(&pool_address) {
+                        return Ok(self.sell_pool(event.token_address, pool_address));
+                    }
                 }
             }
         }

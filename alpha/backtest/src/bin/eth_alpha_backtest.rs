@@ -76,6 +76,22 @@ struct Args {
     /// Live trader skips these; enabling makes backtest apples-to-apples.
     #[arg(long, default_value_t = false)]
     skip_primed: bool,
+
+    /// Enable liquidity-removal exits (default: disabled for quantification).
+    #[arg(long, default_value_t = false)]
+    exit_liquidity_removal: bool,
+
+    /// Enable tax/honeypot exits (default: disabled for quantification).
+    #[arg(long, default_value_t = false)]
+    exit_tax: bool,
+
+    /// Enable LP-approval exits (default: disabled for quantification).
+    #[arg(long, default_value_t = false)]
+    exit_lp_approval: bool,
+
+    /// Enable scam/critical-risk exits (default: disabled for quantification).
+    #[arg(long, default_value_t = false)]
+    exit_scam: bool,
 }
 
 #[tokio::main]
@@ -154,6 +170,10 @@ async fn main() -> Result<()> {
                 sell_amount: buy_amount,
                 min_denom_reserve: min_liquidity_eth,
                 min_stable_denom_reserve: min_liquidity_usd,
+                exit_on_liquidity_removal: args.exit_liquidity_removal,
+                exit_on_tax: args.exit_tax,
+                exit_on_lp_approval: args.exit_lp_approval,
+                exit_on_scam: args.exit_scam,
                 ..SnipeAllConfig::default()
             })));
         }

@@ -30,6 +30,9 @@ pub struct Position {
     pub exit_proceeds: Option<DecimalAmount>,
     /// Pool price at time of buy (denom per token).
     pub entry_price: Option<DecimalAmount>,
+    /// True if the pool was drained/scammed while position was open.
+    /// Used for honest baseline PnL even when no exit is attempted.
+    pub drained: bool,
 }
 
 impl Position {
@@ -43,7 +46,12 @@ impl Position {
             entry_cost_basis: None,
             exit_proceeds: None,
             entry_price: None,
+            drained: false,
         }
+    }
+
+    pub fn mark_drained(&mut self) {
+        self.drained = true;
     }
 
     pub fn mark_intent_created(&mut self, side: OrderSide) -> Result<()> {
@@ -153,15 +161,25 @@ impl Position {
         let Some(cost_basis) = self.entry_cost_basis else {
             return (DecimalAmount::ZERO, DecimalAmount::ZERO);
         };
+
+        // If the position was marked drained (liquidity removed / scammed),
+        // or the pool is unsellable, the position is effectively worthless.
+        // This is the conservative (worst-case) assumption.
+        if self.drained || !pool.can_sell {
+            return (DecimalAmount::ZERO, -cost_basis);
+        }
+
         let Some(entry_price) = self.entry_price else {
             return (cost_basis, DecimalAmount::ZERO);
         };
         if entry_price.is_zero() {
-            return (cost_basis, DecimalAmount::ZERO);
+            // Cannot compute ratio; assume position is worthless.
+            return (DecimalAmount::ZERO, -cost_basis);
         }
         let current_price = pool.price_denom_per_token.unwrap_or_default();
         if current_price.is_zero() {
-            return (cost_basis, DecimalAmount::ZERO);
+            // Price went to zero; full loss.
+            return (DecimalAmount::ZERO, -cost_basis);
         }
 
         // Price-based theoretical value
