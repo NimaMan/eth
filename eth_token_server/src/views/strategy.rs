@@ -561,6 +561,11 @@ mod tests {
         record.liquidity = STABLE_ELIGIBLE_LIQUIDITY;
 
         assert_eq!(test_classification_reason(&mut record), None);
+
+        record.currency = "DAI".to_string();
+        record.liquidity = STABLE_ELIGIBLE_LIQUIDITY;
+
+        assert_eq!(test_classification_reason(&mut record), None);
     }
 
     #[test]
@@ -578,7 +583,7 @@ mod tests {
     #[test]
     fn classification_requires_supported_currency() {
         let mut record = record();
-        record.currency = "DAI".to_string();
+        record.currency = "WBTC".to_string();
 
         assert_eq!(
             test_classification_reason(&mut record),

@@ -302,7 +302,7 @@ mod tests {
     fn buys_usd_stable_pool_at_stable_liquidity_floor() {
         let mut pool = pool();
         pool.denom_symbol = Some("USDC".to_string());
-        pool.denom_reserve = Decimal::from(500u64);
+        pool.denom_reserve = Decimal::from(1_000u64);
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
@@ -332,7 +332,7 @@ mod tests {
     fn holds_usd_stable_pool_below_stable_liquidity_floor() {
         let mut pool = pool();
         pool.denom_symbol = Some("USDT".to_string());
-        pool.denom_reserve = Decimal::from(499u64);
+        pool.denom_reserve = Decimal::from(999u64);
         let market = MarketSnapshotRef {
             block_number: 1,
             token_address: pool.token_address,
@@ -356,6 +356,36 @@ mod tests {
             .unwrap();
 
         assert_eq!(decision, StrategyDecision::Hold);
+    }
+
+    #[test]
+    fn buys_dai_pool_at_stable_liquidity_floor() {
+        let mut pool = pool();
+        pool.denom_symbol = Some("DAI".to_string());
+        pool.denom_reserve = Decimal::from(1_000u64);
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 1,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(decision, StrategyDecision::SubmitOrder(_)));
     }
 
     #[test]

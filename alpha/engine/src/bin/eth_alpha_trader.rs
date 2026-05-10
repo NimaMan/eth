@@ -53,7 +53,7 @@ struct Args {
     #[arg(long, default_value = "0.5")]
     min_liquidity_eth: String,
 
-    #[arg(long, default_value = "500")]
+    #[arg(long, default_value = "1000")]
     min_liquidity_usd: String,
 
     #[arg(long, env = "ALPHA_DATABASE_URL")]

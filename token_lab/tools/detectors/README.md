@@ -51,8 +51,8 @@ triage endpoint, or a strategy-analysis endpoint.
 
 Token-lab severity uses the same pool classification contract as the strategy
 analysis backend. The first split is `eligible` versus `ineligible`: `ETH/WETH
->= 0.5` quote liquidity and `USDC/USDT >= 500` quote liquidity, supported
-currency, creation data, price history, and buy/sell viability for the cohort.
+>= 0.5` quote liquidity and `USDC/USDT/DAI >= 1,000` quote liquidity,
+supported currency, creation data, price history, and buy/sell viability for the cohort.
 Pools below that threshold are still useful as evidence, but they should not
 dominate critical output unless the issue is token-level rather than
 pool-liquidity-specific.

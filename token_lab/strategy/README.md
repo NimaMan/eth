@@ -16,7 +16,7 @@ Initial contract:
   happen against pools.
 - Launch definition: pool creation.
 - Real-liquidity lower bound is quote-family specific: `0.5 ETH/WETH` for
-  ETH-family pools and `500 USDC/USDT` for USD-stable pools. Pools below their
+  ETH-family pools and `1,000 USDC/USDT/DAI` for USD-stable pools. Pools below their
   family threshold should be tracked as dust, and the dust ratio should be
   shown.
 - Winner thresholds: `2x`, `5x`, `10x`, `20x`, `50x`, `100x`.
@@ -45,15 +45,14 @@ JSON
 
 Initial eligible cohort rules:
 
-- quote currency is one of `ETH`, `WETH`, `USDC`, or `USDT`;
+- quote currency is one of `ETH`, `WETH`, `USDC`, `USDT`, or `DAI`;
 - ETH/WETH-denominated pools have at least `0.5` quote liquidity;
-- USDC/USDT-denominated pools have at least `500` quote liquidity;
+- USDC/USDT/DAI-denominated pools have at least `1,000` quote liquidity;
 - the cohort-level simulator evidence says the pool could be bought and sold;
 - block-only historical stats have price-ratio history.
 
-`DAI` remains unsupported for Snipe All and launch-strategy stats unless we
-explicitly add it later. Unknown or unsupported currencies go into
-non-eligible until they receive a named threshold and strategy support.
+Unknown or unsupported currencies go into non-eligible until they receive a
+named threshold and strategy support.
 
 Initial non-eligible reasons:
 

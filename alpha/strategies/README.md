@@ -17,9 +17,8 @@ Entry:
 
 - Buy each eligible live pool once.
 - Skip pools that cannot buy, cannot sell, use an unsupported quote currency, or are below the denomination-specific liquidity floor. Scam and risk labels are later outcomes or exit inputs, not first-pass eligibility gates.
-- Supported quote currencies are `ETH`, `WETH`, `USDC`, and `USDT`. ETH/WETH pools use `min_denom_reserve`; USDC/USDT pools use `min_stable_denom_reserve`.
+- Supported quote currencies are `ETH`, `WETH`, `USDC`, `USDT`, and `DAI`. ETH/WETH pools use `min_denom_reserve`; USDC/USDT/DAI pools use `min_stable_denom_reserve`.
 - The shared rule contract lives in `alpha/pool_classification`; strategy-specific config only overrides that contract's thresholds.
-- `DAI` remains unsupported for Snipe All unless we explicitly add it later.
 - Skip historical warmup state in the live trader; the runtime primes watermarks and only sends new live changes once the token tracker reports `live`.
 
 Exit:

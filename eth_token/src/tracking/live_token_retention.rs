@@ -29,7 +29,7 @@ impl Default for LiveTokenRetentionPolicy {
     fn default() -> Self {
         Self {
             min_weth_denom_reserve: 0.1,
-            min_stable_denom_reserve: 500.0,
+            min_stable_denom_reserve: 1_000.0,
             min_other_denom_reserve: 0.0,
             weth_denoms: address_set([WETH_ADDRESS]),
             stablecoin_denoms: address_set([USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS]),
@@ -501,13 +501,13 @@ mod tests {
     #[test]
     fn stablecoin_pool_uses_stable_threshold() {
         let policy = LiveTokenRetentionPolicy::default();
-        let pool = v2_pool(POOL_ADDRESS, USDC_ADDRESS, 499.9);
+        let pool = v2_pool(POOL_ADDRESS, USDC_ADDRESS, 999.9);
 
         let decision = policy.evaluate_pool(&pool.base, 110);
 
         assert!(!decision.retain);
         assert_eq!(decision.denom_class, LivePoolDenomClass::Stablecoin);
-        assert_eq!(decision.threshold, 500.0);
+        assert_eq!(decision.threshold, 1_000.0);
     }
 
     #[test]

@@ -19,7 +19,7 @@ WETH_LIQUIDITY_DUST = 0.01
 WETH_LIQUIDITY_ELIGIBLE = 0.5
 STABLE_LIQUIDITY_LOW = 1_000.0
 STABLE_LIQUIDITY_DUST = 10.0
-STABLE_LIQUIDITY_ELIGIBLE = 500.0
+STABLE_LIQUIDITY_ELIGIBLE = 1_000.0
 EXTREME_PRICE_RATIO = 1_000.0
 VERY_EXTREME_PRICE_RATIO = 100_000.0
 TINY_SUPPLY_PERCENT = 0.01
@@ -27,7 +27,7 @@ LP_APPROVAL_HIGH_PERCENT = 20.0
 LP_APPROVAL_MEDIUM_PERCENT = 5.0
 LP_HOLDER_CONCENTRATION_HIGH_PERCENT = 90.0
 LP_HOLDER_CONCENTRATION_MEDIUM_PERCENT = 50.0
-ELIGIBLE_CURRENCIES = {"ETH", "WETH", "USDC", "USDT"}
+ELIGIBLE_CURRENCIES = {"ETH", "WETH", "USDC", "USDT", "DAI"}
 
 
 def pool_metrics(pool: Mapping[str, Any]) -> dict[str, Any]:
@@ -213,7 +213,7 @@ def meaningful_liquidity_threshold(pool: Mapping[str, Any]) -> float:
 
 def eligible_liquidity_threshold(pool: Mapping[str, Any]) -> float:
     currency = str(pool.get("currency") or "").upper()
-    if currency in {"USDC", "USDT"}:
+    if currency in {"USDC", "USDT", "DAI"}:
         return STABLE_LIQUIDITY_ELIGIBLE
     if currency in {"ETH", "WETH"}:
         return WETH_LIQUIDITY_ELIGIBLE

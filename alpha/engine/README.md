@@ -135,7 +135,7 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
 Use `--replay-current` for a local smoke test that replays the current token-server snapshot through paper execution.
 
 The deployed paper runtime uses a stable `--run-id snipe-all-v1-paper-live`. On startup it restores active positions from `alpha_trading.positions` and restores pool/signal watermarks from `alpha_trading.strategy_observations`.
-The deployed Snipe All thresholds are `--min-liquidity-eth 0.5` for ETH/WETH pools and `--min-liquidity-usd 500` for USDC/USDT pools.
+The deployed Snipe All thresholds are `--min-liquidity-eth 0.5` for ETH/WETH pools and `--min-liquidity-usd 1000` for USDC/USDT/DAI pools.
 
 Pool matching uses `TokenPoolId` from `eth_alpha_core`: `token_address:pool_identity`. For V2/V3 the pool identity is the pool contract address; for V4 it is `pool_manager#pool_id`. The engine should never coerce V4 pools into fake EVM addresses just to fit order or position keys.
 

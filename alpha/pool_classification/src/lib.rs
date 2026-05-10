@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const ETH_ELIGIBLE_LIQUIDITY: f64 = 0.5;
-pub const STABLE_ELIGIBLE_LIQUIDITY: f64 = 500.0;
+pub const STABLE_ELIGIBLE_LIQUIDITY: f64 = 1_000.0;
 pub const ETH_DUST_LIQUIDITY: f64 = 0.01;
 pub const STABLE_DUST_LIQUIDITY: f64 = 10.0;
 pub const ETH_LOW_LIQUIDITY: f64 = 1.0;
 pub const STABLE_LOW_LIQUIDITY: f64 = 1_000.0;
 
-const DEFAULT_SUPPORTED_QUOTES: [&str; 4] = ["ETH", "WETH", "USDC", "USDT"];
+const DEFAULT_SUPPORTED_QUOTES: [&str; 5] = ["ETH", "WETH", "USDC", "USDT", "DAI"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PoolClassificationConfig {
@@ -624,7 +624,7 @@ fn thresholds_for_quote(
 fn quote_family(symbol: &str) -> Option<QuoteFamily> {
     match symbol.trim().to_ascii_uppercase().as_str() {
         "ETH" | "WETH" => Some(QuoteFamily::Eth),
-        "USDC" | "USDT" => Some(QuoteFamily::Stable),
+        "USDC" | "USDT" | "DAI" => Some(QuoteFamily::Stable),
         _ => None,
     }
 }
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_quote_before_liquidity_checks() {
         let mut input = input();
-        input.quote_symbol = Some("DAI".to_string());
+        input.quote_symbol = Some("WBTC".to_string());
         input.denom_reserve = Some(10_000.0);
 
         let decision = classify_pool(&input);
@@ -811,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn uses_stable_floor_for_usdc_and_usdt() {
+    fn uses_stable_floor_for_usdc_usdt_and_dai() {
         let mut input = input();
         input.quote_symbol = Some("USDC".to_string());
         input.denom_reserve = Some(STABLE_ELIGIBLE_LIQUIDITY);
@@ -825,6 +825,11 @@ mod tests {
             classify_pool(&input).reason,
             Some(NonEligibleReason::LowLiquidity)
         );
+
+        input.quote_symbol = Some("DAI".to_string());
+        input.denom_reserve = Some(STABLE_ELIGIBLE_LIQUIDITY);
+        input.max_denom_reserve = input.denom_reserve;
+        assert!(classify_pool(&input).eligible);
     }
 
     #[test]

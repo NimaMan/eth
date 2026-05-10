@@ -47,8 +47,8 @@ until `/live/status` is `live`; while warming, it records heartbeats and primes
 watermarks only.
 
 Snipe All currently supports ETH/WETH and USD-stable quote pools. Use separate
-floors for each family: WETH-denominated pools are not comparable to USDC/USDT
-pools by raw reserve amount.
+floors for each family: WETH-denominated pools are not comparable to
+USDC/USDT/DAI pools by raw reserve amount.
 
 ## Where To Look First
 

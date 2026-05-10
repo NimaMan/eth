@@ -36,8 +36,8 @@ impl Default for SnipeAllConfig {
             sell_amount: buy_amount.clone(),
             buy_amount,
             min_denom_reserve: Decimal::new(5, 1),
-            min_stable_denom_reserve: Decimal::from(500u64),
-            supported_denom_symbols: ["ETH", "WETH", "USDC", "USDT"]
+            min_stable_denom_reserve: Decimal::from(1_000u64),
+            supported_denom_symbols: ["ETH", "WETH", "USDC", "USDT", "DAI"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
