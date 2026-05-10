@@ -1,3 +1,6 @@
+pub use eth_alpha_store::performance::StrategyPerformanceQuery;
+
+use eth_alpha_store::performance::{load_strategy_performance, StrategyPerformanceReport};
 use eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -234,6 +237,23 @@ impl AlphaTradingStore {
             execution_reports: self.execution_reports(&run_id, 100).await?,
             risk_events: self.risk_events(&run_id, 100).await?,
         }))
+    }
+
+    pub async fn strategy_performance(
+        &self,
+        strategy_id: &str,
+        query: StrategyPerformanceQuery,
+    ) -> Result<Option<StrategyPerformanceReport>> {
+        if strategy_id != STRATEGY_ID {
+            return Ok(None);
+        }
+
+        let Some(run) = self.latest_run().await? else {
+            return Ok(None);
+        };
+
+        let report = load_strategy_performance(&self.pool, strategy_id, &run.run_id, query).await?;
+        Ok(Some(report))
     }
 
     pub async fn reset_strategy_state(

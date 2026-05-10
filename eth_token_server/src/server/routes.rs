@@ -5,7 +5,7 @@ use serde_json::json;
 use warp::http::StatusCode;
 use warp::{Filter, Reply};
 
-use crate::alpha_trading::AlphaStrategyResetRequest;
+use crate::alpha_trading::{AlphaStrategyResetRequest, StrategyPerformanceQuery};
 use crate::error::ApiError;
 use crate::live::StartLiveTrackerRequest;
 use crate::mempool_signals::{MempoolSignalKind, MempoolSignalQuery};
@@ -127,6 +127,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(alpha_strategy_detail);
 
+    let alpha_strategy_performance = warp::path!("alpha" / "strategies" / String / "performance")
+        .and(warp::get())
+        .and(warp::query::<StrategyPerformanceQuery>())
+        .and(with_state(state.clone()))
+        .and_then(alpha_strategy_performance);
+
     let alpha_strategy_reset = warp::path!("alpha" / "strategies" / String / "reset-paper-state")
         .and(warp::post())
         .and(warp::body::json())
@@ -190,6 +196,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(alpha_strategy_performance)
         .or(alpha_strategy_reset)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)
@@ -371,6 +378,28 @@ async fn alpha_strategy_detail(
         )),
         Err(error) => Ok(error_response(
             format!("failed to load alpha strategy: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+async fn alpha_strategy_performance(
+    strategy_id: String,
+    query: StrategyPerformanceQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .strategy_performance(&strategy_id, query)
+        .await
+    {
+        Ok(Some(performance)) => Ok(json_response(&performance, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "alpha strategy not found",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to load alpha strategy performance: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }

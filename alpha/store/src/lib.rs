@@ -1,5 +1,7 @@
 //! PostgreSQL persistence for the alpha trading runtime.
 
+pub mod performance;
+
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
