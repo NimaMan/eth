@@ -9,7 +9,7 @@ use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlockReplayStoreWriter};
 
 use crate::memory;
-use crate::range_indexer::{RangeIndexError, RangeIndexJob};
+use crate::ranges::{RangeIndexError, RangeIndexJob};
 
 const TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH: u64 = 25;
 const TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY: usize = 1;

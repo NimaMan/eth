@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::range_indexer::progress::now_unix_secs;
+use crate::ranges::progress::now_unix_secs;
 use tx_processor::{ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheStore};
 
 #[derive(Clone, Debug, Serialize)]

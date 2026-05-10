@@ -5,8 +5,8 @@ use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
-use crate::range_indexer::{RangeIndexJob, RangeIndexState};
-use crate::views::{network::TokenNetworkView, pool::PoolView};
+use crate::ranges::{RangeIndexJob, RangeIndexState};
+use crate::read_models::{network::TokenNetworkView, pool::PoolView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenListResponse {
@@ -151,7 +151,7 @@ pub async fn token_list(run: &RangeIndexJob) -> TokenListResponse {
 pub fn build_denom_symbols(token: &ERC20Token) -> BTreeMap<String, String> {
     let mut symbols = BTreeMap::new();
     for pool in token.all_pool_bases() {
-        if let Some(symbol) = crate::views::pool::denom_symbol(&pool.identity.denom_address) {
+        if let Some(symbol) = crate::read_models::pool::denom_symbol(&pool.identity.denom_address) {
             symbols.insert(pool.identity.denom_address.clone(), symbol);
         }
     }

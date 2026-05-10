@@ -1,7 +1,7 @@
 use eth_token::tracking::{BlockTokenProcessor, TokenBlockUpdateReport};
 
-use crate::range_indexer::progress::{now_unix_secs, RangeIndexStatus};
-use crate::range_indexer::{RangeIndexError, RangeIndexJob, RangeIndexState};
+use crate::ranges::progress::{now_unix_secs, RangeIndexStatus};
+use crate::ranges::{RangeIndexError, RangeIndexJob, RangeIndexState};
 
 use super::cache::ProcessedBlockDiskCacheMetrics;
 

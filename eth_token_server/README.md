@@ -48,7 +48,7 @@ processed-block disk cache read
 
 When the processed-block disk cache is hot, cache reads are usually only a few
 milliseconds per block. Slow range builds should therefore be profiled around
-`range_indexer/pipeline/apply.rs` and `range_indexer/pipeline/state.rs`, not
+`src/ranges/pipeline/apply.rs` and `src/ranges/pipeline/state.rs`, not
 only around cache loading.
 
 The token block apply path already uses block-scoped simulator sessions through
@@ -144,13 +144,31 @@ python3 eth_token_server/scripts/token_pipeline_profile_summary.py \
 | Need | Start here |
 | --- | --- |
 | Public server crate exports | `src/lib.rs` |
-| Runtime config | `src/config.rs`, `../config.env` |
-| Live token tracker host | `src/live.rs` |
-| HTTP routes/server | `src/server/`, `src/main.rs` |
-| Token/pool DTOs | `src/views/token.rs`, `src/views/pool.rs`, `src/views/live.rs` |
-| Token active-block lookup | `src/views/activity.rs` |
-| Mempool signal endpoint | `src/mempool_signals.rs` |
+| Runtime config and process logging | `src/app/config.rs`, `src/app/logging.rs`, `../config.env` |
+| Shared runtime state | `src/app/state.rs` |
+| HTTP routes/server | `src/http/`, `src/main.rs` |
+| Range indexing orchestration | `src/ranges/` |
+| Token/pool DTOs | `src/read_models/token/`, `src/read_models/pool/`, `src/read_models/live.rs` |
+| Token active-block lookup | `src/read_models/activity.rs` |
+| Mempool and alpha stores | `src/stores/` |
+| Live token tracker host | `src/live/` |
 | Processed-block cache sizing | `examples/processed_block_disk_cache_size.rs` |
+
+The active layout keeps runtime concerns separate:
+
+```text
+src/app/          config, logging, shared server state
+src/http/         warp server, route registry, SSE helpers
+src/ranges/       historical range job manager and block-apply pipeline
+src/read_models/  DTO/read-model builders for tokens, pools, live status, runs
+src/stores/       external read stores for mempool signals and alpha tables
+src/live/         live warmup/tail tracker host
+```
+
+Compatibility re-exports for the old `config`, `server`, `range_indexer`,
+`views`, `alpha_trading`, and `mempool_signals` module names remain in
+`src/lib.rs` for examples and downstream callers, but new code should use the
+folders above.
 
 ## Tests And Commands
 

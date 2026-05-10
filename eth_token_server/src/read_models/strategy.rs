@@ -7,9 +7,9 @@ use eth_pool_classification::{
 use eth_token::pools::TaxBucket;
 use serde::Serialize;
 
-use crate::range_indexer::progress::now_unix_secs;
-use crate::range_indexer::RangeIndexJob;
-use crate::views::pool::PoolView;
+use crate::ranges::progress::now_unix_secs;
+use crate::ranges::RangeIndexJob;
+use crate::read_models::pool::PoolView;
 
 const ETH_BLOCK_SECONDS: u64 = 12;
 const WINNER_THRESHOLDS: [f64; 6] = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0];

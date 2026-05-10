@@ -4,11 +4,11 @@ use eth_live_feed::LiveTokenRuntimeConfig;
 use eyre::{eyre, Result};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
-use crate::alpha_trading::AlphaTradingStore;
-use crate::config::TokenServerConfig;
+use crate::app::config::TokenServerConfig;
 use crate::live::LiveTracker;
-use crate::mempool_signals::MempoolSignalStore;
-use crate::range_indexer::RangeIndexManager;
+use crate::ranges::RangeIndexManager;
+use crate::stores::alpha_trading::AlphaTradingStore;
+use crate::stores::mempool_signals::MempoolSignalStore;
 use reth_chain_query::reth_index::AddressBlockParticipationWriter;
 use tx_processor::{ProcessedBlockDiskCacheStore, ProcessedBlockReplayStoreWriter};
 

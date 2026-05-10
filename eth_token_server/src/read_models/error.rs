@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::range_indexer::{RangeIndexError, RangeIndexJob};
+use crate::ranges::{RangeIndexError, RangeIndexJob};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ErrorListResponse {

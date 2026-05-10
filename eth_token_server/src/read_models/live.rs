@@ -5,8 +5,8 @@ use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, Tr
 use serde::Serialize;
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
-use crate::views::token::{TokenActivitySummary, TokenView};
-use crate::views::{network::TokenNetworkView, pool::PoolView};
+use crate::read_models::token::{TokenActivitySummary, TokenView};
+use crate::read_models::{network::TokenNetworkView, pool::PoolView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LiveStatusResponse {
@@ -97,8 +97,8 @@ pub async fn token_detail(
     );
     let recent_activity = token.activity.recent_blocks(50);
     let pools = PoolView::from_token_pools_with_activity(token, &recent_activity);
-    let denom_symbols = crate::views::token::build_denom_symbols(token);
-    let activity_summary = crate::views::token::build_activity_summary(token);
+    let denom_symbols = crate::read_models::token::build_denom_symbols(token);
+    let activity_summary = crate::read_models::token::build_activity_summary(token);
 
     Some(LiveTokenDetailResponse {
         progress: state.progress.clone(),

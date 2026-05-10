@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::range_indexer::{
-    RangeIndexJob, RangeIndexProgress, RangeIndexRetentionMode, RangeIndexStatus,
-};
+use crate::ranges::{RangeIndexJob, RangeIndexProgress, RangeIndexRetentionMode, RangeIndexStatus};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RunListResponse {

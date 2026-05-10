@@ -7,8 +7,8 @@ use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
-use crate::config::TokenServerConfig;
-use crate::views::run::RunSummaryView;
+use crate::app::config::TokenServerConfig;
+use crate::read_models::run::RunSummaryView;
 use tx_processor::{ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter};
 
 use super::pipeline;

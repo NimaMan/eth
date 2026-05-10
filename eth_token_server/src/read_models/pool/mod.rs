@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::cmp::Ordering;
 
-use crate::range_indexer::RangeIndexJob;
+use crate::ranges::RangeIndexJob;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolListResponse {

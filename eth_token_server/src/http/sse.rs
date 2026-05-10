@@ -6,8 +6,8 @@ use futures_util::stream;
 use futures_util::Stream;
 use warp::sse::Event;
 
-use crate::range_indexer::RangeIndexJob;
-use crate::views;
+use crate::ranges::RangeIndexJob;
+use crate::read_models as views;
 
 pub fn progress_stream(
     run: Arc<RangeIndexJob>,

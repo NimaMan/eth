@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::Instrument;
 use tx_processor::PoolBuySellSimulator;
 
-use crate::range_indexer::{RangeIndexError, RangeIndexJob};
+use crate::ranges::{RangeIndexError, RangeIndexJob};
 
 use super::cache::ProcessedBlockWithMetrics;
 use super::state;
