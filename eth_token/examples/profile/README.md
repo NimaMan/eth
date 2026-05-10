@@ -225,9 +225,54 @@ block processing. The current live runtime clones the full
 `LiveTokenState`, dropping the previous full processor value. That copy/drop
 cycle grows as tracked token/pool/network state grows and dominates live warmup.
 
-The next fix should move live block application to a processor owner that mutates
-one processor in place, while progress/view state is published separately. A
-short-term implementation can use a dedicated processor lock and accept that
-heavy view endpoints wait during block apply. The cleaner version should publish
-view snapshots on a slower cadence so `/live/status` stays cheap without cloning
-the processor every block.
+This was fixed by applying live blocks to one in-place processor. Heavy read
+endpoints may wait for the current block apply to finish, which is the right
+tradeoff until we add lower-cadence view snapshots.
+
+## Captured Live Warmup Result: In-Place Processor
+
+Captured on 2026-05-10 after removing per-block processor clone/restore from
+`LiveTokenRuntime`.
+
+Run:
+
+```text
+TOKEN_SERVER_LOG_RUN_ID=live_warmup_7000_inplace_1778417096
+TOKEN_SERVER_BIND=127.0.0.1:8768
+LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
+```
+
+Profile log:
+
+```text
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/live_warmup_7000_inplace_1778417096/token_pipeline_profile.jsonl
+```
+
+Summary:
+
+```text
+live_profile_rows=7008
+warmup rows=7000
+warmup elapsed from server status=83.4s until live
+warmup block_apply_wall=59.708s total, 8.53ms avg/block, p95=19.86ms, p99=70.75ms, max=190.99ms
+warmup token_apply=53.508s total, 7.64ms avg/block
+warmup state_update=6.191s total, 0.88ms avg/block
+warmup disk_cache_read=18.650s total, 2.66ms avg/block
+state_lock_wait=0.000s total
+```
+
+1K buckets:
+
+```text
+blocks 1-1000:    wall=5.493s  token=4.890s  disk=2.315s  update=0.601s  tokens=87  pools=43
+blocks 1001-2000: wall=7.469s  token=6.722s  disk=2.541s  update=0.746s  tokens=187 pools=108
+blocks 2001-3000: wall=6.434s  token=5.650s  disk=2.477s  update=0.782s  tokens=294 pools=169
+blocks 3001-4000: wall=5.522s  token=4.712s  disk=2.468s  update=0.808s  tokens=357 pools=208
+blocks 4001-5000: wall=10.845s token=9.883s  disk=2.707s  update=0.960s  tokens=445 pools=274
+blocks 5001-6000: wall=11.298s token=10.179s disk=2.927s  update=1.117s  tokens=557 pools=345
+blocks 6001-7000: wall=12.648s token=11.470s disk=3.215s  update=1.176s  tokens=661 pools=410
+```
+
+The run entered live mode and then caught up 8 live-tail blocks. The profile
+shows the clone/restore bottleneck was removed; remaining warmup cost is now
+normal token block work plus processed-block cache reads.

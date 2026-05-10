@@ -123,9 +123,9 @@ simulation_failures.jsonl          other simulator warnings/errors
 - `token_sim_session_profile`: one row per pool simulation branch, including
   whether a historical/live simulator session was created or reused. These rows
   also carry the range `run_id` or `live` for live processing.
-- `live_token_apply_profile`: live warmup/tail wall time around processor clone,
-  token block processing, retention, processor restore, and processed-block
-  cache read/write timing.
+- `live_token_apply_profile`: live warmup/tail wall time around state-lock wait,
+  in-place token block processing, retention, progress/event update, and
+  processed-block cache read/write timing.
 
 Timing fields are emitted in microseconds as `*_us`; matching `*_ms` fields are
 kept for quick inspection and older tooling.

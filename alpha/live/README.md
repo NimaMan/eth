@@ -56,6 +56,23 @@ Mempool processor and token server are readers/consumers.
 and control-address context, but it must not mutate canonical token state.
 Speculative mempool findings should be emitted as risk/signals.
 
+The runtime applies blocks with one long-lived `LiveBlockTokenProcessor`.
+Warmup and live tail use the same processor instance:
+
+```text
+load processed block
+  -> lock live token state for mutation
+  -> apply the block to the in-memory processor
+  -> update progress/events
+  -> unlock for readers
+```
+
+Do not clone the processor per block. The processor contains the token registry,
+pool indexes, and token network graphs; cloning it in the warmup loop makes
+startup cost grow with tracked state instead of with the block being applied.
+Read endpoints may wait for the current block apply to finish. That is the
+intended tradeoff until we add a separate snapshot publisher for heavy views.
+
 ## Hosted In One Process For Now
 
 For the current implementation, `eth_token_server` can host the live token

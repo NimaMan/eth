@@ -62,6 +62,12 @@ Warmup replays old confirmed blocks with the regular Reth post-block metadata pr
 
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, Redis stream tailing, and read-only consumers.
 
+`LiveTokenRuntime` mutates one `LiveBlockTokenProcessor` in place. It does not
+clone the processor for every block. The state lock is held only after a
+processed block has been loaded and only while applying that block and updating
+progress. This keeps warmup cost proportional to block work instead of to the
+full accumulated token registry.
+
 ## Lessons From Python
 
 The Python `LiveBlockTokenProcessor` plus `LiveTokenTracker` already showed the value of:

@@ -8,7 +8,6 @@ use eth_live_state::keys;
 use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
-use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::tracking::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
@@ -589,89 +588,79 @@ impl LiveTokenRuntime {
         P: TokenDiscoveryProvider,
     {
         let block_apply_started = Instant::now();
-        let clone_started = Instant::now();
-        let mut processor = self.clone_processor_for_apply(block_number).await;
-        let clone_processor_us = clone_started.elapsed().as_micros();
-        let apply_started = Instant::now();
-        let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
         let block_transaction_count = loaded.block.transactions.len();
-        let tracked_tokens_before = processor.registry().tokens.len();
-        let tracked_pools_before: usize = processor
-            .registry()
-            .tokens
-            .values()
-            .map(|token| token.pool_count())
-            .sum();
         let block_source = loaded.source;
         let upstream_ms = loaded.upstream_ms;
         let disk_cache_hit = loaded.disk_cache_hit;
         let disk_cache_read_ms = loaded.disk_cache_read_ms;
         let disk_cache_write_ms = loaded.disk_cache_write_ms;
+
+        let state_lock_started = Instant::now();
+        let mut state = self.inner.state.write().await;
+        let state_lock_wait_us = state_lock_started.elapsed().as_micros();
+        state.progress.current_block = Some(block_number);
+        state.progress.updated_at_unix_secs = now_unix_secs();
+
+        let apply_started = Instant::now();
+        let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
+        let tracked_tokens_before = state.processor.registry().tokens.len();
+        let tracked_pools_before: usize = state
+            .processor
+            .registry()
+            .tokens
+            .values()
+            .map(|token| token.pool_count())
+            .sum();
         let process_block_started = Instant::now();
-        let report = match tokio::time::timeout(
-            apply_timeout,
-            processor.process_block_live_with_discovery_provider(
+        let report = state
+            .processor
+            .process_block_live_with_discovery_provider(
                 &loaded.block,
                 discovery_provider,
                 pool_simulator,
-            ),
-        )
-        .await
-        {
-            Ok(report) => report,
-            Err(_) => {
-                let message = format!(
-                    "live token block apply timed out after {} ms at block {} source={} txs={} tracked_tokens_before={} tracked_pools_before={}",
-                    self.inner.config.block_apply_timeout_ms,
-                    block_number,
-                    block_source,
-                    block_transaction_count,
-                    tracked_tokens_before,
-                    tracked_pools_before
-                );
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    block_number,
-                    is_live_tail,
-                    source = block_source,
-                    txs = block_transaction_count,
-                    tracked_tokens_before,
-                    tracked_pools_before,
-                    timeout_ms = self.inner.config.block_apply_timeout_ms,
-                    clone_processor_ms = clone_processor_us / 1_000,
-                    upstream_ms,
-                    disk_cache_hit,
-                    disk_cache_read_ms,
-                    disk_cache_write_ms,
-                    error = %message,
-                    "live token block apply timed out"
-                );
-                bail!("{message}");
-            }
-        };
+            )
+            .await;
         let process_block_us = process_block_started.elapsed().as_micros();
+        if process_block_started.elapsed() > apply_timeout {
+            tracing::warn!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number,
+                is_live_tail,
+                source = block_source,
+                txs = block_transaction_count,
+                tracked_tokens_before,
+                tracked_pools_before,
+                slow_threshold_ms = self.inner.config.block_apply_timeout_ms,
+                process_block_ms = process_block_us / 1_000,
+                upstream_ms,
+                disk_cache_hit,
+                disk_cache_read_ms,
+                disk_cache_write_ms,
+                "slow live token block apply"
+            );
+        }
         let retention_started = Instant::now();
-        let retention_report = processor.apply_index_retention_policy(block_number);
+        let retention_report = state.processor.apply_index_retention_policy(block_number);
         let retention_us = retention_started.elapsed().as_micros();
         let token_apply_us = apply_started.elapsed().as_micros();
         let token_apply_ms = token_apply_us / 1_000;
 
-        let restore_started = Instant::now();
-        let event = self
-            .restore_processor_after_apply(
-                processor,
-                report,
-                retention_report,
-                loaded,
-                token_apply_ms,
-                is_live_tail,
-            )
-            .await;
-        let restore_us = restore_started.elapsed().as_micros();
+        let state_update_started = Instant::now();
+        let event = apply_report(
+            &mut state,
+            report,
+            retention_report,
+            loaded,
+            token_apply_ms,
+            is_live_tail,
+        );
+        let should_log_progress = should_log_block_apply(&state.progress, is_live_tail);
+        let progress = should_log_progress.then(|| state.progress.clone());
+        let state_update_us = state_update_started.elapsed().as_micros();
         let block_apply_wall_us = block_apply_started.elapsed().as_micros();
-        let measured_us = clone_processor_us
+        let measured_us = state_lock_wait_us
             .saturating_add(token_apply_us)
-            .saturating_add(restore_us);
+            .saturating_add(state_update_us);
         let unaccounted_us = block_apply_wall_us.saturating_sub(measured_us);
         tracing::info!(
             target: LIVE_TOKEN_APPLY_PROFILE_LOG_TARGET,
@@ -681,21 +670,21 @@ impl LiveTokenRuntime {
             txs = block_transaction_count,
             tracked_tokens_before,
             tracked_pools_before,
-            clone_processor_us,
+            state_lock_wait_us,
             process_block_us,
             retention_us,
             token_apply_us,
-            restore_us,
+            state_update_us,
             block_apply_wall_us,
             unaccounted_us,
             upstream_us = upstream_ms.saturating_mul(1_000),
             disk_cache_read_us = disk_cache_read_ms.saturating_mul(1_000),
             disk_cache_write_us = disk_cache_write_ms.saturating_mul(1_000),
-            clone_processor_ms = clone_processor_us / 1_000,
+            state_lock_wait_ms = state_lock_wait_us / 1_000,
             process_block_ms = process_block_us / 1_000,
             retention_ms = retention_us / 1_000,
             token_apply_ms,
-            restore_ms = restore_us / 1_000,
+            state_update_ms = state_update_us / 1_000,
             block_apply_wall_ms = block_apply_wall_us / 1_000,
             unaccounted_ms = unaccounted_us / 1_000,
             upstream_ms,
@@ -704,59 +693,31 @@ impl LiveTokenRuntime {
             disk_cache_write_ms,
             "live token apply profile"
         );
-        let _ = self.inner.event_tx.send(event);
-        Ok(())
-    }
-
-    async fn clone_processor_for_apply(&self, block_number: u64) -> LiveBlockTokenProcessor {
-        let mut state = self.inner.state.write().await;
-        state.progress.current_block = Some(block_number);
-        state.progress.updated_at_unix_secs = now_unix_secs();
-        state.processor.clone()
-    }
-
-    async fn restore_processor_after_apply(
-        &self,
-        processor: LiveBlockTokenProcessor,
-        report: TokenBlockUpdateReport,
-        retention_report: Option<eth_token::tracking::LiveTokenRetentionReport>,
-        loaded: LiveBlockLoad,
-        token_apply_ms: u128,
-        is_live_tail: bool,
-    ) -> LiveTokenEvent {
-        let mut state = self.inner.state.write().await;
-        state.processor = processor;
-        let event = apply_report(
-            &mut state,
-            report,
-            retention_report,
-            loaded,
-            token_apply_ms,
-            is_live_tail,
-        );
-        if should_log_block_apply(&state.progress, is_live_tail) {
+        if let Some(progress) = progress {
             tracing::info!(
                 target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                status = ?state.progress.status,
-                current_block = ?state.progress.current_block,
-                blocks_processed = state.progress.blocks_processed,
-                warmup_total_blocks = state.progress.warmup_total_blocks,
-                live_blocks_processed = state.progress.live_blocks_processed,
-                txs_processed = state.progress.txs_processed,
-                tx_failures = state.progress.tx_failures,
-                tracked_tokens = state.progress.tracked_tokens,
-                tracked_pools = state.progress.tracked_pools,
-                tracked_v2_pools = state.progress.tracked_v2_pools,
-                tracked_v3_pools = state.progress.tracked_v3_pools,
-                tracked_v4_pools = state.progress.tracked_v4_pools,
-                block_source = ?state.progress.last_block_source,
-                disk_cache_hits = state.progress.processed_block_disk_cache_hits,
-                disk_cache_misses = state.progress.processed_block_disk_cache_misses,
-                token_apply_ms = ?state.progress.last_block_token_apply_ms,
+                status = ?progress.status,
+                current_block = ?progress.current_block,
+                blocks_processed = progress.blocks_processed,
+                warmup_total_blocks = progress.warmup_total_blocks,
+                live_blocks_processed = progress.live_blocks_processed,
+                txs_processed = progress.txs_processed,
+                tx_failures = progress.tx_failures,
+                tracked_tokens = progress.tracked_tokens,
+                tracked_pools = progress.tracked_pools,
+                tracked_v2_pools = progress.tracked_v2_pools,
+                tracked_v3_pools = progress.tracked_v3_pools,
+                tracked_v4_pools = progress.tracked_v4_pools,
+                block_source = ?progress.last_block_source,
+                disk_cache_hits = progress.processed_block_disk_cache_hits,
+                disk_cache_misses = progress.processed_block_disk_cache_misses,
+                token_apply_ms = ?progress.last_block_token_apply_ms,
                 "live token runtime applied block"
             );
         }
-        event
+        drop(state);
+        let _ = self.inner.event_tx.send(event);
+        Ok(())
     }
 
     async fn mark_live(&self) {
