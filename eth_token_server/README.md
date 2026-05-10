@@ -94,13 +94,25 @@ cargo run --manifest-path blockchains/eth/Cargo.toml -p tx_simulator --release \
   --blocks 25057078 --iterations 1 --mode feasibility
 ```
 
-The server writes token pipeline measurements to a dedicated daily JSON log:
+The server writes one log directory per process under `TOKEN_SERVER_LOG_DIR`
+(default: `/home/nima/code/crypto/blockchains/eth/logs/eth_token_server`):
 
 ```bash
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/token_pipeline_profile.log.YYYY-MM-DD
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/run-<unix>-pid-<pid>/
 ```
 
-It contains three targets:
+Set `TOKEN_SERVER_LOG_RUN_ID=<name>` to force a predictable run folder name for
+repeatable profiling. Each run folder contains:
+
+```text
+server.log                         server lifecycle plus warnings/errors
+live_token_tracker.jsonl           live warmup/tail progress and failures
+token_pipeline_profile.jsonl       token pipeline profile rows
+pool_buy_sell_sim_failures.jsonl   pool buy/sell simulator warnings/errors only
+simulation_failures.jsonl          other simulator warnings/errors
+```
+
+`token_pipeline_profile.jsonl` contains three targets:
 
 - `token_range_apply_profile`: range-runner wall time around processor take,
   token apply, state update, and processed-block disk cache read.
@@ -111,6 +123,9 @@ It contains three targets:
 - `token_sim_session_profile`: one row per pool simulation branch, including
   whether a historical/live simulator session was created or reused. These rows
   also carry the range `run_id` or `live` for live processing.
+- `live_token_apply_profile`: live warmup/tail wall time around processor clone,
+  token block processing, retention, processor restore, and processed-block
+  cache read/write timing.
 
 Timing fields are emitted in microseconds as `*_us`; matching `*_ms` fields are
 kept for quick inspection and older tooling.
@@ -119,7 +134,7 @@ Summarize a captured profile log:
 
 ```bash
 python3 eth_token_server/scripts/token_pipeline_profile_summary.py \
-  /home/nima/code/crypto/blockchains/eth/logs/eth_token_server/token_pipeline_profile.log.YYYY-MM-DD \
+  /home/nima/code/crypto/blockchains/eth/logs/eth_token_server/<run-id>/token_pipeline_profile.jsonl \
   --run-id run-1 \
   --csv /tmp/token_pipeline_profile.csv
 ```
@@ -140,7 +155,7 @@ python3 eth_token_server/scripts/token_pipeline_profile_summary.py \
 ## Tests And Commands
 
 ```bash
-RUST_LOG=info cargo run -p eth_token_server
+cargo run -p eth_token_server
 curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/live/status
 cargo run -p eth_token_server --example processed_block_disk_cache_size -- --fill-missing-then-read

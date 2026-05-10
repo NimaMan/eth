@@ -30,7 +30,7 @@ after the block:
 
 The helper script starts an isolated `eth_token_server`, runs one historical
 range-index job, waits for completion, and summarizes
-`token_pipeline_profile.log`.
+`token_pipeline_profile.jsonl` from that process run directory.
 
 Defaults match the range used while measuring the post-block simulation change:
 
@@ -44,14 +44,26 @@ Useful overrides:
 ```bash
 TOKEN_PROFILE_BIND=127.0.0.1:8766
 TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block
+TOKEN_PROFILE_LOG_RUN_ID=profile_25052270_25059269
 ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
-TOKEN_PROFILE_RUST_LOG=info
 ```
 
 The script writes a temporary config to
 `/tmp/eth_token_server_profile_post_block.env` by copying the shared config and
-overriding only the isolated bind address, log directory, and live auto-start
-setting.
+overriding only the isolated bind address, log root, log run id, and live
+auto-start setting.
+
+The process log files are written under:
+
+```text
+<TOKEN_PROFILE_LOG_DIR>/<TOKEN_PROFILE_LOG_RUN_ID>/
+```
+
+The profile summary reads:
+
+```text
+<TOKEN_PROFILE_LOG_DIR>/<TOKEN_PROFILE_LOG_RUN_ID>/token_pipeline_profile.jsonl
+```
 
 After the run, the per-block CSV is written to:
 
@@ -71,9 +83,9 @@ shortcuts.
 Reproduce:
 
 ```bash
-TOKEN_PROFILE_RUST_LOG='warn,token_range_apply_profile=info,token_block_processor_profile=info,token_sim_session_profile=info' \
 TOKEN_PROFILE_BIND=127.0.0.1:8767 \
 TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block_8767_final \
+TOKEN_PROFILE_LOG_RUN_ID=profile_25052270_25059269_final \
 START_BLOCK=25052270 \
 END_BLOCK=25059269 \
   blockchains/eth/eth_token/examples/profile/run_token_pipeline_profile.sh
@@ -88,7 +100,7 @@ Output CSV:
 Profile log:
 
 ```text
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block_8767_final/token_pipeline_profile.log.2026-05-10
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block_8767_final/profile_25052270_25059269_final/token_pipeline_profile.jsonl
 ```
 
 Summary:
@@ -160,3 +172,62 @@ The next block-level candidates are:
 Do not make the default profile faster by simulating each pool once at the end
 of the whole range. That is a different range-analysis mode, not the live
 block-by-block pipeline.
+
+## Captured Live Warmup Result: 7K Request
+
+Captured on 2026-05-10 after adding `live_token_apply_profile`.
+
+Run:
+
+```text
+TOKEN_SERVER_LOG_RUN_ID=live_warmup_7000_profile_1778416273
+TOKEN_SERVER_BIND=127.0.0.1:8768
+LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
+```
+
+Profile log:
+
+```text
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/live_warmup_7000_profile_1778416273/token_pipeline_profile.jsonl
+```
+
+The run was stopped after 1,423 warmup blocks because the bottleneck was already
+clear and the remaining 7K run would only extend the same slope.
+
+Summary:
+
+```text
+live_profile_rows=1423
+profile window=300.0s
+block_apply_wall=300.020s total, 210.84ms avg/block, p95=377.85ms, p99=401.60ms, max=452.20ms
+clone_processor=135.709s total, 95.37ms avg/block, 45.2% of wall
+restore_processor=154.441s total, 108.53ms avg/block, 51.5% of wall
+token_apply=9.868s total, 6.94ms avg/block, 3.3% of wall
+disk_cache_read=6.913s total, 4.86ms avg/block
+```
+
+250-block buckets:
+
+```text
+blocks 1-250:     wall=4.672s  clone=1.517s  restore=1.659s  token=1.496s  tokens=39  pools=13
+blocks 251-500:   wall=24.317s clone=10.398s restore=12.206s token=1.713s  tokens=54  pools=20
+blocks 501-750:   wall=53.313s clone=24.034s restore=27.550s token=1.728s  tokens=74  pools=34
+blocks 751-1000:  wall=70.864s clone=32.259s restore=37.097s token=1.508s  tokens=91  pools=44
+blocks 1001-1250: wall=82.583s clone=37.902s restore=42.731s token=1.950s  tokens=115 pools=55
+blocks 1251-1423: wall=64.271s clone=29.599s restore=33.198s token=1.474s  tokens=130 pools=63
+```
+
+Interpretation:
+
+The live warmup slowdown is not processed-block cache read time and not token
+block processing. The current live runtime clones the full
+`LiveBlockTokenProcessor` before every block apply, then restores it into
+`LiveTokenState`, dropping the previous full processor value. That copy/drop
+cycle grows as tracked token/pool/network state grows and dominates live warmup.
+
+The next fix should move live block application to a processor owner that mutates
+one processor in place, while progress/view state is published separately. A
+short-term implementation can use a dedicated processor lock and accept that
+heavy view endpoints wait during block apply. The cleaner version should publish
+view snapshots on a slower cadence so `/live/status` stays cheap without cloning
+the processor every block.

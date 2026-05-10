@@ -34,6 +34,7 @@ use super::state::LiveTokenState;
 use super::time::now_unix_secs;
 
 const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
+const LIVE_TOKEN_APPLY_PROFILE_LOG_TARGET: &str = "live_token_apply_profile";
 
 #[derive(Clone)]
 pub struct LiveTokenRuntime {
@@ -587,7 +588,10 @@ impl LiveTokenRuntime {
     where
         P: TokenDiscoveryProvider,
     {
+        let block_apply_started = Instant::now();
+        let clone_started = Instant::now();
         let mut processor = self.clone_processor_for_apply(block_number).await;
+        let clone_processor_us = clone_started.elapsed().as_micros();
         let apply_started = Instant::now();
         let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
         let block_transaction_count = loaded.block.transactions.len();
@@ -599,6 +603,11 @@ impl LiveTokenRuntime {
             .map(|token| token.pool_count())
             .sum();
         let block_source = loaded.source;
+        let upstream_ms = loaded.upstream_ms;
+        let disk_cache_hit = loaded.disk_cache_hit;
+        let disk_cache_read_ms = loaded.disk_cache_read_ms;
+        let disk_cache_write_ms = loaded.disk_cache_write_ms;
+        let process_block_started = Instant::now();
         let report = match tokio::time::timeout(
             apply_timeout,
             processor.process_block_live_with_discovery_provider(
@@ -629,19 +638,25 @@ impl LiveTokenRuntime {
                     tracked_tokens_before,
                     tracked_pools_before,
                     timeout_ms = self.inner.config.block_apply_timeout_ms,
-                    upstream_ms = loaded.upstream_ms,
-                    disk_cache_hit = loaded.disk_cache_hit,
-                    disk_cache_read_ms = loaded.disk_cache_read_ms,
-                    disk_cache_write_ms = loaded.disk_cache_write_ms,
+                    clone_processor_ms = clone_processor_us / 1_000,
+                    upstream_ms,
+                    disk_cache_hit,
+                    disk_cache_read_ms,
+                    disk_cache_write_ms,
                     error = %message,
                     "live token block apply timed out"
                 );
                 bail!("{message}");
             }
         };
+        let process_block_us = process_block_started.elapsed().as_micros();
+        let retention_started = Instant::now();
         let retention_report = processor.apply_index_retention_policy(block_number);
-        let token_apply_ms = apply_started.elapsed().as_millis();
+        let retention_us = retention_started.elapsed().as_micros();
+        let token_apply_us = apply_started.elapsed().as_micros();
+        let token_apply_ms = token_apply_us / 1_000;
 
+        let restore_started = Instant::now();
         let event = self
             .restore_processor_after_apply(
                 processor,
@@ -652,6 +667,43 @@ impl LiveTokenRuntime {
                 is_live_tail,
             )
             .await;
+        let restore_us = restore_started.elapsed().as_micros();
+        let block_apply_wall_us = block_apply_started.elapsed().as_micros();
+        let measured_us = clone_processor_us
+            .saturating_add(token_apply_us)
+            .saturating_add(restore_us);
+        let unaccounted_us = block_apply_wall_us.saturating_sub(measured_us);
+        tracing::info!(
+            target: LIVE_TOKEN_APPLY_PROFILE_LOG_TARGET,
+            block_number,
+            is_live_tail,
+            source = block_source,
+            txs = block_transaction_count,
+            tracked_tokens_before,
+            tracked_pools_before,
+            clone_processor_us,
+            process_block_us,
+            retention_us,
+            token_apply_us,
+            restore_us,
+            block_apply_wall_us,
+            unaccounted_us,
+            upstream_us = upstream_ms.saturating_mul(1_000),
+            disk_cache_read_us = disk_cache_read_ms.saturating_mul(1_000),
+            disk_cache_write_us = disk_cache_write_ms.saturating_mul(1_000),
+            clone_processor_ms = clone_processor_us / 1_000,
+            process_block_ms = process_block_us / 1_000,
+            retention_ms = retention_us / 1_000,
+            token_apply_ms,
+            restore_ms = restore_us / 1_000,
+            block_apply_wall_ms = block_apply_wall_us / 1_000,
+            unaccounted_ms = unaccounted_us / 1_000,
+            upstream_ms,
+            disk_cache_hit,
+            disk_cache_read_ms,
+            disk_cache_write_ms,
+            "live token apply profile"
+        );
         let _ = self.inner.event_tx.send(event);
         Ok(())
     }
