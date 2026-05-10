@@ -51,6 +51,288 @@ Frontend status semantics:
 If this file changes the focus order, stage names, or monitored fields, update
 `interface/asena/eth/static/bogaz.js` in the same change.
 
+## Token Detail Page Improvement Backlog
+
+These tasks target `/eth/tokens/live/:token_address/` and should be picked up
+one by one. They are UI/product tasks, not a change to the bottleneck focus
+order above.
+
+Playwright review on May 10, 2026:
+
+- The requested live URL
+  `/eth/tokens/live/0xb37494a6f836e9e8c86ff4df9c0134544e92bfcb/`
+  currently returns the detail shell with `token not found`, but still renders
+  the same summary cards and bottom sections with `unknown` / `-` values.
+- A populated control page,
+  `/eth/tokens/live/0x0c8ff351a41e4384ea2dc8e0e6f076e3a0e14e96/`,
+  shows the current layout: summary cards `Stage`, `Created`, `Risk`, `Pools`;
+  sections `Market Snapshot`, `Pools`, `Activity Blocks`, `Address PnL`,
+  `Token Network`, `Liquidity Tokens`; and bottom cards `Lifecycle`,
+  `Risk & Controls`, `Metadata`, `Creation`.
+- The populated page currently shows bottom-card duplication and noisy values:
+  `Lifecycle` repeats stage/latest/risk, `Risk & Controls` repeats generic
+  clear/no fields, `Metadata` includes `Decimals` and `Total supply raw`, and
+  buy/sell activity rows render values like `0.3500 0xc02aaa...756cc2`.
+- The current token network renders `67` visible nodes and `160` visible edges
+  for the populated page, including token/pool nodes and visible address labels
+  such as `0x67317c...bbc8a9`, which makes the graph hard to read.
+
+Likely implementation owners:
+
+- Template: `interface/asena/eth/tokens/templates/eth/tokens/detail.html`.
+- Detail rendering: `interface/asena/eth/tokens/static/js/tokens/detail.js`.
+- Activity rendering: `interface/asena/eth/tokens/static/js/tokens/activity.js`.
+- Network rendering:
+  `interface/asena/eth/tokens/static/js/tokens/network/graph.js`,
+  `interface/asena/eth/tokens/static/js/tokens/network/pnl.js`,
+  `interface/asena/eth/tokens/static/js/tokens/network/core.js`.
+- CSS:
+  `interface/asena/eth/tokens/static/css/tokens/detail.css`,
+  `interface/asena/eth/tokens/static/css/tokens/network/index.css`.
+- Backend data contracts if needed:
+  `eth_token_server/src/views/token.rs`,
+  `eth_token_server/src/views/pool.rs`,
+  `eth_token_server/src/views/network.rs`.
+
+### TD-1: Consolidate token facts and remove bottom cards
+
+Current state:
+
+- The top summary grid has `Stage`, `Created`, `Risk`, and `Pools`.
+- The bottom of the page has separate `Lifecycle`, `Risk & Controls`,
+  `Metadata`, and `Creation` cards.
+- Token-level useful fields are split across those bottom cards.
+- Low-value fields such as `Decimals` and `Total supply raw` are visible.
+- Generic `Risk clear` / `Risk unknown` appears in the top summary, lifecycle,
+  risk card, and pool card state strip.
+
+Target behavior:
+
+- Remove the bottom `Lifecycle`, `Risk & Controls`, `Metadata`, and `Creation`
+  cards from the token detail page.
+- Remove the generic `Risk` summary card and generic `Risk` display attributes.
+  If a token has concrete evidence such as hidden mint, liquidity removal, LP
+  approval, or ownership-control evidence, show that as explicit evidence or a
+  flag. Do not show empty `risk=clear` / `risk=unknown` boilerplate.
+- Add one top-level token facts card near the top of the page. It should merge
+  the useful `Metadata` and `Creation` information and keep token-level totals.
+- Keep token-level fields in this new card:
+  address/link, symbol, name, stage/latest block/latest timestamp, created
+  block/time, creator, creation tx, pool count/protocols, total transaction
+  count, active activity-block count, unique address count if available, total
+  buy volume, total sell volume, and total bribe ETH.
+- Do not show `total_supply_raw` or `decimals`. Only show scaled supply if a
+  later product decision says it is useful; default is to omit it.
+- Keep pool-level fields in pool cards only:
+  pool address/id, protocol, denom/currency, current liquidity, denom reserve,
+  token supply in pool, liquidity/FDV, price/initial, can buy, can sell, buy
+  tax, sell tax, pool lifecycle/stage, LP supply, LP holders, LP approval data,
+  pool creation block, trading block, and last sync.
+
+Implementation notes:
+
+- Replace the side `<aside class="token-detail-side">` cards in
+  `detail.html` with a single token facts section in the main flow.
+- Replace `renderDl(el.metadataList, ...)`, `renderDl(el.creationList, ...)`,
+  `renderDl(el.lifecycleList, ...)`, and `renderDl(el.riskList, ...)` in
+  `detail.js` with a focused token facts renderer.
+- Remove `detailRisk` from the summary grid and any generic risk field from
+  `renderDetail`. If explicit evidence remains, name it by evidence type.
+
+Validation:
+
+- Playwright page text for a populated token no longer contains headings
+  `Lifecycle`, `Risk & Controls`, `Metadata`, or `Creation`.
+- Playwright page text no longer contains `RISK clear`, `RISK unknown`,
+  `DECIMALS`, or `TOTAL SUPPLY RAW`.
+- The new token facts card contains transaction count, active blocks, total buy
+  volume, total sell volume, bribe ETH, creation block/time, creator, and
+  creation tx.
+- Pool cards still contain pool trading, liquidity, tax, LP, and pool lifecycle
+  fields.
+
+### TD-2: Audit token-level versus pool-level ownership
+
+Current state:
+
+- `Market Snapshot`, `Lifecycle`, `Risk & Controls`, and pool cards duplicate
+  some pool state and token state.
+- Token-level totals such as activity blocks and buy/sell volume are separated
+  from token identity/creation facts.
+- Pool-level facts such as buy/sell, tax, liquidity, and LP security leak into
+  generic token cards.
+
+Target behavior:
+
+- Treat token facts as the page-level identity and aggregate behavior:
+  identity, creation, latest observed block/time, number of transactions,
+  active blocks, total buy volume, total sell volume, bribes, unique addresses,
+  and number of pools.
+- Treat pool facts as execution and market state:
+  liquidity, reserves, price, FDV ratio, supply in pool, buy/sell viability,
+  taxes, LP holder/approval state, pool stage, pool activity, and pool-specific
+  last sync.
+- `Market Snapshot` may stay as an aggregate top section, but it should not
+  duplicate details that are already clearer in each pool card unless it is
+  clearly marked as "primary pool" or "aggregate".
+- Multi-pool tokens must avoid implying that one pool's buy/sell/tax state is a
+  token-level truth.
+
+Implementation notes:
+
+- Create a small field ownership matrix in the implementation PR description
+  before editing UI code.
+- Prefer deriving the top token facts from `TokenSummary` / `TokenView` fields
+  and pool sections from `PoolView`.
+- If a field can be both token-level and pool-level, label it explicitly, for
+  example `Primary pool liquidity` versus `Total buy volume`.
+
+Validation:
+
+- A token with one pool and a token with multiple pools both render without
+  ambiguous token-level buy/sell/tax values.
+- No pool-specific value appears in the token facts card unless its label says
+  `primary pool` or `aggregate`.
+- No token aggregate activity total appears inside a pool card unless it is
+  filtered to that pool.
+
+### TD-3: Simplify token network around hidden address patterns
+
+Current state:
+
+- The token network includes token nodes, pool nodes, pool connections, and many
+  visible short address labels.
+- The graph emphasizes obvious token/pool topology instead of hidden address
+  patterns.
+- Node radius currently mixes absolute profit, token balance, and activity
+  count, so large holders/activity can dominate even when PnL is the intended
+  signal.
+
+Target behavior:
+
+- On the token detail page, hide token and pool nodes from the visible graph.
+  Do not show connections to the pool as graph edges; that does not add value
+  here.
+- Focus the graph on address-to-address relationships that suggest hidden
+  coordination or manipulation: shared intermediary, shared fee source,
+  temporal coactivity, direct transfers, repeated buy/sell timing, bribe
+  relationships, creator-linked wallets, and other non-obvious address edges.
+- Size address nodes by absolute PnL only, using a stable min/max radius and a
+  log or square-root scale so one outlier does not flatten the graph.
+- Color address nodes by PnL sign: green for profit, red for loss, neutral gray
+  for flat/unknown.
+- Do not use raw or shortened addresses as visible node labels. Use compact
+  value labels such as `+0.76 ETH`, `-0.50 ETH`, or a role/cluster label when
+  available. Keep the full address in `<title>`, tooltip, and the PnL table.
+- Add a small summary above or beside the graph that reports visible clusters,
+  visible addresses, visible hidden-pattern edges, omitted addresses, and total
+  PnL represented.
+- Keep the Address PnL table as the numeric companion. Hover/click should
+  eventually cross-highlight table row and graph node.
+
+Implementation notes:
+
+- Frontend-only filtering can start in `network/graph.js`, but the better data
+  contract is in `eth_token_server/src/views/network.rs`: build a token-detail
+  graph view that filters to address nodes and address-to-address edges.
+- Update `node_score` / graph node selection so token and pool nodes do not
+  consume the visible node budget.
+- Update `networkNodeRadius` to use only `abs(total_profit)`.
+- Update `renderNetworkNode` so visible text does not render addresses.
+- Update the legend to remove the pool legend item and explain PnL color/size
+  plus hidden-pattern edge kinds.
+
+Validation:
+
+- Playwright on a populated token shows no visible graph labels containing
+  `0x` and no labels beginning with `pool_`.
+- The graph still renders useful address nodes and hidden-pattern edges when
+  network data exists.
+- Profitable addresses are green, losing addresses are red, and larger absolute
+  PnL addresses have visibly larger nodes.
+- The visible graph excludes token-to-pool and address-to-pool edges.
+
+### TD-4: Improve Activity Blocks with pool-aware tables and charts
+
+Current state:
+
+- The Activity Blocks section is useful for finding build ranges, but the
+  recent built activity table is hard to read.
+- Volume cells include the raw denom address, for example
+  `0.3500 0xc02aaa...756cc2`, even when the pool card already knows the denom.
+- There is no chart for buy/sell activity, transaction count, or bribe bursts.
+- Recent block activity is currently token-level; pool-level interpretation is
+  hard when a token has multiple pools or multiple denoms.
+
+Target behavior:
+
+- Keep the indexed activity-block summary and `Build Range` / `Open Builder`
+  actions as token-level controls.
+- Add a chart for recent built activity:
+  x-axis block/time, green buy-volume bars, red sell-volume bars, tx-count
+  marker or line, and bribe ETH markers when present.
+- Move or duplicate the recent built activity into pool cards as a `Pool
+  Activity` panel when the activity can be attributed to a pool. The pool card
+  should use the pool denom, so values render as `0.3500 ETH` or `0.3500 WETH`,
+  not `0.3500 0xc02aaa...756cc2`.
+- For token-level aggregate activity with multiple denoms, avoid concatenating
+  amount plus address. Use denom symbols in headers/chips, separate rows per
+  denom, or an aggregate display that has clear labels and full denom in the
+  tooltip only.
+- Add summary numbers near the chart: recent tx count, buy volume, sell volume,
+  net flow, bribe ETH, first/last built block, and number of rows represented.
+- Keep the detailed table below the chart, right-align numeric cells, and use
+  consistent precision.
+
+Implementation notes:
+
+- `activity.js` owns the current table. `formatVolumeByDenom` should accept a
+  display context with known denom metadata so table cells can show symbols
+  instead of addresses.
+- `detail.js` / pool card rendering should pass pool denom metadata into any
+  pool-level activity renderer.
+- If the backend does not expose pool-attributed recent block activity, extend
+  `PoolView` or `TokenDetailResponse` to include `recent_pool_activity` rows.
+  Keep the existing `/tokens/:address/activity-blocks` endpoint for indexed
+  range discovery.
+- The chart can be SVG for consistency with existing pool price/liquidity
+  charts. It must have stable dimensions and degrade to an empty state when
+  there are fewer than two rows.
+
+Validation:
+
+- Playwright on a populated token shows an activity chart above the recent
+  activity table.
+- The Buy Volume and Sell Volume cells no longer contain `0x` denom addresses
+  when the denom is known.
+- A one-pool token shows pool activity in the pool card and the numbers match
+  the existing recent block rows.
+- A multi-pool token does not merge pool-specific volumes without marking them
+  as aggregate.
+- Desktop and mobile screenshots show no overlapping table text, chart labels,
+  or buttons.
+
+### TD-5: Clean live token not-found detail state
+
+Current state:
+
+- A live token that has already fallen out of retention can render a full detail
+  layout with `Stage unknown`, `Risk unknown`, `Pools 0`, and empty bottom
+  cards.
+
+Target behavior:
+
+- For missing live tokens, render a compact not-found state with the requested
+  token address, a short explanation, and links back to Live Tokens, Mempool
+  Signals, and Token Builder.
+- Do not render full market, pool, lifecycle, risk, metadata, creation, or
+  network sections when there is no token payload.
+
+Validation:
+
+- Playwright against the missing live URL shows the compact not-found state and
+  does not show `RISK unknown`, `STAGE unknown`, or the bottom card headings.
+
 ## Active Bottleneck: Live Warmup Memory Pressure While Filling Processed-Block Cache
 
 Observed on May 9, 2026 while `eth-token-server.service` was warming live token
