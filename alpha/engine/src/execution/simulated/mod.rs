@@ -70,8 +70,23 @@ async fn simulate_buy_at_block(
         ));
     }
 
-    // Token decimals default to 18 if unknown.
-    let token_decimals = 18u8;
+    // Token decimals: use pool snapshot if available, otherwise query the contract.
+    let token_decimals = match pool.token_decimals {
+        Some(d) => d,
+        None => {
+            let decimals_result = simulator
+                .simulate_view_function(
+                    intent.token_address,
+                    alloy_primitives::Bytes::from_static(&[0x31, 0x3c, 0xe5, 0x67]), // decimals()
+                    Some(block),
+                )
+                .await;
+            match decimals_result {
+                Ok(r) if r.success => r.decode_uint8(),
+                _ => 18u8,
+            }
+        }
+    };
     let token_amount = Amount {
         raw: result.tokens_received,
         decimals: token_decimals,

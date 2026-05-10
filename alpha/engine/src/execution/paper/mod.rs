@@ -57,16 +57,35 @@ impl EngineExecutionAdapter for PaperExecutionAdapter {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
 
+        let pools = self.pools.lock().expect("pool lock");
+        let block_number = pools.get(&intent.pool_address).map(|p| p.latest_block);
+        drop(pools);
+
         match intent.side {
             OrderSide::Buy => {
-                // Buy: ETH spent = intent.amount, tokens received not modeled.
+                // Buy: ETH spent = intent.amount.
+                // Token amount is estimated from the pool snapshot price
+                // (theoretical; for chain-parity backtests use the EVM adapter).
+                let token_amount = {
+                    let pools = self.pools.lock().expect("pool lock");
+                    pools.get(&intent.pool_address).and_then(|pool| {
+                        let eth_spent = intent.amount.to_decimal();
+                        let price = pool.price_denom_per_token?;
+                        if price.is_zero() {
+                            return None;
+                        }
+                        let tokens = eth_spent / price;
+                        let decimals = pool.token_decimals.unwrap_or(18);
+                        Some(Amount::from_decimal(tokens, decimals))
+                    })
+                };
                 Ok(ExecutionReport {
                     order_id,
                     status: ExecutionStatus::Confirmed,
                     tx_hash: None,
-                    block_number: None,
+                    block_number,
                     filled_amount: Some(intent.amount),
-                    token_amount: None,
+                    token_amount,
                     gas_used: Some(0),
                     error: None,
                 })
@@ -86,7 +105,7 @@ impl EngineExecutionAdapter for PaperExecutionAdapter {
                     order_id,
                     status: ExecutionStatus::Confirmed,
                     tx_hash: None,
-                    block_number: None,
+                    block_number,
                     filled_amount: Some(eth_received),
                     token_amount: None,
                     gas_used: Some(0),

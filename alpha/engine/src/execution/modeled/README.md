@@ -27,8 +27,9 @@ Worst-case fill adapter that produces honest PnL using pool snapshot math.
 ## Use Cases
 
 - Live trader `--mode=modeled` for honest paper PnL.
-- Backtest alignment: the backtest `SimulatedExecutionAdapter` should use the
-  same fill rules so backtest and live paper are comparable.
+- Backtest now uses EVM-backed simulation (`eth_alpha_engine::execution::SimulatedExecutionAdapter`),
+  not this modeled adapter. Live/paper `--mode=modeled` is a fast approximation; backtest
+  uses the real EVM path for chain parity.
 
 ## Future Work
 

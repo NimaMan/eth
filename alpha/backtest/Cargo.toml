@@ -14,7 +14,6 @@ eth_alpha_engine = { path = "../engine" }
 eth_alpha_store = { path = "../store" }
 eth_strategies = { path = "../strategies" }
 eyre = "0.6"
-rand = "0.8"
 rust_decimal = "1.36"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -22,3 +21,5 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tx_processor = { path = "../../tx_processor" }
+tx_simulator = { path = "../../tx_simulator" }

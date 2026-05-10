@@ -309,16 +309,6 @@ where
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
         position.apply_execution_report_with_price(&report, fill_price)?;
 
-        // Fallback: compute entry_token_amount from cost_basis / entry_price
-        // if the execution adapter did not provide it (e.g. backtest).
-        if position.entry_token_amount.is_none() {
-            if let (Some(cost_basis), Some(price)) = (position.entry_cost_basis, position.entry_price) {
-                if !price.is_zero() {
-                    position.entry_token_amount = Some(cost_basis / price);
-                }
-            }
-        }
-
         self.store.upsert_position(&position).await?;
         self.store.record_execution_report(&report).await?;
         if position.is_closed() {

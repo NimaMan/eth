@@ -3,7 +3,7 @@ use eth_alpha_engine::{AlphaEngine, EngineEvent};
 use eyre::Result;
 use tracing::{info, warn};
 
-use crate::execution::SimulatedExecutionAdapter;
+use crate::adapter::BacktestAdapter;
 
 /// Summary statistics produced by a backtest run.
 #[derive(Clone, Debug, Default)]
@@ -20,15 +20,16 @@ pub struct BacktestResult {
 /// (pool snapshots and current block) before each event is handled.
 /// Because the adapter is cloned into the engine, both handles share
 /// the same underlying state.
-pub async fn run_backtest<E, R, S>(
+pub async fn run_backtest<E, R, S, A>(
     engine: &mut AlphaEngine<E, R, S>,
-    adapter: &SimulatedExecutionAdapter,
+    adapter: &A,
     events: Vec<EngineEvent>,
 ) -> Result<BacktestResult>
 where
     E: eth_alpha_engine::EngineExecutionAdapter,
     R: eth_alpha_core::risk::RiskPolicy,
     S: eth_alpha_core::store::TradingStore,
+    A: BacktestAdapter,
 {
     let mut result = BacktestResult::default();
 
@@ -65,7 +66,7 @@ where
     Ok(result)
 }
 
-fn update_adapter_state(adapter: &SimulatedExecutionAdapter, event: &EngineEvent) {
+fn update_adapter_state<A: BacktestAdapter>(adapter: &A, event: &EngineEvent) {
     match event {
         EngineEvent::Market(MarketEvent::PoolUpdated { block_number, pool }) => {
             adapter

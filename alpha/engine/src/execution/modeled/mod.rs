@@ -103,12 +103,23 @@ impl EngineExecutionAdapter for ModeledExecutionAdapter {
 
         let gas = U256::from(self.config.gas_cost_wei);
 
-        let filled_amount = match intent.side {
+        let (filled_amount, token_amount) = match intent.side {
             OrderSide::Buy => {
                 // Buy: we spend the full intended ETH amount.
-                // The tokens received are not modeled here (we track capital
-                // deployed). Gas is deducted from the report.
-                Some(intent.amount.clone())
+                // Token amount is estimated from the pool snapshot price
+                // (theoretical; for chain-parity backtests use the EVM adapter).
+                let token_amount = {
+                    let eth_spent = intent.amount.to_decimal();
+                    let price = pool.price_denom_per_token.unwrap_or_default();
+                    if price.is_zero() {
+                        None
+                    } else {
+                        let tokens = eth_spent / price;
+                        let decimals = pool.token_decimals.unwrap_or(18);
+                        Some(Amount::from_decimal(tokens, decimals))
+                    }
+                };
+                (Some(intent.amount.clone()), token_amount)
             }
             OrderSide::Sell => {
                 // Sell: intent.amount is tokens to sell.
@@ -133,17 +144,19 @@ impl EngineExecutionAdapter for ModeledExecutionAdapter {
                     out.raw = U256::ZERO;
                 }
 
-                Some(out)
+                (Some(out), None)
             }
         };
+
+        let block_number = Some(pool.latest_block);
 
         Ok(ExecutionReport {
             order_id,
             status: ExecutionStatus::Confirmed,
             tx_hash: None,
-            block_number: None,
+            block_number,
             filled_amount,
-            token_amount: None,
+            token_amount,
             gas_used: Some(self.config.gas_cost_wei),
             error: None,
         })
