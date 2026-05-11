@@ -105,6 +105,21 @@ mod tests {
             "PancakeSwap V3 init code hash may be incorrect for Ethereum"
         );
     }
+
+    #[test]
+    fn computes_pancakeswap_v3_pool_for_hash_usdt() {
+        // Verified against on-chain PancakeSwap V3 pool on Ethereum mainnet:
+        // https://dexscreener.com/ethereum/0x1645ca2363ff04fddc6c8b0e8be1c3f773fe6a0d
+        let hash_token = address!("AC7b5d06fa1e77D08aea40d46cb7C5923A87A0cc");
+        let usdt = address!("dAC17F958D2ee523a2206206994597C13D831ec7");
+        let expected = address!("1645ca2363fF04fDDc6C8B0e8bE1C3f773Fe6A0d");
+
+        let computed = compute_pancakeswap_v3_pool(hash_token, usdt, 10000);
+        assert_eq!(
+            computed, expected,
+            "PancakeSwap V3 pool computation failed for HASH/USDT 1% tier"
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

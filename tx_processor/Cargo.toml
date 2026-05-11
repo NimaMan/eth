@@ -92,6 +92,10 @@ name = "can_buy_sell_common_tokens_uniswap_v4"
 path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v4.rs"
 
 [[example]]
+name = "can_buy_sell_common_tokens_pancakeswap_v3"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_pancakeswap_v3.rs"
+
+[[example]]
 name = "usdc_to_dai_uniswap_v3"
 path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
 
