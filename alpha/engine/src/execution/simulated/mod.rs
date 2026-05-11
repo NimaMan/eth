@@ -536,9 +536,9 @@ fn pool_type_for_pool(pool: &PoolSnapshot) -> Option<PoolType> {
             fee_tier: pool.fee_tier.unwrap_or(3000),
         }),
         PoolProtocol::UniswapV4 => Some(PoolType::UniswapV4),
+        PoolProtocol::PancakeSwapV2 => Some(PoolType::PancakeSwapV2),
         PoolProtocol::Unknown(s) => match s.as_str() {
             "sushi" | "sushiswap" => Some(PoolType::SushiSwap),
-            "pancake" | "pancakeswap" => Some(PoolType::PancakeSwapV2),
             _ => None,
         },
     }

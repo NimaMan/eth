@@ -55,6 +55,26 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(40));
     test_sushiswap_pools(weth, usdc, usdt, dai);
 
+    // Test PancakeSwap V2
+    println!("\n🥞 PancakeSwap V2 Pool Verification");
+    println!("{}", "-".repeat(40));
+    test_pancakeswap_v2_pools(weth, usdc, usdt, dai);
+
+    // Test PancakeSwap V3
+    println!("\n🥞 PancakeSwap V3 Pool Verification");
+    println!("{}", "-".repeat(40));
+    test_pancakeswap_v3_pools(weth, usdc, usdt, dai);
+
+    // Test ShibaSwap V2
+    println!("\n🦴 ShibaSwap V2 Pool Verification");
+    println!("{}", "-".repeat(40));
+    test_shibaswap_v2_pools(weth, usdc);
+
+    // Test Fraxswap V2
+    println!("\n🔷 Fraxswap V2 Pool Verification");
+    println!("{}", "-".repeat(40));
+    test_fraxswap_v2_pools(weth, usdc);
+
     // Test using get_address_by_name
     println!("\n🔧 Testing with get_address_by_name");
     println!("{}", "-".repeat(40));
@@ -165,6 +185,54 @@ fn test_sushiswap_pools(weth: Address, usdc: Address, usdt: Address, dai: Addres
     print_verification("WETH/DAI", known_weth_dai, computed_weth_dai);
 }
 
+fn test_pancakeswap_v2_pools(weth: Address, usdc: Address, usdt: Address, dai: Address) {
+    // Verified PancakeSwap V2 pool addresses on Ethereum mainnet.
+    let known_weth_usdc = address!("2997a394e02c46A2D00Eb9A004d0145d79c242cc");
+
+    let computed_weth_usdc = compute_pancakeswap_v2_pool(weth, usdc);
+    print_verification("WETH/USDC", known_weth_usdc, computed_weth_usdc);
+
+    // Additional pairs (not yet verified on-chain)
+    let computed_weth_usdt = compute_pancakeswap_v2_pool(weth, usdt);
+    let computed_weth_dai = compute_pancakeswap_v2_pool(weth, dai);
+    println!("  WETH/USDT computed: 0x{:x} (verify on-chain)", computed_weth_usdt);
+    println!("  WETH/DAI  computed: 0x{:x} (verify on-chain)", computed_weth_dai);
+}
+
+fn test_shibaswap_v2_pools(weth: Address, usdc: Address) {
+    // Verified ShibaSwap V2 pool addresses on Ethereum mainnet.
+    let known_weth_usdc = address!("20e95253e54490d8d30ea41574b24f741ee70201");
+
+    let computed_weth_usdc = compute_shibaswap_v2_pool(weth, usdc);
+    print_verification("WETH/USDC", known_weth_usdc, computed_weth_usdc);
+}
+
+fn test_fraxswap_v2_pools(weth: Address, usdc: Address) {
+    // Verified Fraxswap V2 pool addresses on Ethereum mainnet.
+    let known_weth_usdc = address!("71fd63d6f70bfa901561c3c5240b3d999b899d27");
+
+    let computed_weth_usdc = compute_fraxswap_v2_pool(weth, usdc);
+    print_verification("WETH/USDC", known_weth_usdc, computed_weth_usdc);
+}
+
+fn test_pancakeswap_v3_pools(weth: Address, usdc: Address, usdt: Address, _dai: Address) {
+    // Verified PancakeSwap V3 pool addresses on Ethereum mainnet.
+    let known_weth_usdc_500 = address!("1ac1a8feaaea1900c4166deeed0c11cc10669d36"); // 0.05%
+
+    let computed_weth_usdc_500 = compute_pancakeswap_v3_pool(weth, usdc, 500);
+    print_verification("WETH/USDC 0.05%", known_weth_usdc_500, computed_weth_usdc_500);
+
+    // Additional pairs (not yet verified on-chain)
+    let computed_weth_usdt_500 = compute_pancakeswap_v3_pool(weth, usdt, 500);
+    println!("  WETH/USDT 0.05% computed: 0x{:x} (verify on-chain)", computed_weth_usdt_500);
+
+    println!("\n📊 Testing get_all_pancakeswap_v3_pools for WETH/USDC:");
+    let all_pools = get_all_pancakeswap_v3_pools(weth, usdc);
+    for (pool_addr, fee_tier) in all_pools {
+        println!("  Fee {:.2}%: 0x{:x}", fee_tier as f64 / 10000.0, pool_addr);
+    }
+}
+
 fn test_with_name_lookup() {
     // Try to get addresses by name (if available)
     match (get_address_by_name("WETH"), get_address_by_name("USDC")) {
@@ -244,6 +312,34 @@ async fn test_dynamic_pool_discovery(
             "  ✅ No Curve DAI/WETH pool found (as expected - different volatility classes)"
         ),
         Err(e) => println!("  ❌ Error finding Curve DAI/WETH pool: {}", e),
+    }
+
+    println!("\n🥞 Testing PancakeSwap Pool Verification:");
+
+    // Test PancakeSwap V2 WETH/USDC via on-chain factory lookup
+    match fetch_pancakeswap_v2_pair_address(&simulator, weth, usdc, None).await {
+        Ok(pool) => {
+            if pool.is_zero() {
+                println!("  ℹ️  No PancakeSwap V2 WETH/USDC pool found");
+            } else {
+                let computed = compute_pancakeswap_v2_pool(weth, usdc);
+                print_verification("PancakeSwap V2 WETH/USDC (on-chain)", pool, computed);
+            }
+        }
+        Err(e) => println!("  ❌ Error querying PancakeSwap V2 factory: {}", e),
+    }
+
+    // Test PancakeSwap V3 WETH/USDC 0.05% via on-chain factory lookup
+    match fetch_pancakeswap_v3_pool_address(&simulator, weth, usdc, 500, None).await {
+        Ok(pool) => {
+            if pool.is_zero() {
+                println!("  ℹ️  No PancakeSwap V3 WETH/USDC 0.05% pool found");
+            } else {
+                let computed = compute_pancakeswap_v3_pool(weth, usdc, 500);
+                print_verification("PancakeSwap V3 WETH/USDC 0.05% (on-chain)", pool, computed);
+            }
+        }
+        Err(e) => println!("  ❌ Error querying PancakeSwap V3 factory: {}", e),
     }
 
     println!("\n⚖️  Testing Balancer Pool Verification:");

@@ -10,6 +10,7 @@ pub enum PoolProtocol {
     UniswapV2,
     UniswapV3,
     UniswapV4,
+    PancakeSwapV2,
     Unknown(String),
 }
 

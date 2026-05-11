@@ -1,6 +1,7 @@
 //! Pool-derived network update extraction.
 
 use alloy_primitives::{Address, B256, U256};
+use reth_chain_query::common_addresses::KnownV2Protocol;
 use tx_processor::ProcessedTransaction;
 
 use crate::network::{
@@ -17,6 +18,21 @@ use crate::network::{
 pub const UNISWAP_V2_PROTOCOL: &str = "uniswap_v2";
 pub const UNISWAP_V3_PROTOCOL: &str = "uniswap_v3";
 pub const UNISWAP_V4_PROTOCOL: &str = "uniswap_v4";
+pub const PANCAKE_V2_PROTOCOL: &str = "pancake_v2";
+pub const SUSHI_V2_PROTOCOL: &str = "sushiswap";
+pub const SHIBA_V2_PROTOCOL: &str = "shibaswap_v2";
+pub const FRAX_V2_PROTOCOL: &str = "fraxswap_v2";
+
+fn v2_protocol_label(factory: Address) -> &'static str {
+    match KnownV2Protocol::from_factory(factory) {
+        Some(KnownV2Protocol::UniswapV2) => UNISWAP_V2_PROTOCOL,
+        Some(KnownV2Protocol::SushiSwapV2) => SUSHI_V2_PROTOCOL,
+        Some(KnownV2Protocol::PancakeSwapV2) => PANCAKE_V2_PROTOCOL,
+        Some(KnownV2Protocol::ShibaSwapV2) => SHIBA_V2_PROTOCOL,
+        Some(KnownV2Protocol::FraxswapV2) => FRAX_V2_PROTOCOL,
+        None => UNISWAP_V2_PROTOCOL,
+    }
+}
 
 /// Extract pool-related relationships observed in a processed transaction.
 pub fn extract_pool_updates(
@@ -54,7 +70,7 @@ pub fn extract_pool_updates(
             "tracked token Uniswap V2 pair created",
         );
         edge.attributes
-            .insert("protocol".to_string(), UNISWAP_V2_PROTOCOL.to_string());
+            .insert("protocol".to_string(), v2_protocol_label(event.factory_address).to_string());
         edge.attributes
             .insert("token0".to_string(), address_string(&event.token0));
         edge.attributes

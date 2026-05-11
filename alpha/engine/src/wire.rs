@@ -304,7 +304,7 @@ pub fn parse_protocol(value: &str) -> PoolProtocol {
             PoolProtocol::Unknown("sushi".to_string())
         }
         "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" => {
-            PoolProtocol::Unknown("pancake".to_string())
+            PoolProtocol::PancakeSwapV2
         }
         other => PoolProtocol::Unknown(other.to_string()),
     }

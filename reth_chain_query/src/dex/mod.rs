@@ -4,8 +4,11 @@ pub mod balancer;
 pub mod common;
 pub mod curve;
 pub mod encoding;
+pub mod fraxswap;
 pub mod liquidity;
+pub mod pancakeswap;
 pub mod pool_types;
+pub mod shibaswap;
 pub mod sushiswap;
 pub mod uniswap;
 pub mod uniswap_v2 {
@@ -20,8 +23,11 @@ pub mod uniswap_v4 {
 
 pub use balancer::state::*;
 pub use curve::state::*;
+pub use fraxswap::state::*;
 pub use liquidity::*;
+pub use pancakeswap::state::*;
 pub use pool_types::*;
+pub use shibaswap::state::*;
 pub use sushiswap::state::*;
 pub use uniswap::v2::state::*;
 pub use uniswap::v3::state::*;
