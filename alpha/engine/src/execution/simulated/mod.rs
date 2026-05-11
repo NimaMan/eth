@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use alloy_primitives::Address;
+use alloy_primitives::{address, Address, Bytes, U256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
@@ -29,11 +29,18 @@ use eth_alpha_core::{
 };
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
-    simulate_buy_swap, simulate_sell_swap, BuySwapResult, PoolType, SellSwapResult,
+    simulate_buy_swap_with_params, simulate_sell_swap_with_params, BuySwapResult,
+    PoolBuySellParameters, PoolType, SellSwapResult, UniswapV4PoolConfig as TxUniswapV4PoolConfig,
 };
 use tx_simulator::{LiveTxSimulator, TxSimulator};
 
 use crate::{EngineExecutionAdapter, PositionValueSimulation};
+
+const ERC20_DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67];
+const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+const USDC_ADDRESS: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+const USDT_ADDRESS: Address = address!("dAC17F958D2ee523a2206206994597C13D831ec7");
+const DAI_ADDRESS: Address = address!("6B175474E89094C44Da98b954EedeAC495271d0F");
 
 // ---------------------------------------------------------------------------
 // Shared simulation logic (private)
@@ -47,28 +54,26 @@ async fn simulate_buy_at_block(
     order_id: OrderId,
     intent: OrderIntent,
     pool: &PoolSnapshot,
-    pool_type: PoolType,
     block: u64,
 ) -> Result<ExecutionReport> {
     let eth_amount = intent.amount.raw;
-    let pool_contract_address = match parse_pool_address(&pool.address) {
-        Ok(address) => address,
-        Err(error) => {
-            return Ok(failed_report(
-                order_id,
-                format!("invalid pool address for chain simulation: {error}"),
-            ))
-        }
-    };
+    let params =
+        match pool_simulation_parameters(simulator, pool, intent.token_address, eth_amount, block)
+            .await
+        {
+            Ok(params) => params,
+            Err(error) => {
+                return Ok(failed_report(
+                    order_id,
+                    format!("invalid pool parameters for chain simulation: {error}"),
+                ))
+            }
+        };
 
-    let result: BuySwapResult = match simulate_buy_swap(
+    let result: BuySwapResult = match simulate_buy_swap_with_params(
         simulator.clone(),
         tx_processor.clone(),
-        intent.token_address,
-        pool_contract_address,
-        pool_type,
-        Some(block),
-        eth_amount,
+        params.clone(),
     )
     .await
     {
@@ -90,46 +95,9 @@ async fn simulate_buy_at_block(
         ));
     }
 
-    // Token decimals: use pool snapshot if available, otherwise query the contract.
-    let token_decimals = match pool.token_decimals {
-        Some(d) => d,
-        None => {
-            let decimals_result = simulator
-                .simulate_view_function(
-                    intent.token_address,
-                    alloy_primitives::Bytes::from_static(&[0x31, 0x3c, 0xe5, 0x67]), // decimals()
-                    Some(block),
-                )
-                .await;
-            match decimals_result {
-                Ok(r) if r.success && r.output.len() >= 32 => r.decode_uint8(),
-                Ok(r) if r.success => {
-                    return Ok(failed_report(
-                        order_id,
-                        format!(
-                            "token decimals simulation returned short output: {} bytes",
-                            r.output.len()
-                        ),
-                    ))
-                }
-                Ok(_) => {
-                    return Ok(failed_report(
-                        order_id,
-                        "token decimals simulation reverted",
-                    ))
-                }
-                Err(error) => {
-                    return Ok(failed_report(
-                        order_id,
-                        format!("token decimals simulation failed: {error}"),
-                    ))
-                }
-            }
-        }
-    };
     let token_amount = Amount {
         raw: result.tokens_received,
-        decimals: token_decimals,
+        decimals: params.token_decimals,
     };
 
     Ok(ExecutionReport {
@@ -152,7 +120,6 @@ async fn simulate_sell_at_block(
     order_id: OrderId,
     intent: OrderIntent,
     pool: &PoolSnapshot,
-    pool_type: PoolType,
     block: u64,
     _portfolio: &Arc<Mutex<PortfolioState>>,
 ) -> Result<ExecutionReport> {
@@ -166,24 +133,29 @@ async fn simulate_sell_at_block(
         ));
     }
 
-    let pool_contract_address = match parse_pool_address(&pool.address) {
-        Ok(address) => address,
+    let params = match pool_simulation_parameters(
+        simulator,
+        pool,
+        intent.token_address,
+        tokens_to_sell,
+        block,
+    )
+    .await
+    {
+        Ok(params) => params,
         Err(error) => {
             return Ok(failed_report(
                 order_id,
-                format!("invalid pool address for chain simulation: {error}"),
+                format!("invalid pool parameters for chain simulation: {error}"),
             ))
         }
     };
 
-    let result: SellSwapResult = match simulate_sell_swap(
+    let result: SellSwapResult = match simulate_sell_swap_with_params(
         simulator.clone(),
         tx_processor.clone(),
-        intent.token_address,
-        pool_contract_address,
-        pool_type,
+        params,
         tokens_to_sell,
-        Some(block),
     )
     .await
     {
@@ -292,24 +264,14 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
 
-        let (pool, pool_type, block) = {
+        let (pool, block) = {
             let pools = self.pools.lock().expect("pool lock");
             let Some(pool) = pools.get(&intent.pool_address).cloned() else {
                 return Ok(failed_report(order_id, "pool not in simulation state"));
             };
 
-            let pool_type = match pool_protocol_to_tx_processor(pool.protocol.clone()) {
-                Some(pt) => pt,
-                None => {
-                    return Ok(failed_report(
-                        order_id,
-                        format!("protocol {:?} not supported by simulator", pool.protocol),
-                    ));
-                }
-            };
-
             let block = self.current_block.load(Ordering::Relaxed);
-            (pool, pool_type, block)
+            (pool, block)
         };
 
         if block == 0 {
@@ -324,7 +286,6 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    pool_type,
                     block,
                 )
                 .await
@@ -336,7 +297,6 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    pool_type,
                     block,
                     &self.portfolio,
                 )
@@ -353,9 +313,6 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
         let Some(intent) = sell_intent_for_position(position) else {
             return Ok(None);
         };
-        let Some(pool_type) = pool_protocol_to_tx_processor(pool.protocol.clone()) else {
-            return Ok(None);
-        };
         let block = self.current_block.load(Ordering::Relaxed);
         if block == 0 {
             return Ok(None);
@@ -368,7 +325,6 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
             order_id,
             intent,
             pool,
-            pool_type,
             block,
             &self.portfolio,
         )
@@ -444,22 +400,12 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
 
-        let (pool, pool_type) = {
+        let pool = {
             let pools = self.pools.lock().expect("pool lock");
             let Some(pool) = pools.get(&intent.pool_address).cloned() else {
                 return Ok(failed_report(order_id, "pool not in simulation state"));
             };
-
-            let pool_type = match pool_protocol_to_tx_processor(pool.protocol.clone()) {
-                Some(pt) => pt,
-                None => {
-                    return Ok(failed_report(
-                        order_id,
-                        format!("protocol {:?} not supported by simulator", pool.protocol),
-                    ));
-                }
-            };
-            (pool, pool_type)
+            pool
         };
 
         let block = self
@@ -478,7 +424,6 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    pool_type,
                     block,
                 )
                 .await
@@ -490,7 +435,6 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    pool_type,
                     block,
                     &self.portfolio,
                 )
@@ -505,9 +449,6 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
         pool: &PoolSnapshot,
     ) -> Result<Option<PositionValueSimulation>> {
         let Some(intent) = sell_intent_for_position(position) else {
-            return Ok(None);
-        };
-        let Some(pool_type) = pool_protocol_to_tx_processor(pool.protocol.clone()) else {
             return Ok(None);
         };
         let block = match self.live_sim.latest_state_block_number().await {
@@ -529,7 +470,6 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
             order_id,
             intent,
             pool,
-            pool_type,
             block,
             &self.portfolio,
         )
@@ -541,6 +481,107 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+async fn pool_simulation_parameters(
+    simulator: &Arc<TxSimulator>,
+    pool: &PoolSnapshot,
+    token_address: Address,
+    amount: U256,
+    block: u64,
+) -> std::result::Result<PoolBuySellParameters, String> {
+    let pool_contract_address = parse_pool_address(&pool.address)
+        .map_err(|error| format!("invalid pool address for chain simulation: {error}"))?;
+    let pool_type = pool_type_for_pool(pool).ok_or_else(|| {
+        format!(
+            "protocol {:?} not supported by chain simulator",
+            pool.protocol
+        )
+    })?;
+    let token_decimals = match pool.token_decimals {
+        Some(decimals) => decimals,
+        None => query_erc20_decimals(simulator, token_address, block).await?,
+    };
+    let denom_address = pool
+        .denom_address
+        .ok_or_else(|| format!("pool {} has no denomination address", pool.address))?;
+    let denom_decimals = denom_decimals(simulator, denom_address, block).await?;
+
+    let mut params = PoolBuySellParameters::new(token_address, pool_contract_address, pool_type)
+        .with_test_amount(amount)
+        .with_block(block)
+        .with_denom_address(denom_address)
+        .with_denom_decimals(denom_decimals)
+        .with_token_decimals(token_decimals);
+
+    if let Some(v4) = &pool.uniswap_v4 {
+        params = params.with_uniswap_v4_config(TxUniswapV4PoolConfig {
+            pool_manager: v4.pool_manager,
+            pool_id: v4.pool_id,
+            currency0: v4.currency0,
+            currency1: v4.currency1,
+            fee: v4.fee,
+            tick_spacing: v4.tick_spacing,
+            hooks: v4.hooks,
+            hook_data: Vec::new(),
+        });
+    }
+
+    Ok(params)
+}
+
+fn pool_type_for_pool(pool: &PoolSnapshot) -> Option<PoolType> {
+    match &pool.protocol {
+        PoolProtocol::UniswapV2 => Some(PoolType::UniswapV2),
+        PoolProtocol::UniswapV3 => Some(PoolType::UniswapV3 {
+            fee_tier: pool.fee_tier.unwrap_or(3000),
+        }),
+        PoolProtocol::UniswapV4 => Some(PoolType::UniswapV4),
+        PoolProtocol::Unknown(s) => match s.as_str() {
+            "sushi" | "sushiswap" => Some(PoolType::SushiSwap),
+            "pancake" | "pancakeswap" => Some(PoolType::PancakeSwapV2),
+            _ => None,
+        },
+    }
+}
+
+async fn denom_decimals(
+    simulator: &Arc<TxSimulator>,
+    denom_address: Address,
+    block: u64,
+) -> std::result::Result<u8, String> {
+    if denom_address.is_zero() || denom_address == WETH_ADDRESS || denom_address == DAI_ADDRESS {
+        return Ok(18);
+    }
+    if denom_address == USDC_ADDRESS || denom_address == USDT_ADDRESS {
+        return Ok(6);
+    }
+    query_erc20_decimals(simulator, denom_address, block).await
+}
+
+async fn query_erc20_decimals(
+    simulator: &Arc<TxSimulator>,
+    token_address: Address,
+    block: u64,
+) -> std::result::Result<u8, String> {
+    let result = simulator
+        .simulate_view_function(
+            token_address,
+            Bytes::from_static(&ERC20_DECIMALS_SELECTOR),
+            Some(block),
+        )
+        .await
+        .map_err(|error| format!("token decimals simulation failed: {error}"))?;
+    if !result.success {
+        return Err("token decimals simulation reverted".to_string());
+    }
+    if result.output.len() < 32 {
+        return Err(format!(
+            "token decimals simulation returned short output: {} bytes",
+            result.output.len()
+        ));
+    }
+    Ok(result.decode_uint8())
+}
 
 fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionReport {
     ExecutionReport {
@@ -618,23 +659,6 @@ fn unique_order_prefix() -> String {
         .map(|d| d.as_millis())
         .unwrap_or_default();
     format!("chain-sim-{}-{millis}", std::process::id())
-}
-
-/// Map alpha `PoolProtocol` to tx_processor `PoolType`.
-fn pool_protocol_to_tx_processor(protocol: PoolProtocol) -> Option<PoolType> {
-    match protocol {
-        PoolProtocol::UniswapV2 => Some(PoolType::UniswapV2),
-        PoolProtocol::UniswapV3 => {
-            // Default to 0.3% fee tier when unknown.
-            Some(PoolType::UniswapV3 { fee_tier: 3000 })
-        }
-        PoolProtocol::UniswapV4 => Some(PoolType::UniswapV4),
-        PoolProtocol::Unknown(ref s) => match s.as_str() {
-            "sushi" | "sushiswap" => Some(PoolType::SushiSwap),
-            "pancake" | "pancakeswap" => Some(PoolType::PancakeSwapV2),
-            _ => None,
-        },
-    }
 }
 
 /// Parse the pool contract address from a `TokenPoolId`.

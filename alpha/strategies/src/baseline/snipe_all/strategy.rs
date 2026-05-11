@@ -330,6 +330,8 @@ mod tests {
             token_reserve: Decimal::new(100, 0),
             price_denom_per_token: None,
             token_decimals: None,
+            fee_tier: None,
+            uniswap_v4: None,
             latest_block: 1,
             can_buy: true,
             can_sell: true,

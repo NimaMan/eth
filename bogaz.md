@@ -19,7 +19,7 @@ memory pressure, live-feed regressions, or execution.
 | Order | Bottleneck | Owner | What To Watch | Next Focus |
 | --- | --- | --- | --- | --- |
 | 1 | **Strategy policy quality** | `alpha/strategies` | entry selectivity, exit coverage, risk reaction latency, skipped vs taken ratio, V2/V3/V4 behavior, PnL per pool | Replace `Snipe All v1` with a selective strategy: add pool-quality scoring, activate tax/honeypot/LP-approval exits, add position sizing, and filter low-expectation pools. |
-| 2 | **Chain-sim fill realism** | `alpha/engine` | simulated execution reports versus chain state, gas used, fill failures, unsupported pool routes | Keep live/backtest on `ChainSimExecutionAdapter`/`LiveChainSimExecutionAdapter` only. Close remaining gaps: gas-cost accounting, V4 route support or explicit V4 skip policy, and pool/protocol failure rollups. |
+| 2 | **Chain-sim fill realism** | `alpha/engine` | simulated execution reports versus chain state, gas used, fill failures, unsupported pool routes | Keep live/backtest on `ChainSimExecutionAdapter`/`LiveChainSimExecutionAdapter` only. Close remaining gaps: gas-cost accounting, hook/Permit2 failure rollups, and pool/protocol failure summaries. |
 | 3 | **Trader decision ledger completeness** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior and we can train filters from losers. |
 | 4 | **Backtest and replay alignment** | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live chain-sim runs, same `TokenPoolId` matching, historical lower-bound PnL | Run historical replays with the new selective strategy + chain-sim fills. Compare backtest lower-bound PnL to live chain-sim behavior. Iterate on rules offline. |
 | 5 | **Mempool signal recall and timing** | `mempool_processor`, future `alpha/mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
@@ -558,40 +558,46 @@ eth-token-server
   last cache read:      13 ms
 ```
 
-Live chain-sim strategy (`snipe-all-v1`, refreshed May 11 2026 17:45 UTC):
+Live chain-sim strategy (`snipe-all-v1`, refreshed May 11 2026 18:07 UTC):
 ```text
 mode:                 chain-sim
-run id:               snipe-all-v1-chain-sim-live-v3
-status:               running since 2026-05-11 17:42 UTC
-positions:            10 (open: 7, failed: 3)
-orders:               10
-execution reports:    7 confirmed, 3 failed
+run id:               snipe-all-v1-chain-sim-live-v4
+status:               running since 2026-05-11 18:06 UTC
+positions:            5 (open: 5, failed: 0)
+orders:               5
+execution reports:    5 confirmed, 0 failed
 risk events:          0
-confirmed buy volume: 0.07 ETH
-current value:        0.05368703211916693 ETH
-unrealized PnL:       -0.016312967880833067 ETH
-ROI:                  -23.30423982976152%
-failed reports:       V4 unsupported-route buys
+confirmed buy volume: 0.05 ETH
+current value:        0.04665155557279376 ETH
+unrealized PnL:       -0.0033484444272062442 ETH
+ROI:                  -6.696888854412488%
+V4 reports:           2 confirmed V4 buys, both with current-value snapshots
 ```
 
 ### Interpretation
 
 - **Live infrastructure is healthy**: Cache hit rate is ~99.97%, block apply is
-  ~39 ms, tracked set is 648 tokens / 405 pools. The pipeline can sustain live
+  ~39 ms, tracked set is ~722 tokens / 401 pools. The pipeline can sustain live
   no-capital trading.
-- **The strategy is still not selective**: Immediately after warmup, v3 attempted
-  ten eligible pools, confirmed seven V2/V3 buys, and failed three V4 buys with an
-  explicit unsupported-route reason.
+- **The strategy is still not selective**: The v4 run buys every eligible updated
+  pool. In the first live ticks after restart it confirmed five buys, including
+  two Uniswap V4 pools.
 - **Non-chain-state fills are removed from the pipeline**:
   `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` are the supported
   fill paths. Buy token amount, sell proceeds, and gas used must come from EVM
   simulation against selected Reth/Redis state. Unsupported routes or missing
   state produce failed execution reports.
-- **Open-position values are now chain-sim sell valuations**: The live v3 run
-  reports non-zero `current_value_eth` for all seven confirmed open positions.
+- **Open-position values are now chain-sim sell valuations**: The live v4 run
+  reports non-zero `current_value_eth` for all five confirmed open positions,
+  including the two V4 positions.
   Valuation simulates selling the exact raw token amount from the buy report
   against selected chain state, with synthetic token balance injected only into
   the forked valuation state.
+- **V4 is no longer an unsupported-route gap**: Alpha snapshots now carry the V4
+  pool manager, pool id, currencies, fee, tick spacing, and hooks. V4 buys use
+  Universal Router chain simulation; V4 sells/valuations inject only the simulated
+  wallet token balance, then run ERC20 approval, Permit2 approval, and Universal
+  Router sell calldata through the EVM.
 - **Exits are incomplete**: Only `liquidity_removal` exits are active. Tax,
   honeypot, and LP-approval exits are scaffolded but hold. The previous live run
   produced many critical risk events without corresponding exits; v3 has not yet
@@ -614,7 +620,7 @@ failed reports:       V4 unsupported-route buys
 
 | Priority | Action | Owner | Validation |
 | --- | --- | --- | --- |
-| 1 | Finish chain-sim performance accounting: subtract simulated gas cost, expose failed simulation reasons by pool/protocol, and add V4 route support or an explicit V4 skip policy. | `alpha/engine`, `tx_processor` | Dashboard PnL uses confirmed simulated fills only, reports gas cost separately, and V4 pools are either simulated or excluded before order creation. |
+| 1 | Finish chain-sim performance accounting: subtract simulated gas cost and expose failed simulation reasons by pool/protocol, including hook/Permit2/V4 failures. | `alpha/engine`, `tx_processor` | Dashboard PnL uses confirmed simulated fills only, reports gas cost separately, and groups failures by route/protocol. |
 | 2 | Activate tax/honeypot exit rule in `snipe_all/rules/tax.rs`: sell on `RiskKind::TaxChange` or `Honeypot` when an open position exists. | `alpha/strategies` | Frontend risk table shows sells tied to tax/honeypot events; closed-position count rises. |
 | 3 | Activate LP-approval exit rule in `snipe_all/rules/lp_approval.rs`: sell on `RiskKind::LpApproval` for private creators. | `alpha/strategies` | Same as above for LP-approval events. |
 | 4 | Add pool-quality entry filter to `snipe_all/rules/entry.rs`: score pools by creator history, network cluster risk, holder concentration, and mempool signal density. Reject below threshold. | `alpha/strategies`, `eth_token` | Entry count drops; taken/total ratio is visible in decision ledger; PnL per pool improves. |
@@ -727,8 +733,10 @@ money, chain-sim must show a loss.
   execution reports, not submitted order intents.
 - [ ] Performance reporting separates simulated gas used from gas cost and shows
   failed simulation reasons by pool/protocol.
-- [ ] Add V4 buy/sell simulation support, or block V4 before order creation with
-  an explicit unsupported-route reason.
+- [x] Add V4 buy/sell simulation support for alpha chain-sim:
+  Universal Router buys, ERC20 + Permit2 sell approvals, and V4 sell valuation
+  now run against selected chain state. Remaining V4 failures should be treated
+  as pool-level hook/Permit2/liquidity failures, not unsupported route failures.
 
 Acceptance: Running the current `Snipe All v1` against 7 days of historical data
 produces negative PnL (because buying everything with realistic fills is
@@ -805,7 +813,7 @@ of positive real PnL are recorded.
 
 | Gate | Requirement | Current |
 | --- | --- | --- |
-| G1: Honest chain-sim | PnL reflects chain-state EVM fills | 🚧 Runtime wiring updated; monitor gas cost and V4 gaps next |
+| G1: Honest chain-sim | PnL reflects chain-state EVM fills | 🚧 V2/V3/V4 chain-sim routes wired; gas cost and failure rollups next |
 | G2: Active exits | All critical risks trigger sells | ❌ Only liquidity removal |
 | G3: Selective entry | < 50% of eligible pools entered | ❌ 100% entered |
 | G4: Sized bets | Variable position sizing | ❌ Fixed 0.01 ETH |

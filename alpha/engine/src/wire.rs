@@ -9,7 +9,7 @@ use std::str::FromStr;
 use alloy_primitives::{Address, B256};
 use eth_alpha_core::{
     ids::TokenPoolId,
-    market::{PoolProtocol, PoolSnapshot},
+    market::{PoolProtocol, PoolSnapshot, UniswapV4PoolKeySnapshot},
     risk::{RiskEvent, RiskKind, RiskSeverity},
 };
 use eyre::{eyre, Result};
@@ -50,6 +50,20 @@ pub struct PoolWire {
     pub token_address: String,
     pub pool_address: String,
     pub protocol: String,
+    #[serde(default)]
+    pub pool_id: Option<String>,
+    #[serde(default)]
+    pub pool_manager_address: Option<String>,
+    #[serde(default)]
+    pub currency0: Option<String>,
+    #[serde(default)]
+    pub currency1: Option<String>,
+    #[serde(default)]
+    pub fee_tier: Option<u32>,
+    #[serde(default)]
+    pub tick_spacing: Option<i32>,
+    #[serde(default)]
+    pub hooks: Option<String>,
     pub denom_address: Option<String>,
     pub denom_symbol: Option<String>,
     pub currency: Option<String>,
@@ -132,6 +146,8 @@ impl PoolWire {
             token_reserve: decimal_from_f64(token_reserve),
             price_denom_per_token: self.price.map(decimal_from_f64),
             token_decimals: None,
+            fee_tier: self.fee_tier,
+            uniswap_v4: self.uniswap_v4_pool_key()?,
             latest_block,
             can_buy: self.can_buy,
             can_sell: self.can_sell,
@@ -146,6 +162,56 @@ impl PoolWire {
             .map(str::trim)
             .filter(|symbol| !symbol.is_empty() && !symbol.starts_with("0x"))
             .map(str::to_ascii_uppercase)
+    }
+
+    fn uniswap_v4_pool_key(&self) -> Result<Option<UniswapV4PoolKeySnapshot>> {
+        if !matches!(parse_protocol(&self.protocol), PoolProtocol::UniswapV4) {
+            return Ok(None);
+        }
+
+        let pool_manager = self
+            .pool_manager_address
+            .as_deref()
+            .or_else(|| self.pool_address.split('#').next())
+            .ok_or_else(|| eyre!("v4 pool {} has no pool manager", self.pool_address))
+            .and_then(parse_address)?;
+        let pool_id = self
+            .pool_id
+            .as_deref()
+            .or_else(|| self.pool_address.split('#').nth(1))
+            .ok_or_else(|| eyre!("v4 pool {} has no pool id", self.pool_address))
+            .and_then(parse_hash)?;
+        let currency0 = self
+            .currency0
+            .as_deref()
+            .ok_or_else(|| eyre!("v4 pool {} has no currency0", self.pool_address))
+            .and_then(parse_address)?;
+        let currency1 = self
+            .currency1
+            .as_deref()
+            .ok_or_else(|| eyre!("v4 pool {} has no currency1", self.pool_address))
+            .and_then(parse_address)?;
+        let fee = self
+            .fee_tier
+            .ok_or_else(|| eyre!("v4 pool {} has no fee tier", self.pool_address))?;
+        let tick_spacing = self
+            .tick_spacing
+            .ok_or_else(|| eyre!("v4 pool {} has no tick spacing", self.pool_address))?;
+        let hooks = self
+            .hooks
+            .as_deref()
+            .ok_or_else(|| eyre!("v4 pool {} has no hooks address", self.pool_address))
+            .and_then(parse_address)?;
+
+        Ok(Some(UniswapV4PoolKeySnapshot {
+            pool_manager,
+            pool_id,
+            currency0,
+            currency1,
+            fee,
+            tick_spacing,
+            hooks,
+        }))
     }
 }
 
@@ -234,14 +300,22 @@ pub fn parse_protocol(value: &str) -> PoolProtocol {
         "uniswapv2" | "uniswap_v2" | "uniswap-v2" | "v2" => PoolProtocol::UniswapV2,
         "uniswapv3" | "uniswap_v3" | "uniswap-v3" | "v3" => PoolProtocol::UniswapV3,
         "uniswapv4" | "uniswap_v4" | "uniswap-v4" | "v4" => PoolProtocol::UniswapV4,
-        "sushi" | "sushiswap" | "sushi_v2" | "sushi-v2" => PoolProtocol::Unknown("sushi".to_string()),
-        "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" => PoolProtocol::Unknown("pancake".to_string()),
+        "sushi" | "sushiswap" | "sushi_v2" | "sushi-v2" => {
+            PoolProtocol::Unknown("sushi".to_string())
+        }
+        "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" => {
+            PoolProtocol::Unknown("pancake".to_string())
+        }
         other => PoolProtocol::Unknown(other.to_string()),
     }
 }
 
 pub fn parse_address(value: &str) -> Result<Address> {
     Address::from_str(value).map_err(|error| eyre!("invalid address {value}: {error}"))
+}
+
+pub fn parse_hash(value: &str) -> Result<B256> {
+    B256::from_str(value).map_err(|error| eyre!("invalid hash {value}: {error}"))
 }
 
 pub fn parse_optional_address(value: &str) -> Option<Address> {

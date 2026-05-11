@@ -6,6 +6,7 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
 
+use super::pool_buy_sell_simulator::PoolBuySellSimulator;
 use super::types::{PoolBuySellParameters, PoolType};
 use tx_simulator::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 
@@ -29,54 +30,64 @@ pub struct BuySwapResult {
 /// - Supports Uniswap V2/V3 adapters (more can be added later).
 pub async fn simulate_buy_swap(
     simulator: Arc<TxSimulator>,
-    _tx_processor: Arc<TxProcessor>,
+    tx_processor: Arc<TxProcessor>,
     token_address: Address,
     pool_address: Address,
     pool_type: PoolType,
     block_number: Option<u64>,
     eth_amount: U256,
 ) -> Result<BuySwapResult> {
-    let slippage_tolerance = 0.5_f64;
+    let mut config = PoolBuySellParameters::new(token_address, pool_address, pool_type)
+        .with_test_amount(eth_amount);
+    config.block_number = block_number;
+    simulate_buy_swap_with_params(simulator, tx_processor, config).await
+}
 
-    // Reuse buyer address from existing config default to stay consistent
-    let default_cfg = PoolBuySellParameters::default();
-    let buyer_address = default_cfg.buyer_address;
-
-    // Resolve block
-    let block = match block_number {
+pub async fn simulate_buy_swap_with_params(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    mut config: PoolBuySellParameters,
+) -> Result<BuySwapResult> {
+    let block = match config.block_number {
         Some(b) => b,
         None => simulator.latest_historical_context_block_number()?,
     };
+    config.block_number = Some(block);
 
+    if matches!(config.pool_type, PoolType::UniswapV4) {
+        return simulate_v4_buy_swap(simulator, tx_processor, config, block).await;
+    }
+
+    let buyer_address = config.buyer_address;
     // Build route
-    let route = if let Some(protocol) = pool_type.known_v2_protocol() {
+    let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
         AmmSwapRoute::V2Router {
-            pool: pool_address,
+            pool: config.pool_address,
             router: protocol.router(),
         }
     } else {
-        match pool_type {
+        match config.pool_type {
             PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
-                pool: pool_address,
+                pool: config.pool_address,
                 fee_tier,
             },
             _ => {
                 return Err(eyre::eyre!(
                     "Pool type {:?} not yet supported for buy-only simulation",
-                    pool_type
+                    config.pool_type
                 ));
             }
         }
     };
 
     // Build BUY transaction
-    let slippage_bps = (slippage_tolerance * 100.0).round() as u32;
+    let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
     let buy_tx: UnsignedTransaction = tx_builders::build_buy_swap(
         &route,
         buyer_address,
-        token_address,
-        eth_amount,
+        config.token_address,
+        config.test_amount,
         slippage_bps,
         deadline,
     );
@@ -90,16 +101,16 @@ pub async fn simulate_buy_swap(
         .await?;
 
     // Extract tokens received by buyer
-    let tokens_received = extract_tokens_received(&processed, buyer_address, token_address);
+    let tokens_received = extract_tokens_received(&processed, buyer_address, config.token_address);
 
     let success = processed.status;
     Ok(BuySwapResult {
         success,
         buyer_address,
-        token_address,
-        pool_address,
-        pool_type,
-        denom_spent: eth_amount,
+        token_address: config.token_address,
+        pool_address: config.pool_address,
+        pool_type: config.pool_type,
+        denom_spent: config.test_amount,
         tokens_received,
         buy_transaction: processed,
         block_number: block,
@@ -107,6 +118,45 @@ pub async fn simulate_buy_swap(
             None
         } else {
             Some("Buy transaction failed".to_string())
+        },
+    })
+}
+
+async fn simulate_v4_buy_swap(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    block: u64,
+) -> Result<BuySwapResult> {
+    let pool_simulator = PoolBuySellSimulator::new(simulator, tx_processor);
+    let result = pool_simulator.check_pool(config.clone()).await?;
+    let tokens_received = extract_tokens_received(
+        &result.buy_transaction,
+        config.buyer_address,
+        config.token_address,
+    );
+    let success = result.buy_transaction.status && !tokens_received.is_zero();
+
+    Ok(BuySwapResult {
+        success,
+        buyer_address: config.buyer_address,
+        token_address: config.token_address,
+        pool_address: config.pool_address,
+        pool_type: config.pool_type,
+        denom_spent: if result.denom_spent.is_zero() {
+            config.test_amount
+        } else {
+            result.denom_spent
+        },
+        tokens_received,
+        buy_transaction: result.buy_transaction,
+        block_number: result.block_number.max(block),
+        failure_reason: if success {
+            None
+        } else {
+            result
+                .failure_reason
+                .or_else(|| Some("Universal Router V4 buy transaction failed".to_string()))
         },
     })
 }
