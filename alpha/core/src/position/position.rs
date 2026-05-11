@@ -2,7 +2,10 @@ use crate::{
     amount::{Amount, DecimalAmount},
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
-    ids::{BlockNumber, OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress, WalletId},
+    ids::{
+        BlockNumber, OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress,
+        WalletId,
+    },
     order::OrderSide,
     position::PositionState,
 };
@@ -30,10 +33,14 @@ pub struct Position {
     pub exit_proceeds: Option<DecimalAmount>,
     /// Pool price at time of buy (denom per token).
     pub entry_price: Option<DecimalAmount>,
-    /// Actual tokens received from the buy (from simulation or on-chain).
-    /// Stored as DecimalAmount to avoid token-decimal ambiguity.
-    /// Needed for accurate sell sizing since tokens may have taxes, max limits, etc.
+    /// Human-scale token amount received from the buy.
+    /// Kept for reporting and strategy thresholds.
     pub entry_token_amount: Option<DecimalAmount>,
+    /// Exact raw token amount received from the buy.
+    /// Preferred for follow-up sell simulation because it preserves the token
+    /// decimals and avoids reconstructing raw amounts from display values.
+    #[serde(default)]
+    pub entry_token_raw_amount: Option<Amount>,
     /// Block number at which the buy was confirmed.
     /// Used for time-based exits (e.g., max hold duration).
     #[serde(default)]
@@ -56,6 +63,7 @@ impl Position {
             exit_proceeds: None,
             entry_price: None,
             entry_token_amount: None,
+            entry_token_raw_amount: None,
             entry_block: None,
             drained: false,
         }
@@ -112,9 +120,7 @@ impl Position {
         fill_price: Option<DecimalAmount>,
     ) -> Result<()> {
         match report.status {
-            ExecutionStatus::Confirmed => {
-                self.apply_confirmed_report(report, fill_price)
-            }
+            ExecutionStatus::Confirmed => self.apply_confirmed_report(report, fill_price),
             ExecutionStatus::Failed => {
                 self.state = PositionState::Failed;
                 Ok(())
@@ -142,7 +148,11 @@ impl Position {
             if let Some(price) = fill_price {
                 self.entry_price = Some(price);
             }
-            self.entry_token_amount = report.token_amount.as_ref().map(|a| a.to_decimal());
+            self.entry_token_amount = report
+                .token_amount
+                .as_ref()
+                .map(|amount| amount.to_decimal());
+            self.entry_token_raw_amount = report.token_amount.clone();
             self.entry_block = report.block_number;
             return Ok(());
         }
@@ -161,50 +171,6 @@ impl Position {
             "confirmed report {:?} does not match position {:?}",
             report.order_id, self.state
         )))
-    }
-
-    /// Compute unrealized PnL given the current pool snapshot.
-    ///
-    /// The current value is capped at the pool's denom reserve (you cannot
-    /// extract more liquidity than exists in the pool). This prevents
-    /// astronomical paper valuations on illiquid tokens.
-    ///
-    /// Returns (current_value, unrealized_pnl) in denom terms.
-    pub fn unrealized_pnl(&self, pool: &crate::market::PoolSnapshot) -> (DecimalAmount, DecimalAmount) {
-        let Some(cost_basis) = self.entry_cost_basis else {
-            return (DecimalAmount::ZERO, DecimalAmount::ZERO);
-        };
-
-        // If the position was marked drained (liquidity removed / scammed),
-        // or the pool is unsellable, the position is effectively worthless.
-        // This is the conservative (worst-case) assumption.
-        if self.drained || !pool.can_sell {
-            return (DecimalAmount::ZERO, -cost_basis);
-        }
-
-        let Some(entry_price) = self.entry_price else {
-            return (cost_basis, DecimalAmount::ZERO);
-        };
-        if entry_price.is_zero() {
-            // Cannot compute ratio; assume position is worthless.
-            return (DecimalAmount::ZERO, -cost_basis);
-        }
-        let current_price = pool.price_denom_per_token.unwrap_or_default();
-        if current_price.is_zero() {
-            // Price went to zero; full loss.
-            return (DecimalAmount::ZERO, -cost_basis);
-        }
-
-        // Price-based theoretical value
-        let ratio = current_price / entry_price;
-        let price_value = cost_basis * ratio;
-
-        // Liquidity cap: cannot extract more than pool denom reserve
-        let liquidity_cap = pool.denom_reserve;
-        let current_value = price_value.min(liquidity_cap);
-
-        let unrealized = current_value - cost_basis;
-        (current_value, unrealized)
     }
 
     /// Total realized PnL for a closed position.

@@ -2,8 +2,9 @@
 //!
 //! The engine sits above live feed/state and mempool risk. It consumes typed
 //! market, risk, and execution events, runs strategies, applies risk policy, and
-//! routes approved intents to an execution adapter. The first runtime mode is
-//! paper execution, so this crate deliberately does not talk to `tx_executor`.
+//! routes approved intents to an execution adapter. The no-capital runtime uses
+//! chain-state EVM simulation; real submission remains isolated behind a future
+//! `tx_executor` adapter.
 
 pub mod execution;
 pub mod wire;
@@ -12,10 +13,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
-    amount::DecimalAmount,
+    amount::{Amount, DecimalAmount},
     error::Result,
     execution::ExecutionReport,
-    market::{MarketEvent, MarketSnapshotRef},
+    market::{MarketEvent, MarketSnapshotRef, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
     position::{Position, PositionKey, PositionSnapshot},
@@ -24,8 +25,8 @@ use eth_alpha_core::{
     strategy::{Strategy, StrategyContext, StrategyDecision},
 };
 
-// Re-export adapters at crate root for convenience.
-pub use execution::{ExecutionAdapterKind, ModeledExecutionAdapter, ModeledExecutionConfig, PaperExecutionAdapter};
+// Re-export chain-simulation adapters at crate root for convenience.
+pub use execution::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {
@@ -34,9 +35,25 @@ pub enum EngineEvent {
     Execution(ExecutionReport),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PositionValueSimulation {
+    pub block_number: u64,
+    pub current_value: Amount,
+    pub gas_used: Option<u64>,
+    pub error: Option<String>,
+}
+
 #[async_trait]
 pub trait EngineExecutionAdapter: Send + Sync {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport>;
+
+    async fn simulate_position_value(
+        &self,
+        _position: &Position,
+        _pool: &PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        Ok(None)
+    }
 }
 
 pub struct AlphaEngine<E, R, S>
@@ -167,33 +184,26 @@ where
         let MarketEvent::PoolUpdated { pool, block_number } = event else {
             return Ok(());
         };
-        for position in self.portfolio.positions.values_mut() {
-            if position.key.pool_address != pool.address {
-                continue;
-            }
-            if !position.is_open() {
-                continue;
-            }
-            let (current_value, unrealized) = position.unrealized_pnl(pool);
-            let snapshot = PositionSnapshot {
-                position_id: position.id.clone(),
-                state: position.state.clone(),
-                block_number: *block_number,
-                current_value_eth: current_value,
-                realized_profit_eth: position.realized_pnl(),
-                unrealized_profit_eth: unrealized,
-                roi: if let Some(cost) = position.entry_cost_basis {
-                    if !cost.is_zero() {
-                        ((current_value + position.realized_pnl()) / cost)
-                            - DecimalAmount::from(1)
-                    } else {
-                        DecimalAmount::ZERO
-                    }
-                } else {
-                    DecimalAmount::ZERO
-                },
+        let positions = self
+            .portfolio
+            .positions
+            .values()
+            .filter(|position| position.key.pool_address == pool.address && position.is_open())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for position in positions {
+            let snapshot = if position.drained {
+                Some(zero_value_snapshot(&position, *block_number))
+            } else {
+                self.execution
+                    .simulate_position_value(&position, pool)
+                    .await?
+                    .map(|value| simulated_value_snapshot(&position, value))
             };
-            self.store.append_position_snapshot(&snapshot).await?;
+            if let Some(snapshot) = snapshot {
+                self.store.append_position_snapshot(&snapshot).await?;
+            }
         }
         Ok(())
     }
@@ -233,7 +243,10 @@ where
 
         // Worst-case baseline: mark open positions as drained on
         // liquidity removal or scam confirmation, even if strategy does not exit.
-        if matches!(event.kind, RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed) {
+        if matches!(
+            event.kind,
+            RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed
+        ) {
             if let Some(ref pool_address) = event.pool_address {
                 for position in self.portfolio.positions.values_mut() {
                     if position.key.pool_address == *pool_address
@@ -282,36 +295,27 @@ where
 
     async fn execute_if_allowed(&mut self, intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
         self.store.record_order_intent(&intent).await?;
-        let fill_price = self.market.as_ref().and_then(|m| {
-            m.pool.as_ref().and_then(|p| p.price_denom_per_token)
-        });
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
-                let report = self.execute_intent(intent, fill_price).await?;
+                let report = self.execute_intent(intent).await?;
                 Ok(vec![report])
             }
             RiskDecision::ForceExit { intent, .. } => {
-                let report = self.execute_intent(*intent, fill_price).await?;
+                let report = self.execute_intent(*intent).await?;
                 Ok(vec![report])
             }
             RiskDecision::Reject { .. } | RiskDecision::CancelOpenOrders { .. } => Ok(Vec::new()),
         }
     }
 
-    async fn execute_intent(
-        &mut self,
-        intent: OrderIntent,
-        snapshot_price: Option<DecimalAmount>,
-    ) -> Result<ExecutionReport> {
+    async fn execute_intent(&mut self, intent: OrderIntent) -> Result<ExecutionReport> {
         let mut position = self.position_for_intent(&intent);
         position.mark_intent_created(intent.side)?;
         let report = self.execution.execute(intent.clone()).await?;
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
 
-        // When the execution adapter provides both cost basis and token amount,
-        // compute the actual fill price from the report rather than using the
-        // pool snapshot price. This gives chain-parity pricing that accounts
-        // for real slippage, taxes, and price impact.
+        // Chain-sim buys provide both cost basis and token amount, so entry
+        // price is derived only from the simulated fill.
         let fill_price = match intent.side {
             OrderSide::Buy => {
                 if let (Some(cost), Some(tokens)) = (&report.filled_amount, &report.token_amount) {
@@ -320,13 +324,13 @@ where
                     if !token_dec.is_zero() {
                         Some(cost_dec / token_dec)
                     } else {
-                        snapshot_price
+                        None
                     }
                 } else {
-                    snapshot_price
+                    None
                 }
             }
-            OrderSide::Sell => snapshot_price,
+            OrderSide::Sell => None,
         };
         position.apply_execution_report_with_price(&report, fill_price)?;
 
@@ -336,7 +340,11 @@ where
             let snapshot = PositionSnapshot {
                 position_id: position.id.clone(),
                 state: position.state.clone(),
-                block_number: self.market.as_ref().map(|m| m.block_number).unwrap_or_default(),
+                block_number: self
+                    .market
+                    .as_ref()
+                    .map(|m| m.block_number)
+                    .unwrap_or_default(),
                 current_value_eth: DecimalAmount::ZERO,
                 realized_profit_eth: position.realized_pnl(),
                 unrealized_profit_eth: DecimalAmount::ZERO,
@@ -419,6 +427,49 @@ fn position_id_for_key(key: &PositionKey) -> eth_alpha_core::ids::PositionId {
         key.token_address,
         key.pool_address
     ))
+}
+
+fn zero_value_snapshot(position: &Position, block_number: u64) -> PositionSnapshot {
+    let cost = position.entry_cost_basis.unwrap_or_default();
+    PositionSnapshot {
+        position_id: position.id.clone(),
+        state: position.state.clone(),
+        block_number,
+        current_value_eth: DecimalAmount::ZERO,
+        realized_profit_eth: position.realized_pnl(),
+        unrealized_profit_eth: -cost,
+        roi: if cost.is_zero() {
+            DecimalAmount::ZERO
+        } else {
+            DecimalAmount::from(-1)
+        },
+    }
+}
+
+fn simulated_value_snapshot(
+    position: &Position,
+    simulation: PositionValueSimulation,
+) -> PositionSnapshot {
+    let current_value = simulation.current_value.to_decimal();
+    let cost = position.entry_cost_basis.unwrap_or_default();
+    let realized = position.realized_pnl();
+    PositionSnapshot {
+        position_id: position.id.clone(),
+        state: position.state.clone(),
+        block_number: simulation.block_number,
+        current_value_eth: current_value,
+        realized_profit_eth: realized,
+        unrealized_profit_eth: if cost.is_zero() {
+            DecimalAmount::ZERO
+        } else {
+            current_value - cost
+        },
+        roi: if cost.is_zero() {
+            DecimalAmount::ZERO
+        } else {
+            ((current_value + realized) / cost) - DecimalAmount::from(1)
+        },
+    }
 }
 
 #[derive(Clone, Default)]
@@ -520,8 +571,8 @@ mod tests {
         ) -> Result<StrategyDecision> {
             let pool = ctx.market.pool.as_ref().expect("pool snapshot");
             Ok(StrategyDecision::SubmitOrder(OrderIntent {
-                portfolio_id: PortfolioId("paper".to_string()),
-                wallet_id: WalletId("paper-wallet".to_string()),
+                portfolio_id: PortfolioId("chain-sim".to_string()),
+                wallet_id: WalletId("chain-sim-wallet".to_string()),
                 strategy_name: self.name(),
                 side: OrderSide::Buy,
                 token_address: pool.token_address,
@@ -537,13 +588,32 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct ConfirmingTestExecutionAdapter;
+
+    #[async_trait::async_trait]
+    impl EngineExecutionAdapter for ConfirmingTestExecutionAdapter {
+        async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
+            Ok(ExecutionReport {
+                order_id: eth_alpha_core::ids::OrderId("test-order".to_string()),
+                status: ExecutionStatus::Confirmed,
+                tx_hash: None,
+                block_number: Some(1),
+                filled_amount: Some(intent.amount.clone()),
+                token_amount: Some(intent.amount),
+                gas_used: Some(21_000),
+                error: None,
+            })
+        }
+    }
+
     #[tokio::test]
-    async fn paper_engine_executes_approved_strategy_order() {
+    async fn engine_executes_approved_strategy_order() {
         let store = MemoryTradingStore::default();
         let mut engine = AlphaEngine::new(
             AllowAllRiskPolicy,
             store.clone(),
-            PaperExecutionAdapter::new(),
+            ConfirmingTestExecutionAdapter,
         );
         engine.add_strategy(Box::new(BuyOnMarketStrategy));
 
@@ -586,7 +656,7 @@ mod tests {
         let mut engine = AlphaEngine::new(
             AllowAllRiskPolicy,
             store.clone(),
-            PaperExecutionAdapter::new(),
+            ConfirmingTestExecutionAdapter,
         );
         engine.add_strategy(Box::new(BuyOnMarketStrategy));
 
@@ -617,7 +687,7 @@ mod tests {
         let mut engine = AlphaEngine::new(
             BlockCriticalRiskPolicy,
             store.clone(),
-            PaperExecutionAdapter::new(),
+            ConfirmingTestExecutionAdapter,
         );
         engine.add_strategy(Box::new(BuyOnMarketStrategy));
 

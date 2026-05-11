@@ -12,20 +12,20 @@ memory pressure, live-feed regressions, or execution.
 
 ## Focus Order
 
-> **North star**: The pipeline must produce a profitable strategy on paper with
-> realistic fills before real capital is deployed. Infrastructure is no longer
-> the dominant limit; strategy quality and fill realism are.
+> **North star**: The pipeline must produce a profitable no-capital strategy
+> with chain-sim fills before real capital is deployed. Infrastructure is no
+> longer the dominant limit; strategy quality and fill realism are.
 
 | Order | Bottleneck | Owner | What To Watch | Next Focus |
 | --- | --- | --- | --- | --- |
 | 1 | **Strategy policy quality** | `alpha/strategies` | entry selectivity, exit coverage, risk reaction latency, skipped vs taken ratio, V2/V3/V4 behavior, PnL per pool | Replace `Snipe All v1` with a selective strategy: add pool-quality scoring, activate tax/honeypot/LP-approval exits, add position sizing, and filter low-expectation pools. |
-| 2 | **Paper fill realism** | `alpha/engine` | synthetic execution reports versus worst achievable block price, slippage model, gas cost model | Replace perfect paper fills with worst-case block fill modeling in `PaperExecutionAdapter`. PnL must reflect what a real fill would have achieved. |
+| 2 | **Chain-sim fill realism** | `alpha/engine` | simulated execution reports versus chain state, gas used, fill failures, unsupported pool routes | Keep live/backtest on `ChainSimExecutionAdapter`/`LiveChainSimExecutionAdapter` only. Close remaining gaps: gas-cost accounting, V4 route support or explicit V4 skip policy, and pool/protocol failure rollups. |
 | 3 | **Trader decision ledger completeness** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior and we can train filters from losers. |
-| 4 | **Backtest and replay alignment** | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching, historical lower-bound PnL | Run historical replays with the new selective strategy + worst-case fills. Compare backtest lower-bound PnL to live paper behavior. Iterate on rules offline. |
+| 4 | **Backtest and replay alignment** | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live chain-sim runs, same `TokenPoolId` matching, historical lower-bound PnL | Run historical replays with the new selective strategy + chain-sim fills. Compare backtest lower-bound PnL to live chain-sim behavior. Iterate on rules offline. |
 | 5 | **Mempool signal recall and timing** | `mempool_processor`, future `alpha/mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
 | 6 | **Live feed failure isolation watch** | `alpha/live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Watch the May 11 Reth-or-Redis live-state fix during the next run; optional pool metadata and buy/sell simulation failures must remain pool-level errors, not tracker-level failures. |
 | 7 | **Live warmup memory pressure while filling processed-block cache** | `eth_token_server`, `alpha/live/feed`, `tx_processor`, Reth static files | systemd cgroup memory, RSS, cgroup `anon`/`file`, disk-cache hits/misses, cache write time | Add allocator trimming to the live warmup path and avoid running large backfills while token-server warmup is filling missing cache entries. |
-| 8 | **Real execution handoff** | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping, receipt polling | Only replace the paper adapter with a `tx_executor` adapter after live paper PnL is consistently positive with worst-case fills and decision auditing is complete. |
+| 8 | **Real execution handoff** | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping, receipt polling | Only add a `tx_executor` adapter after live chain-sim PnL is consistently positive and decision auditing is complete. |
 
 ## Frontend Alignment
 
@@ -38,7 +38,7 @@ as the table above and should only derive metrics from existing read-only APIs.
 | Live Warmup Memory Pressure While Filling Processed-Block Cache | `/eth/tokens/api/live/status` | warmup, cache hit/miss, miss rate, cache read/write time, upstream time, apply time, tracked tokens/pools, memory API exposure status |
 | Mempool Signal Recall And Timing | `/eth/tokens/api/mempool/signals?since_days=14&limit=500` | total signals, latest signal age, trading-enabled count, LP approvals, liquidity removals, approval/removal ratio, tax signals, token/pool coverage |
 | Trader Decision Ledger Completeness | `/eth/trade/api/strategies/:strategy_id` | runtime, mode, trading flag, heartbeat age, live block/status, positions, orders/reports, risk count |
-| Paper Fill Realism | `/eth/trade/api/strategies/:strategy_id` | report count, confirmed count, reports with block, reports with tx hash, gas modeled, fill errors |
+| Chain-Sim Fill Realism | `/eth/trade/api/strategies/:strategy_id` | report count, confirmed count, reports with block, gas used, fill errors |
 | Strategy Policy Quality | `/eth/trade/api/strategies/:strategy_id` | active/scaffolded rules, open positions, risk counts by kind, latest risk, latest order |
 | Backtest And Replay Alignment | `/eth/trade/api/runs`, `/eth/trade/api/strategies/:strategy_id` | range runs, completed range runs, latest range status/heartbeat, trader runs, latest trader status |
 | Real Execution Handoff | `/eth/trade/api/strategies/:strategy_id` | mode, trading flag, reports with tx hash, adapter, run id, runtime status |
@@ -47,9 +47,9 @@ Frontend status semantics:
 
 - `blocked`: source API is unavailable, live tracker failed, or a hard runtime
   error is present.
-- `watch`: the stage is running but still incomplete, intentionally paper-only,
-  or missing a required measurement such as memory diagnostics or worst-case
-  fill modeling.
+- `watch`: the stage is running but still incomplete, intentionally no-capital,
+  or missing a required measurement such as memory diagnostics or chain-sim fill
+  failure rates.
 - `clear`: the stage has no currently known blocker for its role.
 
 If this file changes the focus order, stage names, or monitored fields, update
@@ -58,7 +58,7 @@ If this file changes the focus order, stage names, or monitored fields, update
 > **Note (May 10, 2026)**: The focus order above was inverted. Infrastructure
 > stages 1/2 are now 6/7. Strategy quality (was 6) is now 1. If you update the
 > frontend `bogaz.js` trust-domain order, match this new priority: Strategy
-> Policy → Paper Fill → Decision Ledger → Backtest → Mempool Signals → Live
+> Policy → Chain-Sim Fill → Decision Ledger → Backtest → Mempool Signals → Live
 > Feed → Memory → Execution Handoff.
 
 ## Token Detail Page Improvement Backlog
@@ -531,11 +531,12 @@ Frontend: `interface/asena/eth/tokens/static/js/tokens/network/`.
   - Block number, timestamp, gas used
 - This turns the graph from "pretty picture" into "auditable evidence".
 
-## Active Bottleneck: Strategy Policy Quality + Paper Fill Realism
+## Active Bottleneck: Strategy Policy Quality + Chain-Sim Fill Realism
 
 Observed on May 10, 2026; updated on May 11 after the live-state restore fix.
 The dominant limit is not infrastructure; it is that the strategy loses money
-on paper and the paper fills are unrealistically perfect.
+under no-capital evaluation, and fills must come only from chain-state
+simulation.
 
 ### Latest State Snapshot (May 10, 2026 15:27 UTC)
 
@@ -557,34 +558,44 @@ eth-token-server
   last cache read:      13 ms
 ```
 
-Paper strategy (`snipe-all-v1`):
+Live chain-sim strategy (`snipe-all-v1`, refreshed May 11 2026 17:45 UTC):
 ```text
-mode:                 paper
-status:               running since 2026-05-08 14:37 UTC
-positions:            167 (open: 70, closed: 97)
-orders:               282
-execution reports:    264 confirmed, 0 failed
-risk events:          144 (103 critical)
-buy volume:           1.85 ETH
-sell volume:          0.97 ETH
-realized PnL:         0.00 ETH
-ROI:                  0.0%
+mode:                 chain-sim
+run id:               snipe-all-v1-chain-sim-live-v3
+status:               running since 2026-05-11 17:42 UTC
+positions:            10 (open: 7, failed: 3)
+orders:               10
+execution reports:    7 confirmed, 3 failed
+risk events:          0
+confirmed buy volume: 0.07 ETH
+current value:        0.05368703211916693 ETH
+unrealized PnL:       -0.016312967880833067 ETH
+ROI:                  -23.30423982976152%
+failed reports:       V4 unsupported-route buys
 ```
 
 ### Interpretation
 
 - **Live infrastructure is healthy**: Cache hit rate is ~99.97%, block apply is
   ~39 ms, tracked set is 648 tokens / 405 pools. The pipeline can sustain live
-  paper trading.
-- **The strategy is not selective**: It buys every eligible pool. 167 buys in ~2
-  days with 0.01 ETH each = 1.85 ETH deployed. 70 positions are still open.
-- **Paper fills hide losses**: `PaperExecutionAdapter` reports perfect fills
-  (`filled_amount = intent.amount`). Realized PnL is reported as exactly 0.0,
-  which is mathematically implausible for 97 closed positions unless the fill
-  model is perfect and gas/slippage are ignored.
+  no-capital trading.
+- **The strategy is still not selective**: Immediately after warmup, v3 attempted
+  ten eligible pools, confirmed seven V2/V3 buys, and failed three V4 buys with an
+  explicit unsupported-route reason.
+- **Non-chain-state fills are removed from the pipeline**:
+  `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` are the supported
+  fill paths. Buy token amount, sell proceeds, and gas used must come from EVM
+  simulation against selected Reth/Redis state. Unsupported routes or missing
+  state produce failed execution reports.
+- **Open-position values are now chain-sim sell valuations**: The live v3 run
+  reports non-zero `current_value_eth` for all seven confirmed open positions.
+  Valuation simulates selling the exact raw token amount from the buy report
+  against selected chain state, with synthetic token balance injected only into
+  the forked valuation state.
 - **Exits are incomplete**: Only `liquidity_removal` exits are active. Tax,
-  honeypot, and LP-approval exits are scaffolded but hold. 103 critical risk
-  events fired; many of those should have triggered sells but did not.
+  honeypot, and LP-approval exits are scaffolded but hold. The previous live run
+  produced many critical risk events without corresponding exits; v3 has not yet
+  accumulated risk events.
 - **Live-state context lag resolved**: The May 10 `snapshot base block ... ahead
   of local historical context` cascade is no longer an active bottleneck. The
   simulator now uses exactly two sources during live operation: Reth historical
@@ -593,7 +604,7 @@ ROI:                  0.0%
 
 ### Immediate Operating Rule
 
-- **Do not add real capital until paper PnL is positive with worst-case fills.**
+- **Do not add real capital until chain-sim PnL is positive with realistic fills.**
 - The next engineering block is `alpha/strategies` + `alpha/engine`, not
   `tx_executor` or live feed tuning.
 - Backfill and large cache work can run freely; live warmup is complete and
@@ -603,14 +614,14 @@ ROI:                  0.0%
 
 | Priority | Action | Owner | Validation |
 | --- | --- | --- | --- |
-| 1 | Implement worst-case paper fill modeling in `PaperExecutionAdapter`: use block-level price impact, apply slippage, deduct gas, and record fill divergence vs intent. | `alpha/engine` | Paper PnL on closed positions becomes negative (reflecting reality) instead of exactly zero. |
+| 1 | Finish chain-sim performance accounting: subtract simulated gas cost, expose failed simulation reasons by pool/protocol, and add V4 route support or an explicit V4 skip policy. | `alpha/engine`, `tx_processor` | Dashboard PnL uses confirmed simulated fills only, reports gas cost separately, and V4 pools are either simulated or excluded before order creation. |
 | 2 | Activate tax/honeypot exit rule in `snipe_all/rules/tax.rs`: sell on `RiskKind::TaxChange` or `Honeypot` when an open position exists. | `alpha/strategies` | Frontend risk table shows sells tied to tax/honeypot events; closed-position count rises. |
 | 3 | Activate LP-approval exit rule in `snipe_all/rules/lp_approval.rs`: sell on `RiskKind::LpApproval` for private creators. | `alpha/strategies` | Same as above for LP-approval events. |
 | 4 | Add pool-quality entry filter to `snipe_all/rules/entry.rs`: score pools by creator history, network cluster risk, holder concentration, and mempool signal density. Reject below threshold. | `alpha/strategies`, `eth_token` | Entry count drops; taken/total ratio is visible in decision ledger; PnL per pool improves. |
 | 5 | Add position sizing to `SnipeAllConfig`: dynamic buy amount based on pool score, portfolio heat, and recent win rate. | `alpha/strategies`, `alpha/core` | Config exposes `min_buy`, `max_buy`, `score_multiplier`; buy amounts vary across positions. |
 | 6 | Wire decision-audit rows for every skip so the frontend can show *why* a pool was rejected. | `alpha/engine`, `alpha/store` | `strategy_observations` table has skip rows with rule id, score, and reason. |
-| 7 | Run a 7-day historical backtest with the new selective strategy + worst-case fills. | `alpha/backtest` | Backtest PnL is comparable to live paper PnL; rules iterate offline. |
-| 8 | Build `TxExecutorAdapter` implementing `EngineExecutionAdapter` only after paper PnL is positive for 3 consecutive days. | `alpha/engine`, `tx_executor` | Real-submission mode is gated by a config flag and requires explicit operator enable. |
+| 7 | Run a 7-day historical backtest with the new selective strategy + chain-sim fills. | `alpha/backtest` | Backtest PnL is comparable to live chain-sim PnL; rules iterate offline. |
+| 8 | Build `TxExecutorAdapter` implementing `EngineExecutionAdapter` only after chain-sim PnL is positive for 3 consecutive days. | `alpha/engine`, `tx_executor` | Real-submission mode is gated by a config flag and requires explicit operator enable. |
 
 ## Processed-Block Cache Baseline
 
@@ -654,7 +665,7 @@ What this means:
 
 ## Live Feed Readiness And Failure Isolation
 
-The live token tracker must reach `live` reliably before paper trading can
+The live token tracker must reach `live` reliably before chain-sim trading can
 produce dependable measurements.
 
 Known failure class:
@@ -681,30 +692,43 @@ Target behavior:
 
 ## Path to Profitable Deployment
 
-This section is a concise roadmap from the current state (live paper, zero
-selectivity, perfect fills) to a deployed strategy that makes money.
+This section is a concise roadmap from the current state (live chain-sim, zero
+selectivity, no real capital) to a deployed strategy that makes money.
 
 ### Stage 0 — Current State (COMPLETE)
 
 - [x] Live token tracker reaches `live` reliably
 - [x] Processed-block cache fills and reads fast (>99% hit rate)
-- [x] Paper trader binary runs continuously against live state
+- [x] Chain-sim trader binary runs continuously against live state
 - [x] Postgres decision ledger persists positions, orders, reports, risks
 - [x] Mempool signals (liquidity removal, tax, honeypot, LP approval) are
   detected and published
 - [x] Frontend renders live status, strategy detail, and pipeline bottlenecks
 
-### Stage 1 — Make Paper Honest (NEXT)
+### Stage 1 — Make Chain-Sim Honest (NEXT)
 
-Goal: Paper PnL must reflect reality. If the strategy loses money, paper must
-show a loss.
+Goal: No-capital PnL must reflect chain-state simulation. If the strategy loses
+money, chain-sim must show a loss.
 
-- [ ] `PaperExecutionAdapter` models worst-case fill: block-level price impact,
-  configured slippage bps, gas cost deduction.
-- [ ] `SimulatedExecutionAdapter` in backtest uses the same worst-case rule so
-  backtest and live paper are aligned.
-- [ ] Front-end performance chart shows "modeled PnL" separately from "perfect
-  PnL" during the transition.
+- [x] Remove legacy non-chain-state adapters from the
+  runtime pipeline.
+- [x] `ChainSimExecutionAdapter` in backtest and `LiveChainSimExecutionAdapter`
+  in live trading use EVM simulation against selected chain state.
+- [x] Buy reports store the exact raw token amount from EVM simulation; follow-up
+  sells use that raw amount instead of rebuilding from display decimals.
+- [x] Open-position value snapshots come only from chain-sim sell valuation or
+  explicit drained-state zeroing. Missing valuation state/route support skips
+  the snapshot instead of deriving a price-ratio estimate.
+- [x] Live open-position valuation can inject the simulated wallet's token
+  balance into forked state, then run ERC20 approval plus sell calldata through
+  the EVM. This keeps valuation on chain execution while avoiding fake
+  price-ratio math.
+- [x] Performance capital, buy volume, and sell volume come from confirmed
+  execution reports, not submitted order intents.
+- [ ] Performance reporting separates simulated gas used from gas cost and shows
+  failed simulation reasons by pool/protocol.
+- [ ] Add V4 buy/sell simulation support, or block V4 before order creation with
+  an explicit unsupported-route reason.
 
 Acceptance: Running the current `Snipe All v1` against 7 days of historical data
 produces negative PnL (because buying everything with realistic fills is
@@ -755,16 +779,16 @@ visible in frontend.
 Goal: Iterate on rules offline without waiting for live days.
 
 - [ ] Run 30-day historical replay with selective strategy + worst-case fills.
-- [ ] Compare backtest PnL curve to live paper PnL curve.
-- [ ] Tune `min_score`, slippage model, and exit thresholds in backtest.
-- [ ] Re-run live paper with tuned parameters.
+- [ ] Compare backtest PnL curve to live chain-sim PnL curve.
+- [ ] Tune `min_score` and exit thresholds in backtest.
+- [ ] Re-run live chain-sim with tuned parameters.
 
 Acceptance: A rule change can be validated in backtest within hours and
-redeployed to live paper with confidence.
+redeployed to live chain-sim with confidence.
 
 ### Stage 6 — Live Execution Adapter
 
-Goal: Submit real transactions. ONLY after paper is profitable.
+Goal: Submit real transactions. ONLY after chain-sim is profitable.
 
 - [ ] Build `TxExecutorAdapter` implementing `EngineExecutionAdapter`.
 - [ ] Convert `OrderIntent` → swap calldata (V2/V3/V4 route + slippage).
@@ -773,7 +797,7 @@ Goal: Submit real transactions. ONLY after paper is profitable.
 - [ ] Add a manual "enable real trading" flag with capital limit and circuit
   breaker.
 
-Acceptance: The same strategy that was profitable on paper produces real fills
+Acceptance: The same strategy that was profitable in chain-sim produces real fills
 with tracked PnL. Real capital is limited to a small test amount until 30 days
 of positive real PnL are recorded.
 
@@ -781,12 +805,12 @@ of positive real PnL are recorded.
 
 | Gate | Requirement | Current |
 | --- | --- | --- |
-| G1: Honest paper | Paper PnL reflects worst-case fills | ❌ Perfect fills |
+| G1: Honest chain-sim | PnL reflects chain-state EVM fills | 🚧 Runtime wiring updated; monitor gas cost and V4 gaps next |
 | G2: Active exits | All critical risks trigger sells | ❌ Only liquidity removal |
 | G3: Selective entry | < 50% of eligible pools entered | ❌ 100% entered |
 | G4: Sized bets | Variable position sizing | ❌ Fixed 0.01 ETH |
-| G5: Backtest parity | Backtest PnL ≈ live paper PnL | ❌ Not validated |
-| G6: Real money | Paper PnL positive for 7+ days | ❌ 0.0 ETH on 97 closes |
+| G5: Backtest parity | Backtest PnL ≈ live chain-sim PnL | ❌ Not validated |
+| G6: Real money | Chain-sim PnL positive for 7+ days | ❌ Not validated |
 
 Do not proceed to the next stage until the current stage's acceptance criteria
 are met and recorded in this file with a dated measurement.

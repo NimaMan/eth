@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::U256;
@@ -12,10 +13,12 @@ use eth_alpha_core::{
     market::{MarketEvent, PoolSnapshot},
     portfolio::PortfolioState,
 };
-use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, ExecutionAdapterKind, ModeledExecutionAdapter, ModeledExecutionConfig, PaperExecutionAdapter};
 use eth_alpha_engine::wire::{
-    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalsResponse,
-    MempoolSignalWire, PoolWire,
+    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalWire,
+    MempoolSignalsResponse, PoolWire,
+};
+use eth_alpha_engine::{
+    AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, LiveChainSimExecutionAdapter,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
@@ -49,8 +52,8 @@ struct Args {
     #[arg(long, default_value_t = 200)]
     signal_limit: i64,
 
-    #[arg(long, default_value = "10000000000000000")]
-    paper_buy_wei: String,
+    #[arg(long = "buy-wei", default_value = "10000000000000000")]
+    buy_wei: String,
 
     #[arg(long, default_value = "0.5")]
     min_liquidity_eth: String,
@@ -64,9 +67,13 @@ struct Args {
     #[arg(long, env = "ALPHA_TRADER_RUN_ID")]
     run_id: Option<String>,
 
-    /// Execution mode: `paper` (perfect fills) or `modeled` (worst-case fills).
-    #[arg(long, env = "ALPHA_TRADER_MODE", default_value = "paper")]
+    /// Execution mode. Only `chain-sim` is supported; theoretical fill modes are rejected.
+    #[arg(long, env = "ALPHA_TRADER_MODE", default_value = "chain-sim")]
     mode: String,
+
+    /// Reth datadir used by the chain-state simulator.
+    #[arg(long, env = "RETH_DATADIR")]
+    reth_datadir: Option<String>,
 
     /// Process the current token-server snapshot immediately instead of only priming watermarks.
     #[arg(long, default_value_t = false)]
@@ -96,7 +103,6 @@ struct TokenServerClient {
     base_url: String,
     http: reqwest::Client,
 }
-
 
 impl TokenServerClient {
     fn new(base_url: impl Into<String>) -> Self {
@@ -146,7 +152,17 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let paper_buy_wei = parse_u256_decimal(&args.paper_buy_wei)?;
+    let execution_mode = normalize_execution_mode(&args.mode)?;
+    let reth_datadir = match args
+        .reth_datadir
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(value) => value.clone(),
+        None => tx_simulator::config::repo::reth_datadir()
+            .wrap_err("failed to resolve RETH_DATADIR for chain simulation")?,
+    };
+    let buy_wei = parse_u256_decimal(&args.buy_wei)?;
     let min_liquidity_eth = Decimal::from_str(&args.min_liquidity_eth)
         .wrap_err("invalid --min-liquidity-eth decimal")?;
     let min_liquidity_usd = Decimal::from_str(&args.min_liquidity_usd)
@@ -159,15 +175,17 @@ async fn main() -> Result<()> {
         .wrap_err("failed to initialize Postgres trading store")?;
     store
         .start_run(
-            &args.mode,
+            execution_mode,
             json!({
                 "strategy_name": STRATEGY_NAME,
                 "strategy_label": STRATEGY_LABEL,
+                "execution_model": "chain_state_evm_simulation",
                 "token_server_url": &args.token_server_url,
+                "reth_datadir": &reth_datadir,
                 "poll_interval_ms": args.poll_interval_ms,
                 "mempool_since_days": args.mempool_since_days,
                 "signal_limit": args.signal_limit,
-                "paper_buy_wei": &args.paper_buy_wei,
+                "buy_wei": &args.buy_wei,
                 "min_liquidity_eth": &args.min_liquidity_eth,
                 "min_liquidity_usd": &args.min_liquidity_usd,
                 "replay_current": args.replay_current,
@@ -189,25 +207,17 @@ async fn main() -> Result<()> {
     }
     let restored_position_count = portfolio.active_position_count();
 
-    let (adapter, pool_updates) = match args.mode.as_str() {
-        "modeled" => {
-            let adapter = ModeledExecutionAdapter::new(ModeledExecutionConfig::default());
-            let pools = adapter.pools();
-            (ExecutionAdapterKind::Modeled(adapter), Some(pools))
-        }
-        _ => {
-            let adapter = PaperExecutionAdapter::new();
-            let pools = adapter.pools();
-            (ExecutionAdapterKind::Paper(adapter), Some(pools))
-        }
-    };
+    let live_simulator = tx_simulator::LiveTxSimulator::new(&reth_datadir)
+        .wrap_err("failed to initialize live chain simulator")?;
+    let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
+    let adapter =
+        LiveChainSimExecutionAdapter::with_prefix(live_simulator, tx_processor, run_id.clone())
+            .wrap_err("failed to initialize chain-sim execution adapter")?;
+    let pool_updates = adapter.pools();
+    let state_status_adapter = adapter.clone();
 
-    let mut engine = AlphaEngine::new(
-        BlockCriticalRiskPolicy,
-        store.clone(),
-        adapter,
-    )
-    .with_portfolio(portfolio);
+    let mut engine =
+        AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter).with_portfolio(portfolio);
     let stop_loss_ratio = args
         .stop_loss_ratio
         .as_deref()
@@ -219,7 +229,7 @@ async fn main() -> Result<()> {
 
     engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
         buy_amount: Amount {
-            raw: paper_buy_wei,
+            raw: buy_wei,
             decimals: 18,
         },
         sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
@@ -238,8 +248,9 @@ async fn main() -> Result<()> {
 
     info!(
         token_server_url = %args.token_server_url,
+        reth_datadir = %reth_datadir,
         run_id = %run_id,
-        mode = %args.mode,
+        mode = %execution_mode,
         stale_runs,
         replay_current = args.replay_current,
         restored_pool_watermarks = seen_pool_blocks.len(),
@@ -323,9 +334,10 @@ async fn main() -> Result<()> {
             }
             seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
 
-            if let Some(ref pools) = pool_updates {
-                pools.lock().expect("pool lock").insert(pool.address.clone(), pool.clone());
-            }
+            pool_updates
+                .lock()
+                .expect("pool lock")
+                .insert(pool.address.clone(), pool.clone());
 
             if suppress_events || (first_poll && !args.replay_current) {
                 record_pool_observation(
@@ -374,7 +386,10 @@ async fn main() -> Result<()> {
                 info!(
                     order_id = %report.order_id.0,
                     status = ?report.status,
-                    "paper execution report"
+                    block_number = ?report.block_number,
+                    gas_used = ?report.gas_used,
+                    error = ?report.error,
+                    "chain-sim execution report"
                 );
             }
         }
@@ -453,7 +468,10 @@ async fn main() -> Result<()> {
                 info!(
                     order_id = %report.order_id.0,
                     status = ?report.status,
-                    "paper execution report"
+                    block_number = ?report.block_number,
+                    gas_used = ?report.gas_used,
+                    error = ?report.error,
+                    "chain-sim execution report"
                 );
             }
         }
@@ -466,6 +484,24 @@ async fn main() -> Result<()> {
             );
         }
         primed = true;
+
+        let chain_state_status = state_status_adapter.state_status().await;
+        if let Err(error) = &chain_state_status {
+            warn!(error = %error, "chain-sim state status unavailable");
+        }
+        let chain_state_payload = chain_state_status
+            .as_ref()
+            .ok()
+            .map(|state| {
+                json!({
+                    "selected_block_number": state.selected_block_number,
+                    "source": format!("{:?}", state.source),
+                    "latest_reth_finished_block_number": state.latest_reth_finished_block_number,
+                    "latest_historical_context_block_number": state.latest_historical_context_block_number,
+                    "latest_live_block_number": state.latest_live_block_number,
+                    "latest_tracked_state_block_number": state.latest_tracked_state_block_number,
+                })
+            });
 
         info!(
             live_status = %status.progress.status,
@@ -486,9 +522,13 @@ async fn main() -> Result<()> {
             risk_events,
             reports,
             positions = engine.portfolio().active_position_count(),
+            chain_sim_selected_block = chain_state_status.as_ref().ok().map(|state| state.selected_block_number),
+            chain_sim_state_source = chain_state_status.as_ref().ok().map(|state| format!("{:?}", state.source)),
             "alpha trader tick"
         );
         let heartbeat_metadata = json!({
+            "execution_model": "chain_state_evm_simulation",
+            "chain_sim_state": chain_state_payload,
             "live_status": status.progress.status,
             "live_current_block": status.progress.current_block,
             "live_blocks_processed": status.progress.blocks_processed,
@@ -672,6 +712,15 @@ fn reports_payload(reports: &[ExecutionReport]) -> Vec<Value> {
         .iter()
         .filter_map(|report| serde_json::to_value(report).ok())
         .collect()
+}
+
+fn normalize_execution_mode(mode: &str) -> Result<&'static str> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "chain-sim" | "chain_sim" | "chainsim" => Ok("chain-sim"),
+        other => Err(eyre!(
+            "unsupported execution mode {other:?}; only chain-sim is allowed"
+        )),
+    }
 }
 
 fn parse_u256_decimal(value: &str) -> Result<U256> {

@@ -6,8 +6,8 @@ This crate contains built-in strategies. Strategies are decision logic only.
 
 ## Current Implementations
 
-- `MarketTrackerStrategy`: submits one paper buy per tradable pool or `TradingEnabled` risk event, then suppresses repeat buys for that pool. It blocks itself when a matching critical risk is active.
-- `SnipeAllStrategy`: first live paper policy. It buys every newly observed eligible live pool once and exits a matching open position when a liquidity-removal risk event arrives.
+- `MarketTrackerStrategy`: submits one chain-sim buy per tradable pool or `TradingEnabled` risk event, then suppresses repeat buys for that pool. It blocks itself when a matching critical risk is active.
+- `SnipeAllStrategy`: first live no-capital chain-sim policy. It buys every newly observed eligible live pool once and exits a matching open position when a liquidity-removal risk event arrives.
 
 ## Snipe All V1
 
@@ -68,7 +68,7 @@ That shape is useful for migration, but it should not be copied directly:
 
 | Python strategy | Entry rule | Exit rule | Rust port target |
 | --- | --- | --- | --- |
-| `MarketTracker` | buy when token lifecycle becomes `TRADING_ENABLED` | never sell; hold for analytics | benchmark strategy that submits small paper buys and keeps positions open |
+| `MarketTracker` | buy when token lifecycle becomes `TRADING_ENABLED` | never sell; hold for analytics | benchmark strategy that submits small chain-sim buys and keeps positions open |
 | `BuyAll` | buy every trading-enabled token | sell when ROI reaches `profit_target_x`, default `7.0` | simple lifecycle strategy for engine/backtest validation |
 | `BuyScamStrategy` | buy when `latest_token_assessment.is_scam` is true | sell when ROI reaches `profit_target_x`, default `7.0` | controlled research strategy only; never enable for live execution without explicit risk policy |
 | `WalletTrackerStrategy` | buy healthy trading-enabled tokens while below `max_positions` and not already active | sell on profit target, stop loss, or token scam flag | wallet-scoped strategy using engine portfolio state, not process-local booleans |

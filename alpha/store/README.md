@@ -23,7 +23,7 @@ PostgreSQL persistence for the alpha runtime. This crate is infrastructure: it i
 
 `eth_alpha_trader` should use `ALPHA_DATABASE_URL` when set. For the current deployment it falls back to `MEMPOOL_DATABASE_URL`, which already points at the local Ethereum Postgres database.
 
-Rows are tagged by `run_id`, so multiple paper/live/replay runs can coexist:
+Rows are tagged by `run_id`, so multiple chain-sim/live/replay runs can coexist:
 
 ```text
 alpha_trading.trader_runs

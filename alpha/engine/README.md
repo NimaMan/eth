@@ -23,14 +23,15 @@ This is the high-level live trading runtime. It consumes typed events, runs stra
 - It does not simulate pending mempool txs directly.
 - It does not sign transactions.
 - It does not own Redis live-state schemas.
-- It does not model worst-case fills yet; that belongs in the paper execution adapter once the replay loop is ready.
+- It does not use snapshot-price or perfect-fill execution for strategy
+  evaluation. No-capital execution goes through chain-state EVM simulation.
 
 ## Event Loop
 
 ```text
 LiveFeedEvent received
   -> update market view
-  -> mark open positions to market
+  -> mark open positions to market with chain-sim sell valuation when available
   -> run strategies
   -> convert StrategyDecision to OrderIntent
   -> apply portfolio/risk checks
@@ -59,7 +60,7 @@ processed block arrives
   -> eth_live_feed writes canonical live-state snapshots when it owns the write path
   -> eth_live_feed emits MarketEvent / LiveFeedEvent
   -> eth_alpha_engine updates its market view
-  -> eth_alpha_engine marks open positions to market
+  -> eth_alpha_engine marks open positions to market with chain-sim sell valuation when available
   -> eth_alpha_engine runs strategies
   -> StrategyDecision becomes OrderIntent when actionable
   -> risk policy checks the OrderIntent against active RiskEvents and portfolio state
@@ -96,7 +97,8 @@ Critical in-memory decisions happen before lower-priority analytics writes:
 6. `TradingStore` persists durable trade, position, and snapshot records.
 7. Analytics writers can derive PnL, strategy metrics, and dashboard summaries from store records after the critical path.
 
-Backtest and live execution use the same sequence. Backtest swaps in a simulated execution adapter and explicit fill assumptions; live swaps in a `tx_executor` adapter.
+Backtest and live no-capital execution use the same sequence and the same
+chain-sim fill source. Real trading later swaps in a `tx_executor` adapter.
 
 ### Python Concept Mapping
 
@@ -115,13 +117,15 @@ Backtest and live execution use the same sequence. Backtest swaps in a simulated
 
 - `EngineEvent::{Market, Risk, Execution}` is the top-level input.
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
-- `PaperExecutionAdapter` returns synthetic confirmed `ExecutionReport`s and never talks to `tx_executor`.
+- `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` return
+  `ExecutionReport`s from EVM simulation against selected chain state.
 - `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
 - `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
 
 ## Trader Binary
 
-`eth_alpha_trader` is the first runnable alpha runtime inside this crate. It currently runs in paper mode, polls the Rust token server, and consumes:
+`eth_alpha_trader` is the first runnable alpha runtime inside this crate. It
+runs in `chain-sim` mode, polls the Rust token server, and consumes:
 
 - `/live/pools` as confirmed market updates.
 - `/mempool/signals?since_days=14` as speculative risk events.
@@ -132,9 +136,13 @@ Default mode only primes current pool/signal watermarks so it does not retroacti
 cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
 ```
 
-Use `--replay-current` for a local smoke test that replays the current token-server snapshot through paper execution.
+Use `--replay-current` for a local smoke test that replays the current
+token-server snapshot through chain simulation.
 
-The deployed paper runtime uses a stable `--run-id snipe-all-v1-paper-live`. On startup it restores active positions from `alpha_trading.positions` and restores pool/signal watermarks from `alpha_trading.strategy_observations`.
+The deployed no-capital runtime uses a stable
+`--run-id snipe-all-v1-chain-sim-live`. On startup it restores active positions
+from `alpha_trading.positions` and restores pool/signal watermarks from
+`alpha_trading.strategy_observations`.
 The deployed Snipe All thresholds are `--min-liquidity-eth 0.5` for ETH/WETH pools and `--min-liquidity-usd 1000` for USDC/USDT/DAI pools.
 
 Pool matching uses `TokenPoolId` from `eth_alpha_core`: `token_address:pool_identity`. For V2/V3 the pool identity is the pool contract address; for V4 it is `pool_manager#pool_id`. The engine should never coerce V4 pools into fake EVM addresses just to fit order or position keys.
@@ -143,16 +151,17 @@ Pool matching uses `TokenPoolId` from `eth_alpha_core`: `token_address:pool_iden
 
 The Python `LiveStrategyEngine` sometimes updated positions when a signal was submitted and later confirmed on the next token update. In this engine, confirmations should come from `ExecutionReport`.
 
-Backtest mode can synthesize reports immediately, but it should still use the same report path:
+Backtest mode simulates reports against historical chain state, but it still
+uses the same report path:
 
 ```text
-OrderIntent -> SimulatedExecutionAdapter -> ExecutionReport
+OrderIntent -> ChainSimExecutionAdapter -> ExecutionReport
 ```
 
-Live mode uses:
+Live no-capital mode uses:
 
 ```text
-OrderIntent -> TxExecutorAdapter -> ExecutionReport
+OrderIntent -> LiveChainSimExecutionAdapter -> ExecutionReport
 ```
 
 This keeps live and backtest behavior aligned.

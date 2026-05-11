@@ -243,8 +243,6 @@ struct OrderRecord {
     side: String,
     token_address: String,
     pool_address: String,
-    amount_raw: String,
-    amount_decimals: i16,
     created_epoch: i64,
 }
 
@@ -349,16 +347,12 @@ impl PoolRollup {
     }
 
     fn add_order(&mut self, order: &OrderRecord) {
-        let amount = amount_to_f64(&order.amount_raw, order.amount_decimals).unwrap_or(0.0);
         match order.side.as_str() {
             "buy" => {
                 self.buy_order_count += 1;
-                self.buy_volume_eth += amount;
-                self.capital_deployed_eth += amount;
             }
             "sell" => {
                 self.sell_order_count += 1;
-                self.sell_volume_eth += amount;
             }
             _ => {}
         }
@@ -391,8 +385,15 @@ impl PoolRollup {
                 let filled_eth = report.filled_amount_eth().unwrap_or(0.0);
                 confirmed_filled_eth += filled_eth;
                 match side {
-                    ReportSide::Buy => self.confirmed_buy_count += 1,
-                    ReportSide::Sell => self.confirmed_sell_count += 1,
+                    ReportSide::Buy => {
+                        self.confirmed_buy_count += 1;
+                        self.buy_volume_eth += filled_eth;
+                        self.capital_deployed_eth += filled_eth;
+                    }
+                    ReportSide::Sell => {
+                        self.confirmed_sell_count += 1;
+                        self.sell_volume_eth += filled_eth;
+                    }
                 }
             } else if is_failed_report_status(&report.status) {
                 self.failed_report_count += 1;
@@ -568,7 +569,7 @@ async fn load_positions(
 async fn load_orders(pool: &PgPool, run_id: &str, strategy_id: &str) -> Result<Vec<OrderRecord>> {
     let rows = sqlx::query(
         r#"
-        SELECT side, token_address, pool_address, amount_raw, amount_decimals,
+        SELECT side, token_address, pool_address,
                EXTRACT(EPOCH FROM created_at)::BIGINT AS created_epoch
         FROM alpha_trading.order_intents
         WHERE run_id = $1 AND strategy_name = $2
@@ -589,8 +590,6 @@ async fn load_orders(pool: &PgPool, run_id: &str, strategy_id: &str) -> Result<V
                 side: row.try_get("side").map_err(store_error)?,
                 token_address: row.try_get("token_address").map_err(store_error)?,
                 pool_address: row.try_get("pool_address").map_err(store_error)?,
-                amount_raw: row.try_get("amount_raw").map_err(store_error)?,
-                amount_decimals: row.try_get("amount_decimals").map_err(store_error)?,
                 created_epoch: row.try_get("created_epoch").map_err(store_error)?,
             })
         })
@@ -889,8 +888,9 @@ fn build_timeline(
             if let Some(entry_reports) = report_by_order.get(order_id) {
                 for report in entry_reports {
                     if report.status == "confirmed" {
-                        bucket_mut(&mut buckets, report.created_epoch, bucket_secs)
-                            .confirmed_buys += 1;
+                        let bucket = bucket_mut(&mut buckets, report.created_epoch, bucket_secs);
+                        bucket.confirmed_buys += 1;
+                        bucket.buy_volume_eth += report.filled_amount_eth().unwrap_or(0.0);
                     }
                 }
             }
@@ -899,8 +899,9 @@ fn build_timeline(
             if let Some(exit_reports) = report_by_order.get(order_id) {
                 for report in exit_reports {
                     if report.status == "confirmed" {
-                        bucket_mut(&mut buckets, report.created_epoch, bucket_secs)
-                            .confirmed_sells += 1;
+                        let bucket = bucket_mut(&mut buckets, report.created_epoch, bucket_secs);
+                        bucket.confirmed_sells += 1;
+                        bucket.sell_volume_eth += report.filled_amount_eth().unwrap_or(0.0);
                     }
                 }
             }
@@ -908,16 +909,13 @@ fn build_timeline(
     }
 
     for order in orders {
-        let amount = amount_to_f64(&order.amount_raw, order.amount_decimals).unwrap_or(0.0);
         let bucket = bucket_mut(&mut buckets, order.created_epoch, bucket_secs);
         match order.side.as_str() {
             "buy" => {
                 bucket.buy_orders += 1;
-                bucket.buy_volume_eth += amount;
             }
             "sell" => {
                 bucket.sell_orders += 1;
-                bucket.sell_volume_eth += amount;
             }
             _ => {}
         }

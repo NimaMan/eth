@@ -16,7 +16,7 @@ On-chain submission adapter. Not yet implemented.
 
 - Must be explicitly enabled via a config flag.
 - Must enforce a capital limit and circuit breaker.
-- Must only be used after paper/modeled PnL is positive for 7+ days.
+- Must only be used after chain-sim PnL is positive for 7+ days.
 
 ## Why Separate from `tx_executor`
 

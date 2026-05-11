@@ -12,6 +12,6 @@
 //!
 //! This adapter is the **only** component in `alpha/engine` that talks to
 //! `tx_executor`. It must be explicitly enabled via a config flag and capital
-//! limit so paper-mode operators cannot accidentally submit real transactions.
+//! limit so no-capital operators cannot accidentally submit real transactions.
 
 // TODO: implement TxExecutorAdapter

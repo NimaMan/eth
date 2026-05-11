@@ -45,8 +45,8 @@ impl Default for SnipeAllConfig {
             decimals: 18,
         };
         Self {
-            portfolio_id: PortfolioId("paper".to_string()),
-            wallet_id: WalletId("paper-wallet".to_string()),
+            portfolio_id: PortfolioId("chain-sim".to_string()),
+            wallet_id: WalletId("chain-sim-wallet".to_string()),
             sell_fraction: DecimalAmount::from(1),
             buy_amount,
             min_denom_reserve: Decimal::new(5, 1),

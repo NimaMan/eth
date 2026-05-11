@@ -9,7 +9,8 @@ events, and persists decisions before execution.
 - Run trading strategy state machines over `MarketEvent`, `RiskEvent`, and
   `ExecutionReport`.
 - Keep strategy decisions auditable in Postgres before trusting PnL.
-- Keep paper/live/backtest logic behind the same core domain contracts.
+- Keep live chain-sim, backtest, and future real execution behind the same core
+  domain contracts.
 
 ## Owns
 
@@ -42,9 +43,9 @@ tx_processor live_block_processor
   -> strategy_observations + orders + reports + positions + risk events
 ```
 
-`eth_alpha_trader` is paper-only right now. It must not become decision-active
-until `/live/status` is `live`; while warming, it records heartbeats and primes
-watermarks only.
+`eth_alpha_trader` is no-capital chain-sim right now. It must not become
+decision-active until `/live/status` is `live`; while warming, it records
+heartbeats and primes watermarks only.
 
 Snipe All currently supports ETH/WETH and USD-stable quote pools. Use separate
 floors for each family: WETH-denominated pools are not comparable to
@@ -80,8 +81,8 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader
 
 ## Current Hazards
 
-- `eth_alpha_trader` uses paper execution only; do not route it to
-  `tx_executor` without an explicit adapter and persistence plan.
+- `eth_alpha_trader` uses chain-state simulation only; do not route it to
+  `tx_executor` without an explicit adapter, operator gate, and persistence plan.
 - `strategy_observations` is the durable input log. In-memory watermarks are
   polling mechanics and must be recoverable from Postgres.
 - Fix order for live issues is tracked in `../bogaz.md`.

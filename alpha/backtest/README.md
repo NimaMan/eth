@@ -6,9 +6,9 @@ This crate replays historical market data through the same trading core used by 
 
 ## Responsibilities
 
-- Replay existing live/paper runs from `alpha_trading.strategy_observations`.
+- Replay existing live chain-sim runs from `alpha_trading.strategy_observations`.
 - Feed events into `eth_alpha_engine`.
-- Run swaps through the EVM via `eth_alpha_engine::execution::SimulatedExecutionAdapter`.
+- Run swaps through the EVM via `eth_alpha_engine::execution::ChainSimExecutionAdapter`.
 - Produce reports, metrics, and snapshots in Postgres.
 
 ## Non-Responsibilities
@@ -29,7 +29,7 @@ Use the same shape as live:
 ```text
 StrategyDecision
   -> OrderIntent
-  -> SimulatedExecutionAdapter (EVM-backed)
+  -> ChainSimExecutionAdapter (EVM-backed)
   -> ExecutionReport
   -> Engine position update
 ```
@@ -46,7 +46,7 @@ processed block N
   -> eth_alpha_engine handles MarketEvent
   -> strategy decides from the block N snapshot
   -> engine creates OrderIntent
-  -> SimulatedExecutionAdapter runs the swap against block N state via EVM
+  -> ChainSimExecutionAdapter runs the swap against block N state via EVM
   -> ExecutionReport updates order and position state
 ```
 
@@ -54,10 +54,10 @@ Do not treat a strategy decision as if it had been known before every transactio
 
 ## Chain Parity
 
-Backtests use the same EVM simulation path as live/paper trading:
+Backtests use the same EVM simulation path as live chain-sim trading:
 
 - Buy fills run actual swap calldata through `tx_simulator::TxSimulator` at the historical block.
-- Sell fills run actual swap calldata through the EVM using the stored `entry_token_amount`.
+- Sell fills run actual swap calldata through the EVM using the stored raw token amount from the buy report.
 - Token taxes, max-transaction limits, honeypots, and other contract behaviour are captured exactly.
 - No hidden theoretical fallbacks (e.g. `cost_basis / price`) are applied.
 
@@ -79,7 +79,7 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
 | Flag | Description |
 |------|-------------|
 | `--database-url` | Postgres connection string |
-| `--replay-run-id` | Existing live/paper run to replay from `strategy_observations` |
+| `--replay-run-id` | Existing live chain-sim run to replay from `strategy_observations` |
 
 ### Optional arguments
 
@@ -108,4 +108,4 @@ Backtest runs write to the same Postgres `alpha_trading` schema as live trading:
 - `trader_runs` with `mode = 'backtest'`
 - `positions`, `order_intents`, `execution_reports`, `risk_events`
 
-Asena's existing performance endpoints (`/alpha/strategies/<id>/performance`) can query these rows by `run_id` and display backtest results alongside live paper-trading results.
+Asena's existing performance endpoints (`/alpha/strategies/<id>/performance`) can query these rows by `run_id` and display backtest results alongside live chain-sim results.

@@ -1,7 +1,9 @@
 use eth_alpha_core::{
+    amount::{Amount, DecimalAmount},
     ids::{PoolAddress, StrategyName, TokenAddress},
     market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
+    position::Position,
     risk::{RiskEvent, RiskKind, RiskSeverity},
     Result, Strategy, StrategyContext, StrategyDecision,
 };
@@ -55,8 +57,6 @@ impl SnipeAllStrategy {
         token_address: TokenAddress,
         pool_address: PoolAddress,
     ) -> StrategyDecision {
-        self.state.mark_exiting(pool_address.clone());
-
         // Look up the open position to determine how many tokens to sell.
         let position = ctx.portfolio.positions.values().find(|p| {
             p.key.strategy_name == self.name()
@@ -65,19 +65,13 @@ impl SnipeAllStrategy {
                 && p.is_open()
         });
 
-        let token_amount = match position.and_then(|p| p.entry_token_amount) {
-            Some(entry_qty) => {
-                let sell_qty = entry_qty * self.config.sell_fraction;
-                let decimals = ctx
-                    .market
-                    .pool
-                    .as_ref()
-                    .and_then(|p| p.token_decimals)
-                    .unwrap_or(18);
-                eth_alpha_core::amount::Amount::from_decimal(sell_qty, decimals)
-            }
-            None => eth_alpha_core::amount::Amount::zero(18),
+        let Some(token_amount) = position
+            .and_then(|position| sell_amount_from_position(position, self.config.sell_fraction))
+        else {
+            return StrategyDecision::Hold;
         };
+
+        self.state.mark_exiting(pool_address.clone());
 
         StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
@@ -164,20 +158,15 @@ impl SnipeAllStrategy {
                     .unwrap_or(true)
         })
     }
+}
 
-    fn has_active_position(
-        ctx: &StrategyContext<'_>,
-        strategy_name: &StrategyName,
-        token_address: TokenAddress,
-        pool_address: &PoolAddress,
-    ) -> bool {
-        ctx.portfolio.positions.values().any(|position| {
-            position.key.strategy_name == *strategy_name
-                && position.key.token_address == token_address
-                && &position.key.pool_address == pool_address
-                && !position.state.is_terminal()
-        })
+fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) -> Option<Amount> {
+    let raw_amount = position.entry_token_raw_amount.clone()?;
+    if sell_fraction == DecimalAmount::from(1) {
+        return Some(raw_amount);
     }
+    let scaled_amount = raw_amount.to_decimal() * sell_fraction;
+    Some(Amount::from_decimal(scaled_amount, raw_amount.decimals))
 }
 
 impl Strategy for SnipeAllStrategy {
@@ -190,7 +179,10 @@ impl Strategy for SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         event: &MarketEvent,
     ) -> Result<StrategyDecision> {
-        let MarketEvent::PoolUpdated { pool, block_number, .. } = event else {
+        let MarketEvent::PoolUpdated {
+            pool, block_number, ..
+        } = event
+        else {
             return Ok(StrategyDecision::Hold);
         };
 
@@ -206,7 +198,8 @@ impl Strategy for SnipeAllStrategy {
             self.state.mark_bought(pool.address.clone());
 
             // Evaluate proactive price-ratio / time-based exits.
-            if let Some(decision) = self.evaluate_proactive_exit(ctx, position, pool, *block_number) {
+            if let Some(decision) = self.evaluate_proactive_exit(ctx, position, pool, *block_number)
+            {
                 return Ok(decision);
             }
 
@@ -214,7 +207,8 @@ impl Strategy for SnipeAllStrategy {
         }
 
         // 1. Shared eligibility gate: reject ineligible pools first.
-        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config()) {
+        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
+        {
             RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
             _ => {}
         }
@@ -310,7 +304,7 @@ impl Strategy for SnipeAllStrategy {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::Address;
+    use alloy_primitives::{Address, U256};
     use eth_alpha_core::{
         amount::Amount,
         execution::{ExecutionReport, ExecutionStatus},
@@ -380,13 +374,14 @@ mod tests {
                     raw: Default::default(),
                     decimals: 18,
                 }),
-                token_amount: None,
-                gas_used: Some(0),
+                token_amount: Some(Amount {
+                    raw: U256::from(1_000_000u64),
+                    decimals: 9,
+                }),
+                gas_used: Some(21_000),
                 error: None,
             })
             .unwrap();
-        // Set entry_token_amount so sell_pool can compute token quantity.
-        position.entry_token_amount = Some(eth_alpha_core::amount::DecimalAmount::from(1_000_000i64));
         position
     }
 

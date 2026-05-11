@@ -1,14 +1,15 @@
-//! EVM-backed execution adapters.
+//! Chain-state EVM execution adapters.
 //!
 //! Two variants are provided:
 //!
 //! | Adapter | Use Case | Block Source |
 //! |---------|----------|-------------|
-//! | `SimulatedExecutionAdapter` | Historical backtest | Manually-set `current_block` |
-//! | `LiveSimulatedExecutionAdapter` | Live/paper trading | `LiveTxSimulator::latest_state_block_number()` |
+//! | `ChainSimExecutionAdapter` | Historical backtest | Manually-set `current_block` |
+//! | `LiveChainSimExecutionAdapter` | Live no-capital trading | `LiveTxSimulator::latest_state_block_number()` |
 //!
 //! Both run the actual swap calldata through the EVM so that token taxes, max
-//! transaction limits, and other contract-level behaviour are captured exactly.
+//! transaction limits, and other contract-level behaviour are captured from
+//! chain state. No snapshot-price or perfect-fill fallback is allowed here.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,14 +25,15 @@ use eth_alpha_core::{
     market::{PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
+    position::Position,
 };
+use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
     simulate_buy_swap, simulate_sell_swap, BuySwapResult, PoolType, SellSwapResult,
 };
-use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::{LiveTxSimulator, TxSimulator};
 
-use crate::EngineExecutionAdapter;
+use crate::{EngineExecutionAdapter, PositionValueSimulation};
 
 // ---------------------------------------------------------------------------
 // Shared simulation logic (private)
@@ -49,9 +51,17 @@ async fn simulate_buy_at_block(
     block: u64,
 ) -> Result<ExecutionReport> {
     let eth_amount = intent.amount.raw;
-    let pool_contract_address = parse_pool_address(&pool.address)?;
+    let pool_contract_address = match parse_pool_address(&pool.address) {
+        Ok(address) => address,
+        Err(error) => {
+            return Ok(failed_report(
+                order_id,
+                format!("invalid pool address for chain simulation: {error}"),
+            ))
+        }
+    };
 
-    let result: BuySwapResult = simulate_buy_swap(
+    let result: BuySwapResult = match simulate_buy_swap(
         simulator.clone(),
         tx_processor.clone(),
         intent.token_address,
@@ -61,12 +71,22 @@ async fn simulate_buy_at_block(
         eth_amount,
     )
     .await
-    .map_err(|e| eth_alpha_core::error::AlphaCoreError::Execution(e.to_string()))?;
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return Ok(failed_report(
+                order_id,
+                format!("chain buy simulation failed: {error}"),
+            ))
+        }
+    };
 
     if !result.success {
         return Ok(failed_report(
             order_id,
-            result.failure_reason.unwrap_or("buy simulation failed".to_string()),
+            result
+                .failure_reason
+                .unwrap_or("buy simulation failed".to_string()),
         ));
     }
 
@@ -82,8 +102,28 @@ async fn simulate_buy_at_block(
                 )
                 .await;
             match decimals_result {
-                Ok(r) if r.success => r.decode_uint8(),
-                _ => 18u8,
+                Ok(r) if r.success && r.output.len() >= 32 => r.decode_uint8(),
+                Ok(r) if r.success => {
+                    return Ok(failed_report(
+                        order_id,
+                        format!(
+                            "token decimals simulation returned short output: {} bytes",
+                            r.output.len()
+                        ),
+                    ))
+                }
+                Ok(_) => {
+                    return Ok(failed_report(
+                        order_id,
+                        "token decimals simulation reverted",
+                    ))
+                }
+                Err(error) => {
+                    return Ok(failed_report(
+                        order_id,
+                        format!("token decimals simulation failed: {error}"),
+                    ))
+                }
             }
         }
     };
@@ -104,8 +144,8 @@ async fn simulate_buy_at_block(
     })
 }
 
-/// Simulate a sell at a specific block.  Looks up `entry_token_amount` from the
-/// open position, converts to raw U256, and simulates the swap.
+/// Simulate a sell at a specific block using a raw token amount and the same
+/// swap simulation path used for exits and mark-to-market valuation.
 async fn simulate_sell_at_block(
     simulator: &Arc<TxSimulator>,
     tx_processor: &Arc<TxProcessor>,
@@ -120,12 +160,23 @@ async fn simulate_sell_at_block(
     let tokens_to_sell = intent.amount.raw;
 
     if tokens_to_sell.is_zero() {
-        return Ok(failed_report(order_id, "zero token amount; nothing to sell"));
+        return Ok(failed_report(
+            order_id,
+            "zero token amount; nothing to sell",
+        ));
     }
 
-    let pool_contract_address = parse_pool_address(&pool.address)?;
+    let pool_contract_address = match parse_pool_address(&pool.address) {
+        Ok(address) => address,
+        Err(error) => {
+            return Ok(failed_report(
+                order_id,
+                format!("invalid pool address for chain simulation: {error}"),
+            ))
+        }
+    };
 
-    let result: SellSwapResult = simulate_sell_swap(
+    let result: SellSwapResult = match simulate_sell_swap(
         simulator.clone(),
         tx_processor.clone(),
         intent.token_address,
@@ -135,12 +186,22 @@ async fn simulate_sell_at_block(
         Some(block),
     )
     .await
-    .map_err(|e| eth_alpha_core::error::AlphaCoreError::Execution(e.to_string()))?;
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return Ok(failed_report(
+                order_id,
+                format!("chain sell simulation failed: {error}"),
+            ))
+        }
+    };
 
     if !result.success {
         return Ok(failed_report(
             order_id,
-            result.failure_reason.unwrap_or("sell simulation failed".to_string()),
+            result
+                .failure_reason
+                .unwrap_or("sell simulation failed".to_string()),
         ));
     }
 
@@ -165,12 +226,12 @@ async fn simulate_sell_at_block(
 // Historical backtest adapter
 // ---------------------------------------------------------------------------
 
-/// Historical simulation adapter.
+/// Historical chain simulation adapter.
 ///
 /// Runs swaps against a specific block number that is set externally by the
 /// backtest runner.  Use this when replaying historical observations.
 #[derive(Clone)]
-pub struct SimulatedExecutionAdapter {
+pub struct ChainSimExecutionAdapter {
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     order_prefix: Arc<str>,
@@ -180,11 +241,8 @@ pub struct SimulatedExecutionAdapter {
     current_block: Arc<AtomicU64>,
 }
 
-impl SimulatedExecutionAdapter {
-    pub fn new(
-        simulator: Arc<TxSimulator>,
-        tx_processor: Arc<TxProcessor>,
-    ) -> Result<Self> {
+impl ChainSimExecutionAdapter {
+    pub fn new(simulator: Arc<TxSimulator>, tx_processor: Arc<TxProcessor>) -> Result<Self> {
         Ok(Self {
             simulator,
             tx_processor,
@@ -229,7 +287,7 @@ impl SimulatedExecutionAdapter {
 }
 
 #[async_trait]
-impl EngineExecutionAdapter for SimulatedExecutionAdapter {
+impl EngineExecutionAdapter for ChainSimExecutionAdapter {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
@@ -286,20 +344,51 @@ impl EngineExecutionAdapter for SimulatedExecutionAdapter {
             }
         }
     }
+
+    async fn simulate_position_value(
+        &self,
+        position: &Position,
+        pool: &PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        let Some(intent) = sell_intent_for_position(position) else {
+            return Ok(None);
+        };
+        let Some(pool_type) = pool_protocol_to_tx_processor(pool.protocol.clone()) else {
+            return Ok(None);
+        };
+        let block = self.current_block.load(Ordering::Relaxed);
+        if block == 0 {
+            return Ok(None);
+        }
+        let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let order_id = OrderId(format!("{}-value-{order_seq}", self.order_prefix));
+        let report = simulate_sell_at_block(
+            &self.simulator,
+            &self.tx_processor,
+            order_id,
+            intent,
+            pool,
+            pool_type,
+            block,
+            &self.portfolio,
+        )
+        .await?;
+        Ok(position_value_from_report(report, block))
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Live trading adapter
 // ---------------------------------------------------------------------------
 
-/// Live simulation adapter.
+/// Live chain simulation adapter.
 ///
 /// Uses `LiveTxSimulator` so that every fill runs against the latest tracked
 /// chain state (local Reth context when caught up, otherwise live block
 /// processor state).  The block number is fetched automatically on each
 /// execution — no manual `current_block` updates required.
 #[derive(Clone)]
-pub struct LiveSimulatedExecutionAdapter {
+pub struct LiveChainSimExecutionAdapter {
     live_sim: LiveTxSimulator,
     tx_processor: Arc<TxProcessor>,
     order_prefix: Arc<str>,
@@ -308,11 +397,8 @@ pub struct LiveSimulatedExecutionAdapter {
     portfolio: Arc<Mutex<PortfolioState>>,
 }
 
-impl LiveSimulatedExecutionAdapter {
-    pub fn new(
-        live_sim: LiveTxSimulator,
-        tx_processor: Arc<TxProcessor>,
-    ) -> Result<Self> {
+impl LiveChainSimExecutionAdapter {
+    pub fn new(live_sim: LiveTxSimulator, tx_processor: Arc<TxProcessor>) -> Result<Self> {
         Ok(Self {
             live_sim,
             tx_processor,
@@ -353,7 +439,7 @@ impl LiveSimulatedExecutionAdapter {
 }
 
 #[async_trait]
-impl EngineExecutionAdapter for LiveSimulatedExecutionAdapter {
+impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
@@ -412,6 +498,44 @@ impl EngineExecutionAdapter for LiveSimulatedExecutionAdapter {
             }
         }
     }
+
+    async fn simulate_position_value(
+        &self,
+        position: &Position,
+        pool: &PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        let Some(intent) = sell_intent_for_position(position) else {
+            return Ok(None);
+        };
+        let Some(pool_type) = pool_protocol_to_tx_processor(pool.protocol.clone()) else {
+            return Ok(None);
+        };
+        let block = match self.live_sim.latest_state_block_number().await {
+            Ok(block) => block,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "chain-sim position valuation skipped because no live state block is available"
+                );
+                return Ok(None);
+            }
+        };
+        let simulator = self.live_sim.simulator();
+        let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let order_id = OrderId(format!("{}-value-{order_seq}", self.order_prefix));
+        let report = simulate_sell_at_block(
+            &simulator,
+            &self.tx_processor,
+            order_id,
+            intent,
+            pool,
+            pool_type,
+            block,
+            &self.portfolio,
+        )
+        .await?;
+        Ok(position_value_from_report(report, block))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -431,12 +555,69 @@ fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionRepor
     }
 }
 
+fn sell_intent_for_position(position: &Position) -> Option<OrderIntent> {
+    Some(OrderIntent {
+        portfolio_id: position.key.portfolio_id.clone(),
+        wallet_id: position.key.wallet_id.clone(),
+        strategy_name: position.key.strategy_name.clone(),
+        side: OrderSide::Sell,
+        token_address: position.key.token_address,
+        pool_address: position.key.pool_address.clone(),
+        amount: position.entry_token_raw_amount.clone()?,
+        route: None,
+        max_slippage_bps: 0,
+        deadline_secs: 0,
+    })
+}
+
+fn position_value_from_report(
+    report: ExecutionReport,
+    block_number: u64,
+) -> Option<PositionValueSimulation> {
+    match report.status {
+        ExecutionStatus::Confirmed => {
+            let current_value = report.filled_amount?;
+            Some(PositionValueSimulation {
+                block_number: report.block_number.unwrap_or(block_number),
+                current_value,
+                gas_used: report.gas_used,
+                error: None,
+            })
+        }
+        ExecutionStatus::Failed => {
+            let error = report
+                .error
+                .unwrap_or_else(|| "chain-sim position valuation failed".to_string());
+            if valuation_was_unavailable(&error) {
+                return None;
+            }
+            Some(PositionValueSimulation {
+                block_number,
+                current_value: Amount::zero(18),
+                gas_used: report.gas_used,
+                error: Some(error),
+            })
+        }
+        ExecutionStatus::Submitted | ExecutionStatus::Pending | ExecutionStatus::Cancelled => None,
+    }
+}
+
+fn valuation_was_unavailable(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("not supported")
+        || lower.contains("invalid pool address")
+        || lower.contains("current block not set")
+        || lower.contains("pool not in simulation state")
+        || lower.contains("unable to inject synthetic erc20 balance")
+        || lower.contains("state for block")
+}
+
 fn unique_order_prefix() -> String {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
-    format!("sim-{}-{millis}", std::process::id())
+    format!("chain-sim-{}-{millis}", std::process::id())
 }
 
 /// Map alpha `PoolProtocol` to tx_processor `PoolType`.
@@ -461,7 +642,9 @@ fn parse_pool_address(pool_id: &PoolAddress) -> Result<Address> {
     let s = pool_id.as_str();
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() < 2 {
-        return Err(eth_alpha_core::error::AlphaCoreError::InvalidPoolAddress(s.to_string()));
+        return Err(eth_alpha_core::error::AlphaCoreError::InvalidPoolAddress(
+            s.to_string(),
+        ));
     }
     let pool_part = parts[1];
     let addr_str = pool_part.split('#').next().unwrap_or(pool_part);
@@ -469,5 +652,3 @@ fn parse_pool_address(pool_id: &PoolAddress) -> Result<Address> {
         .parse::<Address>()
         .map_err(|_| eth_alpha_core::error::AlphaCoreError::InvalidPoolAddress(s.to_string()))
 }
-
-

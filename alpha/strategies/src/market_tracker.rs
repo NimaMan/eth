@@ -27,8 +27,8 @@ pub struct MarketTrackerConfig {
 impl Default for MarketTrackerConfig {
     fn default() -> Self {
         Self {
-            portfolio_id: PortfolioId("paper".to_string()),
-            wallet_id: WalletId("paper-wallet".to_string()),
+            portfolio_id: PortfolioId("chain-sim".to_string()),
+            wallet_id: WalletId("chain-sim-wallet".to_string()),
             buy_amount: Amount {
                 raw: U256::from(10_000_000_000_000_000u64),
                 decimals: 18,
@@ -80,9 +80,10 @@ impl MarketTrackerStrategy {
         }
 
         // Shared eligibility gate: reject ineligible pools first.
-        use crate::shared_rules;
         use crate::baseline::snipe_all::rule::RuleDecision;
-        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config()) {
+        use crate::shared_rules;
+        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
+        {
             RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
             _ => {}
         }

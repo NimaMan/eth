@@ -76,7 +76,7 @@ mempool_processor
 alpha
   <- eth_token_server live pools/status
   <- mempool signal rows
-  -> strategy observations, paper orders, positions, risk events in Postgres
+  -> strategy observations, chain-sim orders, positions, risk events in Postgres
 
 pyreth
   -> Python-facing wrappers around simulator/query/processor APIs
@@ -105,7 +105,7 @@ Use this map before broad searching:
 | Where is token/pool state updated from processed blocks? | `eth_token/README.md` | `eth_token/src/README.md`, `src/tracking/`, `src/pools/`, `src/manager/`, `src/health/` |
 | How is live token state served to tools and alpha? | `eth_token_server/README.md` | `eth_token_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
 | How are pending transactions detected and converted to signals? | `mempool_processor/README.md` | `mempool_processor/src/function_detector.rs`, `src/tx_router/`, `src/simulator/`, `src/signal_detector/`, `src/db_writers/` |
-| How does the paper/live alpha loop work? | `alpha/README.md` | `alpha/core/README.md`, `alpha/engine/README.md`, `alpha/store/README.md`, `alpha/strategies/README.md`, `alpha/live/*/README.md` |
+| How does the chain-sim/live alpha loop work? | `alpha/README.md` | `alpha/core/README.md`, `alpha/engine/README.md`, `alpha/store/README.md`, `alpha/strategies/README.md`, `alpha/live/*/README.md` |
 | Where are current pipeline bottlenecks tracked? | `bogaz.md` | service memory, cache fill/read metrics, live readiness, mempool timing, alpha decision bottlenecks |
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
 | How is a real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
@@ -135,7 +135,7 @@ Keep new code inside the crate that owns the behavior:
 | `eth_token` | Token and pool state machines, token health, control-address/activity state, network views, block-level token update logic from processed blocks. | Direct tracing/RPC, duplicate transaction decoding, live service hosting. |
 | `eth_token_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
-| `alpha` | Market/risk event handling, strategy state machines, paper execution adapters, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
+| `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
 | `tx_executor` | Validate prepared transactions, reserve nonce, apply gas/bribe policy, sign, broadcast, record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery. |
 | `tx_fund_flow` | Fund-flow network construction, ranking, analytics, visualization. | Core transaction simulation or decoding duplicates. |

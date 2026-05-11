@@ -147,6 +147,27 @@ impl UnsignedTxChainSimulation {
         Ok(previous)
     }
 
+    pub fn account_storage(&mut self, account: Address, storage_key: U256) -> Result<U256> {
+        self.forked_state
+            .db
+            .storage(account, storage_key)
+            .map_err(Into::into)
+    }
+
+    pub fn set_account_storage(
+        &mut self,
+        account: Address,
+        storage_key: U256,
+        value: U256,
+    ) -> Result<U256> {
+        let previous = self.account_storage(account, storage_key)?;
+        self.forked_state
+            .db
+            .insert_account_storage(account, storage_key, value)
+            .map_err(|err| eyre::eyre!("failed to set storage for {account}: {err:?}"))?;
+        Ok(previous)
+    }
+
     fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {
         if let Some(from) = tx.from {
             if tx.nonce.is_none() {

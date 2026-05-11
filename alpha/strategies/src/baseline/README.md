@@ -26,9 +26,9 @@ Winners:        54 (+9.71 ETH)
 Total:         +8.61 ETH unrealized
 ```
 
-**Key insight**: Even the "dumb" baseline is profitable on paper because the
-winners (54 positions) more than compensate for the losers (124 positions).
-The average winner returns +180% ROI.
+**Key insight**: Even the "dumb" baseline looked profitable under no-capital
+simulation because the winners (54 positions) more than compensated for the
+losers (124 positions). The average winner returned +180% ROI.
 
 ### Entry Timing Sanity Check
 
@@ -99,8 +99,10 @@ To make the baseline honest:
 2. **Snapshot-on-drain**: Append a position snapshot with `current_value = 0`
    and `unrealized = -cost_basis` so the final PnL reflects the drain even
    when no post-drain pool update exists.
-3. **`unrealized_pnl()` zero-price fix**: When `current_price = 0` or
-   `can_sell = false`, return `(0, -cost_basis)` instead of `(cost_basis, 0)`.
+3. **Chain-sim mark-to-market only**: Open-position value snapshots come from
+   simulated sells against the selected chain state. If valuation state or route
+   support is unavailable, the engine skips the snapshot instead of deriving a
+   price-ratio estimate.
 
 ### Case Studies
 

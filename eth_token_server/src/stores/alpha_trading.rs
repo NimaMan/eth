@@ -234,8 +234,8 @@ impl AlphaTradingStore {
             recent_runs: self.recent_runs(10).await?,
             positions: self.positions(&run_id, strategy_id, 100).await?,
             orders: self.orders(&run_id, strategy_id, 100).await?,
-            execution_reports: self.execution_reports(&run_id, 100).await?,
-            risk_events: self.risk_events(&run_id, 100).await?,
+            execution_reports: self.run_execution_reports(&run_id, 100).await?,
+            risk_events: self.run_risk_events(&run_id, 100).await?,
         }))
     }
 
@@ -428,23 +428,64 @@ impl AlphaTradingStore {
         row.as_ref().map(row_to_run).transpose()
     }
 
-    async fn recent_runs(&self, limit: i64) -> Result<Vec<TraderRunView>> {
-        let rows = sqlx::query(
+    pub async fn list_runs(&self, mode: Option<&str>, limit: i64) -> Result<Vec<TraderRunView>> {
+        let rows = if let Some(mode) = mode {
+            sqlx::query(
+                r#"
+                SELECT run_id, mode, status, started_at::text AS started_at,
+                       last_heartbeat_at::text AS last_heartbeat_at,
+                       stopped_at::text AS stopped_at,
+                       config::text AS config, metadata::text AS metadata
+                FROM alpha_trading.trader_runs
+                WHERE mode = $1
+                ORDER BY last_heartbeat_at DESC
+                LIMIT $2
+                "#,
+            )
+            .bind(mode)
+            .bind(clamp_limit(limit))
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT run_id, mode, status, started_at::text AS started_at,
+                       last_heartbeat_at::text AS last_heartbeat_at,
+                       stopped_at::text AS stopped_at,
+                       config::text AS config, metadata::text AS metadata
+                FROM alpha_trading.trader_runs
+                ORDER BY last_heartbeat_at DESC
+                LIMIT $1
+                "#,
+            )
+            .bind(clamp_limit(limit))
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        rows.iter().map(row_to_run).collect()
+    }
+
+    pub async fn run_detail(&self, run_id: &str) -> Result<Option<TraderRunView>> {
+        let row = sqlx::query(
             r#"
             SELECT run_id, mode, status, started_at::text AS started_at,
                    last_heartbeat_at::text AS last_heartbeat_at,
                    stopped_at::text AS stopped_at,
                    config::text AS config, metadata::text AS metadata
             FROM alpha_trading.trader_runs
-            ORDER BY last_heartbeat_at DESC
-            LIMIT $1
+            WHERE run_id = $1
             "#,
         )
-        .bind(clamp_limit(limit))
-        .fetch_all(&self.pool)
+        .bind(run_id)
+        .fetch_optional(&self.pool)
         .await?;
 
-        rows.iter().map(row_to_run).collect()
+        row.as_ref().map(row_to_run).transpose()
+    }
+
+    async fn recent_runs(&self, limit: i64) -> Result<Vec<TraderRunView>> {
+        self.list_runs(None, limit).await
     }
 
     async fn strategy_counts(&self, run_id: &str, strategy_id: &str) -> Result<StrategyCounts> {
@@ -540,7 +581,48 @@ impl AlphaTradingStore {
         rows.iter().map(row_to_order).collect()
     }
 
-    async fn execution_reports(
+    pub async fn run_positions(&self, run_id: &str, limit: i64) -> Result<Vec<PositionView>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT position_id, portfolio_id, wallet_id, strategy_name, token_address,
+                   pool_address, state, entry_order_id, exit_order_id,
+                   created_at::text AS created_at, updated_at::text AS updated_at,
+                   payload::text AS payload
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+            ORDER BY updated_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(run_id)
+        .bind(clamp_limit(limit))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.iter().map(row_to_position).collect()
+    }
+
+    pub async fn run_orders(&self, run_id: &str, limit: i64) -> Result<Vec<OrderIntentView>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, portfolio_id, wallet_id, strategy_name, side, token_address,
+                   pool_address, amount_raw, amount_decimals, max_slippage_bps,
+                   deadline_secs, created_at::text AS created_at, payload::text AS payload
+            FROM alpha_trading.order_intents
+            WHERE run_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(run_id)
+        .bind(clamp_limit(limit))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.iter().map(row_to_order).collect()
+    }
+
+    pub async fn run_execution_reports(
         &self,
         run_id: &str,
         limit: i64,
@@ -564,7 +646,7 @@ impl AlphaTradingStore {
         rows.iter().map(row_to_execution_report).collect()
     }
 
-    async fn risk_events(&self, run_id: &str, limit: i64) -> Result<Vec<RiskEventView>> {
+    pub async fn run_risk_events(&self, run_id: &str, limit: i64) -> Result<Vec<RiskEventView>> {
         let rows = sqlx::query(
             r#"
             SELECT id, kind, severity, token_address, pool_address, pending_tx_hash,
@@ -590,7 +672,7 @@ fn summary_from_run(run: Option<&TraderRunView>, counts: StrategyCounts) -> Alph
     AlphaStrategySummary {
         strategy_id: STRATEGY_ID.to_string(),
         name: STRATEGY_NAME.to_string(),
-        description: "Paper strategy that buys every newly observed eligible live pool once and exits on matching liquidity-removal risk.".to_string(),
+        description: "Chain-sim strategy that buys every newly observed eligible live pool once and exits on matching liquidity-removal risk.".to_string(),
         mode: run.map(|run| run.mode.clone()),
         status: run
             .map(|run| run.status.clone())
@@ -621,14 +703,14 @@ fn strategy_rules() -> Vec<StrategyRuleView> {
             name: "Buy Eligible Pools",
             status: "active",
             description:
-                "Submit one paper buy for each new live pool that can buy, can sell, has no liquidity-removal flag, and meets the configured liquidity floor.",
+                "Submit one chain-sim buy for each new live pool that can buy, can sell, has no liquidity-removal flag, and meets the configured liquidity floor.",
         },
         StrategyRuleView {
             rule_id: "exit_liquidity_removal",
             name: "Exit On Liquidity Removal",
             status: "active",
             description:
-                "Submit a paper sell when a liquidity-removal risk event matches an open position.",
+                "Submit one chain-sim sell when a liquidity-removal risk event matches an open position.",
         },
         StrategyRuleView {
             rule_id: "lp_approval",
@@ -810,7 +892,7 @@ mod tests {
     fn summary_reads_live_metadata() {
         let run = TraderRunView {
             run_id: "run-1".to_string(),
-            mode: "paper".to_string(),
+            mode: "chain-sim".to_string(),
             status: "running".to_string(),
             started_at: "2026-05-08 00:00:00+00".to_string(),
             last_heartbeat_at: "2026-05-08 00:00:01+00".to_string(),

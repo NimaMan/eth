@@ -5,15 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use eth_alpha_backtest::{
-    adapter::BacktestAdapter,
-    runner::run_backtest,
-};
+use eth_alpha_backtest::{adapter::BacktestAdapter, runner::run_backtest};
 use eth_alpha_core::amount::Amount;
 use eth_alpha_core::ids::PoolAddress;
 use eth_alpha_core::market::PoolSnapshot;
-use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy};
 use eth_alpha_engine::wire::{MempoolSignalWire, PoolWire};
+use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy};
 use eth_alpha_store::PostgresTradingStore;
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{Result, WrapErr};
@@ -36,7 +33,7 @@ struct Args {
     #[arg(long, default_value = "snipe-all-v1")]
     strategy_name: String,
 
-    /// Existing live or paper run_id to replay from `strategy_observations`.
+    /// Existing live chain-sim run_id to replay from `strategy_observations`.
     #[arg(long)]
     replay_run_id: String,
 
@@ -105,8 +102,7 @@ struct Args {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -157,15 +153,15 @@ async fn main() -> Result<()> {
         ));
     }
 
-    info!(reth_datadir = %args.reth_datadir, "initialising EVM-backed simulation adapter");
+    info!(reth_datadir = %args.reth_datadir, "initialising chain-sim execution adapter");
     let simulator = Arc::new(tx_simulator::TxSimulator::new(&args.reth_datadir)?);
     let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
-    let inner = eth_alpha_engine::execution::SimulatedExecutionAdapter::with_prefix(
+    let inner = eth_alpha_engine::execution::ChainSimExecutionAdapter::with_prefix(
         simulator,
         tx_processor,
         run_id.clone(),
     )?;
-    let adapter = EvmBacktestAdapter::new(inner);
+    let adapter = ChainSimBacktestAdapter::new(inner);
 
     run_backtest_with_adapter(
         args,
@@ -183,7 +179,7 @@ async fn main() -> Result<()> {
 }
 
 /// Load historical events by replaying `strategy_observations` from an existing
-/// live or paper run.
+/// live chain-sim run.
 async fn load_events_from_observations(
     pool: &sqlx::PgPool,
     replay_run_id: &str,
@@ -194,14 +190,16 @@ async fn load_events_from_observations(
     let mut query = String::from(
         "SELECT event_source, event_key, block_number, payload
          FROM alpha_trading.strategy_observations
-         WHERE run_id = $1"
+         WHERE run_id = $1",
     );
     if from_block.is_some() {
         query.push_str(" AND block_number >= $2");
     }
     if to_block.is_some() {
-        query.push_str(&format!(" AND block_number <= ${}",
-            if from_block.is_some() { 3 } else { 2 }));
+        query.push_str(&format!(
+            " AND block_number <= ${}",
+            if from_block.is_some() { 3 } else { 2 }
+        ));
     }
     query.push_str(" ORDER BY block_number ASC NULLS LAST, first_seen_at ASC");
 
@@ -212,7 +210,10 @@ async fn load_events_from_observations(
     if let Some(b) = to_block {
         q = q.bind(b as i64);
     }
-    let rows = q.fetch_all(pool).await.wrap_err("failed to query strategy_observations")?;
+    let rows = q
+        .fetch_all(pool)
+        .await
+        .wrap_err("failed to query strategy_observations")?;
 
     let mut events = Vec::with_capacity(rows.len());
     let mut skipped = 0usize;
@@ -289,29 +290,36 @@ async fn load_events_from_observations(
     }
 
     if skipped > 0 {
-        tracing::info!(skipped, total = rows.len(), "skipped malformed observations");
+        tracing::info!(
+            skipped,
+            total = rows.len(),
+            "skipped malformed observations"
+        );
     }
 
     Ok(events)
 }
 
 #[derive(Clone)]
-struct EvmBacktestAdapter(eth_alpha_engine::execution::SimulatedExecutionAdapter);
+struct ChainSimBacktestAdapter(eth_alpha_engine::execution::ChainSimExecutionAdapter);
 
-impl EvmBacktestAdapter {
-    fn new(inner: eth_alpha_engine::execution::SimulatedExecutionAdapter) -> Self {
+impl ChainSimBacktestAdapter {
+    fn new(inner: eth_alpha_engine::execution::ChainSimExecutionAdapter) -> Self {
         Self(inner)
     }
 }
 
 #[async_trait::async_trait]
-impl eth_alpha_engine::EngineExecutionAdapter for EvmBacktestAdapter {
-    async fn execute(&self, intent: eth_alpha_core::order::OrderIntent) -> eth_alpha_core::error::Result<eth_alpha_core::execution::ExecutionReport> {
+impl eth_alpha_engine::EngineExecutionAdapter for ChainSimBacktestAdapter {
+    async fn execute(
+        &self,
+        intent: eth_alpha_core::order::OrderIntent,
+    ) -> eth_alpha_core::error::Result<eth_alpha_core::execution::ExecutionReport> {
         self.0.execute(intent).await
     }
 }
 
-impl BacktestAdapter for EvmBacktestAdapter {
+impl BacktestAdapter for ChainSimBacktestAdapter {
     fn pools(&self) -> Arc<Mutex<HashMap<PoolAddress, PoolSnapshot>>> {
         self.0.pools()
     }
@@ -334,11 +342,7 @@ async fn run_backtest_with_adapter<A>(
 where
     A: eth_alpha_engine::EngineExecutionAdapter + BacktestAdapter + Clone,
 {
-    let mut engine = AlphaEngine::new(
-        BlockCriticalRiskPolicy,
-        store.clone(),
-        adapter.clone(),
-    );
+    let mut engine = AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter.clone());
 
     match args.strategy_name.as_str() {
         "snipe-all-v1" => {
