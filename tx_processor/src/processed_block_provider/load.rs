@@ -218,8 +218,26 @@ fn is_transient_reth_state_lag_error(error: &eyre::Report) -> bool {
         .collect::<Vec<_>>()
         .join(": ");
 
-    error_chain.contains("failed to trace block transaction")
-        && error_chain.contains("transaction validation error")
+    let live_context_lag = [
+        "cannot restore live state snapshot",
+        "not yet available as local historical context",
+        "missing live block header",
+        "Redis live state snapshot is missing",
+        "unavailable from both Reth historical state and Redis live state",
+        "failed to fetch historical state",
+        "Reth historical state",
+    ]
+    .iter()
+    .any(|needle| error_chain.contains(needle));
+    if live_context_lag {
+        return true;
+    }
+
+    if error_chain.contains("failed to trace block transaction") {
+        return true;
+    }
+
+    error_chain.contains("transaction validation error")
         && (error_chain.contains("lack of funds") || error_chain.contains("nonce"))
 }
 
@@ -256,6 +274,28 @@ mod tests {
              transaction validation error: nonce too low",
         )
         .wrap_err("failed to process block 25056257");
+
+        assert!(is_transient_reth_state_lag_error(&error));
+    }
+
+    #[test]
+    fn classifies_live_snapshot_context_lag_as_transient() {
+        let error = report(
+            "cannot restore live state snapshot for block 25067028: \
+             state for block 25067027 is unavailable from both Reth historical state \
+             and Redis live state",
+        )
+        .wrap_err("failed to process uncached block 25067028");
+
+        assert!(is_transient_reth_state_lag_error(&error));
+    }
+
+    #[test]
+    fn classifies_missing_live_header_as_transient() {
+        let error = report(
+            "missing live block header for 25067028 \
+             (latest live Some(25067030), available [25067030, 25067029])",
+        );
 
         assert!(is_transient_reth_state_lag_error(&error));
     }

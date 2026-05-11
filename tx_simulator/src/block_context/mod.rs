@@ -24,7 +24,10 @@ use crate::{
     header_utils::parse_sealed_header_from_json,
     single_tx::unsigned::UnsignedTransaction,
     tx_builders::processed_tx_json_unsigned_builder::build_unsigned_transaction_from_processed_tx_json,
-    tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},
+    tx_chain::{
+        sequential::{ForkedState, SharedStateProvider},
+        unsigned::UnsignedTxChainSimulation,
+    },
     TxSimulator,
 };
 use alloy_primitives::{Address, B256, U256};
@@ -33,12 +36,13 @@ use eyre::{eyre, Result};
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{HeaderProvider, StateProviderBox};
 use reth_revm::{
-    db::{AccountState as RevmAccountState, DbAccount},
+    database::StateProviderDatabase,
+    db::{AccountState as RevmAccountState, Cache, CacheDB, DbAccount},
     Database,
 };
 use revm::bytecode::Bytecode;
 use serde_json::Value;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 
@@ -74,10 +78,8 @@ impl<'a> BlockContextLoader<'a> {
         header_hint: Option<SealedHeader>,
     ) -> Result<BlockContext> {
         let header = self.load_block_header(block_number, header_hint).await?;
-        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
 
-        if block_number <= latest_historical_context {
-            let state = self.load_historical_state(block_number).await?;
+        if let Some(state) = self.try_load_historical_state(block_number).await? {
             return Ok(BlockContext {
                 header,
                 state: BlockStateProvider::Historical(state),
@@ -87,7 +89,12 @@ impl<'a> BlockContextLoader<'a> {
         let forked = self
             .replay_live_state(block_number, Some(header.clone()))
             .await?
-            .ok_or_else(|| eyre!("live data for block {} is unavailable", block_number))?;
+            .ok_or_else(|| {
+                eyre!(
+                    "state for block {} is unavailable from both Reth historical state and Redis live state",
+                    block_number
+                )
+            })?;
 
         Ok(BlockContext {
             header,
@@ -101,26 +108,13 @@ impl<'a> BlockContextLoader<'a> {
         block_number: u64,
         header_hint: Option<SealedHeader>,
     ) -> Result<Option<ForkedState>> {
-        let cache = match self.simulator.live_chain_cache() {
-            Some(cache) => cache,
-            None => return Ok(None),
-        };
-
-        let Some(latest_live) = cache.latest_block_number().await? else {
+        let Some(cache) = self.simulator.live_chain_cache() else {
             return Ok(None);
         };
-        if block_number > latest_live {
-            return Ok(None);
-        }
 
         let header = self.load_block_header(block_number, header_hint).await?;
-        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
-        if block_number <= latest_historical_context {
-            return Ok(None);
-        }
-
-        if let Some(snapshot) = cache.fetch_chain_state_snapshot(block_number).await? {
-            if snapshot.block_hash == header.hash() {
+        match cache.fetch_chain_state_snapshot(block_number).await? {
+            Some(snapshot) if snapshot.block_hash == header.hash() => {
                 debug!(
                     block_number,
                     base_block_number = snapshot.base_block_number,
@@ -128,20 +122,61 @@ impl<'a> BlockContextLoader<'a> {
                     contracts = snapshot.contract_count(),
                     "restoring tracked live state"
                 );
-                return Ok(Some(
+                Ok(Some(
                     self.forked_state_from_snapshot(&snapshot, header).await?,
-                ));
+                ))
             }
-
-            warn!(
-                block_number,
-                expected = %header.hash(),
-                found = %snapshot.block_hash,
-                "ignoring tracked live state with mismatched block hash"
-            );
+            Some(snapshot) => {
+                warn!(
+                    block_number,
+                    expected = %header.hash(),
+                    found = %snapshot.block_hash,
+                    "ignoring tracked live state with mismatched block hash"
+                );
+                Ok(None)
+            }
+            None => Ok(None),
         }
+    }
 
-        Ok(None)
+    async fn fetch_required_live_state_snapshot(
+        &self,
+        block_number: u64,
+    ) -> Result<ChainStateSnapshot> {
+        let cache = match self.simulator.live_chain_cache() {
+            Some(cache) => cache,
+            None => {
+                return Err(eyre!(
+                    "state for block {} is unavailable from Reth DB and Redis live state is not configured",
+                    block_number
+                ))
+            }
+        };
+
+        match cache.fetch_chain_state_snapshot(block_number).await? {
+            Some(snapshot) if snapshot.block_number == block_number => {
+                validate_live_state_snapshot_schema(&snapshot)?;
+                Ok(snapshot)
+            }
+            Some(snapshot) => Err(eyre!(
+                "Redis live state snapshot key for block {} contained snapshot for block {}",
+                block_number,
+                snapshot.block_number
+            )),
+            None => {
+                let latest_live = cache.latest_block_number().await.ok().flatten();
+                let latest_chain_state =
+                    cache.latest_chain_state_block_number().await.ok().flatten();
+                let available_blocks = cache.recent_block_numbers(10).await.unwrap_or_default();
+                Err(eyre!(
+                    "state for block {} is unavailable from Reth DB and Redis live state snapshot is missing (latest live {:?}, latest chain state {:?}, recent Redis blocks {:?})",
+                    block_number,
+                    latest_live,
+                    latest_chain_state,
+                    available_blocks
+                ))
+            }
+        }
     }
 
     /// Resolve a sealed header for a specific block, falling back to live cache.
@@ -197,8 +232,12 @@ impl<'a> BlockContextLoader<'a> {
         parse_sealed_header_from_json(&payload)
     }
 
-    async fn load_historical_state(&self, block_number: u64) -> Result<StateProviderBox> {
+    async fn try_load_historical_state(
+        &self,
+        block_number: u64,
+    ) -> Result<Option<StateProviderBox>> {
         let retry_delay = Duration::from_millis(STATE_RETRY_DELAY_MS);
+        let mut last_error = None;
         for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
             let simulator = self.simulator.clone();
             match tokio::task::spawn_blocking(move || {
@@ -211,32 +250,24 @@ impl<'a> BlockContextLoader<'a> {
             })
             .await
             {
-                Ok(Ok(state)) => return Ok(state),
+                Ok(Ok(state)) => return Ok(Some(state)),
                 Ok(Err(err)) => {
-                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
-                        return Err(eyre!(
-                            "failed to fetch historical state for block {}: {}",
-                            block_number,
-                            err
-                        ));
-                    }
+                    last_error = Some(err.to_string());
                 }
                 Err(join_err) => {
-                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
-                        return Err(eyre!(
-                            "state fetch task panicked for block {}: {}",
-                            block_number,
-                            join_err
-                        ));
-                    }
+                    last_error = Some(format!("state fetch task panicked: {join_err}"));
                 }
             }
-            sleep(retry_delay).await;
+            if attempt < STATE_RETRY_MAX_ATTEMPTS {
+                sleep(retry_delay).await;
+            }
         }
-        Err(eyre!(
-            "exhausted retries fetching state provider for block {}",
-            block_number
-        ))
+        debug!(
+            block_number,
+            last_error = ?last_error,
+            "Reth historical state unavailable; trying Redis live state"
+        );
+        Ok(None)
     }
 
     async fn build_live_state_snapshot_from_processed_payloads(
@@ -366,8 +397,6 @@ impl<'a> BlockContextLoader<'a> {
         let parent_block = block_number
             .checked_sub(1)
             .ok_or_else(|| eyre!("cannot build live state snapshot for genesis block"))?;
-        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
-
         let live_cache = self.simulator.live_chain_cache();
         if let Some(cache) = live_cache.as_ref() {
             if let Some(snapshot) = cache.fetch_chain_state_snapshot(parent_block).await? {
@@ -376,26 +405,13 @@ impl<'a> BlockContextLoader<'a> {
                         block_number,
                         parent_block,
                         snapshot_base_block_number = snapshot.base_block_number,
-                        latest_historical_context,
                         "using parent tracked live state as base for next live state snapshot"
                     );
 
                     let header = self.load_block_header(parent_block, None).await?;
                     let base_block_number = snapshot.base_block_number;
-                    match self.forked_state_from_snapshot(&snapshot, header).await {
-                        Ok(fork_state) => return Ok((fork_state, base_block_number)),
-                        Err(err) if parent_block <= latest_historical_context => {
-                            warn!(
-                                block_number,
-                                parent_block,
-                                snapshot_base_block_number = base_block_number,
-                                latest_historical_context,
-                                error = %err,
-                                "ignoring parent tracked live state; falling back to local historical parent state"
-                            );
-                        }
-                        Err(err) => return Err(err),
-                    }
+                    let fork_state = self.forked_state_from_snapshot(&snapshot, header).await?;
+                    return Ok((fork_state, base_block_number));
                 } else {
                     warn!(
                         block_number,
@@ -408,24 +424,25 @@ impl<'a> BlockContextLoader<'a> {
             }
         }
 
-        if parent_block <= latest_historical_context {
-            let fork = self.simulator.create_forked_state(parent_block)?;
+        if let Some(fork) = self
+            .forked_state_from_reth_historical_state(parent_block, None)
+            .await?
+        {
             return Ok((fork, parent_block));
         }
 
         if live_cache.is_some() {
             return Err(eyre!(
-                "cannot build live state snapshot for block {}: exact parent snapshot for {} is unavailable",
+                "cannot build live state snapshot for block {}: parent {} is unavailable from both Reth historical state and Redis live state",
                 block_number,
                 parent_block
             ));
         }
 
         Err(eyre!(
-            "cannot build live state snapshot for block {}: parent {} is ahead of latest historical context block {} and live cache is unavailable",
+            "cannot build live state snapshot for block {}: parent {} is unavailable from Reth historical state and Redis live state is not configured",
             block_number,
-            parent_block,
-            latest_historical_context
+            parent_block
         ))
     }
 
@@ -434,41 +451,119 @@ impl<'a> BlockContextLoader<'a> {
         snapshot: &ChainStateSnapshot,
         header: SealedHeader,
     ) -> Result<ForkedState> {
-        if snapshot.schema_version != ChainStateSnapshot::SCHEMA_VERSION {
-            return Err(eyre!(
-                "unsupported live state snapshot schema {} for block {}",
-                snapshot.schema_version,
-                snapshot.block_number
-            ));
-        }
-        self.assert_snapshot_base_available(snapshot)?;
-
+        validate_live_state_snapshot_schema(snapshot)?;
         let mut fork_state = self
-            .simulator
-            .create_forked_state(snapshot.base_block_number)?;
-        fork_state.db.cache = snapshot.cache.clone();
+            .restore_snapshot_base_from_reth_or_redis(snapshot, header.clone())
+            .await?;
         fork_state.block_number = snapshot.block_number;
         fork_state.block_header = header;
         fork_state.nonces.clear();
         Ok(fork_state)
     }
 
-    fn assert_snapshot_base_available(&self, snapshot: &ChainStateSnapshot) -> Result<()> {
-        let latest_historical_context = self.simulator.latest_historical_context_block_number()?;
-        if snapshot.base_block_number > latest_historical_context {
-            let latest_reth_finished = self.simulator.get_latest_block().ok();
-            let latest_static_header = self.simulator.latest_static_header_block_number().ok();
-            return Err(eyre!(
-                "cannot restore live state snapshot for block {}: snapshot base block {} is ahead of local historical context block {} (latest reth finished {:?}, latest static header {:?})",
-                snapshot.block_number,
-                snapshot.base_block_number,
-                latest_historical_context,
-                latest_reth_finished,
-                latest_static_header
-            ));
+    async fn restore_snapshot_base_from_reth_or_redis(
+        &self,
+        snapshot: &ChainStateSnapshot,
+        final_header: SealedHeader,
+    ) -> Result<ForkedState> {
+        let mut snapshots = vec![snapshot.clone()];
+        let mut base_block_number = snapshot.base_block_number;
+        let mut visited = HashSet::new();
+
+        loop {
+            if let Some(mut fork_state) = self
+                .forked_state_from_reth_historical_state(
+                    base_block_number,
+                    Some(final_header.clone()),
+                )
+                .await?
+            {
+                for snapshot in snapshots.iter().rev() {
+                    merge_live_snapshot_cache(&mut fork_state.db.cache, &snapshot.cache);
+                    fork_state.block_number = snapshot.block_number;
+                }
+                return Ok(fork_state);
+            }
+
+            if !visited.insert(base_block_number) {
+                return Err(eyre!(
+                    "cannot restore live state snapshot for block {}: Redis live state snapshot chain loops at base block {}",
+                    snapshot.block_number,
+                    base_block_number
+                ));
+            }
+
+            let base_snapshot = self
+                .fetch_required_live_state_snapshot(base_block_number)
+                .await?;
+            if base_snapshot.base_block_number == base_snapshot.block_number {
+                return Err(eyre!(
+                    "cannot restore live state snapshot for block {}: Redis live state snapshot for block {} uses itself as base",
+                    snapshot.block_number,
+                    base_snapshot.block_number
+                ));
+            }
+            debug!(
+                snapshot_block = snapshot.block_number,
+                redis_base_block = base_snapshot.block_number,
+                redis_base_of_base = base_snapshot.base_block_number,
+                "using Redis live state snapshot as base"
+            );
+            base_block_number = base_snapshot.base_block_number;
+            snapshots.push(base_snapshot);
         }
-        Ok(())
     }
+
+    async fn forked_state_from_reth_historical_state(
+        &self,
+        block_number: u64,
+        header_hint: Option<SealedHeader>,
+    ) -> Result<Option<ForkedState>> {
+        let Some(state) = self.try_load_historical_state(block_number).await? else {
+            return Ok(None);
+        };
+        let header = match header_hint {
+            Some(header) => header,
+            None => self.load_block_header(block_number, None).await?,
+        };
+        Ok(Some(forked_state_from_historical_state(
+            block_number,
+            header,
+            state,
+        )))
+    }
+}
+
+fn validate_live_state_snapshot_schema(snapshot: &ChainStateSnapshot) -> Result<()> {
+    if snapshot.schema_version != ChainStateSnapshot::SCHEMA_VERSION {
+        return Err(eyre!(
+            "unsupported live state snapshot schema {} for block {}",
+            snapshot.schema_version,
+            snapshot.block_number
+        ));
+    }
+    Ok(())
+}
+
+fn forked_state_from_historical_state(
+    block_number: u64,
+    block_header: SealedHeader,
+    state: StateProviderBox,
+) -> ForkedState {
+    let db = CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(state)));
+    ForkedState {
+        db,
+        block_number,
+        block_header,
+        nonces: Default::default(),
+    }
+}
+
+fn merge_live_snapshot_cache(base: &mut Cache, overlay: &Cache) {
+    base.accounts.extend(overlay.accounts.clone());
+    base.contracts.extend(overlay.contracts.clone());
+    base.logs.extend(overlay.logs.clone());
+    base.block_hashes.extend(overlay.block_hashes.clone());
 }
 
 /// Convert stored processed transaction JSON strings into [`UnsignedTransaction`] values.

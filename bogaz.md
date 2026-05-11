@@ -6,9 +6,9 @@ the next action that moves or removes it.
 
 ## Operating Rule
 
-A run is useful only if it tells us which limit dominates: live-state freshness,
-cache fill/read speed, memory pressure, mempool signal recall, decision
-auditing, fill modeling, strategy quality, or execution.
+A run is useful only if it tells us which limit dominates: strategy quality,
+fill modeling, decision auditing, backtest parity, mempool signal recall,
+memory pressure, live-feed regressions, or execution.
 
 ## Focus Order
 
@@ -23,7 +23,7 @@ auditing, fill modeling, strategy quality, or execution.
 | 3 | **Trader decision ledger completeness** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | every decision input has `TokenPoolId`, market payload, signal payload, rule id, decision, order, execution report, exit reason, and PnL snapshot | Make every skip, entry, and exit auditable in Postgres so the frontend can explain strategy behavior and we can train filters from losers. |
 | 4 | **Backtest and replay alignment** | `alpha/backtest`, `alpha/engine` | same strategy state machine in historical and live paper runs, same `TokenPoolId` matching, historical lower-bound PnL | Run historical replays with the new selective strategy + worst-case fills. Compare backtest lower-bound PnL to live paper behavior. Iterate on rules offline. |
 | 5 | **Mempool signal recall and timing** | `mempool_processor`, future `alpha/mempool_risk` | IPC drops, queue depth, arrival writes, first-seen timestamps, LP approvals before liquidity removals, V2/V3/V4 pool identity coverage | Improve early liquidity-removal detection across pool types. LP approval, removal intent, token, canonical `TokenPoolId`, and first-seen time must be persisted before the trader consumes them. |
-| 6 | **Live feed readiness and failure isolation** | `alpha/live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Make live token apply resilient: optional pool metadata and buy/sell simulation failures must be recorded on the affected pool and must not fail the whole live tracker. |
+| 6 | **Live feed failure isolation watch** | `alpha/live/feed`, `eth_token_server`, `eth_token`, `tx_simulator` | live status, failed block, block apply time, simulation validation errors, V2/V3/V4 tracked-pool counters | Watch the May 11 Reth-or-Redis live-state fix during the next run; optional pool metadata and buy/sell simulation failures must remain pool-level errors, not tracker-level failures. |
 | 7 | **Live warmup memory pressure while filling processed-block cache** | `eth_token_server`, `alpha/live/feed`, `tx_processor`, Reth static files | systemd cgroup memory, RSS, cgroup `anon`/`file`, disk-cache hits/misses, cache write time | Add allocator trimming to the live warmup path and avoid running large backfills while token-server warmup is filling missing cache entries. |
 | 8 | **Real execution handoff** | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping, receipt polling | Only replace the paper adapter with a `tx_executor` adapter after live paper PnL is consistently positive with worst-case fills and decision auditing is complete. |
 
@@ -533,10 +533,9 @@ Frontend: `interface/asena/eth/tokens/static/js/tokens/network/`.
 
 ## Active Bottleneck: Strategy Policy Quality + Paper Fill Realism
 
-Observed on May 10, 2026. The live pipeline is stable and the paper trader has
-been running for ~2 days. The dominant limit is no longer infrastructure; it is
-that the strategy loses money on paper and the paper fills are unrealistically
-perfect.
+Observed on May 10, 2026; updated on May 11 after the live-state restore fix.
+The dominant limit is not infrastructure; it is that the strategy loses money
+on paper and the paper fills are unrealistically perfect.
 
 ### Latest State Snapshot (May 10, 2026 15:27 UTC)
 
@@ -586,11 +585,11 @@ ROI:                  0.0%
 - **Exits are incomplete**: Only `liquidity_removal` exits are active. Tax,
   honeypot, and LP-approval exits are scaffolded but hold. 103 critical risk
   events fired; many of those should have triggered sells but did not.
-- **Mempool simulation context lag**: The token-server error log shows repeated
-  "State for block X not yet available as local historical context" where X is
-  3–20 blocks behind the live head. This means the `mempool_processor` is
-  trying to simulate pending txs against a live context that has not caught up.
-  This does not block paper trading but it degrades signal quality.
+- **Live-state context lag resolved**: The May 10 `snapshot base block ... ahead
+  of local historical context` cascade is no longer an active bottleneck. The
+  simulator now uses exactly two sources during live operation: Reth historical
+  state first, then Redis live state snapshots. Missing-context errors are
+  treated as transient during uncached block replay.
 
 ### Immediate Operating Rule
 
@@ -791,3 +790,55 @@ of positive real PnL are recorded.
 
 Do not proceed to the next stage until the current stage's acceptance criteria
 are met and recorded in this file with a dated measurement.
+
+## Resolved Incident: Live Tracker Failure Cascade (May 10, 2026 20:54 UTC)
+
+Status: resolved in code on May 11, 2026.
+
+The live token tracker (`eth_token_server` PID 2925369) transitioned from
+`live` to `failed` at block **25067207** after tx-level snapshot restoration
+started failing at block **25067028**. The first error was:
+
+```text
+cannot restore live state snapshot for block 25067028:
+snapshot base block 25067027 is ahead of local historical context block 25067024
+```
+
+Root cause:
+
+- The simulator rejected Redis `ChainStateSnapshot` restores when the snapshot
+  base was ahead of `latest_historical_context_block_number()`.
+- That strict check used `min(Reth Finish stage, static-file header view)`.
+  During live operation, Reth may have executed state before static-file headers
+  are visible.
+- The tracker then accumulated 2,705 tx-level failures, slowed down, fell behind
+  the Redis live-block retention window, and finally failed on uncached block
+  **25067207**.
+
+Fix shipped:
+
+- `tx_simulator/src/block_context/mod.rs`: live state now has exactly two
+  sources: Reth historical state first, then Redis live state snapshots. Snapshot
+  restore can walk Redis snapshot bases until it finds a Reth base, then merges
+  snapshot overlays in order.
+- `tx_processor/src/processed_block_provider/load.rs`: uncached block replay now
+  treats live context lag, missing live headers, missing Redis snapshots, and
+  trace failures as transient retryable errors.
+- `tx_simulator/src/block_context/mod.rs`: parent live snapshots are reused when
+  building new snapshots, so the base does not unnecessarily rebase to the live
+  tip.
+
+Validation:
+
+- `cargo check -p tx_simulator`
+- `cargo check -p eth_live_feed`
+- `cargo test -p tx_processor processed_block_provider::load::tests --lib`
+
+Current monitoring:
+
+- Watch `/eth/tokens/api/live/status` after restart.
+- This incident should not remain in the active bottleneck list. It is now a
+  live-feed regression watch item only.
+- Acceptance: `live_status` returns to `live` and stays there without
+  `last_error` containing `snapshot base block` or `failed to process uncached
+  block`.
