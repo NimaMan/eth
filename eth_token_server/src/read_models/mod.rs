@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod cache;
 pub mod error;
+pub mod gas_rank;
 pub mod live;
 pub mod network;
 pub mod ops;

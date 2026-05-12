@@ -162,6 +162,13 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(alpha::strategy_reset);
 
+    let alpha_gas_rank_estimate =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "gas-rank" / "estimate")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(with_state(state.clone()))
+            .and_then(alpha::gas_rank_estimate);
+
     let alpha_runs = warp::path!("eth" / "tokens" / "api" / "alpha" / "runs")
         .and(warp::get())
         .and(warp::query::<backtest::RunListQuery>())
@@ -260,6 +267,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(token_activity_blocks)
         .or(alpha_strategy_performance)
         .or(alpha_strategy_reset)
+        .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)
         .or(alpha_run_risks)

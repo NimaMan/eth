@@ -4,6 +4,7 @@ use warp::http::StatusCode;
 
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
+use crate::read_models::gas_rank::{self, GasRankEstimateRequest};
 use crate::stores::alpha_trading::{AlphaStrategyResetRequest, StrategyPerformanceQuery};
 
 pub(super) async fn strategies(state: ServerState) -> Result<warp::reply::Response, Infallible> {
@@ -72,6 +73,19 @@ pub(super) async fn strategy_reset(
         )),
         Err(error) => Ok(error_response(
             format!("failed to reset alpha strategy state: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn gas_rank_estimate(
+    request: GasRankEstimateRequest,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match gas_rank::estimate(&state, request).await {
+        Ok(estimate) => Ok(json_response(&estimate, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to estimate gas rank: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }

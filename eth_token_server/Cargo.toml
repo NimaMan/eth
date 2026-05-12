@@ -7,6 +7,7 @@ workspace = ".."
 
 [dependencies]
 eth_alpha_store = { path = "../alpha/store" }
+eth_block_tx_rank = { path = "../alpha/block_tx_rank" }
 eth_live_feed = { path = "../alpha/live/feed" }
 eth_pipeline_telemetry = { path = "../eth_pipeline_telemetry" }
 eth_pool_classification = { path = "../alpha/pool_classification" }
@@ -21,6 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 eyre.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres"] }
 tokio.workspace = true
 zstd = "0.13"
