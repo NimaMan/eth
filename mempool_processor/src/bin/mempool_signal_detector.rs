@@ -1,12 +1,15 @@
+#[path = "mempool_signal_detector/metrics.rs"]
+mod metrics;
+#[path = "mempool_signal_detector/pipeline.rs"]
+mod pipeline;
 #[path = "mempool_signal_detector/support.rs"]
 mod support;
 
 use clap::Parser;
 use eyre::{bail, Result};
 use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 /// Mempool Signal Detector Service
 ///
@@ -31,6 +34,8 @@ use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::Layer;
 
+use metrics::ServiceMetrics;
+use pipeline::{drain_simulation_results, retry_unresolved_intents};
 use support::{arrival_recording_ingress_observer, parse_tx_hash_or_zero, LocalTimeFormatter};
 
 // Mempool processor imports
@@ -105,123 +110,6 @@ struct Args {
     /// Live runs should not set this.
     #[arg(long)]
     allow_database_disabled: bool,
-}
-
-/// Performance metrics tracker
-struct ServiceMetrics {
-    // Transaction counters
-    total_processed: AtomicU64,
-    contract_creations: AtomicU64,
-    creator_actions: AtomicU64,
-    dex_interactions: AtomicU64,
-    regular_txs: AtomicU64,
-
-    // Simulation metrics
-    simulations_submitted: AtomicU64,
-    simulations_completed: AtomicU64,
-    simulation_errors: AtomicU64,
-
-    // Signal counts
-    trading_enabled_signals: Arc<AtomicU64>,
-    liquidity_removal_signals: Arc<AtomicU64>,
-    honeypot_signals: Arc<AtomicU64>,
-    tax_change_signals: Arc<AtomicU64>,
-
-    // Timing metrics (using Mutex for simplicity with vectors)
-    detection_latencies: Arc<Mutex<Vec<Duration>>>,
-    simulation_times: Arc<Mutex<Vec<Duration>>>,
-}
-
-impl ServiceMetrics {
-    fn new() -> Self {
-        Self {
-            total_processed: AtomicU64::new(0),
-            contract_creations: AtomicU64::new(0),
-            creator_actions: AtomicU64::new(0),
-            dex_interactions: AtomicU64::new(0),
-            regular_txs: AtomicU64::new(0),
-            simulations_submitted: AtomicU64::new(0),
-            simulations_completed: AtomicU64::new(0),
-            simulation_errors: AtomicU64::new(0),
-            trading_enabled_signals: Arc::new(AtomicU64::new(0)),
-            liquidity_removal_signals: Arc::new(AtomicU64::new(0)),
-            honeypot_signals: Arc::new(AtomicU64::new(0)),
-            tax_change_signals: Arc::new(AtomicU64::new(0)),
-            detection_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
-            simulation_times: Arc::new(Mutex::new(Vec::with_capacity(1000))),
-        }
-    }
-
-    async fn add_detection_latency(&self, latency: Duration) {
-        let mut latencies = self.detection_latencies.lock().await;
-        if latencies.len() >= 10000 {
-            latencies.drain(0..5000); // Keep last 5000
-        }
-        latencies.push(latency);
-    }
-
-    async fn add_simulation_time(&self, time: Duration) {
-        let mut times = self.simulation_times.lock().await;
-        if times.len() >= 1000 {
-            times.drain(0..500);
-        }
-        times.push(time);
-    }
-
-    async fn calculate_latency_stats(
-        &self,
-        latencies: &[Duration],
-    ) -> (Duration, Duration, Duration) {
-        if latencies.is_empty() {
-            return (Duration::ZERO, Duration::ZERO, Duration::ZERO);
-        }
-
-        let mut sorted = latencies.to_vec();
-        sorted.sort();
-
-        let sum: Duration = sorted.iter().sum();
-        let avg = sum / sorted.len() as u32;
-        let max = sorted.last().cloned().unwrap_or(Duration::ZERO);
-        let p99 = sorted.get(sorted.len() * 99 / 100).cloned().unwrap_or(max);
-
-        (avg, max, p99)
-    }
-
-    async fn report(&self, elapsed: Duration) -> String {
-        let detection_latencies = self.detection_latencies.lock().await;
-        let (avg_detect, max_detect, _p99_detect) =
-            self.calculate_latency_stats(&detection_latencies).await;
-        drop(detection_latencies);
-
-        let simulation_times = self.simulation_times.lock().await;
-        let (avg_sim, max_sim, _p99_sim) = self.calculate_latency_stats(&simulation_times).await;
-        drop(simulation_times);
-
-        let total = self.total_processed.load(Ordering::Relaxed);
-        let creations = self.contract_creations.load(Ordering::Relaxed);
-        let creator_actions = self.creator_actions.load(Ordering::Relaxed);
-        let _dex = self.dex_interactions.load(Ordering::Relaxed);
-        let _regular = self.regular_txs.load(Ordering::Relaxed);
-
-        let _sims_submitted = self.simulations_submitted.load(Ordering::Relaxed);
-        let sims_completed = self.simulations_completed.load(Ordering::Relaxed);
-        let sim_errors = self.simulation_errors.load(Ordering::Relaxed);
-
-        let rate = total as f64 / elapsed.as_secs_f64();
-
-        format!(
-            "TX: {} ({:.1}/s) | Detect: {}μs/{}μs | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims:{}/{} | Signals: TE:{} LR:{} HP:{} TC:{}",
-            total, rate,
-            avg_detect.as_micros(), max_detect.as_micros(),
-            avg_sim.as_secs_f64() * 1000.0, max_sim.as_secs_f64() * 1000.0,
-            creations, creator_actions,
-            sims_completed, sim_errors,
-            self.trading_enabled_signals.load(Ordering::Relaxed),
-            self.liquidity_removal_signals.load(Ordering::Relaxed),
-            self.honeypot_signals.load(Ordering::Relaxed),
-            self.tax_change_signals.load(Ordering::Relaxed),
-        )
-    }
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -894,232 +782,6 @@ async fn main() -> Result<()> {
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())
-}
-
-async fn drain_simulation_results(
-    receiver: &mut mpsc::Receiver<SimulationResult>,
-    metrics: &ServiceMetrics,
-    mempool_simulator: &MempoolSimulator,
-    simulation_error_log_path: &Path,
-    unresolved_intent_store: &UnresolvedIntentStore,
-) -> usize {
-    let mut drained = 0usize;
-    while let Ok(result) = receiver.try_recv() {
-        drained += 1;
-        let tx_hash = format!("{:?}", result.request.tx_hash);
-        let category = match &result.request.category {
-            TransactionCategory::ContractCreation { .. } => "ContractCreation",
-            TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
-            _ => "Other",
-        };
-
-        if let Some(ref error) = result.error {
-            if is_unresolved_cache_error(error) {
-                unresolved_intent_store
-                    .record(
-                        result.request.tx.clone(),
-                        unresolved_kind_for_result(&result),
-                        error.clone(),
-                    )
-                    .await;
-                continue;
-            }
-
-            if is_replay_context_mismatch(error) {
-                unresolved_intent_store
-                    .resolve(&result.request.tx.hash)
-                    .await;
-                warn!(
-                    "Replay context mismatch for {} classified outside simulation error path: {}",
-                    result.request.tx.hash, error
-                );
-                continue;
-            }
-
-            if is_stale_pending_tx_error(error) {
-                unresolved_intent_store
-                    .resolve(&result.request.tx.hash)
-                    .await;
-                warn!(
-                    "Stale pending tx for {} classified outside simulation error path: {}",
-                    result.request.tx.hash, error
-                );
-                continue;
-            }
-
-            metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-            if !error.contains("No pools found for token") {
-                let block_str = match mempool_simulator.latest_simulation_block().await {
-                    Ok(b) => b.to_string(),
-                    Err(_) => "unknown".to_string(),
-                };
-                if let Ok(mut file) = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(simulation_error_log_path)
-                {
-                    let timestamp = chrono::Local::now();
-                    writeln!(
-                        file,
-                        "[{}] SIMULATION_ERROR | block={} | tx={} | category={} | error={}",
-                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        block_str,
-                        tx_hash,
-                        category,
-                        error
-                    )
-                    .ok();
-                }
-            }
-            unresolved_intent_store
-                .resolve(&result.request.tx.hash)
-                .await;
-        } else {
-            unresolved_intent_store
-                .resolve(&result.request.tx.hash)
-                .await;
-            metrics
-                .simulations_completed
-                .fetch_add(1, Ordering::Relaxed);
-            if result.simulation_time_ms > 0.0 {
-                let sim_duration = Duration::from_secs_f64(result.simulation_time_ms / 1000.0);
-                metrics.add_simulation_time(sim_duration).await;
-            }
-        }
-    }
-    drained
-}
-
-async fn retry_unresolved_intents(
-    unresolved_intent_store: &UnresolvedIntentStore,
-    tx_router: &TransactionRouter,
-    simulation_manager: &SimulationManager,
-    metrics: &ServiceMetrics,
-) {
-    let intents = unresolved_intent_store.take_ready_for_retry().await;
-    for intent in intents {
-        let classification = tx_router.classify(&intent.tx).await;
-        if let Some((_kind, reason)) = tx_router.unresolved_intent_for(&intent.tx, &classification)
-        {
-            unresolved_intent_store
-                .mark_pending(&intent.tx.hash, reason)
-                .await;
-            continue;
-        }
-
-        match &classification.category {
-            TransactionCategory::ContractCreation { .. }
-            | TransactionCategory::CreatorTransaction { .. } => {}
-            _ => {
-                unresolved_intent_store
-                    .mark_pending(
-                        &intent.tx.hash,
-                        "classification still lacks token/pool mapping",
-                    )
-                    .await;
-                continue;
-            }
-        }
-
-        if !classification.requires_simulation {
-            if let TransactionCategory::CreatorTransaction {
-                function_type: CreatorFunctionType::LiquidityPoolApproval,
-                ..
-            } = &classification.category
-            {
-                let published = simulation_manager
-                    .detect_lp_approval(&intent.tx, &classification.category)
-                    .await;
-                if published {
-                    unresolved_intent_store.resolve(&intent.tx.hash).await;
-                } else {
-                    unresolved_intent_store
-                        .mark_pending(
-                            &intent.tx.hash,
-                            "LP approval enrichment still lacks token/pool mapping",
-                        )
-                        .await;
-                }
-            } else {
-                unresolved_intent_store.resolve(&intent.tx.hash).await;
-            }
-            continue;
-        }
-
-        let sim_request = TxSimulationJob {
-            tx: intent.tx.clone(),
-            category: classification.category.clone(),
-            priority: classification.priority,
-            simulation_type: match &classification.category {
-                TransactionCategory::ContractCreation { .. }
-                | TransactionCategory::CreatorTransaction { .. } => {
-                    SimulationType::TransactionWithBuySell
-                }
-                _ => SimulationType::TransactionOnly,
-            },
-            tx_hash: parse_tx_hash_or_zero(&intent.tx.hash),
-        };
-
-        match simulation_manager.submit(sim_request).await {
-            Ok(()) => {
-                metrics
-                    .simulations_submitted
-                    .fetch_add(1, Ordering::Relaxed);
-            }
-            Err(err) => {
-                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                unresolved_intent_store
-                    .mark_pending(
-                        &intent.tx.hash,
-                        format!("simulation queue rejected unresolved intent: {}", err),
-                    )
-                    .await;
-            }
-        }
-    }
-}
-
-fn is_unresolved_cache_error(error: &str) -> bool {
-    error.contains("unresolved_cache_context")
-        || error.contains("No tracked token found for liquidity removal")
-        || error.contains("No token address found for creator")
-        || error.contains("No pools found for token")
-        || error.contains("Token cache reported no pools")
-}
-
-fn is_replay_context_mismatch(error: &str) -> bool {
-    error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
-}
-
-fn is_stale_pending_tx_error(error: &str) -> bool {
-    error.contains("transaction validation error: nonce")
-        && error.contains("too low")
-        && error.contains("expected")
-}
-
-fn unresolved_kind_for_result(result: &SimulationResult) -> UnresolvedIntentKind {
-    if is_v4_modify_liquidity_selector(&result.request.tx.input) {
-        return UnresolvedIntentKind::V4ModifyLiquidity;
-    }
-
-    match &result.request.category {
-        TransactionCategory::CreatorTransaction { function_type, .. } => match function_type {
-            CreatorFunctionType::LiquidityPoolApproval => UnresolvedIntentKind::LpApproval,
-            CreatorFunctionType::LiquidityRemoval => UnresolvedIntentKind::LiquidityRemoval,
-            _ => UnresolvedIntentKind::CreatorControl,
-        },
-        _ => UnresolvedIntentKind::CreatorControl,
-    }
-}
-
-fn is_v4_modify_liquidity_selector(input: &[u8]) -> bool {
-    let Some(selector) = input.get(0..4) else {
-        return false;
-    };
-    matches!(
-        selector,
-        [0xdd, 0x46, 0x50, 0x8f] | [0xa3, 0x55, 0xde, 0x88] | [0x0d, 0x4f, 0x31, 0x9d]
-    )
 }
 
 /// Sets up signal handlers for graceful shutdown
