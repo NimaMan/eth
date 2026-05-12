@@ -248,7 +248,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
+              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
             ORDER BY updated_at DESC
             "#,
         )
