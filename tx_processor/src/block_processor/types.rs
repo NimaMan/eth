@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tx_simulator::block_simulation::BlockTraceEngine;
 
-pub const PROCESSED_BLOCK_SCHEMA_VERSION: u32 = 1;
-
 /// Result of processing an entire block worth of transactions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedBlock {

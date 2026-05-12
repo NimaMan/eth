@@ -30,7 +30,6 @@ pub use address_block_participation::address_participations_from_processed_block
 pub use block_processor::{
     BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
     ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
-    PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
@@ -47,8 +46,7 @@ pub use processed_block_provider::{
     ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
     ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
     ProcessedBlockRangeLoadOptions, ProcessedBlockReplayStoreWrite,
-    ProcessedBlockReplayStoreWriter, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
-    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    ProcessedBlockReplayStoreWriter, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use processed_tx_provider::{

@@ -5,7 +5,7 @@ mod load;
 mod range;
 mod replay_store;
 
-pub use compact::{CompactProcessedTransaction, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION};
+pub use compact::CompactProcessedTransaction;
 pub use disk_cache::{
     ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
     ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,

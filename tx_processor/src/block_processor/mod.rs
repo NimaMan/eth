@@ -25,7 +25,6 @@ use tx_simulator::block_simulation::BlockTraceEngine;
 pub use types::{
     BlockBatchOptions, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
     ProcessRawBlockProfile, ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
-    PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 
 /// High-level orchestration for processing entire blocks worth of transactions.

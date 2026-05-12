@@ -14,7 +14,7 @@ use tx_simulator::live_chain_data::live_data_registry::keys;
 use crate::{
     load_processed_block, BlockProcessor, CompactProcessedTransaction, LoadedProcessedBlock,
     ProcessedBlock, ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter,
-    ProcessedBlockSource, COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
+    ProcessedBlockSource,
 };
 
 #[derive(Clone)]
@@ -247,14 +247,6 @@ fn decode_transactions(
 fn decode_transaction(payload: &str) -> Result<crate::ProcessedBlockTransactions> {
     let decoded: RedisProcessedTransactionPayload = serde_json::from_str(payload)
         .map_err(|err| eyre!("failed to decode compact live processed transaction JSON: {err}"))?;
-    if decoded.processed.processed_tx_schema_version != COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION
-    {
-        return Err(eyre!(
-            "unsupported live processed transaction schema version: expected {}, got {}",
-            COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
-            decoded.processed.processed_tx_schema_version
-        ));
-    }
     Ok(decoded
         .processed
         .into_block_transaction(decoded.processing_error))

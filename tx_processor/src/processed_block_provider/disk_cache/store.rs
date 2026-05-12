@@ -16,7 +16,6 @@ use super::reader::ProcessedBlockDiskCacheReader;
 use super::writer::ProcessedBlockDiskCacheWriter;
 
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
-const CACHE_SCHEMA_VERSION: u32 = 2;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 const CACHE_ZSTD_LEVEL: i32 = 3;
 const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;
@@ -73,7 +72,6 @@ pub struct ProcessedBlockDiskCacheBlockRange {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessedBlockDiskCacheEntry {
-    cache_schema_version: u32,
     key: ProcessedBlockDiskCacheKey,
     header: BlockHeader,
     transactions: Vec<ProcessedBlockDiskCacheTransaction>,
@@ -161,7 +159,7 @@ impl ProcessedBlockDiskCacheStore {
         let decoded = match zstd::stream::decode_all(bytes.as_slice()) {
             Ok(decoded) => decoded,
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     path = %path.display(),
                     error = %error,
                     "processed block disk cache entry is not readable; treating as cache miss"
@@ -172,7 +170,7 @@ impl ProcessedBlockDiskCacheStore {
         let entry = match decode_cache_entry(&decoded) {
             Ok(entry) => entry,
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     path = %path.display(),
                     error = %error,
                     "processed block disk cache entry is not decodable; treating as cache miss"
@@ -181,7 +179,7 @@ impl ProcessedBlockDiskCacheStore {
             }
         };
         if let Err(error) = validate_cache_entry(&entry, key) {
-            tracing::warn!(
+            tracing::debug!(
                 path = %path.display(),
                 error = %error,
                 "processed block disk cache entry is stale or incompatible; treating as cache miss"
@@ -191,7 +189,7 @@ impl ProcessedBlockDiskCacheStore {
         match entry.into_processed_block() {
             Ok(block) => Ok(Some(block)),
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     path = %path.display(),
                     error = %error,
                     "processed block disk cache entry payload is invalid; treating as cache miss"
@@ -486,7 +484,6 @@ fn block_ranges(block_numbers: &[u64]) -> Vec<ProcessedBlockDiskCacheBlockRange>
 impl ProcessedBlockDiskCacheEntry {
     fn from_block(key: ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Result<Self> {
         Ok(Self {
-            cache_schema_version: CACHE_SCHEMA_VERSION,
             key,
             header: block.header.clone(),
             transactions: block
@@ -521,13 +518,6 @@ fn validate_cache_entry(
     entry: &ProcessedBlockDiskCacheEntry,
     expected: &ProcessedBlockDiskCacheKey,
 ) -> Result<()> {
-    if entry.cache_schema_version != CACHE_SCHEMA_VERSION {
-        bail!(
-            "cache schema mismatch: expected {}, found {}",
-            CACHE_SCHEMA_VERSION,
-            entry.cache_schema_version
-        );
-    }
     if entry.key.chain_id != expected.chain_id
         || entry.key.network != expected.network
         || entry.key.block_number != expected.block_number
@@ -716,7 +706,9 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
 
-    use crate::tx_processor::data_models::{ProcessedAccessListItem, TransactionFees};
+    use crate::tx_processor::data_models::{
+        ProcessedAccessListItem, TransactionFees, UniswapV3PoolCreatedEvent,
+    };
     use crate::ProcessedTransaction;
 
     #[test]
@@ -756,6 +748,15 @@ mod tests {
         tx.tx_type = "swap".to_string();
         tx.actions.push("token_tracking".to_string());
         tx.erc721_contracts.insert(Address::repeat_byte(0x77));
+        tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+            factory_address: Address::repeat_byte(0x99),
+            token0: Address::repeat_byte(0x9a),
+            token1: Address::repeat_byte(0x9b),
+            fee: 3_000,
+            tick_spacing: 60,
+            pool: Address::repeat_byte(0x9c),
+            log_index: 8,
+        });
         tx.other_events.push(HashMap::from([(
             "debug".to_string(),
             json!({"kind": "state", "values": [1, 2, 3]}),
@@ -814,6 +815,11 @@ mod tests {
         assert!(cached_tx
             .erc721_contracts
             .contains(&Address::repeat_byte(0x77)));
+        assert_eq!(cached_tx.uniswap_v3_pools.len(), 1);
+        assert_eq!(
+            cached_tx.uniswap_v3_pools[0].factory_address,
+            Address::repeat_byte(0x99)
+        );
         assert_eq!(cached_tx.other_events[0]["debug"]["kind"], "state");
         assert_eq!(
             cached_tx.latest_states[&Address::repeat_byte(0x88)]["nested"]["ok"],

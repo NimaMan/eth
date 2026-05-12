@@ -14,7 +14,7 @@ transaction and block facts.
 
 ## Owns
 
-- `ProcessedTransaction`, `ProcessedBlock`, compact cache schemas, and related
+- `ProcessedTransaction`, `ProcessedBlock`, compact cache shape, and related
   data models.
 - `ProcessedTxProvider` helpers for tx hash and unsigned-call processing.
 - `BlockProcessor` and `ProcessedBlockProvider` for block/range processing.
@@ -45,7 +45,7 @@ Live path:
 
 ```text
 live_block_processor
-  -> compact ProcessedBlock schema
+  -> compact ProcessedBlock payload
   -> ProcessedBlockReplayStoreWriter
   -> processed-block disk cache + address_to_blocks
   -> Redis stream eth/live/blocks
@@ -90,7 +90,7 @@ cargo test -p tx_processor
   path when internal ETH transfers or trace-derived balance deltas are needed.
 - Cold block processing is dominated by EVM replay/tracing. Optimize cache and
   cross-block concurrency before micro-optimizing post-processing.
-- Cache key/version changes must preserve deterministic equality between fresh
-  and cached normalized `ProcessedBlock` output.
+- Cache shape changes must preserve deterministic equality between fresh and
+  cached normalized `ProcessedBlock` output.
 - Do not duplicate token registry state here. Emit decoded facts; let
   `eth_token` maintain durable token/pool state.

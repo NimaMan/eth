@@ -5,9 +5,7 @@ use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tx_simulator::live_chain_data::{live_data_registry::keys, ChainStateSnapshot};
 
-const LIVE_PROCESSED_BLOCK_REDIS_SCHEMA_VERSION: u32 = 2;
-
-/// Writes live block snapshots into Redis using the canonical schema.
+/// Writes live block snapshots into Redis using the current processed-block shape.
 pub struct RedisBlockPublisher {
     client: Client,
     ttl_seconds: Option<usize>,
@@ -62,7 +60,6 @@ impl RedisBlockPublisher {
             })
             .transpose()?;
         let meta_json = serde_json::to_string(&json!({
-            "schema_version": LIVE_PROCESSED_BLOCK_REDIS_SCHEMA_VERSION,
             "chain": "eth",
             "chain_id": 1,
             "block_number": snapshot.block_number,
@@ -162,8 +159,6 @@ impl RedisBlockPublisher {
             cmd.arg("MAXLEN").arg("=").arg(maxlen);
         }
         cmd.arg("*")
-            .arg("schema_version")
-            .arg(LIVE_PROCESSED_BLOCK_REDIS_SCHEMA_VERSION)
             .arg("chain")
             .arg("eth")
             .arg("chain_id")

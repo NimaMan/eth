@@ -7,11 +7,8 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_simulator::block_simulation::BlockTraceEngine;
 
-use crate::block_processor::{ProcessedBlock, PROCESSED_BLOCK_SCHEMA_VERSION};
-use crate::processed_block_provider::{
-    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
-    COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
-};
+use crate::block_processor::ProcessedBlock;
+use crate::processed_block_provider::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
 use crate::tx_processor::data_models::ProcessedTransaction;
 
 /// Default number of blocks to retain in the cache (~2 days on Ethereum mainnet).
@@ -110,7 +107,6 @@ pub struct ProcessedBlockCacheKey {
     pub chain_id: u64,
     pub block_number: u64,
     pub block_hash: B256,
-    pub processor_schema_version: u32,
     pub trace_engine: String,
     pub trace_config_hash: B256,
 }
@@ -123,29 +119,10 @@ impl ProcessedBlockCacheKey {
         trace_engine: BlockTraceEngine,
         trace_config_hash: B256,
     ) -> Self {
-        Self::with_schema_version(
-            chain_id,
-            block_number,
-            block_hash,
-            PROCESSED_BLOCK_SCHEMA_VERSION,
-            trace_engine,
-            trace_config_hash,
-        )
-    }
-
-    pub fn with_schema_version(
-        chain_id: u64,
-        block_number: u64,
-        block_hash: B256,
-        processor_schema_version: u32,
-        trace_engine: BlockTraceEngine,
-        trace_config_hash: B256,
-    ) -> Self {
         Self {
             chain_id,
             block_number,
             block_hash,
-            processor_schema_version,
             trace_engine: trace_engine_id(trace_engine).to_string(),
             trace_config_hash,
         }
@@ -191,9 +168,7 @@ impl ProcessedBlockCacheStore {
 }
 
 pub fn processed_block_trace_config_hash(include_traces: bool) -> B256 {
-    let config = format!(
-        "include_traces={include_traces};tracer=callTracer;version=2;compact_tx_schema={COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION};processed_block_storage_schema=2"
-    );
+    let config = format!("include_traces={include_traces};tracer=callTracer");
     keccak256(config.as_bytes())
 }
 
@@ -206,8 +181,7 @@ pub fn trace_engine_id(trace_engine: BlockTraceEngine) -> &'static str {
 }
 
 fn is_current_disk_cache_key(key: &ProcessedBlockCacheKey) -> bool {
-    key.processor_schema_version == PROCESSED_BLOCK_SCHEMA_VERSION
-        && key.trace_engine == trace_engine_id(BlockTraceEngine::FreshInspector)
+    key.trace_engine == trace_engine_id(BlockTraceEngine::FreshInspector)
         && key.trace_config_hash == processed_block_trace_config_hash(true)
 }
 
@@ -298,17 +272,6 @@ mod tests {
                 1,
                 10,
                 B256::repeat_byte(3),
-                BlockTraceEngine::FreshInspector,
-                B256::repeat_byte(2),
-            )
-        );
-        assert_ne!(
-            base,
-            ProcessedBlockCacheKey::with_schema_version(
-                1,
-                10,
-                B256::repeat_byte(1),
-                PROCESSED_BLOCK_SCHEMA_VERSION + 1,
                 BlockTraceEngine::FreshInspector,
                 B256::repeat_byte(2),
             )

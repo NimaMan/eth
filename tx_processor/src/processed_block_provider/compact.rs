@@ -26,8 +26,6 @@ use crate::tx_processor::data_models::{
 };
 use crate::ProcessedBlockTransactions;
 
-pub const COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION: u32 = 3;
-
 /// Compact processed-transaction representation for block provider storage.
 ///
 /// The runtime type keeps empty vectors and zero values for simple processing.
@@ -35,7 +33,6 @@ pub const COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION: u32 = 3;
 /// values to `None`, so persistent providers only carry fields with data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactProcessedTransaction {
-    pub processed_tx_schema_version: u32,
     pub hash: B256,
     pub block_number: u64,
     pub block_timestamp: u64,
@@ -120,7 +117,6 @@ pub struct CompactProcessedTransaction {
 impl CompactProcessedTransaction {
     pub fn from_processed(tx: &ProcessedTransaction) -> Self {
         Self {
-            processed_tx_schema_version: COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION,
             hash: tx.hash,
             block_number: tx.block_number,
             block_timestamp: tx.block_timestamp,
@@ -455,12 +451,6 @@ mod tests {
             .expect("serialize compact tx");
         let object = value.as_object().expect("compact tx object");
 
-        assert_eq!(
-            object
-                .get("processed_tx_schema_version")
-                .and_then(Value::as_u64),
-            Some(COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION as u64)
-        );
         assert!(!object.contains_key("input"));
         assert!(!object.contains_key("actions"));
         assert!(!object.contains_key("unique_addresses"));
@@ -672,6 +662,10 @@ mod tests {
         assert_eq!(decoded.approval_for_all_events.len(), 1);
         assert_eq!(decoded.uniswap_v2_pair_created_events.len(), 1);
         assert_eq!(decoded.uniswap_v3_pools.len(), 1);
+        assert_eq!(
+            decoded.uniswap_v3_pools[0].factory_address,
+            Address::repeat_byte(0x78)
+        );
         assert_eq!(decoded.uniswap_v4_initializes.len(), 1);
         assert_eq!(decoded.permit2_events.len(), 1);
         assert_eq!(decoded.other_events[0]["event"]["kind"], "debug");

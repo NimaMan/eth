@@ -25,7 +25,7 @@ pub struct LiveTxEntry {
     pub unique_addresses: Vec<String>,
 }
 
-/// Build a snapshot that matches the Redis live-data block schema.
+/// Build a snapshot that matches the Redis live-data block layout.
 pub fn build_live_block_snapshot(block: &ProcessedBlock) -> Result<LiveBlockSnapshot> {
     let header_json = serde_json::to_string(&HeaderPayload::from(&block.header))
         .map_err(|err| eyre!("failed to serialize block header: {}", err))?;
@@ -208,12 +208,6 @@ mod tests {
             serde_json::from_str(&snapshot.tx_entries[0].payload_json).expect("payload json");
         let object = payload.as_object().expect("payload object");
 
-        assert_eq!(
-            object
-                .get("processed_tx_schema_version")
-                .and_then(Value::as_u64),
-            Some(crate::COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION as u64)
-        );
         assert_eq!(
             object.get("input").and_then(Value::as_str),
             Some("0xdeadbeef")
