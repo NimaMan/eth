@@ -1,4 +1,4 @@
-use crate::token_tracking::cache::TokenTrackingCache;
+use crate::token_tracking::cache::{CacheApplyOutcome, CacheUpdateContext, TokenTrackingCache};
 use crate::token_tracking::types::{
     Address, Pool, PoolLifecycle, PoolType, Token, TokenUpdate, TokenWithPools,
 };
@@ -153,9 +153,30 @@ pub async fn apply_snapshot_map_to_cache(
     timestamp: f64,
     message_type: &str,
     token_map: HashMap<Address, TokenWithPools>,
-) {
+) -> CacheApplyOutcome {
+    apply_snapshot_map_to_cache_with_context(
+        cache,
+        block_number,
+        timestamp,
+        message_type,
+        None,
+        false,
+        token_map,
+    )
+    .await
+}
+
+pub async fn apply_snapshot_map_to_cache_with_context(
+    cache: &TokenTrackingCache,
+    block_number: u64,
+    timestamp: f64,
+    message_type: &str,
+    status: Option<String>,
+    require_live_status: bool,
+    token_map: HashMap<Address, TokenWithPools>,
+) -> CacheApplyOutcome {
     if token_map.is_empty() {
-        return;
+        return CacheApplyOutcome::SkippedEmpty;
     }
 
     let update = TokenUpdate {
@@ -166,11 +187,36 @@ pub async fn apply_snapshot_map_to_cache(
         data: token_map,
     };
 
-    let result = cache.batch_update(update).await;
-    debug!(
-        "Applied snapshot batch @block {} ({} tokens, {} pools updated)",
-        block_number, result.tokens_updated, result.pools_updated
-    );
+    let outcome = cache
+        .batch_update_with_context(
+            update,
+            CacheUpdateContext {
+                source: message_type.to_string(),
+                status,
+                require_live_status,
+            },
+        )
+        .await;
+    match &outcome {
+        CacheApplyOutcome::Applied(result) => {
+            debug!(
+                "Applied snapshot batch @block {} ({} tokens, {} pools updated)",
+                block_number, result.tokens_updated, result.pools_updated
+            );
+        }
+        CacheApplyOutcome::Rejected(rejection) => {
+            warn!(
+                "Rejected token cache snapshot source={} status={:?} block={} current_block={} reason={:?}",
+                rejection.source,
+                rejection.status,
+                rejection.block_number,
+                rejection.current_block,
+                rejection.reason
+            );
+        }
+        CacheApplyOutcome::SkippedEmpty => {}
+    }
+    outcome
 }
 
 #[derive(Debug, Deserialize)]

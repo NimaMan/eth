@@ -278,7 +278,7 @@ impl SignalManager {
     /// - Pool address and type are extracted from the result
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
         if let Some(ref err) = result.error {
-            if !err.contains("No pools found for token") {
+            if !is_cache_wait_error(err) {
                 self.log_error("SIMULATION_ERROR", &format_simulation_error(result, err));
             }
         }
@@ -818,6 +818,13 @@ fn token_address_from_simulation_result(result: &SimulationResult) -> Option<Str
         } => Some(contract_address.clone()),
         _ => None,
     }
+}
+
+fn is_cache_wait_error(error: &str) -> bool {
+    error.contains("unresolved_cache_context")
+        || error.contains("No pools found for token")
+        || error.contains("No token address found for creator")
+        || error.contains("Token cache reported no pools")
 }
 
 fn creator_address_from_simulation_result(result: &SimulationResult) -> String {

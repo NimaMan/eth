@@ -21,6 +21,61 @@ pub use super::types::{
     Address, CacheConfig, Pool, PoolLifecycle, Token, TokenUpdate, TokenWithPools,
 };
 
+#[derive(Debug, Clone, Default)]
+struct TokenCacheContext {
+    last_accepted_block: u64,
+    last_accepted_status: Option<String>,
+    last_accepted_source: Option<String>,
+    accepted_updates: u64,
+    rejected_stale_snapshots: u64,
+    rejected_non_live_snapshots: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TokenCacheContextSnapshot {
+    pub last_accepted_block: u64,
+    pub last_accepted_status: Option<String>,
+    pub last_accepted_source: Option<String>,
+    pub accepted_updates: u64,
+    pub rejected_stale_snapshots: u64,
+    pub rejected_non_live_snapshots: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheUpdateContext {
+    pub source: String,
+    pub status: Option<String>,
+    pub require_live_status: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum CacheApplyOutcome {
+    Applied(UpdateResult),
+    Rejected(CacheUpdateRejection),
+    SkippedEmpty,
+}
+
+impl CacheApplyOutcome {
+    pub fn applied(&self) -> bool {
+        matches!(self, Self::Applied(_))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheUpdateRejection {
+    pub source: String,
+    pub status: Option<String>,
+    pub block_number: u64,
+    pub current_block: u64,
+    pub reason: CacheUpdateRejectionReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheUpdateRejectionReason {
+    NonLiveStatus,
+    StaleBlock,
+}
+
 /// High-performance token tracking cache with bounded memory
 #[derive(Clone)]
 pub struct TokenTrackingCache {
@@ -42,6 +97,7 @@ pub struct TokenTrackingCache {
     // Configuration
     config: CacheConfig,
     log_path: Arc<RwLock<Option<PathBuf>>>,
+    context: Arc<RwLock<TokenCacheContext>>,
 }
 
 impl TokenTrackingCache {
@@ -62,6 +118,7 @@ impl TokenTrackingCache {
             scam_pools: Arc::new(RwLock::new(HashSet::new())),
             config,
             log_path: Arc::new(RwLock::new(None)),
+            context: Arc::new(RwLock::new(TokenCacheContext::default())),
         }
     }
 
@@ -183,7 +240,77 @@ impl TokenTrackingCache {
         }
     }
 
+    pub async fn context_snapshot(&self) -> TokenCacheContextSnapshot {
+        let context = self.context.read().await;
+        TokenCacheContextSnapshot {
+            last_accepted_block: context.last_accepted_block,
+            last_accepted_status: context.last_accepted_status.clone(),
+            last_accepted_source: context.last_accepted_source.clone(),
+            accepted_updates: context.accepted_updates,
+            rejected_stale_snapshots: context.rejected_stale_snapshots,
+            rejected_non_live_snapshots: context.rejected_non_live_snapshots,
+        }
+    }
+
     // ===== Batch Update Operations =====
+
+    pub async fn batch_update_with_context(
+        &self,
+        update: TokenUpdate,
+        update_context: CacheUpdateContext,
+    ) -> CacheApplyOutcome {
+        if update.data.is_empty() {
+            return CacheApplyOutcome::SkippedEmpty;
+        }
+
+        let normalized_status = update_context
+            .status
+            .as_ref()
+            .map(|status| status.trim().to_ascii_lowercase());
+        let block_number = update.block_number;
+
+        let mut context = self.context.write().await;
+        if update_context.require_live_status && normalized_status.as_deref() != Some("live") {
+            context.rejected_non_live_snapshots += 1;
+            let rejection = CacheUpdateRejection {
+                source: update_context.source,
+                status: update_context.status,
+                block_number,
+                current_block: context.last_accepted_block,
+                reason: CacheUpdateRejectionReason::NonLiveStatus,
+            };
+            drop(context);
+            self.log_context_rejection_to_file(&rejection).await;
+            return CacheApplyOutcome::Rejected(rejection);
+        }
+
+        if context.last_accepted_block > 0
+            && block_number > 0
+            && block_number < context.last_accepted_block
+        {
+            context.rejected_stale_snapshots += 1;
+            let rejection = CacheUpdateRejection {
+                source: update_context.source,
+                status: update_context.status,
+                block_number,
+                current_block: context.last_accepted_block,
+                reason: CacheUpdateRejectionReason::StaleBlock,
+            };
+            drop(context);
+            self.log_context_rejection_to_file(&rejection).await;
+            return CacheApplyOutcome::Rejected(rejection);
+        }
+
+        let source = update_context.source;
+        let status = update_context.status;
+        let result = self.batch_update(update).await;
+        context.last_accepted_block = context.last_accepted_block.max(block_number);
+        context.last_accepted_status = status;
+        context.last_accepted_source = Some(source);
+        context.accepted_updates += 1;
+
+        CacheApplyOutcome::Applied(result)
+    }
 
     /// Update cache with new token data from Python (batch operation)
     pub async fn batch_update(&self, update: TokenUpdate) -> UpdateResult {
@@ -332,6 +459,25 @@ impl TokenTrackingCache {
             tokens_updated,
             pools_updated,
             creators_added,
+        }
+    }
+
+    async fn log_context_rejection_to_file(&self, rejection: &CacheUpdateRejection) {
+        let log_path = { self.log_path.read().await.clone() };
+        if let Some(path) = log_path {
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+                let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(
+                    file,
+                    "[{}] rejected token cache update source={} status={:?} block={} current_block={} reason={:?}",
+                    timestamp,
+                    rejection.source,
+                    rejection.status,
+                    rejection.block_number,
+                    rejection.current_block,
+                    rejection.reason
+                );
+            }
         }
     }
 
@@ -547,5 +693,135 @@ mod tests {
         let pools = cache.get_pools_for_token(&"0xTOKEN".to_string()).await;
         assert_eq!(pools.len(), 1);
         assert_eq!(pools[0].address, "0xpool");
+    }
+
+    #[tokio::test]
+    async fn rejects_non_live_context_when_live_required() {
+        let cache = TokenTrackingCache::with_defaults();
+        let update = test_update(100);
+
+        let outcome = cache
+            .batch_update_with_context(
+                update,
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("warming".to_string()),
+                    require_live_status: true,
+                },
+            )
+            .await;
+
+        match outcome {
+            CacheApplyOutcome::Rejected(rejection) => {
+                assert_eq!(rejection.reason, CacheUpdateRejectionReason::NonLiveStatus);
+            }
+            other => panic!("expected rejection, got {other:?}"),
+        }
+        let context = cache.context_snapshot().await;
+        assert_eq!(context.accepted_updates, 0);
+        assert_eq!(context.rejected_non_live_snapshots, 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_lower_block_after_live_context() {
+        let cache = TokenTrackingCache::with_defaults();
+
+        let applied = cache
+            .batch_update_with_context(
+                test_update(200),
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("live".to_string()),
+                    require_live_status: true,
+                },
+            )
+            .await;
+        assert!(applied.applied());
+
+        let stale = cache
+            .batch_update_with_context(
+                test_update(199),
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("live".to_string()),
+                    require_live_status: true,
+                },
+            )
+            .await;
+
+        match stale {
+            CacheApplyOutcome::Rejected(rejection) => {
+                assert_eq!(rejection.reason, CacheUpdateRejectionReason::StaleBlock);
+                assert_eq!(rejection.current_block, 200);
+            }
+            other => panic!("expected stale rejection, got {other:?}"),
+        }
+        let context = cache.context_snapshot().await;
+        assert_eq!(context.last_accepted_block, 200);
+        assert_eq!(context.rejected_stale_snapshots, 1);
+    }
+
+    fn test_update(block_number: u64) -> TokenUpdate {
+        let token_address = "0x1000000000000000000000000000000000000001".to_string();
+        let pool_address = "0x2000000000000000000000000000000000000002".to_string();
+        let creator_address = "0x3000000000000000000000000000000000000003".to_string();
+        let token = Token {
+            address: token_address.clone(),
+            symbol: "TEST".to_string(),
+            name: "Test".to_string(),
+            decimals: 18,
+            total_supply: Some("1000".to_string()),
+            creator_address: creator_address.clone(),
+            current_owner: creator_address,
+            tax_setter_addresses: Vec::new(),
+            ownership_renounced: false,
+            renouncement_block: None,
+            buy_tax: None,
+            sell_tax: None,
+            last_tax_change_block: None,
+            tax_history: Vec::new(),
+            creation_block: block_number,
+            creation_tx: "0xHASH".to_string(),
+            creation_timestamp: None,
+            latest_activity_block: block_number,
+            is_scam: false,
+            scam_label: None,
+            total_liquidity: 0.0,
+        };
+        let pool = Pool {
+            address: pool_address.clone(),
+            token_address: token_address.clone(),
+            pool_type: super::super::types::PoolType::UniswapV2,
+            token_reserve: 1000000.0,
+            eth_reserve: 10.0,
+            denom_currency: "ETH".to_string(),
+            denom_address: "0xWETH".to_string(),
+            trading_enabled: true,
+            trading_enabled_block: Some(block_number),
+            trading_enabled_tx: None,
+            fee_tier: None,
+            pool_id: None,
+            last_updated_block: block_number,
+            last_updated_time: 0.0,
+            is_scam: false,
+            scam_label: None,
+            lp_tokens_approved_percentage: None,
+            lifecycle: PoolLifecycle::Active,
+            control_addresses: Vec::new(),
+            can_buy: true,
+            can_sell: true,
+            received_at: std::time::Instant::now(),
+        };
+        let mut pools = HashMap::new();
+        pools.insert(pool_address, pool);
+        let mut data = HashMap::new();
+        data.insert(token_address, TokenWithPools { token, pools });
+        TokenUpdate {
+            message_type: "test".to_string(),
+            token_count: 1,
+            block_number,
+            timestamp: 0.0,
+            data,
+        }
     }
 }

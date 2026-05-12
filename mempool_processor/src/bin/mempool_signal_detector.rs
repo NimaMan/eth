@@ -50,6 +50,7 @@ use mempool_processor::{
         TokenTrackingSubscriber,
     },
     tx_router::{TransactionCategory, TransactionRouter},
+    unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
 };
 use tx_simulator::LiveChainCache;
 
@@ -381,10 +382,10 @@ async fn main() -> Result<()> {
         match hydrate_cache_from_live_token_server(token_cache.as_ref(), base_url).await {
             Ok(report) => {
                 info!(
-                    "✅ Live token tracker cache hydrate complete: status={:?}, block={}, tokens={}, pools={}",
-                    report.status, report.block_number, report.tokens, report.pools
+                    "✅ Live token tracker cache hydrate complete: status={:?}, block={}, tokens={}, pools={}, accepted={}",
+                    report.status, report.block_number, report.tokens, report.pools, report.accepted
                 );
-                live_token_server_hydrate_ok = report.tokens > 0;
+                live_token_server_hydrate_ok = report.accepted && report.tokens > 0;
             }
             Err(err) => {
                 warn!(
@@ -598,6 +599,12 @@ async fn main() -> Result<()> {
         .create(true)
         .append(true)
         .open(simulation_error_log_path.as_ref())?;
+    let unresolved_intent_store = UnresolvedIntentStore::new(
+        20_000,
+        Duration::from_secs(10 * 60),
+        Duration::from_secs(2),
+        run_dir.join("unresolved_intents.log"),
+    );
 
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
@@ -616,6 +623,14 @@ async fn main() -> Result<()> {
             metrics.as_ref(),
             mempool_simulator.as_ref(),
             simulation_error_log_path.as_ref(),
+            &unresolved_intent_store,
+        )
+        .await;
+        retry_unresolved_intents(
+            &unresolved_intent_store,
+            &tx_router,
+            &simulation_manager,
+            metrics.as_ref(),
         )
         .await;
 
@@ -643,7 +658,16 @@ async fn main() -> Result<()> {
                 match &classification.category {
                     TransactionCategory::ContractCreation { .. }
                     | TransactionCategory::CreatorTransaction { .. } => {}
-                    _ => continue,
+                    _ => {
+                        if let Some((kind, reason)) =
+                            tx_router.unresolved_intent_for(&tx, &classification)
+                        {
+                            unresolved_intent_store
+                                .record(tx.clone(), kind, reason)
+                                .await;
+                        }
+                        continue;
+                    }
                 }
 
                 if !classification.requires_simulation {
@@ -652,9 +676,20 @@ async fn main() -> Result<()> {
                         ..
                     } = &classification.category
                     {
-                        let _published = simulation_manager
+                        let published = simulation_manager
                             .detect_lp_approval(&tx, &classification.category)
                             .await;
+                        if published {
+                            unresolved_intent_store.resolve(&tx.hash).await;
+                        } else {
+                            unresolved_intent_store
+                                .record(
+                                    tx.clone(),
+                                    UnresolvedIntentKind::LpApproval,
+                                    "LP approval enrichment failed after routing",
+                                )
+                                .await;
+                        }
                     }
                     continue;
                 }
@@ -692,6 +727,7 @@ async fn main() -> Result<()> {
             metrics.as_ref(),
             mempool_simulator.as_ref(),
             simulation_error_log_path.as_ref(),
+            &unresolved_intent_store,
         )
         .await;
 
@@ -764,6 +800,27 @@ async fn main() -> Result<()> {
             info!(
                 "📊 Token cache stats: {} tokens, {} pools, {} creators",
                 cache_stats.total_tokens, cache_stats.total_pools, cache_stats.total_creators
+            );
+            let cache_context = token_cache.context_snapshot().await;
+            info!(
+                "📊 Token cache context: block={} status={:?} source={:?} accepted={} rejected_stale={} rejected_non_live={}",
+                cache_context.last_accepted_block,
+                cache_context.last_accepted_status,
+                cache_context.last_accepted_source,
+                cache_context.accepted_updates,
+                cache_context.rejected_stale_snapshots,
+                cache_context.rejected_non_live_snapshots
+            );
+            let unresolved_stats = unresolved_intent_store.stats().await;
+            info!(
+                "📊 Unresolved intents: pending={} in_flight={} recorded={} resolved={} expired={} dropped={} avg_cache_wait_ms={:.1}",
+                unresolved_stats.pending,
+                unresolved_stats.in_flight,
+                unresolved_stats.recorded_total,
+                unresolved_stats.resolved_total,
+                unresolved_stats.expired_total,
+                unresolved_stats.dropped_total,
+                unresolved_stats.cache_wait_avg_ms
             );
             last_report_total = total;
 
@@ -844,6 +901,7 @@ async fn drain_simulation_results(
     metrics: &ServiceMetrics,
     mempool_simulator: &MempoolSimulator,
     simulation_error_log_path: &Path,
+    unresolved_intent_store: &UnresolvedIntentStore,
 ) -> usize {
     let mut drained = 0usize;
     while let Ok(result) = receiver.try_recv() {
@@ -856,6 +914,28 @@ async fn drain_simulation_results(
         };
 
         if let Some(ref error) = result.error {
+            if is_unresolved_cache_error(error) {
+                unresolved_intent_store
+                    .record(
+                        result.request.tx.clone(),
+                        unresolved_kind_for_result(&result),
+                        error.clone(),
+                    )
+                    .await;
+                continue;
+            }
+
+            if is_replay_context_mismatch(error) {
+                unresolved_intent_store
+                    .resolve(&result.request.tx.hash)
+                    .await;
+                warn!(
+                    "Replay context mismatch for {} classified outside simulation error path: {}",
+                    result.request.tx.hash, error
+                );
+                continue;
+            }
+
             metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
             if !error.contains("No pools found for token") {
                 let block_str = match mempool_simulator.latest_simulation_block().await {
@@ -880,7 +960,13 @@ async fn drain_simulation_results(
                     .ok();
                 }
             }
+            unresolved_intent_store
+                .resolve(&result.request.tx.hash)
+                .await;
         } else {
+            unresolved_intent_store
+                .resolve(&result.request.tx.hash)
+                .await;
             metrics
                 .simulations_completed
                 .fetch_add(1, Ordering::Relaxed);
@@ -891,6 +977,132 @@ async fn drain_simulation_results(
         }
     }
     drained
+}
+
+async fn retry_unresolved_intents(
+    unresolved_intent_store: &UnresolvedIntentStore,
+    tx_router: &TransactionRouter,
+    simulation_manager: &SimulationManager,
+    metrics: &ServiceMetrics,
+) {
+    let intents = unresolved_intent_store.take_ready_for_retry().await;
+    for intent in intents {
+        let classification = tx_router.classify(&intent.tx).await;
+        if let Some((_kind, reason)) = tx_router.unresolved_intent_for(&intent.tx, &classification)
+        {
+            unresolved_intent_store
+                .mark_pending(&intent.tx.hash, reason)
+                .await;
+            continue;
+        }
+
+        match &classification.category {
+            TransactionCategory::ContractCreation { .. }
+            | TransactionCategory::CreatorTransaction { .. } => {}
+            _ => {
+                unresolved_intent_store
+                    .mark_pending(
+                        &intent.tx.hash,
+                        "classification still lacks token/pool mapping",
+                    )
+                    .await;
+                continue;
+            }
+        }
+
+        if !classification.requires_simulation {
+            if let TransactionCategory::CreatorTransaction {
+                function_type: CreatorFunctionType::LiquidityPoolApproval,
+                ..
+            } = &classification.category
+            {
+                let published = simulation_manager
+                    .detect_lp_approval(&intent.tx, &classification.category)
+                    .await;
+                if published {
+                    unresolved_intent_store.resolve(&intent.tx.hash).await;
+                } else {
+                    unresolved_intent_store
+                        .mark_pending(
+                            &intent.tx.hash,
+                            "LP approval enrichment still lacks token/pool mapping",
+                        )
+                        .await;
+                }
+            } else {
+                unresolved_intent_store.resolve(&intent.tx.hash).await;
+            }
+            continue;
+        }
+
+        let sim_request = TxSimulationJob {
+            tx: intent.tx.clone(),
+            category: classification.category.clone(),
+            priority: classification.priority,
+            simulation_type: match &classification.category {
+                TransactionCategory::ContractCreation { .. }
+                | TransactionCategory::CreatorTransaction { .. } => {
+                    SimulationType::TransactionWithBuySell
+                }
+                _ => SimulationType::TransactionOnly,
+            },
+            tx_hash: parse_tx_hash_or_zero(&intent.tx.hash),
+        };
+
+        match simulation_manager.submit(sim_request).await {
+            Ok(()) => {
+                metrics
+                    .simulations_submitted
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            Err(err) => {
+                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+                unresolved_intent_store
+                    .mark_pending(
+                        &intent.tx.hash,
+                        format!("simulation queue rejected unresolved intent: {}", err),
+                    )
+                    .await;
+            }
+        }
+    }
+}
+
+fn is_unresolved_cache_error(error: &str) -> bool {
+    error.contains("unresolved_cache_context")
+        || error.contains("No tracked token found for liquidity removal")
+        || error.contains("No token address found for creator")
+        || error.contains("No pools found for token")
+        || error.contains("Token cache reported no pools")
+}
+
+fn is_replay_context_mismatch(error: &str) -> bool {
+    error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
+}
+
+fn unresolved_kind_for_result(result: &SimulationResult) -> UnresolvedIntentKind {
+    if is_v4_modify_liquidity_selector(&result.request.tx.input) {
+        return UnresolvedIntentKind::V4ModifyLiquidity;
+    }
+
+    match &result.request.category {
+        TransactionCategory::CreatorTransaction { function_type, .. } => match function_type {
+            CreatorFunctionType::LiquidityPoolApproval => UnresolvedIntentKind::LpApproval,
+            CreatorFunctionType::LiquidityRemoval => UnresolvedIntentKind::LiquidityRemoval,
+            _ => UnresolvedIntentKind::CreatorControl,
+        },
+        _ => UnresolvedIntentKind::CreatorControl,
+    }
+}
+
+fn is_v4_modify_liquidity_selector(input: &[u8]) -> bool {
+    let Some(selector) = input.get(0..4) else {
+        return false;
+    };
+    matches!(
+        selector,
+        [0xdd, 0x46, 0x50, 0x8f] | [0xa3, 0x55, 0xde, 0x88] | [0x0d, 0x4f, 0x31, 0x9d]
+    )
 }
 
 /// Sets up signal handlers for graceful shutdown

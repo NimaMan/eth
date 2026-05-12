@@ -15,3 +15,4 @@ pub mod signal_detector;
 pub mod signal_publisher;
 pub mod simulator;
 pub mod tx_router;
+pub mod unresolved_intents;

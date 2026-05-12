@@ -1,10 +1,10 @@
 # Simulation Manager
 
 The simulation manager is the bridge between **canonical context** (blocks that
-have already been mined and analysed by the Python data pipeline) and **live
+have already been mined and processed by the live token pipeline) and **live
 mempool activity** (creator transactions that might toggle trading or taxes
-before anyone else notices). Its only job is to take the contextual data the
-token tracker shares with us, re-simulate the mempool transactions against the
+before anyone else notices). Its only job is to take the contextual data
+token-server shares with us, re-simulate the mempool transactions against the
 latest canonical snapshot, and emit structured `SimulationResult`s that the
 signal detectors can reason about.
 
@@ -12,15 +12,18 @@ signal detectors can reason about.
 
 | Source | What it contributes | Where it is consumed |
 | --- | --- | --- |
-| Python token-tracking publisher | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks, V3 fee tiers, V4 pool display keys | `TokenTrackingCache` (injected into `SimulationManager`) |
+| `eth_token_server` live context | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks, V3 fee tiers, V4 pool display keys | `TokenTrackingCache` (injected into `SimulationManager`) |
 | Canonical head listener | `SealedHeader` + DB view for the most recent block | `MempoolSimulator`, `LiquidityRemovalSimulator` |
 | Mempool fetcher | Raw transactions plus routing metadata (function detection, category, priority) | `RequestQueue` / flow modules |
+| Unresolved intent store | Critical pending txs that arrived before token/pool mapping was available | Retried by the binary and submitted only after mapping exists |
 
-By the time a transaction enters the simulation path we already know **which
-token/pool it touches** (from the cache) and **why we care** (router category).
-The manager’s responsibility is to enrich that transaction with a replay
-sequence, run the appropriate simulator(s), and update the caches when the
-result materially changes the token’s state.
+By the time a transaction enters the simulation path we should already know
+**which token/pool it touches** (from the cache) and **why we care** (router
+category). If the mapping is not available yet, the transaction belongs in the
+unresolved-intent lane and should not be submitted as a normal simulation
+failure. The manager’s responsibility is to enrich mapped transactions with a
+replay sequence, run the appropriate simulator(s), and update the caches when
+the result materially changes the token’s state.
 
 ## Directory Layout
 
@@ -41,13 +44,13 @@ simulation_manager/
 
 ## Core Responsibilities
 
-1. **Keep helper sequences fresh**  
+1. **Keep helper sequences fresh**
    `pending_sequences` records the processed transactions that ran just before a
    creator tx. This is what allows buy/sell probes to re-use already-seen state
-   (approvals, routing setup, etc.) even before the Python side publishes the
-   next mined block snapshot.
+   (approvals, routing setup, etc.) even before token-server publishes the next
+   mined block snapshot.
 
-2. **Simulate creator activity per pool**  
+2. **Simulate creator activity per pool**
    Every creator transaction is run through the mempool simulator and then
    replayed through `pool_buy_sell_flow` to test each relevant pool reported by
    the token tracker (WETH/token, USDC/token, …). This is how we observe the
@@ -56,13 +59,20 @@ simulation_manager/
    metadata. V4 buy/sell probes remain disabled until the cache exposes the full
    V4 pool-key config required by `tx_processor`.
 
-3. **Track new deployments until the Python cache catches up**  
+3. **Track new deployments until token-server catches up**
    `contract_creation_flow` processes deployment transactions, tries to resolve
    the contract address, and records the processed tx under `(creator, token)`.
-   When the Python publisher later emits definitive pool information for that
-   token we already have the creator context on our side.
+   When token-server later exposes definitive pool information for that token we
+   already have the creator context on our side.
 
-4. **Surface liquidity threats immediately**  
+4. **Keep cache waits out of simulation errors**
+   LP approvals, liquidity removals, creator-control calls, and V4
+   modify-liquidity txs can arrive before token-server has published the mapped
+   token/pool. Those txs are retried outside the manager until mapped. Inside
+   simulation flows, an `unresolved_cache_context` result means "wait for
+   context", not "the pool failed".
+
+5. **Surface liquidity threats immediately**
    Liquidity removal signals are handled in their own flow so they can run even
    when buy/sell probes are skipped. V2/Sushi removals use reserve deltas when
    available. V3 removals map processed pool burn/decrease events back to the
@@ -71,7 +81,7 @@ simulation_manager/
    before mining, the signal is still emitted as unknown severity instead of
    being mislabeled as low risk.
 
-5. **Feed downstream detectors**  
+6. **Feed downstream detectors**
    Every flow ultimately builds a `SimulationResult` and passes it to
    `SignalManager`. The detectors compare the result with the cached “last known”
    token state to decide whether to emit `TradingEnabled`, `HighTax`, or
@@ -97,21 +107,32 @@ ContractCreation flow               CreatorTransaction flow
  emit audit debug info            send per-pool SimulationResults to SignalManager
 ```
 
+Unresolved critical txs do not enter this diagram until token/pool context is
+available:
+
+```text
+critical tx + cache miss
+   -> UnresolvedIntentStore
+   -> retry after token cache refresh
+   -> TransactionRouter resolves mapped token/pool
+   -> request_queue.submit()
+```
+
 ## How This Supports Our Objective
 
-1. **“Get the latest pool/token info from mined tx”**  
-   We deliberately treat the Python publisher as the authoritative source for
-   canonical pool inventory. The manager never tries to reconstruct pools from
-   scratch; it only consumes the cache and keeps short-term helper sequences so
-   we can act *before* the next Python snapshot arrives.
+1. **“Get the latest pool/token info from mined tx”**
+   We deliberately treat token-server as the authoritative source for canonical
+   pool inventory. The manager never tries to reconstruct pools from scratch; it
+   only consumes the cache and keeps short-term helper sequences so we can act
+   *before* the next confirmed snapshot arrives.
 
-2. **“Watch new mempool tx and see their effect on the tokens we track”**  
+2. **“Watch new mempool tx and see their effect on the tokens we track”**
    Creator transactions go through `creator_buy_sell_flow`, guaranteeing both
    the base transaction and the derived buy/sell probes are simulated at the tip
    snapshot. That means we know whether trading is enabled (or taxes changed)
    without waiting for the blockchain to mine a block.
 
-3. **“Buy on trading enabled, sell on scams”**  
+3. **“Buy on trading enabled, sell on scams”**
    The SimulationManager itself does not execute trades, but it produces the
    precise signals (`TradingEnabled`, `HighTax`, `LiquidityRemoval`) that the
    trading handlers listen to. Because each signal includes the relevant pool,
@@ -123,7 +144,7 @@ ContractCreation flow               CreatorTransaction flow
 - **Adding another flow** (e.g., anti-bot protection) should follow the same
   pattern: create `xyz_flow.rs`, expose a method on `SimulationManager`, and
   call it from `simulate_request`.
-- **Token cache integration** lives entirely in the manager. If the Python side
+- **Token cache integration** lives entirely in the manager. If token-server
   starts publishing more metadata (DEX version, fee tiers, etc.), extend the
   cache and flow structs but keep simulators ignorant—they should continue to
   accept resolved pool/token addresses.
@@ -132,6 +153,6 @@ ContractCreation flow               CreatorTransaction flow
   rather than logging minutiae.
 
 Keeping these boundaries clear ensures the simulations remain aligned with our
-trading goals: canonical data from the Python pipeline defines *what exists*,
-mempool simulations predict *what will change*, and signals tell the trading
-layer when to act.
+trading goals: canonical token-server data defines *what exists*, mempool
+simulations predict *what will change*, and signals tell the trading layer when
+to act.

@@ -1,5 +1,6 @@
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
+use crate::unresolved_intents::UnresolvedIntentKind;
 use alloy_primitives::{address, Address as AlloyAddress};
 use reth_chain_query::common_addresses::ROUTERS;
 use reth_chain_query::to_checksum_address;
@@ -94,6 +95,72 @@ impl TransactionRouter {
             tracked_pool_approvals: self.lp_tracked_pool_approvals.load(Ordering::Relaxed),
             pool_cache_misses: self.lp_pool_cache_misses.load(Ordering::Relaxed),
         }
+    }
+
+    pub fn unresolved_intent_for(
+        &self,
+        tx: &MempoolTransaction,
+        classification: &ClassificationResult,
+    ) -> Option<(UnresolvedIntentKind, &'static str)> {
+        if !matches!(classification.category, TransactionCategory::Regular { .. }) {
+            return None;
+        }
+
+        if approval_spender(&tx.input)
+            .map(|spender| is_known_lp_approval_spender(&spender))
+            .unwrap_or(false)
+        {
+            return Some((
+                UnresolvedIntentKind::LpApproval,
+                "LP approval target is not in token cache yet",
+            ));
+        }
+
+        if matches!(
+            tx.function_category.as_ref(),
+            Some(CreatorFunctionType::LiquidityRemoval)
+        ) {
+            if is_v4_modify_liquidity_candidate(tx) {
+                return Some((
+                    UnresolvedIntentKind::V4ModifyLiquidity,
+                    "V4 liquidity tx is waiting for token/pool cache mapping",
+                ));
+            }
+            return Some((
+                UnresolvedIntentKind::LiquidityRemoval,
+                "liquidity removal tx is waiting for token/pool cache mapping",
+            ));
+        }
+
+        if let Some(function_type) = tx
+            .function_category
+            .as_ref()
+            .filter(|function_type| should_route_tracked_token_call(function_type))
+        {
+            return Some((
+                UnresolvedIntentKind::CreatorControl,
+                match function_type {
+                    CreatorFunctionType::TradingControl => {
+                        "trading-control tx target is not in token cache yet"
+                    }
+                    CreatorFunctionType::TaxModification => {
+                        "tax-control tx target is not in token cache yet"
+                    }
+                    CreatorFunctionType::MaxWalletLimit => {
+                        "wallet-limit tx target is not in token cache yet"
+                    }
+                    CreatorFunctionType::OwnershipChange => {
+                        "ownership-control tx target is not in token cache yet"
+                    }
+                    CreatorFunctionType::LiquidityPoolApproval => {
+                        "LP approval target is not in token cache yet"
+                    }
+                    _ => "creator-control tx target is not in token cache yet",
+                },
+            ));
+        }
+
+        None
     }
 
     /// Classify a transaction
@@ -434,6 +501,16 @@ fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
             .unwrap_or(false))
 }
 
+fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool {
+    let Some(selector) = tx.input.get(0..4) else {
+        return false;
+    };
+    matches!(
+        selector,
+        [0xdd, 0x46, 0x50, 0x8f] | [0xa3, 0x55, 0xde, 0x88] | [0x0d, 0x4f, 0x31, 0x9d]
+    )
+}
+
 fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
     *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
         || ROUTERS.values().any(|router| router == spender)
@@ -448,7 +525,10 @@ mod tests {
     use alloy_primitives::U256;
     use serde_json::json;
 
-    use super::{CreatorFunctionType, SimulationPriority, TransactionCategory, TransactionRouter};
+    use super::{
+        ClassificationResult, CreatorFunctionType, SimulationPriority, TransactionCategory,
+        TransactionRouter,
+    };
     use crate::mempool_fetcher::MempoolTransaction;
     use crate::token_tracking::types::PoolLifecycle;
     use crate::token_tracking::{
@@ -678,6 +758,80 @@ mod tests {
         assert_eq!(stats.router_approvals_seen, 1);
         assert_eq!(stats.tracked_pool_approvals, 0);
         assert_eq!(stats.pool_cache_misses, 1);
+    }
+
+    #[tokio::test]
+    async fn exposes_unresolved_lp_approval_intent_on_cache_miss() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x5555555555555555555555555555555555555555")),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(1u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+        };
+
+        let classification = router.classify(&tx).await;
+        let (kind, _) = router
+            .unresolved_intent_for(&tx, &classification)
+            .expect("LP approval should become unresolved intent");
+        assert_eq!(
+            kind,
+            crate::unresolved_intents::UnresolvedIntentKind::LpApproval
+        );
+    }
+
+    #[tokio::test]
+    async fn exposes_unresolved_v4_modify_liquidity_intent() {
+        let router = TransactionRouter::new(Some(Arc::new(TokenTrackingCache::with_defaults())));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x000000000004444c5dc75cb358380d2e3de08a90")),
+            input: hex::decode("dd46508f").unwrap(),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["modifyLiquidities".to_string()],
+            function_category: Some(CreatorFunctionType::LiquidityRemoval),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert!(matches!(
+            classification.category,
+            TransactionCategory::CreatorTransaction { .. }
+        ));
+
+        let regular = ClassificationResult {
+            category: TransactionCategory::Regular {
+                is_transfer: false,
+                is_approval: false,
+            },
+            priority: SimulationPriority::Low,
+            requires_simulation: false,
+            requires_buy_sell_test: false,
+        };
+        let (kind, _) = router
+            .unresolved_intent_for(&tx, &regular)
+            .expect("V4 modify liquidity should be identifiable as unresolved");
+        assert_eq!(
+            kind,
+            crate::unresolved_intents::UnresolvedIntentKind::V4ModifyLiquidity
+        );
     }
 
     #[tokio::test]

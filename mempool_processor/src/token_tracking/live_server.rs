@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use super::cache::TokenTrackingCache;
-use super::live_data::apply_snapshot_map_to_cache;
+use super::live_data::apply_snapshot_map_to_cache_with_context;
 use super::types::{Address, Pool, PoolLifecycle, PoolType, Token, TokenWithPools};
 
 #[derive(Clone, Debug)]
@@ -18,6 +18,7 @@ pub struct LiveTokenServerHydrationReport {
     pub block_number: u64,
     pub tokens: usize,
     pub pools: usize,
+    pub accepted: bool,
 }
 
 pub async fn hydrate_cache_from_live_token_server(
@@ -26,15 +27,21 @@ pub async fn hydrate_cache_from_live_token_server(
 ) -> Result<LiveTokenServerHydrationReport> {
     let client = Client::new();
     let snapshot = fetch_live_token_server_snapshot(&client, base_url).await?;
-    apply_snapshot_map_to_cache(
+    let report = snapshot.report;
+    let outcome = apply_snapshot_map_to_cache_with_context(
         cache,
-        snapshot.report.block_number,
+        report.block_number,
         0.0,
         "live_token_server_hydrate",
+        report.status.clone(),
+        true,
         snapshot.tokens,
     )
     .await;
-    Ok(snapshot.report)
+    Ok(LiveTokenServerHydrationReport {
+        accepted: outcome.applied(),
+        ..report
+    })
 }
 
 pub fn start_live_token_server_cache_sync(
@@ -52,18 +59,27 @@ pub fn start_live_token_server_cache_sync(
             match fetch_live_token_server_snapshot(&client, &base_url).await {
                 Ok(snapshot) => {
                     let report = snapshot.report;
-                    apply_snapshot_map_to_cache(
+                    let outcome = apply_snapshot_map_to_cache_with_context(
                         cache.as_ref(),
                         report.block_number,
                         0.0,
                         "live_token_server_sync",
+                        report.status.clone(),
+                        true,
                         snapshot.tokens,
                     )
                     .await;
-                    debug!(
-                        "Live token server cache sync applied: status={:?}, block={}, tokens={}, pools={}",
-                        report.status, report.block_number, report.tokens, report.pools
-                    );
+                    if outcome.applied() {
+                        debug!(
+                            "Live token server cache sync applied: status={:?}, block={}, tokens={}, pools={}",
+                            report.status, report.block_number, report.tokens, report.pools
+                        );
+                    } else {
+                        debug!(
+                            "Live token server cache sync skipped: status={:?}, block={}, tokens={}, pools={}, outcome={:?}",
+                            report.status, report.block_number, report.tokens, report.pools, outcome
+                        );
+                    }
                 }
                 Err(err) => {
                     warn!(
@@ -86,8 +102,8 @@ async fn fetch_live_token_server_snapshot(
     base_url: &str,
 ) -> Result<LiveTokenServerSnapshot> {
     let started = Instant::now();
-    let token_url = endpoint(base_url, "live/tokens");
-    let pool_url = endpoint(base_url, "live/pools");
+    let token_url = endpoint(base_url, "eth/tokens/api/live/tokens");
+    let pool_url = endpoint(base_url, "eth/tokens/api/live/pools");
 
     let (tokens_response, pools_response) = tokio::try_join!(
         fetch_json::<LiveTokenListResponse>(client, &token_url),
@@ -130,6 +146,7 @@ async fn fetch_live_token_server_snapshot(
         block_number,
         tokens: token_map.len(),
         pools: pool_count,
+        accepted: false,
     };
 
     info!(
@@ -368,8 +385,8 @@ mod tests {
     #[test]
     fn builds_token_server_endpoint() {
         assert_eq!(
-            endpoint("http://127.0.0.1:8765/", "/live/tokens"),
-            "http://127.0.0.1:8765/live/tokens"
+            endpoint("http://127.0.0.1:8765/", "/eth/tokens/api/live/tokens"),
+            "http://127.0.0.1:8765/eth/tokens/api/live/tokens"
         );
     }
 

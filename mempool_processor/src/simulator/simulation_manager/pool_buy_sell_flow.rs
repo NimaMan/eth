@@ -142,6 +142,28 @@ impl SimulationManager {
         let mut results = Vec::new();
 
         for (pool_idx, pool_state) in pool_candidates.into_iter().enumerate() {
+            if matches!(pool_state.pool_type, CachePoolType::UniswapV4) {
+                info!(
+                    "  [Pool {}] Skipping Uniswap V4 pool {} for buy/sell entry probe; V4 entry signals require full V4 simulation support",
+                    pool_idx, pool_state.address
+                );
+                results.push(SimulationResult {
+                    request: request.clone(),
+                    pool_viability_result: None,
+                    error: None,
+                    simulation_time_ms: 0.0,
+                    token_address: Some(token_address),
+                    pool_address: None,
+                    pool_type: Some(cache_pool_type_label(&pool_state.pool_type).to_string()),
+                    debug_info: Some(
+                        "entry_probe_unsupported: Uniswap V4 buy/sell simulation is not enabled"
+                            .to_string(),
+                    ),
+                    liquidity_removal_result: None,
+                });
+                continue;
+            }
+
             let pool_address = match pool_state
                 .address
                 .trim_start_matches("0x")

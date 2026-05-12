@@ -146,13 +146,16 @@ impl SimulationManager {
             let result = SimulationResult {
                 request: request.clone(),
                 pool_viability_result: None,
-                error: Some("No tracked token found for liquidity removal".to_string()),
+                error: Some(
+                    "unresolved_cache_context: liquidity removal has no mapped token/pool yet"
+                        .to_string(),
+                ),
                 simulation_time_ms: simulation_time,
                 token_address: None,
                 pool_address: removal_result.pool_address,
                 pool_type: removal_result.pool_type.clone(),
                 debug_info: removal_result.debug_info.clone(),
-                liquidity_removal_result: Some(removal_result),
+                liquidity_removal_result: None,
             };
             return vec![result];
         };

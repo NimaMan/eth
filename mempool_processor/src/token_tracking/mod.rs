@@ -13,7 +13,10 @@ pub mod types;
 
 // Re-export commonly used types
 pub use address_tracking_cache::{AddressRole, AddressTrackingCache};
-pub use cache::{CacheStats, TokenTrackingCache, UpdateResult};
+pub use cache::{
+    CacheApplyOutcome, CacheStats, CacheUpdateContext, CacheUpdateRejection,
+    CacheUpdateRejectionReason, TokenCacheContextSnapshot, TokenTrackingCache, UpdateResult,
+};
 pub use in_process::{
     apply_live_token_snapshots_to_cache, hydrate_cache_from_live_reader,
     start_live_token_reader_cache_sync,
