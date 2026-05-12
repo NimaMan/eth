@@ -3,6 +3,7 @@ pub mod cache;
 pub mod error;
 pub mod live;
 pub mod network;
+pub mod ops;
 pub mod pool;
 pub mod run;
 pub mod strategy;

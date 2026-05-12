@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use eth_pipeline_telemetry::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::tracking::LiveTokenRetentionReport;
 
@@ -11,6 +12,8 @@ pub struct LiveTokenState {
     pub processor: LiveBlockTokenProcessor,
     pub progress: LiveTokenProgress,
     pub errors: Vec<LiveTokenError>,
+    pub issues: Vec<PipelineIssue>,
+    pub bottlenecks: Vec<PipelineBottleneckSample>,
     pub created_tokens: BTreeSet<String>,
     pub updated_tokens: BTreeSet<String>,
     pub discovered_v2_pools: BTreeSet<String>,
@@ -28,6 +31,8 @@ impl LiveTokenState {
             processor: LiveBlockTokenProcessor::new(history_limit),
             progress: LiveTokenProgress::idle(history_limit),
             errors: Vec::new(),
+            issues: Vec::new(),
+            bottlenecks: Vec::new(),
             created_tokens: BTreeSet::new(),
             updated_tokens: BTreeSet::new(),
             discovered_v2_pools: BTreeSet::new(),
@@ -46,6 +51,8 @@ impl LiveTokenState {
             processor: LiveBlockTokenProcessor::new(history_limit),
             progress: LiveTokenProgress::warming(id, history_limit, start_block, end_block, now),
             errors: Vec::new(),
+            issues: Vec::new(),
+            bottlenecks: Vec::new(),
             created_tokens: BTreeSet::new(),
             updated_tokens: BTreeSet::new(),
             discovered_v2_pools: BTreeSet::new(),

@@ -110,7 +110,22 @@ live_token_tracker.jsonl           live warmup/tail progress and failures
 token_pipeline_profile.jsonl       token pipeline profile rows
 pool_buy_sell_sim_failures.jsonl   pool buy/sell simulator warnings/errors only
 simulation_failures.jsonl          other simulator warnings/errors
+pipeline_issues.jsonl              structured operational issues for Bogaz/ops
+pipeline_health.jsonl              structured health snapshots emitted by ops reads
+pipeline_bottlenecks.jsonl         structured slow-path samples
 ```
+
+The structured ops API is available under:
+
+```text
+GET /eth/tokens/api/ops/health
+GET /eth/tokens/api/ops/issues
+GET /eth/tokens/api/ops/bottlenecks
+```
+
+`/ops/issues` groups by `dedupe_key`, so repeated pool-local failures such as a
+Uniswap V3 factory/configuration mismatch render as one issue group with an
+occurrence count instead of many raw transaction rows.
 
 `token_pipeline_profile.jsonl` contains three targets:
 

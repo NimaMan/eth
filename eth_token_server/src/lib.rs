@@ -37,7 +37,7 @@ pub mod server {
 
 pub mod views {
     pub use crate::read_models::{
-        activity, cache, error, live, network, pool, run, strategy, token,
+        activity, cache, error, live, network, ops, pool, run, strategy, token,
     };
 }
 

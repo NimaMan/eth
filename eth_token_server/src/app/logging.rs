@@ -1,9 +1,11 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use eth_pipeline_telemetry::{JsonlTelemetrySink, MultiTelemetrySink, TracingTelemetrySink};
 use tracing::{Level, Metadata};
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
@@ -102,9 +104,16 @@ pub fn init_logging() -> eyre::Result<LogGuards> {
         .with(token_pipeline_profile_layer)
         .init();
 
+    let telemetry_sink = MultiTelemetrySink::new(vec![
+        Arc::new(JsonlTelemetrySink::open(&run_dir)?),
+        Arc::new(TracingTelemetrySink),
+    ]);
+    let telemetry_initialized = eth_pipeline_telemetry::init_global_sink(Arc::new(telemetry_sink));
+
     tracing::info!(
         log_root = %log_root.display(),
         run_dir = %run_dir.display(),
+        telemetry_initialized,
         "initialized eth_token_server file logger"
     );
     Ok(LogGuards {

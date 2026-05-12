@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,6 +22,10 @@ use eth_alpha_engine::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, LiveChainSimExecutionAdapter,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
+use eth_pipeline_telemetry::{
+    emit_health, emit_issue, JsonlTelemetrySink, MultiTelemetrySink, PipelineHealth,
+    PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingTelemetrySink,
+};
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
@@ -33,6 +38,8 @@ const STRATEGY_NAME: &str = "snipe-all-v1";
 const STRATEGY_LABEL: &str = "Snipe All v1";
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
+const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
+    "/home/nima/code/crypto/blockchains/eth/logs/alpha_trader";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -169,6 +176,9 @@ async fn main() -> Result<()> {
         .wrap_err("invalid --min-liquidity-usd decimal")?;
     let database_url = resolve_database_url(&args)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
+    if let Err(error) = init_alpha_trader_telemetry(&run_id) {
+        warn!(error = %error, "failed to initialize alpha trader telemetry");
+    }
 
     let store = PostgresTradingStore::connect(&database_url, run_id.clone())
         .await
@@ -274,6 +284,42 @@ async fn main() -> Result<()> {
             Ok(result) => result,
             Err(error) => {
                 warn!(error = %error, "alpha trader poll failed");
+                let mut issue = PipelineIssue::new(
+                    "eth_alpha_trader",
+                    "alpha_trader",
+                    "token_server_poll",
+                    PipelineSeverity::Warn,
+                    PipelineImpact::ServiceDegraded,
+                    "alpha_trader_poll_failed",
+                    "Alpha trader token server poll failed",
+                );
+                issue.run_id = Some(run_id.clone());
+                issue.retryable = true;
+                issue.detail = Some(error.to_string());
+                issue
+                    .context
+                    .insert("token_server_url".to_string(), json!(args.token_server_url));
+                issue.context.insert(
+                    "positions".to_string(),
+                    json!(engine.portfolio().active_position_count()),
+                );
+                issue.refresh_ids();
+                emit_issue(&issue);
+                let mut health = PipelineHealth::new(
+                    "eth_alpha_trader",
+                    "alpha_trader",
+                    "main_loop",
+                    PipelineHealthStatus::Degraded,
+                );
+                health.run_id = Some(run_id.clone());
+                health.metrics.insert(
+                    "positions".to_string(),
+                    json!(engine.portfolio().active_position_count()),
+                );
+                health
+                    .metrics
+                    .insert("poll_error".to_string(), json!(error.to_string()));
+                emit_health(&health);
                 let metadata = json!({
                     "token_server_url": &args.token_server_url,
                     "poll_error": error.to_string(),
@@ -548,6 +594,46 @@ async fn main() -> Result<()> {
             "reports": reports,
             "positions": engine.portfolio().active_position_count(),
         });
+        let mut health = PipelineHealth::new(
+            "eth_alpha_trader",
+            "alpha_trader",
+            "main_loop",
+            if live_ready {
+                PipelineHealthStatus::Healthy
+            } else {
+                PipelineHealthStatus::Watch
+            },
+        );
+        health.run_id = Some(run_id.clone());
+        health.current_block = status.progress.current_block;
+        health
+            .metrics
+            .insert("live_status".to_string(), json!(status.progress.status));
+        health.metrics.insert(
+            "live_blocks_processed".to_string(),
+            json!(status.progress.blocks_processed),
+        );
+        health
+            .metrics
+            .insert("token_server_pool_count".to_string(), json!(pools.count));
+        health
+            .metrics
+            .insert("signal_count".to_string(), json!(signals.count));
+        health
+            .metrics
+            .insert("market_events".to_string(), json!(market_events));
+        health
+            .metrics
+            .insert("risk_events".to_string(), json!(risk_events));
+        health.metrics.insert("reports".to_string(), json!(reports));
+        health.metrics.insert(
+            "positions".to_string(),
+            json!(engine.portfolio().active_position_count()),
+        );
+        health
+            .metrics
+            .insert("trading_enabled".to_string(), json!(!suppress_events));
+        emit_health(&health);
         store
             .heartbeat(heartbeat_metadata.clone())
             .await
@@ -579,6 +665,44 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn init_alpha_trader_telemetry(run_id: &str) -> Result<()> {
+    let root = env::var("ALPHA_TRADER_LOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_ALPHA_TRADER_LOG_DIR));
+    let run_dir = root.join(sanitize_path_segment(run_id));
+    let sink = MultiTelemetrySink::new(vec![
+        Arc::new(JsonlTelemetrySink::open(&run_dir)?),
+        Arc::new(TracingTelemetrySink),
+    ]);
+    let initialized = eth_pipeline_telemetry::init_global_sink(Arc::new(sink));
+    info!(
+        run_id,
+        run_dir = %run_dir.display(),
+        initialized,
+        "initialized alpha trader telemetry"
+    );
+    Ok(())
+}
+
+fn sanitize_path_segment(value: &str) -> String {
+    let sanitized = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "alpha-trader".to_string()
+    } else {
+        sanitized
+    }
 }
 
 async fn load_persisted_watermarks(

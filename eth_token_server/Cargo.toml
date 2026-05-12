@@ -8,6 +8,7 @@ workspace = ".."
 [dependencies]
 eth_alpha_store = { path = "../alpha/store" }
 eth_live_feed = { path = "../alpha/live/feed" }
+eth_pipeline_telemetry = { path = "../eth_pipeline_telemetry" }
 eth_pool_classification = { path = "../alpha/pool_classification" }
 eth_price = { path = "../eth_price" }
 eth_token = { path = "../eth_token" }

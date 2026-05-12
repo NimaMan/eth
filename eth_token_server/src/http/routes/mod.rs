@@ -3,6 +3,7 @@ mod backtest;
 mod health;
 mod live;
 mod mempool;
+mod ops;
 mod range;
 mod token_activity;
 
@@ -100,6 +101,21 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::retention);
+
+    let ops_health = warp::path!("eth" / "tokens" / "api" / "ops" / "health")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(ops::health);
+
+    let ops_issues = warp::path!("eth" / "tokens" / "api" / "ops" / "issues")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(ops::issues);
+
+    let ops_bottlenecks = warp::path!("eth" / "tokens" / "api" / "ops" / "bottlenecks")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(ops::bottlenecks);
 
     let mempool_signals = warp::path!("eth" / "tokens" / "api" / "mempool" / "signals")
         .and(warp::get())
@@ -236,6 +252,9 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_tokens)
         .or(live_pools)
         .or(live_retention)
+        .or(ops_health)
+        .or(ops_issues)
+        .or(ops_bottlenecks)
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)

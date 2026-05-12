@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use eth_pipeline_telemetry::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::erc20::{ERC20Token, TokenSummary};
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
 use serde::Serialize;
@@ -12,6 +13,8 @@ use crate::read_models::{network::TokenNetworkView, pool::PoolView};
 pub struct LiveStatusResponse {
     pub progress: LiveTrackerProgress,
     pub errors: Vec<LiveTrackerError>,
+    pub issues: Vec<PipelineIssue>,
+    pub bottlenecks: Vec<PipelineBottleneckSample>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -52,6 +55,8 @@ pub async fn status(tracker: &LiveTracker) -> LiveStatusResponse {
     LiveStatusResponse {
         progress: state.progress.clone(),
         errors: state.errors.clone(),
+        issues: state.issues.clone(),
+        bottlenecks: state.bottlenecks.clone(),
     }
 }
 

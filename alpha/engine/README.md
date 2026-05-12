@@ -128,6 +128,19 @@ chain-sim fill source. Real trading later swaps in a `tx_executor` adapter.
 runs in `chain-sim` mode, polls the Rust token server, and consumes:
 
 - `/live/pools` as confirmed market updates.
+
+Operational telemetry uses the shared `eth_pipeline_telemetry` schema. The
+trader writes JSONL files under `ALPHA_TRADER_LOG_DIR` or, by default:
+
+```text
+/home/nima/code/crypto/blockchains/eth/logs/alpha_trader/<run-id>/
+```
+
+The directory contains `pipeline_health.jsonl`, `pipeline_issues.jsonl`, and
+`pipeline_bottlenecks.jsonl`. Poll failures against the token server are emitted
+as `stage=alpha_trader`, `component=token_server_poll`, and
+`code=alpha_trader_poll_failed`; regular loop heartbeats are emitted as
+`PipelineHealth` records.
 - `/mempool/signals?since_days=14` as speculative risk events.
 
 Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:

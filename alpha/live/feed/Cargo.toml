@@ -8,6 +8,7 @@ workspace = "../../.."
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["serde"] }
 async-trait = "0.1"
+eth_pipeline_telemetry = { path = "../../../eth_pipeline_telemetry" }
 eth_live_state = { path = "../state" }
 eth_token = { path = "../../../eth_token" }
 eyre.workspace = true

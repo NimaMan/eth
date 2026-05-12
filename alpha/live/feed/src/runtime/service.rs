@@ -5,12 +5,17 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use eth_live_state::keys;
+use eth_pipeline_telemetry::{
+    emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
+    PipelineSeverity,
+};
 use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
 use eth_token::tracking::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
+use serde_json::json;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
     load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
@@ -34,6 +39,8 @@ use super::time::now_unix_secs;
 
 const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
 const LIVE_TOKEN_APPLY_PROFILE_LOG_TARGET: &str = "live_token_apply_profile";
+const MAX_LIVE_ISSUES: usize = 1_000;
+const MAX_LIVE_BOTTLENECKS: usize = 1_000;
 
 #[derive(Clone)]
 pub struct LiveTokenRuntime {
@@ -622,6 +629,41 @@ impl LiveTokenRuntime {
             .await;
         let process_block_us = process_block_started.elapsed().as_micros();
         if process_block_started.elapsed() > apply_timeout {
+            let mut sample = PipelineBottleneckSample::new(
+                "eth_token_server",
+                "live_tracker",
+                "block_apply",
+                process_block_us / 1_000,
+                "slow live token block apply",
+            );
+            sample.run_id = state.progress.id.clone();
+            sample.block_number = Some(block_number);
+            sample.threshold_ms = Some(u128::from(self.inner.config.block_apply_timeout_ms));
+            sample
+                .work_units
+                .insert("txs".to_string(), json!(block_transaction_count));
+            sample.work_units.insert(
+                "tracked_tokens_before".to_string(),
+                json!(tracked_tokens_before),
+            );
+            sample.work_units.insert(
+                "tracked_pools_before".to_string(),
+                json!(tracked_pools_before),
+            );
+            sample
+                .breakdown_ms
+                .insert("process_block".to_string(), json!(process_block_us / 1_000));
+            sample
+                .breakdown_ms
+                .insert("upstream".to_string(), json!(upstream_ms));
+            sample
+                .breakdown_ms
+                .insert("disk_cache_read".to_string(), json!(disk_cache_read_ms));
+            sample
+                .breakdown_ms
+                .insert("disk_cache_write".to_string(), json!(disk_cache_write_ms));
+            emit_bottleneck(&sample);
+            push_bottleneck(&mut state, sample);
             tracing::warn!(
                 target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                 block_number,
@@ -763,6 +805,23 @@ impl LiveTokenRuntime {
         state.progress.last_error = Some(error.message.clone());
         state.progress.completed_at_unix_secs = Some(now_unix_secs());
         state.progress.updated_at_unix_secs = now_unix_secs();
+        let mut issue = PipelineIssue::new(
+            "eth_token_server",
+            "live_tracker",
+            "runtime",
+            PipelineSeverity::Error,
+            PipelineImpact::ServiceDown,
+            "live_tracker_failed",
+            "Live token tracker failed",
+        );
+        issue.run_id = state.progress.id.clone();
+        issue.fatal = true;
+        issue.retryable = true;
+        issue.block_number = error.block_number;
+        issue.tx_index = error.tx_index;
+        issue.tx_hash = error.tx_hash.clone();
+        issue.detail = Some(error.message.clone());
+        issue.refresh_ids();
         let event = LiveTokenEvent::RuntimeFailed {
             id: state.progress.id.clone(),
             block_number: error.block_number,
@@ -796,6 +855,8 @@ impl LiveTokenRuntime {
             error = %error.message,
             "live token tracker failed"
         );
+        emit_issue(&issue);
+        push_issue(&mut state, issue);
         state.errors.push(error);
         drop(state);
         let _ = self.inner.event_tx.send(event);
@@ -923,7 +984,17 @@ fn apply_report(
     updated_v4_pools.sort();
     updated_v4_pools.dedup();
 
+    let run_id = state.progress.id.clone();
     for error in report.transaction_errors {
+        let issue = PipelineIssue::live_transaction_error(
+            run_id.clone(),
+            report.block_number,
+            error.tx_index,
+            error.tx_hash.clone(),
+            error.message.clone(),
+        );
+        emit_issue(&issue);
+        push_issue(state, issue);
         state.errors.push(LiveTokenError {
             block_number: Some(report.block_number),
             tx_index: Some(error.tx_index),
@@ -1000,5 +1071,21 @@ fn apply_report(
         updated_v2_pools,
         updated_v3_pools,
         updated_v4_pools,
+    }
+}
+
+fn push_issue(state: &mut LiveTokenState, issue: PipelineIssue) {
+    state.issues.push(issue);
+    if state.issues.len() > MAX_LIVE_ISSUES {
+        let excess = state.issues.len() - MAX_LIVE_ISSUES;
+        state.issues.drain(0..excess);
+    }
+}
+
+fn push_bottleneck(state: &mut LiveTokenState, sample: PipelineBottleneckSample) {
+    state.bottlenecks.push(sample);
+    if state.bottlenecks.len() > MAX_LIVE_BOTTLENECKS {
+        let excess = state.bottlenecks.len() - MAX_LIVE_BOTTLENECKS;
+        state.bottlenecks.drain(0..excess);
     }
 }
