@@ -148,4 +148,7 @@ pub async fn run_range_index(
     }
 
     state::mark_completed(&run).await;
+    if memory::trim_allocator() {
+        tracing::debug!(run_id = %run.id, "trimmed allocator after token range completion");
+    }
 }

@@ -43,6 +43,7 @@ pub(super) async fn mark_stopped(run: &RangeIndexJob) {
     state.progress.status = RangeIndexStatus::Stopped;
     state.progress.completed_at_unix_secs = Some(now_unix_secs());
     state.progress.updated_at_unix_secs = now_unix_secs();
+    state.processor = run.request.block_token_processor();
     tracing::info!(run_id = %run.id, "stopped token tracking run");
 }
 
@@ -53,6 +54,7 @@ pub(super) async fn mark_failed(run: &RangeIndexJob, error: RangeIndexError) {
     state.progress.completed_at_unix_secs = Some(now_unix_secs());
     state.progress.updated_at_unix_secs = now_unix_secs();
     state.errors.push(error);
+    state.processor = run.request.block_token_processor();
     tracing::warn!(run_id = %run.id, error = ?state.progress.last_error, "failed token tracking run");
 }
 

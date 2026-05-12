@@ -8,6 +8,7 @@ use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::app::config::TokenServerConfig;
+use crate::memory;
 use crate::read_models::run::RunSummaryView;
 use tx_processor::{ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter};
 
@@ -16,6 +17,7 @@ use super::RangeIndexStatus;
 use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
 
 const DEFAULT_HISTORICAL_END_BLOCK_LAG: u64 = 256;
+const DEFAULT_HISTORICAL_RANGE_HISTORY_LIMIT: usize = 64;
 
 #[derive(Clone)]
 pub struct RangeIndexManager {
@@ -83,14 +85,16 @@ impl RangeIndexManager {
         self.inner.provider.refresh_static_file_provider()?;
 
         let mut active_run_id = self.inner.active_run_id.write().await;
+        let mut previous_run_to_remove = None;
         if let Some(current_run_id) = active_run_id.as_ref() {
-            let current_run = self.inner.runs.read().await.get(current_run_id).cloned();
+            let current_run_id = current_run_id.clone();
+            let current_run = self.inner.runs.read().await.get(&current_run_id).cloned();
             if let Some(current_run) = current_run {
                 let progress = current_run.progress().await;
                 match active_run_start_decision(Some(&progress.status), replace_active) {
                     ActiveRunStartDecision::Reject => {
                         return Err(StartRangeIndexError::ActiveRunConflict {
-                            active_run_id: current_run_id.clone(),
+                            active_run_id: current_run_id,
                         });
                     }
                     ActiveRunStartDecision::StopAndStart => {
@@ -100,10 +104,21 @@ impl RangeIndexManager {
                             run_id = %current_run.id,
                             "requested stop for replaced active token tracking run"
                         );
+                        previous_run_to_remove = Some(current_run_id);
                     }
-                    ActiveRunStartDecision::Start => {}
+                    ActiveRunStartDecision::Start => {
+                        previous_run_to_remove = Some(current_run_id);
+                    }
                 }
+            } else {
+                previous_run_to_remove = Some(current_run_id);
             }
+        }
+        if let Some(run_id) = previous_run_to_remove {
+            let removed_run = self.inner.runs.write().await.remove(&run_id);
+            drop(removed_run);
+            let _ = memory::trim_allocator();
+            tracing::debug!(run_id = %run_id, "dropped previous token tracking run state");
         }
 
         let sequence = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
@@ -183,9 +198,9 @@ impl RangeIndexManager {
         request: StartRangeIndexRequest,
     ) -> Result<ResolvedRangeIndexRequest> {
         let retention_mode = request.retention_mode;
-        let history_limit = request
-            .history_limit
-            .unwrap_or(self.inner.config.history_limit);
+        let history_limit = request.history_limit.unwrap_or_else(|| {
+            default_historical_range_history_limit(self.inner.config.history_limit)
+        });
         if history_limit == 0 {
             bail!("history_limit must be greater than zero");
         }
@@ -234,6 +249,10 @@ impl RangeIndexManager {
 
         Ok(resolved)
     }
+}
+
+fn default_historical_range_history_limit(config_history_limit: usize) -> usize {
+    config_history_limit.min(DEFAULT_HISTORICAL_RANGE_HISTORY_LIMIT)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -302,5 +321,11 @@ mod tests {
             active_run_start_decision(Some(&RangeIndexStatus::Stopped), false),
             ActiveRunStartDecision::Start
         );
+    }
+
+    #[test]
+    fn default_range_history_limit_is_capped_below_live_history() {
+        assert_eq!(default_historical_range_history_limit(1000), 64);
+        assert_eq!(default_historical_range_history_limit(32), 32);
     }
 }

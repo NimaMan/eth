@@ -18,6 +18,10 @@ use crate::tracking::{
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
 
+fn default_network_graphs_enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockTokenProcessor {
     #[serde(default)]
@@ -25,6 +29,8 @@ pub struct BlockTokenProcessor {
     pub registry: TokenRegistry,
     pub update_router: ProcessedTokenUpdateRouter,
     pub token_index: TrackedTokenIndex,
+    #[serde(default = "default_network_graphs_enabled")]
+    pub network_graphs_enabled: bool,
     #[serde(default)]
     pub network_graphs: BTreeMap<String, RawTokenNetworkGraph>,
     pub processed_blocks: BTreeMap<u64, bool>,
@@ -52,6 +58,7 @@ impl BlockTokenProcessor {
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
             token_index: token_index_with_limit(token_index_limit),
+            network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
@@ -77,6 +84,7 @@ impl BlockTokenProcessor {
             registry,
             update_router,
             token_index,
+            network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
@@ -97,6 +105,11 @@ impl BlockTokenProcessor {
         } else {
             self.token_index.set_live_retention_policy(None);
         }
+    }
+
+    pub fn disable_network_graphs(&mut self) {
+        self.network_graphs_enabled = false;
+        self.network_graphs.clear();
     }
 
     pub async fn process_block(

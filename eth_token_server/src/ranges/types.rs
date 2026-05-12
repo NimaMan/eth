@@ -37,12 +37,14 @@ impl ResolvedRangeIndexRequest {
     }
 
     pub fn block_token_processor(&self) -> BlockTokenProcessor {
-        match self.retention_mode {
+        let mut processor = match self.retention_mode {
             RangeIndexRetentionMode::KeepAll => {
                 BlockTokenProcessor::new_unbounded_token_index(self.history_limit)
             }
             RangeIndexRetentionMode::BoundedIndex => BlockTokenProcessor::new(self.history_limit),
-        }
+        };
+        processor.disable_network_graphs();
+        processor
     }
 }
 
@@ -186,5 +188,19 @@ mod tests {
         let processor = request.block_token_processor();
 
         assert!(processor.token_index.max_size.is_some());
+    }
+
+    #[test]
+    fn range_processors_disable_network_graphs() {
+        let request = ResolvedRangeIndexRequest {
+            start_block: 100,
+            end_block: 101,
+            history_limit: 10,
+            retention_mode: RangeIndexRetentionMode::KeepAll,
+        };
+
+        let processor = request.block_token_processor();
+
+        assert!(!processor.network_graphs_enabled);
     }
 }

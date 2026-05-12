@@ -15,6 +15,10 @@ impl BlockTokenProcessor {
         tx: &ProcessedTransaction,
         token_addresses: BTreeSet<String>,
     ) {
+        if !self.network_graphs_enabled {
+            return;
+        }
+
         for token_address in token_addresses {
             let Some((token_address, decimals)) = self
                 .registry
