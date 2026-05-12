@@ -317,6 +317,14 @@ impl eth_alpha_engine::EngineExecutionAdapter for ChainSimBacktestAdapter {
     ) -> eth_alpha_core::error::Result<eth_alpha_core::execution::ExecutionReport> {
         self.0.execute(intent).await
     }
+
+    async fn simulate_position_value(
+        &self,
+        position: &eth_alpha_core::position::Position,
+        pool: &PoolSnapshot,
+    ) -> eth_alpha_core::error::Result<Option<eth_alpha_engine::PositionValueSimulation>> {
+        self.0.simulate_position_value(position, pool).await
+    }
 }
 
 impl BacktestAdapter for ChainSimBacktestAdapter {
