@@ -634,7 +634,7 @@ async fn main() -> Result<()> {
             let manager_stats = simulation_manager.stats().await;
 
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/ok/err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
                 total,
                 delta,
                 rate,

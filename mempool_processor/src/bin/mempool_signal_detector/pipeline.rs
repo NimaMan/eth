@@ -28,6 +28,9 @@ pub(crate) async fn drain_simulation_results(
     let mut drained = 0usize;
     while let Ok(result) = receiver.try_recv() {
         drained += 1;
+        metrics
+            .simulations_completed
+            .fetch_add(1, Ordering::Relaxed);
         let tx_hash = format!("{:?}", result.request.tx_hash);
         let category = match &result.request.category {
             TransactionCategory::ContractCreation { .. } => "ContractCreation",
@@ -87,9 +90,6 @@ pub(crate) async fn drain_simulation_results(
             unresolved_intent_store
                 .resolve(&result.request.tx.hash)
                 .await;
-            metrics
-                .simulations_completed
-                .fetch_add(1, Ordering::Relaxed);
             if result.simulation_time_ms > 0.0 {
                 let sim_duration = Duration::from_secs_f64(result.simulation_time_ms / 1000.0);
                 metrics.add_simulation_time(sim_duration).await;
