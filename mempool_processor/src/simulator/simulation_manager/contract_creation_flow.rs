@@ -73,7 +73,8 @@ impl SimulationManager {
                 creator: deployer.clone(),
                 token: to_checksum_address(&contract_address),
             };
-            self.record_pending_transaction(key, processed, now).await;
+            self.record_pending_transaction(key, request.tx_hash, processed, now)
+                .await;
         }
 
         match RethQueryProvider::with_simulator(self.mempool_simulator.get_tx_simulator()) {

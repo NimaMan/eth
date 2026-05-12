@@ -4,6 +4,7 @@ mod entry;
 mod failure;
 mod fees;
 mod live_simulator;
+mod prior_replay;
 mod replay_funding;
 mod results;
 mod simulator;

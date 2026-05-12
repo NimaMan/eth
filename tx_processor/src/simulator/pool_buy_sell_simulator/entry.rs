@@ -4,7 +4,6 @@ use alloy_primitives::{Address, Bloom, Bytes, B256, B64, I256, U256};
 use eyre::{eyre, Result, WrapErr};
 use reth_chain_query::provider::BlockHeader;
 use reth_primitives_traits::SealedHeader;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
 
@@ -13,17 +12,13 @@ use super::balance_deltas::{
     extract_tokens_received_from_processed_transaction,
 };
 use super::buyer_setup::prepare_buyer_account;
-use super::failure::{
-    enrich_failure_reason_with_trace, format_failure_with_full_trace, format_failure_with_revert,
-};
-use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
-use super::replay_funding::ensure_replay_sender_can_pay;
+use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
+use super::fees::apply_fee_policy;
+use super::prior_replay::replay_prior_transactions;
 use super::results::create_failed_result;
 use super::uniswap_v4::{check_can_buy_sell_uniswap_v4, check_can_buy_sell_uniswap_v4_with_chain};
 use super::validation::validate_pool_registration;
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
-use crate::tx_builder::UnsignedTxBuilder;
-use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
@@ -187,158 +182,20 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
         }
     };
 
-    let mut prior_tx_results: Vec<ProcessedTransaction> =
-        Vec::with_capacity(config.prior_txs.len());
-
-    for (idx, prior_tx) in config.prior_txs.iter().enumerate() {
-        let mut setup_call = UnsignedTxBuilder::build_unsigned_from_processed_tx(prior_tx);
-        setup_call.nonce = Some(prior_tx.nonce);
-        if setup_call.gas.is_none() {
-            setup_call.gas = if prior_tx.fees.gas_limit > 0 {
-                Some(prior_tx.fees.gas_limit)
-            } else if prior_tx.fees.gas_used > 0 {
-                Some(prior_tx.fees.gas_used)
-            } else {
-                None
-            };
-        }
-        normalize_prior_fees_with_header(base_fee, prior_tx, &mut setup_call);
-
-        let has_explicit_fee = setup_call.gas_price.is_some()
-            || setup_call.max_fee_per_gas.is_some()
-            || setup_call.max_priority_fee_per_gas.is_some();
-        if !has_explicit_fee {
-            apply_fee_policy(&mut setup_call, &config, base_fee);
-        }
-
-        let prior_hash = format!("{:#x}", prior_tx.hash);
-        let prior_nonce = prior_tx.nonce;
-        let previous_nonce =
-            chain.set_account_nonce_for_replay(prior_tx.from_address, prior_nonce)?;
-        if previous_nonce != prior_nonce {
-            tracing::debug!(
-                target: "pool_buy_sell_sim",
-                step = "prior_replay_nonce_normalization",
-                tx_hash = %prior_hash,
-                sender = %prior_tx.from_address,
-                previous_nonce,
-                replay_nonce = prior_nonce,
-                "normalizing sender nonce for selected prior transaction replay"
-            );
-        }
-        if let Some(adjustment) = ensure_replay_sender_can_pay(&mut chain, &setup_call)? {
-            tracing::debug!(
-                target: "pool_buy_sell_sim",
-                step = "prior_replay_sender_funding",
-                tx_hash = %prior_hash,
-                sender = %adjustment.sender,
-                previous_balance = %adjustment.previous_balance,
-                replay_balance = %adjustment.replay_balance,
-                "funding selected prior transaction sender for replay validation"
-            );
-        }
-        let setup_sim_result = chain
-            .step_with_trace(setup_call.clone())
-            .await
-            .map_err(|err| {
-                let context = format!(
-                    "while replaying prior tx {prior_hash} (index {idx}, nonce {prior_nonce}) with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
-                    setup_call.gas,
-                    setup_call.gas_price,
-                    setup_call.max_fee_per_gas,
-                    setup_call.max_priority_fee_per_gas
-                );
-                tracing::warn!(
-                    target: "pool_buy_sell_sim",
-                    step = "prior_replay",
-                    %context,
-                    block = block_number,
-                    error = %err
-                );
-                eyre!("{}: {}", context, err)
-            })?;
-        let setup_processed = tx_processor
-            .process_transaction_from_simulation_result(
-                &setup_call,
-                &setup_sim_result,
-                block_number,
-                idx as u64,
-            )
-            .await?;
-        let succeeded = setup_sim_result.success;
-        prior_tx_results.push(setup_processed);
-        if !succeeded {
-            let prior_to = prior_tx
-                .to_address
-                .map(|address| format!("{address:#x}"))
-                .unwrap_or_else(|| "contract creation".to_string());
-            let base_message = format!(
-                "Setup transaction replay failed tx={} mined_block={} tx_index={} nonce={} from={:#x} to={} mined_status={} simulation_base_block={}",
-                prior_hash,
-                prior_tx.block_number,
-                prior_tx.tx_index,
-                prior_nonce,
-                prior_tx.from_address,
-                prior_to,
-                prior_tx.status,
-                block_number
-            );
-            let failure_message = format!(
-                "{}{}",
-                format_failure_with_full_trace(&base_message, &setup_sim_result),
-                if prior_tx.status {
-                    "; mined receipt succeeded, so this is a setup replay mismatch rather than an on-chain transaction failure"
-                } else {
-                    ""
-                }
-            );
-            tracing::warn!(
-                target: "pool_buy_sell_sim",
-                step = "setup_replay_failed",
-                tx_hash = %prior_hash,
-                mined_block = prior_tx.block_number,
-                tx_index = prior_tx.tx_index,
-                nonce = prior_nonce,
-                from = %prior_tx.from_address,
-                to = %prior_to,
-                mined_status = prior_tx.status,
-                simulation_base_block = block_number,
-                failure = %failure_message
-            );
-            return Ok(create_failed_result(
-                config,
-                block_number,
-                prior_tx_results,
-                None,
-                None,
-                None,
-                failure_message,
-                false,
-                false,
-                false,
-            ));
-        }
+    let prior_replay = replay_prior_transactions(
+        tx_processor.clone(),
+        &config,
+        block_number,
+        base_fee,
+        &mut chain,
+    )
+    .await?;
+    if let Some(failure) = prior_replay.failure {
+        return Ok(failure);
     }
+    let mut prior_tx_results = prior_replay.transactions;
 
-    if !config.prior_txs.is_empty() {
-        let mut next_nonces: HashMap<Address, u64> = HashMap::new();
-        for prior_tx in &config.prior_txs {
-            let next_nonce = prior_tx.nonce.saturating_add(1);
-            next_nonces
-                .entry(prior_tx.from_address)
-                .and_modify(|tracked| {
-                    if next_nonce > *tracked {
-                        *tracked = next_nonce;
-                    }
-                })
-                .or_insert(next_nonce);
-        }
-        for (address, next_nonce) in next_nonces {
-            chain.override_account_nonce(address, next_nonce);
-        }
-    }
-
-    if config.prior_txs.is_empty() {
+    if prior_tx_results.is_empty() {
         validate_pool_registration(&mut chain, &config, block_number)?;
     } else {
         let pool_has_code = chain

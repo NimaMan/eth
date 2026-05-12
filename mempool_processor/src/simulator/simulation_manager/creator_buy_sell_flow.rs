@@ -37,7 +37,7 @@ impl SimulationManager {
 
         let replay_sequence =
             if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
-                self.record_pending_transaction(key, processed.clone(), now)
+                self.record_pending_transaction(key, request.tx_hash, processed.clone(), now)
                     .await
             } else {
                 vec![processed.clone()]

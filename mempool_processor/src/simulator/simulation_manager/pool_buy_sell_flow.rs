@@ -102,6 +102,26 @@ impl SimulationManager {
             }
         };
 
+        let simulation_block = match self.mempool_simulator.latest_simulation_block().await {
+            Ok(block) => block,
+            Err(err) => {
+                return vec![SimulationResult {
+                    request: request.clone(),
+                    pool_viability_result: None,
+                    liquidity_removal_result: None,
+                    error: Some(format!("Failed to resolve live simulation block: {}", err)),
+                    token_address: Some(token_address),
+                    pool_address: None,
+                    pool_type: None,
+                    debug_info: Some(
+                        "buy/sell probe requires the same live base block used for mempool tx processing"
+                            .to_string(),
+                    ),
+                    simulation_time_ms: 0.0,
+                }]
+            }
+        };
+
         // WETH constant used for ETH-denominated pools
         let weth_address = AlloyAddress::from([
             0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
@@ -329,7 +349,7 @@ impl SimulationManager {
                 test_amount: U256::from(10_000_000_000_000_000u64),
                 buyer_address,
                 prior_txs: replay_sequence.to_vec(),
-                block_number: None,
+                block_number: Some(simulation_block),
                 block_header: None,
                 slippage_tolerance: 5.0,
                 gas_price: original_gas_price.map(|v| v as u128),
@@ -366,6 +386,7 @@ impl SimulationManager {
                             max_fee_per_gas: new_max_fee.map(|v| v as u128),
                             max_priority_fee_per_gas: Some(2_000_000_000),
                             prior_txs: replay_sequence.to_vec(),
+                            block_number: Some(simulation_block),
                             ..config
                         };
 

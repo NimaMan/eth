@@ -219,11 +219,12 @@ impl SimulationManager {
     pub(super) async fn record_pending_transaction(
         &self,
         key: SequenceKey,
+        source_hash: alloy_primitives::B256,
         processed: ProcessedTransaction,
         now: Instant,
     ) -> Vec<ProcessedTransaction> {
         self.pending_sequences
-            .record_transaction(key, processed, now)
+            .record_transaction(key, source_hash, processed, now)
             .await
     }
 
