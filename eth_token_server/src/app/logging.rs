@@ -5,7 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use chrono::Utc;
 use eth_pipeline_telemetry::{JsonlTelemetrySink, MultiTelemetrySink, TracingTelemetrySink};
+use serde_json::json;
 use tracing::{Level, Metadata};
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
@@ -29,9 +31,15 @@ pub struct LogGuards {
     _token_pipeline_profile: tracing_appender::non_blocking::WorkerGuard,
 }
 
+struct RunLogDir {
+    run_id: String,
+    path: PathBuf,
+}
+
 pub fn init_logging() -> eyre::Result<LogGuards> {
     let log_root = config_path(TOKEN_SERVER_LOG_DIR_CONFIG, DEFAULT_LOG_DIR)?;
-    let run_dir = create_run_log_dir(&log_root)?;
+    let run_log = create_run_log_dir(&log_root)?;
+    let run_dir = run_log.path.clone();
 
     let file_appender = tracing_appender::rolling::never(&run_dir, "server.log");
     let (file_writer, server_guard) = tracing_appender::non_blocking(file_appender);
@@ -113,6 +121,7 @@ pub fn init_logging() -> eyre::Result<LogGuards> {
     tracing::info!(
         log_root = %log_root.display(),
         run_dir = %run_dir.display(),
+        run_id = %run_log.run_id,
         telemetry_initialized,
         "initialized eth_token_server file logger"
     );
@@ -141,22 +150,52 @@ fn config_value(key: &str) -> eyre::Result<Option<String>> {
     shared_config_value(key)
 }
 
-fn create_run_log_dir(log_root: &Path) -> eyre::Result<PathBuf> {
+fn create_run_log_dir(log_root: &Path) -> eyre::Result<RunLogDir> {
     let run_id = config_value(TOKEN_SERVER_LOG_RUN_ID_CONFIG)?
         .map(|value| sanitize_run_id(&value))
         .filter(|value| !value.is_empty())
         .unwrap_or_else(default_run_id);
-    let run_dir = log_root.join(run_id);
+    let run_dir = log_root.join(&run_id);
     std::fs::create_dir_all(&run_dir)?;
-    Ok(run_dir)
+    write_run_manifest(log_root, &run_dir, &run_id)?;
+    Ok(RunLogDir {
+        run_id,
+        path: run_dir,
+    })
 }
 
 fn default_run_id() -> String {
-    let unix_secs = SystemTime::now()
+    let stamp = Utc::now().format("%Y%m%d-%H%M%SZ");
+    format!("run-{stamp}-pid-{}", std::process::id())
+}
+
+fn write_run_manifest(log_root: &Path, run_dir: &Path, run_id: &str) -> eyre::Result<()> {
+    let unix_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
+        .map(|duration| duration.as_millis())
         .unwrap_or_default();
-    format!("run-{unix_secs}-pid-{}", std::process::id())
+    let manifest = json!({
+        "schema_version": 1,
+        "service": "eth_token_server",
+        "run_id": run_id,
+        "pid": std::process::id(),
+        "started_at_unix_ms": unix_ms,
+        "log_root": log_root.display().to_string(),
+        "run_dir": run_dir.display().to_string(),
+        "files": [
+            "server.log",
+            "live_token_tracker.jsonl",
+            "token_pipeline_profile.jsonl",
+            "pool_buy_sell_sim_failures.jsonl",
+            "simulation_failures.jsonl",
+            "pipeline_issues.jsonl",
+            "pipeline_health.jsonl",
+            "pipeline_bottlenecks.jsonl"
+        ]
+    });
+    let manifest = serde_json::to_vec_pretty(&manifest)?;
+    std::fs::write(run_dir.join("run_manifest.json"), manifest)?;
+    Ok(())
 }
 
 fn sanitize_run_id(value: &str) -> String {

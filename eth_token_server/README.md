@@ -36,6 +36,25 @@ processed-block disk cache + Redis eth/live/blocks
   -> HTTP/SSE clients, mempool context, alpha polling
 ```
 
+## Live Pipeline Boundary
+
+Keep token-server as the confirmed-chain read model host. It should not own
+pending transaction ingestion or mempool signal creation.
+
+Live runtime contracts:
+
+- `live_block_processor` publishes confirmed processed blocks and live state to
+  Redis.
+- `eth_token_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
+  exposes live token/pool context over HTTP.
+- `mempool_signal_detector` consumes token-server context plus Reth/Redis
+  simulation state, then persists pending-transaction signals to Postgres.
+- `eth_alpha_trader` consumes token-server APIs and persisted mempool signals.
+- ASENA reads token-server/trade APIs only.
+
+The mempool signal endpoints are read-only Postgres views. ZMQ and signal logs
+are diagnostics; they are not the token-server or ASENA source of truth.
+
 ## Range Run Performance Path
 
 Historical range builds are split into three distinct costs:
@@ -98,13 +117,15 @@ The server writes one log directory per process under `TOKEN_SERVER_LOG_DIR`
 (default: `/home/nima/code/crypto/blockchains/eth/logs/eth_token_server`):
 
 ```bash
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/run-<unix>-pid-<pid>/
+/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/run-<YYYYMMDD-HHMMSSZ>-pid-<pid>/
 ```
 
 Set `TOKEN_SERVER_LOG_RUN_ID=<name>` to force a predictable run folder name for
-repeatable profiling. Each run folder contains:
+repeatable profiling. Each run folder contains a `run_manifest.json` with the
+run id, pid, root path, run path, and expected file list:
 
 ```text
+run_manifest.json                 run metadata and expected log files
 server.log                         server lifecycle plus warnings/errors
 live_token_tracker.jsonl           live warmup/tail progress and failures
 token_pipeline_profile.jsonl       token pipeline profile rows

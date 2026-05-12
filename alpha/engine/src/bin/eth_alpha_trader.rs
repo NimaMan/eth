@@ -3,9 +3,10 @@ use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use alloy_primitives::U256;
+use chrono::Utc;
 use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
@@ -860,11 +861,8 @@ fn resolve_database_url(args: &Args) -> Result<String> {
 }
 
 fn default_run_id() -> String {
-    let unix_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    format!("alpha-trader-{unix_secs}-{}", std::process::id())
+    let stamp = Utc::now().format("%Y%m%d-%H%M%SZ");
+    format!("alpha-trader-{stamp}-pid-{}", std::process::id())
 }
 
 #[cfg(unix)]

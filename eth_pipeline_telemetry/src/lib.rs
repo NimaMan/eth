@@ -448,6 +448,63 @@ pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
         return issue;
     }
 
+    if message.contains("No UniswapV2 pool found") {
+        let mut issue = PipelineIssue::new(
+            "eth_token_server",
+            "live_tracker",
+            "pool_buy_sell_sim",
+            PipelineSeverity::Warn,
+            PipelineImpact::PoolLocal,
+            "uniswap_v2_pool_missing_at_block",
+            "Uniswap V2 pool missing at block",
+        );
+        issue.fatal = false;
+        issue.retryable = false;
+        issue.token_address = word_after(message, " for token ");
+        if let Some(denom) = word_after(message, " with denom ") {
+            issue
+                .context
+                .insert("denom_address".to_string(), Value::String(denom));
+        }
+        issue.context.insert(
+            "protocol".to_string(),
+            Value::String("uniswap_v2".to_string()),
+        );
+        issue.refresh_ids();
+        return issue;
+    }
+
+    if message.contains("No Uniswap V3 pool found") {
+        let mut issue = PipelineIssue::new(
+            "eth_token_server",
+            "live_tracker",
+            "pool_buy_sell_sim",
+            PipelineSeverity::Warn,
+            PipelineImpact::PoolLocal,
+            "uniswap_v3_pool_missing_at_block",
+            "Uniswap V3 pool missing at block",
+        );
+        issue.fatal = false;
+        issue.retryable = false;
+        issue.token_address = word_after(message, " for token ");
+        if let Some(denom) = word_after(message, " with denom ") {
+            issue
+                .context
+                .insert("denom_address".to_string(), Value::String(denom));
+        }
+        if let Some(fee_tier) = word_after(message, " at fee tier ") {
+            issue
+                .context
+                .insert("fee_tier".to_string(), Value::String(fee_tier));
+        }
+        issue.context.insert(
+            "protocol".to_string(),
+            Value::String("uniswap_v3".to_string()),
+        );
+        issue.refresh_ids();
+        return issue;
+    }
+
     let mut issue = PipelineIssue::new(
         "eth_token_server",
         "live_tracker",
@@ -577,6 +634,50 @@ mod tests {
         assert_eq!(
             issue.context.get("fee_tier").and_then(Value::as_str),
             Some("100")
+        );
+    }
+
+    #[test]
+    fn classifies_uniswap_v2_pool_missing_at_block() {
+        let message = "No UniswapV2 pool found for token 0xD50A8521B490c52d5f7883fe8C71501B524c8Fc9 with denom 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 at block 25073357";
+
+        let issue = classify_live_transaction_error(message);
+
+        assert_eq!(issue.severity, PipelineSeverity::Warn);
+        assert_eq!(issue.impact, PipelineImpact::PoolLocal);
+        assert_eq!(issue.code, "uniswap_v2_pool_missing_at_block");
+        assert!(!issue.fatal);
+        assert_eq!(
+            issue.token_address.as_deref(),
+            Some("0xD50A8521B490c52d5f7883fe8C71501B524c8Fc9")
+        );
+        assert_eq!(
+            issue.context.get("denom_address").and_then(Value::as_str),
+            Some("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+        );
+    }
+
+    #[test]
+    fn classifies_uniswap_v3_pool_missing_at_block() {
+        let message = "No Uniswap V3 pool found for token 0x12a77658112Cf42914cB614D13653ed5852DA1e5 with denom 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 at fee tier 10000 and block 25077898";
+
+        let issue = classify_live_transaction_error(message);
+
+        assert_eq!(issue.severity, PipelineSeverity::Warn);
+        assert_eq!(issue.impact, PipelineImpact::PoolLocal);
+        assert_eq!(issue.code, "uniswap_v3_pool_missing_at_block");
+        assert!(!issue.fatal);
+        assert_eq!(
+            issue.token_address.as_deref(),
+            Some("0x12a77658112Cf42914cB614D13653ed5852DA1e5")
+        );
+        assert_eq!(
+            issue.context.get("denom_address").and_then(Value::as_str),
+            Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+        );
+        assert_eq!(
+            issue.context.get("fee_tier").and_then(Value::as_str),
+            Some("10000")
         );
     }
 }

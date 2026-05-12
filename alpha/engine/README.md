@@ -133,7 +133,7 @@ Operational telemetry uses the shared `eth_pipeline_telemetry` schema. The
 trader writes JSONL files under `ALPHA_TRADER_LOG_DIR` or, by default:
 
 ```text
-/home/nima/code/crypto/blockchains/eth/logs/alpha_trader/<run-id>/
+/home/nima/code/crypto/blockchains/eth/logs/alpha_trader/alpha-trader-<YYYYMMDD-HHMMSSZ>-pid-<pid>/
 ```
 
 The directory contains `pipeline_health.jsonl`, `pipeline_issues.jsonl`, and
