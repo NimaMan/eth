@@ -27,6 +27,27 @@ memory pressure, live-feed regressions, or execution.
 | 7 | **Live warmup memory pressure while filling processed-block cache** | `eth_token_server`, `alpha/live/feed`, `tx_processor`, Reth static files | systemd cgroup memory, RSS, cgroup `anon`/`file`, disk-cache hits/misses, cache write time | Add allocator trimming to the live warmup path and avoid running large backfills while token-server warmup is filling missing cache entries. |
 | 8 | **Real execution handoff** | `alpha/engine`, `tx_executor` | adapter boundary, execution reports, nonce/gas failures, real order id to `TokenPoolId` mapping, receipt polling | Only add a `tx_executor` adapter after live chain-sim PnL is consistently positive and decision auditing is complete. |
 
+## Current Watch Notes
+
+- **May 11, 2026: Hooked Uniswap V4 pools are not eligible for alpha entry yet.**
+  Live run `snipe-all-v1-chain-sim-live-v4` confirmed plain V4 pool buys, but
+  order `snipe-all-v1-chain-sim-live-v4-178` failed on pool
+  `0x000000000004444c5dc75cb358380d2e3de08a90#0x5f54ed5c000eacbf85206125f07e8cdda8fd96b7057095d7bd073e962fc9257d`.
+  The pool had hook `0x298a86cc43af878cb78ca20e80ab0de0a59a0444`
+  with `afterSwap` / `afterSwapReturnDelta` flags. Universal Router returned
+  `WrappedError(address,bytes4,bytes,bytes)` (`0x90bfb865`), which indicates
+  an inner PoolManager or hook revert rather than a generic V4 route failure.
+  Alpha now rejects nonzero-hook V4 pools at the shared entry eligibility gate
+  with reason `unsupported_v4_hooks`. Re-enable hooked V4 entries only after
+  hook-specific support exists, including hook data, hook policy, and failure
+  attribution.
+- **May 11, 2026: Revert decoding moved into a reusable simulator module.**
+  `tx_processor/src/simulator/revert_decoder/` decodes `Error(string)`,
+  `Panic(uint256)`, unknown custom-error selectors, and nested Universal Router
+  `WrappedError(...)` payloads. Simulation failure messages should surface the
+  wrapped target, selector, decoded nested reason, and details instead of
+  stopping at `Unknown error (0x...)`.
+
 ## Frontend Alignment
 
 ASENA renders this ledger at `/eth/bogaz/`. The page must keep the same order

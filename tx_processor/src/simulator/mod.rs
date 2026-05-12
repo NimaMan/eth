@@ -1,6 +1,7 @@
 pub mod buy_swap_simulator;
 pub mod cross_venue_buy_approve_sell;
 pub mod pool_buy_sell_simulator;
+pub mod revert_decoder;
 pub mod sell_swap_simulator;
 pub mod types;
 /// TX Simulator integration module for TxProcessor

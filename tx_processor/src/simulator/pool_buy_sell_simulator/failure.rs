@@ -1,9 +1,11 @@
 use std::convert::TryInto;
 use std::sync::Arc;
 
-use alloy_primitives::{hex, Address, Selector, U256};
+use alloy_primitives::{Address, Selector, U256, hex};
 use tx_simulator::types::CallFrame;
 use tx_simulator::{FullSimulationResult, TxSimulator, UnsignedTransaction};
+
+use crate::simulator::revert_decoder::describe_revert_output;
 
 const SELECTOR_TRANSFER: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 const SELECTOR_TRANSFER_FROM: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
@@ -96,11 +98,7 @@ pub(super) async fn enrich_failure_reason_with_trace(
         .as_deref()
         .map(|s| {
             let trimmed = s.trim();
-            trimmed.is_empty()
-                || trimmed.contains("without returning data")
-                || trimmed.contains("Empty revert payload")
-                || trimmed.contains("UniswapV2:")
-                || trimmed.eq_ignore_ascii_case("execution reverted")
+            is_uninformative_revert(trimmed) || trimmed.contains("UniswapV2:")
         })
         .unwrap_or(true);
 
@@ -110,36 +108,52 @@ pub(super) async fn enrich_failure_reason_with_trace(
             .await
         {
             Ok(full) => {
-                if let Some(reason) = full.revert_reason.as_ref() {
-                    if !reason.is_empty() {
-                        reason_opt = Some(reason.clone());
+                failure_context = find_failure_context(&full.call_trace, 0);
+
+                if let Some(reason) = extract_reason_from_call_trace(&full.call_trace)
+                    .filter(|reason| !is_uninformative_revert(reason))
+                {
+                    reason_opt = Some(reason);
+                } else if let Some(reason) = full
+                    .revert_reason
+                    .as_ref()
+                    .filter(|reason| !is_uninformative_revert(reason))
+                {
+                    reason_opt = Some(reason.clone());
+                } else if let Some(ctx) = failure_context.as_ref() {
+                    if let Some(reason) = ctx
+                        .reason
+                        .clone()
+                        .filter(|reason| !is_uninformative_revert(reason))
+                    {
+                        reason_opt = Some(reason);
                     }
                 }
 
-                failure_context = find_failure_context(&full.call_trace, 0);
+                if reason_opt
+                    .as_deref()
+                    .map(is_uninformative_revert)
+                    .unwrap_or(true)
+                {
+                    if let Some(ctx) = full.revert_context.as_ref() {
+                        reason_opt = Some(format!(
+                            "execution reverted at {} (calldata {} bytes)",
+                            ctx.target, ctx.calldata_len
+                        ));
+                    }
+                }
 
-                if reason_opt.is_none() {
+                if reason_opt
+                    .as_deref()
+                    .map(is_uninformative_revert)
+                    .unwrap_or(true)
+                {
                     if let Some(ctx) = failure_context.as_ref() {
                         if let Some(reason) = ctx.reason.clone() {
                             if !reason.trim().is_empty() {
                                 reason_opt = Some(reason);
                             }
                         }
-                    }
-                }
-
-                if reason_opt.is_none() {
-                    if let Some(reason) = extract_reason_from_call_trace(&full.call_trace) {
-                        reason_opt = Some(reason);
-                    }
-                }
-
-                if reason_opt.is_none() {
-                    if let Some(ctx) = full.revert_context.as_ref() {
-                        reason_opt = Some(format!(
-                            "execution reverted at {} (calldata {} bytes)",
-                            ctx.target, ctx.calldata_len
-                        ));
                     }
                 }
             }
@@ -181,13 +195,15 @@ fn is_uninformative_revert(reason: &str) -> bool {
         || trimmed.eq_ignore_ascii_case("Reverted without reason")
         || trimmed.eq_ignore_ascii_case("Transaction reverted without data")
         || trimmed.eq_ignore_ascii_case("Empty revert payload")
+        || trimmed.starts_with("Unknown error (0x")
+        || trimmed.starts_with("unknown custom error selector 0x")
         || trimmed.contains("without returning data")
         || trimmed.contains("Empty revert payload from")
 }
 
 fn extract_reason_from_call_trace(frame: &CallFrame) -> Option<String> {
     if let Some(output) = frame.output.as_ref() {
-        if let Some(reason) = decode_revert_output(output.as_ref()) {
+        if let Some(reason) = describe_revert_output(output.as_ref()) {
             if !reason.is_empty() {
                 return Some(reason);
             }
@@ -202,7 +218,9 @@ fn extract_reason_from_call_trace(frame: &CallFrame) -> Option<String> {
             {
                 fallback = Some(trimmed.to_string());
             } else {
-                return Some(trimmed.to_string());
+                if !is_uninformative_revert(trimmed) {
+                    return Some(trimmed.to_string());
+                }
             }
         }
     }
@@ -225,49 +243,6 @@ fn extract_reason_from_call_trace(frame: &CallFrame) -> Option<String> {
     })
 }
 
-fn decode_revert_output(data: &[u8]) -> Option<String> {
-    if data.len() < 4 {
-        return None;
-    }
-
-    let selector = &data[..4];
-    if selector == [0x08, 0xc3, 0x79, 0xa0] {
-        if data.len() < 68 {
-            return None;
-        }
-        let len_bytes: [u8; 8] = data[60..68].try_into().ok()?;
-        let str_len = u64::from_be_bytes(len_bytes) as usize;
-        let start = 68;
-        if data.len() < start + str_len {
-            return None;
-        }
-        let string_bytes = &data[start..start + str_len];
-        return Some(String::from_utf8_lossy(string_bytes).to_string());
-    }
-
-    if selector == [0x4e, 0x48, 0x7b, 0x71] {
-        if data.len() < 36 {
-            return Some("panic (no code)".to_string());
-        }
-        let code_bytes: [u8; 8] = data[28..36].try_into().ok()?;
-        let code = u64::from_be_bytes(code_bytes);
-        let description = match code {
-            0x01 => "panic: assertion failed",
-            0x11 => "panic: arithmetic overflow/underflow",
-            0x12 => "panic: division by zero",
-            0x21 => "panic: invalid enum value",
-            0x31 => "panic: storage byte array out-of-bounds",
-            0x32 => "panic: array out-of-bounds",
-            0x41 => "panic: memory overflow",
-            0x51 => "panic: pop from empty array",
-            other => return Some(format!("panic code 0x{other:x}")),
-        };
-        return Some(description.to_string());
-    }
-
-    None
-}
-
 fn find_failure_context(frame: &CallFrame, depth: usize) -> Option<FailureContext> {
     for child in &frame.calls {
         if let Some(ctx) = find_failure_context(child, depth + 1) {
@@ -282,7 +257,7 @@ fn find_failure_context(frame: &CallFrame, depth: usize) -> Option<FailureContex
 
     if reason.is_none() {
         if let Some(output) = frame.output.as_ref() {
-            reason = decode_revert_output(output.as_ref());
+            reason = describe_revert_output(output.as_ref());
         }
     }
 
@@ -476,7 +451,7 @@ fn format_failure_context(ctx: &FailureContext) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Bytes, U256};
+    use alloy_primitives::{Bytes, U256, address};
     use tx_simulator::RevertContext;
 
     fn frame(to: Address, input: Bytes, calls: Vec<CallFrame>) -> CallFrame {
@@ -494,6 +469,58 @@ mod tests {
             value: Some(U256::ZERO),
             typ: "CALL".to_string(),
         }
+    }
+
+    fn word_u256(value: usize) -> [u8; 32] {
+        let mut word = [0u8; 32];
+        let value = value as u128;
+        word[16..32].copy_from_slice(&value.to_be_bytes());
+        word
+    }
+
+    fn word_address(address: Address) -> [u8; 32] {
+        let mut word = [0u8; 32];
+        word[12..32].copy_from_slice(address.as_slice());
+        word
+    }
+
+    fn word_bytes4(selector: [u8; 4]) -> [u8; 32] {
+        let mut word = [0u8; 32];
+        word[0..4].copy_from_slice(&selector);
+        word
+    }
+
+    fn dynamic_bytes(bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&word_u256(bytes.len()));
+        out.extend_from_slice(bytes);
+        let padding = (32 - (bytes.len() % 32)) % 32;
+        out.extend(std::iter::repeat(0).take(padding));
+        out
+    }
+
+    fn error_string(message: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0x08, 0xc3, 0x79, 0xa0]);
+        out.extend_from_slice(&word_u256(32));
+        out.extend_from_slice(&dynamic_bytes(message.as_bytes()));
+        out
+    }
+
+    fn wrapped_error(target: Address, selector: [u8; 4], reason: &[u8], details: &[u8]) -> Vec<u8> {
+        let reason_tail = dynamic_bytes(reason);
+        let details_tail = dynamic_bytes(details);
+        let details_offset = 4 * 32 + reason_tail.len();
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0x90, 0xbf, 0xb8, 0x65]);
+        out.extend_from_slice(&word_address(target));
+        out.extend_from_slice(&word_bytes4(selector));
+        out.extend_from_slice(&word_u256(4 * 32));
+        out.extend_from_slice(&word_u256(details_offset));
+        out.extend_from_slice(&reason_tail);
+        out.extend_from_slice(&details_tail);
+        out
     }
 
     #[test]
@@ -527,5 +554,51 @@ mod tests {
         assert!(message.contains("empty revert payload"));
         assert!(message.contains("selector 0x88316456"));
         assert!(!message.contains("reverted without returning data"));
+    }
+
+    #[test]
+    fn full_trace_decodes_universal_router_wrapped_error() {
+        let target = address!("298a86cc43af878cb78ca20e80ab0de0a59a0444");
+        let output = wrapped_error(
+            target,
+            [0x12, 0x34, 0x56, 0x78],
+            &error_string("afterSwap rejected"),
+            &[],
+        );
+        let full = FullSimulationResult {
+            success: false,
+            gas_used: 100_000,
+            revert_reason: Some("Unknown error (0x90bfb865)".to_string()),
+            revert_context: Some(RevertContext {
+                target,
+                has_code: true,
+                calldata_len: 4,
+            }),
+            call_trace: CallFrame {
+                from: address!("0000000000000000000000000000000000000001"),
+                gas: U256::from(1_000_000),
+                gas_used: U256::from(10_000),
+                to: Some(target),
+                input: Bytes::from_static(&[0x88, 0x31, 0x64, 0x56]),
+                output: Some(Bytes::from(output)),
+                error: Some("execution reverted".to_string()),
+                revert_reason: None,
+                calls: Vec::new(),
+                logs: Vec::new(),
+                value: Some(U256::ZERO),
+                typ: "CALL".to_string(),
+            },
+            struct_logs: None,
+            logs: Vec::new(),
+        };
+
+        let message =
+            format_failure_with_full_trace("Universal Router V4 buy transaction failed", &full);
+
+        assert!(message.contains("Universal Router V4 buy transaction failed"));
+        assert!(message.contains("WrappedError"));
+        assert!(message.contains("afterSwap rejected"));
+        assert!(message.contains("0x12345678"));
+        assert!(!message.contains("Unknown error (0x90bfb865)"));
     }
 }
