@@ -118,6 +118,7 @@ async fn block_processor_discovers_updates_and_indexes_uniswap_v3_pool() {
         b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
     );
     create_tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+        factory_address: address!("1f98431c8ad98523631ae4a59f267346ea31f984"),
         token0: TOKEN_RAW,
         token1: DENOM_RAW,
         fee: 3000,

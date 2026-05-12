@@ -26,7 +26,7 @@ use tx_simulator::tx_builders::{
     amm_swap_route::AmmSwapRoute,
     build_approve_for_route, build_denom_to_token_swap, build_token_to_denom_swap,
     uniswap_v2::{build_approve_v2, Router as UniswapV2Router},
-    uniswap_v3::build_approve_v3,
+    uniswap_v3::{build_approve_v3, build_approve_v3_for_router},
 };
 pub async fn check_can_buy_sell_pool(
     simulator: Arc<TxSimulator>,
@@ -45,7 +45,7 @@ pub async fn check_can_buy_sell_pool(
     }
 
     if (config.pool_type.known_v2_protocol().is_some()
-        || matches!(config.pool_type, PoolType::UniswapV3 { .. }))
+        || config.pool_type.known_v3_protocol().is_some())
         && config.denom_address.is_zero()
     {
         return Err(eyre!(
@@ -152,12 +152,17 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
             pool: config.pool_address,
             router: protocol.router(),
         }
+    } else if let (Some(protocol), Some(fee_tier)) = (
+        config.pool_type.known_v3_protocol(),
+        config.pool_type.v3_fee_tier(),
+    ) {
+        AmmSwapRoute::V3Router {
+            pool: config.pool_address,
+            router: protocol.router(),
+            fee_tier,
+        }
     } else {
         match config.pool_type {
-            PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
-                pool: config.pool_address,
-                fee_tier,
-            },
             PoolType::UniswapV4 => {
                 // Return a well-formed failure result to callers with a clear reason
                 return Ok(create_failed_result(
@@ -233,6 +238,13 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     let denom_approve_tx = if let Some(protocol) = config.pool_type.known_v2_protocol() {
         Some(build_approve_v2(
             UniswapV2Router::Custom(protocol.router()),
+            config.buyer_address,
+            config.denom_address,
+            config.test_amount,
+        ))
+    } else if let Some(protocol) = config.pool_type.known_v3_protocol() {
+        Some(build_approve_v3_for_router(
+            protocol.router(),
             config.buyer_address,
             config.denom_address,
             config.test_amount,

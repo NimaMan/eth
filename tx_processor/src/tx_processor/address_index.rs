@@ -76,6 +76,9 @@ pub(super) fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
     }
 
     for pool in &tx.uniswap_v3_pools {
+        if !pool.factory_address.is_zero() {
+            set.insert(pool.factory_address);
+        }
         set.insert(pool.pool);
         set.insert(pool.token0);
         set.insert(pool.token1);

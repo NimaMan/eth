@@ -1,5 +1,7 @@
 use crate::erc20::ERC20Token;
-use crate::pools::BasePoolConfig;
+use crate::pools::{BasePoolConfig, UniswapV3Pool};
+use alloy_primitives::Address;
+use reth_chain_query::common_addresses::KnownV3Protocol;
 use tx_processor::ProcessedTransaction;
 
 use super::super::known_token_metadata::known_decimals_for_address;
@@ -23,7 +25,8 @@ impl ProcessedTokenUpdateRouter {
             }
 
             let pool_address = address_string(&event.pool);
-            if token.uniswap_v3_pool(&pool_address).is_some() {
+            if let Some(pool) = token.uniswap_v3_pool_mut(&pool_address) {
+                apply_v3_protocol_metadata(pool, event.factory_address);
                 continue;
             }
 
@@ -49,6 +52,7 @@ impl ProcessedTokenUpdateRouter {
                     test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
                 },
             );
+            apply_v3_protocol_metadata(pool, event.factory_address);
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);
@@ -56,5 +60,23 @@ impl ProcessedTokenUpdateRouter {
         }
 
         discovered
+    }
+}
+
+fn apply_v3_protocol_metadata(pool: &mut UniswapV3Pool, factory_address: Address) {
+    match KnownV3Protocol::from_factory(factory_address) {
+        Some(protocol) => {
+            pool.base.identity.protocol = protocol.label().to_string();
+            pool.factory_address = Some(address_string(&protocol.factory()));
+            pool.router_address = Some(address_string(&protocol.router()));
+        }
+        None if !factory_address.is_zero() => {
+            pool.factory_address = Some(address_string(&factory_address));
+        }
+        None => {
+            let protocol = KnownV3Protocol::UniswapV3;
+            pool.factory_address = Some(address_string(&protocol.factory()));
+            pool.router_address = Some(address_string(&protocol.router()));
+        }
     }
 }

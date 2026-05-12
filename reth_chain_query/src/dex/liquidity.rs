@@ -70,7 +70,7 @@ impl RethQueryProvider {
                 self.get_v2_style_liquidity("V2-Router", pool, Some(block_number))
                     .await
             }
-            AmmSwapRoute::UniswapV3 { pool, .. } => {
+            AmmSwapRoute::UniswapV3 { pool, .. } | AmmSwapRoute::V3Router { pool, .. } => {
                 // token addresses via token0()/token1() as well
                 let (t0, t1) = self
                     .uni_v2_get_tokens(pool, Some(block_number))

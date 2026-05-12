@@ -259,6 +259,7 @@ impl LogDecoder {
 
         Ok(Some(DecodedEvent::UniswapV3PoolCreatedEvent(
             UniswapV3PoolCreatedEvent {
+                factory_address: log.address,
                 token0,
                 token1,
                 fee,

@@ -16,7 +16,7 @@ use super::reader::ProcessedBlockDiskCacheReader;
 use super::writer::ProcessedBlockDiskCacheWriter;
 
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = 2;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 const CACHE_ZSTD_LEVEL: i32 = 3;
 const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;

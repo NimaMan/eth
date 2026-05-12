@@ -26,7 +26,7 @@ use crate::tx_processor::data_models::{
 };
 use crate::ProcessedBlockTransactions;
 
-pub const COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION: u32 = 2;
+pub const COMPACT_PROCESSED_TRANSACTION_SCHEMA_VERSION: u32 = 3;
 
 /// Compact processed-transaction representation for block provider storage.
 ///
@@ -593,6 +593,7 @@ mod tests {
                 log_index: 7,
             });
         tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+            factory_address: Address::repeat_byte(0x78),
             token0: token,
             token1: Address::ZERO,
             fee: 3_000,

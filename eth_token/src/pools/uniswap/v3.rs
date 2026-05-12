@@ -23,10 +23,15 @@ use super::concentrated::{
 use super::v2::{LPHolderSnapshot, UniswapV2TxContext};
 
 pub const UNISWAP_V3_PROTOCOL: &str = "UNISWAP-V3";
+pub const SUSHISWAP_V3_PROTOCOL: &str = "SUSHISWAP-V3";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UniswapV3Pool {
     pub base: BasePool,
+    #[serde(default)]
+    pub factory_address: Option<String>,
+    #[serde(default)]
+    pub router_address: Option<String>,
     pub token0: String,
     pub token1: String,
     pub fee_tier: u32,
@@ -95,6 +100,8 @@ impl UniswapV3Pool {
         );
         Self {
             base: BasePool::new(identity, config),
+            factory_address: None,
+            router_address: None,
             token0: normalize_address_string(token0),
             token1: normalize_address_string(token1),
             fee_tier,

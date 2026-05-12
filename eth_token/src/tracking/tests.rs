@@ -6,21 +6,21 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use alloy_primitives::{address, b256, Address, Bytes, U256};
-use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol};
 use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
 use tx_processor::tx_processor::data_models::{
     ContractCreationEvent, ERC20TransferEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV3InitializeEvent, UniswapV3MintEvent,
     UniswapV3PoolCreatedEvent, UniswapV4InitializeEvent, UniswapV4SwapEvent,
 };
-use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
+use tx_processor::{PoolType, ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
 use crate::chain_metadata::{
     StaticTokenMetadataProvider, StaticUniswapV2PoolMetadataProvider, TokenMetadataLookup,
     TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
     UniswapV2PoolMetadataProvider,
 };
-use crate::pools::SUSHISWAP_V2_PROTOCOL;
+use crate::pools::{PoolTradingSimulationConfig, SUSHISWAP_V2_PROTOCOL, SUSHISWAP_V3_PROTOCOL};
 
 pub(crate) fn metadata() -> ERC20TokenMetadata {
     ERC20TokenMetadata::new(
@@ -377,6 +377,7 @@ fn discovers_and_updates_uniswap_v3_pool_for_tracked_token() {
     let mut tx = tx();
     let sqrt = U256::from(1u128) << 96;
     tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+        factory_address: address!("1f98431c8ad98523631ae4a59f267346ea31f984"),
         token0: address!("1111111111111111111111111111111111111111"),
         token1: address!("2222222222222222222222222222222222222222"),
         fee: 3000,
@@ -420,6 +421,50 @@ fn discovers_and_updates_uniswap_v3_pool_for_tracked_token() {
     assert_eq!(pool.fee_tier, 3000);
     assert_eq!(pool.base.price(), 1.0);
     assert_eq!(pool.active_liquidity, 1_000_000_000_000_000_000u128);
+}
+
+#[test]
+fn discovers_sushiswap_v3_pool_from_sushi_factory() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    let protocol = KnownV3Protocol::SushiSwapV3;
+    tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+        factory_address: protocol.factory(),
+        token0: address!("1111111111111111111111111111111111111111"),
+        token1: address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+        fee: 3000,
+        tick_spacing: 60,
+        pool: address!("3333333333333333333333333333333333333333"),
+        log_index: 1,
+    });
+
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    update_router
+        .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
+        .unwrap();
+
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v3_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(pool.base.identity.protocol, SUSHISWAP_V3_PROTOCOL);
+    assert_eq!(
+        pool.factory_address.as_deref(),
+        Some("0xbaceb8ec6b9355dfc0269c18bac9d6e2bdc29c4f")
+    );
+    assert_eq!(
+        pool.router_address.as_deref(),
+        Some("0x2e6cd2d30aa43f40aa81619ff4b6e0a41479b13f")
+    );
+
+    let params = pool
+        .build_buy_sell_parameters(&PoolTradingSimulationConfig::default())
+        .unwrap();
+    assert_eq!(params.pool_type, PoolType::SushiSwapV3 { fee_tier: 3000 });
 }
 
 #[test]

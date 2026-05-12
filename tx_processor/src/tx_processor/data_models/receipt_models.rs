@@ -259,6 +259,8 @@ pub struct TradingDisabledEvent {
 // Uniswap V3 Events
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UniswapV3PoolCreatedEvent {
+    #[serde(default)]
+    pub factory_address: Address,
     pub token0: Address,
     pub token1: Address,
     pub fee: u32,

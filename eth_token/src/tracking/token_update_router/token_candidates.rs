@@ -192,6 +192,9 @@ fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
     }
     addresses.extend(v2_pool_event_addresses(tx));
     for event in &tx.uniswap_v3_pools {
+        if !event.factory_address.is_zero() {
+            addresses.insert(event.factory_address);
+        }
         addresses.insert(event.pool);
         addresses.insert(event.token0);
         addresses.insert(event.token1);

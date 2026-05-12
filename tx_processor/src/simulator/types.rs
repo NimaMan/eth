@@ -1,7 +1,7 @@
 use crate::tx_processor::data_models::ProcessedTransaction;
 /// Type definitions for trading viability analysis
 use alloy_primitives::{Address, B256, U256};
-use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol};
 use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
 
@@ -171,6 +171,7 @@ impl PoolBuySellParameters {
 pub enum PoolType {
     UniswapV2,
     UniswapV3 { fee_tier: u32 }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
+    SushiSwapV3 { fee_tier: u32 },
     SushiSwap,
     PancakeSwapV2,
     ShibaSwapV2,
@@ -188,6 +189,21 @@ impl PoolType {
             Self::PancakeSwapV2 => Some(KnownV2Protocol::PancakeSwapV2),
             Self::ShibaSwapV2 => Some(KnownV2Protocol::ShibaSwapV2),
             Self::FraxswapV2 => Some(KnownV2Protocol::FraxswapV2),
+            _ => None,
+        }
+    }
+
+    pub fn known_v3_protocol(self) -> Option<KnownV3Protocol> {
+        match self {
+            Self::UniswapV3 { .. } => Some(KnownV3Protocol::UniswapV3),
+            Self::SushiSwapV3 { .. } => Some(KnownV3Protocol::SushiSwapV3),
+            _ => None,
+        }
+    }
+
+    pub fn v3_fee_tier(self) -> Option<u32> {
+        match self {
+            Self::UniswapV3 { fee_tier } | Self::SushiSwapV3 { fee_tier } => Some(fee_tier),
             _ => None,
         }
     }

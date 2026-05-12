@@ -64,6 +64,7 @@ impl PyPoolBuySellSimulationResult {
             PoolType::UniswapV2 => "UNISWAP-V2".to_string(),
             PoolType::SushiSwap => "SUSHI-SWAP".to_string(),
             PoolType::UniswapV3 { fee_tier } => format!("UNISWAP-V3({})", fee_tier),
+            PoolType::SushiSwapV3 { fee_tier } => format!("SUSHISWAP-V3({})", fee_tier),
             PoolType::UniswapV4 => "UNISWAP-V4".to_string(),
             _ => "UNKNOWN".to_string(),
         };

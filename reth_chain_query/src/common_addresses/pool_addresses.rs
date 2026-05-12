@@ -14,9 +14,24 @@ pub enum KnownV2Protocol {
     FraxswapV2,
 }
 
+/// Known Ethereum mainnet V3-style protocols that share the Uniswap V3 periphery ABI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KnownV3Protocol {
+    UniswapV3,
+    SushiSwapV3,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KnownV2ProtocolDescriptor {
     pub protocol: KnownV2Protocol,
+    pub label: &'static str,
+    pub factory: Address,
+    pub router: Address,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownV3ProtocolDescriptor {
+    pub protocol: KnownV3Protocol,
     pub label: &'static str,
     pub factory: Address,
     pub router: Address,
@@ -114,19 +129,80 @@ impl KnownV2Protocol {
     }
 }
 
+impl KnownV3Protocol {
+    pub const ALL: [KnownV3Protocol; 2] =
+        [KnownV3Protocol::UniswapV3, KnownV3Protocol::SushiSwapV3];
+
+    pub fn descriptor(self) -> KnownV3ProtocolDescriptor {
+        match self {
+            Self::UniswapV3 => KnownV3ProtocolDescriptor {
+                protocol: self,
+                label: "UNISWAP-V3",
+                factory: address!("1F98431c8aD98523631AE4a59f267346ea31F984"),
+                router: address!("E592427A0AEce92De3Edee1F18E0157C05861564"),
+            },
+            Self::SushiSwapV3 => KnownV3ProtocolDescriptor {
+                protocol: self,
+                label: "SUSHISWAP-V3",
+                factory: address!("bACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F"),
+                router: address!("2E6cd2d30aa43f40aa81619ff4b6E0a41479B13F"),
+            },
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        self.descriptor().label
+    }
+
+    pub fn factory(self) -> Address {
+        self.descriptor().factory
+    }
+
+    pub fn router(self) -> Address {
+        self.descriptor().router
+    }
+
+    pub fn from_factory(factory: Address) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|protocol| protocol.factory() == factory)
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        let normalized = label
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_uppercase())
+            .collect::<String>();
+        match normalized.as_str() {
+            "UNISWAPV3" | "UNIV3" => Some(Self::UniswapV3),
+            "SUSHISWAPV3" | "SUSHIV3" => Some(Self::SushiSwapV3),
+            _ => Self::ALL.iter().copied().find(|protocol| {
+                protocol
+                    .label()
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .map(|c| c.to_ascii_uppercase())
+                    .collect::<String>()
+                    == normalized
+            }),
+        }
+    }
+}
+
 /// Named map of pool factory / registry contracts we track.
 pub static POOL_FACTORIES: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
     let entries: &[(&str, Address)] = &[
         ("univ2_factory", KnownV2Protocol::UniswapV2.factory()),
-        (
-            "univ3_factory",
-            address!("1F98431c8aD98523631AE4a59f267346ea31F984"),
-        ),
+        ("univ3_factory", KnownV3Protocol::UniswapV3.factory()),
         (
             "univ4_pool_manager",
             address!("000000000004444C5DC75cB358380d2E3de08a90"),
         ),
         ("sushi_factory", KnownV2Protocol::SushiSwapV2.factory()),
+        ("sushi_v3_factory", KnownV3Protocol::SushiSwapV3.factory()),
         ("pancake_factory", KnownV2Protocol::PancakeSwapV2.factory()),
         (
             "pancake_v3_factory",
@@ -204,15 +280,13 @@ mod tests {
 pub static ROUTERS: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
     let entries: &[(&str, Address)] = &[
         ("univ2_router", KnownV2Protocol::UniswapV2.router()),
-        (
-            "univ3_router",
-            address!("E592427A0AECe92De3Edee1F18E0157C05861564"),
-        ),
+        ("univ3_router", KnownV3Protocol::UniswapV3.router()),
         (
             "univ3_router2",
             address!("68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"),
         ),
         ("sushi_router", KnownV2Protocol::SushiSwapV2.router()),
+        ("sushi_v3_router", KnownV3Protocol::SushiSwapV3.router()),
         ("pancake_router", KnownV2Protocol::PancakeSwapV2.router()),
         (
             "pancake_v3_router",
@@ -247,6 +321,8 @@ pub fn get_pool_protocol(factory: Address) -> Option<&'static str> {
         Some("univ4")
     } else if factory == POOL_FACTORIES["sushi_factory"] {
         Some("sushi")
+    } else if factory == POOL_FACTORIES["sushi_v3_factory"] {
+        Some("sushi_v3")
     } else if factory == POOL_FACTORIES["pancake_factory"] {
         Some("pancake")
     } else if factory == POOL_FACTORIES["pancake_v3_factory"] {

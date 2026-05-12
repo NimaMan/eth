@@ -71,6 +71,24 @@ pub fn build_buy_swap_v3(
     _slippage_bps: u32,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_buy_swap_v3_with_router(
+        router_address_v3(),
+        buyer,
+        token_out,
+        amount_in_eth,
+        fee_tier,
+        deadline,
+    )
+}
+
+pub fn build_buy_swap_v3_with_router(
+    router: Address,
+    buyer: Address,
+    token_out: Address,
+    amount_in_eth: U256,
+    fee_tier: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         weth_address(),
         token_out,
@@ -84,7 +102,7 @@ pub fn build_buy_swap_v3(
 
     UnsignedTransaction {
         from: Some(buyer),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,
@@ -105,6 +123,26 @@ pub fn build_buy_swap_v3_with_min_out(
     amount_out_min: U256,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_buy_swap_v3_with_min_out_router(
+        router_address_v3(),
+        buyer,
+        token_out,
+        amount_in_eth,
+        fee_tier,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_buy_swap_v3_with_min_out_router(
+    router: Address,
+    buyer: Address,
+    token_out: Address,
+    amount_in_eth: U256,
+    fee_tier: u32,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         weth_address(),
         token_out,
@@ -118,7 +156,7 @@ pub fn build_buy_swap_v3_with_min_out(
 
     UnsignedTransaction {
         from: Some(buyer),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,
@@ -141,7 +179,16 @@ fn encode_approve(spender: Address, amount: U256) -> Bytes {
 
 /// Build approve(tx) for V3 SwapRouter as spender.
 pub fn build_approve_v3(owner: Address, token: Address, amount: U256) -> UnsignedTransaction {
-    let calldata = encode_approve(router_address_v3(), amount);
+    build_approve_v3_for_router(router_address_v3(), owner, token, amount)
+}
+
+pub fn build_approve_v3_for_router(
+    router: Address,
+    owner: Address,
+    token: Address,
+    amount: U256,
+) -> UnsignedTransaction {
+    let calldata = encode_approve(router, amount);
     UnsignedTransaction {
         from: Some(owner),
         to: Some(token),
@@ -165,6 +212,24 @@ pub fn build_sell_swap_v3(
     _slippage_bps: u32,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_sell_swap_v3_with_router(
+        router_address_v3(),
+        seller,
+        token_in,
+        amount_in_tokens,
+        fee_tier,
+        deadline,
+    )
+}
+
+pub fn build_sell_swap_v3_with_router(
+    router: Address,
+    seller: Address,
+    token_in: Address,
+    amount_in_tokens: U256,
+    fee_tier: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         token_in,
         weth_address(),
@@ -178,7 +243,7 @@ pub fn build_sell_swap_v3(
 
     UnsignedTransaction {
         from: Some(seller),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,
@@ -199,6 +264,26 @@ pub fn build_sell_swap_v3_with_min_out(
     amount_out_min: U256,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_sell_swap_v3_with_min_out_router(
+        router_address_v3(),
+        seller,
+        token_in,
+        amount_in_tokens,
+        fee_tier,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_sell_swap_v3_with_min_out_router(
+    router: Address,
+    seller: Address,
+    token_in: Address,
+    amount_in_tokens: U256,
+    fee_tier: u32,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         token_in,
         weth_address(),
@@ -212,7 +297,7 @@ pub fn build_sell_swap_v3_with_min_out(
 
     UnsignedTransaction {
         from: Some(seller),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,
@@ -234,6 +319,26 @@ pub fn build_token_to_token_swap_v3(
     _slippage_bps: u32,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_token_to_token_swap_v3_with_router(
+        router_address_v3(),
+        trader,
+        token_in,
+        token_out,
+        amount_in,
+        fee_tier,
+        deadline,
+    )
+}
+
+pub fn build_token_to_token_swap_v3_with_router(
+    router: Address,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    fee_tier: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         token_in,
         token_out,
@@ -247,7 +352,7 @@ pub fn build_token_to_token_swap_v3(
 
     UnsignedTransaction {
         from: Some(trader),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,
@@ -269,6 +374,28 @@ pub fn build_token_to_token_swap_v3_with_min_out(
     amount_out_min: U256,
     deadline: u64,
 ) -> UnsignedTransaction {
+    build_token_to_token_swap_v3_with_min_out_router(
+        router_address_v3(),
+        trader,
+        token_in,
+        token_out,
+        amount_in,
+        fee_tier,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_token_to_token_swap_v3_with_min_out_router(
+    router: Address,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    fee_tier: u32,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_exact_input_single(
         token_in,
         token_out,
@@ -282,7 +409,7 @@ pub fn build_token_to_token_swap_v3_with_min_out(
 
     UnsignedTransaction {
         from: Some(trader),
-        to: Some(router_address_v3()),
+        to: Some(router),
         gas: Some(350_000),
         gas_price: None,
         max_fee_per_gas: None,

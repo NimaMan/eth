@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
-use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol};
 use reth_chain_query::provider::BlockHeader;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
@@ -253,20 +253,34 @@ impl UniswapV3Pool {
             .test_amount
             .unwrap_or(scaled_decimal_amount(denom_amount, denom_decimals)?);
 
-        let mut params = PoolBuySellParameters::new(
-            token_address,
-            pool_address,
-            PoolType::UniswapV3 {
-                fee_tier: self.fee_tier,
-            },
-        )
-        .with_test_amount(test_amount)
-        .with_denom_address(denom_address)
-        .with_denom_decimals(denom_decimals)
-        .with_token_decimals(self.base.config.token_decimals);
+        let pool_type = self.simulation_pool_type();
+        let mut params = PoolBuySellParameters::new(token_address, pool_address, pool_type)
+            .with_test_amount(test_amount)
+            .with_denom_address(denom_address)
+            .with_denom_decimals(denom_decimals)
+            .with_token_decimals(self.base.config.token_decimals);
 
         apply_common_parameter_config(&mut params, config);
         Ok(params)
+    }
+
+    fn simulation_pool_type(&self) -> PoolType {
+        let protocol = self
+            .factory_address
+            .as_deref()
+            .and_then(|address| parse_address(address).ok())
+            .and_then(KnownV3Protocol::from_factory)
+            .or_else(|| KnownV3Protocol::from_label(&self.base.identity.protocol))
+            .unwrap_or(KnownV3Protocol::UniswapV3);
+
+        match protocol {
+            KnownV3Protocol::UniswapV3 => PoolType::UniswapV3 {
+                fee_tier: self.fee_tier,
+            },
+            KnownV3Protocol::SushiSwapV3 => PoolType::SushiSwapV3 {
+                fee_tier: self.fee_tier,
+            },
+        }
     }
 
     pub async fn evaluate_trading_status_v3_with_pool_simulator(

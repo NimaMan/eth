@@ -247,16 +247,19 @@ async fn simulate_pool(
         .ok_or_else(|| eyre!("missing fee tier for pool {}", pool.pool_address))?;
     let test_amount = scaled_decimal_amount(0.01, denom_decimals)?;
 
-    let config = PoolBuySellParameters::new(
-        token_address,
-        pool_address,
-        PoolType::UniswapV3 { fee_tier },
-    )
-    .with_test_amount(test_amount)
-    .with_denom_address(denom_address)
-    .with_denom_decimals(denom_decimals)
-    .with_token_decimals(token_decimals)
-    .with_block(block_number);
+    let pool_type = match pool.protocol.to_ascii_uppercase().as_str() {
+        "SUSHISWAP-V3" | "SUSHISWAP_V3" | "SUSHI-V3" | "SUSHI_V3" => {
+            PoolType::SushiSwapV3 { fee_tier }
+        }
+        _ => PoolType::UniswapV3 { fee_tier },
+    };
+
+    let config = PoolBuySellParameters::new(token_address, pool_address, pool_type)
+        .with_test_amount(test_amount)
+        .with_denom_address(denom_address)
+        .with_denom_decimals(denom_decimals)
+        .with_token_decimals(token_decimals)
+        .with_block(block_number);
 
     check_can_buy_sell_pool(simulator, tx_processor, config).await
 }

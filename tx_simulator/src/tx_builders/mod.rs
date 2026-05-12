@@ -52,6 +52,16 @@ pub fn build_buy_swap(
             slippage_bps,
             deadline,
         ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_buy_swap_v3_with_router(
+            router,
+            buyer,
+            token_out,
+            amount_in_eth,
+            fee_tier,
+            deadline,
+        ),
         AmmSwapRoute::CurveV1 {
             pool,
             i,
@@ -119,6 +129,17 @@ pub fn build_buy_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_buy_swap_v3_with_min_out_router(
+            router,
+            buyer,
+            token_out,
+            amount_in_eth,
+            fee_tier,
+            amount_out_min,
+            deadline,
+        ),
         _ => uniswap_v2::build_buy_swap_v2_with_min_out(
             uniswap_v2::Router::UniswapV2,
             buyer,
@@ -148,6 +169,9 @@ pub fn build_approve_for_route(
             uniswap_v2::build_approve_v2(uniswap_v2::Router::Custom(router), owner, token, amount)
         }
         AmmSwapRoute::UniswapV3 { .. } => uniswap_v3::build_approve_v3(owner, token, amount),
+        AmmSwapRoute::V3Router { router, .. } => {
+            uniswap_v3::build_approve_v3_for_router(router, owner, token, amount)
+        }
         _ => uniswap_v2::build_approve_v2(uniswap_v2::Router::UniswapV2, owner, token, amount),
     }
 }
@@ -192,6 +216,16 @@ pub fn build_sell_swap(
             amount_in_tokens,
             fee_tier,
             slippage_bps,
+            deadline,
+        ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_sell_swap_v3_with_router(
+            router,
+            seller,
+            token_in,
+            amount_in_tokens,
+            fee_tier,
             deadline,
         ),
         _ => uniswap_v2::build_sell_swap_v2(
@@ -277,6 +311,11 @@ fn build_fee_tolerant_token_to_token_swap(
         AmmSwapRoute::UniswapV3 { fee_tier, .. } => uniswap_v3::build_token_to_token_swap_v3(
             trader, token_in, token_out, amount_in, fee_tier, 0, deadline,
         ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_token_to_token_swap_v3_with_router(
+            router, trader, token_in, token_out, amount_in, fee_tier, deadline,
+        ),
         _ => build_token_to_token_swap(route, trader, token_in, token_out, amount_in, 0, deadline),
     }
 }
@@ -316,6 +355,17 @@ pub fn build_sell_swap_with_min_out(
             deadline,
         ),
         AmmSwapRoute::UniswapV3 { fee_tier, .. } => uniswap_v3::build_sell_swap_v3_with_min_out(
+            seller,
+            token_in,
+            amount_in_tokens,
+            fee_tier,
+            amount_out_min,
+            deadline,
+        ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_sell_swap_v3_with_min_out_router(
+            router,
             seller,
             token_in,
             amount_in_tokens,
@@ -381,6 +431,11 @@ pub fn build_token_to_token_swap(
             slippage_bps,
             deadline,
         ),
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_token_to_token_swap_v3_with_router(
+            router, trader, token_in, token_out, amount_in, fee_tier, deadline,
+        ),
         _ => uniswap_v2::build_token_to_token_swap_v2(
             uniswap_v2::Router::UniswapV2,
             trader,
@@ -444,6 +499,18 @@ pub fn build_token_to_token_swap_with_min_out(
                 deadline,
             )
         }
+        AmmSwapRoute::V3Router {
+            router, fee_tier, ..
+        } => uniswap_v3::build_token_to_token_swap_v3_with_min_out_router(
+            router,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            fee_tier,
+            amount_out_min,
+            deadline,
+        ),
         _ => uniswap_v2::build_token_to_token_swap_v2_with_min_out(
             uniswap_v2::Router::UniswapV2,
             trader,
@@ -468,6 +535,7 @@ pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
             0x2c, 0xca, 0x9C, 0x37, 0x8B, 0x9F,
         ]),
         AmmSwapRoute::V2Router { router, .. } => router,
+        AmmSwapRoute::V3Router { router, .. } => router,
         AmmSwapRoute::UniswapV3 { .. } => Address::from([
             0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0,
             0x15, 0x7C, 0x05, 0x86, 0x15, 0x64,

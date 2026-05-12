@@ -1,7 +1,7 @@
 //! Pool-derived network update extraction.
 
 use alloy_primitives::{Address, B256, U256};
-use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol};
 use tx_processor::ProcessedTransaction;
 
 use crate::network::{
@@ -17,6 +17,7 @@ use crate::network::{
 
 pub const UNISWAP_V2_PROTOCOL: &str = "uniswap_v2";
 pub const UNISWAP_V3_PROTOCOL: &str = "uniswap_v3";
+pub const SUSHI_V3_PROTOCOL: &str = "sushiswap_v3";
 pub const UNISWAP_V4_PROTOCOL: &str = "uniswap_v4";
 pub const PANCAKE_V2_PROTOCOL: &str = "pancake_v2";
 pub const SUSHI_V2_PROTOCOL: &str = "sushiswap";
@@ -31,6 +32,14 @@ fn v2_protocol_label(factory: Address) -> &'static str {
         Some(KnownV2Protocol::ShibaSwapV2) => SHIBA_V2_PROTOCOL,
         Some(KnownV2Protocol::FraxswapV2) => FRAX_V2_PROTOCOL,
         None => UNISWAP_V2_PROTOCOL,
+    }
+}
+
+fn v3_protocol_label(factory: Address) -> &'static str {
+    match KnownV3Protocol::from_factory(factory) {
+        Some(KnownV3Protocol::UniswapV3) => UNISWAP_V3_PROTOCOL,
+        Some(KnownV3Protocol::SushiSwapV3) => SUSHI_V3_PROTOCOL,
+        None => UNISWAP_V3_PROTOCOL,
     }
 }
 
@@ -69,8 +78,10 @@ pub fn extract_pool_updates(
             "uniswap_v2_pair_created",
             "tracked token Uniswap V2 pair created",
         );
-        edge.attributes
-            .insert("protocol".to_string(), v2_protocol_label(event.factory_address).to_string());
+        edge.attributes.insert(
+            "protocol".to_string(),
+            v2_protocol_label(event.factory_address).to_string(),
+        );
         edge.attributes
             .insert("token0".to_string(), address_string(&event.token0));
         edge.attributes
@@ -165,8 +176,16 @@ pub fn extract_pool_updates(
             "uniswap_v3_pool_created",
             "tracked token Uniswap V3 pool created",
         );
-        edge.attributes
-            .insert("protocol".to_string(), UNISWAP_V3_PROTOCOL.to_string());
+        edge.attributes.insert(
+            "protocol".to_string(),
+            v3_protocol_label(event.factory_address).to_string(),
+        );
+        if !event.factory_address.is_zero() {
+            edge.attributes.insert(
+                "factory".to_string(),
+                address_string(&event.factory_address),
+            );
+        }
         edge.attributes
             .insert("fee".to_string(), event.fee.to_string());
         edge.attributes
@@ -523,6 +542,7 @@ mod tests {
         let token = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let mut tx = tx();
         tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+            factory_address: address!("1f98431c8ad98523631ae4a59f267346ea31f984"),
             token0: token,
             token1: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
             fee: 3_000,

@@ -77,12 +77,17 @@ pub async fn simulate_sell_swap_with_params(
             pool: config.pool_address,
             router: protocol.router(),
         }
+    } else if let (Some(protocol), Some(fee_tier)) = (
+        config.pool_type.known_v3_protocol(),
+        config.pool_type.v3_fee_tier(),
+    ) {
+        AmmSwapRoute::V3Router {
+            pool: config.pool_address,
+            router: protocol.router(),
+            fee_tier,
+        }
     } else {
         match config.pool_type {
-            PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
-                pool: config.pool_address,
-                fee_tier,
-            },
             _ => {
                 return Err(eyre::eyre!(
                     "Pool type {:?} not yet supported for sell-only simulation",

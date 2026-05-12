@@ -1,8 +1,7 @@
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
-use reth_chain_query::dex::{
-    encoding::{encode_function_call, encode_two_addresses, encode_two_addresses_and_uint256},
-    UNISWAP_V3_FACTORY,
+use reth_chain_query::dex::encoding::{
+    encode_function_call, encode_two_addresses, encode_two_addresses_and_uint256,
 };
 use tx_simulator::{UnsignedTxChainSimulation, ViewFunctionResult};
 
@@ -16,88 +15,94 @@ pub(super) fn validate_pool_registration(
     config: &PoolBuySellParameters,
     block_number: u64,
 ) -> Result<()> {
-    match config.pool_type {
-        pool_type if pool_type.known_v2_protocol().is_some() => {
-            let denom = config.denom_address;
-            if denom.is_zero() {
-                return Err(eyre!(
-                    "denom_address missing for {:?} pool",
-                    config.pool_type
-                ));
-            }
-            let protocol = pool_type
-                .known_v2_protocol()
-                .expect("checked known v2 protocol");
-            let resolved = fetch_uniswap_v2_pair_address_on_chain(
-                chain,
-                protocol.factory(),
+    if let Some(protocol) = config.pool_type.known_v2_protocol() {
+        let denom = config.denom_address;
+        if denom.is_zero() {
+            return Err(eyre!(
+                "denom_address missing for {:?} pool",
+                config.pool_type
+            ));
+        }
+        let resolved = fetch_uniswap_v2_pair_address_on_chain(
+            chain,
+            protocol.factory(),
+            config.token_address,
+            denom,
+            block_number,
+            config.pool_type,
+        )?;
+
+        if resolved.is_zero() {
+            return Err(eyre!(
+                "No {:?} pool found for token {} with denom {} at block {}",
+                config.pool_type,
                 config.token_address,
                 denom,
-                block_number,
-                config.pool_type,
-            )?;
-
-            if resolved.is_zero() {
-                return Err(eyre!(
-                    "No {:?} pool found for token {} with denom {} at block {}",
-                    config.pool_type,
-                    config.token_address,
-                    denom,
-                    block_number
-                ));
-            }
-
-            if resolved != config.pool_address {
-                return Err(eyre!(
-                    "{:?} factory reports pool {} but configuration provided {} for token {} / denom {} at block {}",
-                    config.pool_type,
-                    resolved,
-                    config.pool_address,
-                    config.token_address,
-                    denom,
-                    block_number
-                ));
-            }
+                block_number
+            ));
         }
-        PoolType::UniswapV3 { fee_tier } => {
-            let denom = config.denom_address;
-            if denom.is_zero() {
-                return Err(eyre!("denom_address missing for Uniswap V3 pool checks"));
-            }
 
-            let resolved = fetch_uniswap_v3_pool_address_on_chain(
-                chain,
-                UNISWAP_V3_FACTORY,
+        if resolved != config.pool_address {
+            return Err(eyre!(
+                "{:?} factory reports pool {} but configuration provided {} for token {} / denom {} at block {}",
+                config.pool_type,
+                resolved,
+                config.pool_address,
+                config.token_address,
+                denom,
+                block_number
+            ));
+        }
+        return Ok(());
+    }
+
+    if let (Some(protocol), Some(fee_tier)) = (
+        config.pool_type.known_v3_protocol(),
+        config.pool_type.v3_fee_tier(),
+    ) {
+        let denom = config.denom_address;
+        if denom.is_zero() {
+            return Err(eyre!(
+                "denom_address missing for {} pool checks",
+                protocol.label()
+            ));
+        }
+
+        let resolved = fetch_uniswap_v3_pool_address_on_chain(
+            chain,
+            protocol.factory(),
+            config.token_address,
+            denom,
+            fee_tier,
+            block_number,
+            protocol.label(),
+        )?;
+
+        if resolved.is_zero() {
+            return Err(eyre!(
+                "No {} pool found for token {} with denom {} at fee tier {} and block {}",
+                protocol.label(),
                 config.token_address,
                 denom,
                 fee_tier,
-                block_number,
-            )?;
-
-            if resolved.is_zero() {
-                return Err(eyre!(
-                    "No Uniswap V3 pool found for token {} with denom {} at fee tier {} and block {}",
-                    config.token_address,
-                    denom,
-                    fee_tier,
-                    block_number
-                ));
-            }
-
-            if resolved != config.pool_address {
-                return Err(eyre!(
-                    "Uniswap V3 factory reports pool {} but configuration provided {} for token {} / denom {} at fee tier {} and block {}",
-                    resolved,
-                    config.pool_address,
-                    config.token_address,
-                    denom,
-                    fee_tier,
-                    block_number
-                ));
-            }
+                block_number
+            ));
         }
-        PoolType::UniswapV4 => {}
-        _ => {}
+
+        if resolved != config.pool_address {
+            return Err(eyre!(
+                "{} factory reports pool {} but configuration provided {} for token {} / denom {} at fee tier {} and block {}",
+                protocol.label(),
+                resolved,
+                config.pool_address,
+                config.token_address,
+                denom,
+                fee_tier,
+                block_number
+            ));
+        }
+
+        return Ok(());
     }
 
     Ok(())
@@ -141,6 +146,7 @@ fn fetch_uniswap_v3_pool_address_on_chain(
     token_b: Address,
     fee_tier: u32,
     block_number: u64,
+    protocol_label: &str,
 ) -> Result<Address> {
     let params = encode_two_addresses_and_uint256(token_a, token_b, U256::from(fee_tier));
     let call_data = encode_function_call(UNISWAP_V3_FACTORY_GET_POOL, &params);
@@ -148,7 +154,8 @@ fn fetch_uniswap_v3_pool_address_on_chain(
         .simulate_view_call(factory, call_data)
         .map_err(|err| {
             eyre!(
-                "Uniswap V3 factory getPool check failed at block {}: {}",
+                "{} factory getPool check failed at block {}: {}",
+                protocol_label,
                 block_number,
                 err
             )
@@ -156,7 +163,7 @@ fn fetch_uniswap_v3_pool_address_on_chain(
 
     decode_factory_address_response(
         response,
-        format!("Uniswap V3 factory getPool fee={fee_tier}"),
+        format!("{protocol_label} factory getPool fee={fee_tier}"),
         factory,
         token_a,
         token_b,
