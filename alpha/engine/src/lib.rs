@@ -15,11 +15,11 @@ use async_trait::async_trait;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     error::Result,
-    execution::ExecutionReport,
+    execution::{ExecutionReport, ExecutionStatus},
     market::{MarketEvent, MarketSnapshotRef, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
-    position::{Position, PositionKey, PositionSnapshot},
+    position::{Position, PositionKey, PositionSnapshot, PositionState},
     risk::{RiskDecision, RiskEvent, RiskKind, RiskPolicy, RiskSeverity},
     store::TradingStore,
     strategy::{Strategy, StrategyContext, StrategyDecision},
@@ -188,12 +188,16 @@ where
             .portfolio
             .positions
             .values()
-            .filter(|position| position.key.pool_address == pool.address && position.is_open())
+            .filter(|position| position.key.pool_address == pool.address && position.has_exposure())
             .cloned()
             .collect::<Vec<_>>();
 
         for position in positions {
-            let snapshot = if position.drained {
+            let snapshot = if position.drained
+                || matches!(
+                    position.state,
+                    PositionState::SellFailed | PositionState::SellCancelled
+                ) {
                 Some(zero_value_snapshot(&position, *block_number))
             } else {
                 self.execution
@@ -250,7 +254,7 @@ where
             if let Some(ref pool_address) = event.pool_address {
                 for position in self.portfolio.positions.values_mut() {
                     if position.key.pool_address == *pool_address
-                        && position.is_open()
+                        && position.has_exposure()
                         && !position.drained
                     {
                         position.mark_drained();
@@ -313,6 +317,7 @@ where
         position.mark_intent_created(intent.side)?;
         let report = self.execution.execute(intent.clone()).await?;
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+        let report_status = report.status.clone();
 
         // Chain-sim buys provide both cost basis and token amount, so entry
         // price is derived only from the simulated fill.
@@ -336,7 +341,21 @@ where
 
         self.store.upsert_position(&position).await?;
         self.store.record_execution_report(&report).await?;
-        if position.is_closed() {
+        if intent.side == OrderSide::Sell
+            && matches!(
+                report_status,
+                ExecutionStatus::Failed | ExecutionStatus::Cancelled
+            )
+        {
+            let snapshot = zero_value_snapshot(
+                &position,
+                report
+                    .block_number
+                    .or_else(|| self.market.as_ref().map(|m| m.block_number))
+                    .unwrap_or_default(),
+            );
+            self.store.append_position_snapshot(&snapshot).await?;
+        } else if position.is_closed() {
             let snapshot = PositionSnapshot {
                 position_id: position.id.clone(),
                 state: position.state.clone(),

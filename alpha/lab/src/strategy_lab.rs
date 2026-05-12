@@ -21,6 +21,8 @@ pub struct RunSummary {
     pub positions: i64,
     pub open_positions: i64,
     pub failed_positions: i64,
+    pub buy_failed_positions: i64,
+    pub sell_failed_positions: i64,
     pub entry_cost_eth: String,
     pub execution_reports: i64,
     pub confirmed_reports: i64,
@@ -133,6 +135,14 @@ pub fn print_strategy_report(report: &StrategyReport) {
             vec![
                 "failed positions".to_string(),
                 report.summary.failed_positions.to_string(),
+            ],
+            vec![
+                "buy failed positions".to_string(),
+                report.summary.buy_failed_positions.to_string(),
+            ],
+            vec![
+                "sell failed positions".to_string(),
+                report.summary.sell_failed_positions.to_string(),
             ],
             vec![
                 "entry cost ETH".to_string(),
@@ -336,13 +346,23 @@ fn issue_flags(
             ),
         });
     }
-    if summary.failed_positions > 0 {
+    if summary.buy_failed_positions > 0 {
         flags.push(IssueFlag {
             severity: "medium".to_string(),
-            code: "failed_positions".to_string(),
+            code: "buy_failed_positions".to_string(),
             message: format!(
                 "{} positions failed entry simulation",
-                summary.failed_positions
+                summary.buy_failed_positions
+            ),
+        });
+    }
+    if summary.sell_failed_positions > 0 {
+        flags.push(IssueFlag {
+            severity: "high".to_string(),
+            code: "sell_failed_positions".to_string(),
+            message: format!(
+                "{} positions still have exposure after a failed sell",
+                summary.sell_failed_positions
             ),
         });
     }
@@ -391,24 +411,35 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
         rollup AS (
             SELECT
                 count(*) AS positions,
-                count(*) FILTER (WHERE state='buy_confirmed') AS open_positions,
-                count(*) FILTER (WHERE state='failed') AS failed_positions,
+                count(*) FILTER (
+                    WHERE state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                ) AS open_positions,
+                count(*) FILTER (WHERE state IN ('buy_failed', 'sell_failed')) AS failed_positions,
+                count(*) FILTER (WHERE state='buy_failed') AS buy_failed_positions,
+                count(*) FILTER (WHERE state='sell_failed') AS sell_failed_positions,
                 coalesce(sum((payload->>'entry_cost_basis')::numeric), 0) AS entry_cost_eth,
                 count(l.*) AS latest_snapshot_positions,
                 coalesce(sum(l.current_value_eth), 0) AS latest_current_value_eth,
                 coalesce(sum(l.realized_profit_eth), 0) AS realized_pnl_eth,
                 coalesce(sum(l.unrealized_profit_eth), 0) AS unrealized_pnl_eth,
                 coalesce(sum(l.realized_profit_eth + l.unrealized_profit_eth), 0) AS total_pnl_eth,
-                count(*) FILTER (WHERE state='buy_confirmed' AND l.position_id IS NULL) AS open_without_snapshot,
                 count(*) FILTER (
-                    WHERE state='buy_confirmed'
+                    WHERE state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                      AND l.position_id IS NULL
+                ) AS open_without_snapshot,
+                count(*) FILTER (
+                    WHERE state IN ('buy_confirmed', 'sell_failed', 'sell_cancelled')
                       AND (payload->>'entry_token_amount')::numeric = 0
                       AND coalesce(payload->'entry_token_raw_amount'->>'raw', '') NOT IN ('', '0', '0x', '0x0')
                 ) AS zero_decimal_nonzero_raw,
                 CASE
-                    WHEN sum((payload->>'entry_cost_basis')::numeric) FILTER (WHERE state='buy_confirmed') > 0
+                    WHEN sum((payload->>'entry_cost_basis')::numeric) FILTER (
+                        WHERE state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                    ) > 0
                     THEN coalesce(sum(l.realized_profit_eth + l.unrealized_profit_eth), 0)
-                         / (sum((payload->>'entry_cost_basis')::numeric) FILTER (WHERE state='buy_confirmed'))
+                         / (sum((payload->>'entry_cost_basis')::numeric) FILTER (
+                             WHERE state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                         ))
                     ELSE NULL
                 END AS total_roi_on_open_cost
             FROM pos
@@ -418,6 +449,8 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
             rollup.positions,
             rollup.open_positions,
             rollup.failed_positions,
+            rollup.buy_failed_positions,
+            rollup.sell_failed_positions,
             rollup.entry_cost_eth::text AS entry_cost_eth,
             rollup.latest_current_value_eth::text AS latest_current_value_eth,
             rollup.realized_pnl_eth::text AS realized_pnl_eth,
@@ -443,6 +476,8 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
         positions: row.try_get("positions")?,
         open_positions: row.try_get("open_positions")?,
         failed_positions: row.try_get("failed_positions")?,
+        buy_failed_positions: row.try_get("buy_failed_positions")?,
+        sell_failed_positions: row.try_get("sell_failed_positions")?,
         entry_cost_eth: row.try_get("entry_cost_eth")?,
         execution_reports: row.try_get("execution_reports")?,
         confirmed_reports: row.try_get("confirmed_reports")?,
@@ -464,7 +499,8 @@ async fn load_concentration(pool: &PgPool, run_id: &str) -> Result<PnlConcentrat
         r#"
         WITH latest AS (
             SELECT DISTINCT ON (ps.run_id, ps.position_id)
-                   NULLIF(ps.unrealized_profit_eth, '')::numeric AS pnl
+                   NULLIF(ps.realized_profit_eth, '')::numeric
+                     + NULLIF(ps.unrealized_profit_eth, '')::numeric AS pnl
             FROM alpha_trading.position_snapshots ps
             WHERE ps.run_id = $1
             ORDER BY ps.run_id, ps.position_id, ps.block_number DESC NULLS LAST, ps.id DESC
@@ -550,7 +586,8 @@ async fn load_protocols(
         WITH pos AS (
             SELECT lower(pool_address) AS pool_id, (payload->>'entry_block')::bigint AS entry_block
             FROM alpha_trading.positions
-            WHERE run_id = $1 AND state = 'buy_confirmed'
+            WHERE run_id = $1
+              AND payload ? 'entry_block'
         )
         SELECT
             coalesce(so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
@@ -600,7 +637,8 @@ async fn load_ranked_positions(
                    ps.run_id,
                    ps.position_id,
                    NULLIF(ps.current_value_eth, '')::numeric AS current_value_eth,
-                   NULLIF(ps.unrealized_profit_eth, '')::numeric AS pnl,
+                   NULLIF(ps.realized_profit_eth, '')::numeric
+                     + NULLIF(ps.unrealized_profit_eth, '')::numeric AS pnl,
                    NULLIF(ps.roi, '')::numeric AS roi,
                    ps.block_number AS snapshot_block
             FROM alpha_trading.position_snapshots ps

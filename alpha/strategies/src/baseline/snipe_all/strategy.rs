@@ -62,7 +62,7 @@ impl SnipeAllStrategy {
             p.key.strategy_name == self.name()
                 && p.key.token_address == token_address
                 && p.key.pool_address == pool_address
-                && p.is_open()
+                && p.can_submit_exit()
         });
 
         let Some(token_amount) = position
@@ -70,8 +70,6 @@ impl SnipeAllStrategy {
         else {
             return StrategyDecision::Hold;
         };
-
-        self.state.mark_exiting(pool_address.clone());
 
         StrategyDecision::SubmitOrder(OrderIntent {
             portfolio_id: self.config.portfolio_id.clone(),
@@ -96,8 +94,7 @@ impl SnipeAllStrategy {
         pool: &PoolSnapshot,
         current_block: u64,
     ) -> Option<StrategyDecision> {
-        // Already exiting?
-        if self.state.is_exiting(&pool.address) {
+        if !position.can_submit_exit() {
             return None;
         }
 
@@ -193,7 +190,7 @@ impl Strategy for SnipeAllStrategy {
             p.key.strategy_name == strategy_name
                 && p.key.token_address == pool.token_address
                 && p.key.pool_address == pool.address
-                && p.is_open()
+                && p.has_exposure()
         }) {
             self.state.mark_bought(pool.address.clone());
 
@@ -243,9 +240,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
-                    }
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                 }
             }
         }
@@ -259,9 +254,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
-                    }
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                 }
             }
         }
@@ -275,9 +268,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
-                    }
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                 }
             }
         }
@@ -291,9 +282,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    if !self.state.is_exiting(&pool_address) {
-                        return Ok(self.sell_pool(ctx, event.token_address, pool_address));
-                    }
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
                 }
             }
         }

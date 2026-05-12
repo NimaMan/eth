@@ -89,6 +89,7 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
 | `--from-block` | Start block (inclusive) | first observation |
 | `--to-block` | End block (inclusive) | last observation |
 | `--skip-primed` | Skip warmup observations | false |
+| `--include-mempool-signals` | Replay stored mempool risk signals | false |
 | `--stop-loss-ratio` | Stop-loss trigger ratio | disabled |
 | `--take-profit-ratio` | Take-profit trigger ratio | disabled |
 | `--max-hold-blocks` | Force exit after N blocks | disabled |

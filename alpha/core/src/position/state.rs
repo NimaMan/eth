@@ -6,10 +6,13 @@ pub enum PositionState {
     BuyIntentCreated,
     BuySubmitted,
     BuyConfirmed,
+    BuyFailed,
+    BuyCancelled,
     SellIntentCreated,
     SellSubmitted,
+    SellFailed,
+    SellCancelled,
     SellConfirmed,
-    Failed,
     Cancelled,
     Scammed,
 }
@@ -18,10 +21,29 @@ impl PositionState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            PositionState::SellConfirmed
-                | PositionState::Failed
+            PositionState::BuyFailed
+                | PositionState::BuyCancelled
+                | PositionState::SellConfirmed
                 | PositionState::Cancelled
                 | PositionState::Scammed
+        )
+    }
+
+    pub fn has_exposure(&self) -> bool {
+        matches!(
+            self,
+            PositionState::BuyConfirmed
+                | PositionState::SellIntentCreated
+                | PositionState::SellSubmitted
+                | PositionState::SellFailed
+                | PositionState::SellCancelled
+        )
+    }
+
+    pub fn can_submit_exit(&self) -> bool {
+        matches!(
+            self,
+            PositionState::BuyConfirmed | PositionState::SellFailed | PositionState::SellCancelled
         )
     }
 }

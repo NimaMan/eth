@@ -42,7 +42,8 @@ impl Amount {
         let decimal_pos = chars.len() - decimals;
         chars.insert(decimal_pos, '.');
         let decimal_str: String = chars.iter().collect();
-        DecimalAmount::from_str_exact(&decimal_str).unwrap_or_default()
+        DecimalAmount::from_str_exact(&decimal_str)
+            .unwrap_or_else(|_| scaled_digits_to_decimal_lossy(&s, decimals))
     }
 
     /// Convert a decimal value to raw amount.
@@ -68,5 +69,50 @@ impl Amount {
         let raw_str = format!("{}{}{}", int_part, frac_trimmed, "0".repeat(zeros_to_add));
         let raw = U256::from_str_radix(&raw_str, 10).unwrap_or(U256::ZERO);
         Self { raw, decimals }
+    }
+}
+
+fn scaled_digits_to_decimal_lossy(raw_digits: &str, decimals: usize) -> DecimalAmount {
+    let digits = raw_digits.trim_start_matches('0');
+    if digits.is_empty() {
+        return DecimalAmount::ZERO;
+    }
+
+    // rust_decimal supports roughly 28 significant decimal digits. Keep the
+    // leading significant digits and express the scale through the exponent so
+    // very large ERC20 supplies do not collapse to zero in reporting.
+    let significant_len = digits.len().min(28);
+    let significant = &digits[..significant_len];
+    let mantissa = if significant_len == 1 {
+        significant.to_string()
+    } else {
+        format!("{}.{}", &significant[..1], &significant[1..])
+    };
+    let exponent = digits.len() as i32 - decimals as i32 - 1;
+    DecimalAmount::from_scientific_lossy(&format!("{mantissa}E{exponent}")).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_standard_eth_scale_exactly() {
+        let amount = Amount {
+            raw: U256::from(1_500_000_000_000_000_000u128),
+            decimals: 18,
+        };
+
+        assert_eq!(amount.to_decimal().to_string(), "1.500000000000000000");
+    }
+
+    #[test]
+    fn large_scaled_amount_does_not_collapse_to_zero() {
+        let amount = Amount {
+            raw: U256::from_str_radix("52a5dd4266c9ae03322fef0fe1", 16).unwrap(),
+            decimals: 18,
+        };
+
+        assert!(amount.to_decimal() > DecimalAmount::ZERO);
     }
 }

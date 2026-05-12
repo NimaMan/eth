@@ -1,8 +1,11 @@
 use eth_alpha_core::{ExecutionReport, ExecutionStatus, OrderId, PositionState};
 
 #[test]
-fn failed_execution_status_is_terminal() {
-    assert!(PositionState::Failed.is_terminal());
+fn failed_buy_status_is_terminal_but_failed_sell_keeps_exposure() {
+    assert!(PositionState::BuyFailed.is_terminal());
+    assert!(!PositionState::SellFailed.is_terminal());
+    assert!(PositionState::SellFailed.has_exposure());
+    assert!(PositionState::SellFailed.can_submit_exit());
     assert_eq!(ExecutionStatus::Failed, ExecutionStatus::Failed);
 
     let report = ExecutionReport {

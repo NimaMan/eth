@@ -79,7 +79,12 @@ impl Position {
                 self.state = PositionState::BuyIntentCreated;
                 Ok(())
             }
-            (PositionState::BuyConfirmed, OrderSide::Sell) => {
+            (
+                PositionState::BuyConfirmed
+                | PositionState::SellFailed
+                | PositionState::SellCancelled,
+                OrderSide::Sell,
+            ) => {
                 self.state = PositionState::SellIntentCreated;
                 Ok(())
             }
@@ -121,16 +126,50 @@ impl Position {
     ) -> Result<()> {
         match report.status {
             ExecutionStatus::Confirmed => self.apply_confirmed_report(report, fill_price),
-            ExecutionStatus::Failed => {
-                self.state = PositionState::Failed;
-                Ok(())
-            }
-            ExecutionStatus::Cancelled => {
-                self.state = PositionState::Cancelled;
-                Ok(())
-            }
+            ExecutionStatus::Failed => self.apply_failed_report(report),
+            ExecutionStatus::Cancelled => self.apply_cancelled_report(report),
             ExecutionStatus::Submitted | ExecutionStatus::Pending => Ok(()),
         }
+    }
+
+    fn apply_failed_report(&mut self, report: &ExecutionReport) -> Result<()> {
+        if self.entry_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::BuySubmitted
+        {
+            self.state = PositionState::BuyFailed;
+            return Ok(());
+        }
+
+        if self.exit_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::SellSubmitted
+        {
+            self.state = PositionState::SellFailed;
+            return Ok(());
+        }
+
+        Err(AlphaCoreError::InvalidPositionTransition(format!(
+            "failed report {:?} does not match position {:?}",
+            report.order_id, self.state
+        )))
+    }
+
+    fn apply_cancelled_report(&mut self, report: &ExecutionReport) -> Result<()> {
+        if self.entry_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::BuySubmitted
+        {
+            self.state = PositionState::BuyCancelled;
+            return Ok(());
+        }
+
+        if self.exit_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::SellSubmitted
+        {
+            self.state = PositionState::SellCancelled;
+            return Ok(());
+        }
+
+        self.state = PositionState::Cancelled;
+        Ok(())
     }
 
     fn apply_confirmed_report(
@@ -182,7 +221,15 @@ impl Position {
     }
 
     pub fn is_open(&self) -> bool {
-        self.state == PositionState::BuyConfirmed
+        self.has_exposure()
+    }
+
+    pub fn has_exposure(&self) -> bool {
+        self.state.has_exposure()
+    }
+
+    pub fn can_submit_exit(&self) -> bool {
+        self.state.can_submit_exit()
     }
 
     pub fn is_closed(&self) -> bool {

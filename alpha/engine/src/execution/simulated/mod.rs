@@ -629,9 +629,6 @@ fn position_value_from_report(
             let error = report
                 .error
                 .unwrap_or_else(|| "chain-sim position valuation failed".to_string());
-            if valuation_was_unavailable(&error) {
-                return None;
-            }
             Some(PositionValueSimulation {
                 block_number,
                 current_value: Amount::zero(18),
@@ -641,16 +638,6 @@ fn position_value_from_report(
         }
         ExecutionStatus::Submitted | ExecutionStatus::Pending | ExecutionStatus::Cancelled => None,
     }
-}
-
-fn valuation_was_unavailable(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("not supported")
-        || lower.contains("invalid pool address")
-        || lower.contains("current block not set")
-        || lower.contains("pool not in simulation state")
-        || lower.contains("unable to inject synthetic erc20 balance")
-        || lower.contains("state for block")
 }
 
 fn unique_order_prefix() -> String {
@@ -675,4 +662,32 @@ fn parse_pool_address(pool_id: &PoolAddress) -> Result<Address> {
     addr_str
         .parse::<Address>()
         .map_err(|_| eth_alpha_core::error::AlphaCoreError::InvalidPoolAddress(s.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_position_valuation_returns_zero_value_snapshot_input() {
+        let report = ExecutionReport {
+            order_id: OrderId("valuation-1".to_string()),
+            status: ExecutionStatus::Failed,
+            tx_hash: None,
+            block_number: None,
+            filled_amount: None,
+            token_amount: None,
+            gas_used: Some(123),
+            error: Some("unable to inject synthetic ERC20 balance".to_string()),
+        };
+
+        let value = position_value_from_report(report, 42).expect("zero valuation");
+        assert_eq!(value.block_number, 42);
+        assert_eq!(value.current_value, Amount::zero(18));
+        assert_eq!(value.gas_used, Some(123));
+        assert_eq!(
+            value.error.as_deref(),
+            Some("unable to inject synthetic ERC20 balance")
+        );
+    }
 }

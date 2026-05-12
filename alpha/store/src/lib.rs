@@ -248,7 +248,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state NOT IN ('sell_confirmed', 'failed', 'cancelled', 'scammed')
+              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
             ORDER BY updated_at DESC
             "#,
         )
@@ -475,10 +475,13 @@ fn position_state_label(state: &PositionState) -> &'static str {
         PositionState::BuyIntentCreated => "buy_intent_created",
         PositionState::BuySubmitted => "buy_submitted",
         PositionState::BuyConfirmed => "buy_confirmed",
+        PositionState::BuyFailed => "buy_failed",
+        PositionState::BuyCancelled => "buy_cancelled",
         PositionState::SellIntentCreated => "sell_intent_created",
         PositionState::SellSubmitted => "sell_submitted",
+        PositionState::SellFailed => "sell_failed",
+        PositionState::SellCancelled => "sell_cancelled",
         PositionState::SellConfirmed => "sell_confirmed",
-        PositionState::Failed => "failed",
         PositionState::Cancelled => "cancelled",
         PositionState::Scammed => "scammed",
     }

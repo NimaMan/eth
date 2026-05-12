@@ -54,6 +54,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     skip_primed: bool,
 
+    /// Replay mempool risk signals. Disabled by default for pool-only historical baselines.
+    #[arg(long, default_value_t = false)]
+    include_mempool_signals: bool,
+
     /// Enable liquidity-removal exits (default: disabled for quantification).
     #[arg(long, default_value_t = false)]
     exit_liquidity_removal: bool,
@@ -130,6 +134,7 @@ async fn main() -> Result<()> {
             serde_json::json!({
                 "strategy_name": args.strategy_name,
                 "replay_run_id": args.replay_run_id,
+                "include_mempool_signals": args.include_mempool_signals,
                 "min_liquidity_usd": min_liquidity_usd.to_string(),
             }),
         )
@@ -140,6 +145,7 @@ async fn main() -> Result<()> {
         store.pool(),
         &args.replay_run_id,
         args.skip_primed,
+        args.include_mempool_signals,
         args.from_block,
         args.to_block,
     )
@@ -184,6 +190,7 @@ async fn load_events_from_observations(
     pool: &sqlx::PgPool,
     replay_run_id: &str,
     skip_primed: bool,
+    include_mempool_signals: bool,
     from_block: Option<u64>,
     to_block: Option<u64>,
 ) -> Result<Vec<eth_alpha_engine::EngineEvent>> {
@@ -261,6 +268,10 @@ async fn load_events_from_observations(
                 ));
             }
             "mempool_signal" => {
+                if !include_mempool_signals {
+                    skipped += 1;
+                    continue;
+                }
                 let signal_wire: MempoolSignalWire = match serde_json::from_value(
                     payload.get("signal").cloned().unwrap_or(Value::Null),
                 ) {
