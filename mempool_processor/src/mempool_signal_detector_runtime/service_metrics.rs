@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-/// Performance metrics tracker.
+/// Service-level counters and latency summaries for the live detector process.
 pub(crate) struct ServiceMetrics {
     pub(crate) total_processed: AtomicU64,
     pub(crate) contract_creations: AtomicU64,

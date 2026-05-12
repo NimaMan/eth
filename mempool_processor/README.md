@@ -137,7 +137,7 @@ Run-root diagnostics:
 | Need | Start here |
 | --- | --- |
 | Public module map | `src/lib.rs` |
-| Binary wiring | `src/bin/README.md`, `src/bin/mempool_signal_detector.rs` |
+| Binary wiring | `src/bin/mempool_signal_detector.rs`, `src/mempool_signal_detector_runtime/README.md` |
 | Fetch and arrival tracking | `src/mempool_fetcher/`, `src/arrival_recorder.rs` |
 | Function selectors | `src/function_detector.rs` |
 | Routing/categories | `src/tx_router/` |

@@ -1,9 +1,5 @@
-#[path = "mempool_signal_detector/metrics.rs"]
-mod metrics;
-#[path = "mempool_signal_detector/pipeline.rs"]
-mod pipeline;
-#[path = "mempool_signal_detector/support.rs"]
-mod support;
+#[path = "../mempool_signal_detector_runtime/mod.rs"]
+mod mempool_signal_detector_runtime;
 
 use clap::Parser;
 use eyre::{bail, Result};
@@ -34,9 +30,11 @@ use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::Layer;
 
-use metrics::ServiceMetrics;
-use pipeline::{drain_simulation_results, retry_unresolved_intents};
-use support::{arrival_recording_ingress_observer, parse_tx_hash_or_zero, LocalTimeFormatter};
+use mempool_signal_detector_runtime::{
+    create_arrival_recording_ingress_observer, drain_completed_simulation_outcomes,
+    parse_mempool_transaction_hash_or_zero, retry_cache_waiting_unresolved_intents,
+    LocalLogTimeFormatter, ServiceMetrics,
+};
 
 // Mempool processor imports
 use mempool_processor::{
@@ -174,14 +172,14 @@ async fn main() -> Result<()> {
     let main_layer = fmt::layer()
         .with_target(false)
         .with_writer(main_file_appender)
-        .with_timer(LocalTimeFormatter::default())
+        .with_timer(LocalLogTimeFormatter)
         .with_ansi(false)
         .with_filter(EnvFilter::new(main_filter));
 
     let console_layer = fmt::layer()
         .with_target(false)
         .with_writer(std::io::stdout)
-        .with_timer(LocalTimeFormatter::default())
+        .with_timer(LocalLogTimeFormatter)
         .with_filter(EnvFilter::new(main_filter));
 
     // Combine layers
@@ -471,7 +469,7 @@ async fn main() -> Result<()> {
     // simulation workers are ready so ingress timestamps are captured and the
     // detector can drain immediately.
     info!("\n🔌 Connecting to Reth IPC...");
-    let ingress_observer = arrival_recording_ingress_observer(arrival_recorder.clone());
+    let ingress_observer = create_arrival_recording_ingress_observer(arrival_recorder.clone());
     let ipc_client =
         MempoolFetcherIPCClient::new_with_observer(Some(&cfg_ipc_path), Some(ingress_observer))?;
     ipc_client.start().await?;
@@ -506,7 +504,7 @@ async fn main() -> Result<()> {
             break;
         }
 
-        drain_simulation_results(
+        drain_completed_simulation_outcomes(
             &mut simulation_result_rx,
             metrics.as_ref(),
             mempool_simulator.as_ref(),
@@ -514,7 +512,7 @@ async fn main() -> Result<()> {
             &unresolved_intent_store,
         )
         .await;
-        retry_unresolved_intents(
+        retry_cache_waiting_unresolved_intents(
             &unresolved_intent_store,
             &tx_router,
             &simulation_manager,
@@ -593,7 +591,7 @@ async fn main() -> Result<()> {
                         }
                         _ => SimulationType::TransactionOnly,
                     },
-                    tx_hash: parse_tx_hash_or_zero(&tx.hash),
+                    tx_hash: parse_mempool_transaction_hash_or_zero(&tx.hash),
                 };
 
                 match simulation_manager.submit(sim_request).await {
@@ -610,7 +608,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        drain_simulation_results(
+        drain_completed_simulation_outcomes(
             &mut simulation_result_rx,
             metrics.as_ref(),
             mempool_simulator.as_ref(),

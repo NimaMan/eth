@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use mempool_processor::{
     function_detector::CreatorFunctionType,
+    mempool_fetcher::MempoolTransaction,
     simulator::{
         MempoolSimulator, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
     },
@@ -15,19 +16,19 @@ use mempool_processor::{
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use super::metrics::ServiceMetrics;
-use super::support::parse_tx_hash_or_zero;
+use super::mempool_transaction_hash::parse_mempool_transaction_hash_or_zero;
+use super::service_metrics::ServiceMetrics;
 
-pub(crate) async fn drain_simulation_results(
-    receiver: &mut mpsc::Receiver<SimulationResult>,
+pub(crate) async fn drain_completed_simulation_outcomes(
+    completed_simulation_results: &mut mpsc::Receiver<SimulationResult>,
     metrics: &ServiceMetrics,
     mempool_simulator: &MempoolSimulator,
-    simulation_error_log_path: &Path,
+    actionable_simulation_error_log_path: &Path,
     unresolved_intent_store: &UnresolvedIntentStore,
 ) -> usize {
-    let mut drained = 0usize;
-    while let Ok(result) = receiver.try_recv() {
-        drained += 1;
+    let mut drained_outcome_count = 0usize;
+    while let Ok(result) = completed_simulation_results.try_recv() {
+        drained_outcome_count += 1;
         metrics
             .simulations_completed
             .fetch_add(1, Ordering::Relaxed);
@@ -39,18 +40,18 @@ pub(crate) async fn drain_simulation_results(
         };
 
         if let Some(ref error) = result.error {
-            if is_unresolved_cache_error(error) {
+            if is_cache_wait_error(error) {
                 unresolved_intent_store
                     .record(
                         result.request.tx.clone(),
-                        unresolved_kind_for_result(&result),
+                        unresolved_intent_kind_for_simulation_result(&result),
                         error.clone(),
                     )
                     .await;
                 continue;
             }
 
-            if is_replay_context_mismatch(error) {
+            if is_replay_context_mismatch_error(error) {
                 unresolved_intent_store
                     .resolve(&result.request.tx.hash)
                     .await;
@@ -61,7 +62,7 @@ pub(crate) async fn drain_simulation_results(
                 continue;
             }
 
-            if is_stale_pending_tx_error(error) {
+            if is_stale_pending_nonce_error(error) {
                 unresolved_intent_store
                     .resolve(&result.request.tx.hash)
                     .await;
@@ -74,9 +75,9 @@ pub(crate) async fn drain_simulation_results(
 
             metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
             if !error.contains("No pools found for token") {
-                write_simulation_error(
+                write_actionable_simulation_error(
                     mempool_simulator,
-                    simulation_error_log_path,
+                    actionable_simulation_error_log_path,
                     &tx_hash,
                     category,
                     error,
@@ -96,10 +97,10 @@ pub(crate) async fn drain_simulation_results(
             }
         }
     }
-    drained
+    drained_outcome_count
 }
 
-pub(crate) async fn retry_unresolved_intents(
+pub(crate) async fn retry_cache_waiting_unresolved_intents(
     unresolved_intent_store: &UnresolvedIntentStore,
     tx_router: &TransactionRouter,
     simulation_manager: &SimulationManager,
@@ -131,7 +132,7 @@ pub(crate) async fn retry_unresolved_intents(
         }
 
         if !classification.requires_simulation {
-            retry_unresolved_no_simulation(
+            handle_ready_unresolved_intent_without_simulation(
                 unresolved_intent_store,
                 simulation_manager,
                 &intent.tx.hash,
@@ -153,7 +154,7 @@ pub(crate) async fn retry_unresolved_intents(
                 }
                 _ => SimulationType::TransactionOnly,
             },
-            tx_hash: parse_tx_hash_or_zero(&intent.tx.hash),
+            tx_hash: parse_mempool_transaction_hash_or_zero(&intent.tx.hash),
         };
 
         match simulation_manager.submit(sim_request).await {
@@ -175,11 +176,11 @@ pub(crate) async fn retry_unresolved_intents(
     }
 }
 
-async fn retry_unresolved_no_simulation(
+async fn handle_ready_unresolved_intent_without_simulation(
     unresolved_intent_store: &UnresolvedIntentStore,
     simulation_manager: &SimulationManager,
     tx_hash: &str,
-    tx: &mempool_processor::mempool_fetcher::MempoolTransaction,
+    tx: &MempoolTransaction,
     category: &TransactionCategory,
 ) {
     if let TransactionCategory::CreatorTransaction {
@@ -203,7 +204,7 @@ async fn retry_unresolved_no_simulation(
     }
 }
 
-async fn write_simulation_error(
+async fn write_actionable_simulation_error(
     mempool_simulator: &MempoolSimulator,
     simulation_error_log_path: &Path,
     tx_hash: &str,
@@ -233,7 +234,7 @@ async fn write_simulation_error(
     }
 }
 
-fn is_unresolved_cache_error(error: &str) -> bool {
+fn is_cache_wait_error(error: &str) -> bool {
     error.contains("unresolved_cache_context")
         || error.contains("No tracked token found for liquidity removal")
         || error.contains("No token address found for creator")
@@ -241,18 +242,18 @@ fn is_unresolved_cache_error(error: &str) -> bool {
         || error.contains("Token cache reported no pools")
 }
 
-fn is_replay_context_mismatch(error: &str) -> bool {
+fn is_replay_context_mismatch_error(error: &str) -> bool {
     error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
 }
 
-fn is_stale_pending_tx_error(error: &str) -> bool {
+fn is_stale_pending_nonce_error(error: &str) -> bool {
     error.contains("transaction validation error: nonce")
         && error.contains("too low")
         && error.contains("expected")
 }
 
-fn unresolved_kind_for_result(result: &SimulationResult) -> UnresolvedIntentKind {
-    if is_v4_modify_liquidity_selector(&result.request.tx.input) {
+fn unresolved_intent_kind_for_simulation_result(result: &SimulationResult) -> UnresolvedIntentKind {
+    if input_uses_uniswap_v4_modify_liquidity_selector(&result.request.tx.input) {
         return UnresolvedIntentKind::V4ModifyLiquidity;
     }
 
@@ -266,7 +267,7 @@ fn unresolved_kind_for_result(result: &SimulationResult) -> UnresolvedIntentKind
     }
 }
 
-fn is_v4_modify_liquidity_selector(input: &[u8]) -> bool {
+fn input_uses_uniswap_v4_modify_liquidity_selector(input: &[u8]) -> bool {
     let Some(selector) = input.get(0..4) else {
         return false;
     };
