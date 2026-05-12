@@ -218,7 +218,9 @@ impl UnresolvedIntentStore {
                 log_data = Some((entry.kind, entry.attempts));
             }
         }
-        if let Some((kind, attempts)) = log_data {
+        if let Some((kind, attempts)) =
+            log_data.filter(|(_, attempts)| should_log_waiting(*attempts))
+        {
             self.log_line("WAITING", tx_hash, kind, &reason, attempts);
         }
     }
@@ -299,6 +301,10 @@ impl UnresolvedIntentStore {
     }
 }
 
+fn should_log_waiting(attempts: u32) -> bool {
+    attempts <= 3 || attempts.is_power_of_two() || attempts % 25 == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +341,14 @@ mod tests {
         assert_eq!(stats.pending, 0);
         assert_eq!(stats.recorded_total, 1);
         assert_eq!(stats.resolved_total, 1);
+    }
+
+    #[test]
+    fn waiting_retry_logs_are_rate_limited() {
+        let logged_attempts: Vec<u32> = (1..=32)
+            .filter(|attempt| should_log_waiting(*attempt))
+            .collect();
+        assert_eq!(logged_attempts, vec![1, 2, 3, 4, 8, 16, 25, 32]);
     }
 
     fn test_tx(hash: &str) -> MempoolTransaction {

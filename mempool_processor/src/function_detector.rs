@@ -360,20 +360,18 @@ impl FunctionDetector {
     /// Map function selectors to types based on known signatures
     fn map_function_name_to_type(&self, selector_hex: &str) -> Option<CreatorFunctionType> {
         match selector_hex {
-            // Tax modification functions
-            "715018a6" | "70a08231" => Some(CreatorFunctionType::TaxModification),
+            // Tax modification selectors belong here only when they are known
+            // mutating setters. View/transfer selectors must not be promoted
+            // into creator-control.
 
             // Trading control functions
             "8a8c523c" | "c9567bf9" => Some(CreatorFunctionType::TradingControl),
 
             // Ownership functions
-            "f2fde38b" | "8da5cb5b" => Some(CreatorFunctionType::OwnershipChange),
+            "f2fde38b" | "715018a6" => Some(CreatorFunctionType::OwnershipChange),
 
             // Liquidity additions
             "e8e33700" | "f305d719" => Some(CreatorFunctionType::LiquidityAddition),
-
-            // Max wallet/tx limits
-            "a9059cbb" => Some(CreatorFunctionType::MaxWalletLimit),
 
             _ => None,
         }
@@ -893,5 +891,94 @@ impl Clone for FunctionStats {
             swaps: self.swaps,
             other_functions: self.other_functions,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CreatorFunctionType, FunctionDetector};
+    use crate::mempool_fetcher::MempoolTransaction;
+    use alloy_primitives::U256;
+    use serde_json::json;
+    use std::time::Instant;
+
+    #[test]
+    fn erc20_transfer_is_not_wallet_limit_control() {
+        let detector = FunctionDetector::new();
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x5555555555555555555555555555555555555555")),
+            input: erc20_transfer_calldata("0x3333333333333333333333333333333333333333"),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: Vec::new(),
+            function_category: None,
+        };
+
+        let detected = detector.detect_batch(vec![tx]);
+        assert!(matches!(
+            detected[0].function_category,
+            Some(CreatorFunctionType::Other(_))
+        ));
+        assert!(!matches!(
+            detected[0].function_category,
+            Some(CreatorFunctionType::MaxWalletLimit)
+        ));
+    }
+
+    #[test]
+    fn erc20_balance_of_is_not_tax_modification() {
+        let detector = FunctionDetector::new();
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x5555555555555555555555555555555555555555")),
+            input: erc20_balance_of_calldata("0x3333333333333333333333333333333333333333"),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: Vec::new(),
+            function_category: None,
+        };
+
+        let detected = detector.detect_batch(vec![tx]);
+        assert!(matches!(
+            detected[0].function_category,
+            Some(CreatorFunctionType::Other(_))
+        ));
+        assert!(!matches!(
+            detected[0].function_category,
+            Some(CreatorFunctionType::TaxModification)
+        ));
+    }
+
+    fn erc20_transfer_calldata(to: &str) -> Vec<u8> {
+        let mut input = hex::decode("a9059cbb").unwrap();
+        let address = address_bytes(to);
+        input.extend_from_slice(&[0u8; 12]);
+        input.extend_from_slice(&address);
+        input.extend_from_slice(&[0u8; 31]);
+        input.push(1);
+        input
+    }
+
+    fn erc20_balance_of_calldata(account: &str) -> Vec<u8> {
+        let mut input = hex::decode("70a08231").unwrap();
+        let address = address_bytes(account);
+        input.extend_from_slice(&[0u8; 12]);
+        input.extend_from_slice(&address);
+        input
+    }
+
+    fn address_bytes(address: &str) -> Vec<u8> {
+        hex::decode(address.trim_start_matches("0x")).unwrap()
     }
 }

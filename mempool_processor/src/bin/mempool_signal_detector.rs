@@ -936,6 +936,17 @@ async fn drain_simulation_results(
                 continue;
             }
 
+            if is_stale_pending_tx_error(error) {
+                unresolved_intent_store
+                    .resolve(&result.request.tx.hash)
+                    .await;
+                warn!(
+                    "Stale pending tx for {} classified outside simulation error path: {}",
+                    result.request.tx.hash, error
+                );
+                continue;
+            }
+
             metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
             if !error.contains("No pools found for token") {
                 let block_str = match mempool_simulator.latest_simulation_block().await {
@@ -1078,6 +1089,12 @@ fn is_unresolved_cache_error(error: &str) -> bool {
 
 fn is_replay_context_mismatch(error: &str) -> bool {
     error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
+}
+
+fn is_stale_pending_tx_error(error: &str) -> bool {
+    error.contains("transaction validation error: nonce")
+        && error.contains("too low")
+        && error.contains("expected")
 }
 
 fn unresolved_kind_for_result(result: &SimulationResult) -> UnresolvedIntentKind {

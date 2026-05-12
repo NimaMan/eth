@@ -165,6 +165,16 @@ impl SignalManager {
     }
 
     fn log_buy_sell_simulation_errors(&self, result: &SimulationResult, buy_sell: &BuySellResult) {
+        if result
+            .pool_viability_result
+            .as_ref()
+            .and_then(|pool_result| pool_result.failure_reason.as_deref())
+            .map(is_replay_context_mismatch)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
         if let Some(ref error) = buy_sell.buy_tax_error {
             self.log_error(
                 "BUY_TAX_ERROR",
@@ -278,7 +288,10 @@ impl SignalManager {
     /// - Pool address and type are extracted from the result
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
         if let Some(ref err) = result.error {
-            if !is_cache_wait_error(err) {
+            if !is_cache_wait_error(err)
+                && !is_replay_context_mismatch(err)
+                && !is_stale_pending_tx_error(err)
+            {
                 self.log_error("SIMULATION_ERROR", &format_simulation_error(result, err));
             }
         }
@@ -825,6 +838,16 @@ fn is_cache_wait_error(error: &str) -> bool {
         || error.contains("No pools found for token")
         || error.contains("No token address found for creator")
         || error.contains("Token cache reported no pools")
+}
+
+fn is_replay_context_mismatch(error: &str) -> bool {
+    error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
+}
+
+fn is_stale_pending_tx_error(error: &str) -> bool {
+    error.contains("transaction validation error: nonce")
+        && error.contains("too low")
+        && error.contains("expected")
 }
 
 fn creator_address_from_simulation_result(result: &SimulationResult) -> String {
