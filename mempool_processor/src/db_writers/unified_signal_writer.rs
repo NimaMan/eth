@@ -3,19 +3,18 @@
 /// A single writer that orchestrates all signal types and routes them to the appropriate
 /// database writers. This keeps the signal publisher clean and makes it easy to add new
 /// signal types without modifying multiple places.
-use alloy_primitives::U256;
 use eyre::Result;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
 use super::{
-    LiquidityRemovalSignalRecord, LiquidityRemovalSignalWriter, LpApprovalSignalRecord,
-    LpApprovalSignalWriter, ScamSignalRecord, ScamSignalWriter, SignalWriterConfig,
-    TaxSignalRecord, TaxSignalWriter, TradingSignalRecord, TradingSignalWriter,
+    LiquidityRemovalSignalRecord, LiquidityRemovalSignalWriter, LpApprovalSignalWriter,
+    ScamSignalRecord, ScamSignalWriter, SignalWriterConfig, TaxSignalRecord, TaxSignalWriter,
+    TradingSignalRecord, TradingSignalWriter,
 };
 use crate::signal_detector::types::TaxSignalRecord as TaxSignal;
 use crate::signal_detector::{
-    HoneypotSignal, LiquidityRemovalSignal, LpApprovalSignal, Signal, TradingEnabledSignal,
+    HoneypotSignal, LiquidityRemovalSignal, Signal, TradingEnabledSignal,
 };
 
 fn normalize_pool_type(pool_type: &str) -> String {
@@ -357,51 +356,5 @@ fn liquidity_removal_risk_label(removal_percentage: Option<f64>) -> String {
         p if p > 50.0 => "DRAINING".to_string(),
         p if p >= 20.0 => "SIGNIFICANT".to_string(),
         _ => "LOW".to_string(),
-    }
-}
-
-impl LpApprovalSignalRecord {
-    /// Convert from LpApprovalSignal
-    pub fn from_lp_approval_signal(signal: &LpApprovalSignal) -> Self {
-        let is_unlimited_amount = signal.amount == U256::MAX;
-        let approval_pct = signal.approval_percentage.or_else(|| {
-            if is_unlimited_amount {
-                Some(100.0)
-            } else {
-                None
-            }
-        });
-        let unlimited = approval_pct
-            .map(|pct| pct >= 99.99)
-            .unwrap_or(is_unlimited_amount);
-        let approval_amount = if is_unlimited_amount {
-            None
-        } else {
-            Some(signal.amount.to_string())
-        };
-
-        Self {
-            token_address: signal.token_address.clone(),
-            pool_address: signal.pool_address.clone(),
-            pool_type: normalize_pool_type(&signal.pool_type),
-            denom_address: signal
-                .denom_address
-                .clone()
-                .unwrap_or_else(|| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
-            denom_currency: signal
-                .denom_currency
-                .clone()
-                .or_else(|| Some("WETH".to_string())),
-            detection_timestamp: chrono::Utc::now(),
-            detection_tx_hash: signal.tx_hash.clone(),
-            approved_spender: signal.router_address.clone(),
-            approval_amount,
-            approval_percentage: approval_pct,
-            is_unlimited_approval: unlimited,
-            approval_type: "LP_TOKEN".to_string(),
-            previous_allowance: signal.previous_allowance,
-            creator_address: signal.approver_address.clone(),
-            signal_source: "mempool".to_string(),
-        }
     }
 }

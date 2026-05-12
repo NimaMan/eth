@@ -793,6 +793,13 @@ impl SignalManager {
                 {
                     enriched_signal.approval_percentage = Some(100.0);
                 }
+                if enriched_signal.approval_percentage.is_none() {
+                    warn!(
+                        "LP approval {} cannot be published without approved LP percentage",
+                        lp_signal.tx_hash
+                    );
+                    return false;
+                }
 
                 let signal = Signal::LpApproval(enriched_signal.clone());
 

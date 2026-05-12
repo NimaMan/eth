@@ -465,15 +465,9 @@ impl SignalPublisher {
                     })
                     .unwrap_or_else(|| "N/A".to_string());
 
-                let raw_display = if s.amount == U256::MAX {
-                    "MAX".to_string()
-                } else {
-                    s.amount.to_string()
-                };
-
                 writeln!(
                     self.log_files.lp_approval,
-                    "[{}] LP_APPROVAL | Approver: {} | Token: {} | Pool: {} | PoolType: {} | Router: {} | Percent: {} | RawAmount: {} | TxHash: {}",
+                    "[{}] LP_APPROVAL | Approver: {} | Token: {} | Pool: {} | PoolType: {} | Router: {} | Percent: {} | TxHash: {}",
                     timestamp,
                     s.approver_address,
                     s.token_address,
@@ -481,7 +475,6 @@ impl SignalPublisher {
                     s.pool_type,
                     s.router_address,
                     percent_str,
-                    raw_display,
                     s.tx_hash
                 )?;
                 self.log_files.lp_approval.flush()?;

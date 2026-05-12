@@ -95,6 +95,7 @@ impl LiquidityRemovalSignalWriter {
             .max_connections(5)
             .connect(database_url)
             .await?;
+        ensure_liquidity_removal_schema(&pool).await?;
 
         let (sender, receiver) = mpsc::unbounded_channel();
         let handle = tokio::spawn(writer_task(pool, receiver));
@@ -230,5 +231,17 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
     );
 
     batch.clear();
+    Ok(())
+}
+
+async fn ensure_liquidity_removal_schema(pool: &PgPool) -> Result<()> {
+    sqlx::query(
+        r#"
+        ALTER TABLE live_trading.liquidity_removal_signals
+        ALTER COLUMN pool_address TYPE text
+        "#,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }

@@ -330,23 +330,23 @@ fn lp_approval_select() -> &'static str {
         creator_address,
         approved_spender AS subject_address,
         CASE
-            WHEN is_unlimited_approval THEN 'Unlimited LP approval'
-            ELSE 'LP approval'
+            WHEN approval_percentage >= 99.99 THEN 'Full LP approval'
+            ELSE 'LP approval ' || to_char(approval_percentage, 'FM999990.00') || '%'
         END AS headline,
-        approval_amount::text AS value_1,
-        previous_allowance::text AS value_2,
-        is_unlimited_approval::text AS flag,
+        approval_percentage::text AS value_1,
+        NULL::text AS value_2,
+        COALESCE(approval_percentage >= 99.99, false)::text AS flag,
         jsonb_build_object(
             'approved_spender', approved_spender,
-            'approval_amount', approval_amount::text,
-            'is_unlimited_approval', is_unlimited_approval,
+            'approval_percentage', approval_percentage,
+            'is_full_approval', COALESCE(approval_percentage >= 99.99, false),
             'approval_type', approval_type,
-            'previous_allowance', previous_allowance::text,
             'signal_source', signal_source,
             'created_at', created_at::text
         )::text AS payload,
         detection_timestamp AS sort_timestamp
     FROM live_trading.lp_approval_signals
+    WHERE approval_percentage IS NOT NULL
     "#
 }
 
