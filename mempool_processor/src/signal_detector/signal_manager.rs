@@ -1,9 +1,9 @@
 use crate::config::TaxDetectionConfig;
 use crate::signal_publisher::SignalPublisher;
-use crate::simulator::SimulationResult;
+use crate::simulator::{BuySellResult, SimulationResult};
 use crate::token_tracking::types::PoolType;
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use reth_chain_query::to_checksum_address;
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -65,9 +65,9 @@ impl SignalManager {
         // Create log directory if it doesn't exist
         std::fs::create_dir_all(&config.log_dir).ok();
 
-        // Create detector-specific log files
-        let simulation_results_log_path = config.log_dir.join("simulation_results.log");
-        let tax_log_path = config.log_dir.join("tax_signals.log");
+        // Create detector-specific log files. The signals directory is for
+        // semantic signal logs only; generic simulation diagnostics go to the
+        // run-level simulation_errors.log file.
         let signal_log_path = config.log_dir.join("signal_manager.log");
         let error_log_path = config
             .log_dir
@@ -101,13 +101,8 @@ impl SignalManager {
         Self {
             _config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
-            trading_status_detector: TradingStatusDetector::with_log_path(
-                simulation_results_log_path,
-            ),
-            tax_signal_detector: TaxDetector::with_log_path(
-                config.tax_detection.clone(),
-                tax_log_path,
-            ),
+            trading_status_detector: TradingStatusDetector::new(),
+            tax_signal_detector: TaxDetector::new(config.tax_detection.clone()),
             lp_approval_detector: LpApprovalDetector::new(&config.log_dir),
             token_cache: None,
             signal_log_path,
@@ -169,21 +164,18 @@ impl SignalManager {
         }
     }
 
-    fn log_sim_error(&self, level: &str, details: &str) {
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.error_log_path)
-        {
-            let timestamp = chrono::Local::now();
-            writeln!(
-                file,
-                "[{}] {} | {}",
-                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                level,
-                details
-            )
-            .ok();
+    fn log_buy_sell_simulation_errors(&self, result: &SimulationResult, buy_sell: &BuySellResult) {
+        if let Some(ref error) = buy_sell.buy_tax_error {
+            self.log_error(
+                "BUY_TAX_ERROR",
+                &format_buy_sell_error(result, error.as_str()),
+            );
+        }
+        if let Some(ref error) = buy_sell.sell_tax_error {
+            self.log_error(
+                "SELL_TAX_ERROR",
+                &format_buy_sell_error(result, error.as_str()),
+            );
         }
     }
 
@@ -287,70 +279,7 @@ impl SignalManager {
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
         if let Some(ref err) = result.error {
             if !err.contains("No pools found for token") {
-                self.log_sim_error("ERROR", &format!("{} | {}", result.request.tx.hash, err));
-                self.log_error("ERROR", &format!("{} | {}", result.request.tx.hash, err));
-            }
-        }
-
-        // Skip logging for contract creation transactions to reduce noise
-        if !matches!(
-            result.request.category,
-            crate::tx_router::TransactionCategory::ContractCreation { .. }
-        ) {
-            // Compact per‑TX header (written only to signal_manager.log, not console)
-            self.log_activity("TX", &result.request.tx.hash);
-            self.log_activity(
-                "RECEIVED",
-                &format!("Category: {:?}", result.request.category),
-            );
-        }
-
-        // Log creator token info if this is a creator transaction
-        if let crate::tx_router::TransactionCategory::CreatorTransaction {
-            creator,
-            target_token: _,
-            target_address,
-            function_type,
-            ..
-        } = &result.request.category
-        {
-            if let Some(ref token_cache) = self.token_cache {
-                // Get all tokens created by this creator.
-                let checksummed_creator = creator
-                    .parse::<Address>()
-                    .map(|address| to_checksum_address(&address))
-                    .unwrap_or_else(|_| creator.clone());
-                let creator_tokens = token_cache
-                    .get_tokens_by_creator(&checksummed_creator)
-                    .await;
-                if !creator_tokens.is_empty() {
-                    let mut token_info_parts = Vec::new();
-                    for token in &creator_tokens {
-                        let pools = token_cache.get_pools_for_token(&token.address).await;
-                        let pool_count = pools.len();
-                        let total_liquidity: f64 = pools.iter().map(|pool| pool.eth_reserve).sum();
-                        token_info_parts.push(format!(
-                            "{} (pools: {}, liquidity: {:.2} ETH)",
-                            token.address, pool_count, total_liquidity
-                        ));
-                    }
-                    // Trim: omit verbose creator/token listing
-
-                    // Check if this is an approve on a pool/LP token
-                    if matches!(function_type, crate::function_detector::CreatorFunctionType::Other(s) if s == "approve")
-                    {
-                        // Check if target_address matches any of the pools
-                        for token in &creator_tokens {
-                            let pools = token_cache.get_pools_for_token(&token.address).await;
-                            for pool_state in pools {
-                                if target_address.eq_ignore_ascii_case(&pool_state.address) {
-                                    // Trim: rely on LP_APPROVAL signal logging
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
+                self.log_error("SIMULATION_ERROR", &format_simulation_error(result, err));
             }
         }
 
@@ -359,14 +288,7 @@ impl SignalManager {
         // First, extract key values from simulation result
         let buy_sell_result = result.buy_sell_result();
         let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &buy_sell_result {
-            self.log_activity(
-                "BUY_SELL_RESULT",
-                &format!(
-                    "can_buy: {} | can_approve: {} | can_sell: {}",
-                    buy_sell.can_buy, buy_sell.can_approve, buy_sell.can_sell
-                ),
-            );
-
+            self.log_buy_sell_simulation_errors(result, buy_sell);
             (
                 None::<f64>, // TODO: Calculate from state changes
                 None::<f64>, // TODO: Calculate from state changes
@@ -587,49 +509,8 @@ impl SignalManager {
                 _ => {}
             }
         } else {
-            // No trading signal detected - log what we found
-            // Skip trading status logging for contract creation transactions to reduce noise
-            if !matches!(
-                result.request.category,
-                crate::tx_router::TransactionCategory::ContractCreation { .. }
-            ) {
-                if let Some(ref buy_sell) = result.buy_sell_result() {
-                    let buy_tax = buy_sell
-                        .buy_tax
-                        .map(|v| format!("{:.1}%", v))
-                        .unwrap_or_else(|| {
-                            buy_sell
-                                .buy_tax_error
-                                .as_ref()
-                                .map(|e| format!("ERR: {}", e))
-                                .unwrap_or_else(|| "unknown".to_string())
-                        });
-                    let sell_tax = buy_sell
-                        .sell_tax
-                        .map(|v| format!("{:.1}%", v))
-                        .unwrap_or_else(|| {
-                            buy_sell
-                                .sell_tax_error
-                                .as_ref()
-                                .map(|e| format!("ERR: {}", e))
-                                .unwrap_or_else(|| "unknown".to_string())
-                        });
-
-                    self.log_activity(
-                        "TRADING_STATUS",
-                        &format!(
-                            "No change | Can Buy: {} | Can Approve: {} | Can Sell: {} | buy_tax: {} | sell_tax: {}",
-                            buy_sell.can_buy,
-                            buy_sell.can_approve,
-                            buy_sell.can_sell,
-                            buy_tax,
-                            sell_tax
-                        ),
-                    );
-                } else {
-                    self.log_activity("TRADING_STATUS", "No change (no buy/sell result)");
-                }
-            }
+            // No signal is emitted for the common no-change path. Success and
+            // no-change counts are captured by interval metrics.
         }
 
         // STEP 3: Liquidity detector - Check for pool drains and liquidity removals
@@ -946,6 +827,47 @@ fn creator_address_from_simulation_result(result: &SimulationResult) -> String {
         }
         _ => "unknown".to_string(),
     }
+}
+
+fn format_simulation_error(result: &SimulationResult, error: &str) -> String {
+    format!(
+        "tx={} | category={:?} | token={} | pool={} | pool_type={} | error={}",
+        result.request.tx.hash,
+        result.request.category,
+        token_address_from_simulation_result(result).unwrap_or_else(|| "unknown".to_string()),
+        result
+            .pool_address
+            .map(|addr| to_checksum_address(&addr))
+            .unwrap_or_else(|| "unknown".to_string()),
+        result.pool_type.as_deref().unwrap_or("unknown"),
+        error
+    )
+}
+
+fn format_buy_sell_error(result: &SimulationResult, error: &str) -> String {
+    format!(
+        "tx={} | token={} | pool={} | pool_type={} | can_buy={} | can_approve={} | can_sell={} | error={}",
+        result.request.tx.hash,
+        token_address_from_simulation_result(result).unwrap_or_else(|| "unknown".to_string()),
+        result
+            .pool_address
+            .map(|addr| to_checksum_address(&addr))
+            .unwrap_or_else(|| "unknown".to_string()),
+        result.pool_type.as_deref().unwrap_or("unknown"),
+        result
+            .buy_sell_result()
+            .map(|buy_sell| buy_sell.can_buy)
+            .unwrap_or(false),
+        result
+            .buy_sell_result()
+            .map(|buy_sell| buy_sell.can_approve)
+            .unwrap_or(false),
+        result
+            .buy_sell_result()
+            .map(|buy_sell| buy_sell.can_sell)
+            .unwrap_or(false),
+        error
+    )
 }
 
 fn pool_type_label(pool_type: &PoolType) -> String {

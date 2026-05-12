@@ -1,7 +1,7 @@
 # Signal Detector Module
 
 ## Purpose
-Converts pool‑scoped simulation results into actionable, per‑pool trading signals and publishes them via logs/ZMQ (and optionally to a database, enabled by default).
+Converts pool‑scoped simulation results into actionable, per‑pool trading signals and publishes them via logs/ZMQ and the live Postgres signal store.
 
 Key properties:
 - Per‑Pool: Every signal is specific to a (token_address, pool_address) pair.
@@ -95,14 +95,20 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 - Semantic signal logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
   - `honeypot_signals.log`
-  - `tax_signals.log`
+  - `tax_signals.log` (actual tax risk signals only)
   - `liquidity_removals.log` (also contains ScamDetection entries)
   - `lp_approval_signals.log`
-  - `signal_manager.log` (summary/activity)
+  - `signal_manager.log` (emitted signals and publication summaries)
+
+- Simulation diagnostics
+  - Successful simulations are counted in interval metrics and are not written
+    one-by-one.
+  - Run-level `simulation_errors.log` is the operational artifact for failed
+    simulations and buy/sell branch errors such as failed tax calculation.
 
 - Database
-  - When `SignalPublisherConfig.enable_database = true` (the default), signals are persisted via the unified database writer used by SignalPublisher.
-  - Disable database writes by setting `enable_database = false` when constructing the publisher.
+  - Live runs require signal persistence through the unified database writer.
+  - Use `--allow-database-disabled` only for diagnostic ZMQ/log-only runs.
 
 ## Processing Flow (Per Pool)
 
@@ -135,7 +141,8 @@ enriches the payload from `TokenTrackingCache` before publishing.
 
 - Per‑pool semantics: signals are specific to a single pool — multiple pools per token produce multiple independent signals.
 - Historical vs latest state: when at‑block simulation is not possible (pruned state), detectors still use best available results; TradingEnabled requires valid tax values and can_buy/can_approve/can_sell.
-- Publishing is best‑effort and non‑blocking; DB writes are optional and gated by build features.
+- Publishing is best‑effort and non‑blocking, but DB writes are required for
+  live product runs because token-server and ASENA read persisted signals.
 - LP approval diagnostics are included in the periodic mempool health output:
   router approvals seen, tracked pool approvals, pool cache misses, LP approvals
   published, and DB write errors.
@@ -148,4 +155,3 @@ enriches the payload from `TokenTrackingCache` before publishing.
 - Unknown reserve impact is not low risk. When the simulator can map a removal
   intent to a tracked pool but cannot measure the drain before mining, the DB
   writer stores the risk level as `UNKNOWN`.
-- **Open issue – missing TradingEnabled output:** The latest prod run (`logs/signal_detector_2025-10-26_21-43-44/`) shows multiple simulation results with `can_buy=true`/`can_sell=true` and finite taxes (e.g. `simulation_results.log` entries for tx `0x3a48c4...` on pool `0xBD2067...` and tx `0x60fa30...` on pool `0x36BFC4...`), yet `trading_enabled.log` remains empty and `signal_manager.log` records `TRADING_STATUS | No change`. This means `TradingStatusDetector::detect` is returning `None` even when all success criteria appear satisfied. The detector currently short-circuits only when either leg fails, taxes are `None`/above threshold, or the pair has already been emitted in-process, so one of those guards is tripping unexpectedly. Next steps: add DEBUG instrumentation (or temporarily bump log level) around the early returns in `trading_status_detector.rs` and confirm whether the dedupe set (`emitted_trading_pairs`) or tax gating is blocking emission. Until that’s fixed, live runs won’t produce TradingEnabled signals even though the simulator proves the pool is tradeable.

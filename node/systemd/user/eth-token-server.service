@@ -1,7 +1,7 @@
 [Unit]
-Description=Ethereum mempool signal detector
-Wants=network-online.target reth.service redis-server.service eth-rust-live-block-processor.service eth-token-server.service
-After=network-online.target reth.service redis-server.service eth-rust-live-block-processor.service eth-token-server.service
+Description=Ethereum token server and live token tracker
+Wants=network-online.target redis-server.service eth-rust-live-block-processor.service
+After=network-online.target redis-server.service eth-rust-live-block-processor.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -11,7 +11,7 @@ EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
 Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUST_LOG=info
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/mempool_signal_detector --batch-size 100 --sim-workers 4 --report-interval 30
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_token_server
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

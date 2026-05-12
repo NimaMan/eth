@@ -9,11 +9,7 @@ use crate::config::TaxDetectionConfig;
 /// - Tax changes (when compared to previous state)
 /// - Suspicious tax patterns
 use crate::simulator::SimulationResult;
-use chrono;
 use eth_token::pools::TaxBucket;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct TaxSignal {
@@ -52,23 +48,11 @@ pub enum TaxSignalType {
 pub struct TaxDetector {
     /// Tax detection configuration
     config: TaxDetectionConfig,
-    /// Path to the log file
-    log_file_path: Option<PathBuf>,
 }
 
 impl TaxDetector {
     pub fn new(config: TaxDetectionConfig) -> Self {
-        Self {
-            config,
-            log_file_path: None,
-        }
-    }
-
-    pub fn with_log_path(config: TaxDetectionConfig, log_path: PathBuf) -> Self {
-        Self {
-            config,
-            log_file_path: Some(log_path),
-        }
+        Self { config }
     }
 
     /// Detect tax-related signals from simulation result
@@ -106,14 +90,6 @@ impl TaxDetector {
         let buy_tax_bucket_key = tax_bucket_key(buy_tax_bucket);
         let sell_tax_bucket_key = tax_bucket_key(sell_tax_bucket);
         let combined_tax_bucket_key = tax_bucket_key(combined_tax_bucket);
-
-        // Always log the tax calculation results
-        self.log_tax_detection(
-            &token_address,
-            sim_result,
-            calculated_buy_tax,
-            calculated_sell_tax,
-        );
 
         // Check for high taxes. Sell-blocked/honeypot is emitted as a separate
         // semantic signal by SignalManager, not as a tax signal.
@@ -184,108 +160,7 @@ impl TaxDetector {
             }
         }
 
-        // Log summary if any signals detected
-        if !signals.is_empty() {
-            // Log to file if path is configured
-            if let Some(ref log_path) = self.log_file_path {
-                for signal in &signals {
-                    if let Ok(mut file) =
-                        OpenOptions::new().create(true).append(true).open(log_path)
-                    {
-                        let timestamp = chrono::Local::now();
-                        let buy_tax_str = signal
-                            .buy_tax
-                            .map(|t| format!("{:.1}%", t))
-                            .unwrap_or_else(|| "None".to_string());
-                        let sell_tax_str = signal
-                            .sell_tax
-                            .map(|t| format!("{:.1}%", t))
-                            .unwrap_or_else(|| "None".to_string());
-
-                        writeln!(file, "[{}] TX: {} | Token: {} | Type: {:?} | Buy Tax: {} | Sell Tax: {} | Confidence: {:.2} | Details: {}",
-                            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                            sim_result.request.tx.hash,
-                            signal.token_address,
-                            signal.signal_type,
-                            buy_tax_str,
-                            sell_tax_str,
-                            signal.confidence,
-                            signal.details
-                        ).ok();
-                    }
-                }
-            }
-        }
-
         signals
-    }
-
-    /// Log tax detection results for debugging and monitoring
-    fn log_tax_detection(
-        &self,
-        token_address: &str,
-        sim_result: &SimulationResult,
-        buy_tax: Option<f64>,
-        sell_tax: Option<f64>,
-    ) {
-        if let Some(ref log_path) = self.log_file_path {
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-                let timestamp = chrono::Local::now();
-
-                // Extract pool address if available
-                let pool_address = sim_result
-                    .pool_address
-                    .map(|addr| format!("0x{}", hex::encode(addr)))
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Extract buy/sell capabilities and error messages
-                let (can_buy, can_approve, can_sell, buy_tax_error, sell_tax_error) =
-                    if let Some(buy_sell) = sim_result.buy_sell_result() {
-                        (
-                            buy_sell.can_buy,
-                            buy_sell.can_approve,
-                            buy_sell.can_sell,
-                            buy_sell.buy_tax_error.clone(),
-                            buy_sell.sell_tax_error.clone(),
-                        )
-                    } else {
-                        (false, false, false, None, None)
-                    };
-
-                // Format buy tax: show percentage if calculated, or error if failed
-                let buy_tax_str = match buy_tax {
-                    Some(tax) => format!("{:.1}%", tax),
-                    None => match buy_tax_error {
-                        Some(error) => format!("ERROR: {}", error),
-                        None => "ERROR: Unknown".to_string(),
-                    },
-                };
-
-                // Format sell tax: show percentage if calculated, or error if failed
-                let sell_tax_str = match sell_tax {
-                    Some(tax) => format!("{:.1}%", tax),
-                    None => match sell_tax_error {
-                        Some(error) => format!("ERROR: {}", error),
-                        None => "ERROR: Unknown".to_string(),
-                    },
-                };
-
-                writeln!(
-                    file,
-                    "[{}] TAX_DETECTION | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_approve: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
-                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    sim_result.request.tx.hash,
-                    token_address,
-                    pool_address,
-                    can_buy,
-                    can_approve,
-                    can_sell,
-                    buy_tax_str,
-                    sell_tax_str
-                )
-                .ok();
-            }
-        }
     }
 
     /// Check if simulation indicates a buy-then-stuck honeypot.

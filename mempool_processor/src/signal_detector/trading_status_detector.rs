@@ -6,9 +6,6 @@ use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
 use reth_chain_query::to_checksum_address;
 use std::collections::HashSet;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -42,8 +39,6 @@ pub enum TradingStatusChange {
 pub struct TradingStatusDetector {
     /// Tax threshold for considering trading "enabled" (default: 25%)
     tax_threshold: f64,
-    /// Path to the log file
-    log_file_path: Option<PathBuf>,
     /// Token tracking cache to check existing trading status
     token_cache: Option<Arc<TokenTrackingCache>>,
     /// Tracks (token, pool) pairs we have already emitted signals for during this run
@@ -54,16 +49,6 @@ impl TradingStatusDetector {
     pub fn new() -> Self {
         Self {
             tax_threshold: 25.0, // 25% tax threshold
-            log_file_path: None,
-            token_cache: None,
-            emitted_trading_pairs: Arc::new(Mutex::new(HashSet::new())),
-        }
-    }
-
-    pub fn with_log_path(log_path: PathBuf) -> Self {
-        Self {
-            tax_threshold: 25.0,
-            log_file_path: Some(log_path),
             token_cache: None,
             emitted_trading_pairs: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -148,16 +133,6 @@ impl TradingStatusDetector {
         // Extract tax values from simulation result (calculated in simulation_manager)
         let buy_tax = buy_sell.buy_tax;
         let sell_tax = buy_sell.sell_tax;
-
-        // Always log simulation results for debugging (now includes tax values)
-        self.log_simulation_result(
-            &token_address,
-            &pool_address,
-            &buy_sell,
-            tx_hash,
-            buy_tax,
-            sell_tax,
-        );
 
         // Check if trading works (both buy and sell)
         if !buy_sell.can_buy || !buy_sell.can_approve || !buy_sell.can_sell {
@@ -270,57 +245,6 @@ impl TradingStatusDetector {
                 already_enabled_in_cache
             ),
         })
-    }
-
-    /// Log simulation results to file for debugging (always log everything)
-    fn log_simulation_result(
-        &self,
-        token_address: &str,
-        pool_address: &str,
-        buy_sell: &crate::simulator::BuySellResult,
-        tx_hash: &str,
-        buy_tax: Option<f64>,
-        sell_tax: Option<f64>,
-    ) {
-        if let Some(ref log_path) = self.log_file_path {
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-                let timestamp = chrono::Local::now();
-
-                // Format buy tax: show percentage if calculated, or error if failed
-                let buy_tax_str = match buy_tax {
-                    Some(tax) => format!("{:.1}%", tax),
-                    None => match &buy_sell.buy_tax_error {
-                        Some(error) => format!("ERROR: {}", error),
-                        None => "ERROR: Unknown".to_string(),
-                    },
-                };
-
-                // Format sell tax: show percentage if calculated, or error if failed
-                let sell_tax_str = match sell_tax {
-                    Some(tax) => format!("{:.1}%", tax),
-                    None => match &buy_sell.sell_tax_error {
-                        Some(error) => format!("ERROR: {}", error),
-                        None => "ERROR: Unknown".to_string(),
-                    },
-                };
-
-                writeln!(
-                    file,
-                    "[{}] SIMULATION_RESULT | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_approve: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
-                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    tx_hash,
-                    token_address,
-                    pool_address,
-                    buy_sell.can_buy,
-                    buy_sell.can_approve,
-                    buy_sell.can_sell,
-                    buy_tax_str,
-                    sell_tax_str
-                )
-                .ok();
-                writeln!(file, "").ok(); // Add empty line for readability
-            }
-        }
     }
 
     /// Check if trading is already enabled for this token/pool combination

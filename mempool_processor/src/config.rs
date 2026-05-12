@@ -16,6 +16,14 @@ pub const IPC_PATH_ENV: &str = "IPC_PATH";
 pub const MEMPOOL_IPC_PATH_ENV: &str = "MEMPOOL_IPC_PATH";
 pub const MEMPOOL_RETH_DATADIR_ENV: &str = "MEMPOOL_RETH_DATADIR";
 pub const MEMPOOL_LOG_DIR_ENV: &str = "MEMPOOL_LOG_DIR";
+pub const MEMPOOL_SIM_WORKERS_ENV: &str = "MEMPOOL_SIM_WORKERS";
+pub const MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_SIGNAL_ENDPOINT";
+pub const MEMPOOL_ZMQ_ALERT_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_ALERT_ENDPOINT";
+pub const MEMPOOL_DATABASE_URL_ENV: &str = "MEMPOOL_DATABASE_URL";
+pub const MEMPOOL_TOKEN_CACHE_REDIS_URL_ENV: &str = "MEMPOOL_TOKEN_CACHE_REDIS_URL";
+pub const MEMPOOL_TOKEN_CACHE_REDIS_PREFIX_ENV: &str = "MEMPOOL_TOKEN_CACHE_REDIS_PREFIX";
+pub const MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT_ENV: &str = "MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT";
+pub const MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV: &str = "MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD";
 pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
 pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
@@ -551,7 +559,7 @@ impl MempoolProcessorConfig {
         config.ipc.socket_path = reth_ipc_path_from_env();
         config.simulation.reth_datadir = reth_datadir_from_env();
 
-        if let Ok(workers) = std::env::var("MEMPOOL_SIM_WORKERS") {
+        if let Some(workers) = config_value(&[MEMPOOL_SIM_WORKERS_ENV]) {
             if let Ok(val) = workers.parse() {
                 config.simulation.worker_threads = val;
             }
@@ -560,28 +568,28 @@ impl MempoolProcessorConfig {
         config.simulation.live_data_redis_url = live_data_redis_url_from_env();
         config.logging.log_dir = mempool_log_dir_from_env();
 
-        if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_SIGNAL_ENDPOINT") {
+        if let Some(endpoint) = config_value(&[MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV]) {
             config.zmq.signal_endpoint = endpoint;
         }
 
-        if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_ALERT_ENDPOINT") {
+        if let Some(endpoint) = config_value(&[MEMPOOL_ZMQ_ALERT_ENDPOINT_ENV]) {
             config.zmq.alert_endpoint = endpoint;
         }
 
-        if let Ok(url) = std::env::var("MEMPOOL_DATABASE_URL") {
+        if let Some(url) = config_value(&[MEMPOOL_DATABASE_URL_ENV]) {
             config.database.url = Some(url);
             config.database.enabled = true;
         }
 
-        if let Ok(redis_url) = std::env::var("MEMPOOL_TOKEN_CACHE_REDIS_URL") {
+        if let Some(redis_url) = config_value(&[MEMPOOL_TOKEN_CACHE_REDIS_URL_ENV]) {
             config.token_cache_source.redis_url = redis_url;
         }
 
-        if let Ok(prefix) = std::env::var("MEMPOOL_TOKEN_CACHE_REDIS_PREFIX") {
+        if let Some(prefix) = config_value(&[MEMPOOL_TOKEN_CACHE_REDIS_PREFIX_ENV]) {
             config.token_cache_source.redis_token_prefix = prefix;
         }
 
-        if let Ok(pub_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT") {
+        if let Some(pub_endpoint) = config_value(&[MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT_ENV]) {
             config.token_cache_source.zmq_pub_endpoint = pub_endpoint;
         }
 
@@ -603,7 +611,7 @@ impl MempoolProcessorConfig {
             }
         }
 
-        if let Ok(threshold) = std::env::var("MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD") {
+        if let Some(threshold) = config_value(&[MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV]) {
             if let Ok(val) = threshold.parse::<f64>() {
                 config.token_cache_source.eth_threshold = val;
             }

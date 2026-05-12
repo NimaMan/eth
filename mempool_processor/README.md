@@ -42,6 +42,60 @@ Reth IPC pending tx
   -> Postgres rows + signal logs + ZMQ tcp://127.0.0.1:5556
 ```
 
+## Live Pipeline Boundary
+
+Keep `mempool_signal_detector` as a separate runtime. Do not merge it into
+token-server or the live token tracker. token-server owns confirmed-chain
+token/pool state and HTTP read models; the mempool detector owns speculative
+pending-transaction routing, simulation, and semantic signal persistence.
+
+Live runtime contracts:
+
+- `live_block_processor` publishes confirmed processed blocks and live state to
+  Redis.
+- `eth_token_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
+  exposes live token/pool context over HTTP.
+- `mempool_signal_detector` consumes Reth pending tx, token-server context, and
+  Redis/Reth simulation state, then writes semantic signals to Postgres.
+- `eth_alpha_trader` consumes token-server APIs and persisted mempool signals.
+- ASENA reads token-server/trade APIs only; it should not consume ZMQ/logs
+  directly.
+
+Failure isolation rules:
+
+- Pending-tx bursts or simulation failures must not stop token-server live
+  block tracking.
+- Live simulations can use only local Reth historical state or Redis live state.
+  If neither source has the needed block/state, fail with a source-specific
+  error.
+- ZMQ/log output is diagnostic; persisted Postgres rows are the source of truth
+  for token-server, ASENA, and alpha.
+
+## Live Persistence Rule
+
+For live runs, Postgres signal persistence is required. token-server and ASENA
+read mempool signals from `live_trading.*`; ZMQ and signal logs are diagnostic
+outputs. `mempool_signal_detector` loads `MEMPOOL_DATABASE_URL` from the process
+environment or the shared `ETH_CONFIG_PATH` config file and refuses to start
+without it unless `--allow-database-disabled` is passed for a diagnostic run.
+
+## Logging Contract
+
+One run directory is created under `MEMPOOL_LOG_DIR`. Successful simulations are
+reported through interval metrics only; they are not written one-by-one. The
+high-signal diagnostic artifact is `simulation_errors.log`, which contains
+simulation execution failures and buy/sell branch errors such as failed tax
+calculation.
+
+The `signals/` subdirectory is semantic only:
+
+- `trading_enabled.log`
+- `honeypot_signals.log`
+- `tax_signals.log` for actual tax risk signals, not every tax calculation
+- `liquidity_removals.log`
+- `lp_approval_signals.log`
+- `signal_manager.log` for emitted signals and publication summaries
+
 ## Where To Look First
 
 | Need | Start here |

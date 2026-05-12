@@ -1,0 +1,7 @@
+[Unit]
+Description=Ethereum live token, mempool, and no-capital alpha pipeline
+Wants=eth-rust-live-block-processor.service eth-token-server.service eth-mempool-signal-detector.service eth-alpha-trader.service
+After=eth-rust-live-block-processor.service eth-token-server.service eth-mempool-signal-detector.service eth-alpha-trader.service
+
+[Install]
+WantedBy=default.target

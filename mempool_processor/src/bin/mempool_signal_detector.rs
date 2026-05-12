@@ -2,7 +2,7 @@
 mod support;
 
 use clap::Parser;
-use eyre::Result;
+use eyre::{bail, Result};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,8 @@ use mempool_processor::{
 };
 use tx_simulator::LiveChainCache;
 
+const MEMPOOL_ALLOW_DATABASE_DISABLED_ENV: &str = "MEMPOOL_ALLOW_DATABASE_DISABLED";
+
 #[derive(Parser, Debug)]
 struct Args {
     /// Optional config file path (TOML)
@@ -97,6 +99,11 @@ struct Args {
     /// Kept for compatibility but ignored.
     #[arg(long, env = "ARRIVAL_INDEX_DIR")]
     _arrival_index_dir: Option<String>,
+
+    /// Allow a diagnostic run to publish only ZMQ/log signals without Postgres.
+    /// Live runs should not set this.
+    #[arg(long)]
+    allow_database_disabled: bool,
 }
 
 /// Performance metrics tracker
@@ -303,6 +310,14 @@ async fn main() -> Result<()> {
     info!("  Batch Size: {}", args.batch_size);
     info!("  Simulation Workers: {}", sim_workers);
     info!("  Simulation Timeout: {}ms", args.simulation_timeout_ms);
+    info!(
+        "  Database Persistence: {}",
+        if base_config.database.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
 
     info!("  Report Interval: {}s", cfg_report_interval);
     let live_chain_cache = match LiveChainCache::new(&base_config.simulation.live_data_redis_url) {
@@ -322,6 +337,17 @@ async fn main() -> Result<()> {
         }
     };
     info!("================================");
+
+    let allow_database_disabled =
+        args.allow_database_disabled || env_flag_enabled(MEMPOOL_ALLOW_DATABASE_DISABLED_ENV);
+    if !base_config.database.enabled && !allow_database_disabled {
+        bail!(
+            "mempool_signal_detector live profile requires persisted signal writes. \
+             Set {} in the environment or shared ETH_CONFIG_PATH config.env, or pass \
+             --allow-database-disabled only for a diagnostic ZMQ/log-only run.",
+            mempool_processor::config::MEMPOOL_DATABASE_URL_ENV
+        );
+    }
 
     // Initialize metrics
     let metrics = Arc::new(ServiceMetrics::new());
@@ -565,13 +591,9 @@ async fn main() -> Result<()> {
     info!("\n🏃 Starting main processing loop...\n");
     info!("📁 Run directory: {}", run_dir.display());
 
-    // Create simulation log path for direct simulation result logging
-    let simulation_log_path = Arc::new(run_dir.join("simulation_results.log"));
+    // Successful simulations are counted in metrics. Only failures get their
+    // own file so the run directory stays focused on actionable diagnostics.
     let simulation_error_log_path = Arc::new(run_dir.join("simulation_errors.log"));
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(simulation_log_path.as_ref())?;
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -593,7 +615,6 @@ async fn main() -> Result<()> {
             &mut simulation_result_rx,
             metrics.as_ref(),
             mempool_simulator.as_ref(),
-            simulation_log_path.as_ref(),
             simulation_error_log_path.as_ref(),
         )
         .await;
@@ -670,7 +691,6 @@ async fn main() -> Result<()> {
             &mut simulation_result_rx,
             metrics.as_ref(),
             mempool_simulator.as_ref(),
-            simulation_log_path.as_ref(),
             simulation_error_log_path.as_ref(),
         )
         .await;
@@ -823,7 +843,6 @@ async fn drain_simulation_results(
     receiver: &mut mpsc::Receiver<SimulationResult>,
     metrics: &ServiceMetrics,
     mempool_simulator: &MempoolSimulator,
-    simulation_log_path: &Path,
     simulation_error_log_path: &Path,
 ) -> usize {
     let mut drained = 0usize;
@@ -835,49 +854,6 @@ async fn drain_simulation_results(
             TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
             _ => "Other",
         };
-
-        if let Ok(mut file) = OpenOptions::new()
-            .create(false)
-            .append(true)
-            .open(simulation_log_path)
-        {
-            let timestamp = chrono::Local::now();
-
-            if let Some(ref error) = result.error {
-                writeln!(
-                    file,
-                    "[{}] ERROR | {} | {} | {}",
-                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    tx_hash,
-                    category,
-                    error
-                )
-                .ok();
-            } else {
-                let buy_sell_info = if let Some(ref pool_result) = result.pool_viability_result {
-                    format!(
-                        "CanBuy: {}, CanSell: {}, BuyTax: {:.2}%, SellTax: {:.2}%",
-                        pool_result.can_buy,
-                        pool_result.can_sell,
-                        pool_result.buy_tax_percent,
-                        pool_result.sell_tax_percent
-                    )
-                } else {
-                    "No buy/sell data".to_string()
-                };
-
-                writeln!(
-                    file,
-                    "[{}] SUCCESS | {} | {} | SimTime: {:.1}ms | {}",
-                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    tx_hash,
-                    category,
-                    result.simulation_time_ms,
-                    buy_sell_info
-                )
-                .ok();
-            }
-        }
 
         if let Some(ref error) = result.error {
             metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
@@ -894,7 +870,7 @@ async fn drain_simulation_results(
                     let timestamp = chrono::Local::now();
                     writeln!(
                         file,
-                        "[{}] ERROR | block={} | {} | {} | {}",
+                        "[{}] SIMULATION_ERROR | block={} | tx={} | category={} | error={}",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                         block_str,
                         tx_hash,
@@ -957,6 +933,18 @@ fn setup_shutdown_handler() -> Arc<AtomicBool> {
     });
 
     shutdown
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            let value = value.trim();
+            value == "1"
+                || value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("yes")
+                || value.eq_ignore_ascii_case("on")
+        })
+        .unwrap_or(false)
 }
 
 fn append_line_to_file(path: &Path, line: &str) {

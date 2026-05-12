@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **mempool_signal_detector** is a production-grade service that implements a complete signal detection pipeline for Ethereum mempool transactions. It receives transactions from Reth IPC, detects function signatures, routes transactions by category, simulates relevant transactions, detects signals (trading enabled, liquidity removal, honeypots), and publishes signals via ZMQ and logs.
+The **mempool_signal_detector** is a production-grade service that implements a complete signal detection pipeline for Ethereum mempool transactions. It receives transactions from Reth IPC, detects function signatures, routes transactions by category, simulates relevant transactions, detects signals (trading enabled, liquidity removal, honeypots), and publishes signals via ZMQ, logs, and the live Postgres signal store.
 
 This service operates with strict performance targets:
 - Function detection: <10μs per transaction
@@ -491,11 +491,16 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 #### 7.2 Semantic Signal Logs (under the run directory's `signals/` folder)
 - `trading_enabled.log`: Token becomes tradeable with reasonable taxes
 - `honeypot_signals.log`: Buy succeeds but sell fails for the same pool
-- `tax_signals.log`: Tax bucket risks, tax changes, or suspicious tax patterns
+- `tax_signals.log`: Actual tax bucket risks, tax changes, or suspicious tax
+  patterns. Routine tax calculations are not logged here.
 - `liquidity_removals.log`: LP removal operations (also includes ScamDetection entries)
 - (scam detections merged into `liquidity_removals.log`)
 - `lp_approval_signals.log`: Tracked pool holder approving router/Permit2 to spend LP tokens
-- `signal_manager.log`: Per‑TX activity summary from detectors
+- `signal_manager.log`: Emitted signals and publication summaries
+
+Simulation diagnostics live at the run root. Successful simulations are counted
+in interval metrics and are not written one-by-one. `simulation_errors.log`
+captures actionable simulation execution failures and buy/sell branch errors.
 
 #### 7.3 Database (Optional)
 - Simple schema for binary signals only
@@ -697,7 +702,7 @@ The service creates a timestamped run directory with the following structure:
 ```
 mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
 ├── signal_detector.log          # Main service + lifecycle logs
-├── simulation_results.log       # One line per simulation outcome (success/error)
+├── simulation_errors.log        # Simulation execution and buy/sell branch errors
 ├── function_detector/           # Classification/debug diagnostics
 │   ├── liquidity_removals.log   # Fast path for removal function matches
 │   └── trading_enabled.log      # Creator-side trading enablement detections
@@ -707,7 +712,7 @@ mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
     ├── tax_signals.log          # Tax bucket risk signals
     ├── liquidity_removals.log   # LiquidityRemoval + ScamDetection signals
     ├── lp_approval_signals.log  # LP approval (rug setup) signals
-    └── signal_manager.log       # Summary + publication diagnostics
+    └── signal_manager.log       # Emitted signals + publication diagnostics
 ```
 
 ## Monitoring & Operations

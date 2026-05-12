@@ -7,9 +7,14 @@ This folder will host quick scripts/notebooks for validating the signal pipeline
 - Pair `function_detector/trading_enabled.log` entries with `signals/trading_enabled.log`.
   - Remember: the function detector logs *every* mempool transaction that matches a selector, while the signals directory captures the subset (primarily creator transactions) that survive simulation and cache checks.
 
-2. **Simulation result validation**
-   - Parse `simulation_results.log` and confirm each successful simulation produced the expected signal type.
-   - Flag simulations that returned errors and confirm they are reflected in service logs (`signal_detector.log`).
+2. **Simulation error validation**
+   - Parse run-level `simulation_errors.log` and group failures by error class,
+     token, pool, and function type.
+   - Confirm actionable errors are reflected in service logs
+     (`signal_detector.log`) and do not prevent unrelated pool signals from
+     being emitted.
+   - Successful simulations are counted in interval metrics, not written
+     one-by-one.
 
 3. **Signal completeness checks**
    - Count per-signal totals in the log files and compare with ZMQ archive / DB entries (where available).

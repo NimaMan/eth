@@ -86,7 +86,7 @@ src/
 
 **TradingStatusDetector** (`signal_detector/trading_status_detector.rs`):
 - Detects trading enabled signals when taxes are reasonable (<25%)
-- Logs simulation results to `simulation_results.log`
+- Does not write successful simulation rows; success is tracked by interval metrics
 - Checks token cache for existing trading status
 
 ### 2. Token Tracking System (ACTIVE)
@@ -111,12 +111,16 @@ src/
   - `liquidity_removals.log` - Pool drain signals
   - Scam alerts are included in `liquidity_removals.log`
 - ZMQ multipart publishing to tcp://127.0.0.1:5556
-- Database writing via db_writers/ (optional)
-- **NEW**: Empty lines between signals for readability
+- Database writing via db_writers/; required for live runs because token-server
+  and ASENA read persisted signals
 
-**TradingStatusDetector Logging**:
-- `simulation_results.log` - SIMULATION_RESULT entries (separate from trading_enabled.log)
-- **NEW**: Enhanced BuySell field shows actual results: "SimulationRan(can_buy:true, can_approve:true, can_sell:false)"
+**Simulation diagnostics**:
+- `simulation_errors.log` at the run root is the focused artifact for failed
+  simulations and buy/sell branch errors.
+- Successful simulations are counted in interval stats and not logged
+  one-by-one.
+- The `signals/` directory is semantic only; `tax_signals.log` contains actual
+  tax risk signals, not routine tax calculations.
 
 ## Critical Implementation Notes
 

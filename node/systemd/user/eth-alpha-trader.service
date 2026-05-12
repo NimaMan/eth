@@ -1,7 +1,7 @@
 [Unit]
 Description=Ethereum alpha trader
-Wants=network-online.target eth-mempool-signal-detector.service
-After=network-online.target eth-mempool-signal-detector.service
+Wants=network-online.target eth-token-server.service eth-mempool-signal-detector.service
+After=network-online.target eth-token-server.service eth-mempool-signal-detector.service
 StartLimitIntervalSec=0
 
 [Service]

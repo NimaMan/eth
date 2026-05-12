@@ -93,7 +93,7 @@ class SignalSubscriber:
         
         # Detect signal type from message content
         combined = f"{topic} {message}"
-        if "TAX_DETECTION" in combined or "TAX_SIGNAL" in combined:
+        if "TAX_SIGNAL" in combined:
             self.stats["tax"] += 1
             signal_type = "TAX"
         elif "LIQUIDITY" in combined:
