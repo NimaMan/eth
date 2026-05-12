@@ -24,6 +24,7 @@ The root Rust workspace is this directory. Current workspace members from
 | `mempool_processor/` | `mempool_processor` | Reth IPC mempool fetch, function detection, pending simulation, semantic signal detection, DB writers, and ZMQ publishing. |
 | `pyreth/` | `pyreth` | PyO3 bindings over the Rust simulator, chain query, tx processor, and selected higher-level helpers. |
 | `alpha/core/` | `eth_alpha_core` | Pure trading domain types and traits. |
+| `alpha/block_tx_rank/` | `eth_block_tx_rank` | Rough mined-block transaction rank and gas-before estimates for live trading decisions. |
 | `alpha/store/` | `eth_alpha_store` | Durable run, observation, order, position, execution, and risk records. |
 | `alpha/strategies/` | `eth_strategies` | Built-in strategy implementations. |
 | `alpha/engine/` | `eth_alpha_engine` | Strategy runtime, portfolio/order state, risk gating, and execution adapter boundary. |
@@ -34,7 +35,7 @@ Important adjacent code that is not currently a root workspace member:
 
 | Folder | Purpose |
 | --- | --- |
-| `tx_executor/` | Gas-first direct transaction submission core. Receives prepared transactions; does not choose strategy or routes. |
+| `tx_executor/` | Direct transaction submission core. Receives prepared transactions; does not choose strategy, routes, or rank. |
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
 | `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
 | `node/` | Reth/Lighthouse node scripts and systemd service helpers. |
@@ -76,6 +77,7 @@ mempool_processor
 alpha
   <- eth_token_server live pools/status
   <- mempool signal rows
+  <- recent mined block fee samples for block-rank evidence
   -> strategy observations, chain-sim orders, positions, risk events in Postgres
 
 pyreth
@@ -83,7 +85,7 @@ pyreth
 
 tx_executor
   <- prepared direct transactions from a planner/strategy adapter
-  -> nonce, gas, signing, broadcast, execution records
+  -> nonce, fee-cap validation, signing, broadcast, execution records
 ```
 
 Short version: `tx_simulator` executes chain state; `reth_chain_query` reads and
@@ -106,6 +108,7 @@ Use this map before broad searching:
 | How is live token state served to tools and alpha? | `eth_token_server/README.md` | `eth_token_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
 | How are pending transactions detected and converted to signals? | `mempool_processor/README.md` | `mempool_processor/src/function_detector.rs`, `src/tx_router/`, `src/simulator/`, `src/signal_detector/`, `src/db_writers/` |
 | How does the chain-sim/live alpha loop work? | `alpha/README.md` | `alpha/core/README.md`, `alpha/engine/README.md`, `alpha/store/README.md`, `alpha/strategies/README.md`, `alpha/live/*/README.md` |
+| How do I estimate rough tx position from recent mined blocks? | `alpha/block_tx_rank/README.md` | `alpha/block_tx_rank/src/lib.rs`, `reth_chain_query/src/provider/block/` |
 | Where are current pipeline bottlenecks tracked? | `bogaz.md` | service memory, cache fill/read metrics, live readiness, mempool timing, alpha decision bottlenecks |
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
 | How is a real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
@@ -135,9 +138,9 @@ Keep new code inside the crate that owns the behavior:
 | `eth_token` | Token and pool state machines, token health, control-address/activity state, network views, block-level token update logic from processed blocks. | Direct tracing/RPC, duplicate transaction decoding, live service hosting. |
 | `eth_token_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
-| `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
+| `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
-| `tx_executor` | Validate prepared transactions, reserve nonce, apply gas/bribe policy, sign, broadcast, record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery. |
+| `tx_executor` | Validate prepared transactions, reserve nonce, enforce fee caps, sign, broadcast, record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery, tx rank estimation. |
 | `tx_fund_flow` | Fund-flow network construction, ranking, analytics, visualization. | Core transaction simulation or decoding duplicates. |
 
 ## Common Runtime Inputs

@@ -99,6 +99,9 @@ Critical in-memory decisions happen before lower-priority analytics writes:
 
 Backtest and live no-capital execution use the same sequence and the same
 chain-sim fill source. Real trading later swaps in a `tx_executor` adapter.
+That real adapter must consult `eth_block_tx_rank` before submission and persist
+the rank evidence with the order decision; `tx_executor` only receives the final
+prepared transaction.
 
 ### Python Concept Mapping
 
@@ -119,6 +122,9 @@ chain-sim fill source. Real trading later swaps in a `tx_executor` adapter.
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
 - `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` return
   `ExecutionReport`s from EVM simulation against selected chain state.
+- The future real adapter is responsible for route/calldata construction,
+  pre-simulation, `eth_block_tx_rank` checks, and then final submission through
+  `tx_executor`.
 - `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
 - `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
 

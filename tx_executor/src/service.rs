@@ -2,9 +2,7 @@ use crate::{
     broadcast::RpcBroadcaster,
     config::{BroadcastMode, EthTxExecutorConfig},
     error::Result,
-    gas::TxGasProfile,
     nonce::NonceManager,
-    position::{BlockPositionEstimate, MempoolPositionEstimator},
     repository::{ExecutionEvent, ExecutionRecorder},
     request::DirectRawTransactionRequest,
     signer::LocalTransactionSigner,
@@ -20,7 +18,6 @@ pub struct EthTxExecutionService {
     signer: LocalTransactionSigner,
     nonce_manager: NonceManager,
     broadcaster: RpcBroadcaster,
-    position_estimator: MempoolPositionEstimator,
     recorder: Arc<dyn ExecutionRecorder>,
 }
 
@@ -30,7 +27,6 @@ impl EthTxExecutionService {
         signer: LocalTransactionSigner,
         nonce_manager: NonceManager,
         broadcaster: RpcBroadcaster,
-        position_estimator: MempoolPositionEstimator,
         recorder: Arc<dyn ExecutionRecorder>,
     ) -> Self {
         Self {
@@ -38,7 +34,6 @@ impl EthTxExecutionService {
             signer,
             nonce_manager,
             broadcaster,
-            position_estimator,
             recorder,
         }
     }
@@ -70,7 +65,6 @@ impl EthTxExecutionService {
         let nonce = self.nonce_manager.reserve(prepared.nonce).await?;
         prepared.nonce = Some(nonce);
 
-        let position = self.estimate_position(&prepared).await;
         let signed = self.signer.sign_direct_raw(&prepared).await?;
         self.record(
             &prepared.attempt_id,
@@ -79,7 +73,6 @@ impl EthTxExecutionService {
             json!({
                 "tx_hash": signed.tx_hash,
                 "nonce": nonce,
-                "position": position,
             }),
         )
         .await;
@@ -102,7 +95,6 @@ impl EthTxExecutionService {
                     prepared,
                     ExecutionStatus::DryRun,
                     Some(signed.tx_hash),
-                    position,
                     None,
                     started,
                 ))
@@ -132,7 +124,6 @@ impl EthTxExecutionService {
                         prepared,
                         ExecutionStatus::Broadcast,
                         Some(rpc_hash),
-                        position,
                         None,
                         started,
                     ))
@@ -151,7 +142,6 @@ impl EthTxExecutionService {
                         prepared,
                         ExecutionStatus::BroadcastError,
                         Some(signed.tx_hash),
-                        position,
                         Some(message),
                         started,
                     ))
@@ -160,41 +150,11 @@ impl EthTxExecutionService {
         }
     }
 
-    async fn estimate_position(
-        &self,
-        prepared: &PreparedDirectRawTransaction,
-    ) -> Option<BlockPositionEstimate> {
-        if !self.config.estimate_pending_position {
-            return None;
-        }
-
-        match self
-            .position_estimator
-            .estimate(TxGasProfile {
-                gas_limit: prepared.gas_limit,
-                max_fee_per_gas: prepared.max_fee_per_gas,
-                max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
-            })
-            .await
-        {
-            Ok(position) => Some(position),
-            Err(err) => {
-                warn!(
-                    attempt_id = prepared.attempt_id,
-                    error = %err,
-                    "could not estimate pending block position"
-                );
-                None
-            }
-        }
-    }
-
     fn result(
         &self,
         prepared: PreparedDirectRawTransaction,
         status: ExecutionStatus,
         tx_hash: Option<ethers_core::types::H256>,
-        position: Option<BlockPositionEstimate>,
         error: Option<String>,
         started: Instant,
     ) -> SubmitDirectRawResult {
@@ -208,7 +168,6 @@ impl EthTxExecutionService {
             gas_limit: prepared.gas_limit,
             max_fee_per_gas: prepared.max_fee_per_gas,
             max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
-            position,
             error,
             elapsed_ms: started.elapsed().as_millis(),
         }

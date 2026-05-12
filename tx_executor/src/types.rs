@@ -1,4 +1,3 @@
-use crate::position::BlockPositionEstimate;
 use ethers_core::types::{Address, H256, U256};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,7 +46,6 @@ pub struct SubmitDirectRawResult {
     pub gas_limit: U256,
     pub max_fee_per_gas: U256,
     pub max_priority_fee_per_gas: U256,
-    pub position: Option<BlockPositionEstimate>,
     pub error: Option<String>,
     pub elapsed_ms: u128,
 }

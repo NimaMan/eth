@@ -2,7 +2,7 @@
 name = "tx_executor"
 version = "0.1.0"
 edition = "2021"
-description = "Gas-first Ethereum transaction executor for prepared direct transactions"
+description = "Ethereum transaction executor for prepared direct transactions"
 
 [workspace]
 

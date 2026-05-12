@@ -1,0 +1,15 @@
+[package]
+name = "eth_block_tx_rank"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+workspace = "../.."
+
+[dependencies]
+alloy-primitives = { version = "1.5.7", features = ["serde"] }
+eyre = { workspace = true }
+reth_chain_query = { path = "../../reth_chain_query" }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

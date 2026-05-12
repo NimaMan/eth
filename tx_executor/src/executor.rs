@@ -3,7 +3,6 @@ use crate::{
     config::EthTxExecutorConfig,
     error::{EthTxExecutorError, Result},
     nonce::NonceManager,
-    position::MempoolPositionEstimator,
     repository::{ExecutionRecorder, JsonlRecorder, NoopRecorder},
     service::EthTxExecutionService,
     signer::LocalTransactionSigner,
@@ -37,8 +36,7 @@ impl EthTxExecutor {
             None => Arc::new(NoopRecorder),
         };
         let nonce_manager = NonceManager::new(provider.clone(), signer.address());
-        let broadcaster = RpcBroadcaster::new(provider.clone());
-        let position_estimator = MempoolPositionEstimator::new(provider);
+        let broadcaster = RpcBroadcaster::new(provider);
 
         Ok(Self {
             service: EthTxExecutionService::new(
@@ -46,7 +44,6 @@ impl EthTxExecutor {
                 signer,
                 nonce_manager,
                 broadcaster,
-                position_estimator,
                 recorder,
             ),
         })

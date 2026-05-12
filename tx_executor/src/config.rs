@@ -17,7 +17,6 @@ pub struct EthTxExecutorConfig {
     pub max_priority_fee_per_gas_wei: u128,
     pub max_fee_per_gas_wei: u128,
     pub local_journal_path: Option<PathBuf>,
-    pub estimate_pending_position: bool,
 }
 
 impl EthTxExecutorConfig {
@@ -30,7 +29,6 @@ impl EthTxExecutorConfig {
             max_priority_fee_per_gas_wei: 500_000_000_000,
             max_fee_per_gas_wei: 1_000_000_000_000,
             local_journal_path: None,
-            estimate_pending_position: true,
         }
     }
 }

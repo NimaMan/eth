@@ -16,8 +16,6 @@ pub enum EthTxExecutorError {
     Broadcast(String),
     #[error("rpc error: {0}")]
     Rpc(String),
-    #[error("position unavailable: {0}")]
-    PositionUnavailable(String),
     #[error("repository error: {0}")]
     Repository(String),
     #[error("serialization error: {0}")]

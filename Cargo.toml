@@ -4,6 +4,8 @@ members = [
     "alpha/core",
     "alpha/engine",
     "alpha/backtest",
+    "alpha/lab",
+    "alpha/block_tx_rank",
     "alpha/pool_classification",
     "alpha/store",
     "alpha/strategies",

@@ -122,7 +122,7 @@ The token runtime operates at block granularity. For a given processed block:
 4. The engine turns an approved decision into an `OrderIntent`.
 5. Backtest or live execution decides the fill and emits `ExecutionReport`.
 
-Strategies must not assume they can observe intra-block ordering unless the market event explicitly provides it. A strategy decision made from block `N` is a decision after observing the block-level state for `N`, not a guaranteed transaction position inside that block.
+Strategies must not assume they can observe intra-block ordering unless the market event explicitly provides it. A strategy decision made from block `N` is a decision after observing the block-level state for `N`, not a guaranteed transaction position inside that block. For future real execution, the strategy or real adapter must consume `eth_block_tx_rank` evidence before submitting through `tx_executor`.
 
 ## Backtest Fill Contract
 
