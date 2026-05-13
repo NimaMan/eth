@@ -1,6 +1,16 @@
 use crate::tx_builders::PermitData;
 use crate::UnsignedTransaction;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_sol_types::{sol, SolCall, SolValue};
+
+const COMMAND_V3_SWAP_EXACT_IN: u8 = 0x00;
+const COMMAND_UNWRAP_WETH: u8 = 0x0c;
+const UNIVERSAL_ROUTER_ADDRESS_THIS: Address =
+    address!("0000000000000000000000000000000000000002");
+
+sol! {
+    function execute(bytes commands, bytes[] inputs, uint256 deadline);
+}
 
 fn router_address_v3() -> Address {
     Address::from([
@@ -14,6 +24,83 @@ fn weth_address() -> Address {
         0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9,
         0x08, 0x3C, 0x75, 0x6C, 0xc2,
     ])
+}
+
+#[derive(Debug, Clone)]
+pub struct UniversalRouterV3ExactInputRequest {
+    pub universal_router: Address,
+    pub caller: Address,
+    pub recipient: Address,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub fee: u32,
+    pub amount_in: U256,
+    pub min_amount_out: U256,
+    pub deadline: U256,
+    pub payer_is_user: bool,
+    pub unwrap_weth_to: Option<Address>,
+}
+
+pub fn build_universal_router_v3_exact_input_tx(
+    request: &UniversalRouterV3ExactInputRequest,
+) -> eyre::Result<UnsignedTransaction> {
+    let path = encode_v3_path(request.token_in, request.fee, request.token_out)?;
+    let mut commands = vec![COMMAND_V3_SWAP_EXACT_IN];
+    let mut inputs = Vec::new();
+    let swap_recipient = if request.unwrap_weth_to.is_some() {
+        UNIVERSAL_ROUTER_ADDRESS_THIS
+    } else {
+        request.recipient
+    };
+    let input = (
+        swap_recipient,
+        request.amount_in,
+        request.min_amount_out,
+        Bytes::from(path),
+        request.payer_is_user,
+        Bytes::new(),
+    )
+        .abi_encode_params();
+    inputs.push(Bytes::from(input));
+
+    if let Some(unwrap_recipient) = request.unwrap_weth_to {
+        commands.push(COMMAND_UNWRAP_WETH);
+        inputs.push(Bytes::from(
+            (unwrap_recipient, request.min_amount_out).abi_encode_params(),
+        ));
+    }
+
+    let calldata = executeCall {
+        commands: Bytes::from(commands),
+        inputs,
+        deadline: request.deadline,
+    }
+    .abi_encode();
+
+    Ok(UnsignedTransaction {
+        from: Some(request.caller),
+        to: Some(request.universal_router),
+        gas: Some(2_500_000),
+        gas_price: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(Bytes::from(calldata)),
+        nonce: None,
+        ..Default::default()
+    })
+}
+
+fn encode_v3_path(token_in: Address, fee: u32, token_out: Address) -> eyre::Result<Vec<u8>> {
+    if fee > 0x00ff_ffff {
+        eyre::bail!("Uniswap V3 fee {fee} exceeds uint24");
+    }
+    let mut path = Vec::with_capacity(43);
+    path.extend_from_slice(token_in.as_slice());
+    let fee_bytes = fee.to_be_bytes();
+    path.extend_from_slice(&fee_bytes[1..]);
+    path.extend_from_slice(token_out.as_slice());
+    Ok(path)
 }
 
 /// Encode exactInputSingle(params)
@@ -435,4 +522,93 @@ pub fn build_sell_with_self_permit_v3(
 ) -> UnsignedTransaction {
     // Fallback: build standard sell (no permit bundling yet)
     build_sell_swap_v3(seller, token_in, amount_in_tokens, fee_tier, 0, deadline)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_universal_router_v3_exact_input() {
+        let caller = Address::with_last_byte(1);
+        let token_in = Address::with_last_byte(2);
+        let token_out = Address::with_last_byte(3);
+        let router = Address::with_last_byte(4);
+
+        let tx = build_universal_router_v3_exact_input_tx(&UniversalRouterV3ExactInputRequest {
+            universal_router: router,
+            caller,
+            recipient: caller,
+            token_in,
+            token_out,
+            fee: 3000,
+            amount_in: U256::from(1000u64),
+            min_amount_out: U256::ZERO,
+            deadline: U256::from(123u64),
+            payer_is_user: true,
+            unwrap_weth_to: None,
+        })
+        .unwrap();
+
+        let data = tx.data.unwrap();
+        assert_eq!(tx.from, Some(caller));
+        assert_eq!(tx.to, Some(router));
+        assert_eq!(tx.value, Some(U256::ZERO));
+        assert_eq!(&data[..4], executeCall::SELECTOR);
+        assert!(data
+            .windows(1)
+            .any(|window| window == [COMMAND_V3_SWAP_EXACT_IN]));
+    }
+
+    #[test]
+    fn rejects_universal_router_v3_fee_outside_uint24() {
+        let err = build_universal_router_v3_exact_input_tx(&UniversalRouterV3ExactInputRequest {
+            universal_router: Address::with_last_byte(4),
+            caller: Address::with_last_byte(1),
+            recipient: Address::with_last_byte(1),
+            token_in: Address::with_last_byte(2),
+            token_out: Address::with_last_byte(3),
+            fee: 0x0100_0000,
+            amount_in: U256::from(1000u64),
+            min_amount_out: U256::ZERO,
+            deadline: U256::from(123u64),
+            payer_is_user: true,
+            unwrap_weth_to: None,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("exceeds uint24"));
+    }
+
+    #[test]
+    fn encodes_universal_router_v3_unwrap_sequence() {
+        let caller = Address::with_last_byte(1);
+        let token_in = Address::with_last_byte(2);
+        let weth = weth_address();
+        let router = Address::with_last_byte(4);
+
+        let tx = build_universal_router_v3_exact_input_tx(&UniversalRouterV3ExactInputRequest {
+            universal_router: router,
+            caller,
+            recipient: caller,
+            token_in,
+            token_out: weth,
+            fee: 3000,
+            amount_in: U256::from(1000u64),
+            min_amount_out: U256::ZERO,
+            deadline: U256::from(123u64),
+            payer_is_user: true,
+            unwrap_weth_to: Some(caller),
+        })
+        .unwrap();
+
+        let data = tx.data.unwrap();
+        assert_eq!(&data[..4], executeCall::SELECTOR);
+        assert!(data.windows(2).any(|window| {
+            window == [COMMAND_V3_SWAP_EXACT_IN, COMMAND_UNWRAP_WETH]
+        }));
+        assert!(data.windows(32).any(|window| {
+            window == UNIVERSAL_ROUTER_ADDRESS_THIS.into_word().as_slice()
+        }));
+    }
 }
