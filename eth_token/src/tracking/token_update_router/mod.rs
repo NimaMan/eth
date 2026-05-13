@@ -249,7 +249,7 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
-                direct_state_only: false,
+                direct_state_only: true,
                 profile_run_id: Some("live"),
             },
             None,
@@ -556,7 +556,7 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
-                direct_state_only: false,
+                direct_state_only: true,
                 profile_run_id: Some("live"),
             },
             None,

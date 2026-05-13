@@ -857,14 +857,6 @@ async fn live_block_state_session_chain(
     profile_run_id: Option<&str>,
 ) -> Result<UnsignedTxChainSimulation> {
     let block_number = state_session_block_number(pool_config, tx);
-    if missing_live_current_block_header(pool_config, tx) {
-        return Err(eyre!(
-            "live current-block {} simulation requires ProcessedBlock.header block={} pool={}",
-            pool_kind,
-            block_number,
-            pool_id
-        ));
-    }
     let needs_session = !block_sessions
         .lock()
         .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?
@@ -878,6 +870,14 @@ async fn live_block_state_session_chain(
                 "direct live block state session missing block={} for {} pool={}",
                 block_number,
                 pool_kind,
+                pool_id
+            ));
+        }
+        if missing_live_current_block_header(pool_config, tx) {
+            return Err(eyre!(
+                "live current-block {} simulation requires ProcessedBlock.header block={} pool={}",
+                pool_kind,
+                block_number,
                 pool_id
             ));
         }
