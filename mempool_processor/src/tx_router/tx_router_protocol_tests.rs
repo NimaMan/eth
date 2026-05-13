@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use alloy_primitives::U256;
+use alloy_primitives::{address, Address, U256};
 use reth_chain_query::common_addresses::POOL_FACTORIES;
 use reth_chain_query::to_checksum_address;
 use serde_json::json;
 
 use super::{CreatorFunctionType, SimulationPriority, TransactionCategory, TransactionRouter};
+use crate::liquidity_approval_call::{PERMIT2_ADDRESS, PERMIT2_APPROVE_SELECTOR};
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::types::PoolLifecycle;
 use crate::token_tracking::{
@@ -44,6 +45,83 @@ async fn routes_balancer_vault_lp_approval_when_pool_share_is_tracked() {
     assert_eq!(classification.priority, SimulationPriority::Critical);
     assert!(!classification.requires_simulation);
     assert!(!classification.requires_buy_sell_test);
+    assert!(matches!(
+        classification.category,
+        TransactionCategory::CreatorTransaction {
+            function_type: CreatorFunctionType::LiquidityPoolApproval,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn routes_tracked_lp_approval_to_unknown_spender() {
+    let cache = Arc::new(TokenTrackingCache::with_defaults());
+    let token_address = "0x1111111111111111111111111111111111111111".to_string();
+    let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+    hydrate_token_with_pool(&cache, &token_address, &pool_address).await;
+
+    let router = TransactionRouter::new(Some(cache));
+    let tx = MempoolTransaction {
+        hash: "0xtx".to_string(),
+        data: json!({}),
+        detection_ns: 0,
+        detection_time: Instant::now(),
+        latency_ns: 0,
+        from: address_bytes("0x2222222222222222222222222222222222222222"),
+        to: Some(address_bytes(&pool_address)),
+        input: approve_calldata(
+            "0x9999999999999999999999999999999999999999",
+            U256::from(1_000_000u64),
+        ),
+        value: U256::ZERO,
+        gas_price: Some(U256::ZERO),
+        functions: vec!["approve".to_string()],
+        function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+    };
+
+    let classification = router.classify(&tx).await;
+    assert_eq!(classification.priority, SimulationPriority::Critical);
+    assert!(!classification.requires_simulation);
+    assert!(matches!(
+        classification.category,
+        TransactionCategory::CreatorTransaction {
+            function_type: CreatorFunctionType::LiquidityPoolApproval,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn routes_permit2_approval_when_ownership_token_is_tracked_pool() {
+    let cache = Arc::new(TokenTrackingCache::with_defaults());
+    let token_address = "0x1111111111111111111111111111111111111111".to_string();
+    let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+    hydrate_token_with_pool(&cache, &token_address, &pool_address).await;
+
+    let router = TransactionRouter::new(Some(cache));
+    let tx = MempoolTransaction {
+        hash: "0xtx".to_string(),
+        data: json!({}),
+        detection_ns: 0,
+        detection_time: Instant::now(),
+        latency_ns: 0,
+        from: address_bytes("0x2222222222222222222222222222222222222222"),
+        to: Some(PERMIT2_ADDRESS.to_vec()),
+        input: permit2_approve_calldata(
+            address_from_hex(&pool_address),
+            address!("9999999999999999999999999999999999999999"),
+            U256::from(1_000_000u64),
+        ),
+        value: U256::ZERO,
+        gas_price: Some(U256::ZERO),
+        functions: vec!["permit2_approve".to_string()],
+        function_category: Some(CreatorFunctionType::Other("permit2_approve".to_string())),
+    };
+
+    let classification = router.classify(&tx).await;
+    assert_eq!(classification.priority, SimulationPriority::Critical);
+    assert!(!classification.requires_simulation);
     assert!(matches!(
         classification.category,
         TransactionCategory::CreatorTransaction {
@@ -177,4 +255,23 @@ fn exit_pool_calldata(pool_id: [u8; 32]) -> Vec<u8> {
     let mut input = hex::decode("8bdb3913").unwrap();
     input.extend_from_slice(&pool_id);
     input
+}
+
+fn permit2_approve_calldata(token: Address, spender: Address, amount: U256) -> Vec<u8> {
+    let mut input = PERMIT2_APPROVE_SELECTOR.to_vec();
+    input.extend_from_slice(&pad_address(token));
+    input.extend_from_slice(&pad_address(spender));
+    input.extend_from_slice(&amount.to_be_bytes::<32>());
+    input.extend_from_slice(&U256::from(1234u64).to_be_bytes::<32>());
+    input
+}
+
+fn pad_address(address: Address) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes[12..].copy_from_slice(address.as_slice());
+    bytes
+}
+
+fn address_from_hex(address: &str) -> Address {
+    Address::from_slice(&address_bytes(address))
 }

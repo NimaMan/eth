@@ -5,6 +5,7 @@
 pub mod common;
 pub mod config;
 pub mod db_writers;
+pub mod liquidity_approval_call;
 pub mod mempool_fetcher;
 pub mod token_tracking;
 

@@ -1,7 +1,8 @@
-/// LP Token Approval Detector
+/// Liquidity ownership approval detector
 ///
-/// Detects when LP token holders approve routers to spend their LP tokens,
-/// which is typically the precursor to a rug pull (liquidity removal)
+/// Detects when LP/BPT/Curve-LP holders approve another address to spend the
+/// ownership token. This is typically the precursor to liquidity removal.
+use crate::liquidity_approval_call::decode_liquidity_approval_call;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::TransactionCategory;
 use alloy_primitives::{Address, U256};
@@ -87,35 +88,23 @@ impl LpApprovalDetector {
         tx: &MempoolTransaction,
         _category: &TransactionCategory,
     ) -> Option<LpApprovalSignal> {
-        // Verify this is an approve() call
-        if tx.input.len() < 68 || &tx.input[0..4] != &[0x09, 0x5e, 0xa7, 0xb3] {
+        let approval = decode_liquidity_approval_call(tx)?;
+        if approval.amount == U256::ZERO {
             return None;
         }
 
-        // Extract spender (router) from calldata
-        let mut spender_bytes = [0u8; 20];
-        spender_bytes.copy_from_slice(&tx.input[16..36]);
-        let router_address = Address::from(spender_bytes);
-
-        // Extract amount from calldata
-        let amount = U256::from_be_slice(&tx.input[36..68]);
-
-        let router_hex = to_checksum_address(&router_address);
+        let router_hex = to_checksum_address(&approval.spender);
 
         // Derive approver and LP token address directly from transaction fields.
         let approver = to_checksum_address(&Address::from_slice(&tx.from));
-        let lp_token_address = tx
-            .to
-            .as_ref()
-            .map(|t| to_checksum_address(&Address::from_slice(t)))
-            .unwrap_or_else(|| "unknown".to_string());
+        let lp_token_address = to_checksum_address(&approval.ownership_token);
 
         let signal = LpApprovalSignal {
             tx_hash: tx.hash.clone(),
             creator: approver.clone(),
             lp_token_address: lp_token_address.clone(),
             router_address: router_hex.clone(),
-            amount,
+            amount: approval.amount,
             timestamp: Utc::now().timestamp(),
             // Additional fields for database
             token_address: lp_token_address.clone(), // Resolved to actual token by SignalManager

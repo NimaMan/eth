@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{
     trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
-    TaxDetector, TaxSignalType, TradingStatusDetector,
+    TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
 };
 
 /// Configuration for signal detection
@@ -45,6 +45,7 @@ pub struct SignalManager {
     liquidity_detector: LiquidityDetector,
     trading_status_detector: TradingStatusDetector,
     tax_signal_detector: TaxDetector,
+    token_supply_risk_detector: TokenSupplyRiskDetector,
     lp_approval_detector: LpApprovalDetector,
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
@@ -102,6 +103,7 @@ impl SignalManager {
             liquidity_detector: LiquidityDetector::new(),
             trading_status_detector: TradingStatusDetector::new(),
             tax_signal_detector: TaxDetector::new(config.tax_detection.clone()),
+            token_supply_risk_detector: TokenSupplyRiskDetector::new(),
             lp_approval_detector: LpApprovalDetector::new(&config.log_dir),
             token_cache: None,
             signal_log_path,
@@ -466,6 +468,10 @@ impl SignalManager {
                     },
                 ));
             }
+        }
+
+        if let Some(signal) = self.token_supply_risk_detector.detect(result) {
+            signals.push(signal);
         }
 
         if let Some(trading_signal) = self

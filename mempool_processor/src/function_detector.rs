@@ -3,9 +3,12 @@
 // Simple function signature detector that categorizes transactions
 // based on their function selectors (4-byte signatures)
 
+use crate::liquidity_approval_call::{
+    decode_liquidity_approval_call, is_liquidity_approval_selector,
+    liquidity_approval_function_name,
+};
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{address, Address as AlloyAddress};
-use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
 use reth_chain_query::to_checksum_address;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +23,7 @@ pub enum CreatorFunctionType {
     LiquidityRemoval,      // Removing liquidity from pool
     LiquidityPoolApproval, // LP token approval to router (rug pull setup)
     MaxWalletLimit,
+    TokenSupplyModification,
     Other(String),
 }
 
@@ -139,11 +143,11 @@ impl FunctionDetector {
             });
         }
 
-        // Check for approve function first - needs special handling for LP tokens
-        if selector == &hex_to_bytes("095ea7b3") {
-            let approve_type = self.classify_approve(tx);
+        // Approval functions need special handling for LP/BPT/Curve ownership tokens.
+        if is_liquidity_approval_selector(selector) {
+            let approve_type = self.classify_liquidity_approval(tx);
             return Some(FunctionDetectionResult {
-                function_name: "approve".to_string(),
+                function_name: liquidity_approval_function_name(selector).to_string(),
                 function_type: approve_type,
                 selector: selector_hex.to_string(),
             });
@@ -209,66 +213,56 @@ impl FunctionDetector {
             // into creator-control.
 
             // Trading control functions
-            "8a8c523c" | "c9567bf9" => Some(CreatorFunctionType::TradingControl),
+            "8a8c523c" | "c9567bf9" | "fb201b1d" | "17700f01" | "8456cb59" | "3f4ba83a" => {
+                Some(CreatorFunctionType::TradingControl)
+            }
 
             // Ownership functions
-            "f2fde38b" | "715018a6" => Some(CreatorFunctionType::OwnershipChange),
+            "f2fde38b" | "715018a6" | "3659cfe6" => Some(CreatorFunctionType::OwnershipChange),
 
             // Liquidity additions
             "e8e33700" | "f305d719" => Some(CreatorFunctionType::LiquidityAddition),
+
+            // Tax and fee mutators that need post-tx buy/sell simulation.
+            "0b78f9c0" | "6db79437" | "c647b20e" | "dc1052e2" | "8cd09d50" | "21ecff5b"
+            | "95913d17" | "667f6526" | "9012c4a8" => Some(CreatorFunctionType::TaxModification),
+
+            // Wallet/tx-limit controls can become sell restrictions after the tx.
+            "ec28438a" | "27a14fc2" | "31baf7d5" | "0b006d60" | "74010ece" | "ea1644d5"
+            | "751039fc" => Some(CreatorFunctionType::MaxWalletLimit),
+
+            // Supply mutators are emitted as token_supply_risk only when called
+            // directly on a tracked token contract.
+            "40c10f19" | "e58306f9" | "484b973c" | "627804af" | "68573107" | "8ba4cc3c" => {
+                Some(CreatorFunctionType::TokenSupplyModification)
+            }
 
             _ => None,
         }
     }
 
-    /// Classify approve() calls - determine if it's LP token approval for rug pull
-    fn classify_approve(
+    /// Classify approvals that can grant control over liquidity ownership tokens.
+    fn classify_liquidity_approval(
         &self,
         tx: &crate::mempool_fetcher::MempoolTransaction,
     ) -> CreatorFunctionType {
-        // Check if we have enough data for approve(address,uint256)
-        if tx.input.len() < 68 {
+        let Some(approval) = decode_liquidity_approval_call(tx) else {
+            return CreatorFunctionType::Other("approve".to_string());
+        };
+        if approval.amount == alloy_primitives::U256::ZERO {
             return CreatorFunctionType::Other("approve".to_string());
         }
 
-        let Some(spender) = approval_spender(&tx.input) else {
-            return CreatorFunctionType::Other("approve".to_string());
-        };
-        let spender_is_known = is_known_lp_approval_spender(&spender);
-        let spender_addr = to_checksum_address(&spender);
+        let ownership_token = to_checksum_address(&approval.ownership_token);
 
-        // Check if the approve is being called on an LP token contract
-        if let Some(to_bytes) = &tx.to {
-            let to_addr = to_checksum_address(&AlloyAddress::from_slice(to_bytes));
-
-            // Check if the 'to' address is a pool (LP token)
-            if let Some(ref cache) = self.token_cache {
-                let is_pool = futures::executor::block_on(cache.is_pool(&to_addr));
-                let spender_is_tracked_pool =
-                    futures::executor::block_on(cache.is_pool(&spender_addr));
-
-                if is_pool && (spender_is_known || spender_is_tracked_pool) {
-                    return CreatorFunctionType::LiquidityPoolApproval;
-                }
+        if let Some(ref cache) = self.token_cache {
+            if futures::executor::block_on(cache.is_pool(&ownership_token)) {
+                return CreatorFunctionType::LiquidityPoolApproval;
             }
         }
 
-        // Regular approval (not LP token or not to router)
         CreatorFunctionType::Other("approve".to_string())
     }
-}
-
-fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
-    if input.len() < 68 || input.get(0..4)? != [0x09, 0x5e, 0xa7, 0xb3].as_slice() {
-        return None;
-    }
-    Some(AlloyAddress::from_slice(&input[16..36]))
-}
-
-fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
-    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
-        || *spender == POOL_FACTORIES["balancer_vault"]
-        || ROUTERS.values().any(|router| router == spender)
 }
 
 fn is_uniswap_v3_position_manager(tx: &crate::mempool_fetcher::MempoolTransaction) -> bool {

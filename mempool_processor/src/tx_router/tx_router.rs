@@ -1,8 +1,11 @@
+use crate::liquidity_approval_call::{
+    decode_liquidity_approval_call, is_known_liquidity_approval_spender,
+    is_liquidity_approval_selector,
+};
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
 use crate::unresolved_intents::UnresolvedIntentKind;
 use alloy_primitives::{address, Address as AlloyAddress};
-use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
 use reth_chain_query::to_checksum_address;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -92,8 +95,9 @@ impl TransactionRouter {
             return None;
         }
 
-        if approval_spender(&tx.input)
-            .map(|spender| is_known_lp_approval_spender(&spender))
+        if decode_liquidity_approval_call(tx)
+            .filter(|approval| approval.amount != alloy_primitives::U256::ZERO)
+            .map(|approval| is_known_liquidity_approval_spender(&approval.spender))
             .unwrap_or(false)
         {
             return Some((
@@ -140,6 +144,9 @@ impl TransactionRouter {
                     }
                     CreatorFunctionType::LiquidityPoolApproval => {
                         "LP approval target is not in token cache yet"
+                    }
+                    CreatorFunctionType::TokenSupplyModification => {
+                        "supply-control tx target is not in token cache yet"
                     }
                     _ => "creator-control tx target is not in token cache yet",
                 },
@@ -248,8 +255,10 @@ impl TransactionRouter {
         &self,
         tx: &MempoolTransaction,
     ) -> Option<ClassificationResult> {
-        let spender = approval_spender(&tx.input)?;
-        let spender_is_known = is_known_lp_approval_spender(&spender);
+        let approval = decode_liquidity_approval_call(tx)?;
+        if approval.amount == alloy_primitives::U256::ZERO {
+            return None;
+        }
 
         self.lp_router_approvals_seen
             .fetch_add(1, Ordering::Relaxed);
@@ -258,25 +267,12 @@ impl TransactionRouter {
             self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-        let Some(target_address) = tx
-            .to
-            .as_ref()
-            .map(|to| to_checksum_address(&AlloyAddress::from_slice(to)))
-        else {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
-            return None;
-        };
+        let target_address = to_checksum_address(&approval.ownership_token);
 
         let Some(pool) = cache.get_pool_by_address(&target_address).await else {
             self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-        let spender_address = to_checksum_address(&spender);
-        let spender_is_tracked_pool = cache.is_pool(&spender_address).await;
-        if !spender_is_known && !spender_is_tracked_pool {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
-            return None;
-        }
 
         self.lp_tracked_pool_approvals
             .fetch_add(1, Ordering::Relaxed);
@@ -415,7 +411,10 @@ impl TransactionRouter {
             && (&input_data[0..4] == &[0xa9, 0x05, 0x9c, 0xbb]
                 || &input_data[0..4] == &[0x23, 0xb8, 0x72, 0xdd]);
 
-        let is_approval = input_data.len() >= 4 && &input_data[0..4] == &[0x09, 0x5e, 0xa7, 0xb3];
+        let is_approval = input_data
+            .get(0..4)
+            .map(is_liquidity_approval_selector)
+            .unwrap_or(false);
 
         ClassificationResult {
             category: TransactionCategory::Regular {
@@ -437,6 +436,7 @@ fn should_route_tracked_token_call(function_type: &CreatorFunctionType) -> bool 
             | CreatorFunctionType::MaxWalletLimit
             | CreatorFunctionType::OwnershipChange
             | CreatorFunctionType::LiquidityPoolApproval
+            | CreatorFunctionType::TokenSupplyModification
     )
 }
 
@@ -449,6 +449,7 @@ fn priority_for_creator_function(function_type: &CreatorFunctionType) -> Simulat
         CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical,
         CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
         CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
+        CreatorFunctionType::TokenSupplyModification => SimulationPriority::Critical,
         CreatorFunctionType::Other(_) => SimulationPriority::High,
     }
 }
@@ -466,13 +467,6 @@ fn calldata_address_param(input: &[u8], param_idx: usize) -> Option<String> {
         return None;
     }
     Some(format!("0x{}", hex::encode(&input[start..end])))
-}
-
-fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
-    if input.len() < 68 || input.get(0..4)? != [0x09, 0x5e, 0xa7, 0xb3].as_slice() {
-        return None;
-    }
-    Some(AlloyAddress::from_slice(&input[16..36]))
 }
 
 fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
@@ -504,12 +498,6 @@ fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool {
         selector,
         [0xdd, 0x46, 0x50, 0x8f] | [0xa3, 0x55, 0xde, 0x88] | [0x0d, 0x4f, 0x31, 0x9d]
     )
-}
-
-fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
-    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
-        || *spender == POOL_FACTORIES["balancer_vault"]
-        || ROUTERS.values().any(|router| router == spender)
 }
 
 #[cfg(test)]
