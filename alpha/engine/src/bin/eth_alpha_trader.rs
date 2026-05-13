@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -39,18 +39,15 @@ const STRATEGY_NAME: &str = "snipe-all-v1";
 const STRATEGY_LABEL: &str = "Snipe All v1";
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
+const ALPHA_DATABASE_URL_CONFIG: &str = "ALPHA_DATABASE_URL";
+const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
+const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
+const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/logs/alpha_trader";
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[arg(
-        long,
-        env = "ALPHA_TOKEN_SERVER_URL",
-        default_value = "http://127.0.0.1:8765"
-    )]
-    token_server_url: String,
-
     #[arg(long, default_value_t = 2_000)]
     poll_interval_ms: u64,
 
@@ -69,19 +66,12 @@ struct Args {
     #[arg(long, default_value = "1000")]
     min_liquidity_usd: String,
 
-    #[arg(long, env = "ALPHA_DATABASE_URL")]
-    database_url: Option<String>,
-
-    #[arg(long, env = "ALPHA_TRADER_RUN_ID")]
+    #[arg(long)]
     run_id: Option<String>,
 
     /// Execution mode. Only `chain-sim` is supported; theoretical fill modes are rejected.
-    #[arg(long, env = "ALPHA_TRADER_MODE", default_value = "chain-sim")]
+    #[arg(long, default_value = "chain-sim")]
     mode: String,
-
-    /// Reth datadir used by the chain-state simulator.
-    #[arg(long, env = "RETH_DATADIR")]
-    reth_datadir: Option<String>,
 
     /// Process the current token-server snapshot immediately instead of only priming watermarks.
     #[arg(long, default_value_t = false)]
@@ -160,24 +150,18 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    let shared_config = load_shared_config()?;
     let execution_mode = normalize_execution_mode(&args.mode)?;
-    let reth_datadir = match args
-        .reth_datadir
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        Some(value) => value.clone(),
-        None => tx_simulator::config::repo::reth_datadir()
-            .wrap_err("failed to resolve RETH_DATADIR for chain simulation")?,
-    };
+    let token_server_url = chain_server_url_from_config(&shared_config)?;
+    let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
     let buy_wei = parse_u256_decimal(&args.buy_wei)?;
     let min_liquidity_eth = Decimal::from_str(&args.min_liquidity_eth)
         .wrap_err("invalid --min-liquidity-eth decimal")?;
     let min_liquidity_usd = Decimal::from_str(&args.min_liquidity_usd)
         .wrap_err("invalid --min-liquidity-usd decimal")?;
-    let database_url = resolve_database_url(&args)?;
+    let database_url = resolve_database_url(&shared_config)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
-    if let Err(error) = init_alpha_trader_ops_events(&run_id) {
+    if let Err(error) = init_alpha_trader_ops_events(&run_id, &shared_config) {
         warn!(error = %error, "failed to initialize alpha trader ops events");
     }
 
@@ -191,7 +175,7 @@ async fn main() -> Result<()> {
                 "strategy_name": STRATEGY_NAME,
                 "strategy_label": STRATEGY_LABEL,
                 "execution_model": "chain_state_evm_simulation",
-                "token_server_url": &args.token_server_url,
+                "token_server_url": &token_server_url,
                 "reth_datadir": &reth_datadir,
                 "poll_interval_ms": args.poll_interval_ms,
                 "mempool_since_days": args.mempool_since_days,
@@ -252,13 +236,13 @@ async fn main() -> Result<()> {
         ..SnipeAllConfig::default()
     })));
 
-    let client = TokenServerClient::new(args.token_server_url.clone());
+    let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids) = load_persisted_watermarks(&store).await?;
     let mut primed = false;
     let mut shutdown = ShutdownSignals::new()?;
 
     info!(
-        token_server_url = %args.token_server_url,
+        token_server_url = %token_server_url,
         reth_datadir = %reth_datadir,
         run_id = %run_id,
         mode = %execution_mode,
@@ -299,7 +283,7 @@ async fn main() -> Result<()> {
                 issue.detail = Some(error.to_string());
                 issue
                     .context
-                    .insert("token_server_url".to_string(), json!(args.token_server_url));
+                    .insert("token_server_url".to_string(), json!(token_server_url));
                 issue.context.insert(
                     "positions".to_string(),
                     json!(engine.portfolio().active_position_count()),
@@ -322,7 +306,7 @@ async fn main() -> Result<()> {
                     .insert("poll_error".to_string(), json!(error.to_string()));
                 emit_health(&health);
                 let metadata = json!({
-                    "token_server_url": &args.token_server_url,
+                    "token_server_url": &token_server_url,
                     "poll_error": error.to_string(),
                     "trading_enabled": false,
                     "positions": engine.portfolio().active_position_count(),
@@ -668,10 +652,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_alpha_trader_ops_events(run_id: &str) -> Result<()> {
-    let root = env::var("ALPHA_TRADER_LOG_DIR")
+fn init_alpha_trader_ops_events(run_id: &str, config: &HashMap<String, String>) -> Result<()> {
+    let root = optional_shared_config_value(config, ALPHA_TRADER_LOG_DIR_CONFIG)
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_ALPHA_TRADER_LOG_DIR));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_ALPHA_TRADER_LOG_DIR));
     let run_dir = root.join(sanitize_path_segment(run_id));
     let sink = MultiOpsEventSink::new(vec![
         Arc::new(JsonlOpsEventSink::open(&run_dir)?),
@@ -848,16 +832,82 @@ fn normalize_execution_mode(mode: &str) -> Result<&'static str> {
     }
 }
 
+fn shared_config_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("config.env")
+}
+
+fn load_shared_config() -> Result<HashMap<String, String>> {
+    let path = shared_config_path();
+    let contents = fs::read_to_string(&path)
+        .wrap_err_with(|| format!("failed to read shared config file {}", path.display()))?;
+    Ok(parse_shared_config(&contents))
+}
+
+fn parse_shared_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        values.insert(
+            key.to_string(),
+            unquote_config_value(value.trim()).to_string(),
+        );
+    }
+    values
+}
+
+fn optional_shared_config_value(config: &HashMap<String, String>, key: &str) -> Option<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> Result<String> {
+    optional_shared_config_value(config, key).ok_or_else(|| {
+        eyre!(
+            "{key} must be set in shared config file {}",
+            shared_config_path().display()
+        )
+    })
+}
+
+fn chain_server_url_from_config(config: &HashMap<String, String>) -> Result<String> {
+    let bind = required_shared_config_value(config, CHAIN_SERVER_BIND_CONFIG)?;
+    Ok(format!("http://{bind}"))
+}
+
+fn unquote_config_value(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+}
+
 fn parse_u256_decimal(value: &str) -> Result<U256> {
     U256::from_str_radix(value, 10).map_err(|error| eyre!("invalid decimal U256 {value}: {error}"))
 }
 
-fn resolve_database_url(args: &Args) -> Result<String> {
-    args.database_url
-        .clone()
-        .or_else(|| env::var("MEMPOOL_DATABASE_URL").ok())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| eyre!("set ALPHA_DATABASE_URL or MEMPOOL_DATABASE_URL for alpha trader"))
+fn resolve_database_url(config: &HashMap<String, String>) -> Result<String> {
+    required_shared_config_value(config, ALPHA_DATABASE_URL_CONFIG)
 }
 
 fn default_run_id() -> String {

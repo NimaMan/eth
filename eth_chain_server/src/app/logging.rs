@@ -1,6 +1,6 @@
 use std::{
     backtrace::Backtrace,
-    env, panic,
+    panic,
     path::{Path, PathBuf},
     sync::Arc,
     thread,
@@ -198,12 +198,6 @@ fn config_path(key: &str, default: &str) -> eyre::Result<PathBuf> {
 }
 
 fn config_value(key: &str) -> eyre::Result<Option<String>> {
-    if let Some(value) = env::var_os(key) {
-        let value = value.to_string_lossy().trim().to_string();
-        if !value.is_empty() {
-            return Ok(Some(value));
-        }
-    }
     shared_config_value(key)
 }
 

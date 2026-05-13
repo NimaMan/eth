@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use eth_alpha_lab::{
     connect,
@@ -10,9 +14,6 @@ use eyre::{eyre, Result};
 #[command(name = "eth_alpha_lab")]
 #[command(about = "Offline diagnostics for ETH alpha strategy and position sanity checks")]
 struct Args {
-    #[arg(long, env = "ALPHA_DATABASE_URL", hide_env_values = true)]
-    database_url: String,
-
     #[command(subcommand)]
     command: Command,
 }
@@ -58,7 +59,9 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let pool = connect(&args.database_url).await?;
+    let shared_config = load_shared_config()?;
+    let database_url = required_shared_config_value(&shared_config, "ALPHA_DATABASE_URL")?;
+    let pool = connect(&database_url).await?;
 
     match args.command {
         Command::Strategy {
@@ -117,4 +120,70 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn shared_config_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("config.env")
+}
+
+fn load_shared_config() -> Result<HashMap<String, String>> {
+    let path = shared_config_path();
+    let contents = fs::read_to_string(&path).map_err(|error| {
+        eyre!(
+            "failed to read shared config file {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(parse_shared_config(&contents))
+}
+
+fn parse_shared_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        values.insert(
+            key.to_string(),
+            unquote_config_value(value.trim()).to_string(),
+        );
+    }
+    values
+}
+
+fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> Result<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            eyre!(
+                "{key} must be set in shared config file {}",
+                shared_config_path().display()
+            )
+        })
+}
+
+fn unquote_config_value(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
 }

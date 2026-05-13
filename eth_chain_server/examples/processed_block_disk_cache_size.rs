@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -189,9 +191,11 @@ struct Args {
 
 impl Args {
     fn parse() -> eyre::Result<Self> {
-        let mut datadir = std::env::var("RETH_DATADIR")
-            .unwrap_or_else(|_| "/home/nima/storage/samsung8tb/ethereum/reth".to_string());
-        let mut cache_dir = None;
+        let shared_config = load_shared_config()?;
+        let mut datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
+        let mut cache_dir =
+            optional_shared_config_value(&shared_config, "PROCESSED_BLOCK_DISK_CACHE_DIR")
+                .map(PathBuf::from);
         let mut start = None;
         let mut end = None;
         let mut history_limit = 1_000;
@@ -263,6 +267,77 @@ impl Args {
             fill_missing_then_read,
         })
     }
+}
+
+fn shared_config_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("config.env")
+}
+
+fn load_shared_config() -> eyre::Result<HashMap<String, String>> {
+    let path = shared_config_path();
+    let contents = fs::read_to_string(&path).map_err(|error| {
+        eyre::eyre!(
+            "failed to read shared config file {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(parse_shared_config(&contents))
+}
+
+fn parse_shared_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        values.insert(
+            key.to_string(),
+            unquote_config_value(value.trim()).to_string(),
+        );
+    }
+    values
+}
+
+fn optional_shared_config_value(config: &HashMap<String, String>, key: &str) -> Option<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn required_shared_config_value(
+    config: &HashMap<String, String>,
+    key: &str,
+) -> eyre::Result<String> {
+    optional_shared_config_value(config, key).ok_or_else(|| {
+        eyre::eyre!(
+            "{key} must be set in shared config file {}",
+            shared_config_path().display()
+        )
+    })
+}
+
+fn unquote_config_value(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
 }
 
 fn print_summary(label: &str, values: &[f64]) {

@@ -21,7 +21,9 @@ PostgreSQL persistence for the alpha runtime. This crate is infrastructure: it i
 
 ## Runtime Contract
 
-`eth_alpha_trader` should use `ALPHA_DATABASE_URL` when set. For the current deployment it falls back to `MEMPOOL_DATABASE_URL`, which already points at the local Ethereum Postgres database.
+`eth_alpha_trader`, `eth_alpha_backtest`, `eth_alpha_lab`, and `eth_chain_server`
+read `ALPHA_DATABASE_URL` from the shared `blockchains/eth/config.env` file.
+There is no `MEMPOOL_DATABASE_URL` fallback for alpha state.
 
 Rows are tagged by `run_id`, so multiple chain-sim/live/replay runs can coexist:
 

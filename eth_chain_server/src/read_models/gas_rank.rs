@@ -7,6 +7,7 @@ use eyre::{eyre, Result};
 use reth_chain_query::provider::RpcBlockDataFetcher;
 use serde::{Deserialize, Serialize};
 
+use crate::app::config::shared_config_value;
 use crate::http::ServerState;
 use crate::recent_blocks::RecentProcessedBlock;
 
@@ -552,7 +553,8 @@ fn u256_to_f64(value: U256) -> f64 {
 }
 
 fn execution_rpc_url() -> String {
-    std::env::var("RETH_HTTP_RPC")
-        .or_else(|_| std::env::var("ETH_NODE_URL"))
-        .unwrap_or_else(|_| DEFAULT_EXECUTION_RPC_URL.to_string())
+    shared_config_value("RETH_HTTP_RPC")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEFAULT_EXECUTION_RPC_URL.to_string())
 }

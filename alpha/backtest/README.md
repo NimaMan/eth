@@ -67,12 +67,14 @@ Backtests use the same EVM simulation path as live chain-sim trading:
 
 ```bash
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
-  --database-url "$ALPHA_DATABASE_URL" \
   --replay-run-id "alpha-trader-1715350000-12345" \
   --buy-amount-wei 10000000000000000 \
   --min-liquidity-eth 0.5 \
   --min-liquidity-usd 1000
 ```
+
+The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
+`blockchains/eth/config.env` by default.
 
 ### Required arguments
 

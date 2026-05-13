@@ -136,7 +136,8 @@ runs in `chain-sim` mode, polls the Rust token server, and consumes:
 - `/live/pools` as confirmed market updates.
 
 Operational events use the shared `eth_ops_events` schema. The
-trader writes JSONL files under `ALPHA_TRADER_LOG_DIR` or, by default:
+trader reads `ALPHA_TRADER_LOG_DIR` from `blockchains/eth/config.env` and writes
+JSONL files there. If that key is omitted, it falls back to:
 
 ```text
 /home/nima/code/crypto/blockchains/eth/logs/alpha_trader/alpha-trader-<YYYYMMDD-HHMMSSZ>-pid-<pid>/

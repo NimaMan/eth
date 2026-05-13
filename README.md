@@ -158,6 +158,7 @@ RETH_WS_RPC=ws://127.0.0.1:8546
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
 CHAIN_SERVER_BIND=127.0.0.1:8765
 MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 MEMPOOL_ZMQ_SIGNAL_ENDPOINT=tcp://127.0.0.1:5556
 ```
 

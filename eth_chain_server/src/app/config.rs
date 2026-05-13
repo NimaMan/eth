@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use eyre::{eyre, Result};
 
-const ETH_CONFIG_PATH_ENV: &str = "ETH_CONFIG_PATH";
 const ETH_NODE_ROOT_CONFIG: &str = "ETH_NODE_ROOT";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 const RETH_INDEX_DIR_CONFIG: &str = "RETH_INDEX_DIR";
@@ -36,7 +34,6 @@ const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
 const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 1_000_000;
 const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 3_000;
-const DEFAULT_MEMPOOL_DATABASE_URL: &str = "postgresql://postgres:postgres@localhost:5432/eth_db";
 const DEFAULT_MEMPOOL_SIGNAL_LIMIT: i64 = 200;
 
 #[derive(Clone, Debug)]
@@ -105,16 +102,8 @@ impl ChainServerConfig {
             LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG,
             DEFAULT_BLOCK_APPLY_TIMEOUT_MS,
         )?;
-        let mempool_database_url = config_string(
-            config,
-            MEMPOOL_DATABASE_URL_CONFIG,
-            DEFAULT_MEMPOOL_DATABASE_URL,
-        );
-        let alpha_database_url = config_string(
-            config,
-            ALPHA_DATABASE_URL_CONFIG,
-            mempool_database_url.as_str(),
-        );
+        let mempool_database_url = required_config_string(config, MEMPOOL_DATABASE_URL_CONFIG)?;
+        let alpha_database_url = required_config_string(config, ALPHA_DATABASE_URL_CONFIG)?;
         let mempool_signal_limit = config_parse(
             config,
             MEMPOOL_SIGNAL_LIMIT_CONFIG,
@@ -185,9 +174,6 @@ impl ChainServerConfig {
 }
 
 pub fn shared_config_value(key: &str) -> Result<Option<String>> {
-    if let Some(value) = env_config_value(key) {
-        return Ok(Some(value));
-    }
     let config = load_config_env()?;
     Ok(config
         .get(key)
@@ -211,13 +197,9 @@ fn default_reth_index_dir(reth_datadir: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn eth_config_path() -> PathBuf {
-    env::var_os(ETH_CONFIG_PATH_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("config.env")
-        })
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("config.env")
 }
 
 fn load_config_env() -> Result<HashMap<String, String>> {
@@ -266,30 +248,29 @@ fn unquote(value: &str) -> &str {
 }
 
 fn config_string(config: &HashMap<String, String>, key: &str, default: &str) -> String {
-    env_config_value(key).unwrap_or_else(|| {
-        config
-            .get(key)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .unwrap_or(default)
-            .to_string()
-    })
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn required_config_string(config: &HashMap<String, String>, key: &str) -> Result<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| eyre!("{key} must be set in {}", eth_config_path().display()))
 }
 
 fn config_value<'a>(config: &'a HashMap<String, String>, key: &str) -> Option<String> {
-    env_config_value(key).or_else(|| {
-        config
-            .get(key)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-    })
-}
-
-fn env_config_value(key: &str) -> Option<String> {
-    env::var_os(key)
-        .map(|value| value.to_string_lossy().trim().to_string())
+    config
+        .get(key)
+        .map(|value| value.trim())
         .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn config_optional_path(config: &HashMap<String, String>, key: &str) -> Option<PathBuf> {
@@ -320,6 +301,7 @@ mod tests {
             RETH_HTTP_RPC=http://127.0.0.1:8545
             RETH_WS_RPC=ws://127.0.0.1:8546
             MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -332,7 +314,13 @@ mod tests {
 
     #[test]
     fn ignores_non_canonical_warmup_key() {
-        let values = parse_env_config("CHAIN_SERVER_LIVE_WARMUP_BLOCKS=2000");
+        let values = parse_env_config(
+            r#"
+            CHAIN_SERVER_LIVE_WARMUP_BLOCKS=2000
+            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            "#,
+        );
 
         let config = ChainServerConfig::from_config_values(&values).unwrap();
 
@@ -345,6 +333,8 @@ mod tests {
             r#"
             CHAIN_SERVER_BIND="127.0.0.1:9999"
             LIVE_TOKEN_TRACKER_WARMUP_BLOCKS='123'
+            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -356,7 +346,13 @@ mod tests {
 
     #[test]
     fn reads_auto_start_live_flag() {
-        let values = parse_env_config("CHAIN_SERVER_AUTO_START_LIVE=false");
+        let values = parse_env_config(
+            r#"
+            CHAIN_SERVER_AUTO_START_LIVE=false
+            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            "#,
+        );
 
         let config = ChainServerConfig::from_config_values(&values).unwrap();
 

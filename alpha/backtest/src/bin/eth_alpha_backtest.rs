@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -21,12 +23,8 @@ use tracing::info;
 
 #[derive(Debug, Parser)]
 struct Args {
-    /// PostgreSQL database URL.
-    #[arg(long, env = "ALPHA_DATABASE_URL")]
-    database_url: String,
-
     /// Unique run identifier for this backtest.
-    #[arg(long, env = "ALPHA_BACKTEST_RUN_ID")]
+    #[arg(long)]
     run_id: Option<String>,
 
     /// Strategy to run.
@@ -96,10 +94,6 @@ struct Args {
     /// Disabled by default.
     #[arg(long)]
     max_hold_blocks: Option<u64>,
-
-    /// Path to the Reth database directory.
-    #[arg(long, default_value = "/home/nima/storage/samsung8tb/ethereum/reth")]
-    reth_datadir: String,
 }
 
 #[tokio::main]
@@ -111,6 +105,9 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    let shared_config = load_shared_config()?;
+    let database_url = required_shared_config_value(&shared_config, "ALPHA_DATABASE_URL")?;
+    let reth_datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
 
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
 
@@ -124,7 +121,7 @@ async fn main() -> Result<()> {
     let min_liquidity_usd =
         Decimal::from_str(&args.min_liquidity_usd).wrap_err("invalid --min-liquidity-usd")?;
 
-    let store = PostgresTradingStore::connect(&args.database_url, run_id.clone())
+    let store = PostgresTradingStore::connect(&database_url, run_id.clone())
         .await
         .wrap_err("failed to connect to Postgres trading store")?;
 
@@ -134,8 +131,20 @@ async fn main() -> Result<()> {
             serde_json::json!({
                 "strategy_name": args.strategy_name,
                 "replay_run_id": args.replay_run_id,
+                "from_block": args.from_block,
+                "to_block": args.to_block,
+                "skip_primed": args.skip_primed,
                 "include_mempool_signals": args.include_mempool_signals,
+                "buy_amount_wei": args.buy_amount_wei,
+                "min_liquidity_eth": min_liquidity_eth.to_string(),
                 "min_liquidity_usd": min_liquidity_usd.to_string(),
+                "exit_liquidity_removal": args.exit_liquidity_removal,
+                "exit_tax": args.exit_tax,
+                "exit_lp_approval": args.exit_lp_approval,
+                "exit_scam": args.exit_scam,
+                "stop_loss_ratio": args.stop_loss_ratio,
+                "take_profit_ratio": args.take_profit_ratio,
+                "max_hold_blocks": args.max_hold_blocks,
             }),
         )
         .await
@@ -159,8 +168,8 @@ async fn main() -> Result<()> {
         ));
     }
 
-    info!(reth_datadir = %args.reth_datadir, "initialising chain-sim execution adapter");
-    let simulator = Arc::new(tx_simulator::TxSimulator::new(&args.reth_datadir)?);
+    info!(reth_datadir = %reth_datadir, "initialising chain-sim execution adapter");
+    let simulator = Arc::new(tx_simulator::TxSimulator::new(&reth_datadir)?);
     let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
     let inner = eth_alpha_engine::execution::ChainSimExecutionAdapter::with_prefix(
         simulator,
@@ -437,4 +446,66 @@ fn default_run_id() -> String {
         .map(|d| d.as_secs())
         .unwrap_or_default();
     format!("alpha-backtest-{secs}-{}", std::process::id())
+}
+
+fn shared_config_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("config.env")
+}
+
+fn load_shared_config() -> Result<HashMap<String, String>> {
+    let path = shared_config_path();
+    let contents = fs::read_to_string(&path)
+        .wrap_err_with(|| format!("failed to read shared config file {}", path.display()))?;
+    Ok(parse_shared_config(&contents))
+}
+
+fn parse_shared_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        values.insert(
+            key.to_string(),
+            unquote_config_value(value.trim()).to_string(),
+        );
+    }
+    values
+}
+
+fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> Result<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "{key} must be set in shared config file {}",
+                shared_config_path().display()
+            )
+        })
+}
+
+fn unquote_config_value(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
 }

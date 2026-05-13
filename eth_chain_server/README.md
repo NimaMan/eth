@@ -243,6 +243,7 @@ CHAIN_SERVER_BIND=127.0.0.1:8765
 CHAIN_SERVER_AUTO_START_LIVE=true
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
 MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 ```
 
 ## Current Hazards
