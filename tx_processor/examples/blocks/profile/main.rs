@@ -16,6 +16,7 @@ use tx_processor::{
 };
 use tx_simulator::block_simulation::{BlockTraceEngine, BlockTracer};
 
+#[path = "support/canonical.rs"]
 mod canonical;
 
 use canonical::{first_json_diff, normalize_processed_block};

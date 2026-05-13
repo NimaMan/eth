@@ -39,7 +39,7 @@ impl TokenConfig {
     }
 }
 
-#[path = "token_sets/uniswap_v3.rs"]
+#[path = "../fixtures/token_sets/uniswap_v3.rs"]
 mod uniswap_v3_tokens;
 
 async fn test_token(

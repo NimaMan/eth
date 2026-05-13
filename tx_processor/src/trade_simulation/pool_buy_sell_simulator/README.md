@@ -228,7 +228,7 @@ Priority order:
 3. Move V3 pool state/header reads onto live-aware simulation/view APIs.
 4. Retest the old fee failures against the current base-fee clamping.
 5. After the local Reth execution node is synced, turn representative log cases
-   into regression examples under `examples/pool_analysis`.
+   into regression examples under `examples/trade_simulation/viability`.
 
 ---
 
@@ -242,7 +242,7 @@ When extending or debugging the simulator:
    `PoolBuySellSimulationResult` or change configuration defaults.
 3. **Keep balance extraction in sync** with the naming used by
    `AddressBalanceChangeCalculator`. Currency symbols (WETH→ETH) must match.
-4. **Add regression examples** under `examples/pool_analysis` when you encounter
+4. **Add regression examples** under `examples/trade_simulation/viability` when you encounter
    a failure pattern. This keeps the token set up-to-date and protects against
    future refactors that regress fee handling.
 5. **Leverage `enrich_failure_reason_with_trace`** when a revert appears. It

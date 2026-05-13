@@ -224,6 +224,6 @@ Common reasons:
 
 ## See Also
 
-- [tx_processor examples](../../tx_processor/examples/pool_analysis/) - Rust examples
+- [tx_processor trade simulation examples](../../../tx_processor/examples/trade_simulation/) - Rust examples
 - [PyReth documentation](../../README.md) - Main PyReth docs
-- [Pool adapter source](../../../src/python/pool_buy_sell_simulator.rs) - Implementation details
+- [Pool simulator binding](../../src/simulator/pool_buy_sell_simulator.rs) - Implementation details

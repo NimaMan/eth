@@ -50,7 +50,10 @@ async fn main() -> Result<()> {
     let total_tokens = token_configs.len();
     let mut all_results = Vec::new();
 
-    println!("📋 Testing {} tokens across PancakeSwap, ShibaSwap, and Fraxswap:", total_tokens);
+    println!(
+        "📋 Testing {} tokens across PancakeSwap, ShibaSwap, and Fraxswap:",
+        total_tokens
+    );
     for config in &token_configs {
         println!("  {} ({:?})", config.symbol, config.pool_type);
     }
@@ -103,16 +106,13 @@ async fn test_single_token(
     println!("  Pool:  {}", pool_address);
     println!("  Type:  {:?}", config.pool_type);
 
-    let pool_config = PoolBuySellParameters::new(
-        config.token_address,
-        pool_address,
-        config.pool_type.clone(),
-    )
-    .with_test_amount(U256::from(1_000_000_000_000_000_000u64))
-    .with_denom_address(config.denom_address)
-    .with_denom_decimals(18)
-    .with_token_decimals(config.decimals)
-    .with_block(latest_block);
+    let pool_config =
+        PoolBuySellParameters::new(config.token_address, pool_address, config.pool_type.clone())
+            .with_test_amount(U256::from(1_000_000_000_000_000_000u64))
+            .with_denom_address(config.denom_address)
+            .with_denom_decimals(18)
+            .with_token_decimals(config.decimals)
+            .with_block(latest_block);
 
     match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), pool_config).await {
         Ok(result) => {
@@ -225,9 +225,11 @@ fn print_summary(results: &[TokenTestResult]) {
     println!("  💥 Errors:    {}", errors);
     println!("  📊 Total:     {}", results.len());
 
-    println!("\n{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {:<20}",
-        "Symbol", "Tradeable", "Buy", "Approve", "Sell", "Error");
-    println!("{}", "-".repeat(90));
+    println!(
+        "\n{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {:<42} | {:<10} | Error",
+        "Symbol", "Tradeable", "Buy", "Approve", "Sell", "Pool", "Duration"
+    );
+    println!("{}", "-".repeat(160));
 
     for r in results {
         let symbol = r.config.symbol;
@@ -238,13 +240,15 @@ fn print_summary(results: &[TokenTestResult]) {
             let sell = if res.can_sell { "✅" } else { "❌" };
             let reason = res.failure_reason.as_deref().unwrap_or("-");
             println!(
-                "{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {}",
-                symbol, tradeable, buy, approve, sell, reason
+                "{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {:<42} | {:<10?} | {}",
+                symbol, tradeable, buy, approve, sell, r.pool_address, r.test_duration, reason
             );
         } else {
             let err = r.error.as_deref().unwrap_or("Unknown");
-            println!("{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {}",
-                symbol, "💥 ERROR", "-", "-", "-", err);
+            println!(
+                "{:<20} | {:<10} | {:<8} | {:<8} | {:<8} | {:<42} | {:<10?} | {}",
+                symbol, "💥 ERROR", "-", "-", "-", r.pool_address, r.test_duration, err
+            );
         }
     }
 }

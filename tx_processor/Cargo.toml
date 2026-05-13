@@ -7,102 +7,113 @@ workspace = ".."
 [features]
 default = []
 
-# TX Processor examples and operational binaries.
-
-# Transaction Processing examples  
+# Transaction processing examples
 [[example]]
 name = "process_transaction_by_hash"
-path = "examples/tx_processor/process_transaction_by_hash.rs"
+path = "examples/processing/tx_by_hash.rs"
 
 [[example]]
 name = "processed_tx_from_unsigned_tx"
-path = "examples/tx_processor/processed_tx_from_unsigned_tx.rs"
+path = "examples/processing/unsigned_tx.rs"
 
 [[example]]
-name = "test_bribe_detection"
-path = "examples/tx_processor/test_bribe_detection.rs"
+name = "bribe_detection"
+path = "examples/processing/bribe_detection.rs"
 
-# Simulation examples
+[[example]]
+name = "liquidity_removal_detection"
+path = "examples/processing/liquidity_removal_detection.rs"
+
+# Block processing examples
 [[example]]
 name = "process_block"
-path = "examples/block/process_block.rs"
+path = "examples/blocks/process.rs"
 
 [[example]]
 name = "process_block_batch"
-path = "examples/block/process_block_batch.rs"
+path = "examples/blocks/process_batch.rs"
 
 [[example]]
 name = "profile_processed_blocks"
-path = "examples/block/profile/main.rs"
+path = "examples/blocks/profile/main.rs"
 
 [[example]]
 name = "profile_processed_block_range_throughput"
-path = "examples/block/profile/range_throughput.rs"
+path = "examples/blocks/profile/range_throughput.rs"
 
 [[example]]
 name = "compare_block_sources"
-path = "examples/block/compare_block_sources.rs"
+path = "examples/blocks/compare_sources.rs"
 
 [[example]]
 name = "refresh_processed_block_disk_cache"
-path = "examples/block/cache/refresh_processed_block_disk_cache.rs"
+path = "examples/blocks/cache/refresh_disk_cache.rs"
 
+# Processed provider examples
 [[example]]
 name = "provider_process_block"
-path = "examples/provider/process_block.rs"
+path = "examples/providers/processed_block.rs"
 
 [[example]]
 name = "provider_token_transactions"
-path = "examples/provider/token_transactions.rs"
+path = "examples/providers/token_transactions.rs"
 
 [[example]]
 name = "fetch_processed_tx"
-path = "examples/provider/fetch_processed_tx.rs"
+path = "examples/providers/processed_tx.rs"
 
-# Pool analysis examples
+# Trade simulation examples
 [[example]]
 name = "erc20_pool_tax_demo"
-path = "examples/pool_analysis/erc20_pool_tax_demo.rs"
-
-[[example]]
-name = "erc20_pool_with_enable_tx"
-path = "examples/pool_analysis/erc20_pool_with_enable_tx.rs"
-
-[[example]]
-name = "erc20_pool_liquidity_removal_simple"
-path = "examples/pool_analysis/erc20_pool_liquidity_removal_simple.rs"
+path = "examples/trade_simulation/viability/tax_demo.rs"
 
 [[example]]
 name = "erc20_pool_block_range_analysis"
-path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
+path = "examples/trade_simulation/viability/block_range.rs"
 
 [[example]]
 name = "can_buy_sell_common_tokens_uniswap_v2"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v2.rs"
+path = "examples/trade_simulation/viability/uniswap_v2_common_tokens.rs"
 
 [[example]]
 name = "can_buy_sell_common_tokens_uniswap_v3"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v3.rs"
+path = "examples/trade_simulation/viability/uniswap_v3_common_tokens.rs"
 
 [[example]]
 name = "can_buy_sell_common_tokens_uniswap_v4"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v4.rs"
+path = "examples/trade_simulation/viability/uniswap_v4_common_pools.rs"
+
+[[example]]
+name = "probe_uniswap_v4_pool"
+path = "examples/trade_simulation/probes/uniswap_v4_pool.rs"
+
+[[example]]
+name = "probe_sell_swap"
+path = "examples/trade_simulation/probes/sell_swap.rs"
+
+[[example]]
+name = "probe_pool_buy_sell"
+path = "examples/trade_simulation/probes/pool_buy_sell.rs"
 
 [[example]]
 name = "can_buy_sell_common_tokens_pancakeswap_v3"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_pancakeswap_v3.rs"
+path = "examples/trade_simulation/viability/pancakeswap_v3_common_tokens.rs"
+
+[[example]]
+name = "can_buy_sell_common_tokens_multi_v2"
+path = "examples/trade_simulation/viability/multi_v2_common_tokens.rs"
 
 [[example]]
 name = "usdc_to_dai_uniswap_v3"
-path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
+path = "examples/trade_simulation/viability/usdc_to_dai_v3.rs"
 
 [[example]]
 name = "check_token_server_uniswap_v3_pools"
-path = "examples/pool_analysis/check_token_server_uniswap_v3_pools.rs"
+path = "examples/trade_simulation/diagnostics/check_token_server_uniswap_v3_pools.rs"
 
 [[example]]
 name = "token_metadata_with_prior_tx"
-path = "examples/token_parameter_extraction/token_metadata_with_prior_tx.rs"
+path = "examples/metadata/token_metadata_with_prior_tx.rs"
 
 [[bin]]
 name = "live_block_processor"
@@ -110,7 +121,7 @@ path = "src/bin/live_block_processor/main.rs"
 
 [[example]]
 name = "denom_token_metadata"
-path = "examples/token_parameter_extraction/denom_token_metadata.rs"
+path = "examples/metadata/denom_tokens.rs"
 
 [dependencies]
 tx_simulator = { path = "../tx_simulator" }

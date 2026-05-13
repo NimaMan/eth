@@ -190,7 +190,8 @@ Use focused tests/examples near the owner crate:
 | --- | --- |
 | Simulator parity | `tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs`, `tx_simulator/examples/replay/*` |
 | Query parity | `reth_chain_query/examples/block/*`, `reth_chain_query/examples/transactions/*`, `reth_chain_query/examples/reth_index/*` |
-| Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/block/*`, `tx_processor/examples/pool_analysis/*` |
+| Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/processing/*`, `tx_processor/examples/blocks/*` |
+| Trade simulation examples | `tx_processor/examples/trade_simulation/*` |
 | Token/pool state | `eth_token/tests/`, `eth_token/examples/tracking/token_tracking_range.rs`, `eth_token/examples/validation/*` |
 | Live token server | `eth_token_server/README.md`, `logs/eth_token_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |

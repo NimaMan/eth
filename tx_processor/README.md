@@ -72,9 +72,9 @@ refresh_processed_block_disk_cache
 | Process block/ranges | `src/block_processor/`, `src/processed_tx_provider/block/` |
 | Persistent block cache | `src/processed_tx_provider/block/disk_cache/` |
 | Live Redis publisher | `src/bin/live_block_processor/README.md` |
-| Buy/sell/tax simulation | `src/trade_simulation/`, `examples/pool_analysis/` |
+| Buy/sell/tax simulation | `src/trade_simulation/`, `examples/trade_simulation/` |
 | Processed tx rebuild helpers | `src/processed_tx_builder/` |
-| Profiling harness | `examples/block/profile/README.md` |
+| Profiling harness | `examples/blocks/profile/README.md` |
 
 ## Trade Simulation Layout
 
@@ -97,7 +97,7 @@ Permit2 and protocol-specific calldata.
 
 ```bash
 cargo run -p tx_processor --example process_transaction_by_hash -- <tx_hash>
-cargo run -p tx_processor --example process_block -- --block <block>
+cargo run -p tx_processor --example process_block -- <block>
 cargo run -p tx_processor --bin live_block_processor
 cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- --blocks 100000
 cargo run -p tx_processor --release --example profile_processed_blocks -- --mode all

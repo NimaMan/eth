@@ -33,7 +33,7 @@ pub enum ExpectedBehavior {
     MayFail,      // Known problematic tokens
 }
 
-#[path = "token_sets/uniswap_v2.rs"]
+#[path = "../fixtures/token_sets/uniswap_v2.rs"]
 mod uniswap_v2_tokens;
 
 /// Result of testing a single token
@@ -373,73 +373,6 @@ fn print_token_result_with_block_delay(
     }
 }
 
-/// Print detailed results for a single token test
-fn print_token_result(
-    config: &TokenConfig,
-    result: &PoolBuySellSimulationResult,
-    duration: std::time::Duration,
-) {
-    println!("📈 Analysis Results for {}:", config.symbol);
-    println!("==================================");
-    println!("⏱️  Execution Time: {:?}", duration);
-    println!("📦 Block Number: {}", result.block_number);
-
-    println!("\n🔍 Individual Operations:");
-    println!("  📈 Can Buy: {}", if result.can_buy { "✅" } else { "❌" });
-    println!(
-        "  ✅ Can Approve: {}",
-        if result.can_approve { "✅" } else { "❌" }
-    );
-    println!(
-        "  📉 Can Sell: {}",
-        if result.can_sell { "✅" } else { "❌" }
-    );
-    println!(
-        "  🎯 Overall Tradeable: {}",
-        if result.is_tradeable { "✅" } else { "❌" }
-    );
-
-    if result.is_tradeable {
-        println!("\n💰 Tax Analysis:");
-        println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
-        println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
-
-        println!("\n🔢 Trade Details:");
-        println!("  🪙 Tokens Received: {}", result.tokens_received);
-        println!("  💵 ETH Received Back: {} wei", result.denom_received);
-
-        let loss = result.denom_spent.saturating_sub(result.denom_received);
-        let loss_eth = loss.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
-        println!("  📊 Net Loss: {:.6} ETH ({} wei)", loss_eth, loss);
-
-        // Tax analysis
-        if result.buy_tax_percent > 0.0 || result.sell_tax_percent > 0.0 {
-            println!("\n⚠️  Tax Detection:");
-            if result.buy_tax_percent > 0.0 {
-                println!("     Buy tax detected: {:.2}%", result.buy_tax_percent);
-            }
-            if result.sell_tax_percent > 0.0 {
-                println!("     Sell tax detected: {:.2}%", result.sell_tax_percent);
-            }
-        }
-
-        println!("\n✅ {} is fully tradeable!", config.symbol);
-    } else {
-        println!("\n❌ Trading failed for {}!", config.symbol);
-        if let Some(reason) = &result.failure_reason {
-            println!("   Detailed Error: {}", reason);
-        }
-
-        // Additional debug info
-        println!("\n🔍 Debug Information:");
-        println!("  💰 ETH Spent: {} wei", result.denom_spent);
-        println!("  🪙 Tokens Received: {}", result.tokens_received);
-        println!("  💵 ETH Received Back: {} wei", result.denom_received);
-        println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
-        println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
-    }
-}
-
 /// Print comprehensive summary of all test results
 fn print_comprehensive_summary(results: &[TokenTestResult]) {
     println!("\n{}", "=".repeat(80));
@@ -476,10 +409,11 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
 
     // Detailed results table
     println!("\n📋 Detailed Results Table:");
-    println!("{}", "-".repeat(120));
+    println!("{}", "-".repeat(165));
     println!(
-        "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+        "{:<6} | {:<42} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
         "Symbol",
+        "Pool",
         "Tradeable",
         "Buy",
         "Approve",
@@ -489,7 +423,7 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
         "Net Loss",
         "Failure Reason"
     );
-    println!("{}", "-".repeat(120));
+    println!("{}", "-".repeat(165));
 
     for result in results {
         let symbol = result.config.symbol;
@@ -528,8 +462,9 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
             };
 
             println!(
-                "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+                "{:<6} | {:<42} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
                 symbol,
+                result.pool_address,
                 tradeable,
                 can_buy,
                 can_approve,
@@ -554,13 +489,13 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
                 };
 
             println!(
-                "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
-                symbol, "💥 ERROR", "-", "-", "-", "-", "-", "-", error_reason
+                "{:<6} | {:<42} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+                symbol, result.pool_address, "💥 ERROR", "-", "-", "-", "-", "-", "-", error_reason
             );
         }
     }
 
-    println!("{}", "-".repeat(120));
+    println!("{}", "-".repeat(165));
 
     // Performance summary
     let total_duration: std::time::Duration = results.iter().map(|r| r.test_duration).sum();

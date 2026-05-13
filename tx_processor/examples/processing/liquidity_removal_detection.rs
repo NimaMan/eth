@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 /// Simple Example: Detect Liquidity Removal from ERC20 Pools
 ///
 /// Shows how to check if a pool lost liquidity after a transaction

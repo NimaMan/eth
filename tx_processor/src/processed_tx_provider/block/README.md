@@ -83,7 +83,7 @@ parallel_range_read_wall_ms_per_block=0.435
 ```
 
 The historical backfill entrypoint is
-`tx_processor/examples/block/cache/refresh_processed_block_disk_cache.rs`.
+`tx_processor/examples/blocks/cache/refresh_disk_cache.rs`.
 It fills missing processed-block cache files through
 `ProcessedBlockReplayStoreWriter`. When a block is already present in the disk
 cache, the normal backfill path reads it and does not rewrite
