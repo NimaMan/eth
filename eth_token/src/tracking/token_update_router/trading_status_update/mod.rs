@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use eyre::{eyre, Result};
@@ -22,6 +22,8 @@ use super::{
 };
 
 const TOKEN_SIM_SESSION_PROFILE_LOG_TARGET: &str = "token_sim_session_profile";
+const TOKEN_SIM_SESSION_PROFILE_ENV: &str = "TOKEN_SIM_SESSION_PROFILE";
+static TOKEN_SIM_SESSION_PROFILE_ENABLED: OnceLock<bool> = OnceLock::new();
 
 pub(super) async fn simulate_updated_v2_pools(
     token: &mut ERC20Token,
@@ -218,7 +220,7 @@ pub(super) async fn simulate_updated_v2_pools(
                     failure_reason.clone(),
                     failure_class_code.map(|code| code.to_string()),
                 );
-                tracing::info!(
+                tracing::debug!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
                     token_address = %token_address,
@@ -436,7 +438,7 @@ pub(super) async fn simulate_updated_v3_pools(
             Ok(failure_reason) => {
                 pool.base
                     .set_trading_failure_context(failure_reason.clone(), None);
-                tracing::info!(
+                tracing::debug!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
                     token_address = %token_address,
@@ -518,11 +520,13 @@ pub(super) async fn simulate_updated_v4_pools(
             continue;
         };
 
-        let pool_config = if should_simulate_at_current_block(
+        let simulate_at_current_block = should_simulate_v4_at_current_block(
             pool_key,
             current_block_pool_keys,
             trading_simulation,
-        ) {
+            tx,
+        );
+        let pool_config = if simulate_at_current_block {
             PoolTradingSimulationConfig {
                 block_number: Some(tx.block_number),
                 block_header: block_header.cloned(),
@@ -656,7 +660,7 @@ pub(super) async fn simulate_updated_v4_pools(
             Ok(failure_reason) => {
                 pool.base
                     .set_trading_failure_context(failure_reason.clone(), None);
-                tracing::info!(
+                tracing::debug!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
                     token_address = %token_address,
@@ -737,6 +741,16 @@ pub(super) fn current_block_simulation_pool_addresses(
     addresses
 }
 
+fn should_simulate_v4_at_current_block(
+    pool_key: &str,
+    current_block_pool_keys: &[String],
+    trading_simulation: PoolTradingSimulationMode<'_>,
+    tx: &ProcessedTransaction,
+) -> bool {
+    should_simulate_at_current_block(pool_key, current_block_pool_keys, trading_simulation)
+        || has_v4_trading_simulation_trigger(tx, pool_key)
+}
+
 async fn block_session_chain_after_tx(
     block_session: &Mutex<Option<BlockTxStateSession>>,
     pool_simulator: &PoolBuySellSimulator,
@@ -797,22 +811,24 @@ async fn block_session_chain_after_tx(
         )
     })?;
     let branch_us = elapsed_micros(branch_started);
-    tracing::info!(
-        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
-        run_id = profile_run_id.unwrap_or(""),
-        mode = "historical",
-        block_number = tx.block_number,
-        tx_index = tx.tx_index,
-        pool_kind,
-        pool_id = %pool_id,
-        session_needed = needs_session,
-        session_created,
-        session_create_us,
-        session_create_ms = session_create_us / 1_000,
-        branch_us,
-        branch_ms = branch_us / 1_000,
-        "token simulation session profile"
-    );
+    if token_sim_session_profile_enabled() {
+        tracing::info!(
+            target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+            run_id = profile_run_id.unwrap_or(""),
+            mode = "historical",
+            block_number = tx.block_number,
+            tx_index = tx.tx_index,
+            pool_kind,
+            pool_id = %pool_id,
+            session_needed = needs_session,
+            session_created,
+            session_create_us,
+            session_create_ms = session_create_us / 1_000,
+            branch_us,
+            branch_ms = branch_us / 1_000,
+            "token simulation session profile"
+        );
+    }
     Ok(chain)
 }
 
@@ -834,6 +850,14 @@ async fn live_block_state_session_chain(
     profile_run_id: Option<&str>,
 ) -> Result<UnsignedTxChainSimulation> {
     let block_number = state_session_block_number(pool_config, tx);
+    if missing_live_current_block_header(pool_config, tx) {
+        return Err(eyre!(
+            "live current-block {} simulation requires ProcessedBlock.header block={} pool={}",
+            pool_kind,
+            block_number,
+            pool_id
+        ));
+    }
     let needs_session = !block_sessions
         .lock()
         .map_err(|err| eyre!("live block state session lock poisoned: {err}"))?
@@ -894,24 +918,26 @@ async fn live_block_state_session_chain(
     let branch_started = Instant::now();
     let chain = session.simulation_chain();
     let branch_us = elapsed_micros(branch_started);
-    tracing::info!(
-        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
-        run_id = profile_run_id.unwrap_or(""),
-        mode = "live",
-        block_number = tx.block_number,
-        state_session_block_number = block_number,
-        tx_index = tx.tx_index,
-        pool_kind,
-        pool_id = %pool_id,
-        session_needed = needs_session,
-        session_created,
-        session_create_us,
-        session_create_ms = session_create_us / 1_000,
-        branch_us,
-        branch_ms = branch_us / 1_000,
-        session_cache_size = guard.len(),
-        "token simulation session profile"
-    );
+    if token_sim_session_profile_enabled() {
+        tracing::info!(
+            target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+            run_id = profile_run_id.unwrap_or(""),
+            mode = "live",
+            block_number = tx.block_number,
+            state_session_block_number = block_number,
+            tx_index = tx.tx_index,
+            pool_kind,
+            pool_id = %pool_id,
+            session_needed = needs_session,
+            session_created,
+            session_create_us,
+            session_create_ms = session_create_us / 1_000,
+            branch_us,
+            branch_ms = branch_us / 1_000,
+            session_cache_size = guard.len(),
+            "token simulation session profile"
+        );
+    }
     Ok(chain)
 }
 
@@ -969,29 +995,39 @@ async fn historical_block_state_session_chain(
     let branch_started = Instant::now();
     let chain = session.simulation_chain();
     let branch_us = elapsed_micros(branch_started);
-    tracing::info!(
-        target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
-        run_id = profile_run_id.unwrap_or(""),
-        mode = "historical_post_block",
-        block_number = tx.block_number,
-        state_session_block_number = block_number,
-        tx_index = tx.tx_index,
-        pool_kind,
-        pool_id = %pool_id,
-        session_needed = needs_session,
-        session_created,
-        session_create_us,
-        session_create_ms = session_create_us / 1_000,
-        branch_us,
-        branch_ms = branch_us / 1_000,
-        session_cache_size = guard.len(),
-        "token simulation session profile"
-    );
+    if token_sim_session_profile_enabled() {
+        tracing::info!(
+            target: TOKEN_SIM_SESSION_PROFILE_LOG_TARGET,
+            run_id = profile_run_id.unwrap_or(""),
+            mode = "historical_post_block",
+            block_number = tx.block_number,
+            state_session_block_number = block_number,
+            tx_index = tx.tx_index,
+            pool_kind,
+            pool_id = %pool_id,
+            session_needed = needs_session,
+            session_created,
+            session_create_us,
+            session_create_ms = session_create_us / 1_000,
+            branch_us,
+            branch_ms = branch_us / 1_000,
+            session_cache_size = guard.len(),
+            "token simulation session profile"
+        );
+    }
     Ok(chain)
 }
 
 fn elapsed_micros(started: Instant) -> u128 {
     started.elapsed().as_micros()
+}
+
+fn token_sim_session_profile_enabled() -> bool {
+    *TOKEN_SIM_SESSION_PROFILE_ENABLED.get_or_init(|| {
+        std::env::var(TOKEN_SIM_SESSION_PROFILE_ENV)
+            .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false)
+    })
 }
 
 fn pool_config_for_state_session(
@@ -1009,6 +1045,14 @@ fn state_session_block_number(
     pool_config
         .block_number
         .unwrap_or_else(|| tx.block_number.saturating_sub(1))
+}
+
+fn missing_live_current_block_header(
+    pool_config: &PoolTradingSimulationConfig,
+    tx: &ProcessedTransaction,
+) -> bool {
+    pool_config.block_header.is_none()
+        && state_session_block_number(pool_config, tx) == tx.block_number
 }
 
 pub(super) fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
@@ -1083,4 +1127,82 @@ fn has_v4_trading_simulation_trigger(tx: &ProcessedTransaction, pool_key: &str) 
         || tx.uniswap_v4_swaps.iter().any(|event| {
             v4_event_display_key(event.pool_manager_address, event.event_id) == pool_key
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{address, b256, B256, U256};
+    use tx_processor::tx_processor::data_models::receipt_models::UniswapV4SwapEvent;
+
+    use super::*;
+
+    #[test]
+    fn v4_event_trigger_uses_current_block_even_without_current_pool_list_entry() {
+        let pool_manager = address!("000000000004444c5dc75cb358380d2e3de08a90");
+        let pool_id = b256!("896b942201672b004f285d16b1467dab7d77e957daa550fc406688ec60269ac4");
+        let pool_key = v4_event_display_key(pool_manager, pool_id);
+        let mut tx = ProcessedTransaction::new(
+            B256::ZERO,
+            25_086_268,
+            0,
+            54,
+            address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some(pool_manager),
+            U256::ZERO,
+            true,
+            0,
+            2,
+            Vec::new(),
+        );
+        tx.uniswap_v4_swaps.push(UniswapV4SwapEvent {
+            pool_manager_address: pool_manager,
+            event_id: pool_id,
+            sender: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            amount0: -1,
+            amount1: 1,
+            sqrt_price_x96: U256::ZERO,
+            liquidity: 1,
+            tick: 0,
+            fee: 3000,
+            log_index: 1,
+        });
+
+        assert!(should_simulate_v4_at_current_block(
+            &pool_key,
+            &[],
+            PoolTradingSimulationMode::Noop,
+            &tx
+        ));
+    }
+
+    #[test]
+    fn live_current_block_simulation_requires_header_hint() {
+        let tx = ProcessedTransaction::new(
+            B256::ZERO,
+            25_086_268,
+            0,
+            54,
+            address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            None,
+            U256::ZERO,
+            true,
+            0,
+            2,
+            Vec::new(),
+        );
+        let current_block_config = PoolTradingSimulationConfig {
+            block_number: Some(tx.block_number),
+            ..Default::default()
+        };
+        let parent_block_config = PoolTradingSimulationConfig::default();
+
+        assert!(missing_live_current_block_header(
+            &current_block_config,
+            &tx
+        ));
+        assert!(!missing_live_current_block_header(
+            &parent_block_config,
+            &tx
+        ));
+    }
 }

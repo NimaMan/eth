@@ -238,6 +238,16 @@ impl<'a> BlockContextLoader<'a> {
         &self,
         block_number: u64,
     ) -> Result<Option<StateProviderBox>> {
+        let latest_reth_finished = self.simulator.get_latest_block()?;
+        if !historical_state_available_from_reth(block_number, latest_reth_finished) {
+            debug!(
+                block_number,
+                latest_reth_finished,
+                "Reth historical state is behind requested block; using Redis live state"
+            );
+            return Ok(None);
+        }
+
         let retry_delay = Duration::from_millis(STATE_RETRY_DELAY_MS);
         let mut last_error = None;
         for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
@@ -547,6 +557,10 @@ fn validate_live_state_snapshot_schema(snapshot: &ChainStateSnapshot) -> Result<
     Ok(())
 }
 
+fn historical_state_available_from_reth(block_number: u64, latest_reth_finished: u64) -> bool {
+    block_number <= latest_reth_finished
+}
+
 fn forked_state_from_historical_state(
     block_number: u64,
     block_header: SealedHeader,
@@ -750,5 +764,12 @@ mod tests {
         post_state.storage.insert(slot, updated);
 
         assert!(removed_storage_slots(&pre_state, &post_state).is_empty());
+    }
+
+    #[test]
+    fn historical_state_requires_reth_finish_at_requested_block() {
+        assert!(historical_state_available_from_reth(100, 100));
+        assert!(historical_state_available_from_reth(99, 100));
+        assert!(!historical_state_available_from_reth(101, 100));
     }
 }
