@@ -8,7 +8,7 @@ use alloy_primitives::{address, Address, U256};
 use eyre::{Result, WrapErr};
 use reth_chain_query::dex::uniswap_v3::compute_uniswap_v3_pool;
 use std::sync::Arc;
-use tx_processor::simulator::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType};
+use tx_processor::trade_simulation::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType};
 use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::TxSimulator;
 

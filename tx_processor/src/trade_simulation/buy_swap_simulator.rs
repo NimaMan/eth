@@ -88,7 +88,7 @@ pub async fn simulate_buy_swap_with_params(
     // Build BUY transaction
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
-    let buy_tx: UnsignedTransaction = tx_builders::build_buy_swap(
+    let mut buy_tx: UnsignedTransaction = tx_builders::build_buy_swap(
         &route,
         buyer_address,
         config.token_address,
@@ -96,19 +96,25 @@ pub async fn simulate_buy_swap_with_params(
         slippage_bps,
         deadline,
     );
+    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    let base_fee = chain.block_base_fee();
+    chain.set_eth_balance(
+        buyer_address,
+        config
+            .test_amount
+            .saturating_add(U256::from(1_000_000_000_000_000_000u128)),
+    )?;
+    apply_buy_fee_policy(&mut buy_tx, config.buy_gas_limit, base_fee);
 
-    // Use the provider that can simulate and return a ProcessedTransaction directly
-    let provider_factory = simulator.provider_factory().clone();
-    let processed_tx_provider =
-        crate::processed_tx_provider::ProcessedTxProvider::with_provider_factory(provider_factory)?;
-    let processed = processed_tx_provider
-        .process_transaction_from_unsigned_tx(buy_tx.clone(), Some(block))
+    let buy_sim = chain.step_with_trace(buy_tx.clone()).await?;
+    let processed = tx_processor
+        .process_transaction_from_simulation_result(&buy_tx, &buy_sim, block, 0)
         .await?;
 
     // Extract tokens received by buyer
     let tokens_received = extract_tokens_received(&processed, buyer_address, config.token_address);
 
-    let success = processed.status;
+    let success = buy_sim.success && !tokens_received.is_zero();
     Ok(BuySwapResult {
         success,
         buyer_address,
@@ -121,8 +127,13 @@ pub async fn simulate_buy_swap_with_params(
         block_number: block,
         failure_reason: if success {
             None
+        } else if buy_sim.success {
+            Some("Buy transaction succeeded with zero tokens received".to_string())
         } else {
-            Some("Buy transaction failed".to_string())
+            Some(format_failure_with_revert(
+                "Buy transaction failed",
+                buy_sim.revert_reason.as_deref(),
+            ))
         },
     })
 }
@@ -191,4 +202,22 @@ fn extract_tokens_received(
         }
     }
     U256::ZERO
+}
+
+fn apply_buy_fee_policy(tx: &mut UnsignedTransaction, gas_limit: u64, base_fee: Option<u128>) {
+    tx.gas = Some(gas_limit);
+    if let Some(base_fee) = base_fee {
+        tx.gas_price = None;
+        tx.max_fee_per_gas = Some(base_fee);
+        tx.max_priority_fee_per_gas = Some(0);
+    } else if tx.gas_price.is_none() && tx.max_fee_per_gas.is_none() {
+        tx.gas_price = Some(1);
+    }
+}
+
+fn format_failure_with_revert(prefix: &str, revert_reason: Option<&str>) -> String {
+    match revert_reason.filter(|reason| !reason.trim().is_empty()) {
+        Some(reason) => format!("{prefix}: {reason}"),
+        None => prefix.to_string(),
+    }
 }

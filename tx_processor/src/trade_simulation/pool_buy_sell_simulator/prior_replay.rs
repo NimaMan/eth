@@ -5,8 +5,8 @@ use alloy_primitives::Address;
 use eyre::{eyre, Result};
 use tx_simulator::UnsignedTxChainSimulation;
 
-use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
-use crate::tx_builder::UnsignedTxBuilder;
+use crate::processed_tx_builder::UnsignedTxBuilder;
+use crate::trade_simulation::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
 

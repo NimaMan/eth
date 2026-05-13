@@ -10,7 +10,7 @@ use alloy_primitives::{Address, B256};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList, PyTuple};
 use std::{str::FromStr, sync::Arc};
-use tx_processor::simulator::types::{
+use tx_processor::trade_simulation::types::{
     UniswapV4PoolConfig, DEFAULT_APPROVE_GAS_LIMIT, DEFAULT_BUY_GAS_LIMIT, DEFAULT_SELL_GAS_LIMIT,
 };
 use tx_processor::ProcessedTransaction as RustProcessedTransaction;

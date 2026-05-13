@@ -3,7 +3,7 @@ use eyre::{eyre, Result, WrapErr};
 use serde::Deserialize;
 use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Instant};
 use tx_processor::{
-    simulator::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType},
+    trade_simulation::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType},
     tx_processor::TxProcessor,
 };
 use tx_simulator::TxSimulator;
@@ -233,7 +233,7 @@ async fn simulate_pool(
     tokens: &HashMap<String, u8>,
     pool: &TokenServerPool,
     active_block: u64,
-) -> Result<tx_processor::simulator::PoolBuySellSimulationResult> {
+) -> Result<tx_processor::trade_simulation::PoolBuySellSimulationResult> {
     let token_address = parse_address(&pool.token_address)?;
     let pool_address = parse_address(&pool.pool_address)?;
     let denom_address = parse_address(&pool.denom_address)?;

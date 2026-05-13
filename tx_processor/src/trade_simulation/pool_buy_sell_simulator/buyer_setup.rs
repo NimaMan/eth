@@ -14,7 +14,9 @@ use tx_simulator::{
 use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
 use super::fees::apply_fee_policy;
 use super::results::create_failed_result;
-use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use crate::trade_simulation::types::{
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
 

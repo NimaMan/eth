@@ -1,6 +1,6 @@
 use tx_simulator::UnsignedTransaction;
 
-use crate::simulator::types::PoolBuySellParameters;
+use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::data_models::ProcessedTransaction;
 
 pub(super) fn apply_fee_policy(

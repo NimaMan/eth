@@ -20,7 +20,9 @@ transaction and block facts.
 - `BlockProcessor` and `ProcessedBlockProvider` for block/range processing.
 - Log decoding, trace conversion, internal transaction extraction, and address
   balance-change calculation.
-- Pool buy/approve/sell viability orchestration in `src/simulator/`.
+- Pool buy/approve/sell viability orchestration in `src/trade_simulation/`.
+- `processed_tx_builder` helpers for rebuilding signed or unsigned transaction
+  payloads from `ProcessedTransaction` values.
 - `live_block_processor` that publishes compact processed blocks to Redis.
 
 ## Does Not Own
@@ -70,8 +72,26 @@ refresh_processed_block_disk_cache
 | Process block/ranges | `src/block_processor/`, `src/processed_tx_provider/block/` |
 | Persistent block cache | `src/processed_tx_provider/block/disk_cache/` |
 | Live Redis publisher | `src/bin/live_block_processor/README.md` |
-| Buy/sell/tax simulation | `src/simulator/`, `examples/pool_analysis/` |
+| Buy/sell/tax simulation | `src/trade_simulation/`, `examples/pool_analysis/` |
+| Processed tx rebuild helpers | `src/processed_tx_builder/` |
 | Profiling harness | `examples/block/profile/README.md` |
+
+## Trade Simulation Layout
+
+- `src/trade_simulation/buy_swap_simulator.rs`: single buy swap simulation.
+- `src/trade_simulation/sell_swap/`: sell-only simulation, split by concern:
+  router-based V2/V3 protocols, Uniswap Universal Router V3/V4 flows, token
+  balance setup, denom-output extraction, and common result/error helpers.
+- `src/trade_simulation/pool_buy_sell_simulator/`: full buy -> approve -> sell
+  viability checks, prior-transaction replay, and tax calculation.
+- `src/trade_simulation/cross_venue_buy_approve_sell.rs`: cross-venue sequence
+  helper.
+
+Router-based sell simulation covers the known V2-style protocols represented by
+`PoolType` (`UniswapV2`, `SushiSwap`, `PancakeSwapV2`, `ShibaSwapV2`,
+`FraxswapV2`) plus known V3 router protocols such as `SushiSwapV3`. Uniswap V3
+and V4 Universal Router flows live in their own modules because they require
+Permit2 and protocol-specific calldata.
 
 ## Tests And Commands
 

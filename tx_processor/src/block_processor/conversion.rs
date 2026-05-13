@@ -1,8 +1,39 @@
-use alloy_primitives::{Log as AlloyLog, U256};
+use alloy_consensus::{Header as AlloyHeader, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+use alloy_primitives::{Address, Bloom, Bytes, Log as AlloyLog, B256, B64, U256};
 use reth_chain_query::provider::{
-    CallFrame as ProviderCallFrame, Log as ProviderLog, TransactionTrace,
+    BlockHeader, CallFrame as ProviderCallFrame, Log as ProviderLog, TransactionTrace,
 };
+use reth_primitives_traits::SealedHeader;
 use tx_simulator::CallFrame;
+
+pub fn sealed_header_from_processed_block_header(header: &BlockHeader) -> SealedHeader {
+    let sparse_header = AlloyHeader {
+        parent_hash: header.parent_hash,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        beneficiary: Address::ZERO,
+        state_root: EMPTY_ROOT_HASH,
+        transactions_root: EMPTY_ROOT_HASH,
+        receipts_root: EMPTY_ROOT_HASH,
+        logs_bloom: Bloom::ZERO,
+        difficulty: U256::ZERO,
+        number: header.number,
+        gas_limit: header.gas_limit,
+        gas_used: header.gas_used,
+        timestamp: header.timestamp,
+        extra_data: Bytes::default(),
+        mix_hash: B256::ZERO,
+        nonce: B64::ZERO,
+        base_fee_per_gas: header.base_fee_per_gas,
+        withdrawals_root: header.withdrawals_root,
+        blob_gas_used: header.blob_gas_used,
+        excess_blob_gas: header.excess_blob_gas,
+        parent_beacon_block_root: header.parent_beacon_block_root,
+        requests_hash: header.requests_hash,
+        block_access_list_hash: header.block_access_list_hash,
+        slot_number: header.slot_number,
+    };
+    SealedHeader::new(sparse_header, header.hash)
+}
 
 /// Convert logs from provider format to alloy primitives log type used by tx_processor
 pub fn convert_logs(raw_logs: &[ProviderLog]) -> Vec<AlloyLog> {

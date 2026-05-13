@@ -11,7 +11,7 @@ use alloy_primitives::{Address, U256};
 /// - Historical analysis of token behavior
 use eyre::Result;
 use std::sync::Arc;
-use tx_processor::simulator::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType};
+use tx_processor::trade_simulation::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType};
 use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::TxSimulator;
 

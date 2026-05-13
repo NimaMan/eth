@@ -2,7 +2,7 @@ use crate::{ExpectedBehavior, TokenConfig};
 use reth_chain_query::common_addresses::dex_token_denom_pairs::{
     uniswap_v2_tokens, UniswapV2TokenInfo,
 };
-use tx_processor::simulator::PoolType;
+use tx_processor::trade_simulation::PoolType;
 
 pub fn token_configs() -> Vec<TokenConfig> {
     uniswap_v2_tokens()

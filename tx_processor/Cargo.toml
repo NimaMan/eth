@@ -7,10 +7,7 @@ workspace = ".."
 [features]
 default = []
 
-# TX Processor Examples - Uses modular tx_simulator for simulation
-# Note: Library functionality broken after refactoring, examples work
-
-# TX Processor Examples - Only examples that actually exist
+# TX Processor examples and operational binaries.
 
 # Transaction Processing examples  
 [[example]]
@@ -116,7 +113,6 @@ name = "denom_token_metadata"
 path = "examples/token_parameter_extraction/denom_token_metadata.rs"
 
 [dependencies]
-# Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
 
 

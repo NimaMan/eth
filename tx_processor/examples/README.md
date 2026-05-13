@@ -1,132 +1,30 @@
-# TX Processor Examples - POST-REFACTORING STATUS
+# tx_processor Examples
 
-## ⚠️ CURRENT STATUS: ALL EXAMPLES FAIL DUE TO REFACTORING
+Examples are grouped by the workflow they exercise. They are registered in
+`tx_processor/Cargo.toml` and are expected to compile with:
 
-**Problem:** These examples were written during the migration away from the legacy `reth_tx_simulator` crate. That crate has been replaced by the modular `tx_simulator` + `tx_processor` stack. Some examples still reference the old API and need import/usage updates before they compile.
-
-**Root Cause:** Out-of-date imports/usages referencing `reth_tx_simulator`, plus version drift (e.g., `alloy_rpc_types_trace`) and missing trait imports (`SignerRecoverable`). Update examples to use the `tx_simulator` crate APIs.
-
-## Available Examples (16 total)
-
-This directory contains the actual examples that exist in the tx_processor module. Previously there were 45+ documented examples, but only these 16 actually exist on disk.
-
-### 1. Transaction Processing (`tx_processor/`) - 3 examples
-
-#### `process_transaction_by_hash.rs`
-**Purpose:** Process transaction by hash with full event decoding
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Uses ProcessedTxProvider to fetch and decode transaction data, extract internal transactions, and calculate balance changes
-
-#### `processed_tx_from_call_data.rs`
-**Purpose:** Generate ProcessedTransaction from raw call data
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Pre-execution analysis by simulating unsigned transactions
-
-#### `test_bribe_detection.rs`
-**Purpose:** MEV bribe detection in transactions
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Analyzes transactions for MEV bribes and validator payments
-
-### 2. Pool Analysis (`pool_analysis/`) - 6 examples
-
-#### `erc20_pool_tax_demo.rs`
-**Purpose:** Analyze tokens with transfer taxes
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Pool viability testing with tax detection and effective amount calculation
-
-#### `erc20_pool_with_enable_tx.rs`
-**Purpose:** Handle pools requiring enable transactions
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Tests tokens with trading enable/disable mechanisms
-
-#### `erc20_pool_liquidity_removal_simple.rs`
-**Purpose:** Simulate liquidity removal from pools
-**Status:** ❌ Fails - dependency issues
-**Original Function:** LP token mechanics and impermanent loss calculation
-
-#### `erc20_pool_block_range_analysis.rs`
-**Purpose:** Analyze pool behavior over block ranges
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Historical pool analysis with volume and liquidity tracking
-
-#### `can_buy_sell_common_tokens_uniswap_v2.rs`
-**Purpose:** Test token viability on Uniswap V2
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Validates WETH, USDC, USDT, DAI trading on V2
-
-#### `can_buy_sell_common_tokens_uniswap_v3.rs`
-**Purpose:** Test token viability on Uniswap V3
-**Status:** ❌ Fails - dependency issues
-**Original Function:** Tests concentrated liquidity pools and fee tiers
-
-### V4 Pool Viability Example
-
-#### `can_buy_sell_common_tokens_uniswap_v4.rs`
-**Purpose:** Acceptance example for Universal Router V4 buy → Permit2 approve → sell simulation.
-**Status Goal:** ✅ Uses the same pool buy/sell simulator path as token tracking.
-**Success Definition:**
-- Build Uniswap v4 calldata via the deployed Universal Router builder.
-- Execute buy/approve/sell through Universal Router and Permit2.
-- Persist standard tax/trace outputs.
-- Report success in the CLI output without manual patching.
-**How to run (when ready):**
 ```bash
-RETH_DATADIR=/home/nima/.local/share/reth/mainnet \
-  cargo run --manifest-path Cargo.toml -p tx_processor --example can_buy_sell_common_tokens_uniswap_v4
+cargo check -p tx_processor --examples
 ```
 
-## Resolution Required
+## Groups
 
-### To Fix These Examples:
+| Directory | Purpose |
+| --- | --- |
+| `tx_processor/` | Process individual transactions by hash or unsigned tx payload. |
+| `block/` | Process blocks, compare block sources, refresh processed-block caches, and profile throughput. |
+| `provider/` | Exercise provider-level block and token transaction reads. |
+| `pool_analysis/` | Run trade viability simulations against known pools and probe specific pool setups. |
+| `token_parameter_extraction/` | Extract token and denomination metadata needed by higher-level workflows. |
 
-1. **Update Dependencies** - Resolve `alloy_rpc_types_trace` version conflicts
-2. **Import Missing Traits** - Add `use alloy_consensus::transaction::recovered::SignerRecoverable;`
-3. **Fix API Changes** - Update calls to match new `recover_signer` method signatures
-4. **Test Compilation** - Verify all 16 examples compile after fixes
+## Common Environment
 
-### Expected Performance (when working):
+Most examples need a synced local Reth datadir. Prefer `RETH_DATADIR`; several
+older examples still fall back to `~/.local/share/reth/mainnet`.
 
-| Transaction Type | Processing Time | Throughput |
-|-----------------|-----------------|------------|
-| Simple ETH Transfer | ~2-3ms | 400 tx/sec |
-| ERC20 Transfer | ~3-5ms | 250 tx/sec |
-| Complex DeFi | ~4-5ms | 200 tx/sec |
-| Batch (4 threads) | ~0.5ms/tx | 1825 tx/sec |
-
-## Requirements (when fixed)
-
-- Synced Reth node with database at `/home/nima/.local/share/reth/mainnet`
-- Rust 1.70+ with cargo
-- Update imports/usages to `tx_simulator` (replacement for `reth_tx_simulator`)
-
-## Usage Patterns (when working)
-
-### Transaction Processing
-```rust
-// This is the intended usage once dependencies are fixed
-let provider = ProcessedTxProvider::new("/home/nima/.local/share/reth/mainnet")?;
-let tx_hash = B256::from_str("0x...")?;
-let processed_tx = provider.process_transaction_by_hash(tx_hash).await?;
+```bash
+RETH_DATADIR=/path/to/reth/mainnet cargo run -p tx_processor --example process_block -- --block 19000000
 ```
 
-### Sequential Simulation
-```rust
-// Intended SimulationChain usage
-let simulator = TxSimulator::new(RETH_DB_PATH)?;
-let mut chain = simulator.start_simulation_chain(None).await?;
-let results = chain.step_multiple(transactions).await?;
-```
-
-### Pool Analysis
-```rust
-// Pool viability testing pattern
-let config = PoolBuySellParameters::default();
-let result = check_can_buy_sell_pool(processor, pool_address, token_address, PoolType::UniswapV2, config).await?;
-```
-
-## Summary
-
-- **16 examples exist** (down from 45+ phantom entries in Cargo.toml)
-- Some still reference the removed `reth_tx_simulator` crate — switch to `tx_simulator`
-- Organized into 4 categories: tx_processor, simulation, token investigations, pool analysis
-- Ready to fix by updating imports and aligning versions (no design changes required)
+Pool analysis examples use the public `tx_processor::trade_simulation` API.
+Transaction reconstruction helpers live under `tx_processor::processed_tx_builder`.

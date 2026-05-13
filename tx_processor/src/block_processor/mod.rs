@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tx_simulator::block_simulation::BlockTraceEngine;
 
+pub use conversion::sealed_header_from_processed_block_header;
 pub use types::{
     BlockBatchOptions, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
     ProcessRawBlockProfile, ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,

@@ -8,8 +8,8 @@ use alloy_primitives::U256;
 use eyre::Result;
 use reth_chain_query::common_addresses::{uniswap_v4_pools, UniswapV4PoolInfo};
 use std::sync::Arc;
-use tx_processor::simulator::types::UniswapV4PoolConfig;
-use tx_processor::simulator::{
+use tx_processor::trade_simulation::types::UniswapV4PoolConfig;
+use tx_processor::trade_simulation::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
 use tx_processor::tx_processor::TxProcessor;

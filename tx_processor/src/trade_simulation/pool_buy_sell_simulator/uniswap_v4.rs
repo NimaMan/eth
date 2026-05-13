@@ -25,8 +25,10 @@ use super::failure::{enrich_failure_reason_with_trace, format_failure_with_rever
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
-use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
-use crate::tx_builder::UnsignedTxBuilder;
+use crate::processed_tx_builder::UnsignedTxBuilder;
+use crate::trade_simulation::types::{
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
@@ -34,6 +36,7 @@ use crate::tx_processor::tax_calculator::{
 use crate::tx_processor::TxProcessor;
 
 const UNIVERSAL_ROUTER_V4: Address = address!("66a9893cC07D91D95644AEDD05D03f95e1dBA8Af");
+const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
 const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 const PERMIT2_EXPIRATION: u64 = (1_u64 << 48) - 1;
 
@@ -135,6 +138,13 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
     base_fee: Option<u128>,
     mut chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
+    chain.set_eth_balance(
+        config.buyer_address,
+        config
+            .test_amount
+            .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE)),
+    )?;
+
     let v4_cfg = config
         .uniswap_v4_config
         .clone()

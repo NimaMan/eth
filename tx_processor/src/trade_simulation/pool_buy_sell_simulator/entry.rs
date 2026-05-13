@@ -1,8 +1,6 @@
 use crate::tx_processor::TxProcessor;
-use alloy_consensus::{Header as AlloyHeader, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, I256, U256};
+use alloy_primitives::{I256, U256};
 use eyre::{eyre, Result, WrapErr};
-use reth_chain_query::provider::BlockHeader;
 use reth_primitives_traits::SealedHeader;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
@@ -18,7 +16,10 @@ use super::prior_replay::replay_prior_transactions;
 use super::results::create_failed_result;
 use super::uniswap_v4::{check_can_buy_sell_uniswap_v4, check_can_buy_sell_uniswap_v4_with_chain};
 use super::validation::validate_pool_registration;
-use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use crate::block_processor::sealed_header_from_processed_block_header;
+use crate::trade_simulation::types::{
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+};
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
@@ -28,6 +29,8 @@ use tx_simulator::tx_builders::{
     uniswap_v2::{build_approve_v2, Router as UniswapV2Router},
     uniswap_v3::{build_approve_v3, build_approve_v3_for_router},
 };
+
+const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
 pub async fn check_can_buy_sell_pool(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
@@ -147,6 +150,13 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     base_fee: Option<u128>,
     mut chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
+    chain.set_eth_balance(
+        config.buyer_address,
+        config
+            .test_amount
+            .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE)),
+    )?;
+
     let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
         AmmSwapRoute::V2Router {
             pool: config.pool_address,
@@ -680,38 +690,11 @@ pub(super) fn block_header_hint(
     Ok(Some(sealed_header_from_processed_block_header(header)))
 }
 
-pub fn sealed_header_from_processed_block_header(header: &BlockHeader) -> SealedHeader {
-    let sparse_header = AlloyHeader {
-        parent_hash: header.parent_hash,
-        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        beneficiary: Address::ZERO,
-        state_root: EMPTY_ROOT_HASH,
-        transactions_root: EMPTY_ROOT_HASH,
-        receipts_root: EMPTY_ROOT_HASH,
-        logs_bloom: Bloom::ZERO,
-        difficulty: U256::ZERO,
-        number: header.number,
-        gas_limit: header.gas_limit,
-        gas_used: header.gas_used,
-        timestamp: header.timestamp,
-        extra_data: Bytes::default(),
-        mix_hash: B256::ZERO,
-        nonce: B64::ZERO,
-        base_fee_per_gas: header.base_fee_per_gas,
-        withdrawals_root: header.withdrawals_root,
-        blob_gas_used: header.blob_gas_used,
-        excess_blob_gas: header.excess_blob_gas,
-        parent_beacon_block_root: header.parent_beacon_block_root,
-        requests_hash: header.requests_hash,
-        block_access_list_hash: header.block_access_list_hash,
-        slot_number: header.slot_number,
-    };
-    SealedHeader::new(sparse_header, header.hash)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
+    use reth_chain_query::provider::BlockHeader;
 
     fn processed_block_header(number: u64) -> BlockHeader {
         BlockHeader {

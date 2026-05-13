@@ -5,7 +5,7 @@ use reth_chain_query::dex::encoding::{
 };
 use tx_simulator::{UnsignedTxChainSimulation, ViewFunctionResult};
 
-use crate::simulator::types::{PoolBuySellParameters, PoolType};
+use crate::trade_simulation::types::{PoolBuySellParameters, PoolType};
 
 const UNISWAP_V2_FACTORY_GET_PAIR: [u8; 4] = [0xe6, 0xa4, 0x39, 0x05];
 const UNISWAP_V3_FACTORY_GET_POOL: [u8; 4] = [0x16, 0x98, 0xee, 0x82];

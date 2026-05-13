@@ -19,16 +19,17 @@ pub use tx_simulator::{
 pub mod address_block_participation;
 pub mod block_processor;
 pub mod live;
+pub mod processed_tx_builder;
 pub mod processed_tx_provider;
-pub mod simulator;
-pub mod tx_builder;
+pub mod trade_simulation;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
 pub use address_block_participation::address_participations_from_processed_block;
 pub use block_processor::{
-    BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
-    ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
+    sealed_header_from_processed_block_header, BlockBatchOptions, BlockProcessor,
+    CachedProcessedBlock, PersistentProcessedBlockCacheMode, ProcessedBlock, ProcessedBlockSource,
+    ProcessedBlockTransactions,
 };
 pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
@@ -52,14 +53,13 @@ pub use processed_tx_provider::{
 };
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 // Export ERC20 token buy-approve-sell simulator through simulator module
-pub use simulator::{
-    check_can_buy_sell_pool, sealed_header_from_processed_block_header, simulate_buy_swap,
-    simulate_buy_swap_with_params, simulate_sell_swap, simulate_sell_swap_with_params,
-    BuySwapResult, LivePoolBuySellSimulator, OptionalSetupBuyApproveSellResult,
-    PoolBuySellParameters, PoolBuySellSimulationResult, PoolBuySellSimulator, PoolType,
-    SellSwapResult, UniswapV4PoolConfig,
+pub use processed_tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
+pub use trade_simulation::{
+    check_can_buy_sell_pool, simulate_buy_swap, simulate_buy_swap_with_params, simulate_sell_swap,
+    simulate_sell_swap_with_params, BuySwapResult, LivePoolBuySellSimulator,
+    OptionalSetupBuyApproveSellResult, PoolBuySellParameters, PoolBuySellSimulationResult,
+    PoolBuySellSimulator, PoolType, SellSwapResult, UniswapV4PoolConfig,
 };
-pub use tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 
 // Convenience facade: simulate and return ProcessedTransaction directly
 use alloy_primitives::B256;

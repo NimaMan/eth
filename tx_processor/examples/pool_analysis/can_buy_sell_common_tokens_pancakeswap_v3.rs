@@ -6,7 +6,7 @@ use alloy_primitives::{address, Address, U256};
 use eyre::Result;
 use reth_chain_query::dex::compute_pancakeswap_v3_pool;
 use std::sync::Arc;
-use tx_processor::simulator::{
+use tx_processor::trade_simulation::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
 use tx_processor::tx_processor::TxProcessor;
@@ -167,11 +167,8 @@ async fn main() -> Result<()> {
     let mut results = Vec::new();
 
     for token in &tokens {
-        let pool_address = compute_pancakeswap_v3_pool(
-            token.token_address,
-            token.denom_address,
-            token.fee_tier,
-        );
+        let pool_address =
+            compute_pancakeswap_v3_pool(token.token_address, token.denom_address, token.fee_tier);
 
         println!(
             "🔍 Testing {} @ {} (pool: {})",
@@ -180,8 +177,14 @@ async fn main() -> Result<()> {
             pool_address
         );
 
-        match test_token(simulator.clone(), tx_processor.clone(), token, pool_address, latest_block)
-            .await
+        match test_token(
+            simulator.clone(),
+            tx_processor.clone(),
+            token,
+            pool_address,
+            latest_block,
+        )
+        .await
         {
             Ok(result) => {
                 println!(

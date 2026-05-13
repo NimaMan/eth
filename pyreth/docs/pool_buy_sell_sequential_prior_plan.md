@@ -22,13 +22,13 @@ Replaying only TX #3 without TX #1/#2 leaves the sandbox with no token/pair, cau
   - Document expected outcomes (buy/sell should succeed once the full sequence is applied).
 
 ### 2. API Changes
-- Update `PoolBuySellParameters` (`../tx_processor/src/simulator/types.rs`):
+- Update `PoolBuySellParameters` (`../tx_processor/src/trade_simulation/types.rs`):
   - Replace `prior_tx: Option<ProcessedTransaction>` with `prior_txs: Vec<ProcessedTransaction>`.
   - Maintain backward compatibility in Python binding by accepting both single and list parameters.
 - Adjust result struct to optionally return the list of `prior_transactions` for debug/logging.
 
 ### 3. Simulator Logic
-- In `../tx_processor/src/simulator/pool_buy_sell_simulator.rs`:
+- In `../tx_processor/src/trade_simulation/pool_buy_sell_simulator/`:
   - Iterate through `prior_txs` in order; for each, set the `UnsignedTransaction` and run `step_with_trace` on the simulation chain.
   - Collect individual `ProcessedTransaction` results for diagnostics.
   - Only after the entire sequence succeeds, run our standard buy/approve/sell.
@@ -49,7 +49,7 @@ Replaying only TX #3 without TX #1/#2 leaves the sandbox with no token/pair, cau
 - Add regression tests ensuring the simulator handles empty prior lists (legacy behavior) and multiple entries.
 
 ### 7. Documentation
-- Update simulator README (`blockchains/eth/mempool_processor/src/simulator/README.md`) with instructions on collecting sequential prior transactions and how the new API is used.
+- Update simulator README (`blockchains/eth/tx_processor/src/trade_simulation/README.md`) with instructions on collecting sequential prior transactions and how the new API is used.
 - Mention the specific MIND block example as a “known-good” scenario.
 
 ## Notes

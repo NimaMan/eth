@@ -6,7 +6,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
 use reth_chain_query::dex::{compute_uniswap_v3_pool, UNISWAP_V3_FACTORY};
 use std::sync::Arc;
-use tx_processor::simulator::{
+use tx_processor::trade_simulation::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
 use tx_processor::tx_processor::TxProcessor;

@@ -8,7 +8,7 @@ use reth_chain_query::dex::{
     compute_fraxswap_v2_pool, compute_pancakeswap_v2_pool, compute_shibaswap_v2_pool,
 };
 use std::sync::Arc;
-use tx_processor::simulator::{
+use tx_processor::trade_simulation::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
 use tx_processor::tx_processor::TxProcessor;

@@ -174,7 +174,7 @@ Contains:
 AMM transactions (buy/approve/sell) are constructed by `reth_chain_query::tx_builders` and selected via `AmmSwapRoute`:
 
 ```rust
-use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
+use reth_chain_query::tx_builders::{self, AmmSwapRoute};
 
 let route = AmmSwapRoute::UniswapV2 { pool };
 let buy = tx_builders::build_buy_swap(&route, buyer, token_out, eth_in, slippage_bps, deadline);
@@ -182,7 +182,10 @@ let approve = tx_builders::build_approve_for_route(&route, buyer, token_out, U25
 let sell = tx_builders::build_sell_swap(&route, buyer, token_out, tokens_in, slippage_bps, deadline);
 ```
 
-Multi‑step sequences are orchestrated via the simulators in `src/simulator` (e.g., `buy_swap_simulator.rs`, `sell_swap_simulator.rs`, `pool_buy_sell_simulator.rs`, `cross_venue_buy_approve_sell.rs`) and use the core processor to convert each step to a `ProcessedTransaction`.
+Multi-step sequences are orchestrated via `src/trade_simulation` (for example
+`buy_swap_simulator.rs`, `sell_swap/`, `pool_buy_sell_simulator/`, and
+`cross_venue_buy_approve_sell.rs`) and use the core processor to convert each
+step to a `ProcessedTransaction`.
 
 ## Recommended Usage Patterns
 
