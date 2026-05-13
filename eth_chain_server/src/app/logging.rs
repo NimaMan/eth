@@ -8,7 +8,7 @@ use std::{
 };
 
 use chrono::Utc;
-use eth_pipeline_telemetry::{JsonlTelemetrySink, MultiTelemetrySink, TracingTelemetrySink};
+use eth_ops_events::{JsonlOpsEventSink, MultiOpsEventSink, TracingOpsEventSink};
 use serde_json::json;
 use tracing::{Level, Metadata};
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -127,17 +127,17 @@ pub fn init_logging() -> eyre::Result<LogGuards> {
         .init();
     install_panic_hook();
 
-    let telemetry_sink = MultiTelemetrySink::new(vec![
-        Arc::new(JsonlTelemetrySink::open(&run_dir)?),
-        Arc::new(TracingTelemetrySink),
+    let ops_event_sink = MultiOpsEventSink::new(vec![
+        Arc::new(JsonlOpsEventSink::open(&run_dir)?),
+        Arc::new(TracingOpsEventSink),
     ]);
-    let telemetry_initialized = eth_pipeline_telemetry::init_global_sink(Arc::new(telemetry_sink));
+    let ops_events_initialized = eth_ops_events::init_global_sink(Arc::new(ops_event_sink));
 
     tracing::info!(
         log_root = %log_root.display(),
         run_dir = %run_dir.display(),
         run_id = %run_log.run_id,
-        telemetry_initialized,
+        ops_events_initialized,
         "initialized eth_chain_server file logger"
     );
     Ok(LogGuards {

@@ -8,7 +8,7 @@ workspace = "../../.."
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["serde"] }
 async-trait = "0.1"
-eth_pipeline_telemetry = { path = "../../../eth_pipeline_telemetry" }
+eth_ops_events = { path = "../../../eth_ops_events" }
 eth_live_state = { path = "../state" }
 eth_pool_classification = { path = "../../pool_classification" }
 eth_token = { path = "../../../eth_token" }

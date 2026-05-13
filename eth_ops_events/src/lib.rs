@@ -111,25 +111,25 @@ pub struct PipelineBottleneckSample {
     pub message: String,
 }
 
-pub trait TelemetrySink: Send + Sync {
+pub trait OpsEventSink: Send + Sync {
     fn emit_issue(&self, issue: &PipelineIssue);
     fn emit_health(&self, health: &PipelineHealth);
     fn emit_bottleneck(&self, sample: &PipelineBottleneckSample);
 }
 
 #[derive(Default)]
-pub struct NoopTelemetrySink;
+pub struct NoopOpsEventSink;
 
-impl TelemetrySink for NoopTelemetrySink {
+impl OpsEventSink for NoopOpsEventSink {
     fn emit_issue(&self, _issue: &PipelineIssue) {}
     fn emit_health(&self, _health: &PipelineHealth) {}
     fn emit_bottleneck(&self, _sample: &PipelineBottleneckSample) {}
 }
 
 #[derive(Default)]
-pub struct TracingTelemetrySink;
+pub struct TracingOpsEventSink;
 
-impl TelemetrySink for TracingTelemetrySink {
+impl OpsEventSink for TracingOpsEventSink {
     fn emit_issue(&self, issue: &PipelineIssue) {
         match issue.severity {
             PipelineSeverity::Info => tracing::info!(
@@ -163,17 +163,17 @@ impl TelemetrySink for TracingTelemetrySink {
     }
 }
 
-pub struct MultiTelemetrySink {
-    sinks: Vec<Arc<dyn TelemetrySink>>,
+pub struct MultiOpsEventSink {
+    sinks: Vec<Arc<dyn OpsEventSink>>,
 }
 
-impl MultiTelemetrySink {
-    pub fn new(sinks: Vec<Arc<dyn TelemetrySink>>) -> Self {
+impl MultiOpsEventSink {
+    pub fn new(sinks: Vec<Arc<dyn OpsEventSink>>) -> Self {
         Self { sinks }
     }
 }
 
-impl TelemetrySink for MultiTelemetrySink {
+impl OpsEventSink for MultiOpsEventSink {
     fn emit_issue(&self, issue: &PipelineIssue) {
         for sink in &self.sinks {
             sink.emit_issue(issue);
@@ -193,13 +193,13 @@ impl TelemetrySink for MultiTelemetrySink {
     }
 }
 
-pub struct JsonlTelemetrySink {
+pub struct JsonlOpsEventSink {
     issues: Mutex<BufWriter<File>>,
     health: Mutex<BufWriter<File>>,
     bottlenecks: Mutex<BufWriter<File>>,
 }
 
-impl JsonlTelemetrySink {
+impl JsonlOpsEventSink {
     pub fn open(dir: impl AsRef<Path>) -> eyre::Result<Self> {
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir)?;
@@ -217,7 +217,7 @@ impl JsonlTelemetrySink {
     }
 }
 
-impl TelemetrySink for JsonlTelemetrySink {
+impl OpsEventSink for JsonlOpsEventSink {
     fn emit_issue(&self, issue: &PipelineIssue) {
         write_jsonl(&self.issues, issue);
     }
@@ -231,9 +231,9 @@ impl TelemetrySink for JsonlTelemetrySink {
     }
 }
 
-static GLOBAL_SINK: OnceLock<Arc<dyn TelemetrySink>> = OnceLock::new();
+static GLOBAL_SINK: OnceLock<Arc<dyn OpsEventSink>> = OnceLock::new();
 
-pub fn init_global_sink(sink: Arc<dyn TelemetrySink>) -> bool {
+pub fn init_global_sink(sink: Arc<dyn OpsEventSink>) -> bool {
     GLOBAL_SINK.set(sink).is_ok()
 }
 
@@ -241,7 +241,7 @@ pub fn emit_issue(issue: &PipelineIssue) {
     if let Some(sink) = GLOBAL_SINK.get() {
         sink.emit_issue(issue);
     } else {
-        TracingTelemetrySink.emit_issue(issue);
+        TracingOpsEventSink.emit_issue(issue);
     }
 }
 
@@ -249,7 +249,7 @@ pub fn emit_health(health: &PipelineHealth) {
     if let Some(sink) = GLOBAL_SINK.get() {
         sink.emit_health(health);
     } else {
-        TracingTelemetrySink.emit_health(health);
+        TracingOpsEventSink.emit_health(health);
     }
 }
 
@@ -257,7 +257,7 @@ pub fn emit_bottleneck(sample: &PipelineBottleneckSample) {
     if let Some(sink) = GLOBAL_SINK.get() {
         sink.emit_bottleneck(sample);
     } else {
-        TracingTelemetrySink.emit_bottleneck(sample);
+        TracingOpsEventSink.emit_bottleneck(sample);
     }
 }
 
@@ -413,7 +413,7 @@ pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
         && message.contains("configuration provided")
     {
         let mut issue = PipelineIssue::new(
-            "eth_token_server",
+            "eth_chain_server",
             "live_tracker",
             "pool_buy_sell_sim",
             PipelineSeverity::Warn,
@@ -450,7 +450,7 @@ pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
 
     if message.contains("No UniswapV2 pool found") {
         let mut issue = PipelineIssue::new(
-            "eth_token_server",
+            "eth_chain_server",
             "live_tracker",
             "pool_buy_sell_sim",
             PipelineSeverity::Warn,
@@ -476,7 +476,7 @@ pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
 
     if message.contains("No Uniswap V3 pool found") {
         let mut issue = PipelineIssue::new(
-            "eth_token_server",
+            "eth_chain_server",
             "live_tracker",
             "pool_buy_sell_sim",
             PipelineSeverity::Warn,
@@ -506,7 +506,7 @@ pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
     }
 
     let mut issue = PipelineIssue::new(
-        "eth_token_server",
+        "eth_chain_server",
         "live_tracker",
         "token_block_apply",
         PipelineSeverity::Warn,
@@ -532,14 +532,14 @@ fn open_append(path: impl AsRef<Path>) -> eyre::Result<File> {
 
 fn write_jsonl<T: Serialize>(writer: &Mutex<BufWriter<File>>, value: &T) {
     let Ok(mut writer) = writer.lock() else {
-        tracing::error!(target: "pipeline_telemetry", "telemetry writer lock poisoned");
+        tracing::error!(target: "eth_ops_events", "ops event writer lock poisoned");
         return;
     };
     if let Err(error) = serde_json::to_writer(&mut *writer, value).and_then(|_| {
         writer.write_all(b"\n").map_err(serde_json::Error::io)?;
         writer.flush().map_err(serde_json::Error::io)
     }) {
-        tracing::error!(target: "pipeline_telemetry", error = %error, "failed to write telemetry jsonl");
+        tracing::error!(target: "eth_ops_events", error = %error, "failed to write ops event jsonl");
     }
 }
 

@@ -1,4 +1,4 @@
-use eth_pipeline_telemetry::{emit_issue, PipelineBottleneckSample, PipelineIssue};
+use eth_ops_events::{emit_issue, PipelineBottleneckSample, PipelineIssue};
 use eth_token::tracking::{LiveTokenRetentionReport, TokenBlockUpdateReport};
 use tx_processor::LoadedProcessedBlock as LiveBlockLoad;
 

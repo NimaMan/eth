@@ -23,9 +23,9 @@ use eth_alpha_engine::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, LiveChainSimExecutionAdapter,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
-use eth_pipeline_telemetry::{
-    emit_health, emit_issue, JsonlTelemetrySink, MultiTelemetrySink, PipelineHealth,
-    PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingTelemetrySink,
+use eth_ops_events::{
+    emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
+    PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
 use eyre::{eyre, Result, WrapErr};
@@ -177,8 +177,8 @@ async fn main() -> Result<()> {
         .wrap_err("invalid --min-liquidity-usd decimal")?;
     let database_url = resolve_database_url(&args)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
-    if let Err(error) = init_alpha_trader_telemetry(&run_id) {
-        warn!(error = %error, "failed to initialize alpha trader telemetry");
+    if let Err(error) = init_alpha_trader_ops_events(&run_id) {
+        warn!(error = %error, "failed to initialize alpha trader ops events");
     }
 
     let store = PostgresTradingStore::connect(&database_url, run_id.clone())
@@ -668,21 +668,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_alpha_trader_telemetry(run_id: &str) -> Result<()> {
+fn init_alpha_trader_ops_events(run_id: &str) -> Result<()> {
     let root = env::var("ALPHA_TRADER_LOG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_ALPHA_TRADER_LOG_DIR));
     let run_dir = root.join(sanitize_path_segment(run_id));
-    let sink = MultiTelemetrySink::new(vec![
-        Arc::new(JsonlTelemetrySink::open(&run_dir)?),
-        Arc::new(TracingTelemetrySink),
+    let sink = MultiOpsEventSink::new(vec![
+        Arc::new(JsonlOpsEventSink::open(&run_dir)?),
+        Arc::new(TracingOpsEventSink),
     ]);
-    let initialized = eth_pipeline_telemetry::init_global_sink(Arc::new(sink));
+    let initialized = eth_ops_events::init_global_sink(Arc::new(sink));
     info!(
         run_id,
         run_dir = %run_dir.display(),
         initialized,
-        "initialized alpha trader telemetry"
+        "initialized alpha trader ops events"
     );
     Ok(())
 }

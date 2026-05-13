@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use eth_pipeline_telemetry::{PipelineBottleneckSample, PipelineIssue};
+use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::erc20::{ERC20Token, TokenSummary};
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
 use serde::Serialize;

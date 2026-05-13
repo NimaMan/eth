@@ -135,7 +135,7 @@ runs in `chain-sim` mode, polls the Rust token server, and consumes:
 
 - `/live/pools` as confirmed market updates.
 
-Operational telemetry uses the shared `eth_pipeline_telemetry` schema. The
+Operational events use the shared `eth_ops_events` schema. The
 trader writes JSONL files under `ALPHA_TRADER_LOG_DIR` or, by default:
 
 ```text

@@ -11,7 +11,7 @@ members = [
     "alpha/strategies",
     "alpha/live/state",
     "alpha/live/feed",
-    "eth_pipeline_telemetry",
+    "eth_ops_events",
     "tx_simulator",
     "tx_processor",
     "reth_chain_query",

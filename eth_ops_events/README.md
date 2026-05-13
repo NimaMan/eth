@@ -1,4 +1,4 @@
-# eth_pipeline_telemetry
+# eth_ops_events
 
 Shared operational event contract for the ETH live pipeline.
 
@@ -20,11 +20,11 @@ trading gate. Fatal service failures should set `fatal=true` and use
 
 Initial sinks:
 
-- `JsonlTelemetrySink`: writes `pipeline_issues.jsonl`,
+- `JsonlOpsEventSink`: writes `pipeline_issues.jsonl`,
   `pipeline_health.jsonl`, and `pipeline_bottlenecks.jsonl`.
-- `TracingTelemetrySink`: mirrors structured records through `tracing`.
-- `MultiTelemetrySink`: fans out to several sinks.
+- `TracingOpsEventSink`: mirrors structured records through `tracing`.
+- `MultiOpsEventSink`: fans out to several sinks.
 
-`eth_token_server` initializes the global sink for its run directory. Other ETH
+`eth_chain_server` initializes the global sink for its run directory. Other ETH
 services should use this crate directly and either initialize their own local
 sink or emit through the process-global sink when hosted inside the token server.

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use eth_pipeline_telemetry::{
+use eth_ops_events::{
     emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
     PipelineSeverity,
 };

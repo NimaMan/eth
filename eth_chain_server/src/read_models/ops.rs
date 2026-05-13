@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use eth_pipeline_telemetry::{
+use eth_ops_events::{
     emit_health, PipelineBottleneckSample, PipelineHealth, PipelineHealthStatus, PipelineImpact,
     PipelineIssue,
 };

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use eth_pipeline_telemetry::{PipelineBottleneckSample, PipelineIssue};
+use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::tracking::LiveTokenRetentionReport;
 
