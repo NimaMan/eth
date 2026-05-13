@@ -33,40 +33,25 @@ impl ServerState {
             .reth_datadir
             .to_str()
             .ok_or_else(|| eyre!("RETH_DATADIR is not valid UTF-8"))?;
-        let provider = attach_reth_index(
-            RethQueryProvider::new(datadir)?,
+        let reth_index = open_reth_index_handles(
             config.reth_index_dir.as_deref(),
+            config.processed_block_disk_cache_dir.is_some(),
         );
+        let provider = attach_reth_index(RethQueryProvider::new(datadir)?, reth_index.reader());
         let provider = Arc::new(provider);
-        let (processed_block_disk_cache, processed_block_replay_store) = match config
-            .processed_block_disk_cache_dir
-            .as_ref()
-        {
-            Some(path) => {
-                let store = ProcessedBlockDiskCacheStore::open(path)?;
-                let address_index = match config.reth_index_dir.as_ref() {
-                    Some(index_dir) => match RethIndexDB::open(index_dir) {
-                        Ok(db) => Some(AddressBlockParticipationWriter::new(Arc::new(db))),
-                        Err(error) => {
-                            tracing::warn!(
-                                reth_index_dir = %index_dir.display(),
-                                error = %error,
-                                "processed block replay store address index writer unavailable; continuing with disk cache only"
-                            );
-                            None
-                        }
-                    },
-                    None => None,
-                };
-                let writer = ProcessedBlockReplayStoreWriter::new(
-                    store.clone(),
-                    provider.chain_id(),
-                    address_index,
-                );
-                (Some(Arc::new(store)), Some(Arc::new(writer)))
-            }
-            None => (None, None),
-        };
+        let (processed_block_disk_cache, processed_block_replay_store) =
+            match config.processed_block_disk_cache_dir.as_ref() {
+                Some(path) => {
+                    let store = ProcessedBlockDiskCacheStore::open(path)?;
+                    let writer = ProcessedBlockReplayStoreWriter::new(
+                        store.clone(),
+                        provider.chain_id(),
+                        reth_index.address_writer(),
+                    );
+                    (Some(Arc::new(store)), Some(Arc::new(writer)))
+                }
+                None => (None, None),
+            };
         let range_indexer = RangeIndexManager::new(
             config.clone(),
             provider.clone(),
@@ -124,24 +109,78 @@ impl ServerState {
     }
 }
 
-fn attach_reth_index(
-    provider: RethQueryProvider,
+struct RethIndexHandles {
+    reader: Option<Arc<RethIndexDB>>,
+    address_writer: Option<AddressBlockParticipationWriter>,
+}
+
+impl RethIndexHandles {
+    fn none() -> Self {
+        Self {
+            reader: None,
+            address_writer: None,
+        }
+    }
+
+    fn reader(&self) -> Option<Arc<RethIndexDB>> {
+        self.reader.clone()
+    }
+
+    fn address_writer(&self) -> Option<AddressBlockParticipationWriter> {
+        self.address_writer.clone()
+    }
+}
+
+fn open_reth_index_handles(
     reth_index_dir: Option<&std::path::Path>,
-) -> RethQueryProvider {
+    needs_address_writer: bool,
+) -> RethIndexHandles {
     let Some(reth_index_dir) = reth_index_dir else {
-        return provider;
+        return RethIndexHandles::none();
     };
 
+    if needs_address_writer {
+        match RethIndexDB::open(reth_index_dir) {
+            Ok(db) => {
+                let db = Arc::new(db);
+                return RethIndexHandles {
+                    reader: Some(db.clone()),
+                    address_writer: Some(AddressBlockParticipationWriter::new(db)),
+                };
+            }
+            Err(error) => {
+                tracing::warn!(
+                    reth_index_dir = %reth_index_dir.display(),
+                    error = %error,
+                    "processed block replay store address index writer unavailable; trying read-only reth_index for lookups"
+                );
+            }
+        }
+    }
+
     match RethIndexDB::open_read_only(reth_index_dir) {
-        Ok(db) => provider.with_reth_index_db(Arc::new(db)),
+        Ok(db) => RethIndexHandles {
+            reader: Some(Arc::new(db)),
+            address_writer: None,
+        },
         Err(error) => {
             tracing::warn!(
                 reth_index_dir = %reth_index_dir.display(),
                 error = %error,
                 "reth_index unavailable; token activity block lookup disabled"
             );
-            provider
+            RethIndexHandles::none()
         }
+    }
+}
+
+fn attach_reth_index(
+    provider: RethQueryProvider,
+    reth_index_db: Option<Arc<RethIndexDB>>,
+) -> RethQueryProvider {
+    match reth_index_db {
+        Some(db) => provider.with_reth_index_db(db),
+        None => provider,
     }
 }
 
