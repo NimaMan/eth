@@ -413,6 +413,9 @@ where
 
     let result = run_backtest(&mut engine, &adapter, events).await?;
 
+    let total_positions = engine.portfolio().positions.len();
+    let open_positions = engine.portfolio().active_position_count();
+
     store
         .mark_stopped(
             "completed",
@@ -421,7 +424,8 @@ where
                 "reports_generated": result.reports_generated,
                 "confirmed_reports": result.confirmed_reports,
                 "failed_reports": result.failed_reports,
-                "positions": engine.portfolio().active_position_count(),
+                "positions": total_positions,
+                "open_positions": open_positions,
             }),
         )
         .await
@@ -433,7 +437,8 @@ where
         reports_generated = result.reports_generated,
         confirmed = result.confirmed_reports,
         failed = result.failed_reports,
-        open_positions = engine.portfolio().active_position_count(),
+        positions = total_positions,
+        open_positions,
         "backtest finished"
     );
 
