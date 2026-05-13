@@ -22,8 +22,8 @@ pub fn resolve_live_data_redis_url() -> String {
 use crate::{
     config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
     header_utils::parse_sealed_header_from_json,
+    live_chain_data::processed_tx_json::build_unsigned_transaction_from_processed_tx_json,
     single_tx::unsigned::UnsignedTransaction,
-    tx_builders::processed_tx_json_unsigned_builder::build_unsigned_transaction_from_processed_tx_json,
     tx_chain::{
         sequential::{ForkedState, SharedStateProvider},
         unsigned::UnsignedTxChainSimulation,

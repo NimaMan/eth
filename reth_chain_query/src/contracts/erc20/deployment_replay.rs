@@ -5,7 +5,7 @@ use tracing::{debug, warn};
 
 use crate::RethQueryProvider;
 use tx_simulator::{
-    tx_builders::processed_tx_json_unsigned_builder::build_unsigned_transaction_from_processed_tx_json,
+    live_chain_data::processed_tx_json::build_unsigned_transaction_from_processed_tx_json,
     UnsignedTransaction, UnsignedTxChainSimulation,
 };
 

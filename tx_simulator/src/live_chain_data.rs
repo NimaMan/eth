@@ -12,4 +12,6 @@ pub mod live_data_registry {
     pub use crate::block_context::live_data_registry::*;
 }
 
+pub mod processed_tx_json;
+
 pub use live_data_registry::{keys, ChainStateSnapshot};

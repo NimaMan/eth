@@ -1,7 +1,6 @@
 pub mod amm_swap_route;
 pub mod curve;
 pub mod permit2;
-pub mod processed_tx_json_unsigned_builder;
 pub mod uniswap_v2;
 pub mod uniswap_v3;
 pub mod uniswap_v4;
