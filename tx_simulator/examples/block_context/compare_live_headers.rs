@@ -2,8 +2,8 @@ use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
 use reth_primitives_traits::SealedHeader;
 use serde_json::{json, Value};
+use tx_simulator::block_context::header_json::parse_sealed_header_from_json;
 use tx_simulator::block_context::{live_chain_cache::LiveChainCache, resolve_live_data_redis_url};
-use tx_simulator::header_utils::parse_sealed_header_from_json;
 
 const DEFAULT_RPC_URL: &str = "http://127.0.0.1:8545";
 

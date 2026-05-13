@@ -26,7 +26,6 @@ pub mod tx_chain {
 }
 pub mod block_trace;
 pub mod contract_simulation;
-pub mod header_utils;
 pub mod live;
 pub mod revert;
 pub mod session;

@@ -5,6 +5,7 @@
 //! yet. Callers that need headers or state at a specific block should rely on
 //! [`BlockContextLoader`] instead of open-coding MDBX/Redis fallbacks.
 
+pub mod header_json;
 pub mod live_chain_cache;
 pub mod live_data_registry;
 pub mod processed_tx_json;
@@ -22,7 +23,6 @@ pub fn resolve_live_data_redis_url() -> String {
 
 use crate::{
     config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
-    header_utils::parse_sealed_header_from_json,
     single_tx::unsigned::UnsignedTransaction,
     tx_chain::{
         sequential::{ForkedState, SharedStateProvider},
@@ -46,6 +46,7 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 
+use self::header_json::parse_sealed_header_from_json;
 use self::live_data_registry::ChainStateSnapshot;
 use self::processed_tx_json::build_unsigned_transaction_from_processed_tx_json;
 /// Block state returned by [`BlockContextLoader`].

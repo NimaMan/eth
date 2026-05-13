@@ -5,11 +5,34 @@ lowest-level execution and tracing layer in the ETH workspace.
 
 ## Purpose
 
-- Simulate signed and unsigned Ethereum transactions against a local Reth MDBX
-  database.
-- Replay transaction chains, bundles, blocks, and live-head state without RPC
-  overhead.
-- Produce raw execution results and geth-compatible traces for higher layers.
+- Read state directly from Reth MDBX, with the datadir resolved from
+  `RETH_DATADIR`, `RETH_DB_PATH`, or the repository-level `config.env`.
+- Simulate signed transactions, unsigned calls, view functions, stateful
+  transaction chains, bundles, blocks, and live-head state without RPC overhead.
+- Run unsigned transactions without signatures, matching the `debug_traceCall`
+  style workflow.
+- Produce raw execution results, revert reasons, logs, and geth-compatible
+  `CallFrame` traces for higher layers.
+- Support independent parallel simulation for high-throughput workloads.
+- Keep the crate focused on simulation only; result enrichment and business
+  interpretation belong in `tx_processor`.
+
+## Architecture
+
+`tx_simulator` is intentionally split by simulation responsibility rather than
+kept as one monolithic simulator file:
+
+| Area | Responsibility |
+| --- | --- |
+| `src/simulator.rs` | Core `TxSimulator`, provider setup, Reth DB access, fork creation, base fee, and shared execution helpers |
+| `src/single_tx/` | Isolated signed, unsigned, and parallel transaction simulation |
+| `src/tx_chain/` | Stateful signed/unsigned chains and one-shot sequential transaction batches |
+| `src/session/` | Higher-level mixed signed/unsigned sessions and block replay state |
+| `src/block_context/` | Header/state loading across MDBX and live Redis-backed block context |
+| `src/block_trace/` | Full block tracing, call-frame extraction, and profiling |
+| `src/contract_simulation/` | Read-only contract calls, calldata helpers, and simple output decoding |
+| `src/revert/` | Revert payload decoding and simulation revert reason normalization |
+| `src/tx_builders/` | Low-level transaction builders used by simulator examples and tests |
 
 ## Owns
 
