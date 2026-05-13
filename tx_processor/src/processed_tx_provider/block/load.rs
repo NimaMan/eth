@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use eyre::{Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
-use tokio::time::{sleep, Duration};
 use tx_simulator::block_simulation::BlockTraceEngine;
 
 use crate::{
@@ -20,18 +19,38 @@ pub struct LoadedProcessedBlock {
     pub source: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProcessedBlockProviderRetry {
-    pub attempts: usize,
-    pub delay_ms: u64,
+/// Regular processed-block provider.
+///
+/// This is the historical path: read the local disk replay store first, and
+/// process the block from Reth exactly once when the cache is missing.
+#[derive(Clone)]
+pub struct ProcessedBlockProvider {
+    tx_processor: BlockProcessor,
+    provider: Arc<RethQueryProvider>,
+    replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
 }
 
-impl ProcessedBlockProviderRetry {
-    pub const fn none() -> Self {
+impl ProcessedBlockProvider {
+    pub fn new(
+        tx_processor: BlockProcessor,
+        provider: Arc<RethQueryProvider>,
+        replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
+    ) -> Self {
         Self {
-            attempts: 0,
-            delay_ms: 0,
+            tx_processor,
+            provider,
+            replay_store_writer,
         }
+    }
+
+    pub async fn load_block(&self, block_number: u64) -> Result<LoadedProcessedBlock> {
+        load_processed_block(
+            &self.tx_processor,
+            self.provider.as_ref(),
+            self.replay_store_writer.clone(),
+            block_number,
+        )
+        .await
     }
 }
 
@@ -40,22 +59,16 @@ pub async fn load_processed_block(
     provider: &RethQueryProvider,
     replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     block_number: u64,
-    retry: ProcessedBlockProviderRetry,
 ) -> Result<LoadedProcessedBlock> {
     if let Some(replay_store_writer) = replay_store_writer {
-        if let Some(cached) = load_cached_processed_block_with_retry(
-            provider,
-            replay_store_writer.clone(),
-            block_number,
-            retry,
-        )
-        .await?
+        if let Some(cached) =
+            load_cached_processed_block(provider, replay_store_writer.clone(), block_number).await?
         {
             return Ok(cached);
         }
 
         let started = Instant::now();
-        let block = process_uncached_block_with_retry(tx_processor, block_number, retry)
+        let block = process_uncached_block(tx_processor, block_number)
             .await
             .wrap_err_with(|| format!("failed to process uncached block {block_number}"))?;
         let mut disk_cache_write_ms = 0;
@@ -83,7 +96,7 @@ pub async fn load_processed_block(
     }
 
     let started = Instant::now();
-    let block = process_uncached_block_with_retry(tx_processor, block_number, retry)
+    let block = process_uncached_block(tx_processor, block_number)
         .await
         .wrap_err_with(|| format!("failed to process block {block_number}"))?;
     Ok(LoadedProcessedBlock {
@@ -96,28 +109,17 @@ pub async fn load_processed_block(
     })
 }
 
-pub async fn load_cached_processed_block_with_retry(
+pub async fn load_cached_processed_block(
     provider: &RethQueryProvider,
     replay_store_writer: Arc<ProcessedBlockReplayStoreWriter>,
     block_number: u64,
-    retry: ProcessedBlockProviderRetry,
 ) -> Result<Option<LoadedProcessedBlock>> {
-    for attempt in 0..=retry.attempts {
-        if let Some(cached) = read_cached_block(
-            replay_store_writer.clone(),
-            provider.chain_id(),
-            block_number,
-        )
-        .await?
-        {
-            return Ok(Some(cached));
-        }
-        if attempt < retry.attempts && retry.delay_ms > 0 {
-            sleep(Duration::from_millis(retry.delay_ms)).await;
-        }
-    }
-
-    Ok(None)
+    read_cached_block(
+        replay_store_writer.clone(),
+        provider.chain_id(),
+        block_number,
+    )
+    .await
 }
 
 async fn read_cached_block(
@@ -164,61 +166,115 @@ async fn read_cached_block(
     }))
 }
 
-pub(super) async fn process_uncached_block_with_retry(
+pub(super) async fn process_uncached_block(
     tx_processor: &BlockProcessor,
     block_number: u64,
-    retry: ProcessedBlockProviderRetry,
 ) -> Result<ProcessedBlock> {
-    process_uncached_block_with_options_retry(
+    process_uncached_block_with_options(
         tx_processor,
         block_number,
         true,
         BlockTraceEngine::default(),
-        retry,
     )
     .await
 }
 
-pub(super) async fn process_uncached_block_with_options_retry(
+pub(super) async fn process_uncached_block_with_options(
     tx_processor: &BlockProcessor,
     block_number: u64,
     include_traces: bool,
     trace_engine: BlockTraceEngine,
-    retry: ProcessedBlockProviderRetry,
 ) -> Result<ProcessedBlock> {
-    for attempt in 0..=retry.attempts {
-        match tx_processor
-            .process_block_with_trace_engine(block_number, include_traces, trace_engine)
-            .await
-        {
-            Ok(block) => return Ok(block),
-            Err(error) if attempt < retry.attempts && is_transient_reth_state_lag_error(&error) => {
-                tracing::warn!(
-                    block_number,
-                    attempt = attempt + 1,
-                    max_attempts = retry.attempts + 1,
-                    error = %error,
-                    "processed block replay failed while Reth state may still be catching up"
-                );
-                if retry.delay_ms > 0 {
-                    sleep(Duration::from_millis(retry.delay_ms)).await;
-                }
-            }
-            Err(error) => return Err(error),
+    match tx_processor
+        .process_block_with_trace_engine(block_number, include_traces, trace_engine)
+        .await
+    {
+        Ok(block) => Ok(block),
+        Err(error) => {
+            log_processed_block_replay_error(
+                tx_processor,
+                block_number,
+                include_traces,
+                trace_engine,
+                &error,
+            );
+            Err(error)
         }
     }
-
-    unreachable!("retry loop always returns before exhausting attempts")
 }
 
-fn is_transient_reth_state_lag_error(error: &eyre::Report) -> bool {
-    let error_chain = error
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessedBlockReplayErrorKind {
+    LiveHistoricalContextLag,
+    HistoricalTraceReplayMismatch,
+    Other,
+}
+
+impl ProcessedBlockReplayErrorKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveHistoricalContextLag => "live_historical_context_lag",
+            Self::HistoricalTraceReplayMismatch => "historical_trace_replay_mismatch",
+            Self::Other => "other",
+        }
+    }
+}
+
+fn latest_reth_block_number(tx_processor: &BlockProcessor) -> Option<u64> {
+    tx_processor
+        .provider()
+        .and_then(|provider| provider.get_latest_block().ok())
+}
+
+fn classify_processed_block_replay_error(error: &eyre::Report) -> ProcessedBlockReplayErrorKind {
+    let error_chain = error_chain(error);
+
+    if is_live_historical_context_lag(&error_chain) {
+        return ProcessedBlockReplayErrorKind::LiveHistoricalContextLag;
+    }
+
+    if is_historical_trace_replay_mismatch(&error_chain) {
+        return ProcessedBlockReplayErrorKind::HistoricalTraceReplayMismatch;
+    }
+
+    ProcessedBlockReplayErrorKind::Other
+}
+
+fn log_processed_block_replay_error(
+    tx_processor: &BlockProcessor,
+    block_number: u64,
+    include_traces: bool,
+    trace_engine: BlockTraceEngine,
+    error: &eyre::Report,
+) {
+    let error_kind = classify_processed_block_replay_error(error);
+    if error_kind == ProcessedBlockReplayErrorKind::Other {
+        return;
+    }
+
+    let latest_reth_block = latest_reth_block_number(tx_processor);
+    tracing::error!(
+        block_number,
+        latest_reth_block,
+        blocks_behind_latest = latest_reth_block.map(|latest| latest.saturating_sub(block_number)),
+        include_traces,
+        trace_engine = trace_engine.as_str(),
+        replay_error_kind = error_kind.as_str(),
+        error = %error,
+        "processed block replay failed"
+    );
+}
+
+fn error_chain(error: &eyre::Report) -> String {
+    error
         .chain()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
-        .join(": ");
+        .join(": ")
+}
 
-    let live_context_lag = [
+fn is_live_historical_context_lag(error_chain: &str) -> bool {
+    [
         "cannot restore live state snapshot",
         "not yet available as local historical context",
         "missing live block header",
@@ -228,17 +284,17 @@ fn is_transient_reth_state_lag_error(error: &eyre::Report) -> bool {
         "Reth historical state",
     ]
     .iter()
-    .any(|needle| error_chain.contains(needle));
-    if live_context_lag {
-        return true;
-    }
+    .any(|needle| error_chain.contains(needle))
+}
 
-    if error_chain.contains("failed to trace block transaction") {
-        return true;
+fn is_historical_trace_replay_mismatch(error_chain: &str) -> bool {
+    if !error_chain.contains("failed to trace block transaction") {
+        return false;
     }
 
     error_chain.contains("transaction validation error")
-        && (error_chain.contains("lack of funds") || error_chain.contains("nonce"))
+        || error_chain.contains("lack of funds")
+        || error_chain.contains("nonce")
 }
 
 #[cfg(test)]
@@ -250,32 +306,41 @@ mod tests {
     }
 
     #[test]
-    fn classifies_trace_validation_lack_of_funds_as_transient_state_lag() {
+    fn classifies_trace_validation_lack_of_funds_as_replay_mismatch() {
         let error = report(
             "failed to trace block transaction block_number=25056257 tx_index=5: \
              transaction validation error: lack of funds (60968524683211705390) \
              for max fee (60968613646342838366)",
         );
 
-        assert!(is_transient_reth_state_lag_error(&error));
+        assert_eq!(
+            classify_processed_block_replay_error(&error),
+            ProcessedBlockReplayErrorKind::HistoricalTraceReplayMismatch
+        );
     }
 
     #[test]
     fn does_not_retry_unrelated_processing_errors() {
         let error = report("failed to decode receipt for block 10");
 
-        assert!(!is_transient_reth_state_lag_error(&error));
+        assert_eq!(
+            classify_processed_block_replay_error(&error),
+            ProcessedBlockReplayErrorKind::Other
+        );
     }
 
     #[test]
-    fn classifies_wrapped_trace_validation_error() {
+    fn classifies_wrapped_trace_validation_error_as_replay_mismatch() {
         let error = report(
             "failed to trace block transaction block_number=25056257 tx_index=5: \
              transaction validation error: nonce too low",
         )
         .wrap_err("failed to process block 25056257");
 
-        assert!(is_transient_reth_state_lag_error(&error));
+        assert_eq!(
+            classify_processed_block_replay_error(&error),
+            ProcessedBlockReplayErrorKind::HistoricalTraceReplayMismatch
+        );
     }
 
     #[test]
@@ -287,7 +352,10 @@ mod tests {
         )
         .wrap_err("failed to process uncached block 25067028");
 
-        assert!(is_transient_reth_state_lag_error(&error));
+        assert_eq!(
+            classify_processed_block_replay_error(&error),
+            ProcessedBlockReplayErrorKind::LiveHistoricalContextLag
+        );
     }
 
     #[test]
@@ -297,6 +365,9 @@ mod tests {
              (latest live Some(25067030), available [25067030, 25067029])",
         );
 
-        assert!(is_transient_reth_state_lag_error(&error));
+        assert_eq!(
+            classify_processed_block_replay_error(&error),
+            ProcessedBlockReplayErrorKind::LiveHistoricalContextLag
+        );
     }
 }

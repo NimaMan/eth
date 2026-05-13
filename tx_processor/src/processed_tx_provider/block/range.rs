@@ -6,10 +6,10 @@ use reth_chain_query::RethQueryProvider;
 
 use crate::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore,
-    ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
+    ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
 };
 
-use super::load::{process_uncached_block_with_options_retry, process_uncached_block_with_retry};
+use super::load::{process_uncached_block, process_uncached_block_with_options};
 
 const PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
 pub const DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH: u64 = 250;
@@ -23,7 +23,6 @@ pub struct ProcessedBlockRangeLoadOptions {
     pub fill_batch_blocks: usize,
     pub fill_concurrency: usize,
     pub read_concurrency: usize,
-    pub retry: ProcessedBlockProviderRetry,
 }
 
 impl Default for ProcessedBlockRangeLoadOptions {
@@ -32,7 +31,6 @@ impl Default for ProcessedBlockRangeLoadOptions {
             fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
             fill_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
             read_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY,
-            retry: ProcessedBlockProviderRetry::none(),
         }
     }
 }
@@ -56,11 +54,6 @@ impl ProcessedBlockRangeLoadOptions {
         if value > 0 {
             self.read_concurrency = value;
         }
-        self
-    }
-
-    pub fn with_retry(mut self, retry: ProcessedBlockProviderRetry) -> Self {
-        self.retry = retry;
         self
     }
 }
@@ -138,8 +131,7 @@ pub async fn load_processed_block_range_with_options(
     let mut blocks = Vec::with_capacity((end_block - start_block + 1) as usize);
     for block_number in start_block..=end_block {
         let block_started = Instant::now();
-        let block =
-            process_uncached_block_with_retry(tx_processor, block_number, options.retry).await?;
+        let block = process_uncached_block(tx_processor, block_number).await?;
         blocks.push(LoadedProcessedBlockWithMetrics {
             block,
             upstream_ms: block_started.elapsed().as_millis(),
@@ -330,11 +322,10 @@ async fn fill_cache_entries(
             .iter()
             .map(|key| key.block_number)
             .collect::<Vec<_>>();
-        let processed_missing_blocks = process_block_batch_with_retry(
+        let processed_missing_blocks = process_block_batch(
             tx_processor,
             missing_blocks,
             BlockBatchOptions::default().with_max_concurrency(options.fill_concurrency.max(1)),
-            options.retry,
         )
         .await?;
 
@@ -390,11 +381,10 @@ async fn fill_cache_entries(
     ))
 }
 
-async fn process_block_batch_with_retry<I>(
+async fn process_block_batch<I>(
     tx_processor: &BlockProcessor,
     block_numbers: I,
     options: BlockBatchOptions,
-    retry: ProcessedBlockProviderRetry,
 ) -> eyre::Result<Vec<ProcessedBlock>>
 where
     I: IntoIterator<Item = u64>,
@@ -410,12 +400,11 @@ where
         .map(move |number| {
             let processor = processor.clone();
             async move {
-                process_uncached_block_with_options_retry(
+                process_uncached_block_with_options(
                     &processor,
                     number,
                     options.include_traces,
                     options.trace_engine,
-                    retry,
                 )
                 .await
                 .map_err(|err| eyre::eyre!("failed to process block {number}: {err}"))

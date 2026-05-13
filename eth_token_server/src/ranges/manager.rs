@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::app::config::TokenServerConfig;
 use crate::memory;
 use crate::read_models::run::RunSummaryView;
-use tx_processor::{ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter};
+use tx_processor::ProcessedBlockReplayStoreWriter;
 
 use super::pipeline;
 use super::RangeIndexStatus;
@@ -132,16 +132,6 @@ impl RangeIndexManager {
         let task_provider = self.inner.provider.clone();
         let task_processed_block_replay_store = self.inner.processed_block_replay_store.clone();
         let processed_block_disk_cache_blocks = self.inner.config.processed_block_disk_cache_blocks;
-        let processed_block_retry = ProcessedBlockProviderRetry {
-            attempts: self
-                .inner
-                .config
-                .live_processed_block_disk_cache_retry_attempts,
-            delay_ms: self
-                .inner
-                .config
-                .live_processed_block_disk_cache_retry_delay_ms,
-        };
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -153,7 +143,6 @@ impl RangeIndexManager {
                 task_provider,
                 task_processed_block_replay_store,
                 processed_block_disk_cache_blocks,
-                processed_block_retry,
             ));
         });
 

@@ -22,7 +22,7 @@ correctness harness.
 ## Does Not Own
 
 - Production processing logic; edit `tx_processor/src/block_processor/` and
-  `tx_processor/src/processed_block_provider/`.
+  `tx_processor/src/processed_tx_provider/block/`.
 - Reth trace engine internals; edit `tx_simulator/src/block_trace/`.
 - Token-state warmup behavior; edit `eth_token_server` or `eth_token`.
 
@@ -43,7 +43,7 @@ profile_processed_blocks
 | --- | --- |
 | CLI modes and output columns | `main.rs` |
 | Production block processing | `tx_processor/src/block_processor/` |
-| Persistent cache implementation | `tx_processor/src/processed_block_provider/disk_cache/` |
+| Persistent cache implementation | `tx_processor/src/processed_tx_provider/block/disk_cache/` |
 | Trace engine | `tx_simulator/src/block_trace/` |
 | Historical warmup cases | `cases/` |
 

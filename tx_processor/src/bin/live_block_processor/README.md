@@ -41,7 +41,7 @@ Reth head update
 | --- | --- |
 | Binary entrypoint | `main.rs` |
 | Live processor types | `tx_processor/src/live/` |
-| Replay-store writer | `tx_processor/src/processed_block_provider/replay_store.rs` |
+| Replay-store writer | `tx_processor/src/processed_tx_provider/block/replay_store.rs` |
 | Service units | `node/systemd/user/eth-rust-live-block-processor.service` |
 | Runtime config | `config.env` |
 

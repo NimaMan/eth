@@ -19,7 +19,6 @@ pub use tx_simulator::{
 pub mod address_block_participation;
 pub mod block_processor;
 pub mod live;
-pub mod processed_block_provider;
 pub mod processed_tx_provider;
 pub mod simulator;
 pub mod tx_builder;
@@ -35,23 +34,21 @@ pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
     LiveProcessedBlockReplayStoreSink,
 };
-pub use processed_block_provider::{
-    load_cached_processed_block_with_retry, load_processed_block, load_processed_block_range,
-    load_processed_block_range_with_options, prune_processed_block_disk_cache,
-    should_prune_processed_block_disk_cache, CompactProcessedTransaction,
-    LiveProcessedBlockProvider, LoadedProcessedBlock, LoadedProcessedBlockWithMetrics,
-    ProcessedBlockAddressIndexWrite, ProcessedBlockDiskCacheBlockRange,
+pub use processed_tx_provider::{
+    load_cached_processed_block, load_processed_block, load_processed_block_range,
+    load_processed_block_range_with_options, processed_block_trace_config_hash,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
+    AddressProcessedTxProvider, CompactProcessedTransaction, LiveProcessedBlockProvider,
+    LoadedProcessedBlock, LoadedProcessedBlockWithMetrics, ProcessedBlockAddressIndexWrite,
+    ProcessedBlockCacheKey, ProcessedBlockCacheStore, ProcessedBlockDiskCacheBlockRange,
     ProcessedBlockDiskCacheChainCoverage, ProcessedBlockDiskCacheCoverage,
     ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
     ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,
-    ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProviderRetry,
+    ProcessedBlockDiskCacheWriter, ProcessedBlockLoadMetrics, ProcessedBlockProvider,
     ProcessedBlockRangeLoadOptions, ProcessedBlockReplayStoreWrite,
-    ProcessedBlockReplayStoreWriter, DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+    ProcessedBlockReplayStoreWriter, ProcessedTxProvider, TokenProcessedTxProvider,
+    DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
-};
-pub use processed_tx_provider::{
-    processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,
-    ProcessedBlockCacheStore, ProcessedTxProvider, TokenProcessedTxProvider,
 };
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 // Export ERC20 token buy-approve-sell simulator through simulator module

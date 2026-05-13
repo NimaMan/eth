@@ -20,10 +20,6 @@ const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_CONFIG: &str = "PROCESSED_BLOCK_DISK_CAC
 const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 const LIVE_BLOCKCHAIN_DATA_REDIS_URL_CONFIG: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
 const ETH_PROCESSED_BLOCK_STREAM_CONFIG: &str = "ETH_PROCESSED_BLOCK_STREAM";
-const LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_CONFIG: &str =
-    "LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS";
-const LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_CONFIG: &str =
-    "LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS";
 const LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS_CONFIG: &str = "LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS";
 const LIVE_TOKEN_TRACKER_STREAM_COUNT_CONFIG: &str = "LIVE_TOKEN_TRACKER_STREAM_COUNT";
 const LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG: &str =
@@ -41,8 +37,6 @@ const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
 const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 1_000_000;
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
 const DEFAULT_LIVE_BLOCK_STREAM: &str = "eth/live/blocks";
-const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS: usize = 20;
-const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS: u64 = 100;
 const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
 const DEFAULT_STREAM_COUNT: usize = 100;
 const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 3_000;
@@ -62,8 +56,6 @@ pub struct TokenServerConfig {
     pub processed_block_disk_cache_blocks: u64,
     pub redis_url: String,
     pub live_block_stream: String,
-    pub live_processed_block_disk_cache_retry_attempts: usize,
-    pub live_processed_block_disk_cache_retry_delay_ms: u64,
     pub live_stream_block_ms: usize,
     pub live_stream_count: usize,
     pub live_block_apply_timeout_ms: u64,
@@ -122,16 +114,6 @@ impl TokenServerConfig {
             ETH_PROCESSED_BLOCK_STREAM_CONFIG,
             DEFAULT_LIVE_BLOCK_STREAM,
         );
-        let live_processed_block_disk_cache_retry_attempts = config_parse(
-            config,
-            LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_CONFIG,
-            DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS,
-        )?;
-        let live_processed_block_disk_cache_retry_delay_ms = config_parse(
-            config,
-            LIVE_TOKEN_TRACKER_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_CONFIG,
-            DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS,
-        )?;
         let live_stream_block_ms = config_parse(
             config,
             LIVE_TOKEN_TRACKER_STREAM_BLOCK_MS_CONFIG,
@@ -232,8 +214,6 @@ impl TokenServerConfig {
             processed_block_disk_cache_blocks,
             redis_url,
             live_block_stream,
-            live_processed_block_disk_cache_retry_attempts,
-            live_processed_block_disk_cache_retry_delay_ms,
             live_stream_block_ms,
             live_stream_count,
             live_block_apply_timeout_ms,

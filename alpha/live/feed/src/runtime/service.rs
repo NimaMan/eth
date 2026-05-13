@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -12,17 +13,16 @@ use eth_pipeline_telemetry::{
 use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
-use eth_token::tracking::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::json;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
     load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
-    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockProviderRetry,
-    ProcessedBlockReplayStoreWriter,
+    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter,
 };
 
+use super::apply_report::{apply_report, push_bottleneck, push_issue};
 use super::config::LiveTokenRuntimeConfig;
 use super::event::LiveTokenEvent;
 use super::helpers::{
@@ -39,8 +39,36 @@ use super::time::now_unix_secs;
 
 const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
 const LIVE_TOKEN_APPLY_PROFILE_LOG_TARGET: &str = "live_token_apply_profile";
-const MAX_LIVE_ISSUES: usize = 1_000;
-const MAX_LIVE_BOTTLENECKS: usize = 1_000;
+
+fn live_error_from_report(
+    block_number: Option<u64>,
+    tx_index: Option<u64>,
+    tx_hash: Option<String>,
+    error: &eyre::Report,
+    mut context: BTreeMap<String, String>,
+) -> LiveTokenError {
+    if let Some(root_error) = error.chain().last() {
+        context.insert("root_error".to_string(), root_error.to_string());
+    }
+
+    LiveTokenError::new(block_number, tx_index, tx_hash, error.to_string())
+        .with_detail(error_chain_detail(error))
+        .with_context_map(context)
+}
+
+fn phase_context(phase: &str) -> BTreeMap<String, String> {
+    let mut context = BTreeMap::new();
+    context.insert("phase".to_string(), phase.to_string());
+    context
+}
+
+fn error_chain_detail(error: &eyre::Report) -> String {
+    error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ")
+}
 
 #[derive(Clone)]
 pub struct LiveTokenRuntime {
@@ -140,12 +168,9 @@ impl LiveTokenRuntime {
                     panic_payload_message(payload.as_ref())
                 );
                 tracing::error!(error = %message, "live token runtime task panicked");
-                local_runtime.block_on(runtime_for_failure.mark_failed(LiveTokenError {
-                    block_number: None,
-                    tx_index: None,
-                    tx_hash: None,
-                    message,
-                }));
+                local_runtime.block_on(runtime_for_failure.mark_failed(
+                    LiveTokenError::new(None, None, None, message).with_context("phase", "panic"),
+                ));
             }
         });
 
@@ -313,7 +338,6 @@ impl LiveTokenRuntime {
                 .apply_block(
                     block_number,
                     false,
-                    self.processed_block_retry(),
                     &tx_processor,
                     &warmup_discovery_provider,
                     &pool_simulator,
@@ -327,12 +351,13 @@ impl LiveTokenRuntime {
                     error = %error,
                     "live token runtime warmup block failed"
                 );
-                self.mark_failed(LiveTokenError {
-                    block_number: Some(block_number),
-                    tx_index: None,
-                    tx_hash: None,
-                    message: error.to_string(),
-                })
+                self.mark_failed(live_error_from_report(
+                    Some(block_number),
+                    None,
+                    None,
+                    &error,
+                    phase_context("warmup"),
+                ))
                 .await;
                 return;
             }
@@ -355,12 +380,13 @@ impl LiveTokenRuntime {
                     error = %error,
                     "live token runtime failed to initialize redis stream"
                 );
-                self.mark_failed(LiveTokenError {
-                    block_number: None,
-                    tx_index: None,
-                    tx_hash: None,
-                    message: error.to_string(),
-                })
+                self.mark_failed(live_error_from_report(
+                    None,
+                    None,
+                    None,
+                    &error,
+                    phase_context("redis_stream_init"),
+                ))
                 .await;
                 return;
             }
@@ -370,7 +396,6 @@ impl LiveTokenRuntime {
             tx_processor.clone(),
             self.inner.provider.clone(),
             self.inner.processed_block_replay_store.clone(),
-            self.processed_block_retry(),
         ) {
             Ok(provider) => provider,
             Err(error) => {
@@ -380,12 +405,13 @@ impl LiveTokenRuntime {
                     error = %error,
                     "live token runtime failed to initialize live processed block provider"
                 );
-                self.mark_failed(LiveTokenError {
-                    block_number: None,
-                    tx_index: None,
-                    tx_hash: None,
-                    message: error.to_string(),
-                })
+                self.mark_failed(live_error_from_report(
+                    None,
+                    None,
+                    None,
+                    &error,
+                    phase_context("live_provider_init"),
+                ))
                 .await;
                 return;
             }
@@ -413,12 +439,13 @@ impl LiveTokenRuntime {
                     error = %error,
                     "live token runtime live-tail catch-up failed"
                 );
-                self.mark_failed(LiveTokenError {
-                    block_number: None,
-                    tx_index: None,
-                    tx_hash: None,
-                    message: error.to_string(),
-                })
+                self.mark_failed(live_error_from_report(
+                    None,
+                    None,
+                    None,
+                    &error,
+                    phase_context("live_tail_catch_up"),
+                ))
                 .await;
                 return;
             }
@@ -433,12 +460,13 @@ impl LiveTokenRuntime {
                         error = %error,
                         "live token runtime failed to read redis stream"
                     );
-                    self.mark_failed(LiveTokenError {
-                        block_number: None,
-                        tx_index: None,
-                        tx_hash: None,
-                        message: error.to_string(),
-                    })
+                    self.mark_failed(live_error_from_report(
+                        None,
+                        None,
+                        None,
+                        &error,
+                        phase_context("redis_stream_read"),
+                    ))
                     .await;
                     return;
                 }
@@ -469,22 +497,16 @@ impl LiveTokenRuntime {
                     error = %error,
                     "live token runtime live-tail catch-up failed after stream event"
                 );
-                self.mark_failed(LiveTokenError {
-                    block_number: None,
-                    tx_index: None,
-                    tx_hash: None,
-                    message: error.to_string(),
-                })
+                self.mark_failed(live_error_from_report(
+                    None,
+                    None,
+                    None,
+                    &error,
+                    phase_context("live_tail_catch_up_after_stream_event"),
+                ))
                 .await;
                 return;
             }
-        }
-    }
-
-    fn processed_block_retry(&self) -> ProcessedBlockProviderRetry {
-        ProcessedBlockProviderRetry {
-            attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
-            delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
         }
     }
 
@@ -556,7 +578,6 @@ impl LiveTokenRuntime {
         &self,
         block_number: u64,
         is_live_tail: bool,
-        retry: ProcessedBlockProviderRetry,
         tx_processor: &BlockProcessor,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
@@ -569,7 +590,6 @@ impl LiveTokenRuntime {
             self.inner.provider.as_ref(),
             self.inner.processed_block_replay_store.clone(),
             block_number,
-            retry,
         )
         .await?;
 
@@ -820,7 +840,10 @@ impl LiveTokenRuntime {
         issue.block_number = error.block_number;
         issue.tx_index = error.tx_index;
         issue.tx_hash = error.tx_hash.clone();
-        issue.detail = Some(error.message.clone());
+        issue.detail = error.detail.clone().or_else(|| Some(error.message.clone()));
+        for (key, value) in &error.context {
+            issue.context.insert(key.clone(), json!(value));
+        }
         issue.refresh_ids();
         let event = LiveTokenEvent::RuntimeFailed {
             id: state.progress.id.clone(),
@@ -853,6 +876,8 @@ impl LiveTokenRuntime {
             error_tx_index = ?error.tx_index,
             error_tx_hash = ?error.tx_hash,
             error = %error.message,
+            error_detail = ?error.detail,
+            error_context = ?error.context,
             "live token tracker failed"
         );
         emit_issue(&issue);
@@ -912,180 +937,5 @@ impl LiveTokenReader for LiveTokenRuntime {
 
     fn subscribe(&self) -> broadcast::Receiver<LiveTokenEvent> {
         self.inner.event_tx.subscribe()
-    }
-}
-
-fn apply_report(
-    state: &mut LiveTokenState,
-    report: TokenBlockUpdateReport,
-    retention_report: Option<eth_token::tracking::LiveTokenRetentionReport>,
-    loaded: LiveBlockLoad,
-    token_apply_ms: u128,
-    is_live_tail: bool,
-) -> LiveTokenEvent {
-    let updated_tokens = report.updated_token_addresses.clone();
-    let created_tokens = report.created_token_addresses.clone();
-    let block_hash = report.block_hash.clone();
-    let block_number = report.block_number;
-
-    state.progress.current_block = Some(report.block_number);
-    state.progress.blocks_processed += 1;
-    if is_live_tail {
-        state.progress.live_blocks_processed += 1;
-    }
-    state.progress.txs_scanned += report.transaction_count;
-    state.progress.txs_processed += report.processed_transaction_count;
-    state.progress.tx_failures += report.failed_transaction_count;
-    state.progress.token_update_reports += report.token_updates.len();
-    state.progress.last_block_upstream_ms = Some(loaded.upstream_ms);
-    state.progress.last_block_token_apply_ms = Some(token_apply_ms);
-    state.progress.last_block_disk_cache_read_ms = Some(loaded.disk_cache_read_ms);
-    state.progress.last_block_disk_cache_write_ms = Some(loaded.disk_cache_write_ms);
-    state.progress.last_block_source = Some(loaded.source.to_string());
-    state.progress.last_error = None;
-    if loaded.disk_cache_hit {
-        state.progress.processed_block_disk_cache_hits += 1;
-    } else {
-        state.progress.processed_block_disk_cache_misses += 1;
-    }
-    state.progress.updated_at_unix_secs = now_unix_secs();
-
-    state.created_tokens.extend(created_tokens);
-    state.updated_tokens.extend(updated_tokens.clone());
-
-    let mut updated_v2_pools = Vec::new();
-    let mut updated_v3_pools = Vec::new();
-    let mut updated_v4_pools = Vec::new();
-    for update in report.token_updates {
-        state
-            .discovered_v2_pools
-            .extend(update.discovered_known_v2_pools);
-        updated_v2_pools.extend(update.updated_known_v2_pools.clone());
-        state.updated_v2_pools.extend(update.updated_known_v2_pools);
-        state
-            .discovered_v3_pools
-            .extend(update.discovered_uniswap_v3_pools);
-        updated_v3_pools.extend(update.updated_uniswap_v3_pools.clone());
-        state
-            .updated_v3_pools
-            .extend(update.updated_uniswap_v3_pools);
-        state
-            .discovered_v4_pools
-            .extend(update.discovered_uniswap_v4_pools);
-        updated_v4_pools.extend(update.updated_uniswap_v4_pools.clone());
-        state
-            .updated_v4_pools
-            .extend(update.updated_uniswap_v4_pools);
-    }
-    updated_v2_pools.sort();
-    updated_v2_pools.dedup();
-    updated_v3_pools.sort();
-    updated_v3_pools.dedup();
-    updated_v4_pools.sort();
-    updated_v4_pools.dedup();
-
-    let run_id = state.progress.id.clone();
-    for error in report.transaction_errors {
-        let issue = PipelineIssue::live_transaction_error(
-            run_id.clone(),
-            report.block_number,
-            error.tx_index,
-            error.tx_hash.clone(),
-            error.message.clone(),
-        );
-        emit_issue(&issue);
-        push_issue(state, issue);
-        state.errors.push(LiveTokenError {
-            block_number: Some(report.block_number),
-            tx_index: Some(error.tx_index),
-            tx_hash: Some(error.tx_hash),
-            message: error.message,
-        });
-    }
-
-    if let Some(retention_report) = retention_report {
-        state.progress.retention_evaluated_tokens = retention_report.evaluated_tokens;
-        state.progress.retention_dropped_tokens += retention_report.dropped_tokens;
-        state.progress.retention_dropped_v2_pools += retention_report.dropped_v2_pool_count;
-        state.last_retention_report = Some(retention_report);
-    }
-
-    state.progress.created_tokens_unique = state.created_tokens.len();
-    state.progress.updated_tokens_unique = state.updated_tokens.len();
-    state.progress.discovered_v2_pools_unique = state.discovered_v2_pools.len();
-    state.progress.updated_v2_pools_unique = state.updated_v2_pools.len();
-    state.progress.discovered_v3_pools_unique = state.discovered_v3_pools.len();
-    state.progress.updated_v3_pools_unique = state.updated_v3_pools.len();
-    state.progress.discovered_v4_pools_unique = state.discovered_v4_pools.len();
-    state.progress.updated_v4_pools_unique = state.updated_v4_pools.len();
-    state.progress.tracked_tokens = state.processor.registry().tokens.len();
-    state.progress.indexed_tokens = state.processor.block_processor().token_index.entries.len();
-    state.progress.indexed_pools = state
-        .processor
-        .block_processor()
-        .token_index
-        .pool_to_token
-        .len();
-    state.progress.indexed_v2_pools = state
-        .processor
-        .registry()
-        .tokens
-        .values()
-        .map(|token| token.v2_pools.len())
-        .sum();
-    state.progress.tracked_v2_pools = state
-        .processor
-        .registry()
-        .tokens
-        .values()
-        .map(|token| token.v2_pools.len())
-        .sum();
-    state.progress.indexed_v3_pools = state
-        .processor
-        .registry()
-        .tokens
-        .values()
-        .map(|token| token.v3_pools.len())
-        .sum();
-    state.progress.tracked_v3_pools = state.progress.indexed_v3_pools;
-    state.progress.indexed_v4_pools = state
-        .processor
-        .registry()
-        .tokens
-        .values()
-        .map(|token| token.v4_pools.len())
-        .sum();
-    state.progress.tracked_v4_pools = state.progress.indexed_v4_pools;
-    state.progress.tracked_pools = state
-        .processor
-        .registry()
-        .tokens
-        .values()
-        .map(|token| token.pool_count())
-        .sum();
-
-    LiveTokenEvent::BlockApplied {
-        block_number,
-        block_hash,
-        updated_tokens,
-        updated_v2_pools,
-        updated_v3_pools,
-        updated_v4_pools,
-    }
-}
-
-fn push_issue(state: &mut LiveTokenState, issue: PipelineIssue) {
-    state.issues.push(issue);
-    if state.issues.len() > MAX_LIVE_ISSUES {
-        let excess = state.issues.len() - MAX_LIVE_ISSUES;
-        state.issues.drain(0..excess);
-    }
-}
-
-fn push_bottleneck(state: &mut LiveTokenState, sample: PipelineBottleneckSample) {
-    state.bottlenecks.push(sample);
-    if state.bottlenecks.len() > MAX_LIVE_BOTTLENECKS {
-        let excess = state.bottlenecks.len() - MAX_LIVE_BOTTLENECKS;
-        state.bottlenecks.drain(0..excess);
     }
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    processed_block_provider::CompactProcessedTransaction, processed_block_trace_config_hash,
+    processed_block_trace_config_hash, processed_tx_provider::CompactProcessedTransaction,
     ProcessedBlock, ProcessedBlockTransactions,
 };
 use alloy_primitives::B256;

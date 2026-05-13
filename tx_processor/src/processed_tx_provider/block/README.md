@@ -1,12 +1,13 @@
-# Processed Block Provider
+# Processed Block Providers
 
-This module owns processed-block loading and persistence boundaries for the ETH
-Rust pipeline.
+This module is the block-level part of `processed_tx_provider`. It owns
+processed-block loading and persistence boundaries for the ETH Rust pipeline.
 
-- `load.rs` loads one block through disk cache first, then direct Reth block
-  processing as fallback.
+- `load.rs` provides `ProcessedBlockProvider`: disk cache first, then direct
+  Reth block processing once. This regular historical path has no retry loop.
 - `live.rs` provides `LiveProcessedBlockProvider`, which hydrates live
-  processed blocks from Redis first and falls back to disk/direct processing.
+  processed blocks from Redis first, retries live Redis hydration when
+  configured, and then falls back explicitly to `ProcessedBlockProvider`.
 - `range.rs` loads historical block ranges and fills missing disk-cache entries.
 - `replay_store.rs` owns the canonical write path for the replay store:
   processed-block disk cache plus derived block-level indexes.

@@ -1,5 +1,5 @@
 use crate::block_processor::{ProcessedBlock, ProcessedBlockTransactions};
-use crate::processed_block_provider::CompactProcessedTransaction;
+use crate::processed_tx_provider::CompactProcessedTransaction;
 use alloy_primitives::Address;
 use eyre::{eyre, Result};
 use serde::Serialize;
@@ -160,7 +160,7 @@ fn address_set_to_strings(addresses: &HashSet<Address>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processed_block_provider::CompactProcessedTransaction;
+    use crate::processed_tx_provider::CompactProcessedTransaction;
     use crate::tx_processor::data_models::ProcessedTransaction;
     use alloy_primitives::{B256, U256};
     use reth_chain_query::provider::BlockHeader;

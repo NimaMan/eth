@@ -67,8 +67,8 @@ refresh_processed_block_disk_cache
 | Public API and re-exports | `src/lib.rs` |
 | Transaction decoding pipeline | `src/tx_processor/` |
 | Process tx by hash/unsigned tx | `src/processed_tx_provider/` |
-| Process block/ranges | `src/block_processor/`, `src/processed_block_provider/` |
-| Persistent block cache | `src/processed_block_provider/disk_cache/` |
+| Process block/ranges | `src/block_processor/`, `src/processed_tx_provider/block/` |
+| Persistent block cache | `src/processed_tx_provider/block/disk_cache/` |
 | Live Redis publisher | `src/bin/live_block_processor/README.md` |
 | Buy/sell/tax simulation | `src/simulator/`, `examples/pool_analysis/` |
 | Profiling harness | `examples/block/profile/README.md` |

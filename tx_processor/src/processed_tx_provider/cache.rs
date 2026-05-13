@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tx_simulator::block_simulation::BlockTraceEngine;
 
 use crate::block_processor::ProcessedBlock;
-use crate::processed_block_provider::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
+use crate::processed_tx_provider::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
 use crate::tx_processor::data_models::ProcessedTransaction;
 
 /// Default number of blocks to retain in the cache (~2 days on Ethereum mainnet).

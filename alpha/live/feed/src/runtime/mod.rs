@@ -1,3 +1,4 @@
+mod apply_report;
 mod config;
 mod event;
 mod helpers;

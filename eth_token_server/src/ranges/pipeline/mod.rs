@@ -19,7 +19,6 @@ pub async fn run_range_index(
     provider: Arc<RethQueryProvider>,
     processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     processed_block_disk_cache_blocks: u64,
-    processed_block_retry: cache::ProcessedBlockProviderRetry,
 ) {
     tracing::info!(
         run_id = %run.id,
@@ -38,8 +37,7 @@ pub async fn run_range_index(
     let processed_block_load_options = cache::ProcessedBlockRangeLoadOptions::default()
         .with_fill_batch_blocks(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH as usize)
         .with_fill_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
-        .with_read_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
-        .with_retry(processed_block_retry);
+        .with_read_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY);
     if let Some(replay_store) = processed_block_replay_store.as_deref() {
         cache::prune_processed_block_disk_cache(
             replay_store.disk_cache_store(),

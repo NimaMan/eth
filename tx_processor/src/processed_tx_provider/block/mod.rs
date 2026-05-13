@@ -14,8 +14,7 @@ pub use disk_cache::{
 };
 pub use live::LiveProcessedBlockProvider;
 pub use load::{
-    load_cached_processed_block_with_retry, load_processed_block, LoadedProcessedBlock,
-    ProcessedBlockProviderRetry,
+    load_cached_processed_block, load_processed_block, LoadedProcessedBlock, ProcessedBlockProvider,
 };
 pub use range::{
     load_processed_block_range, load_processed_block_range_with_options,

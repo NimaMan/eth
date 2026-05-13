@@ -11,19 +11,15 @@ use reth_chain_query::provider::BlockHeader;
 use serde::Deserialize;
 use tx_simulator::live_chain_data::live_data_registry::keys;
 
-use crate::{
-    load_processed_block, BlockProcessor, CompactProcessedTransaction, LoadedProcessedBlock,
-    ProcessedBlock, ProcessedBlockProviderRetry, ProcessedBlockReplayStoreWriter,
-    ProcessedBlockSource,
-};
+use super::compact::CompactProcessedTransaction;
+use super::load::{LoadedProcessedBlock, ProcessedBlockProvider};
+use super::replay_store::ProcessedBlockReplayStoreWriter;
+use crate::{BlockProcessor, ProcessedBlock, ProcessedBlockSource};
 
 #[derive(Clone)]
 pub struct LiveProcessedBlockProvider {
     redis: RedisLiveProcessedBlockProvider,
-    tx_processor: BlockProcessor,
-    provider: Arc<reth_chain_query::RethQueryProvider>,
-    replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
-    retry: ProcessedBlockProviderRetry,
+    regular_provider: ProcessedBlockProvider,
 }
 
 impl LiveProcessedBlockProvider {
@@ -32,38 +28,36 @@ impl LiveProcessedBlockProvider {
         tx_processor: BlockProcessor,
         provider: Arc<reth_chain_query::RethQueryProvider>,
         replay_store_writer: Option<Arc<ProcessedBlockReplayStoreWriter>>,
-        retry: ProcessedBlockProviderRetry,
     ) -> Result<Self> {
         Ok(Self {
             redis: RedisLiveProcessedBlockProvider::new(redis_url)?,
-            tx_processor,
-            provider,
-            replay_store_writer,
-            retry,
+            regular_provider: ProcessedBlockProvider::new(
+                tx_processor,
+                provider,
+                replay_store_writer,
+            ),
         })
     }
 
     pub async fn load_block(&self, block_number: u64) -> Result<LoadedProcessedBlock> {
         match self.redis.load_block(block_number).await {
             Ok(Some(loaded)) => return Ok(loaded),
-            Ok(None) => {}
-            Err(error) => {
+            Ok(None) => {
                 tracing::warn!(
                     block_number,
-                    error = %error,
-                    "failed to hydrate processed block from live Redis; falling back"
+                    "live Redis processed block missing after stream notification; loading from disk/Reth"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                block_number,
+                redis_error = %error,
+                "live Redis processed block unavailable after stream notification; loading from disk/Reth"
                 );
             }
         }
 
-        load_processed_block(
-            &self.tx_processor,
-            self.provider.as_ref(),
-            self.replay_store_writer.clone(),
-            block_number,
-            self.retry,
-        )
-        .await
+        self.regular_provider.load_block(block_number).await
     }
 }
 

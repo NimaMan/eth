@@ -103,7 +103,7 @@ Use this map before broad searching:
 | How do I simulate a transaction, bundle, block, or live head state? | `tx_simulator/README.md` | `tx_simulator/src/lib.rs`, `src/single_tx/`, `src/tx_chain/`, `src/block_trace/`, `src/live/`, `examples/` |
 | How do I query balances, blocks, receipts, entities, DEX state, or indexed data? | `reth_chain_query/README.md` | `reth_chain_query/src/lib.rs`, `src/provider/`, `src/reth_index/`, `src/dex/`, `src/tx_builders.rs`, `examples/` |
 | How do raw/simulated transactions become decoded transaction facts? | `tx_processor/README.md` | `tx_processor/src/lib.rs`, `src/tx_processor/`, `src/processed_tx_provider/`, `src/block_processor/` |
-| How are processed blocks cached and streamed live? | `tx_processor/src/bin/live_block_processor/README.md` | `tx_processor/src/live/`, `src/processed_block_provider/`, `alpha/live/feed/README.md` |
+| How are processed blocks cached and streamed live? | `tx_processor/src/bin/live_block_processor/README.md` | `tx_processor/src/live/`, `tx_processor/src/processed_tx_provider/block/`, `alpha/live/feed/README.md` |
 | Where is token/pool state updated from processed blocks? | `eth_token/README.md` | `eth_token/src/README.md`, `src/tracking/`, `src/pools/`, `src/manager/`, `src/health/` |
 | How is live token state served to tools and alpha? | `eth_token_server/README.md` | `eth_token_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
 | How are pending transactions detected and converted to signals? | `mempool_processor/README.md` | `mempool_processor/src/function_detector.rs`, `src/tx_router/`, `src/simulator/`, `src/signal_detector/`, `src/db_writers/` |
