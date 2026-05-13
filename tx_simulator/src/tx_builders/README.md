@@ -10,15 +10,17 @@ Purpose
   builder logic over adding on-chain branching, discovery, or generic adapter behavior.
 
 Entrypoints
-- `amm/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
-- `amm/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, `build_token_to_token_swap_v3(_with_min_out)`, `build_approve_v3`
-- `uniswap_v4.rs`: pool-key orientation, ERC20/WETH helpers, and Universal Router v4 builders
-- `permit2.rs`: Permit2 allowance approval builder
-- `mod.rs`:
+- `protocols/uniswap/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
+- `protocols/sushiswap/v2.rs`: Sushi V2 router constants and V2-router wrapper exports
+- `protocols/uniswap/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, Universal Router v3 helpers, and `build_approve_v3`
+- `protocols/uniswap/v4/`: pool-key orientation, ERC20/WETH helpers, and Universal Router v4 builders
+- `protocols/permit2.rs`: Permit2 allowance approval builder
+- `route_dispatch.rs`:
   - Route-aware dispatchers: `build_buy_swap`, `build_sell_swap`, `build_approve_for_route`
   - Token→Token: `build_token_to_token_swap(_with_min_out)`
   - `spender_for_route(&AmmSwapRoute)` returns the router address to approve
   - `build_sell_with_permit(...)` entrypoint routes to V3 permit builder when available
+- `routes.rs`: `AmmSwapRoute`
 
 Permit Plan (V3)
 - Implement `build_sell_with_self_permit_v3` to encode:

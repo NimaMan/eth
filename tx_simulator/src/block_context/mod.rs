@@ -7,6 +7,7 @@
 
 pub mod live_chain_cache;
 pub mod live_data_registry;
+pub mod processed_tx_json;
 
 /// Default Redis URL used for live chain data snapshots when no environment
 /// override is provided.
@@ -22,7 +23,6 @@ pub fn resolve_live_data_redis_url() -> String {
 use crate::{
     config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
     header_utils::parse_sealed_header_from_json,
-    live_chain_data::processed_tx_json::build_unsigned_transaction_from_processed_tx_json,
     single_tx::unsigned::UnsignedTransaction,
     tx_chain::{
         sequential::{ForkedState, SharedStateProvider},
@@ -47,6 +47,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 
 use self::live_data_registry::ChainStateSnapshot;
+use self::processed_tx_json::build_unsigned_transaction_from_processed_tx_json;
 /// Block state returned by [`BlockContextLoader`].
 pub(crate) enum BlockStateProvider {
     /// State is available directly from MDBX.
