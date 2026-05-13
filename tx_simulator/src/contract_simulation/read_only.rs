@@ -1,8 +1,3 @@
-/// Contract Method Simulator - for calling read-only contract methods
-///
-/// This module provides functionality to call read-only methods (view/pure functions) on smart contracts
-/// without creating a transaction. These are commonly used for querying token balances,
-/// total supply, decimals, and other contract state.
 use crate::{
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
@@ -70,58 +65,4 @@ impl TxSimulator {
         self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
             .await
     }
-}
-
-// Public utility functions for contract method encoding/decoding
-
-/// Encode a contract read-only call with no arguments (just 4-byte selector)
-pub fn encode_contract_read_call_no_args(selector: [u8; 4]) -> Bytes {
-    Bytes::from(selector.to_vec())
-}
-
-/// Encode a contract read-only call with a single address argument (e.g., balanceOf)
-pub fn encode_contract_read_call_with_address_arg(selector: [u8; 4], address: Address) -> Bytes {
-    let mut data = selector.to_vec();
-    // Pad address to 32 bytes (addresses are left-padded with zeros)
-    let mut padded = [0u8; 32];
-    padded[12..].copy_from_slice(address.as_ref());
-    data.extend_from_slice(&padded);
-    Bytes::from(data)
-}
-
-/// Decode a uint256 value from contract method output bytes
-pub fn decode_uint256_from_contract_output(output: &Bytes) -> U256 {
-    if output.len() >= 32 {
-        U256::from_be_slice(&output[..32])
-    } else {
-        U256::ZERO
-    }
-}
-
-/// Decode a uint8 value from contract method output bytes (e.g., decimals)
-pub fn decode_uint8_from_contract_output(output: &Bytes) -> u8 {
-    if output.len() >= 32 {
-        output[31]
-    } else {
-        0
-    }
-}
-
-/// Decode a string value from contract method output bytes (e.g., name, symbol)
-pub fn decode_string_from_contract_output(output: &Bytes) -> String {
-    if output.len() < 64 {
-        return String::new();
-    }
-
-    // Skip offset (32 bytes) and length (32 bytes)
-    let len_bytes = &output[32..64];
-    let len = U256::from_be_slice(len_bytes).to::<usize>();
-
-    if output.len() < 64 + len {
-        return String::new();
-    }
-
-    // Get the actual string bytes
-    let string_bytes = &output[64..64 + len];
-    String::from_utf8_lossy(string_bytes).to_string()
 }

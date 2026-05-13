@@ -84,7 +84,7 @@ impl TokenMetadataSimulator {
         let data = self.encode_selector(signature);
         let res = chain.simulate_view_call(contract, data).ok()?;
         if res.success {
-            crate::contract_method_simulator::decode_string_from_contract_output(&res.output).into()
+            crate::contract_simulation::decode_string_from_contract_output(&res.output).into()
         } else {
             None
         }
@@ -100,7 +100,7 @@ impl TokenMetadataSimulator {
         let res = chain.simulate_view_call(contract, data).ok()?;
         if res.success && res.output.len() >= 32 {
             Some(
-                crate::contract_method_simulator::decode_uint256_from_contract_output(&res.output)
+                crate::contract_simulation::decode_uint256_from_contract_output(&res.output)
                     .to::<u8>(),
             )
         } else {
@@ -117,7 +117,7 @@ impl TokenMetadataSimulator {
         let data = self.encode_selector(signature);
         let res = chain.simulate_view_call(contract, data).ok()?;
         if res.success {
-            Some(crate::contract_method_simulator::decode_uint256_from_contract_output(&res.output))
+            Some(crate::contract_simulation::decode_uint256_from_contract_output(&res.output))
         } else {
             None
         }

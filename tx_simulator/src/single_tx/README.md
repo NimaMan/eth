@@ -70,7 +70,7 @@ Keeping these helpers separate lets downstream callers opt into the heavier step
 
 ### Downstream Usage
 
-* `tx_simulator/src/contract_method_simulator.rs` – uses the no-trace output path for
+* `tx_simulator/src/contract_simulation/read_only.rs` – uses the no-trace output path for
   read-only calls so view helpers do not pay call-tracer overhead.
 * `tx_processor/src/processed_tx_provider/provider.rs` – calls the full-trace variants to populate
   `ProcessedTransaction` with per-opcode `struct_logs`, letting Python pipelines and DeFi analyses

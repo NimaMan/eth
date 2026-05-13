@@ -7,7 +7,7 @@ use alloy_primitives::{Address, Bytes, B256};
 use eyre::Result;
 use hex_literal::hex;
 use tx_simulator::{
-    contract_method_simulator::{
+    contract_simulation::{
         decode_string_from_contract_output, encode_contract_read_call_with_address_arg,
     },
     types::ViewFunctionResult,

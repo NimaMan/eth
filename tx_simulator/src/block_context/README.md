@@ -25,7 +25,7 @@ live feed.
      - Reject stale or mismatched snapshots instead of approximating state.
 
 3. **Reuse everywhere**
-   * `contract_method_simulator`, `single_tx::unsigned`, block tracer, token
+   * `contract_simulation`, `single_tx::unsigned`, block tracer, token
      metadata, etc., should all call these helpers instead of directly touching
      MDBX/Redis.
 

@@ -25,7 +25,7 @@ pub mod tx_chain {
     pub mod unsigned;
 }
 pub mod block_trace;
-pub mod contract_method_simulator;
+pub mod contract_simulation;
 pub mod header_utils;
 pub mod live;
 pub mod live_chain_data;

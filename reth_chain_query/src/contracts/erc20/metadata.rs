@@ -1,7 +1,7 @@
 use crate::RethQueryProvider;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
-use tx_simulator::contract_method_simulator::{
+use tx_simulator::contract_simulation::{
     decode_string_from_contract_output, decode_uint256_from_contract_output,
     encode_contract_read_call_with_address_arg,
 };

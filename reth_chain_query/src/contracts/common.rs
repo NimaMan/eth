@@ -2,7 +2,7 @@ use crate::RethQueryProvider;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use tx_simulator::{
-    contract_method_simulator::decode_uint256_from_contract_output, UnsignedTxChainSimulation,
+    contract_simulation::decode_uint256_from_contract_output, UnsignedTxChainSimulation,
 };
 
 /// Execute a view function expected to return a 32-byte word. Returns `Ok(None)`

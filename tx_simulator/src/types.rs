@@ -101,17 +101,17 @@ pub struct ViewFunctionResult {
 impl ViewFunctionResult {
     /// Decode the output as a U256 value
     pub fn decode_uint256(&self) -> U256 {
-        crate::contract_method_simulator::decode_uint256_from_contract_output(&self.output)
+        crate::contract_simulation::decode_uint256_from_contract_output(&self.output)
     }
 
     /// Decode the output as a uint8 value
     pub fn decode_uint8(&self) -> u8 {
-        crate::contract_method_simulator::decode_uint8_from_contract_output(&self.output)
+        crate::contract_simulation::decode_uint8_from_contract_output(&self.output)
     }
 
     /// Decode the output as a string
     pub fn decode_string(&self) -> String {
-        crate::contract_method_simulator::decode_string_from_contract_output(&self.output)
+        crate::contract_simulation::decode_string_from_contract_output(&self.output)
     }
 }
 

@@ -3,7 +3,7 @@ use eyre::{bail, eyre, Result};
 use std::{env, process, str::FromStr};
 use tx_simulator::{
     config::repo,
-    contract_method_simulator::{
+    contract_simulation::{
         decode_string_from_contract_output, decode_uint256_from_contract_output,
         decode_uint8_from_contract_output, encode_contract_read_call_no_args,
     },
