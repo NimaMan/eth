@@ -33,6 +33,6 @@ pub use signal_manager::{SignalManager, SignalManagerConfig};
 pub use tax_signal_detector::{TaxDetector, TaxSignal, TaxSignalType};
 pub use trading_status_detector::{TradingStatusDetector, TradingStatusSignal};
 pub use types::{
-    HighTaxWarningSignal, HoneypotSignal, LiquidityRemovalSignal, ScamDetectionSignal, Signal,
-    TaxWarningType, TradingEnabledSignal,
+    HighTaxWarningSignal, HoneypotSignal, LiquidityRemovalSignal, Signal, TaxWarningType,
+    TradingEnabledSignal,
 };

@@ -37,7 +37,7 @@ Reth pending tx stream
        builds SimulationResult
   -> SignalManager
        emits semantic TradingEnabled / Tax / Honeypot / LiquidityRemoval /
-       ScamDetection / LpApproval signals
+       LpApproval signals
   -> SignalPublisher
        writes Postgres rows, semantic logs, and ZMQ topics
 ```
@@ -45,19 +45,30 @@ Reth pending tx stream
 ## Token Context Contract
 
 The service hydrates and refreshes `TokenTrackingCache` from token-server live
-HTTP endpoints. Redis snapshots are a startup fallback until token-server
-provides an accepted live snapshot.
+HTTP endpoints. The refresh loop is:
+
+```text
+fetch /live/tokens + /live/pools
+wait on /live/updates?after_block=<accepted_block>
+token-server BlockApplied wakes the long-poll
+fetch /live/tokens + /live/pools again
+```
+
+`/live/updates` carries wakeup metadata only; it is not an authoritative token
+payload.
 
 Cache acceptance is monotonic:
 
-- Accept only snapshots with `status=live`.
+- Accept `status=warming` until the first live context is accepted, then accept
+  only `status=live`.
 - Reject empty live-server hydrate responses as unsuccessful startup hydration.
 - Reject snapshots whose context block is lower than the last accepted block.
 - Log accepted/rejected context with block, status, source, and rejection
   counters.
 
 This prevents a token-server restart or warmup response from rolling the mempool
-processor back to stale token/pool mappings.
+processor back to stale token/pool mappings. Redis token snapshots and
+token-update ZMQ are not used for token context.
 
 ## Unresolved Intent Lane
 
@@ -121,7 +132,7 @@ Signal semantics:
 - `Honeypot`: buy/approve succeed but sell fails for the same pool.
 - `TaxSignal`: buy/sell tax enters high or extreme buckets, or crosses
   configured thresholds.
-- `LiquidityRemoval` / `ScamDetection`: tracked pool drain/removal risk.
+- `LiquidityRemoval`: tracked pool drain/removal risk.
 - `LpApproval`: tracked LP/pool token approval to known router/Permit2.
 
 Successful mined tx replay mismatches are classified as
@@ -139,7 +150,6 @@ ZMQ topics are diagnostic/low-latency fanout:
 - `honeypot_signal`
 - `tax_signal`
 - `liquidity_removal`
-- `scam_detection`
 - `lp_approval`
 
 The stable consumer path for token-server, ASENA, and alpha is the persisted
@@ -156,14 +166,11 @@ logs/mempool_processor/signal_detector_YYYY-MM-DD_HH-MM-SS/
 ├── simulation_results.log       # compact simulation summaries where enabled
 ├── simulation_errors.log        # actionable simulator/viability errors
 ├── unresolved_intents.log       # internal cache-wait lane
-├── function_detector/
-│   ├── liquidity_removals.log   # selector/debug matches
-│   └── trading_enabled.log      # selector/debug matches
 └── signals/
     ├── trading_enabled.log      # semantic entry signals
     ├── honeypot_signals.log     # semantic cannot-sell signals
     ├── tax_signals.log          # semantic tax risk signals
-    ├── liquidity_removals.log   # semantic removal/scam signals
+    ├── liquidity_removals.log   # semantic removal/drain signals
     ├── lp_approval_signals.log  # semantic LP approval signals
     └── signal_manager.log       # publication summaries
 ```
@@ -210,7 +217,8 @@ Useful options:
 
 Healthy live behavior looks like:
 
-- Token-server snapshots are `status=live` and monotonic by block.
+- Token-server snapshots are monotonic by block; `warming` is accepted only
+  before the first `live` context.
 - Simulation queue depth returns to zero between bursts.
 - LP approval cache misses do not grow without corresponding unresolved-intent
   telemetry.

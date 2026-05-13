@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use tokio::signal;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use tracing_subscriber::Layer;
 
 use mempool_signal_detector_runtime::{
@@ -49,8 +49,8 @@ use mempool_processor::{
         MempoolSimulator, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
     },
     token_tracking::{
-        hydrate_cache_from_live_token_server, start_live_token_server_cache_sync,
-        TokenTrackingSubscriber,
+        hydrate_cache_from_live_token_server, start_live_token_server_cache_sync, CacheConfig,
+        TokenTrackingCache,
     },
     tx_router::{TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
@@ -243,18 +243,14 @@ async fn main() -> Result<()> {
     // Initialize components
     info!("\n🔧 Initializing pipeline components...");
 
-    // 1. Token tracking subscriber
-    info!("📊 Starting token tracking subscriber...");
+    // 1. Token context from eth_token_server
+    info!("📊 Starting token context sync from eth_token_server...");
     let source_cfg = &base_config.token_cache_source;
-    let mut token_subscriber = TokenTrackingSubscriber::with_sources(
-        source_cfg.eth_threshold,
-        &source_cfg.zmq_pub_endpoint,
-        &source_cfg.redis_url,
-        &source_cfg.redis_token_prefix,
-    );
-    let token_cache = token_subscriber.get_cache();
+    let token_cache = Arc::new(TokenTrackingCache::new(CacheConfig {
+        eth_threshold: source_cfg.eth_threshold,
+        ..Default::default()
+    }));
 
-    let mut live_token_server_hydrate_ok = false;
     let live_token_server_sync_handle = if let Some(base_url) = source_cfg
         .live_token_server_url
         .as_deref()
@@ -271,7 +267,6 @@ async fn main() -> Result<()> {
                     "✅ Live token tracker cache hydrate complete: status={:?}, block={}, tokens={}, pools={}, accepted={}",
                     report.status, report.block_number, report.tokens, report.pools, report.accepted
                 );
-                live_token_server_hydrate_ok = report.accepted && report.tokens > 0;
             }
             Err(err) => {
                 warn!(
@@ -284,20 +279,11 @@ async fn main() -> Result<()> {
         Some(start_live_token_server_cache_sync(
             token_cache.clone(),
             base_url.to_string(),
-            Duration::from_secs(source_cfg.live_token_server_sync_interval_secs.max(1)),
         ))
     } else {
-        info!("📡 Rust live token tracker cache source disabled");
+        warn!("📡 Rust live token tracker cache source disabled; token context will remain empty");
         None
     };
-    token_subscriber.skip_initial_redis_warmup(live_token_server_hydrate_ok);
-
-    // Start token subscriber in background
-    let subscriber_handle = tokio::spawn(async move {
-        if let Err(e) = token_subscriber.start_listening().await {
-            error!("Token subscriber error: {}", e);
-        }
-    });
 
     // Wait for initial cache population
     info!("⏳ Waiting for token cache population...");
@@ -317,13 +303,6 @@ async fn main() -> Result<()> {
 
     // 4. Function detector
     info!("🔍 Initializing function detector...");
-    // Create function detector with custom log directory
-    let detector_log_dir = run_dir.join("function_detector");
-    std::fs::create_dir_all(&detector_log_dir)?;
-    std::env::set_var(
-        "FUNCTION_DETECTOR_LOG_DIR",
-        detector_log_dir.to_str().unwrap(),
-    );
     let function_detector = FunctionDetector::new_with_cache(Some(token_cache.clone()));
     info!("✅ Function detector ready");
 
@@ -632,7 +611,7 @@ async fn main() -> Result<()> {
             let manager_stats = simulation_manager.stats().await;
 
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} | Published:{} ZMQ:{} DB:{} Err:{}",
                 total,
                 delta,
                 rate,
@@ -644,7 +623,6 @@ async fn main() -> Result<()> {
                 publisher_stats.lp_approvals,
                 publisher_stats.tax_signals,
                 publisher_stats.honeypot_signals,
-                publisher_stats.scam_detections,
                 publisher_stats.total_published,
                 publisher_stats.zmq_published,
                 publisher_stats.db_written,
@@ -748,13 +726,12 @@ async fn main() -> Result<()> {
         publisher.get_stats()
     };
     info!(
-        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} SCAM:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
+        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
         publisher_stats.trading_enabled,
         publisher_stats.liquidity_removals,
         publisher_stats.lp_approvals,
         publisher_stats.tax_signals,
         publisher_stats.honeypot_signals,
-        publisher_stats.scam_detections,
         publisher_stats.total_published,
         publisher_stats.zmq_published,
         publisher_stats.logs_written,
@@ -776,7 +753,6 @@ async fn main() -> Result<()> {
     if let Some(handle) = live_token_server_sync_handle {
         handle.abort();
     }
-    subscriber_handle.abort();
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())

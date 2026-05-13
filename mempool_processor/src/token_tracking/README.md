@@ -12,21 +12,32 @@ Primary live source:
 ```text
 eth_token live tracker
   -> eth_token_server live HTTP APIs
-  -> hydrate_cache_from_live_token_server()
-  -> start_live_token_server_cache_sync()
+  -> GET /eth/tokens/api/live/tokens
+  -> GET /eth/tokens/api/live/pools
   -> TokenTrackingCache
 ```
 
-Startup fallback:
+Update notification:
 
 ```text
-Redis live token snapshots
-  -> TokenTrackingSubscriber warmup
-  -> TokenTrackingCache
+eth_token_server applies confirmed block
+  -> broadcasts LiveTokenEvent::BlockApplied in process
+  -> /eth/tokens/api/live/updates long-poll returns
+  -> mempool refreshes /live/tokens + /live/pools
 ```
 
-Redis warmup is only skipped when live-token-server hydration returns
-`status=live`, non-empty data, and the cache accepts the snapshot.
+The update endpoint is only a wakeup path. Token and pool context always comes
+from `/live/tokens` and `/live/pools`. Redis token snapshots and token-update
+ZMQ are intentionally not part of this module anymore.
+
+Refresh sequence:
+
+1. `mempool_signal_detector` fetches `/live/tokens` and `/live/pools`.
+2. It records the accepted token-context block in `TokenTrackingCache`.
+3. It opens `/live/updates?after_block=<accepted_block>&timeout_ms=30000`.
+4. token-server returns immediately when a newer block is already applied or
+   when the next `BlockApplied` runtime event fires.
+5. mempool reloads `/live/tokens` and `/live/pools` and repeats the wait.
 
 ## Cache Context Rules
 
@@ -35,13 +46,14 @@ the last accepted context block, status, and source.
 
 Accepted live-token-server snapshots must be:
 
-- `status=live`
+- `status=warming` before any live context has been accepted, or `status=live`
 - non-empty for startup hydrate success
 - block number greater than or equal to the current accepted context block
 
 Rejected snapshots are counted and logged with block/status/source:
 
-- non-live snapshots, such as `warming`
+- warming snapshots after a live context has already been accepted
+- non-live/non-warming snapshots
 - stale snapshots below the accepted block
 - empty hydrate results during startup
 

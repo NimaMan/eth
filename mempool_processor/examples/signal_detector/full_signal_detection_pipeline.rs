@@ -22,11 +22,13 @@ use tracing::{info, warn};
 // Mempool processor imports
 use alloy_primitives::{Address, B256, U256};
 use mempool_processor::{
-    config::{DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT},
     function_detector::FunctionDetector,
     mempool_fetcher::MempoolFetcherIPCClient,
     simulator::MempoolSimulator,
-    token_tracking::{TokenTrackingCache, TokenTrackingSubscriber},
+    token_tracking::{
+        hydrate_cache_from_live_token_server, start_live_token_server_cache_sync, CacheConfig,
+        TokenTrackingCache,
+    },
     tx_router::{SimulationPriority, TransactionCategory, TransactionRouter as TxRouter},
 };
 use reth_chain_query::to_checksum_address;
@@ -102,20 +104,21 @@ struct ManagerStats {
     max_simulation_time_ms: f64,
 }
 
-fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
-    let pub_endpoint = std::env::var("TOKEN_CACHE_PUB_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string());
-    let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
-        .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
-    let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
-        .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
+async fn build_token_cache(threshold: f64) -> Arc<TokenTrackingCache> {
+    let cache = Arc::new(TokenTrackingCache::new(CacheConfig {
+        eth_threshold: threshold,
+        ..Default::default()
+    }));
+    let base_url = std::env::var("MEMPOOL_LIVE_TOKEN_SERVER_URL")
+        .unwrap_or_else(|_| mempool_processor::config::DEFAULT_LIVE_TOKEN_SERVER_URL.to_string());
 
-    println!(
-        "Token snapshot sources: redis={}, pub={}",
-        redis_url, pub_endpoint
-    );
+    println!("Token context source: {}", base_url);
+    if let Err(error) = hydrate_cache_from_live_token_server(cache.as_ref(), &base_url).await {
+        warn!("Initial token-server hydrate failed: {}", error);
+    }
+    start_live_token_server_cache_sync(cache.clone(), base_url);
 
-    TokenTrackingSubscriber::with_sources(threshold, &pub_endpoint, &redis_url, &redis_prefix)
+    cache
 }
 
 fn parse_tx_hash_or_zero(hash: &str) -> B256 {
@@ -444,17 +447,9 @@ async fn main() -> Result<()> {
     info!("🎯 Target: {} transactions", args.target_count);
     info!("⚠️  Signal detection is DISABLED for this test");
 
-    // Initialize token tracking subscriber
-    info!("\n📦 Initializing token tracking subscriber...");
-    let mut token_subscriber = build_token_subscriber(0.1); // 0.1 ETH threshold
-    let token_cache = token_subscriber.get_cache();
-
-    // Start subscriber in background
-    let _subscriber_handle = tokio::spawn(async move {
-        if let Err(e) = token_subscriber.start_listening().await {
-            warn!("Token subscriber error: {}", e);
-        }
-    });
+    // Initialize token context from eth_token_server.
+    info!("\n📦 Initializing token context from eth_token_server...");
+    let token_cache = build_token_cache(0.1).await; // 0.1 ETH threshold
 
     // Wait for initial cache population
     info!("⏳ Waiting for token cache population...");

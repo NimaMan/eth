@@ -62,4 +62,4 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 - **eth_kartal**: Can consume signals for automated trading decisions
 - **Monitoring**: Multiple monitoring tools can run simultaneously
 - **Real-time**: Signals are published as soon as detected (microsecond latency)
-- **Wire Format**: Signal publisher sends multipart `{topic, json}` on port `5556`; port `5557` is for live token updates.
+- **Wire Format**: Signal publisher sends multipart `{topic, json}` on port `5556`.

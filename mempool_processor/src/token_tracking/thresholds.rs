@@ -1,7 +1,7 @@
 //! Liquidity thresholds aligned with `eth_token/erc20_token/config/scam_thresholds.py`.
 //!
-//! We replicate the denomination thresholds here so the Rust cache applies the same
-//! gating logic as the Python publisher. Thresholds are expressed in native units
+//! We replicate the denomination thresholds here so the mempool cache applies the same
+//! liquidity gating. Thresholds are expressed in native units
 //! for the denomination token (ETH, stablecoin units, etc.).
 
 const ETH_CATEGORY: f64 = 0.05; // 0.05 ETH (~$200 at $4k/ETH)

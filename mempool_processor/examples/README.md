@@ -47,14 +47,12 @@ cargo run --example replay_liquidity_removal --release -- --help
 cargo run --example replay_trading_status --release -- --help
 ```
 
-## Token Tracking And Writers
+## Writers And Diagnostics
 
-- `export_all_tokens_from_cache_to_csv`: load token snapshots from Redis and export cache data.
 - `test_unified_writer`: verify unified signal writer behavior.
 - `signal_subscriber/signal_subscriber.py`: Python ZMQ subscriber for published signals.
 
 ```bash
-cargo run --example export_all_tokens_from_cache_to_csv --release
 cargo run --example test_unified_writer --release
 python examples/signal_subscriber/signal_subscriber.py
 ```
@@ -67,7 +65,7 @@ Live examples expect local infrastructure:
 - Reth IPC socket: default `/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc`
 - HTTP RPC: default `http://127.0.0.1:8545`
 - Reth data directory: default `/home/nima/storage/samsung8tb/ethereum/reth`
-- Redis token snapshots for token tracking examples: default `redis://localhost:6379/0`
+- Token server: default `http://127.0.0.1:8765`
 
 Useful overrides:
 
@@ -75,5 +73,5 @@ Useful overrides:
 RETH_IPC_PATH=/custom/reth.ipc cargo run --example test_fetcher_simple
 RETH_HTTP_RPC=http://127.0.0.1:8545 cargo run --example verify_new_transactions_only
 RETH_DATADIR=/path/to/reth cargo run --example full_pipeline_signal_detection
-TOKEN_SNAPSHOT_REDIS_URL=redis://localhost:6379/0 cargo run --example export_all_tokens_from_cache_to_csv
+MEMPOOL_LIVE_TOKEN_SERVER_URL=http://127.0.0.1:8765 cargo run --example full_pipeline_signal_detection
 ```

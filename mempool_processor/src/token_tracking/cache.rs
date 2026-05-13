@@ -45,7 +45,14 @@ pub struct TokenCacheContextSnapshot {
 pub struct CacheUpdateContext {
     pub source: String,
     pub status: Option<String>,
-    pub require_live_status: bool,
+    pub status_policy: CacheStatusPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheStatusPolicy {
+    Any,
+    LiveOnly,
+    LiveOrWarmingUntilLive,
 }
 
 #[derive(Debug, Clone)]
@@ -270,7 +277,21 @@ impl TokenTrackingCache {
         let block_number = update.block_number;
 
         let mut context = self.context.write().await;
-        if update_context.require_live_status && normalized_status.as_deref() != Some("live") {
+        let current_status = context
+            .last_accepted_status
+            .as_ref()
+            .map(|status| status.trim().to_ascii_lowercase());
+        let status_allowed = match update_context.status_policy {
+            CacheStatusPolicy::Any => true,
+            CacheStatusPolicy::LiveOnly => normalized_status.as_deref() == Some("live"),
+            CacheStatusPolicy::LiveOrWarmingUntilLive => {
+                normalized_status.as_deref() == Some("live")
+                    || (normalized_status.as_deref() == Some("warming")
+                        && current_status.as_deref() != Some("live"))
+            }
+        };
+
+        if !status_allowed {
             context.rejected_non_live_snapshots += 1;
             let rejection = CacheUpdateRejection {
                 source: update_context.source,
@@ -312,7 +333,7 @@ impl TokenTrackingCache {
         CacheApplyOutcome::Applied(result)
     }
 
-    /// Update cache with new token data from Python (batch operation)
+    /// Update cache with token-server token/pool context.
     pub async fn batch_update(&self, update: TokenUpdate) -> UpdateResult {
         let mut tokens_updated = 0;
         let mut pools_updated = 0;
@@ -706,7 +727,7 @@ mod tests {
                 CacheUpdateContext {
                     source: "live_token_server_sync".to_string(),
                     status: Some("warming".to_string()),
-                    require_live_status: true,
+                    status_policy: CacheStatusPolicy::LiveOnly,
                 },
             )
             .await;
@@ -723,6 +744,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepts_warming_context_until_live_context_exists() {
+        let cache = TokenTrackingCache::with_defaults();
+
+        let outcome = cache
+            .batch_update_with_context(
+                test_update(100),
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("warming".to_string()),
+                    status_policy: CacheStatusPolicy::LiveOrWarmingUntilLive,
+                },
+            )
+            .await;
+
+        assert!(outcome.applied());
+        let context = cache.context_snapshot().await;
+        assert_eq!(context.last_accepted_block, 100);
+        assert_eq!(context.last_accepted_status.as_deref(), Some("warming"));
+    }
+
+    #[tokio::test]
+    async fn rejects_warming_context_after_live_context_exists() {
+        let cache = TokenTrackingCache::with_defaults();
+
+        let live = cache
+            .batch_update_with_context(
+                test_update(200),
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("live".to_string()),
+                    status_policy: CacheStatusPolicy::LiveOrWarmingUntilLive,
+                },
+            )
+            .await;
+        assert!(live.applied());
+
+        let warming = cache
+            .batch_update_with_context(
+                test_update(201),
+                CacheUpdateContext {
+                    source: "live_token_server_sync".to_string(),
+                    status: Some("warming".to_string()),
+                    status_policy: CacheStatusPolicy::LiveOrWarmingUntilLive,
+                },
+            )
+            .await;
+
+        match warming {
+            CacheApplyOutcome::Rejected(rejection) => {
+                assert_eq!(rejection.reason, CacheUpdateRejectionReason::NonLiveStatus);
+                assert_eq!(rejection.current_block, 200);
+            }
+            other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn rejects_lower_block_after_live_context() {
         let cache = TokenTrackingCache::with_defaults();
 
@@ -732,7 +810,7 @@ mod tests {
                 CacheUpdateContext {
                     source: "live_token_server_sync".to_string(),
                     status: Some("live".to_string()),
-                    require_live_status: true,
+                    status_policy: CacheStatusPolicy::LiveOnly,
                 },
             )
             .await;
@@ -744,7 +822,7 @@ mod tests {
                 CacheUpdateContext {
                     source: "live_token_server_sync".to_string(),
                     status: Some("live".to_string()),
-                    require_live_status: true,
+                    status_policy: CacheStatusPolicy::LiveOnly,
                 },
             )
             .await;

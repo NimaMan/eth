@@ -8,9 +8,11 @@ use serde::Deserialize;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
-use super::cache::TokenTrackingCache;
-use super::live_data::apply_snapshot_map_to_cache_with_context;
+use super::cache::{CacheStatusPolicy, TokenTrackingCache};
+use super::snapshot_apply::apply_snapshot_map_to_cache_with_context;
 use super::types::{Address, Pool, PoolLifecycle, PoolType, Token, TokenWithPools};
+
+const TOKEN_SERVER_UPDATE_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct LiveTokenServerHydrationReport {
@@ -34,7 +36,7 @@ pub async fn hydrate_cache_from_live_token_server(
         0.0,
         "live_token_server_hydrate",
         report.status.clone(),
-        true,
+        CacheStatusPolicy::LiveOrWarmingUntilLive,
         snapshot.tokens,
     )
     .await;
@@ -47,25 +49,23 @@ pub async fn hydrate_cache_from_live_token_server(
 pub fn start_live_token_server_cache_sync(
     cache: Arc<TokenTrackingCache>,
     base_url: String,
-    interval: Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let client = Client::new();
-        let mut ticker = tokio::time::interval(interval.max(Duration::from_secs(1)));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_requested_block = 0u64;
 
         loop {
-            ticker.tick().await;
             match fetch_live_token_server_snapshot(&client, &base_url).await {
                 Ok(snapshot) => {
                     let report = snapshot.report;
+                    last_requested_block = last_requested_block.max(report.block_number);
                     let outcome = apply_snapshot_map_to_cache_with_context(
                         cache.as_ref(),
                         report.block_number,
                         0.0,
                         "live_token_server_sync",
                         report.status.clone(),
-                        true,
+                        CacheStatusPolicy::LiveOrWarmingUntilLive,
                         snapshot.tokens,
                     )
                     .await;
@@ -86,6 +86,36 @@ pub fn start_live_token_server_cache_sync(
                         "Live token server cache sync failed for {}: {}",
                         base_url, err
                     );
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            }
+
+            match wait_for_live_token_server_update(
+                &client,
+                &base_url,
+                last_requested_block,
+                TOKEN_SERVER_UPDATE_WAIT,
+            )
+            .await
+            {
+                Ok(update) => {
+                    if let Some(block_number) = update.block_number {
+                        last_requested_block = last_requested_block.max(block_number);
+                    }
+                    if update.event != "timeout" {
+                        debug!(
+                            "Live token server update notification: event={}, status={:?}, block={:?}",
+                            update.event, update.status, update.block_number
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "Live token server update wait failed for {}: {}",
+                        base_url, err
+                    );
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
@@ -162,6 +192,31 @@ async fn fetch_live_token_server_snapshot(
         report,
         tokens: token_map,
     })
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct LiveTokenServerUpdateNotification {
+    #[serde(default)]
+    event: String,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    block_number: Option<u64>,
+}
+
+async fn wait_for_live_token_server_update(
+    client: &Client,
+    base_url: &str,
+    after_block: u64,
+    max_wait: Duration,
+) -> Result<LiveTokenServerUpdateNotification> {
+    let update_url = format!(
+        "{}?after_block={}&timeout_ms={}",
+        endpoint(base_url, "eth/tokens/api/live/updates"),
+        after_block,
+        max_wait.as_millis()
+    );
+    fetch_json::<LiveTokenServerUpdateNotification>(client, &update_url).await
 }
 
 async fn fetch_json<T>(client: &Client, url: &str) -> Result<T>

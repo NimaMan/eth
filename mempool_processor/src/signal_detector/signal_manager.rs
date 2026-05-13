@@ -246,18 +246,6 @@ impl SignalManager {
                         s.can_sell
                     )
                 }
-                Signal::ScamDetection(s) => {
-                    format!(
-                        "[{}] SIGNAL_DETECTED | SCAM_DETECTION | {} | pool: {} | token: {} | scammer: {} | eth_drained: {:.4} | drain_%: {:.1}%",
-                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        s.tx_hash,
-                        s.pool_address,
-                        s.token_address,
-                        s.scammer_address,
-                        s.eth_drained,
-                        s.drain_percentage
-                    )
-                }
                 Signal::LiquidityRemoval(s) => {
                     let est_eth = s
                         .estimated_eth_removed

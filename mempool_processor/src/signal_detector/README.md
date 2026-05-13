@@ -45,13 +45,7 @@ Signals are semantic trading/risk events defined in `signal_detector/types.rs` a
   `LOW` for measured smaller removals, and `UNKNOWN` when protocol intent maps
   to a tracked pool before reserve impact can be measured.
 
-5) ScamDetection (topic: `scam_detection`)
-- Trigger: pool drain above threshold (>60%) or remaining ETH below threshold (≤0.3 ETH).
-- Payload:
-  - tx_hash, pool_address, pool_type, token_address
-  - scammer_address, eth_drained, eth_remaining, drain_percentage, timestamp
-
-6) LpApproval (topic: `lp_approval`)
+5) LpApproval (topic: `lp_approval`)
 - Trigger: non‑simulated LP token approval transactions for tracked pools,
   regardless of whether the approver is the token creator.
 - Payload (LpApprovalSignal):
@@ -78,7 +72,7 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 
 - LiquidityDetector (`liquidity_detector.rs`)
   - Detects drains/removals via state changes or LiquidityRemovalResult
-  - Emits ScamDetection or LiquidityRemoval signals
+  - Emits LiquidityRemoval signals
 
 - LpApprovalDetector (`lp_approval_detector.rs`)
   - Checks non‑simulated transactions classified as tracked-pool LP approvals
@@ -89,14 +83,14 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 
 - ZMQ
   - Endpoint: `tcp://127.0.0.1:5556`
-  - Topics: `trading_enabled`, `honeypot_signal`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`
+  - Topics: `trading_enabled`, `honeypot_signal`, `tax_signal`, `liquidity_removal`, `lp_approval`
   - Format: JSON serialized signal structs
 
 - Semantic signal logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
   - `honeypot_signals.log`
   - `tax_signals.log` (actual tax risk signals only)
-  - `liquidity_removals.log` (also contains ScamDetection entries)
+  - `liquidity_removals.log`
   - `lp_approval_signals.log`
   - `signal_manager.log` (emitted signals and publication summaries)
 

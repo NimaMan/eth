@@ -15,7 +15,6 @@ pub enum Signal {
     TaxSignal(TaxSignalRecord),
     Honeypot(HoneypotSignal),
     LiquidityRemoval(LiquidityRemovalSignal),
-    ScamDetection(ScamDetectionSignal),
     LpApproval(LpApprovalSignal),
 }
 
@@ -95,23 +94,6 @@ pub struct LiquidityRemovalSignal {
     pub estimated_eth_removed: Option<f64>,
     pub remaining_eth: Option<f64>,
     pub removal_percentage: Option<f64>,
-    pub timestamp: u64,
-}
-
-/// Scam detection signal
-///
-/// Generated when a scam (liquidity drain) is detected on a SPECIFIC pool.
-/// Tracks ETH drained from this particular pool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScamDetectionSignal {
-    pub tx_hash: String,
-    pub pool_address: String,
-    pub pool_type: String, // V2, V3, V4
-    pub token_address: String,
-    pub scammer_address: String,
-    pub eth_drained: f64,
-    pub eth_remaining: f64,
-    pub drain_percentage: f64,
     pub timestamp: u64,
 }
 

@@ -90,7 +90,6 @@ pub struct PublisherStats {
     pub honeypot_signals: std::sync::atomic::AtomicU64,
     pub liquidity_removals: std::sync::atomic::AtomicU64,
     pub lp_approvals: std::sync::atomic::AtomicU64,
-    pub scam_detections: std::sync::atomic::AtomicU64,
     pub zmq_published: std::sync::atomic::AtomicU64,
     pub logs_written: std::sync::atomic::AtomicU64,
     pub db_written: std::sync::atomic::AtomicU64,
@@ -289,11 +288,6 @@ impl SignalPublisher {
                     .lp_approvals
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            Signal::ScamDetection(_) => {
-                self.stats
-                    .scam_detections
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
         }
 
         // Fast ZMQ publishing
@@ -327,20 +321,13 @@ impl SignalPublisher {
 
     /// Publish signal to ZMQ (fast)
     fn publish_zmq(&self, signal: &Signal) -> Result<()> {
-        // Convert to topic/json; skip ScamDetection (deprecated)
-        let topic_and_data: Option<(&str, String)> = match signal {
-            Signal::TradingEnabled(s) => Some(("trading_enabled", serde_json::to_string(s)?)),
-            Signal::TaxSignal(s) => Some(("tax_signal", serde_json::to_string(s)?)),
-            Signal::Honeypot(s) => Some(("honeypot_signal", serde_json::to_string(s)?)),
-            Signal::LiquidityRemoval(s) => Some(("liquidity_removal", serde_json::to_string(s)?)),
-            Signal::LpApproval(s) => Some(("lp_approval", serde_json::to_string(s)?)),
-            Signal::ScamDetection(_) => None,
+        let (topic, json_data) = match signal {
+            Signal::TradingEnabled(s) => ("trading_enabled", serde_json::to_string(s)?),
+            Signal::TaxSignal(s) => ("tax_signal", serde_json::to_string(s)?),
+            Signal::Honeypot(s) => ("honeypot_signal", serde_json::to_string(s)?),
+            Signal::LiquidityRemoval(s) => ("liquidity_removal", serde_json::to_string(s)?),
+            Signal::LpApproval(s) => ("lp_approval", serde_json::to_string(s)?),
         };
-
-        if topic_and_data.is_none() {
-            return Ok(());
-        }
-        let (topic, json_data) = topic_and_data.unwrap();
 
         // Log what we're about to send
         debug!(
@@ -450,8 +437,6 @@ impl SignalPublisher {
                 )?;
                 self.log_files.liquidity_removal.flush()?;
             }
-            // ScamDetection is deprecated: no log output
-            Signal::ScamDetection(_) => {}
             Signal::LpApproval(s) => {
                 let percent_str = s
                     .approval_percentage
@@ -514,10 +499,6 @@ impl SignalPublisher {
                 .stats
                 .lp_approvals
                 .load(std::sync::atomic::Ordering::Relaxed),
-            scam_detections: self
-                .stats
-                .scam_detections
-                .load(std::sync::atomic::Ordering::Relaxed),
             zmq_published: self
                 .stats
                 .zmq_published
@@ -548,7 +529,6 @@ pub struct PublisherStatsSnapshot {
     pub honeypot_signals: u64,
     pub liquidity_removals: u64,
     pub lp_approvals: u64,
-    pub scam_detections: u64,
     pub zmq_published: u64,
     pub logs_written: u64,
     pub db_written: u64,

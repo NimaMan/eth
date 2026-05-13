@@ -8,7 +8,6 @@ workspace = ".."
 
 # Real-time JSON-RPC/WebSocket/IPC client
 tokio           = { version = "1.37", features = ["full"] }
-tokio-stream    = "0.1"
 tracing         = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 tracing-appender = "0.2"
@@ -25,7 +24,7 @@ reqwest         = "0.11"
 # URL handling
 url             = "2.5"
 
-# ZeroMQ PUB/SUB to Python
+# ZeroMQ signal fanout
 zmq             = "0.10"
 
 # Time handling
@@ -60,8 +59,6 @@ bytes           = "1.5"
 ethereum-types  = "0.14"
 ethabi          = "18.0"
 lazy_static     = "1.4"
-redis           = { version = "0.32.7", features = ["tokio-comp", "safe_iterators"] }
-
 serde           = { version = "1.0", features = ["derive"] }
 serde_json      = "1.0"
 toml            = "0.8"
@@ -84,7 +81,6 @@ warp            = "0.3"
 tokio-tungstenite = "0.20"
 
 # Transaction processing with proven tax calculation
-eth_live_feed = { path = "../alpha/live/feed" }
 eth_token = { path = "../eth_token" }
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
@@ -170,10 +166,6 @@ path = "examples/test_unified_writer.rs"
 [[example]]
 name = "full_pipeline_signal_detection"
 path = "examples/signal_detector/full_signal_detection_pipeline.rs"
-
-[[example]]
-name = "export_all_tokens_from_cache_to_csv"
-path = "examples/token_tracking/export_all_tokens_from_cache_to_csv.rs"
 
 [[example]]
 name = "replay_trading_enabled_signal"

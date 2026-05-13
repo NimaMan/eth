@@ -91,10 +91,14 @@ Failure isolation rules:
 - Live simulations can use only local Reth historical state or Redis live state.
   If neither source has the needed block/state, fail with a source-specific
   error.
-- Live token-server snapshots are accepted only when `status=live` and their
-  context block is not below the last accepted context block. Warming, empty, or
-  stale snapshots are rejected and counted; Redis startup fallback remains
-  available until a valid live snapshot is accepted.
+- Mempool token context comes only from token-server `/live/tokens` and
+  `/live/pools`. `/live/updates` is a notification-only long-poll wakeup: when
+  token-server broadcasts `BlockApplied`, the request returns and mempool
+  immediately reloads `/live/tokens` and `/live/pools`. Redis token snapshots
+  and token-update ZMQ are not context sources.
+- Live token-server snapshots are accepted while `status=warming` until the
+  first live context is accepted. After that, only `status=live` snapshots are
+  accepted, and lower-block snapshots are rejected and counted.
 - ZMQ/log output is diagnostic; persisted Postgres rows are the source of truth
   for token-server, ASENA, and alpha.
 

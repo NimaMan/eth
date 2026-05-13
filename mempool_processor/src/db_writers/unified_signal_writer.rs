@@ -205,11 +205,6 @@ impl UnifiedSignalWriter {
                     debug!("LP approval signal writer not available");
                 }
             }
-
-            // ScamDetection signals are no longer written to DB
-            Signal::ScamDetection(_s) => {
-                debug!("Skipping ScamDetection signal (DB disabled)");
-            }
         }
 
         Ok(())

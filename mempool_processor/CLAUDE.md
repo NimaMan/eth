@@ -94,7 +94,7 @@ src/
 **TokenTrackingCache** (`token_tracking/cache.rs`):
 - Maintains token metadata and trading status
 - Used by signal manager for trading status filtering
-- ZMQ subscriber for Python publisher updates
+- Hydrates from `eth_token_server` `/live/tokens` and `/live/pools`
 
 **Tax Calculation** (`token_tracking/token_parameter_extraction/tax_calculator.rs`):
 - Core functions: `calculate_buy_tax()`, `calculate_sell_tax()`
@@ -168,13 +168,13 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 - **Simulation amounts**: 0.01 ETH primary, 0.001 ETH fallback
 - **Tax thresholds**: 25% for buy/sell tax warnings
 - **Channel buffer**: 50,000 transactions
-- **ZMQ endpoint**: tcp://127.0.0.1:5557
+- **Signal ZMQ endpoint**: tcp://127.0.0.1:5556
 
 
 ## Notes for Future Development
 
 - Simulation manager is the bottleneck, not signal detection
-- Pool state synchronization with Python publisher is critical  
+- Pool state synchronization with token-server HTTP is critical
 - Transaction ordering matters for nonce handling
 - V2/Sushi and V3 pool support are active where the token cache has enough
   metadata; V4 removal intent is surfaced as unknown-severity risk until V4

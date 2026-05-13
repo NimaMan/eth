@@ -1,29 +1,32 @@
 use chrono::Utc;
 use eyre::Result;
-use mempool_processor::config::{DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT};
 use mempool_processor::function_detector::FunctionDetector;
 /// Transaction Router with Token Cache Example
 ///
 /// This example demonstrates the complete pipeline:
-/// 1. Connects to Python publisher to get token/pool data
-/// 2. Builds token cache from published data
+/// 1. Hydrates token/pool context from eth_token_server
+/// 2. Keeps the local cache updated from token-server notifications
 /// 3. Processes 1000 transactions through IPC → Function Detector → TX Router
 /// 4. Uses token cache to properly classify creator transactions
 /// 5. Logs detailed results for verification
 ///
 /// Algorithm:
-/// - Initialize token tracking subscriber to receive pool/creator data from Python
+/// - Initialize token tracking cache from token-server live HTTP views
 /// - Wait for initial cache population (2 seconds)
 /// - Process transactions in batches through function detector
 /// - Use TransactionRouter with populated token cache for accurate classification
 /// - Track statistics: creator txs, dex interactions, contract creations
 /// - Log routing decisions with token cache hits/misses
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
-use mempool_processor::token_tracking::TokenTrackingSubscriber;
+use mempool_processor::token_tracking::{
+    hydrate_cache_from_live_token_server, start_live_token_server_cache_sync, CacheConfig,
+    TokenTrackingCache,
+};
 use mempool_processor::tx_router::{SimulationPriority, TransactionCategory, TransactionRouter};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -57,19 +60,11 @@ async fn main() -> Result<()> {
     writeln!(log_file, "=========================================")?;
     info!("📁 Logging to: {}", log_path.display());
 
-    // Initialize token tracker to get cache from Python publisher
-    info!("📊 Initializing token tracker to receive pool/creator data...");
-    let mut token_tracker = build_token_subscriber(0.1); // 0.1 ETH threshold
-    let token_cache = token_tracker.get_cache();
+    // Initialize token context from eth_token_server.
+    info!("📊 Initializing token context from eth_token_server...");
+    let token_cache = build_token_cache(0.1).await; // 0.1 ETH threshold
 
-    // Start listening for token updates in background
-    tokio::spawn(async move {
-        if let Err(e) = token_tracker.start_listening().await {
-            warn!("Token tracker error: {}", e);
-        }
-    });
-
-    // Give it time to load initial data from Python publisher
+    // Give the first token-server hydrate a moment to populate cache.
     info!("⏳ Waiting for initial token cache population...");
     tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -481,18 +476,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
-    let pub_endpoint = std::env::var("TOKEN_CACHE_PUB_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string());
-    let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
-        .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
-    let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
-        .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
+async fn build_token_cache(threshold: f64) -> Arc<TokenTrackingCache> {
+    let cache = Arc::new(TokenTrackingCache::new(CacheConfig {
+        eth_threshold: threshold,
+        ..Default::default()
+    }));
+    let base_url = std::env::var("MEMPOOL_LIVE_TOKEN_SERVER_URL")
+        .unwrap_or_else(|_| mempool_processor::config::DEFAULT_LIVE_TOKEN_SERVER_URL.to_string());
 
-    println!(
-        "Token snapshot sources: redis={}, pub={}",
-        redis_url, pub_endpoint
-    );
+    println!("Token context source: {}", base_url);
+    if let Err(error) = hydrate_cache_from_live_token_server(cache.as_ref(), &base_url).await {
+        warn!("Initial token-server hydrate failed: {}", error);
+    }
+    start_live_token_server_cache_sync(cache.clone(), base_url);
 
-    TokenTrackingSubscriber::with_sources(threshold, &pub_endpoint, &redis_url, &redis_prefix)
+    cache
 }

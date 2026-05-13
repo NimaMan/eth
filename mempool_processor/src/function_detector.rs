@@ -5,21 +5,10 @@
 
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{address, Address as AlloyAddress};
-use chrono::Utc;
-use hex;
-use lazy_static::lazy_static;
 use reth_chain_query::common_addresses::ROUTERS;
 use reth_chain_query::to_checksum_address;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use tracing::{error, info, warn};
-use zmq::{Context, Socket};
-// (duplicates removed)
-use futures;
+use std::sync::Arc;
 
 /// Types of functions called by creators
 #[derive(Debug, Clone, PartialEq)]
@@ -42,116 +31,6 @@ pub struct FunctionDetectionResult {
     pub selector: String,
 }
 
-lazy_static! {
-    /// Log directory path - initialized once at startup
-    static ref LOG_DIR: PathBuf = {
-        // Check if log directory is provided via environment variable
-        if let Ok(dir) = std::env::var("FUNCTION_DETECTOR_LOG_DIR") {
-            PathBuf::from(dir)
-        } else {
-            // Fallback to default with timestamp
-            let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
-            let base_dir = PathBuf::from(crate::config::DEFAULT_LOG_DIR);
-            let dir = base_dir.join(format!("signal_detector_{}", timestamp));
-            std::fs::create_dir_all(&dir).expect("Failed to create log directory");
-            dir
-        }
-    };
-
-    /// Liquidity removal log file
-    static ref LIQUIDITY_REMOVAL_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("liquidity_removals.log");
-        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .expect("Failed to open liquidity removal log file");
-
-        Mutex::new(file)
-    };
-
-    /// Trading enabled log file
-    static ref TRADING_ENABLED_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("trading_enabled.log");
-        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .expect("Failed to open trading enabled log file");
-
-        Mutex::new(file)
-    };
-
-
-
-
-
-    /// Global statistics
-    static ref FUNCTION_STATS: Mutex<FunctionStats> = Mutex::new(FunctionStats::default());
-
-    /// ZMQ Publisher for signals (legacy path)
-    static ref ZMQ_PUBLISHER: Mutex<Option<Socket>> = {
-        let enabled = std::env::var("FUNCTION_DETECTOR_ENABLE_ZMQ")
-            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-
-        if !enabled {
-            info!(
-                "Function detector ZMQ publisher disabled (set FUNCTION_DETECTOR_ENABLE_ZMQ=1 to enable)"
-            );
-            return Mutex::new(None);
-        }
-
-        match Context::new().socket(zmq::PUB) {
-            Ok(socket) => {
-                let _ = socket.set_sndhwm(10000);
-                let _ = socket.set_linger(0);
-
-                match socket.bind("tcp://127.0.0.1:5556") {
-                    Ok(_) => {
-                        info!("✅ Function detector ZMQ publisher bound to tcp://127.0.0.1:5556");
-                        Mutex::new(Some(socket))
-                    }
-                    Err(e) => {
-                        error!("Failed to bind function detector ZMQ publisher: {}", e);
-                        Mutex::new(None)
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Failed to create function detector ZMQ socket: {}", e);
-                Mutex::new(None)
-            }
-        }
-    };
-}
-
-#[derive(Debug, Default)]
-pub struct FunctionStats {
-    pub total_checked: u64,
-    pub liquidity_removals: u64,
-    pub trading_enabled: u64,
-    pub swaps: u64,
-    pub other_functions: u64,
-}
-
-/// Signal alert for eth_kartal
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignalAlert {
-    pub alert_type: String,
-    pub function_name: String,
-    pub tx_hash: String,
-    pub from_address: String,
-    pub to_address: String,
-    pub value: String,
-    pub gas_price: String,
-    pub selector: String,
-    pub timestamp: String,
-    pub detection_latency_us: u64,
-}
-
 /// Function detector that categorizes transactions by their function signatures
 pub struct FunctionDetector {
     liquidity_removal: LiquidityRemovalDetector,
@@ -166,18 +45,6 @@ impl FunctionDetector {
     }
 
     pub fn new_with_cache(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
-        info!("🔍 Function detector initialized");
-        info!("📁 Log directory: {}", LOG_DIR.display());
-
-        // Startup information now only goes to stdout/main log via tracing
-        info!("==========================================");
-        info!("🚀 Starting Mempool Signal Detection Service");
-        info!("⚡ Using non-blocking IPC for sub-millisecond latency");
-        info!("🔍 Function detector initialized");
-        info!("📁 Log directory: {}", LOG_DIR.display());
-        info!("🎯 Starting main processing loop...");
-        info!("==========================================");
-
         Self {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
@@ -224,26 +91,6 @@ impl FunctionDetector {
         None
     }
 
-    /// Detect all function types in the transaction
-    pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::MempoolTransaction) {
-        // Use pre-parsed fields directly
-        if ipc_tx.input.is_empty() {
-            return;
-        }
-
-        let tx_hash = &ipc_tx.hash;
-        let from = to_checksum_address(&AlloyAddress::from_slice(&ipc_tx.from));
-        let to = ipc_tx
-            .to
-            .as_ref()
-            .map(|addr| to_checksum_address(&AlloyAddress::from_slice(addr)))
-            .unwrap_or_else(|| "contract_creation".to_string());
-        let value = format!("0x{:x}", ipc_tx.value);
-        let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
-
-        self.detect_all(tx_hash, &from, &to, &value, &gas_price, &ipc_tx.input);
-    }
-
     /// Process batch of transactions and return with function information and categories
     pub fn detect_batch(
         &self,
@@ -269,9 +116,6 @@ impl FunctionDetector {
                 // Store the function type for router to use
                 tx.function_category = Some(result.function_type);
             }
-
-            // Still call the existing detection for logging and ZMQ publishing
-            self.detect_from_ipc(&tx);
 
             tx.functions = functions;
         }
@@ -412,279 +256,6 @@ impl FunctionDetector {
 
         // Regular approval (not LP token or not to router)
         CreatorFunctionType::Other("approve".to_string())
-    }
-
-    /// Internal function to detect all function types with extracted details
-    fn detect_all(
-        &self,
-        tx_hash: &str,
-        from: &str,
-        to: &str,
-        value: &str,
-        gas_price: &str,
-        input_data: &[u8],
-    ) {
-        if input_data.len() < 4 {
-            return;
-        }
-
-        let selector_bytes = &input_data[0..4];
-        let mut stats = match FUNCTION_STATS.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                error!("Failed to acquire function stats lock: {}", e);
-                return;
-            }
-        };
-        stats.total_checked += 1;
-
-        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-
-        // Check liquidity removal first
-        if let Some(function_name) = self.liquidity_removal.detect(selector_bytes) {
-            stats.liquidity_removals += 1;
-            info!("💧 LIQUIDITY REMOVAL: {} in tx {}", function_name, tx_hash);
-
-            // Create signal alert - only encode to hex when needed for external publishing
-            let selector_hex = format!(
-                "{:02x}{:02x}{:02x}{:02x}",
-                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]
-            );
-            let signal = SignalAlert {
-                alert_type: "liquidity_removal".to_string(),
-                function_name: function_name.to_string(),
-                tx_hash: tx_hash.to_string(),
-                from_address: from.to_string(),
-                to_address: to.to_string(),
-                value: value.to_string(),
-                gas_price: gas_price.to_string(),
-                selector: selector_hex.clone(),
-                timestamp: timestamp.to_string(),
-                detection_latency_us: 0, // Will be set by receiver
-            };
-
-            // Publish via ZMQ
-            self.publish_signal(&signal);
-
-            // Log to liquidity removal file with full transaction details
-            if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
-                let _ = writeln!(
-                    log_file,
-                    "[{}] TX: {} | From: {} | To: {} | Value: {} | GasPrice: {} | Function: {} | Selector: {}",
-                    timestamp,
-                    tx_hash,
-                    from,
-                    to,
-                    value,
-                    gas_price,
-                    function_name,
-                    selector_hex
-                );
-                let _ = log_file.flush();
-            }
-            return;
-        }
-
-        // Check trading enabled
-        if let Some(function_name) = self.trading_enabled.detect(selector_bytes) {
-            stats.trading_enabled += 1;
-            info!("🎯 TRADING ENABLED: {} in tx {}", function_name, tx_hash);
-
-            // Try to get the actual token address from creator cache
-            let token_address = if let Some(ref cache) = self.token_cache {
-                // Use tokio runtime to run async function
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        cache
-                            .get_token_for_creator(&from.to_string())
-                            .await
-                            .map(|token_info| token_info.address.clone())
-                    })
-                })
-            } else {
-                None
-            };
-
-            // Use found token address or fall back to 'to' address or empty
-            let token_addr = token_address.unwrap_or_else(|| {
-                if to != "contract_creation" {
-                    to.to_string()
-                } else {
-                    String::new()
-                }
-            });
-
-            // Create signal alert - only encode to hex when needed for external publishing
-            let selector_hex = format!(
-                "{:02x}{:02x}{:02x}{:02x}",
-                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]
-            );
-            let signal = SignalAlert {
-                alert_type: "trading_enabled".to_string(),
-                function_name: function_name.to_string(),
-                tx_hash: tx_hash.to_string(),
-                from_address: from.to_string(),
-                to_address: to.to_string(),
-                value: value.to_string(),
-                gas_price: gas_price.to_string(),
-                selector: selector_hex.clone(),
-                timestamp: timestamp.to_string(),
-                detection_latency_us: 0, // Will be set by receiver
-            };
-
-            // Publish via ZMQ
-            self.publish_signal(&signal);
-
-            // Log to trading enabled file with pattern-friendly format including token address
-            if let Ok(mut log_file) = TRADING_ENABLED_LOG.lock() {
-                let _ = writeln!(
-                    log_file,
-                    "[{}] {} | {} | {} | {}",
-                    timestamp, function_name, token_addr, from, tx_hash
-                );
-                let _ = log_file.flush();
-            }
-            return;
-        }
-
-        // Check swaps - we count them but don't log/alert
-        if let Some(_function_name) = self.swap.detect(selector_bytes) {
-            stats.swaps += 1;
-            return;
-        }
-
-        // Check for approve function - log if it's an LP token approval
-        // Note: Classification already done in detect_and_categorize, this is just for logging
-        if selector_bytes == &hex_to_bytes("095ea7b3") {
-            // Check if this was classified as an LP approval
-            // We need to check the same way as classify_approve does
-            if input_data.len() >= 68 {
-                if approval_spender(input_data)
-                    .map(|spender| is_known_lp_approval_spender(&spender))
-                    .unwrap_or(false)
-                {
-                    // Check if the 'to' address is a pool
-                    let is_lp_approval = if let Some(ref cache) = self.token_cache {
-                        tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(async { cache.is_pool(&to.to_string()).await })
-                        })
-                    } else {
-                        false
-                    };
-
-                    if is_lp_approval {
-                        // This is an LP token approval - critical signal!
-                        stats.liquidity_removals += 1; // Count as liquidity removal preparation
-                        info!(
-                            "🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}",
-                            tx_hash
-                        );
-
-                        // Create critical signal alert
-                        let selector_hex = format!(
-                            "{:02x}{:02x}{:02x}{:02x}",
-                            selector_bytes[0],
-                            selector_bytes[1],
-                            selector_bytes[2],
-                            selector_bytes[3]
-                        );
-                        let signal = SignalAlert {
-                            alert_type: "lp_token_approval".to_string(),
-                            function_name: "approve (LP Token)".to_string(),
-                            tx_hash: tx_hash.to_string(),
-                            from_address: from.to_string(),
-                            to_address: to.to_string(),
-                            value: value.to_string(),
-                            gas_price: gas_price.to_string(),
-                            selector: selector_hex.clone(),
-                            timestamp: timestamp.to_string(),
-                            detection_latency_us: 0,
-                        };
-
-                        // Publish via ZMQ
-                        self.publish_signal(&signal);
-
-                        // Log to liquidity removal file as preparation
-                        if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
-                            let _ = writeln!(
-                                log_file,
-                                "[{}] LP APPROVAL TX: {} | From: {} | LP Pair: {} | Value: {} | GasPrice: {} | Function: approve (LP Token) | Selector: {}",
-                                timestamp,
-                                tx_hash,
-                                from,
-                                to,
-                                value,
-                                gas_price,
-                                selector_hex
-                            );
-                            let _ = log_file.flush();
-                        }
-                        return;
-                    }
-                }
-            }
-            // Regular token approval - just count
-            stats.other_functions += 1;
-            return;
-        }
-
-        // All other functions - just count them
-        stats.other_functions += 1;
-    }
-
-    /// Get the log directory path
-    pub fn get_log_dir(&self) -> &std::path::Path {
-        &*LOG_DIR
-    }
-
-    /// Get statistics
-    pub fn get_stats(&self) -> FunctionStats {
-        match FUNCTION_STATS.lock() {
-            Ok(guard) => guard.clone(),
-            Err(e) => {
-                error!("Failed to acquire function stats lock: {}", e);
-                FunctionStats::default()
-            }
-        }
-    }
-
-    /// Publish signal via ZMQ
-    fn publish_signal(&self, signal: &SignalAlert) {
-        if let Ok(publisher) = ZMQ_PUBLISHER.lock() {
-            if let Some(ref socket) = *publisher {
-                match serde_json::to_string(signal) {
-                    Ok(json) => {
-                        match socket.send(&json, zmq::DONTWAIT) {
-                            Ok(_) => {
-                                // Signal published successfully
-                            }
-                            Err(zmq::Error::EAGAIN) => {
-                                warn!("ZMQ publisher buffer full, signal dropped");
-                            }
-                            Err(e) => {
-                                error!("Failed to publish signal: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to serialize signal: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Log periodic statistics summary
-    pub fn log_stats_summary(&self) {
-        let stats = self.get_stats();
-
-        info!("📊 Function Detection Statistics:");
-        info!("   Total transactions checked: {}", stats.total_checked);
-        info!("   Liquidity removals: {}", stats.liquidity_removals);
-        info!("   Trading enabled: {}", stats.trading_enabled);
-        info!("   Swaps: {}", stats.swaps);
-        info!("   Other functions: {}", stats.other_functions);
     }
 }
 
@@ -878,18 +449,6 @@ impl SwapDetector {
             self.signatures.get(&key).copied()
         } else {
             None
-        }
-    }
-}
-
-impl Clone for FunctionStats {
-    fn clone(&self) -> Self {
-        Self {
-            total_checked: self.total_checked,
-            liquidity_removals: self.liquidity_removals,
-            trading_enabled: self.trading_enabled,
-            swaps: self.swaps,
-            other_functions: self.other_functions,
         }
     }
 }

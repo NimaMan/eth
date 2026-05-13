@@ -70,9 +70,9 @@ python3 performance/test_alert_throughput.py
 - **Note**: Run during active trading hours for best results
 
 #### `integration_test_pool_levels.py`
-- **Purpose**: Tests pool subscriber integration
-- **What it tests**: Pool state updates via ZMQ
-- **Note**: Requires Python pool publisher running
+- **Purpose**: Legacy pool-subscriber validation
+- **What it tests**: Historical ZMQ pool update path
+- **Note**: Deprecated; live token context now comes from token-server HTTP.
 
 ### Performance Tests
 
@@ -134,7 +134,7 @@ From `VALIDATION_CHECKLIST.md`, the alert system must:
 ### No alerts in E2E test
 - Run during active trading hours (9am-5pm EST best)
 - Verify Reth node is synced: `curl http://localhost:8545`
-- Check pool subscriber is running on port 5557
+- Check token-server live context is reachable: `curl http://127.0.0.1:8765/eth/tokens/api/live/status`
 - Lower thresholds: `--percentage-threshold 0.2`
 
 ### Throughput test fails

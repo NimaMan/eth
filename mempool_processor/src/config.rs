@@ -18,11 +18,7 @@ pub const MEMPOOL_RETH_DATADIR_ENV: &str = "MEMPOOL_RETH_DATADIR";
 pub const MEMPOOL_LOG_DIR_ENV: &str = "MEMPOOL_LOG_DIR";
 pub const MEMPOOL_SIM_WORKERS_ENV: &str = "MEMPOOL_SIM_WORKERS";
 pub const MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_SIGNAL_ENDPOINT";
-pub const MEMPOOL_ZMQ_ALERT_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_ALERT_ENDPOINT";
 pub const MEMPOOL_DATABASE_URL_ENV: &str = "MEMPOOL_DATABASE_URL";
-pub const MEMPOOL_TOKEN_CACHE_REDIS_URL_ENV: &str = "MEMPOOL_TOKEN_CACHE_REDIS_URL";
-pub const MEMPOOL_TOKEN_CACHE_REDIS_PREFIX_ENV: &str = "MEMPOOL_TOKEN_CACHE_REDIS_PREFIX";
-pub const MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT_ENV: &str = "MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT";
 pub const MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV: &str = "MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD";
 pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
@@ -39,14 +35,9 @@ pub const DEFAULT_ETH_RPC_URL: &str = "http://127.0.0.1:8545";
 pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the shared Ethereum workspace.
 pub const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/mempool_processor";
-pub const DEFAULT_TOKEN_CACHE_PUB_ENDPOINT: &str = "tcp://127.0.0.1:5557";
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
-pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "eth/live/token/snapshot/";
 pub const MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV: &str = "MEMPOOL_LIVE_TOKEN_SERVER_URL";
-pub const MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS_ENV: &str =
-    "MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS";
 pub const DEFAULT_LIVE_TOKEN_SERVER_URL: &str = "http://127.0.0.1:8765";
-pub const DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS: u64 = 5;
 
 /// Path to the shared Ethereum workspace config.
 pub fn eth_config_path() -> PathBuf {
@@ -88,7 +79,7 @@ pub fn eth_rpc_url_from_env() -> String {
         .unwrap_or_else(|| DEFAULT_ETH_RPC_URL.to_string())
 }
 
-/// Redis URL for live blockchain/token snapshot data.
+/// Redis URL for live chain state used by ahead-of-MDBX simulations.
 pub fn live_data_redis_url_from_env() -> String {
     config_value(&[LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV])
         .unwrap_or_else(|| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
@@ -216,10 +207,6 @@ fn default_live_data_redis_url() -> String {
 
 fn default_live_token_server_url() -> Option<String> {
     Some(DEFAULT_LIVE_TOKEN_SERVER_URL.to_string())
-}
-
-fn default_live_token_server_sync_interval_secs() -> u64 {
-    DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS
 }
 
 /// Main configuration structure
@@ -404,9 +391,6 @@ pub struct ZmqConfig {
     /// Signal publisher endpoint
     pub signal_endpoint: String,
 
-    /// Alert publisher endpoint
-    pub alert_endpoint: String,
-
     /// Send high water mark
     pub send_hwm: i32,
 
@@ -422,15 +406,6 @@ pub struct TokenCacheSourceConfig {
     /// HTTP base URL for the Rust token server that owns the live token tracker
     #[serde(default = "default_live_token_server_url")]
     pub live_token_server_url: Option<String>,
-    /// Poll interval for refreshing the mempool cache from the live token tracker
-    #[serde(default = "default_live_token_server_sync_interval_secs")]
-    pub live_token_server_sync_interval_secs: u64,
-    /// ZMQ PUB endpoint for token update notifications
-    pub zmq_pub_endpoint: String,
-    /// Redis URL hosting live token snapshots
-    pub redis_url: String,
-    /// Key prefix for token snapshots
-    pub redis_token_prefix: String,
 }
 
 impl Default for TokenCacheSourceConfig {
@@ -438,10 +413,6 @@ impl Default for TokenCacheSourceConfig {
         Self {
             eth_threshold: 0.1,
             live_token_server_url: default_live_token_server_url(),
-            live_token_server_sync_interval_secs: DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS,
-            zmq_pub_endpoint: DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string(),
-            redis_url: live_data_redis_url_from_env(),
-            redis_token_prefix: DEFAULT_REDIS_TOKEN_PREFIX.to_string(),
         }
     }
 }
@@ -520,7 +491,6 @@ impl Default for MempoolProcessorConfig {
             zmq: ZmqConfig {
                 enabled: true,
                 signal_endpoint: "tcp://127.0.0.1:5556".to_string(),
-                alert_endpoint: "tcp://127.0.0.1:5557".to_string(),
                 send_hwm: 10000,
                 linger: 0,
             },
@@ -572,25 +542,9 @@ impl MempoolProcessorConfig {
             config.zmq.signal_endpoint = endpoint;
         }
 
-        if let Some(endpoint) = config_value(&[MEMPOOL_ZMQ_ALERT_ENDPOINT_ENV]) {
-            config.zmq.alert_endpoint = endpoint;
-        }
-
         if let Some(url) = config_value(&[MEMPOOL_DATABASE_URL_ENV]) {
             config.database.url = Some(url);
             config.database.enabled = true;
-        }
-
-        if let Some(redis_url) = config_value(&[MEMPOOL_TOKEN_CACHE_REDIS_URL_ENV]) {
-            config.token_cache_source.redis_url = redis_url;
-        }
-
-        if let Some(prefix) = config_value(&[MEMPOOL_TOKEN_CACHE_REDIS_PREFIX_ENV]) {
-            config.token_cache_source.redis_token_prefix = prefix;
-        }
-
-        if let Some(pub_endpoint) = config_value(&[MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT_ENV]) {
-            config.token_cache_source.zmq_pub_endpoint = pub_endpoint;
         }
 
         if let Some(url) = config_value(&[MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV]) {
@@ -601,14 +555,6 @@ impl MempoolProcessorConfig {
                 } else {
                     Some(url.to_string())
                 };
-        }
-
-        if let Some(interval) = config_value(&[MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS_ENV]) {
-            if let Ok(val) = interval.parse::<u64>() {
-                config
-                    .token_cache_source
-                    .live_token_server_sync_interval_secs = val.max(1);
-            }
         }
 
         if let Some(threshold) = config_value(&[MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV]) {

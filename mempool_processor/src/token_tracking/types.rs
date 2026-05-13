@@ -4,10 +4,9 @@
 // 1. Single source of truth for each concept
 // 2. Arc-wrapped for zero-copy sharing
 // 3. Proper type aliases for clarity
-// 4. Serde compatibility with Python
+// 4. Serde compatibility with token-server HTTP views
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 
 /// Type alias for Ethereum addresses (checksummed hex strings)
@@ -56,7 +55,7 @@ pub struct Token {
     #[serde(default)]
     pub renouncement_block: Option<BlockNumber>,
 
-    // Tax state - from Python (0-100 range)
+    // Tax state in percentage points (0-100 range)
     #[serde(alias = "current_buy_tax")]
     pub buy_tax: Option<f64>,
     #[serde(alias = "current_sell_tax")]
@@ -83,7 +82,7 @@ pub struct Token {
     pub total_liquidity: f64,
 }
 
-/// Lifecycle states shared with Python publisher
+/// Lifecycle states shared with token-server views.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PoolLifecycle {
@@ -155,7 +154,7 @@ pub struct Pool {
     #[serde(default)]
     pub can_sell: bool,
 
-    // System metadata (not from Python)
+    // Local cache metadata
     #[serde(skip, default = "std::time::Instant::now")]
     pub received_at: std::time::Instant,
 }
@@ -187,7 +186,7 @@ pub struct PendingTaxChange {
     pub function_selector: Option<String>,
 }
 
-/// Update message from Python
+/// Batch token/pool cache update.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenUpdate {
     pub message_type: String,
@@ -197,7 +196,7 @@ pub struct TokenUpdate {
     pub data: HashMap<Address, TokenWithPools>,
 }
 
-/// Token with embedded pools (as sent by Python)
+/// Token with embedded pool context from token-server views.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenWithPools {
     // All Token fields
@@ -291,118 +290,4 @@ where
     }
 
     deserializer.deserialize_option(SupplyVisitor)
-}
-
-// ===== ZMQ Message Types (for Python communication) =====
-
-/// Pool update from Python (legacy format)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolUpdate {
-    pub eth_reserve: f64,
-    pub token_reserve: f64,
-    pub token_address: Address,
-    pub pool_type: PoolType,
-    pub block_number: BlockNumber,
-    pub update_time: f64,
-}
-
-/// Bulk pool updates message
-#[derive(Debug, Clone, Deserialize)]
-pub struct PoolUpdatesMessage {
-    pub message_type: String,
-    pub pool_count: usize,
-    pub block_number: BlockNumber,
-    pub timestamp: f64,
-    pub data: HashMap<Address, PoolUpdate>,
-}
-
-/// Token creator information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TokenCreator {
-    pub creator_address: Address,
-    pub token_address: Address,
-    pub creation_block: BlockNumber,
-    pub creation_tx_hash: TxHash,
-    pub creation_time: f64,
-    pub uses_private_mempool: bool,
-}
-
-/// Single creator update message
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenCreatorMessage {
-    pub message_type: String,
-    pub creator: TokenCreator,
-}
-
-/// Bulk creators update message
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenCreatorsMessage {
-    pub message_type: String,
-    pub creator_count: usize,
-    pub data: HashMap<Address, TokenCreator>,
-}
-
-/// Token-centric updates message (new format)
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenUpdatesMessage {
-    #[serde(rename = "type")]
-    pub message_type: String, // Python sends "type", we call it message_type
-    pub token_count: usize,
-    pub block_number: BlockNumber,
-    pub timestamp: f64,
-    #[serde(default)]
-    pub data: Value,
-}
-
-/// Response to token query requests
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenQueryResponse {
-    pub status: String,
-    pub count: Option<usize>,
-    pub error: Option<String>,
-    pub data: Option<Value>,
-}
-
-/// Creator state information (unused but kept for compatibility)
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenCreatorState {
-    pub address: Address,
-    pub block_number: BlockNumber,
-    pub timestamp: f64,
-}
-
-pub enum TokenUpdatePayload {
-    TokenMap(HashMap<Address, TokenWithPools>),
-    Addresses(Vec<String>),
-    Empty,
-}
-
-impl TokenUpdatesMessage {
-    pub fn into_snapshot_map(self) -> TokenUpdatePayload {
-        match self.data {
-            Value::Object(map) => {
-                let value = Value::Object(map);
-                match serde_json::from_value::<HashMap<Address, TokenWithPools>>(value) {
-                    Ok(parsed) if !parsed.is_empty() => TokenUpdatePayload::TokenMap(parsed),
-                    Ok(_) => TokenUpdatePayload::Empty,
-                    Err(err) => {
-                        tracing::warn!("Failed to parse token snapshot payload: {}", err);
-                        TokenUpdatePayload::Empty
-                    }
-                }
-            }
-            Value::Array(arr) => {
-                let addresses: Vec<String> = arr
-                    .into_iter()
-                    .filter_map(|val| val.as_str().map(|s| s.to_string()))
-                    .collect();
-                if addresses.is_empty() {
-                    TokenUpdatePayload::Empty
-                } else {
-                    TokenUpdatePayload::Addresses(addresses)
-                }
-            }
-            _ => TokenUpdatePayload::Empty,
-        }
-    }
 }
