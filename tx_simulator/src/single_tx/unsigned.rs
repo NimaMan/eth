@@ -6,7 +6,7 @@
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
-    simulation_revert_decoder::decode_revert_reason,
+    revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
     tx_fee_parameters::{GasInputs, TxFeeContext},

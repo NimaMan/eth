@@ -13,7 +13,7 @@
 /// between transactions, use SimulationChain instead.
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
-    simulation_revert_decoder::decode_revert_reason,
+    revert::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     tx_fee_parameters::{GasInputs, TxFeeContext},

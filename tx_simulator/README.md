@@ -56,7 +56,7 @@ ahead of that context, `LiveTxSimulator` hydrates from the live chain cache.
 | Stateful tx chains | `src/tx_chain/unsigned.rs`, `src/tx_chain/signed.rs` |
 | Block traces and parity | `src/block_trace/`, `examples/block/` |
 | Live state replay | `src/live/`, `src/block_context/` |
-| Revert/debug helpers | `src/simulation_revert_decoder.rs`, `src/tracers/` |
+| Revert/debug helpers | `src/revert/`, `src/tracers/` |
 
 ## Tests And Commands
 

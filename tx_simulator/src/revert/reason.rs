@@ -7,10 +7,18 @@ use std::convert::TryFrom;
 
 use crate::types::RevertContext;
 
+use super::decoder::decode_revert_output;
+
 /// Decode revert data from EVM execution into a human-readable message
 pub fn decode_revert_data(revert_data: &Bytes) -> String {
     if revert_data.is_empty() {
         return "Empty revert payload".to_string();
+    }
+
+    if let Some(decoded) = decode_revert_output(revert_data.as_ref()) {
+        if decoded.signature == Some("WrappedError(address,bytes4,bytes,bytes)") {
+            return decoded.summary;
+        }
     }
 
     // Convert to hex string for processing
@@ -92,6 +100,7 @@ pub fn decode_revert_message(revert_data: &str) -> String {
         "b4fa3fb3" => "V3: STF".to_string(), // SafeTransferFrom failed
         "b9ec1e96" => "V3: TF".to_string(),  // Transfer failed
         "025dbdd4" => "V3: SPL".to_string(), // Sqrt Price Limit
+        "316cf0eb" => "V3InvalidSwap".to_string(),
 
         // Common ERC20 errors
         "cc2e993e" => "TradingNotEnabled".to_string(),
@@ -113,6 +122,7 @@ pub fn decode_revert_message(revert_data: &str) -> String {
         "675cae38" => "InsufficientLiquidity".to_string(),
         "5c7c9124" => "InvalidPath".to_string(),
         "1ab7da6b" => "Expired".to_string(),
+        "3b99b53d" => "SliceOutOfBounds".to_string(),
 
         // Safe math errors
         "50df29df" => "SafeMath: subtraction overflow".to_string(),
@@ -251,6 +261,12 @@ mod tests {
         let revert_data = "0xb4fa3fb3";
         let decoded = decode_revert_message(revert_data);
         assert_eq!(decoded, "V3: STF");
+    }
+
+    #[test]
+    fn test_decode_universal_router_v3_errors() {
+        assert_eq!(decode_revert_message("0x316cf0eb"), "V3InvalidSwap");
+        assert_eq!(decode_revert_message("0x3b99b53d"), "SliceOutOfBounds");
     }
 
     #[test]

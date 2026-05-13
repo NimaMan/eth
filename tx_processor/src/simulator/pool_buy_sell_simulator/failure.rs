@@ -1,11 +1,11 @@
 use std::convert::TryInto;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, Selector, U256, hex};
+use alloy_primitives::{hex, Address, Selector, U256};
 use tx_simulator::types::CallFrame;
 use tx_simulator::{FullSimulationResult, TxSimulator, UnsignedTransaction};
 
-use crate::simulator::revert_decoder::describe_revert_output;
+use tx_simulator::revert::describe_revert_output;
 
 const SELECTOR_TRANSFER: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 const SELECTOR_TRANSFER_FROM: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
@@ -451,7 +451,7 @@ fn format_failure_context(ctx: &FailureContext) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Bytes, U256, address};
+    use alloy_primitives::{address, Bytes, U256};
     use tx_simulator::RevertContext;
 
     fn frame(to: Address, input: Bytes, calls: Vec<CallFrame>) -> CallFrame {

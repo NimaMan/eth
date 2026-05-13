@@ -5,7 +5,7 @@ use crate::single_tx::unsigned::UnsignedTransaction;
 /// committing state changes between steps. Useful for buy → approve → sell
 /// flows with real signatures.
 use crate::{
-    simulation_revert_decoder::decode_revert_reason,
+    revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
     types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},

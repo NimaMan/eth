@@ -4,7 +4,7 @@
 /// with valid signatures (v, r, s).
 use crate::{
     block_context::BlockStateProvider,
-    simulation_revert_decoder::decode_revert_reason,
+    revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::{ForkedState, SharedStateProvider, SharedStateProviderDatabase},
     types::{FullSimulationResult, SimulationResult},

@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256, hex};
+use alloy_primitives::{hex, Address, U256};
 
 const SELECTOR_ERROR_STRING: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
 const SELECTOR_PANIC: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];

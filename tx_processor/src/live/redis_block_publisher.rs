@@ -3,7 +3,7 @@ use eyre::{eyre, Result};
 use redis::{aio::ConnectionManager, Client};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tx_simulator::live_chain_data::{live_data_registry::keys, ChainStateSnapshot};
+use tx_simulator::block_context::live_data_registry::{keys, ChainStateSnapshot};
 
 /// Writes live block snapshots into Redis using the current processed-block shape.
 pub struct RedisBlockPublisher {

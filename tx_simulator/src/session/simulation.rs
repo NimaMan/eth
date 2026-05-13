@@ -10,7 +10,7 @@ use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 use crate::{
-    simulation_revert_decoder::decode_revert_reason,
+    revert::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::{signed::SignedTransaction, unsigned::UnsignedTransaction},
     tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},

@@ -5,7 +5,10 @@ use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 use std::str::FromStr;
-use tx_simulator::{live_chain_data::ChainStateSnapshot, TxSimulator};
+use tx_simulator::{
+    block_context::live_data_registry::{keys, ChainStateSnapshot},
+    TxSimulator,
+};
 
 use crate::live::{
     block_logger::BlockProcessingLogger,
@@ -232,8 +235,7 @@ fn redis_processed_block_stream() -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| {
-            tx_simulator::live_chain_data::live_data_registry::keys::processed_block_stream_key()
-                .to_string()
+            keys::processed_block_stream_key().to_string()
         })
 }
 

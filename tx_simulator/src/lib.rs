@@ -28,9 +28,8 @@ pub mod block_trace;
 pub mod contract_simulation;
 pub mod header_utils;
 pub mod live;
-pub mod live_chain_data;
+pub mod revert;
 pub mod session;
-pub mod simulation_revert_decoder;
 pub mod tx_builders;
 
 // Back-compat module paths for external crates relying on previous layout
@@ -56,7 +55,7 @@ pub mod block_simulation {
 }
 
 pub mod live_chain_cache {
-    pub use crate::live_chain_data::live_chain_cache::*;
+    pub use crate::block_context::live_chain_cache::*;
 }
 
 // Re-export main types

@@ -40,7 +40,7 @@ Key Building Blocks Here
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
 - Live simulator: tx_simulator/src/live/simulator.rs:1
   - Selects local historical context when caught up, otherwise tracked live state.
-- Trace decoding helpers: tx_simulator/src/simulation_revert_decoder.rs:1
+- Revert decoding helpers: tx_simulator/src/revert/:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.

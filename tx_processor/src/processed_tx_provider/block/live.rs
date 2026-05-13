@@ -9,7 +9,7 @@ use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use reth_chain_query::provider::BlockHeader;
 use serde::Deserialize;
-use tx_simulator::live_chain_data::live_data_registry::keys;
+use tx_simulator::block_context::live_data_registry::keys;
 
 use super::compact::CompactProcessedTransaction;
 use super::load::{LoadedProcessedBlock, ProcessedBlockProvider};
