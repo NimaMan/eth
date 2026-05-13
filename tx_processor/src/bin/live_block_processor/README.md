@@ -1,11 +1,13 @@
 # live_block_processor
 
-Agent operating map for the Rust live processed-block publisher.
+Legacy/developer-only operating map for the Rust live processed-block
+publisher. Production live token tracking is owned by `eth_chain_server` through
+its joined `LiveChainRuntime`; it does not depend on this Redis publisher.
 
 ## Purpose
 
 - Watch Ethereum head updates, process each live block through `tx_processor`,
-  and publish a compact processed-block snapshot to Redis.
+  and publish a compact processed-block snapshot to Redis for local experiments.
 - Emit stream/pubsub notifications and enqueue a background replay-store write
   for the processed-block disk cache and address-block index.
 
@@ -13,15 +15,15 @@ Agent operating map for the Rust live processed-block publisher.
 
 - Binary `live_block_processor`.
 - Live block polling/subscription, block processing, Redis snapshot writes, and
-  compact block log output.
+  compact block log output when this legacy tool is run explicitly.
 - Background sink: `LiveProcessedBlockReplayStoreSink`.
 
 ## Does Not Own
 
 - Core transaction decoding logic; use `tx_processor/src/tx_processor/`.
-- Token registry mutation; use `eth_token` via `eth_token_server`.
+- Token registry mutation; use `eth_token` via `eth_chain_server`.
 - Mempool signals; use `mempool_processor`.
-- Systemd deployment ownership; service files live under `node/systemd/user/`.
+- Production systemd deployment; use `node/systemd/user/eth-chain-server.service`.
 
 ## Data Flow
 
@@ -42,7 +44,7 @@ Reth head update
 | Binary entrypoint | `main.rs` |
 | Live processor types | `tx_processor/src/live/` |
 | Replay-store writer | `tx_processor/src/processed_tx_provider/block/replay_store.rs` |
-| Service units | `node/systemd/user/eth-rust-live-block-processor.service` |
+| Production live runtime | `eth_chain_server/src/live/chain_runtime.rs` |
 | Runtime config | `config.env` |
 
 ## Commands
@@ -56,7 +58,7 @@ RUST_LOG=info \
 cargo run --release -p tx_processor --bin live_block_processor
 ```
 
-Continuous mode:
+Continuous local experiment:
 
 ```bash
 ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env \

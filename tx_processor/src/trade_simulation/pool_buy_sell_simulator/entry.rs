@@ -119,17 +119,10 @@ pub async fn check_can_buy_sell_pool_with_chain(
         Some(b) => b,
         None => simulator.latest_historical_context_block_number()?,
     };
-    let header_hint = block_header_hint(&config, block_number)?;
-    let header = match header_hint {
-        Some(header) => header,
-        None => {
-            simulator
-                .block_context_loader()
-                .load_block_header(block_number, None)
-                .await?
-        }
+    let base_fee = match block_header_hint(&config, block_number)? {
+        Some(header) => header.header().base_fee_per_gas.map(|fee| fee as u128),
+        None => chain.block_base_fee(),
     };
-    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
 
     check_can_buy_sell_pool_with_prepared_chain(
         simulator,

@@ -49,6 +49,11 @@ where
     insert_v3_position_transfer_candidates(registry, tx, &mut candidates);
     insert_v4_position_transfer_candidates(registry, tx, &mut candidates);
     insert_v4_position_approval_candidates(registry, tx, &mut candidates);
+    insert_v2_pair_created_candidates(registry, token_index, tx, &mut candidates);
+
+    if metadata_timeout.is_some() {
+        return Ok(candidates.into_iter().collect());
+    }
 
     for pool_address in v2_pool_event_addresses(tx) {
         let pool_address_string = address_string(&pool_address);
@@ -80,6 +85,18 @@ where
     }
 
     Ok(candidates.into_iter().collect())
+}
+
+fn insert_v2_pair_created_candidates(
+    registry: &TokenRegistry,
+    token_index: &TrackedTokenIndex,
+    tx: &ProcessedTransaction,
+    candidates: &mut BTreeSet<String>,
+) {
+    for event in &tx.uniswap_v2_pair_created_events {
+        insert_resolved_token_address(registry, token_index, candidates, event.token0);
+        insert_resolved_token_address(registry, token_index, candidates, event.token1);
+    }
 }
 
 fn insert_v3_position_transfer_candidates(

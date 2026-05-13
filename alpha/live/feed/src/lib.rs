@@ -1,10 +1,10 @@
 //! Live confirmed-chain feed pipeline contracts.
 //!
-//! This crate coordinates processed confirmed blocks, block-token updates,
-//! optional live-state writes, and downstream live-feed events. The concrete
-//! live token runtime consumes the canonical Redis live block stream while
-//! keeping token/pool state in-process for readers such as the token server and
-//! mempool risk code.
+//! This crate coordinates processed confirmed blocks, block-token updates, and
+//! downstream live-feed events. The concrete live token runtime warms from
+//! historical processed blocks and then consumes direct in-process
+//! `LiveBlockUpdate`s from the chain server while keeping token/pool state
+//! in-process for HTTP readers, mempool risk code, and alpha consumers.
 
 pub mod block_token;
 pub mod error;
@@ -21,9 +21,9 @@ pub use event::{
 };
 pub use pipeline::{LiveFeedBlockInput, LiveFeedPipeline};
 pub use runtime::{
-    LiveBlockLoad, LiveTokenError, LiveTokenEvent, LiveTokenPoolSnapshot, LiveTokenProgress,
-    LiveTokenReader, LiveTokenRuntime, LiveTokenRuntimeConfig, LiveTokenSnapshot, LiveTokenState,
-    LiveTokenStatus, RedisBlockStreamEvent, ResolvedLiveTokenRuntimeRequest,
+    LiveBlockLoad, LiveBlockUpdate, LiveTokenError, LiveTokenEvent, LiveTokenPoolSnapshot,
+    LiveTokenProgress, LiveTokenReader, LiveTokenRuntime, LiveTokenRuntimeConfig,
+    LiveTokenSnapshot, LiveTokenState, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
 };
 pub use source::ProcessedBlockSource;

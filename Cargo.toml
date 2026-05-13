@@ -17,7 +17,7 @@ members = [
     "reth_chain_query",
     "eth_token",
     "eth_price",
-    "eth_token_server",
+    "eth_chain_server",
     "mempool_processor",
     "pyreth",
 ]

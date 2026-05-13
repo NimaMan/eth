@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
-use tx_processor::{LivePoolBuySellSimulator, ProcessedBlock};
+use tx_processor::{BlockStateSession, LivePoolBuySellSimulator, ProcessedBlock};
 
 use crate::chain_metadata::{
     TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolMetadataProvider,
@@ -109,6 +112,28 @@ impl LiveBlockTokenProcessor {
                 block,
                 discovery_provider,
                 pool_simulator,
+            )
+            .await
+    }
+
+    pub async fn process_block_live_with_discovery_provider_and_sessions<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+        block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
+        direct_state_only: bool,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
+        self.block_processor
+            .process_block_with_discovery_provider_and_live_pool_simulator_sessions(
+                block,
+                discovery_provider,
+                pool_simulator,
+                block_sessions,
+                direct_state_only,
             )
             .await
     }

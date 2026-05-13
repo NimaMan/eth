@@ -52,6 +52,7 @@ pub enum PersistentProcessedBlockCacheMode {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ProcessedBlockSource {
     LiveRedis,
+    LiveDirect,
     Cache,
     Processed,
 }
@@ -60,6 +61,7 @@ impl ProcessedBlockSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LiveRedis => "live_redis_processed_block",
+            Self::LiveDirect => "live_block_update",
             Self::Cache => "processed_block_disk_cache",
             Self::Processed => "processed_block",
         }

@@ -36,6 +36,7 @@ pub struct ChainStateInfo {
 }
 
 /// A stateful simulation chain that maintains blockchain state between unsigned transactions
+#[derive(Clone)]
 pub struct UnsignedTxChainSimulation {
     /// Reference to the underlying simulator
     simulator: Arc<TxSimulator>,
@@ -147,6 +148,18 @@ impl UnsignedTxChainSimulation {
         Ok(previous)
     }
 
+    /// Treat an address as an EOA inside this fork only.
+    ///
+    /// This is intended for synthetic replay probes that need `msg.sender` to be
+    /// a contract address without tripping transaction-origin validation.
+    pub fn set_account_as_eoa_for_replay(&mut self, owner: Address) -> Result<()> {
+        let mut account = self.forked_state.db.basic(owner)?.unwrap_or_default();
+        account.code = None;
+        account.code_hash = KECCAK_EMPTY;
+        self.forked_state.db.insert_account_info(owner, account);
+        Ok(())
+    }
+
     pub fn account_storage(&mut self, account: Address, storage_key: U256) -> Result<U256> {
         self.forked_state
             .db
@@ -166,6 +179,23 @@ impl UnsignedTxChainSimulation {
             .insert_account_storage(account, storage_key, value)
             .map_err(|err| eyre::eyre!("failed to set storage for {account}: {err:?}"))?;
         Ok(previous)
+    }
+
+    /// Return storage slots currently materialized in this fork's local cache.
+    pub fn cached_account_storage(&self, account: Address) -> Vec<(U256, U256)> {
+        self.forked_state
+            .db
+            .cache
+            .accounts
+            .get(&account)
+            .map(|account| {
+                account
+                    .storage
+                    .iter()
+                    .map(|(slot, value)| (*slot, *value))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {

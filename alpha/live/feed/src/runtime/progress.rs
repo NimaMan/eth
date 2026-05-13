@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::time::now_unix_secs;
@@ -25,6 +27,43 @@ pub struct LiveTokenError {
     pub tx_index: Option<u64>,
     pub tx_hash: Option<String>,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub context: BTreeMap<String, String>,
+}
+
+impl LiveTokenError {
+    pub fn new(
+        block_number: Option<u64>,
+        tx_index: Option<u64>,
+        tx_hash: Option<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            block_number,
+            tx_index,
+            tx_hash,
+            message: message.into(),
+            detail: None,
+            context: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn with_context(mut self, key: impl Into<String>, value: impl ToString) -> Self {
+        self.context.insert(key.into(), value.to_string());
+        self
+    }
+
+    pub fn with_context_map(mut self, context: BTreeMap<String, String>) -> Self {
+        self.context.extend(context);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

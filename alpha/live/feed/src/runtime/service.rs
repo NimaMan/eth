@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use eth_live_state::keys;
 use eth_pipeline_telemetry::{
     emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
     PipelineSeverity,
@@ -18,8 +17,9 @@ use reth_chain_query::RethQueryProvider;
 use serde_json::json;
 use tokio::sync::{broadcast, watch, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
-    load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
-    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter,
+    load_processed_block, sealed_header_from_processed_block_header, BlockProcessor,
+    BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock, LiveStateDiffFrame,
+    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
 };
 
 use super::apply_report::{apply_report, push_bottleneck, push_issue};
@@ -32,7 +32,6 @@ use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
 };
-use super::redis_stream::{missing_blocks_after, RedisBlockStream};
 use super::snapshot::LiveTokenSnapshot;
 use super::state::LiveTokenState;
 use super::time::now_unix_secs;
@@ -83,6 +82,7 @@ struct LiveTokenRuntimeInner {
     stop_requested: AtomicBool,
     next_id: AtomicU64,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    direct_live_block_sessions: Mutex<BTreeMap<u64, BlockStateSession>>,
     event_tx: broadcast::Sender<LiveTokenEvent>,
     shutdown_tx: watch::Sender<bool>,
 }
@@ -93,6 +93,41 @@ pub trait LiveTokenReader: Send + Sync {
     async fn token_snapshots(&self) -> Vec<LiveTokenSnapshot>;
     async fn token_snapshot(&self, token_address: &str) -> Option<LiveTokenSnapshot>;
     fn subscribe(&self) -> broadcast::Receiver<LiveTokenEvent>;
+}
+
+#[derive(Debug)]
+pub struct LiveBlockUpdate {
+    loaded: LiveBlockLoad,
+    state_diffs: Option<Vec<LiveStateDiffFrame>>,
+}
+
+impl LiveBlockUpdate {
+    pub fn from_live_processed_block(
+        processed: LiveProcessedBlock,
+        disk_cache_write_ms: u128,
+    ) -> Self {
+        let upstream_ms = processed
+            .processed_at
+            .signed_duration_since(processed.head_arrival)
+            .num_milliseconds()
+            .max(0) as u128;
+        let state_diffs = processed.state_diffs;
+        Self {
+            loaded: LiveBlockLoad {
+                block: processed.processed_block,
+                upstream_ms,
+                disk_cache_hit: false,
+                disk_cache_read_ms: 0,
+                disk_cache_write_ms,
+                source: ProcessedBlockSource::LiveDirect.as_str(),
+            },
+            state_diffs,
+        }
+    }
+
+    pub fn block_number(&self) -> u64 {
+        self.loaded.block.header.number
+    }
 }
 
 impl LiveTokenRuntime {
@@ -113,6 +148,7 @@ impl LiveTokenRuntime {
                 stop_requested: AtomicBool::new(false),
                 next_id: AtomicU64::new(1),
                 task: Mutex::new(None),
+                direct_live_block_sessions: Mutex::new(BTreeMap::new()),
                 event_tx,
                 shutdown_tx,
             }),
@@ -136,6 +172,7 @@ impl LiveTokenRuntime {
         let request = self.resolve_request(request)?;
         self.inner.stop_requested.store(false, Ordering::SeqCst);
         let _ = self.inner.shutdown_tx.send(false);
+        self.inner.direct_live_block_sessions.lock().await.clear();
 
         {
             let mut state = self.inner.state.write().await;
@@ -213,6 +250,45 @@ impl LiveTokenRuntime {
 
     pub async fn state(&self) -> RwLockReadGuard<'_, LiveTokenState> {
         self.inner.state.read().await
+    }
+
+    pub async fn apply_live_block_update(&self, update: LiveBlockUpdate) -> Result<()> {
+        let LiveBlockUpdate {
+            loaded,
+            state_diffs,
+        } = update;
+        let block_number = loaded.block.header.number;
+        {
+            let state = self.inner.state.read().await;
+            if state.progress.status != LiveTokenStatus::Live {
+                bail!(
+                    "live token runtime is {}; cannot apply live block update {}",
+                    status_label(&state.progress.status),
+                    block_number
+                );
+            }
+        }
+
+        let discovery_provider = LiveRethChainMetadataProvider::new(self.inner.provider.as_ref());
+        let pool_simulator =
+            LivePoolBuySellSimulator::from_simulator(self.inner.provider.simulator().clone());
+        self.apply_loaded_block(
+            block_number,
+            true,
+            loaded,
+            &discovery_provider,
+            &pool_simulator,
+            state_diffs.as_deref(),
+        )
+        .await
+    }
+
+    pub async fn fail_runtime(&self, message: impl Into<String>, phase: impl Into<String>) {
+        self.mark_failed(
+            LiveTokenError::new(None, None, None, message.into())
+                .with_context("phase", phase.into()),
+        )
+        .await;
     }
 
     fn resolve_request(
@@ -328,8 +404,6 @@ impl LiveTokenRuntime {
         let tx_processor = BlockProcessor::new(self.inner.provider.clone());
         let warmup_discovery_provider =
             RethChainMetadataProvider::new(self.inner.provider.as_ref());
-        let live_discovery_provider =
-            LiveRethChainMetadataProvider::new(self.inner.provider.as_ref());
         let pool_simulator =
             LivePoolBuySellSimulator::from_simulator(self.inner.provider.simulator().clone());
 
@@ -369,58 +443,6 @@ impl LiveTokenRuntime {
         }
 
         self.mark_live().await;
-
-        let stream = match RedisBlockStream::new(
-            &self.inner.config.redis_url,
-            &self.inner.config.live_block_stream,
-            keys::latest_block_number_key(),
-        ) {
-            Ok(stream) => stream,
-            Err(error) => {
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    live_id = %request.id,
-                    error = %error,
-                    "live token runtime failed to initialize redis stream"
-                );
-                self.mark_failed(live_error_from_report(
-                    None,
-                    None,
-                    None,
-                    &error,
-                    phase_context("redis_stream_init"),
-                ))
-                .await;
-                return;
-            }
-        };
-        let live_processed_block_provider = match LiveProcessedBlockProvider::new(
-            &self.inner.config.redis_url,
-            tx_processor.clone(),
-            self.inner.provider.clone(),
-            self.inner.processed_block_replay_store.clone(),
-        ) {
-            Ok(provider) => provider,
-            Err(error) => {
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    live_id = %request.id,
-                    error = %error,
-                    "live token runtime failed to initialize live processed block provider"
-                );
-                self.mark_failed(live_error_from_report(
-                    None,
-                    None,
-                    None,
-                    &error,
-                    phase_context("live_provider_init"),
-                ))
-                .await;
-                return;
-            }
-        };
-
-        let mut last_stream_id = "$".to_string();
         let mut shutdown_rx = self.inner.shutdown_tx.subscribe();
         loop {
             if self.inner.stop_requested.load(Ordering::SeqCst) {
@@ -428,169 +450,11 @@ impl LiveTokenRuntime {
                 return;
             }
 
-            if let Err(error) = self
-                .catch_up_to_latest(
-                    &stream,
-                    &live_processed_block_provider,
-                    &live_discovery_provider,
-                    &pool_simulator,
-                )
-                .await
-            {
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    live_id = %request.id,
-                    error = %error,
-                    "live token runtime live-tail catch-up failed"
-                );
-                self.mark_failed(live_error_from_report(
-                    None,
-                    None,
-                    None,
-                    &error,
-                    phase_context("live_tail_catch_up"),
-                ))
-                .await;
-                return;
-            }
-
-            let events = tokio::select! {
-                biased;
-
-                changed = shutdown_rx.changed() => {
-                    let should_stop = changed.is_err() || *shutdown_rx.borrow();
-                    if should_stop {
-                        self.mark_stopped().await;
-                        return;
-                    }
-                    continue;
-                }
-
-                read = stream.read_after(&last_stream_id) => {
-                    match read {
-                        Ok(events) => events,
-                        Err(error) => {
-                            tracing::error!(
-                                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                                live_id = %request.id,
-                                last_stream_id = %last_stream_id,
-                                error = %error,
-                                "live token runtime failed to read redis stream"
-                            );
-                            self.mark_failed(live_error_from_report(
-                                None,
-                                None,
-                                None,
-                                &error,
-                                phase_context("redis_stream_read"),
-                            ))
-                            .await;
-                            return;
-                        }
-                    }
-                }
-            };
-
-            if events.is_empty() {
-                continue;
-            }
-
-            if let Some(last) = events.last() {
-                last_stream_id = last.stream_id.clone();
-            }
-            self.record_stream_events(events.len() as u64, Some(last_stream_id.clone()))
-                .await;
-
-            if let Err(error) = self
-                .catch_up_to_latest(
-                    &stream,
-                    &live_processed_block_provider,
-                    &live_discovery_provider,
-                    &pool_simulator,
-                )
-                .await
-            {
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    live_id = %request.id,
-                    error = %error,
-                    "live token runtime live-tail catch-up failed after stream event"
-                );
-                self.mark_failed(live_error_from_report(
-                    None,
-                    None,
-                    None,
-                    &error,
-                    phase_context("live_tail_catch_up_after_stream_event"),
-                ))
-                .await;
+            if shutdown_rx.changed().await.is_err() || *shutdown_rx.borrow() {
+                self.mark_stopped().await;
                 return;
             }
         }
-    }
-
-    async fn catch_up_to_latest(
-        &self,
-        stream: &RedisBlockStream,
-        live_processed_block_provider: &LiveProcessedBlockProvider,
-        discovery_provider: &LiveRethChainMetadataProvider<'_>,
-        pool_simulator: &LivePoolBuySellSimulator,
-    ) -> Result<()> {
-        let Some(latest_block) = stream.latest_block_number().await? else {
-            return Ok(());
-        };
-        let last_applied_block = self.progress().await.current_block;
-        let missing = missing_blocks_after(last_applied_block, latest_block);
-        if missing.is_empty() {
-            return Ok(());
-        }
-
-        let mut applied_blocks = 0_u64;
-        for block_number in missing {
-            if self.inner.stop_requested.load(Ordering::SeqCst) {
-                return Ok(());
-            }
-            let applied = self
-                .apply_live_tail_block(
-                    block_number,
-                    live_processed_block_provider,
-                    discovery_provider,
-                    pool_simulator,
-                )
-                .await?;
-            if !applied {
-                break;
-            }
-            applied_blocks += 1;
-        }
-        if applied_blocks > 1 {
-            self.record_gap_blocks(applied_blocks - 1).await;
-        }
-        Ok(())
-    }
-
-    async fn apply_live_tail_block<P>(
-        &self,
-        block_number: u64,
-        live_processed_block_provider: &LiveProcessedBlockProvider,
-        discovery_provider: &P,
-        pool_simulator: &LivePoolBuySellSimulator,
-    ) -> Result<bool>
-    where
-        P: TokenDiscoveryProvider,
-    {
-        let loaded = live_processed_block_provider
-            .load_block(block_number)
-            .await?;
-        self.apply_loaded_block(
-            block_number,
-            true,
-            loaded,
-            discovery_provider,
-            pool_simulator,
-        )
-        .await?;
-        Ok(true)
     }
 
     async fn apply_block<P>(
@@ -618,6 +482,7 @@ impl LiveTokenRuntime {
             loaded,
             discovery_provider,
             pool_simulator,
+            None,
         )
         .await
     }
@@ -629,6 +494,7 @@ impl LiveTokenRuntime {
         loaded: LiveBlockLoad,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
+        live_state_diffs: Option<&[LiveStateDiffFrame]>,
     ) -> Result<()>
     where
         P: TokenDiscoveryProvider,
@@ -640,6 +506,44 @@ impl LiveTokenRuntime {
         let disk_cache_hit = loaded.disk_cache_hit;
         let disk_cache_read_ms = loaded.disk_cache_read_ms;
         let disk_cache_write_ms = loaded.disk_cache_write_ms;
+        let live_block_sessions: StdMutex<BTreeMap<u64, BlockStateSession>> =
+            StdMutex::new(BTreeMap::new());
+        if is_live_tail {
+            match live_state_diffs {
+                Some(state_diffs) => {
+                    match self
+                        .build_direct_live_block_session(&loaded, pool_simulator, state_diffs)
+                        .await
+                    {
+                        Ok(session) => {
+                            live_block_sessions
+                                .lock()
+                                .map_err(|err| {
+                                    eyre::eyre!("direct live block session lock poisoned: {err}")
+                                })?
+                                .insert(block_number, session.clone());
+                            self.remember_direct_live_block_session(block_number, session)
+                                .await;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                                block_number,
+                                error = %error,
+                                "failed to build direct live block state session"
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        block_number,
+                        "live block update did not include state diffs for direct state session"
+                    );
+                }
+            }
+        }
 
         let state_lock_started = Instant::now();
         let mut state = self.inner.state.write().await;
@@ -658,18 +562,31 @@ impl LiveTokenRuntime {
             .map(|token| token.pool_count())
             .sum();
         let process_block_started = Instant::now();
-        let report = state
-            .processor
-            .process_block_live_with_discovery_provider(
-                &loaded.block,
-                discovery_provider,
-                pool_simulator,
-            )
-            .await;
+        let report = if is_live_tail {
+            state
+                .processor
+                .process_block_live_with_discovery_provider_and_sessions(
+                    &loaded.block,
+                    discovery_provider,
+                    pool_simulator,
+                    &live_block_sessions,
+                    true,
+                )
+                .await
+        } else {
+            state
+                .processor
+                .process_block_live_with_discovery_provider(
+                    &loaded.block,
+                    discovery_provider,
+                    pool_simulator,
+                )
+                .await
+        };
         let process_block_us = process_block_started.elapsed().as_micros();
         if process_block_started.elapsed() > apply_timeout {
             let mut sample = PipelineBottleneckSample::new(
-                "eth_token_server",
+                "eth_chain_server",
                 "live_tracker",
                 "block_apply",
                 process_block_us / 1_000,
@@ -801,6 +718,74 @@ impl LiveTokenRuntime {
         Ok(())
     }
 
+    async fn build_direct_live_block_session(
+        &self,
+        loaded: &LiveBlockLoad,
+        pool_simulator: &LivePoolBuySellSimulator,
+        state_diffs: &[LiveStateDiffFrame],
+    ) -> Result<BlockStateSession> {
+        let block_number = loaded.block.header.number;
+        let block_hash = loaded.block.header.hash;
+        let parent_hash = loaded.block.header.parent_hash;
+        let block_header = sealed_header_from_processed_block_header(&loaded.block.header);
+        let simulator = pool_simulator.simulator();
+        let parent_session = {
+            let sessions = self.inner.direct_live_block_sessions.lock().await;
+            block_number
+                .checked_sub(1)
+                .and_then(|parent| sessions.get(&parent).cloned())
+        };
+
+        if let Some(parent_session) = parent_session {
+            match simulator
+                .block_state_session_from_parent_prestate_diffs(
+                    &parent_session,
+                    block_number,
+                    block_hash,
+                    parent_hash,
+                    block_header.clone(),
+                    state_diffs,
+                )
+                .await
+            {
+                Ok(session) => return Ok(session),
+                Err(error) => {
+                    tracing::info!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        block_number,
+                        error = %error,
+                        "rebuilding direct live block state session from current prestate diffs"
+                    );
+                }
+            }
+        }
+
+        simulator
+            .block_state_session_from_prestate_diffs(
+                block_number,
+                block_hash,
+                parent_hash,
+                block_header,
+                state_diffs,
+            )
+            .await
+    }
+
+    async fn remember_direct_live_block_session(
+        &self,
+        block_number: u64,
+        session: BlockStateSession,
+    ) {
+        let mut sessions = self.inner.direct_live_block_sessions.lock().await;
+        sessions.insert(block_number, session);
+        while sessions.len() > 16 {
+            let Some(oldest) = sessions.keys().next().copied() else {
+                break;
+            };
+            sessions.remove(&oldest);
+        }
+    }
+
     async fn mark_live(&self) {
         let mut state = self.inner.state.write().await;
         state.progress.status = LiveTokenStatus::Live;
@@ -845,7 +830,7 @@ impl LiveTokenRuntime {
         state.progress.completed_at_unix_secs = Some(now_unix_secs());
         state.progress.updated_at_unix_secs = now_unix_secs();
         let mut issue = PipelineIssue::new(
-            "eth_token_server",
+            "eth_chain_server",
             "live_tracker",
             "runtime",
             PipelineSeverity::Error,
@@ -904,19 +889,6 @@ impl LiveTokenRuntime {
         state.errors.push(error);
         drop(state);
         let _ = self.inner.event_tx.send(event);
-    }
-
-    async fn record_stream_events(&self, count: u64, last_stream_id: Option<String>) {
-        let mut state = self.inner.state.write().await;
-        state.progress.live_stream_events += count;
-        state.progress.last_stream_id = last_stream_id;
-        state.progress.updated_at_unix_secs = now_unix_secs();
-    }
-
-    async fn record_gap_blocks(&self, count: u64) {
-        let mut state = self.inner.state.write().await;
-        state.progress.live_gap_blocks_caught_up += count;
-        state.progress.updated_at_unix_secs = now_unix_secs();
     }
 }
 

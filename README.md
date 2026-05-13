@@ -20,7 +20,7 @@ The root Rust workspace is this directory. Current workspace members from
 | `reth_chain_query/` | `reth_chain_query` | Typed direct DB queries, common addresses, entity views, RethIndex tables, live head helpers, and AMM/Dex helpers. |
 | `tx_processor/` | `tx_processor` | Processed transactions and blocks: log decoding, traces, balance deltas, tax math, disk cache, and live block processing. |
 | `eth_token/` | `eth_token` | Token, pool, health, lifecycle, and network state built from processed blocks/transactions. |
-| `eth_token_server/` | `eth_token_server` | Runtime/API around `eth_token`; live tracker host, processed-block cache reader, HTTP/SSE views, and alpha-facing endpoints. |
+| `eth_chain_server/` | `eth_chain_server` | Runtime/API around `eth_token`; live tracker host, processed-block cache reader, HTTP/SSE views, and alpha-facing endpoints. |
 | `mempool_processor/` | `mempool_processor` | Reth IPC mempool fetch, function detection, pending simulation, semantic signal detection, DB writers, and ZMQ publishing. |
 | `pyreth/` | `pyreth` | PyO3 bindings over the Rust simulator, chain query, tx processor, and selected higher-level helpers. |
 | `alpha/core/` | `eth_alpha_core` | Pure trading domain types and traits. |
@@ -28,7 +28,7 @@ The root Rust workspace is this directory. Current workspace members from
 | `alpha/store/` | `eth_alpha_store` | Durable run, observation, order, position, execution, and risk records. |
 | `alpha/strategies/` | `eth_strategies` | Built-in strategy implementations. |
 | `alpha/engine/` | `eth_alpha_engine` | Strategy runtime, portfolio/order state, risk gating, and execution adapter boundary. |
-| `alpha/live/state/` | `eth_live_state` | Shared Redis live-state schemas and protocol. |
+| `alpha/live/state/` | `eth_live_state` | Legacy live-state schemas and protocol helpers; not the normal chain-server live transport. |
 | `alpha/live/feed/` | `eth_live_feed` | Live confirmed-chain feed over processed blocks and token updates. |
 
 Important adjacent code that is not currently a root workspace member:
@@ -55,27 +55,27 @@ tx_simulator
   -> tx_processor
        simulate tx/block -> ProcessedTransaction / ProcessedBlock
 
-tx_processor live_block_processor
+eth_chain_server LiveChainRuntime
+  -> tx_processor live block processing
   -> processed-block disk cache
-  -> Redis stream eth/live/blocks
-  -> eth_live_feed / eth_token_server
+  -> direct LiveBlockUpdate handoff to eth_live_feed
 
 eth_token
   <- tx_processor ProcessedBlock / ProcessedTransaction
   -> token state, pool state, health state, network/activity views
 
-eth_token_server
-  <- eth_token + eth_live_feed + processed-block disk cache
+eth_chain_server
+  <- eth_token + eth_live_feed + processed-block disk cache + execution RPC/WS
   -> HTTP live/range views for tokens, pools, mempool signals, alpha strategy input
 
 mempool_processor
   <- Reth pending transactions
-  <- eth_token_server token/pool context
+  <- eth_chain_server /live/updates wakeup + /live/tokens and /live/pools context
   <- tx_simulator / tx_processor for simulation and tax/tradability checks
   -> Postgres signal rows, signal logs, ZMQ notifications
 
 alpha
-  <- eth_token_server live pools/status
+  <- eth_chain_server live pools/status
   <- mempool signal rows
   <- recent mined block fee samples for block-rank evidence
   -> strategy observations, chain-sim orders, positions, risk events in Postgres
@@ -90,7 +90,7 @@ tx_executor
 
 Short version: `tx_simulator` executes chain state; `reth_chain_query` reads and
 builds DB-backed context; `tx_processor` turns execution into decoded facts;
-`eth_token` turns decoded facts into token/pool state; `eth_token_server` hosts
+`eth_token` turns decoded facts into token/pool state; `eth_chain_server` hosts
 that state; `mempool_processor` detects speculative risk/opportunity; `alpha`
 decides what to do with confirmed state plus mempool risk.
 
@@ -103,9 +103,9 @@ Use this map before broad searching:
 | How do I simulate a transaction, bundle, block, or live head state? | `tx_simulator/README.md` | `tx_simulator/src/lib.rs`, `src/single_tx/`, `src/tx_chain/`, `src/block_trace/`, `src/live/`, `examples/` |
 | How do I query balances, blocks, receipts, entities, DEX state, or indexed data? | `reth_chain_query/README.md` | `reth_chain_query/src/lib.rs`, `src/provider/`, `src/reth_index/`, `src/dex/`, `src/tx_builders.rs`, `examples/` |
 | How do raw/simulated transactions become decoded transaction facts? | `tx_processor/README.md` | `tx_processor/src/lib.rs`, `src/tx_processor/`, `src/processed_tx_provider/`, `src/block_processor/` |
-| How are processed blocks cached and streamed live? | `tx_processor/src/bin/live_block_processor/README.md` | `tx_processor/src/live/`, `tx_processor/src/processed_tx_provider/block/`, `alpha/live/feed/README.md` |
+| How are live processed blocks cached and applied? | `eth_chain_server/README.md` | `eth_chain_server/src/live/`, `tx_processor/src/live/`, `alpha/live/feed/README.md` |
 | Where is token/pool state updated from processed blocks? | `eth_token/README.md` | `eth_token/src/README.md`, `src/tracking/`, `src/pools/`, `src/manager/`, `src/health/` |
-| How is live token state served to tools and alpha? | `eth_token_server/README.md` | `eth_token_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
+| How is live token state served to tools and alpha? | `eth_chain_server/README.md` | `eth_chain_server/src/live.rs`, `src/views/`, `src/server/`, `src/mempool_signals.rs` |
 | How are pending transactions detected and converted to signals? | `mempool_processor/README.md` | `mempool_processor/src/function_detector.rs`, `src/tx_router/`, `src/simulator/`, `src/signal_detector/`, `src/db_writers/` |
 | How does the chain-sim/live alpha loop work? | `alpha/README.md` | `alpha/core/README.md`, `alpha/engine/README.md`, `alpha/store/README.md`, `alpha/strategies/README.md`, `alpha/live/*/README.md` |
 | How do I estimate rough tx position from recent mined blocks? | `alpha/block_tx_rank/README.md` | `alpha/block_tx_rank/src/lib.rs`, `reth_chain_query/src/provider/block/` |
@@ -136,7 +136,7 @@ Keep new code inside the crate that owns the behavior:
 | `reth_chain_query` | Typed Reth DB reads, provider abstractions, entity views, time/block helpers, DEX state readers, stateless calldata builders, RethIndex tables/writers. | Simulation orchestration, processed transaction semantics, tax math, live strategy logic. |
 | `tx_processor` | `ProcessedTransaction`, `ProcessedBlock`, event/log decoding, internal calls, balance deltas, bribe/tax calculations, pool buy/approve/sell viability orchestration, disk cache. | Long-lived token registry state, HTTP serving, strategy decisions, transaction signing. |
 | `eth_token` | Token and pool state machines, token health, control-address/activity state, network views, block-level token update logic from processed blocks. | Direct tracing/RPC, duplicate transaction decoding, live service hosting. |
-| `eth_token_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
+| `eth_chain_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
 | `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
@@ -155,10 +155,8 @@ RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth
 RETH_IPC_PATH=/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc
 RETH_HTTP_RPC=http://127.0.0.1:8545
 RETH_WS_RPC=ws://127.0.0.1:8546
-LIVE_BLOCKCHAIN_DATA_REDIS_URL=redis://localhost:6379/0
-ETH_PROCESSED_BLOCK_STREAM=eth/live/blocks
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
-TOKEN_SERVER_BIND=127.0.0.1:8765
+CHAIN_SERVER_BIND=127.0.0.1:8765
 MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 MEMPOOL_ZMQ_SIGNAL_ENDPOINT=tcp://127.0.0.1:5556
 ```
@@ -174,8 +172,7 @@ Run from this directory:
 cargo check --workspace
 cargo run -p tx_simulator --example verify_database_setup
 cargo run -p tx_processor --example process_transaction_by_hash -- <tx_hash>
-cargo run -p tx_processor --bin live_block_processor
-cargo run -p eth_token_server
+cargo run -p eth_chain_server
 cargo run -p mempool_processor --bin mempool_signal_detector
 ```
 
@@ -193,7 +190,7 @@ Use focused tests/examples near the owner crate:
 | Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/processing/*`, `tx_processor/examples/blocks/*` |
 | Trade simulation examples | `tx_processor/examples/trade_simulation/*` |
 | Token/pool state | `eth_token/tests/`, `eth_token/examples/tracking/token_tracking_range.rs`, `eth_token/examples/validation/*` |
-| Live token server | `eth_token_server/README.md`, `logs/eth_token_server/`, `GET /live/status`, `GET /live/pools` |
+| Live token server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
 | Token lab cases and strategy cohorts | `token_lab/README.md`, `token_lab/strategy/README.md`, and one case folder under `token_lab/cases/` |
@@ -213,10 +210,10 @@ Examples of correct placement:
 - New decoded event or balance-derived fact: add it to `tx_processor`, then
   let `eth_token`, `mempool_processor`, or `alpha` consume the processed fact.
 - New token or pool state field: add it to `eth_token` and expose it through
-  `eth_token_server` views if callers need it.
+  `eth_chain_server` views if callers need it.
 - New mempool risk signal: detect/rout fast in `mempool_processor`, but consume
   processed transaction facts from `tx_processor` and token context from
-  `eth_token_server`.
+  `eth_chain_server`.
 - New strategy behavior: implement in `alpha/strategies` and persist decision
   evidence through `alpha/store`.
 - New Python-facing capability: implement the Rust behavior in its owner crate,

@@ -234,9 +234,7 @@ fn redis_processed_block_stream() -> String {
     env::var("ETH_PROCESSED_BLOCK_STREAM")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| {
-            keys::processed_block_stream_key().to_string()
-        })
+        .unwrap_or_else(|| keys::processed_block_stream_key().to_string())
 }
 
 async fn build_chain_state_snapshot(

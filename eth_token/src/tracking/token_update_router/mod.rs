@@ -110,6 +110,7 @@ pub(crate) enum PoolTradingSimulationMode<'a> {
     LiveBlockSession {
         pool_simulator: &'a LivePoolBuySellSimulator,
         block_sessions: &'a Mutex<BTreeMap<u64, BlockStateSession>>,
+        direct_state_only: bool,
         profile_run_id: Option<&'a str>,
     },
     #[cfg(test)]
@@ -133,7 +134,7 @@ impl<'a> PoolTradingSimulationMode<'a> {
     }
 }
 
-pub(super) const LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS: u64 = 2_500;
+pub(super) const LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS: u64 = 250;
 pub(super) const LIVE_POOL_SIMULATION_TIMEOUT_MS: u64 = 2_500;
 pub(super) const LIVE_TOKEN_TRACKER_LOG_TARGET: &str = "live_token_tracker";
 
@@ -248,6 +249,7 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                direct_state_only: false,
                 profile_run_id: Some("live"),
             },
             None,
@@ -554,6 +556,7 @@ impl ProcessedTokenUpdateRouter {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                direct_state_only: false,
                 profile_run_id: Some("live"),
             },
             None,

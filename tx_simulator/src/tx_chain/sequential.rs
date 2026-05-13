@@ -14,6 +14,7 @@
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
     revert::decode_revert_reason,
+    simulator::EthereumProviderFactory,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     tx_fee_parameters::{GasInputs, TxFeeContext},
@@ -44,37 +45,77 @@ use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 #[derive(Clone)]
-pub(crate) struct SharedStateProvider(Arc<Mutex<StateProviderBox>>);
+pub(crate) enum SharedStateProvider {
+    Static(Arc<Mutex<StateProviderBox>>),
+    RefreshingHistory {
+        provider_factory: EthereumProviderFactory,
+        block_number: u64,
+    },
+}
 
 impl SharedStateProvider {
     pub(crate) fn new(provider: StateProviderBox) -> Self {
-        Self(Arc::new(Mutex::new(provider)))
+        Self::Static(Arc::new(Mutex::new(provider)))
+    }
+
+    pub(crate) fn refreshing_history(
+        provider_factory: EthereumProviderFactory,
+        block_number: u64,
+    ) -> Self {
+        Self::RefreshingHistory {
+            provider_factory,
+            block_number,
+        }
     }
 }
 
 impl EvmStateProvider for SharedStateProvider {
     fn basic_account(&self, address: &Address) -> reth_provider::ProviderResult<Option<Account>> {
-        self.0
-            .lock()
-            .expect("state provider lock poisoned")
-            .basic_account(address)
+        match self {
+            Self::Static(provider) => provider
+                .lock()
+                .expect("state provider lock poisoned")
+                .basic_account(address),
+            Self::RefreshingHistory {
+                provider_factory,
+                block_number,
+            } => provider_factory
+                .history_by_block_number(*block_number)?
+                .basic_account(address),
+        }
     }
 
     fn block_hash(&self, number: u64) -> reth_provider::ProviderResult<Option<B256>> {
-        self.0
-            .lock()
-            .expect("state provider lock poisoned")
-            .block_hash(number)
+        match self {
+            Self::Static(provider) => provider
+                .lock()
+                .expect("state provider lock poisoned")
+                .block_hash(number),
+            Self::RefreshingHistory {
+                provider_factory,
+                block_number,
+            } => provider_factory
+                .history_by_block_number(*block_number)?
+                .block_hash(number),
+        }
     }
 
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
     ) -> reth_provider::ProviderResult<Option<Bytecode>> {
-        self.0
-            .lock()
-            .expect("state provider lock poisoned")
-            .bytecode_by_hash(code_hash)
+        match self {
+            Self::Static(provider) => provider
+                .lock()
+                .expect("state provider lock poisoned")
+                .bytecode_by_hash(code_hash),
+            Self::RefreshingHistory {
+                provider_factory,
+                block_number,
+            } => provider_factory
+                .history_by_block_number(*block_number)?
+                .bytecode_by_hash(code_hash),
+        }
     }
 
     fn storage(
@@ -82,10 +123,18 @@ impl EvmStateProvider for SharedStateProvider {
         account: Address,
         storage_key: B256,
     ) -> reth_provider::ProviderResult<Option<U256>> {
-        self.0
-            .lock()
-            .expect("state provider lock poisoned")
-            .storage(account, storage_key)
+        match self {
+            Self::Static(provider) => provider
+                .lock()
+                .expect("state provider lock poisoned")
+                .storage(account, storage_key),
+            Self::RefreshingHistory {
+                provider_factory,
+                block_number,
+            } => provider_factory
+                .history_by_block_number(*block_number)?
+                .storage(account, storage_key),
+        }
     }
 }
 

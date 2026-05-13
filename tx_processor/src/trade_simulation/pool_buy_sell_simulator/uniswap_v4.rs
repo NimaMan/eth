@@ -107,17 +107,10 @@ pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
     let block_number = config
         .block_number
         .unwrap_or(simulator.latest_historical_context_block_number()?);
-    let header_hint = block_header_hint(&config, block_number)?;
-    let header = match header_hint {
-        Some(header) => header,
-        None => {
-            simulator
-                .block_context_loader()
-                .load_block_header(block_number, None)
-                .await?
-        }
+    let base_fee = match block_header_hint(&config, block_number)? {
+        Some(header) => header.header().base_fee_per_gas.map(|fee| fee as u128),
+        None => chain.block_base_fee(),
     };
-    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
 
     check_can_buy_sell_uniswap_v4_with_prepared_chain(
         simulator,
@@ -678,19 +671,28 @@ async fn simulate_and_process(
     tx_index: u64,
     step: &'static str,
 ) -> Result<(FullSimulationResult, ProcessedTransaction)> {
-    let result = chain.step_with_trace(tx.clone()).await.map_err(|err| {
-        tracing::warn!(
-            target: "pool_buy_sell_sim",
-            step,
-            block = block_number,
-            error = %err,
-            "failed Uniswap V4 simulation step"
-        );
-        err
-    })?;
+    let result = chain
+        .step_with_trace(tx.clone())
+        .await
+        .map_err(|err| {
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step,
+                block = block_number,
+                error = %err,
+                "failed Uniswap V4 simulation step"
+            );
+            err
+        })
+        .wrap_err_with(|| {
+            format!("while executing Uniswap V4 simulation step {step} at block {block_number}")
+        })?;
     let processed = tx_processor
         .process_transaction_from_simulation_result(&tx, &result, block_number, tx_index)
-        .await?;
+        .await
+        .wrap_err_with(|| {
+            format!("while processing Uniswap V4 simulation step {step} at block {block_number}")
+        })?;
     Ok((result, processed))
 }
 

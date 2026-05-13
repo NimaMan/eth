@@ -11,3 +11,5 @@ pub use block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot};
 pub use live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig, LiveProcessedBlock};
 pub use live_block_service::LiveBlockService;
 pub use processed_block_replay_store_sink::LiveProcessedBlockReplayStoreSink;
+
+pub type LiveStateDiffFrame = alloy_rpc_types_trace::geth::PreStateFrame;

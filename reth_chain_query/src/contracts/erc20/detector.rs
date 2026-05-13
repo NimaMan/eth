@@ -1,5 +1,5 @@
-use super::deployment_replay::prepare_state_for_metadata;
 use super::metadata::TokenMetadata;
+use super::pending_replay::prepare_state_for_metadata;
 use crate::contracts::common::{build_two_address_payload, call_uint256_view, contains_signature};
 use crate::utils::function_signatures::erc20;
 use crate::RethQueryProvider;

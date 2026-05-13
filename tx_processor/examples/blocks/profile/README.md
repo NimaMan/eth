@@ -24,7 +24,7 @@ correctness harness.
 - Production processing logic; edit `tx_processor/src/block_processor/` and
   `tx_processor/src/processed_tx_provider/block/`.
 - Reth trace engine internals; edit `tx_simulator/src/block_trace/`.
-- Token-state warmup behavior; edit `eth_token_server` or `eth_token`.
+- Token-state warmup behavior; edit `eth_chain_server` or `eth_token`.
 
 ## Data Flow
 

@@ -4,16 +4,16 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{ProcessedBlock, ProcessedBlockReplayStoreWriter};
 
-const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_CHAIN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
 const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
-    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
+    "ETH_CHAIN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
 const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 const DEFAULT_RETAIN_BLOCKS: u64 = 1_000_000;
 const DEFAULT_QUEUE_BLOCKS: usize = 256;
 const PRUNE_INTERVAL_WRITES: u64 = 1_000;
 
 /// Non-blocking background sink for writing live processed blocks into the
-/// replay store after Redis publication has succeeded.
+/// replay store after a live processed block has been applied.
 pub struct LiveProcessedBlockReplayStoreSink {
     sender: mpsc::Sender<ProcessedBlock>,
     _worker: JoinHandle<()>,

@@ -1,5 +1,5 @@
-mod deployment_replay;
 mod detector;
 mod metadata;
+mod pending_replay;
 
 pub use metadata::TokenMetadata;

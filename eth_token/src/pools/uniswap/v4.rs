@@ -386,8 +386,8 @@ impl UniswapV4Pool {
 
     pub fn build_simulator_pool_config(
         &self,
-    ) -> Result<tx_processor::simulator::types::UniswapV4PoolConfig> {
-        Ok(tx_processor::simulator::types::UniswapV4PoolConfig {
+    ) -> Result<tx_processor::trade_simulation::types::UniswapV4PoolConfig> {
+        Ok(tx_processor::trade_simulation::types::UniswapV4PoolConfig {
             pool_manager: parse_address(&self.pool_manager_address)?,
             pool_id: parse_hash(&self.pool_id)?,
             currency0: parse_address(&self.pool_key.currency0)?,

@@ -145,6 +145,10 @@ impl ProcessedTokenUpdateRouter {
     where
         P: UniswapV2PoolMetadataProvider,
     {
+        if metadata_timeout.is_some() {
+            return Ok(Vec::new());
+        }
+
         let token_address = token.contract_address.clone();
         let mut discovered = Vec::new();
 

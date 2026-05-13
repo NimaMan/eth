@@ -1,0 +1,20 @@
+[Unit]
+Description=Ethereum chain server
+Wants=network-online.target reth.service
+After=network-online.target reth.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nima/code/crypto/blockchains/eth
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
+Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
+Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUST_LOG=info
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_chain_server
+Restart=always
+RestartSec=5
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=default.target

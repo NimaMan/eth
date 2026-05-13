@@ -33,7 +33,7 @@ pub use block_processor::{
 };
 pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
-    LiveProcessedBlockReplayStoreSink,
+    LiveProcessedBlockReplayStoreSink, LiveStateDiffFrame,
 };
 pub use processed_tx_provider::{
     load_cached_processed_block, load_processed_block, load_processed_block_range,

@@ -38,9 +38,9 @@ use reth_provider::{HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{AccountState as RevmAccountState, Cache, CacheDB, DbAccount},
-    Database,
 };
 use revm::bytecode::Bytecode;
+use revm::state::AccountInfo;
 use serde_json::Value;
 use std::{collections::HashSet, sync::Arc};
 use tokio::time::{sleep, Duration};
@@ -401,6 +401,142 @@ impl<'a> BlockContextLoader<'a> {
         ))
     }
 
+    pub(crate) async fn direct_forked_state_from_prestate_diffs(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        parent_hash: B256,
+        header: SealedHeader,
+        state_diffs: &[PreStateFrame],
+    ) -> Result<ForkedState> {
+        if header.number != block_number {
+            return Err(eyre!(
+                "direct live state header block mismatch: header={}, expected={}",
+                header.number,
+                block_number
+            ));
+        }
+        if header.hash() != block_hash {
+            return Err(eyre!(
+                "direct live state header hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.hash(),
+                block_hash
+            ));
+        }
+        if header.parent_hash != parent_hash {
+            return Err(eyre!(
+                "direct live state parent hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.parent_hash,
+                parent_hash
+            ));
+        }
+
+        let parent_block = block_number
+            .checked_sub(1)
+            .ok_or_else(|| eyre!("cannot build direct live state for genesis block"))?;
+        let parent_state_available = match self.try_load_historical_state(parent_block).await {
+            Ok(state) => state.is_some(),
+            Err(error) => {
+                debug!(
+                    block_number,
+                    parent_block,
+                    error = %error,
+                    "direct live state parent state unavailable; using latest historical base"
+                );
+                false
+            }
+        };
+        let parent_header = match self.fetch_header_from_mdbx(parent_block) {
+            Ok(header) => header,
+            Err(error) => {
+                debug!(
+                    block_number,
+                    parent_block,
+                    error = %error,
+                    "direct live state parent header unavailable; using latest historical base"
+                );
+                None
+            }
+        };
+
+        let (base_block, base_header) = match (parent_state_available, parent_header) {
+            (true, Some(parent_header)) => {
+                if parent_header.hash() != parent_hash {
+                    return Err(eyre!(
+                        "direct live state parent hash mismatch for block {}: parent header={}, expected={}",
+                        block_number,
+                        parent_header.hash(),
+                        parent_hash
+                    ));
+                }
+                (parent_block, parent_header)
+            }
+            _ => {
+                let base_block = self
+                    .simulator
+                    .latest_historical_context_block_number()?
+                    .min(parent_block);
+                self
+                    .try_load_historical_state(base_block)
+                    .await?
+                    .ok_or_else(|| {
+                        eyre!(
+                            "cannot build direct live state for block {}: base {} is unavailable from Reth historical state",
+                            block_number,
+                            base_block
+                        )
+                    })?;
+                let base_header = self.fetch_header_from_mdbx(base_block)?.ok_or_else(|| {
+                    eyre!(
+                        "cannot build direct live state for block {}: base header {} is unavailable from Reth historical headers",
+                        block_number,
+                        base_block
+                    )
+                })?;
+                debug!(
+                    block_number,
+                    parent_block,
+                    base_block,
+                    "using latest historical base plus prestate diff overlay for direct live state"
+                );
+                (base_block, base_header)
+            }
+        };
+
+        let mut fork_state = forked_state_from_refreshing_historical_state(
+            base_block,
+            base_header,
+            self.simulator.provider_factory.clone(),
+        );
+
+        fork_state.block_number = header.number;
+        fork_state.block_header = header;
+        fork_state.nonces.clear();
+        fork_state
+            .db
+            .cache
+            .block_hashes
+            .insert(U256::from(parent_block), parent_hash);
+        fork_state
+            .db
+            .cache
+            .block_hashes
+            .insert(U256::from(block_number), block_hash);
+        for (tx_index, frame) in state_diffs.iter().enumerate() {
+            let diff = frame.as_diff().ok_or_else(|| {
+                eyre!(
+                    "direct live state diff for block {} tx index {} was not diffMode",
+                    block_number,
+                    tx_index
+                )
+            })?;
+            apply_prestate_diff(&mut fork_state, diff)?;
+        }
+        Ok(fork_state)
+    }
+
     async fn load_parent_state_for_live_snapshot(
         &self,
         block_number: u64,
@@ -575,6 +711,22 @@ fn forked_state_from_historical_state(
     }
 }
 
+fn forked_state_from_refreshing_historical_state(
+    block_number: u64,
+    block_header: SealedHeader,
+    provider_factory: crate::simulator::EthereumProviderFactory,
+) -> ForkedState {
+    let db = CacheDB::new(StateProviderDatabase::new(
+        SharedStateProvider::refreshing_history(provider_factory, block_number),
+    ));
+    ForkedState {
+        db,
+        block_number,
+        block_header,
+        nonces: Default::default(),
+    }
+}
+
 fn merge_live_snapshot_cache(base: &mut Cache, overlay: &Cache) {
     base.accounts.extend(overlay.accounts.clone());
     base.contracts.extend(overlay.contracts.clone());
@@ -593,7 +745,7 @@ fn decode_processed_transaction_payloads(payloads: &[&str]) -> Result<Vec<Unsign
     Ok(txs)
 }
 
-fn apply_prestate_diff(fork_state: &mut ForkedState, diff: &DiffMode) -> Result<()> {
+pub(crate) fn apply_prestate_diff(fork_state: &mut ForkedState, diff: &DiffMode) -> Result<()> {
     for address in diff
         .pre
         .keys()
@@ -632,7 +784,16 @@ fn apply_post_state_to_account(
     post_state: &PreStateAccountState,
     created_in_tx: bool,
 ) -> Result<()> {
-    let mut info = fork_state.db.basic(address)?.unwrap_or_default();
+    let mut info = account_info_from_prestate(pre_state)
+        .or_else(|| {
+            fork_state
+                .db
+                .cache
+                .accounts
+                .get(&address)
+                .and_then(DbAccount::info)
+        })
+        .unwrap_or_default();
 
     if let Some(balance) = post_state.balance {
         info.balance = balance;
@@ -674,6 +835,23 @@ fn apply_post_state_to_account(
 
     fork_state.nonces.remove(&address);
     Ok(())
+}
+
+fn account_info_from_prestate(pre_state: Option<&PreStateAccountState>) -> Option<AccountInfo> {
+    let pre_state = pre_state?;
+    let mut info = AccountInfo::default();
+    if let Some(balance) = pre_state.balance {
+        info.balance = balance;
+    }
+    if let Some(nonce) = pre_state.nonce {
+        info.nonce = nonce;
+    }
+    if let Some(code) = pre_state.code.as_ref() {
+        let bytecode = Bytecode::new_raw(code.clone());
+        info.code_hash = bytecode.hash_slow();
+        info.code = Some(bytecode);
+    }
+    Some(info)
 }
 
 fn removed_storage_slots(

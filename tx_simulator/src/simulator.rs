@@ -26,7 +26,7 @@ use reth_provider::{
 };
 
 type EthereumProviderTypes = AnyNodeTypes<EthPrimitives, ChainSpec, EthStorage, EthEngineTypes>;
-type EthereumProviderFactory =
+pub(crate) type EthereumProviderFactory =
     ProviderFactory<NodeTypesWithDBAdapter<EthereumProviderTypes, Arc<DatabaseEnv>>>;
 
 /// Transaction Simulator with direct database access

@@ -16,7 +16,7 @@ use tx_processor::{
 const DEFAULT_BLOCKS: u64 = 100_000;
 const DEFAULT_RETAIN_BLOCKS: u64 = 1_000_000;
 const DISK_CACHE_DIR_ENV: &str = "PROCESSED_BLOCK_DISK_CACHE_DIR";
-const TOKEN_SERVER_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
+const CHAIN_SERVER_DISK_CACHE_DIR_ENV: &str = "ETH_CHAIN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
 const DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 
 /// Refresh processed-block disk cache and related block-derived indexes.
@@ -278,11 +278,11 @@ fn resolve_cache_dir(value: Option<&Path>) -> Result<PathBuf> {
         return Ok(path.to_path_buf());
     }
     if let Some(value) =
-        non_empty_env(DISK_CACHE_DIR_ENV).or_else(|| non_empty_env(TOKEN_SERVER_DISK_CACHE_DIR_ENV))
+        non_empty_env(DISK_CACHE_DIR_ENV).or_else(|| non_empty_env(CHAIN_SERVER_DISK_CACHE_DIR_ENV))
     {
         return Ok(PathBuf::from(value));
     }
-    if let Some(value) = config_env_value(&[DISK_CACHE_DIR_ENV, TOKEN_SERVER_DISK_CACHE_DIR_ENV])? {
+    if let Some(value) = config_env_value(&[DISK_CACHE_DIR_ENV, CHAIN_SERVER_DISK_CACHE_DIR_ENV])? {
         return Ok(PathBuf::from(value));
     }
 

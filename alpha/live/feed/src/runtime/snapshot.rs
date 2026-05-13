@@ -1,3 +1,7 @@
+use eth_pool_classification::{
+    classify_pool_with_config, EligiblePoolOutcome, PoolClassificationConfig,
+    PoolClassificationInput,
+};
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{BasePool, PoolLifecycle, UniswapV2Pool};
 use serde::{Deserialize, Serialize};
@@ -85,6 +89,12 @@ impl LiveTokenSnapshot {
 
         let buy_tax = pools.iter().find_map(|pool| pool.buy_tax);
         let sell_tax = pools.iter().find_map(|pool| pool.sell_tax);
+        let liquidity_removal_pool_count =
+            pools.iter().filter(|pool| pool.liquidity_removal).count();
+        let is_scam = token.is_scam() || liquidity_removal_pool_count > 0;
+        let scam_label = token.scam_label().or_else(|| {
+            (liquidity_removal_pool_count > 0).then(|| "liquidity_removal".to_string())
+        });
 
         Self {
             contract_address: token.contract_address.clone(),
@@ -101,12 +111,12 @@ impl LiveTokenSnapshot {
             ownership_renounced: token.ownership_renounced(),
             latest_activity_block: token.latest_block_number,
             latest_activity_timestamp: token.latest_block_timestamp,
-            is_scam: token.is_scam(),
-            scam_label: token.scam_label(),
+            is_scam,
+            scam_label,
             hidden_mint_detected: token.hidden_mint_detected(),
             hidden_mint_block: token.hidden_mint_block(),
             hidden_mint_tx: token.hidden_mint_tx(),
-            liquidity_removal_pool_count: token.liquidity_removal_pool_count(),
+            liquidity_removal_pool_count,
             buy_tax,
             sell_tax,
             pools,
@@ -128,6 +138,46 @@ impl LiveTokenPoolSnapshot {
         pool: &BasePool,
         lp_tokens_approved_percentage: Option<f64>,
     ) -> Self {
+        let explicit_liquidity_removal = pool.has_liquidity_removal();
+        let max_denom_reserve = max_denom_reserve(pool);
+        let classification = classify_pool_with_config(
+            &PoolClassificationInput {
+                quote_symbol: denom_symbol(&pool.identity.denom_address)
+                    .map(str::to_string)
+                    .or_else(|| Some(pool.identity.denom_address.clone())),
+                denom_reserve: Some(pool.denom_reserve()),
+                max_denom_reserve: Some(max_denom_reserve),
+                token_reserve: Some(pool.token_reserve()),
+                can_buy: pool.effective_can_buy(),
+                can_sell: pool.effective_can_sell(),
+                cohort_can_buy: Some(pool.state.can_buy || pool.has_observed_buy()),
+                cohort_can_sell: Some(pool.state.can_sell || pool.has_observed_sell()),
+                liquidity_removed: explicit_liquidity_removal,
+                creation_block: pool.creation_block,
+                creation_timestamp: pool.creation_timestamp,
+                has_price_history: !pool.price_history.is_empty(),
+                ..PoolClassificationInput::default()
+            },
+            &PoolClassificationConfig::default(),
+        );
+        let derived_liquidity_removal = matches!(
+            classification.eligible_outcome,
+            Some(EligiblePoolOutcome::LiquidityRemoval)
+        );
+        let liquidity_removal = explicit_liquidity_removal || derived_liquidity_removal;
+        let liquidity_removal_label = if explicit_liquidity_removal {
+            pool.scam_label.clone()
+        } else if derived_liquidity_removal {
+            Some("liquidity_removal (derived from reserve drop)".to_string())
+        } else {
+            None
+        };
+        let lifecycle = if derived_liquidity_removal && !explicit_liquidity_removal {
+            PoolLifecycle::LiquidityRemoved
+        } else {
+            pool.state.lifecycle
+        };
+
         Self {
             pool_address: pool.identity.pool_address.clone(),
             token_address: token_address.to_string(),
@@ -145,18 +195,39 @@ impl LiveTokenPoolSnapshot {
             trading_enabled_tx: pool.can_buy_tx.clone(),
             buy_tax: pool.buy_tax,
             sell_tax: pool.sell_tax,
-            is_scam: pool.has_liquidity_removal(),
-            scam_label: pool.scam_label.clone(),
-            liquidity_removal: pool.has_liquidity_removal(),
-            liquidity_removal_label: pool.scam_label.clone(),
+            is_scam: liquidity_removal,
+            scam_label: liquidity_removal_label.clone(),
+            liquidity_removal,
+            liquidity_removal_label,
             liquidity_removal_block: pool.scam_block,
             liquidity_removal_tx_hash: pool.scam_tx_hash.clone(),
             creation_block: pool.creation_block,
             latest_block_number: pool.latest_block_number,
-            lifecycle: lifecycle_label(pool.state.lifecycle),
+            lifecycle: lifecycle_label(lifecycle),
             control_addresses: sorted_strings(pool.token_control_addresses.iter().cloned()),
             lp_tokens_approved_percentage,
         }
+    }
+}
+
+fn max_denom_reserve(pool: &BasePool) -> f64 {
+    pool.reserve_tracker
+        .reserve_history
+        .iter()
+        .map(|snapshot| snapshot.denom_reserve)
+        .filter(|value| value.is_finite())
+        .fold(pool.denom_reserve(), f64::max)
+}
+
+fn denom_symbol(denom_address: &str) -> Option<&'static str> {
+    match denom_address.trim().to_ascii_lowercase().as_str() {
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        | "0x0000000000000000000000000000000000000000"
+        | "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" => Some("WETH"),
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" => Some("USDC"),
+        "0xdac17f958d2ee523a2206206994597c13d831ec7" => Some("USDT"),
+        "0x6b175474e89094c44da98b954eedeac495271d0f" => Some("DAI"),
+        _ => None,
     }
 }
 
@@ -180,4 +251,59 @@ fn lifecycle_label(lifecycle: PoolLifecycle) -> String {
         PoolLifecycle::Evicted => "EVICTED",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eth_token::erc20::ERC20TokenMetadata;
+    use eth_token::pools::base::BasePoolConfig;
+
+    const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+
+    fn token_with_drained_pool() -> ERC20Token {
+        let mut token = ERC20Token::new(ERC20TokenMetadata::new(
+            "0x1000000000000000000000000000000000000001",
+            "Example",
+            "EX",
+            18,
+            "1000000000000000000000000",
+        ));
+        let pool = token.create_uniswap_v2_pool(
+            "0x2000000000000000000000000000000000000002",
+            WETH_ADDRESS,
+            BasePoolConfig {
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                history_limit: 10,
+                ..BasePoolConfig::new(18)
+            },
+            [] as [&str; 0],
+        );
+        pool.base.creation_block = Some(100);
+        pool.base.creation_timestamp = Some(1_700);
+        pool.base
+            .update_reserves(1_000.0, 1.2, 100, 1_700, "0xSYNC1");
+        pool.base.state.record_swap(0.1, 25.0, 0.1, 25.0);
+        pool.base
+            .update_reserves(1_000.0, 0.03, 120, 1_940, "0xDRAIN");
+        token
+    }
+
+    #[test]
+    fn live_snapshot_derives_liquidity_removal_from_reserve_drop() {
+        let snapshot = LiveTokenSnapshot::from_token(&token_with_drained_pool());
+        let pool = snapshot
+            .pools
+            .iter()
+            .find(|pool| pool.pool_address == "0x2000000000000000000000000000000000000002")
+            .expect("pool snapshot");
+
+        assert!(pool.liquidity_removal);
+        assert!(pool.is_scam);
+        assert_eq!(pool.lifecycle, "LIQUIDITY_REMOVED");
+        assert_eq!(snapshot.liquidity_removal_pool_count, 1);
+        assert!(snapshot.is_scam);
+        assert_eq!(snapshot.scam_label.as_deref(), Some("liquidity_removal"));
+    }
 }

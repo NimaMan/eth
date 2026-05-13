@@ -151,6 +151,7 @@ pub(super) async fn simulate_updated_v2_pools(
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                direct_state_only,
                 profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
@@ -160,6 +161,7 @@ pub(super) async fn simulate_updated_v2_pools(
                     tx,
                     "v2",
                     pool_address,
+                    direct_state_only,
                     profile_run_id,
                 )
                 .await?;
@@ -376,6 +378,7 @@ pub(super) async fn simulate_updated_v3_pools(
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                direct_state_only,
                 profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
@@ -385,6 +388,7 @@ pub(super) async fn simulate_updated_v3_pools(
                     tx,
                     "v3",
                     pool_address,
+                    direct_state_only,
                     profile_run_id,
                 )
                 .await?;
@@ -598,6 +602,7 @@ pub(super) async fn simulate_updated_v4_pools(
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions,
+                direct_state_only,
                 profile_run_id,
             } => {
                 let chain = live_block_state_session_chain(
@@ -607,6 +612,7 @@ pub(super) async fn simulate_updated_v4_pools(
                     tx,
                     "v4",
                     pool_key,
+                    direct_state_only,
                     profile_run_id,
                 )
                 .await?;
@@ -847,6 +853,7 @@ async fn live_block_state_session_chain(
     tx: &ProcessedTransaction,
     pool_kind: &'static str,
     pool_id: &str,
+    direct_state_only: bool,
     profile_run_id: Option<&str>,
 ) -> Result<UnsignedTxChainSimulation> {
     let block_number = state_session_block_number(pool_config, tx);
@@ -866,6 +873,14 @@ async fn live_block_state_session_chain(
     let mut session_created = false;
 
     if needs_session {
+        if direct_state_only && block_number == tx.block_number {
+            return Err(eyre!(
+                "direct live block state session missing block={} for {} pool={}",
+                block_number,
+                pool_kind,
+                pool_id
+            ));
+        }
         let session_create_started = Instant::now();
         let simulator = pool_simulator.simulator();
         let session = if let Some(block_header) = pool_config.block_header.as_ref() {
