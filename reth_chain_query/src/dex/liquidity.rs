@@ -3,7 +3,7 @@ use eyre::Result;
 
 use crate::common_addresses::DENOM_ADDRESSES;
 use crate::provider::RethQueryProvider;
-use crate::tx_builders::amm_swap_route::AmmSwapRoute;
+use tx_simulator::tx_builders::AmmSwapRoute;
 
 /// Normalized liquidity info across AMM routes.
 #[derive(Debug, Clone)]

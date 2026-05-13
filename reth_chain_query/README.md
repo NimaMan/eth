@@ -15,9 +15,10 @@ entity/DEX helpers, and lightweight indexes.
 
 - `RethQueryProvider` and provider factories in `src/provider/`.
 - Legacy `ChainQuery` compatibility in `src/query_engine.rs`.
-- Entity/address catalogs in `src/entities/` and `src/common_addresses/`.
+- Canonical known-address catalogs and identification helpers in
+  `src/common_addresses/`.
+- Entity analysis helpers in `src/entities/`.
 - DEX readers/helpers in `src/dex/`.
-- Stateless AMM calldata builders in `src/tx_builders.rs`.
 - PostgreSQL helpers and RethIndex tables/writers in `src/postgres_db/` and
   `src/reth_index/`.
 - Block/time utilities in `src/utils/time_utils/`.
@@ -25,6 +26,7 @@ entity/DEX helpers, and lightweight indexes.
 ## Does Not Own
 
 - Transaction simulation orchestration; use `tx_simulator`.
+- Stateless AMM calldata builders; use `tx_simulator::tx_builders`.
 - Processed transaction semantics, decoded events, tax math, or block cache
   schemas; use `tx_processor`.
 - Token lifecycle state; use `eth_token`.
@@ -40,8 +42,10 @@ Reth MDBX
   -> tx_processor, eth_token, eth_token_server, mempool_processor, pyreth
 ```
 
-Builders are stateless: callers supply route/token/amount/deadline data, and
-the builder returns calldata/spender information without DB mutation.
+Known addresses are centralized under `src/common_addresses/`; callers can use
+`identify_known_address` to classify stablecoins, denom tokens, CEX/ETF
+addresses, fee recipients, DEX factories/routers, wallets, and other named
+addresses.
 
 ## Where To Look First
 
@@ -52,7 +56,7 @@ the builder returns calldata/spender information without DB mutation.
 | RethIndex schemas and writers | `src/reth_index/` |
 | PostgreSQL query helpers | `src/postgres_db/` |
 | DEX state readers | `src/dex/` |
-| AMM swap builders | `src/tx_builders.rs` |
+| AMM swap builders | `tx_simulator/src/tx_builders/` |
 | Address/entity catalogs | `src/common_addresses/`, `src/entities/` |
 | Examples by query family | `examples/README.md` |
 
@@ -74,5 +78,6 @@ cargo test -p reth_chain_query
   return incomplete history.
 - RethIndex/Postgres helpers are optional side indexes. Do not make core direct
   reads depend on them unless the API explicitly says so.
-- If adding a new AMM route, put route/spender/calldata builders here first,
-  then call them from `tx_processor` or strategies.
+- If adding a new AMM route, put route/spender/calldata builders in
+  `tx_simulator::tx_builders`, then call them from `tx_processor` or
+  strategies.

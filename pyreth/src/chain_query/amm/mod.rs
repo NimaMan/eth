@@ -5,10 +5,10 @@
 
 use alloy_primitives::U256;
 use pyo3::prelude::*;
-use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::{PoolLiquidityInfo, RethQueryProvider};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+use tx_simulator::tx_builders::AmmSwapRoute;
 
 /// Python wrapper for AMM pool liquidity info
 #[pyclass(name = "PoolLiquidityInfo")]

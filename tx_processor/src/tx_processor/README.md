@@ -48,8 +48,8 @@ Caller
 ```
 +----------------------+        +--------------------+
 |  reth_chain_query    |        |    tx_simulator    |
-|  - tx_builders (AMM) |  --->  |  (Reth DB access)  |
-|  - provider helpers  |        |  simulate + traces |
+|  - provider helpers  |  --->  |  tx_builders (AMM) |
+|  - typed reads       |        |  simulate + traces |
 +----------^-----------+        +---------^----------+
            |                               |
            | uses                          | returns FullSimulationResult
@@ -171,10 +171,10 @@ Contains:
 
 ## AMM Integration & Builders
 
-AMM transactions (buy/approve/sell) are constructed by `reth_chain_query::tx_builders` and selected via `AmmSwapRoute`:
+AMM transactions (buy/approve/sell) are constructed by `tx_simulator::tx_builders` and selected via `AmmSwapRoute`:
 
 ```rust
-use reth_chain_query::tx_builders::{self, AmmSwapRoute};
+use tx_simulator::tx_builders::{self, AmmSwapRoute};
 
 let route = AmmSwapRoute::UniswapV2 { pool };
 let buy = tx_builders::build_buy_swap(&route, buyer, token_out, eth_in, slippage_bps, deadline);

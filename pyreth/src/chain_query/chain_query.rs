@@ -25,10 +25,10 @@ use alloy_primitives::B256 as RB256;
 use reth_chain_query::dex::find_uniswap_v4_pools_for_pair;
 use reth_chain_query::provider::{BalanceDiff, TransactionData as RustTransactionData};
 use reth_chain_query::reth_index::RethIndexDB;
-use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::BlockTimeConverter;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
 use tokio::runtime::Runtime;
+use tx_simulator::tx_builders::AmmSwapRoute;
 
 static RETH_INDEX_DB: Lazy<Mutex<Option<(PathBuf, Arc<RethIndexDB>)>>> =
     Lazy::new(|| Mutex::new(None));

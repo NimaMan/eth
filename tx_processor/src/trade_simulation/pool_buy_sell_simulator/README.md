@@ -60,7 +60,7 @@ each leg records full call traces. `TxProcessor` processes the trace into a
 ## Builder choices and why they matter
 
 ### Denomination preparation
-- **Builder:** `reth_chain_query::tx_builders::amm::uniswap_v4::build_weth_deposit_tx`
+- **Builder:** `tx_simulator::tx_builders::uniswap_v4::build_weth_deposit_tx`
 - **When:** Only when the denomination token is canonical WETH and the pool
   type is *not* Uniswap V4 (which has its own workflow).
 - **Why:** Fee-on-transfer tokens often require exact balance accounting. Using
@@ -78,7 +78,7 @@ each leg records full call traces. `TxProcessor` processes the trace into a
   denomination tokens deducted from the buyer is observable in `ProcessedTransaction`.
 
 ### Token approve leg
-- **Builder:** `reth_chain_query::tx_builders::build_approve_for_route`
+- **Builder:** `tx_simulator::tx_builders::build_approve_for_route`
 - **Rationale:** Uses the router-specific spender and max allowance. The approve
   must happen *after* the buy so we can treat the resulting transaction as
   realistic (router allowance can be revoked in tax-heavy tokens).

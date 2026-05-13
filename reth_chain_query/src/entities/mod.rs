@@ -23,23 +23,24 @@ pub use cex::{CexBalanceSummary, ExchangeBalance};
 // Re-export ETF types
 pub use etf::{EtfHoldingsSummary, ProviderHoldings};
 
-use crate::common_addresses::{
-    cex::get_cex_by_address, etf::get_etf_by_address, stablecoins::get_stablecoin_by_address,
-};
+pub use crate::common_addresses::{KnownAddress, KnownAddressKind};
+
 use crate::provider::RethQueryProvider;
 use alloy_primitives::Address;
 
 impl RethQueryProvider {
+    /// Identify a known important address using the canonical common-address catalogs.
+    pub fn identify_known_address(&self, address: Address) -> Option<KnownAddress> {
+        crate::common_addresses::identify_known_address(address)
+    }
+
     /// Identify entity type for an address
     pub fn identify_entity_type(&self, address: Address) -> EntityType {
-        if get_stablecoin_by_address(address).is_some() {
-            EntityType::Stablecoin
-        } else if get_cex_by_address(address).is_some() {
-            EntityType::CEX
-        } else if get_etf_by_address(address).is_some() {
-            EntityType::ETF
-        } else {
-            EntityType::Unknown
+        match self.identify_known_address(address).map(|known| known.kind) {
+            Some(KnownAddressKind::Stablecoin) => EntityType::Stablecoin,
+            Some(KnownAddressKind::Cex) => EntityType::CEX,
+            Some(KnownAddressKind::Etf) => EntityType::ETF,
+            _ => EntityType::Unknown,
         }
     }
 }

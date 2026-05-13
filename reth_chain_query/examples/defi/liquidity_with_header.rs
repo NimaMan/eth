@@ -8,9 +8,10 @@
 
 use alloy_primitives::address;
 use eyre::{eyre, Result};
-use reth_chain_query::{AmmSwapRoute, RethQueryProvider};
+use reth_chain_query::RethQueryProvider;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
+use tx_simulator::tx_builders::AmmSwapRoute;
 
 fn default_reth_db() -> Result<String> {
     tx_simulator::config::repo::reth_datadir()

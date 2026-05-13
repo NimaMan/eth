@@ -26,7 +26,6 @@ pub mod query_engine;
 pub mod common_addresses;
 pub mod dex;
 pub mod postgres_db;
-pub mod tx_builders;
 pub mod utils;
 
 pub use utils::function_signatures;
@@ -65,18 +64,10 @@ pub use dex::*;
 
 // Re-export common addresses
 pub use common_addresses::{
-    cex::{CexAddress, CEX_ADDRESSES},
-    etf::{EtfAddress, ETF_ADDRESSES},
-    // Address types
-    stablecoins::{StablecoinInfo, STABLECOINS},
-    ADDRESSES_BY_NAME,
-    DENOM_ADDRESSES,
-    ERC20_TOKEN_DECIMALS,
-    FEE_RECIPIENTS,
+    identify_known_address, is_known_address, CexAddress, EtfAddress, KnownAddress,
+    KnownAddressKind, StablecoinInfo, ADDRESSES_BY_NAME, CEX_ADDRESSES, DENOM_ADDRESSES,
+    ERC20_TOKEN_DECIMALS, ETF_ADDRESSES, FEE_RECIPIENTS, STABLECOINS,
 };
-
-// Re-export swap route for convenience
-pub use tx_builders::amm_swap_route::AmmSwapRoute;
 
 // Re-export commonly used types from dependencies
 pub use alloy_primitives::{Address, B256, U256};

@@ -76,13 +76,6 @@ This directory contains working examples demonstrating the usage of the RethChai
 - **What it does**: Compares database results with RPC results for validation
 - **Use case**: Data integrity verification, testing
 
-### Transaction Builder Examples
-
-#### `signed_bundle_simulation`
-- **Purpose**: Demonstrate building and simulating a signed swap→approve→swap bundle
-- **What it does**: Uses the tx_builders helpers to compose Uniswap/Sushi transactions and verifies them with the simulator
-- **Use case**: Strategy prototyping, gas/nonce sanity checks before broadcasting bundles
-
 ### Block Verification Examples
 
 #### `verify_block_receipts_rpc_equivalence`

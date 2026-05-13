@@ -5,9 +5,8 @@
 
 use alloy_primitives::address;
 use eyre::Result;
-use reth_chain_query::{
-    common_addresses::uniswap_v4_pools, Address, AmmSwapRoute, RethQueryProvider, B256,
-};
+use reth_chain_query::{common_addresses::uniswap_v4_pools, Address, RethQueryProvider, B256};
+use tx_simulator::tx_builders::AmmSwapRoute;
 
 fn default_reth_db() -> Result<String> {
     tx_simulator::config::repo::reth_datadir()
