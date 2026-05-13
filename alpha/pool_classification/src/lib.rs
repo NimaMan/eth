@@ -20,6 +20,7 @@ pub const LP_APPROVAL_EXPOSURE_THRESHOLD: f64 = 20.0;
 pub const LP_HOLDER_CONCENTRATION_THRESHOLD: f64 = 90.0;
 
 const DEFAULT_SUPPORTED_QUOTES: [&str; 5] = ["ETH", "WETH", "USDC", "USDT", "DAI"];
+const SIGNIFICANT_LIQUIDITY_DROP_RATIO: f64 = 0.80;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PoolClassificationConfig {
@@ -247,31 +248,25 @@ impl PoolClassificationInput {
             input.has_price_history = has_price_history(value);
         }
         if input.lp_approved_percentage.is_none() {
-            input.lp_approved_percentage = number_field(
-                value,
-                &["lp_approved_percentage", "lpApprovedPercentage"],
-            );
+            input.lp_approved_percentage =
+                number_field(value, &["lp_approved_percentage", "lpApprovedPercentage"]);
         }
         if input.lp_max_holder_share.is_none() {
-            input.lp_max_holder_share = number_field(
-                value,
-                &["lp_max_holder_share", "lpMaxHolderShare"],
-            );
+            input.lp_max_holder_share =
+                number_field(value, &["lp_max_holder_share", "lpMaxHolderShare"]);
         }
         if input.supply_ratio_status.is_none() {
             input.supply_ratio_status =
                 string_field(value, &["supply_ratio_status", "supplyRatioStatus"]);
         }
         if input.ownership_renounced.is_none() {
-            input.ownership_renounced = boolish_field(
-                value,
-                &["ownership_renounced", "ownershipRenounced"],
-            )
-                .then_some(true)
-                .or_else(|| {
-                    boolish_field(value, &["ownership_not_renounced", "ownershipNotRenounced"])
-                        .then_some(false)
-                });
+            input.ownership_renounced =
+                boolish_field(value, &["ownership_renounced", "ownershipRenounced"])
+                    .then_some(true)
+                    .or_else(|| {
+                        boolish_field(value, &["ownership_not_renounced", "ownershipNotRenounced"])
+                            .then_some(false)
+                    });
         }
         Ok(input)
     }
@@ -350,6 +345,12 @@ impl PoolCategory {
 #[serde(rename_all = "snake_case")]
 pub enum EligiblePoolOutcome {
     Active,
+    LiquidityRemoval,
+    HiddenMint,
+    Honeypot,
+    CurrentLowLiquidity,
+    CannotBuy,
+    CannotSell,
     ExtremeTax,
     LpApprovalExposure,
     ConcentratedLpOwnership,
@@ -359,6 +360,12 @@ impl EligiblePoolOutcome {
     pub fn key(self) -> &'static str {
         match self {
             Self::Active => "active",
+            Self::LiquidityRemoval => "liquidity_removal",
+            Self::HiddenMint => "hidden_mint",
+            Self::Honeypot => "honeypot",
+            Self::CurrentLowLiquidity => "current_low_liquidity",
+            Self::CannotBuy => "cannot_buy",
+            Self::CannotSell => "cannot_sell",
             Self::ExtremeTax => "extreme_tax",
             Self::LpApprovalExposure => "lp_approval_exposure",
             Self::ConcentratedLpOwnership => "concentrated_lp_ownership",
@@ -368,6 +375,12 @@ impl EligiblePoolOutcome {
     pub fn label(self) -> &'static str {
         match self {
             Self::Active => "Active",
+            Self::LiquidityRemoval => "Liquidity removal",
+            Self::HiddenMint => "Hidden mint",
+            Self::Honeypot => "Honeypot",
+            Self::CurrentLowLiquidity => "Current low liquidity",
+            Self::CannotBuy => "Cannot buy",
+            Self::CannotSell => "Cannot sell",
             Self::ExtremeTax => "Extreme tax",
             Self::LpApprovalExposure => "LP approval exposure",
             Self::ConcentratedLpOwnership => "Concentrated LP ownership",
@@ -444,6 +457,11 @@ pub fn classify_pool_with_config(
     let liquidity_class = liquidity_class_for_input(input, config);
     let current_liquidity = finite_positive(input.denom_reserve);
     let max_liquidity = finite_positive(input.max_denom_reserve);
+    let eligibility_liquidity = max_liquidity.or(current_liquidity);
+    let liquidity_removed = input.liquidity_removed
+        || derived_liquidity_removed(current_liquidity, max_liquidity, thresholds);
+    let cohort_can_buy = input.cohort_can_buy.unwrap_or(input.can_buy);
+    let cohort_can_sell = input.cohort_can_sell.unwrap_or(input.can_sell);
     let reason = match (quote_symbol.as_deref(), thresholds) {
         (Some(symbol), Some(_)) if config.supports_quote_symbol(symbol) => None,
         _ => Some(NonEligibleReason::UnsupportedCurrency),
@@ -459,27 +477,29 @@ pub fn classify_pool_with_config(
     })
     .or_else(|| {
         let min_liquidity = thresholds.map(|thresholds| thresholds.eligible);
-        match (current_liquidity, min_liquidity) {
+        match (eligibility_liquidity, min_liquidity) {
             (Some(liquidity), Some(min_liquidity)) if liquidity >= min_liquidity => None,
             _ => Some(NonEligibleReason::LowLiquidity),
         }
     })
     .or_else(|| {
-        if config.require_buy && !input.can_buy {
+        if config.require_buy && !cohort_can_buy {
             Some(NonEligibleReason::CannotBuy)
         } else {
             None
         }
     })
     .or_else(|| {
-        if config.require_sell && !input.can_sell {
+        if config.require_sell && !cohort_can_sell {
             Some(NonEligibleReason::CannotSell)
         } else {
             None
         }
     })
     .or_else(|| {
-        if config.reject_risk_from_cohort && input.is_scam {
+        if config.reject_risk_from_cohort
+            && (input.is_scam || input.hidden_mint || liquidity_removed || input.honeypot)
+        {
             Some(NonEligibleReason::RiskBlocked)
         } else {
             None
@@ -494,7 +514,8 @@ pub fn classify_pool_with_config(
     });
 
     let eligible = reason.is_none();
-    let eligible_outcome = eligible.then(|| eligible_outcome(input, current_liquidity, thresholds));
+    let eligible_outcome =
+        eligible.then(|| eligible_outcome(input, current_liquidity, thresholds, liquidity_removed));
     let cohort = if eligible {
         PoolCohort::Eligible
     } else {
@@ -518,7 +539,7 @@ pub fn classify_pool_with_config(
         quote_symbol,
         denom_reserve: current_liquidity,
         max_denom_reserve: max_liquidity,
-        eligibility_liquidity: current_liquidity,
+        eligibility_liquidity,
         min_liquidity: thresholds.map(|thresholds| thresholds.eligible),
         meaningful_liquidity: thresholds.map(|thresholds| thresholds.dust),
         low_liquidity: thresholds.map(|thresholds| thresholds.low),
@@ -528,12 +549,31 @@ pub fn classify_pool_with_config(
 
 fn eligible_outcome(
     input: &PoolClassificationInput,
-    _current_liquidity: Option<f64>,
-    _thresholds: Option<LiquidityThresholds>,
+    current_liquidity: Option<f64>,
+    thresholds: Option<LiquidityThresholds>,
+    liquidity_removed: bool,
 ) -> EligiblePoolOutcome {
+    if liquidity_removed {
+        return EligiblePoolOutcome::LiquidityRemoval;
+    }
+    if input.hidden_mint {
+        return EligiblePoolOutcome::HiddenMint;
+    }
+    if input.honeypot || (input.can_buy && !input.can_sell) {
+        return EligiblePoolOutcome::Honeypot;
+    }
     match normalized_tax_bucket(input.tax_bucket.as_deref()).as_deref() {
         Some("extreme_tax") => return EligiblePoolOutcome::ExtremeTax,
         _ => {}
+    }
+    if !current_liquidity_allows_entry(current_liquidity, thresholds) {
+        return EligiblePoolOutcome::CurrentLowLiquidity;
+    }
+    if !input.can_buy {
+        return EligiblePoolOutcome::CannotBuy;
+    }
+    if !input.can_sell {
+        return EligiblePoolOutcome::CannotSell;
     }
     if let Some(approved) = input.lp_approved_percentage {
         if approved >= LP_APPROVAL_EXPOSURE_THRESHOLD {
@@ -546,6 +586,32 @@ fn eligible_outcome(
         }
     }
     EligiblePoolOutcome::Active
+}
+
+fn current_liquidity_allows_entry(
+    current_liquidity: Option<f64>,
+    thresholds: Option<LiquidityThresholds>,
+) -> bool {
+    match (current_liquidity, thresholds) {
+        (Some(liquidity), Some(thresholds)) => liquidity >= thresholds.eligible,
+        _ => false,
+    }
+}
+
+fn derived_liquidity_removed(
+    current_liquidity: Option<f64>,
+    max_liquidity: Option<f64>,
+    thresholds: Option<LiquidityThresholds>,
+) -> bool {
+    let (Some(current), Some(max_seen), Some(thresholds)) =
+        (current_liquidity, max_liquidity, thresholds)
+    else {
+        return false;
+    };
+    if max_seen <= 0.0 || max_seen < thresholds.eligible || current >= thresholds.eligible {
+        return false;
+    }
+    ((max_seen - current.max(0.0)) / max_seen) >= SIGNIFICANT_LIQUIDITY_DROP_RATIO
 }
 
 pub fn classification_label(input: &PoolClassificationInput) -> &'static str {
@@ -891,10 +957,11 @@ mod tests {
     }
 
     #[test]
-    fn json_input_ignores_historical_risk_for_classification() {
+    fn json_input_keeps_liquidity_removal_inside_eligible_cohort() {
         let value = serde_json::json!({
             "currency": "WETH",
             "denom_reserve": 1.0,
+            "max_denom_reserve": 2.0,
             "can_buy": true,
             "can_sell": true,
             "risk_level": "liquidity_removal"
@@ -902,30 +969,69 @@ mod tests {
         let input = PoolClassificationInput::from_json_value(&value).unwrap();
         let decision = classify_pool(&input);
 
-        // Historical risk states (liquidity removal, hidden mint, etc.)
-        // are tracked separately and do NOT affect classification.
-        // Only current tradability matters for eligibility.
         assert!(decision.eligible);
-        assert_eq!(decision.category, PoolCategory::EligibleActive);
+        assert_eq!(decision.cohort, PoolCohort::Eligible);
+        assert_eq!(decision.category, PoolCategory::EligibleRisk);
         assert_eq!(
             decision.eligible_outcome,
-            Some(EligiblePoolOutcome::Active)
+            Some(EligiblePoolOutcome::LiquidityRemoval)
         );
+        assert_eq!(decision.reason, None);
     }
 
     #[test]
-    fn current_liquidity_drops_pool_below_floor_to_ineligible() {
+    fn current_liquidity_drop_stays_eligible_as_liquidity_removal() {
         let mut input = input();
         input.denom_reserve = Some(0.03);
         input.max_denom_reserve = Some(1.2);
 
         let decision = classify_pool(&input);
 
-        assert!(!decision.eligible);
+        assert!(decision.eligible);
+        assert_eq!(decision.reason, None);
+        assert_eq!(decision.cohort, PoolCohort::Eligible);
+        assert_eq!(decision.category, PoolCategory::EligibleRisk);
         assert_eq!(
-            decision.reason,
-            Some(NonEligibleReason::LowLiquidity)
+            decision.eligible_outcome,
+            Some(EligiblePoolOutcome::LiquidityRemoval)
         );
-        assert_eq!(decision.category, PoolCategory::Ineligible);
+        assert_eq!(decision.eligibility_liquidity, Some(1.2));
+        assert_eq!(decision.liquidity_class, LiquidityClass::Low);
+    }
+
+    #[test]
+    fn current_liquidity_minor_dip_stays_eligible_as_current_low_liquidity() {
+        let mut input = input();
+        input.denom_reserve = Some(0.49);
+        input.max_denom_reserve = Some(0.51);
+
+        let decision = classify_pool(&input);
+
+        assert!(decision.eligible);
+        assert_eq!(decision.reason, None);
+        assert_eq!(
+            decision.eligible_outcome,
+            Some(EligiblePoolOutcome::CurrentLowLiquidity)
+        );
+        assert!(!decision.tradable_now);
+    }
+
+    #[test]
+    fn cohort_uses_ever_tradable_flags_but_current_sell_failure_is_outcome() {
+        let mut input = input();
+        input.can_buy = true;
+        input.can_sell = false;
+        input.cohort_can_buy = Some(true);
+        input.cohort_can_sell = Some(true);
+
+        let decision = classify_pool(&input);
+
+        assert!(decision.eligible);
+        assert_eq!(decision.reason, None);
+        assert_eq!(
+            decision.eligible_outcome,
+            Some(EligiblePoolOutcome::Honeypot)
+        );
+        assert!(!decision.tradable_now);
     }
 }

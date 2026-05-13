@@ -19,7 +19,12 @@ const FRAXSWAP_V2_FACTORY_GET_PAIR: [u8; 4] = [0xe6, 0xa4, 0x39, 0x05];
 /// Compute Fraxswap V2 pool address deterministically.
 pub fn compute_fraxswap_v2_pool(token_a: Address, token_b: Address) -> Address {
     let (token0, token1) = sort_tokens(token_a, token_b);
-    compute_create2_address(FRAXSWAP_V2_FACTORY, token0, token1, FRAXSWAP_V2_INIT_CODE_HASH)
+    compute_create2_address(
+        FRAXSWAP_V2_FACTORY,
+        token0,
+        token1,
+        FRAXSWAP_V2_INIT_CODE_HASH,
+    )
 }
 
 /// Query Fraxswap V2 factory for a token pair using a view call.

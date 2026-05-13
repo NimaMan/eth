@@ -7,6 +7,7 @@ use eth_alpha_core::{
     amount::Amount,
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
+    ids::PositionId,
     order::{OrderIntent, OrderSide},
     position::{Position, PositionSnapshot, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -369,35 +370,27 @@ impl TradingStore for PostgresTradingStore {
     }
 
     async fn record_execution_report(&self, report: &ExecutionReport) -> Result<()> {
-        let payload = to_json(report)?;
-        let (filled_amount_raw, filled_amount_decimals) = report
-            .filled_amount
-            .as_ref()
-            .map(|amount| (Some(amount_raw(amount)), Some(i16::from(amount.decimals))))
-            .unwrap_or((None, None));
-        sqlx::query(
-            r#"
-            INSERT INTO alpha_trading.execution_reports (
-                run_id, order_id, status, tx_hash, block_number, filled_amount_raw,
-                filled_amount_decimals, gas_used, error, payload, created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(&report.order_id.0)
-        .bind(execution_status_label(&report.status))
-        .bind(report.tx_hash.map(|hash| hash.to_string()))
-        .bind(report.block_number.map(u64_to_i64))
-        .bind(filled_amount_raw)
-        .bind(filled_amount_decimals)
-        .bind(report.gas_used.map(u64_to_i64))
-        .bind(report.error.as_deref())
-        .bind(payload)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(())
+        self.record_execution_report_with_context(None, None, report)
+            .await
+    }
+
+    async fn record_position_execution_report(
+        &self,
+        position_id: &PositionId,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        self.record_execution_report_with_context(Some(position_id), None, report)
+            .await
+    }
+
+    async fn record_order_execution_report(
+        &self,
+        position_id: &PositionId,
+        side: OrderSide,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        self.record_execution_report_with_context(Some(position_id), Some(side), report)
+            .await
     }
 
     async fn record_risk_event(&self, event: &RiskEvent) -> Result<()> {
@@ -424,6 +417,47 @@ impl TradingStore for PostgresTradingStore {
         .bind(event.pending_tx_hash.map(|hash| hash.to_string()))
         .bind(event.observed_block.map(u64_to_i64))
         .bind(&event.message)
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+}
+
+impl PostgresTradingStore {
+    async fn record_execution_report_with_context(
+        &self,
+        position_id: Option<&PositionId>,
+        order_side: Option<OrderSide>,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        let payload = to_json(report)?;
+        let (filled_amount_raw, filled_amount_decimals) = report
+            .filled_amount
+            .as_ref()
+            .map(|amount| (Some(amount_raw(amount)), Some(i16::from(amount.decimals))))
+            .unwrap_or((None, None));
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.execution_reports (
+                run_id, position_id, order_side, order_id, status, tx_hash, block_number, filled_amount_raw,
+                filled_amount_decimals, gas_used, error, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(position_id.map(|id| id.0.as_str()))
+        .bind(order_side.map(order_side_label))
+        .bind(&report.order_id.0)
+        .bind(execution_status_label(&report.status))
+        .bind(report.tx_hash.map(|hash| hash.to_string()))
+        .bind(report.block_number.map(u64_to_i64))
+        .bind(filled_amount_raw)
+        .bind(filled_amount_decimals)
+        .bind(report.gas_used.map(u64_to_i64))
+        .bind(report.error.as_deref())
         .bind(payload)
         .execute(&self.pool)
         .await
@@ -572,6 +606,8 @@ const MIGRATIONS: &[&str] = &[
     CREATE TABLE IF NOT EXISTS alpha_trading.execution_reports (
         id BIGSERIAL PRIMARY KEY,
         run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        position_id TEXT,
+        order_side TEXT,
         order_id TEXT NOT NULL,
         status TEXT NOT NULL,
         tx_hash TEXT,
@@ -584,9 +620,15 @@ const MIGRATIONS: &[&str] = &[
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     "#,
+    "ALTER TABLE alpha_trading.execution_reports ADD COLUMN IF NOT EXISTS position_id TEXT",
+    "ALTER TABLE alpha_trading.execution_reports ADD COLUMN IF NOT EXISTS order_side TEXT",
     r#"
     CREATE INDEX IF NOT EXISTS execution_reports_run_created_idx
     ON alpha_trading.execution_reports (run_id, created_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS execution_reports_position_created_idx
+    ON alpha_trading.execution_reports (run_id, position_id, created_at DESC)
     "#,
     r#"
     CREATE INDEX IF NOT EXISTS execution_reports_order_created_idx

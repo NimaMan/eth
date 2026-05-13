@@ -613,6 +613,8 @@ async fn load_execution_reports(
               WHERE positions.run_id = $1
                 AND positions.strategy_name = $2
                 AND (
+                    positions.position_id = execution_reports.position_id
+                    OR
                     positions.entry_order_id = execution_reports.order_id
                     OR positions.exit_order_id = execution_reports.order_id
                 )

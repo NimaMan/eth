@@ -30,7 +30,7 @@ events, and persists decisions before execution.
 
 - Raw simulation, traces, or calldata building; use `tx_simulator`,
   `tx_processor`, and `reth_chain_query`.
-- Canonical token/pool state mutation; use `eth_token` and `eth_token_server`.
+- Canonical token/pool state mutation; use `eth_token` and `eth_chain_server`.
 - Signing, nonce management, final fee-cap validation, or broadcast; use
   `tx_executor`.
 - Mempool ingestion or signal persistence; use `mempool_processor`.
@@ -40,7 +40,7 @@ events, and persists decisions before execution.
 ```text
 tx_processor live_block_processor
   -> Redis eth/live/blocks + processed-block disk cache
-  -> eth_token_server live token/pool views
+  -> eth_chain_server live token/pool views
   -> eth_alpha_trader polls /live/status, /live/pools, /mempool/signals
   -> future real adapter checks eth_block_tx_rank before tx_executor
   -> strategy_observations + orders + reports + positions + risk events

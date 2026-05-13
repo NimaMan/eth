@@ -19,8 +19,8 @@ pub mod live_chain;
 pub mod provider;
 pub mod reth_index;
 
-// Legacy modules (to be refactored)
-pub mod query_engine;
+// Public query facade
+pub mod chain_query;
 
 // Utility modules
 pub mod common_addresses;
@@ -51,8 +51,8 @@ pub use entities::{
     ProviderHoldings, StablecoinMarketAnalysis, StablecoinMarketData, UnitMarketData,
 };
 
-// Re-export legacy types (to be deprecated)
-pub use query_engine::ChainQuery;
+// Re-export query facade
+pub use chain_query::ChainQuery;
 
 // Re-export time utilities
 pub use utils::time_utils::{

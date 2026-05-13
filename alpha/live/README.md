@@ -17,16 +17,16 @@ responsibility while keeping the existing crate names stable:
 
 The live token tracker is a continuous runtime, not a finite range runner. It
 warms from recent processed blocks, then keeps applying every new confirmed
-block published by the live block processor.
+block handed to it by `eth_chain_server`'s `LiveChainRuntime`.
 
 ```text
-eth-live-block-processor
-  -> processed block Redis/cache
-  -> live chain-state overlay
+eth_chain_server LiveChainRuntime
+  -> execution RPC/WS new-head processing
+  -> direct LiveBlockUpdate handoff
 
 LiveTokenRuntime
   -> warmup from processed-block cache
-  -> consume every new processed block
+  -> consume every new LiveBlockUpdate
   -> update tokens/pools/retention
   -> publish token update events
 
@@ -39,10 +39,9 @@ Mempool processor
   -> emit risk/signals
 ```
 
-The live block processor is responsible for publishing the processed block and
-advancing the live chain-state overlay first. After that, token tracking can use
-the processed block as ordered confirmed input, while `LiveTxSimulator` and
-`LivePoolBuySellSimulator` can target the latest tracked live state.
+`LiveChainRuntime` is responsible for processing the confirmed block and handing
+it to token tracking in order. Redis live block/state transport is not part of
+the normal runtime path.
 
 ## Core Invariant
 
@@ -75,7 +74,7 @@ intended tradeoff until we add a separate snapshot publisher for heavy views.
 
 ## Hosted In One Process For Now
 
-For the current implementation, `eth_token_server` can host the live token
+For the current implementation, `eth_chain_server` can host the live token
 runtime, token-server API, and mempool runtime in one Rust process. That keeps
 state sharing simple and avoids Redis/ZMQ as an internal dependency for the
 token/mempool handoff.
@@ -84,7 +83,7 @@ The boundary should still stay modular:
 
 - `feed/` defines the live token runtime and event contract.
 - `state/` defines shared snapshots/readers/writers.
-- `eth_token_server` hosts the runtime and exposes HTTP views.
+- `eth_chain_server` hosts the runtime and exposes HTTP views.
 - `mempool_processor` consumes live token state and live token events.
 
 This lets us split the runtimes into separate services later without changing
@@ -94,5 +93,5 @@ the conceptual data flow.
 
 - `feed/README.md`: crate-level confirmed live-feed and token-runtime contract.
 - `state/README.md`: shared live-state protocol, snapshots, keys, and store traits.
-- `../../eth_token_server/README.md`: token-server API and inspector-facing live state exposure.
+- `../../eth_chain_server/README.md`: chain-server API and inspector-facing live state exposure.
 - `../../mempool_processor/README.md`: mempool risk processing, token context consumption, and `LiveTxSimulator` use.

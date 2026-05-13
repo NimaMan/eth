@@ -44,7 +44,7 @@ Implementation shape:
 
 The code lives under this folder because the rules are investigation rules, not
 production policy. Once a detector is proven by investigations and regression
-coverage, promote the stable part into Rust crate logic, an `eth_token_server`
+coverage, promote the stable part into Rust crate logic, an `eth_chain_server`
 triage endpoint, or a strategy-analysis endpoint.
 
 ## Pool Classification

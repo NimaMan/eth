@@ -63,9 +63,10 @@ async fn simulate_buy_at_block(
         {
             Ok(params) => params,
             Err(error) => {
-                return Ok(failed_report(
+                return Ok(failed_report_at(
                     order_id,
                     format!("invalid pool parameters for chain simulation: {error}"),
+                    block,
                 ))
             }
         };
@@ -79,19 +80,21 @@ async fn simulate_buy_at_block(
     {
         Ok(result) => result,
         Err(error) => {
-            return Ok(failed_report(
+            return Ok(failed_report_at(
                 order_id,
                 format!("chain buy simulation failed: {error}"),
+                block,
             ))
         }
     };
 
     if !result.success {
-        return Ok(failed_report(
+        return Ok(failed_report_at(
             order_id,
             result
                 .failure_reason
                 .unwrap_or("buy simulation failed".to_string()),
+            block,
         ));
     }
 
@@ -127,9 +130,10 @@ async fn simulate_sell_at_block(
     let tokens_to_sell = intent.amount.raw;
 
     if tokens_to_sell.is_zero() {
-        return Ok(failed_report(
+        return Ok(failed_report_at(
             order_id,
             "zero token amount; nothing to sell",
+            block,
         ));
     }
 
@@ -144,9 +148,10 @@ async fn simulate_sell_at_block(
     {
         Ok(params) => params,
         Err(error) => {
-            return Ok(failed_report(
+            return Ok(failed_report_at(
                 order_id,
                 format!("invalid pool parameters for chain simulation: {error}"),
+                block,
             ))
         }
     };
@@ -161,19 +166,21 @@ async fn simulate_sell_at_block(
     {
         Ok(result) => result,
         Err(error) => {
-            return Ok(failed_report(
+            return Ok(failed_report_at(
                 order_id,
                 format!("chain sell simulation failed: {error}"),
+                block,
             ))
         }
     };
 
     if !result.success {
-        return Ok(failed_report(
+        return Ok(failed_report_at(
             order_id,
             result
                 .failure_reason
                 .unwrap_or("sell simulation failed".to_string()),
+            block,
         ));
     }
 
@@ -264,14 +271,17 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
 
-        let (pool, block) = {
+        let block = self.current_block.load(Ordering::Relaxed);
+        let pool = {
             let pools = self.pools.lock().expect("pool lock");
             let Some(pool) = pools.get(&intent.pool_address).cloned() else {
-                return Ok(failed_report(order_id, "pool not in simulation state"));
+                return Ok(if block == 0 {
+                    failed_report(order_id, "pool not in simulation state")
+                } else {
+                    failed_report_at(order_id, "pool not in simulation state", block)
+                });
             };
-
-            let block = self.current_block.load(Ordering::Relaxed);
-            (pool, block)
+            pool
         };
 
         if block == 0 {
@@ -584,11 +594,23 @@ async fn query_erc20_decimals(
 }
 
 fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionReport {
+    failed_report_with_block(order_id, reason, None)
+}
+
+fn failed_report_at(order_id: OrderId, reason: impl Into<String>, block: u64) -> ExecutionReport {
+    failed_report_with_block(order_id, reason, Some(block))
+}
+
+fn failed_report_with_block(
+    order_id: OrderId,
+    reason: impl Into<String>,
+    block_number: Option<u64>,
+) -> ExecutionReport {
     ExecutionReport {
         order_id,
         status: ExecutionStatus::Failed,
         tx_hash: None,
-        block_number: None,
+        block_number,
         filled_amount: None,
         token_amount: None,
         gas_used: None,

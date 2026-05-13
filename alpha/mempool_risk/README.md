@@ -42,7 +42,7 @@ database/log sinks for risk analytics
 It must not write:
 
 ```text
-eth/live/token/snapshot/...
+canonical token/pool state
 eth/live/block/...
 eth/live/latest/...
 ```
@@ -53,11 +53,14 @@ Confirmed blocks are ordered and canonical. Mempool transactions are speculative
 
 ## Lessons From Current Code
 
-The existing mempool processor already hydrates token state from Redis and uses live chain overlays for ahead-of-MDBX simulation. Keep that dependency direction:
+The existing mempool processor hydrates token/pool context from token-server HTTP
+and uses Redis live chain overlays only for ahead-of-MDBX simulation state. Keep
+that dependency direction:
 
 ```text
-live_feed writes live state
-mempool_risk reads live state
+live_feed writes confirmed chain state
+eth_chain_server serves confirmed token/pool context
+mempool_risk reads token-server context and live chain overlays
 mempool_risk emits risk
 alpha_engine decides what to do with risk
 ```

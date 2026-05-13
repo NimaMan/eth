@@ -195,8 +195,14 @@ fn test_pancakeswap_v2_pools(weth: Address, usdc: Address, usdt: Address, dai: A
     // Additional pairs (not yet verified on-chain)
     let computed_weth_usdt = compute_pancakeswap_v2_pool(weth, usdt);
     let computed_weth_dai = compute_pancakeswap_v2_pool(weth, dai);
-    println!("  WETH/USDT computed: 0x{:x} (verify on-chain)", computed_weth_usdt);
-    println!("  WETH/DAI  computed: 0x{:x} (verify on-chain)", computed_weth_dai);
+    println!(
+        "  WETH/USDT computed: 0x{:x} (verify on-chain)",
+        computed_weth_usdt
+    );
+    println!(
+        "  WETH/DAI  computed: 0x{:x} (verify on-chain)",
+        computed_weth_dai
+    );
 }
 
 fn test_shibaswap_v2_pools(weth: Address, usdc: Address) {
@@ -220,11 +226,18 @@ fn test_pancakeswap_v3_pools(weth: Address, usdc: Address, usdt: Address, _dai: 
     let known_weth_usdc_500 = address!("1ac1a8feaaea1900c4166deeed0c11cc10669d36"); // 0.05%
 
     let computed_weth_usdc_500 = compute_pancakeswap_v3_pool(weth, usdc, 500);
-    print_verification("WETH/USDC 0.05%", known_weth_usdc_500, computed_weth_usdc_500);
+    print_verification(
+        "WETH/USDC 0.05%",
+        known_weth_usdc_500,
+        computed_weth_usdc_500,
+    );
 
     // Additional pairs (not yet verified on-chain)
     let computed_weth_usdt_500 = compute_pancakeswap_v3_pool(weth, usdt, 500);
-    println!("  WETH/USDT 0.05% computed: 0x{:x} (verify on-chain)", computed_weth_usdt_500);
+    println!(
+        "  WETH/USDT 0.05% computed: 0x{:x} (verify on-chain)",
+        computed_weth_usdt_500
+    );
 
     println!("\n📊 Testing get_all_pancakeswap_v3_pools for WETH/USDC:");
     let all_pools = get_all_pancakeswap_v3_pools(weth, usdc);

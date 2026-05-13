@@ -28,7 +28,7 @@ after the block:
 
 ## 7K Token Pipeline Profile
 
-The helper script starts an isolated `eth_token_server`, runs one historical
+The helper script starts an isolated `eth_chain_server`, runs one historical
 range-index job, waits for completion, and summarizes
 `token_pipeline_profile.jsonl` from that process run directory.
 
@@ -43,13 +43,13 @@ Useful overrides:
 
 ```bash
 TOKEN_PROFILE_BIND=127.0.0.1:8766
-TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block
+TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server_profile_post_block
 TOKEN_PROFILE_LOG_RUN_ID=profile_25052270_25059269
 ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 ```
 
 The script writes a temporary config to
-`/tmp/eth_token_server_profile_post_block.env` by copying the shared config and
+`/tmp/eth_chain_server_profile_post_block.env` by copying the shared config and
 overriding only the isolated bind address, log root, log run id, and live
 auto-start setting.
 
@@ -84,7 +84,7 @@ Reproduce:
 
 ```bash
 TOKEN_PROFILE_BIND=127.0.0.1:8767 \
-TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block_8767_final \
+TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server_profile_post_block_8767_final \
 TOKEN_PROFILE_LOG_RUN_ID=profile_25052270_25059269_final \
 START_BLOCK=25052270 \
 END_BLOCK=25059269 \
@@ -100,7 +100,7 @@ Output CSV:
 Profile log:
 
 ```text
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server_profile_post_block_8767_final/profile_25052270_25059269_final/token_pipeline_profile.jsonl
+/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server_profile_post_block_8767_final/profile_25052270_25059269_final/token_pipeline_profile.jsonl
 ```
 
 Summary:
@@ -180,15 +180,15 @@ Captured on 2026-05-10 after adding `live_token_apply_profile`.
 Run:
 
 ```text
-TOKEN_SERVER_LOG_RUN_ID=live_warmup_7000_profile_1778416273
-TOKEN_SERVER_BIND=127.0.0.1:8768
+CHAIN_SERVER_LOG_RUN_ID=live_warmup_7000_profile_1778416273
+CHAIN_SERVER_BIND=127.0.0.1:8768
 LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
 ```
 
 Profile log:
 
 ```text
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/live_warmup_7000_profile_1778416273/token_pipeline_profile.jsonl
+/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server/live_warmup_7000_profile_1778416273/token_pipeline_profile.jsonl
 ```
 
 The run was stopped after 1,423 warmup blocks because the bottleneck was already
@@ -237,15 +237,15 @@ Captured on 2026-05-10 after removing per-block processor clone/restore from
 Run:
 
 ```text
-TOKEN_SERVER_LOG_RUN_ID=live_warmup_7000_inplace_1778417096
-TOKEN_SERVER_BIND=127.0.0.1:8768
+CHAIN_SERVER_LOG_RUN_ID=live_warmup_7000_inplace_1778417096
+CHAIN_SERVER_BIND=127.0.0.1:8768
 LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
 ```
 
 Profile log:
 
 ```text
-/home/nima/code/crypto/blockchains/eth/logs/eth_token_server/live_warmup_7000_inplace_1778417096/token_pipeline_profile.jsonl
+/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server/live_warmup_7000_inplace_1778417096/token_pipeline_profile.jsonl
 ```
 
 Summary:

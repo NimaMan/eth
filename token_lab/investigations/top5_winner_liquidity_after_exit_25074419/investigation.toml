@@ -1,0 +1,44 @@
+title = "Top-five winner liquidity-after-exit review"
+status = "explained"
+run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "top winner chain parity"
+classification = "low_liquidity_after_realized_exit"
+
+[[tokens]]
+rank = 2
+token = "0x0654750A6012bD42e06a0f1141153Dc8C60F7Fb1"
+pool = "0x25aeb70269c8e9d4c80d2c82dcd74d813ee1efd9"
+sell_block = 25077522
+first_bad_block = 25077722
+sell_proceeds_wei = "2329928443477287333"
+drain_tx_hash = "0xc4fc96637c8814dfbbfeee7b0a3994e3f362cda73d867328342daf68f953afc4"
+
+[[tokens]]
+rank = 3
+token = "0xDBb77651dF8A633A4E9D8c858E46878845878B20"
+pool = "0x97cddc3607198b137b37bc68af11c2eba8868f3f"
+sell_block = 25077831
+first_bad_block = 25077998
+sell_proceeds_wei = "2006753067216354612"
+drain_tx_hash = "0xbf27f0a617e80ba2c51540a7861dc6017be5f725540767592e4f979c1d6ce85b"
+
+[[tokens]]
+rank = 4
+token = "0x8CEDa8619ad186E7C9bCA77734e48c8f518f5d01"
+pool = "0xd8e654a9b4e861b54adb903ada20e3787dbd0079"
+sell_block = 25077529
+first_bad_block = 25077595
+sell_proceeds_wei = "1055073350228747716"
+drain_tx_hash = "0x834fead8ee0ed75b360441ad448351509f897dab5f2be655c3aef8a801f78697"
+
+[[tokens]]
+rank = 5
+token = "0x3B0e37179fC806302f4A15f85577a06A6Eb38B4F"
+pool = "0xd2888a9f952e2dda7676f320322aca8e117f4c5a"
+sell_block = 25074622
+first_bad_block = 25074698
+sell_proceeds_wei = "808653169922843955"
+drain_tx_hash = "0xc8b945bc88184ee9fc0723945de5219cb786221c163fd2901d5be9dffe4a717b"

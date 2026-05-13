@@ -1,0 +1,60 @@
+title = "15k historical failed sell classification"
+status = "confirmed"
+run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "sell restriction classification"
+
+[[tokens]]
+symbol = "unknown"
+token = "0xBCB2BcA68eDf968aD7304CB71cEecD3aD60962bd"
+pool = "0x0a5080fb0c7fac5f124b79301dca9b236e21d70e"
+classification = "closed_retry_confirmed"
+
+[[tokens]]
+symbol = "unknown"
+token = "0x4fD80A8867e0e55D5422CD611391B23033130325"
+pool = "0xb4a5b558041e60e7144073f2f599546cb62b21cc"
+classification = "no_observed_sell_evidence"
+
+[[tokens]]
+symbol = "unknown"
+token = "0xbfb08D7058d336308b5BD8B727B7F9F0c3e212fd"
+pool = "0x5f7743e68af95244c491f5ea7f0e18b4b76c52ee"
+classification = "v3_drained_zero_liquidity_at_exit"
+
+[[tokens]]
+symbol = "unknown"
+token = "0x2a6F605B6db391F5CBfF4B6fDE4C9b8502e73D20"
+pool = "0xaa540307a287d821e686809c11e5f7c5538b50c3"
+classification = "no_observed_sell_evidence"
+
+[[tokens]]
+symbol = "unknown"
+token = "0xdf1a391EfcEA02c853726C63f7354C409930C90b"
+pool = "0x22003bdcc5b20b675c1a2a590145941e7ba913d8"
+classification = "address_specific_sell_restriction"
+
+[[tokens]]
+symbol = "unknown"
+token = "0x11aEE4BE385E1f9437f9AaC38287A3052BE80F3F"
+pool = "0xecce2302b424b7e4c0c941d367878e6cb6d79e7d"
+classification = "chunkable_max_transfer"
+
+[[tokens]]
+symbol = "unknown"
+token = "0x5E30BCf428b1eCE75Ea6a9D6176cadBabb11cD06"
+pool = "0xfaf20ca927a44f4f391d7956ccc2c59652c3c4ea"
+classification = "pancakeswap_v2_unsellable"
+
+[[tokens]]
+symbol = "unknown"
+token = "0xbe74B2CFd44d799A6997920F089546644501Af21"
+pool = "0x2c029ab56eb4fe63af432d8a23fbffe3c2e80c3c"
+classification = "address_specific_sell_restriction"
+
+[[tokens]]
+symbol = "unknown"
+token = "0x2834311B28d38B8BF23C97fA7EA1D7330ac5B56C"
+pool = "0x035a91b3398e2c9b6c8d32745ce7eee7a1d04024"
+classification = "address_specific_sell_restriction"

@@ -8,7 +8,7 @@ block-level token updates.
 - Consume `tx_processor::ProcessedBlock` and `ProcessedTransaction` output.
 - Maintain token, pool, lifecycle, LP, approval, activity, health, and network
   state for historical range builds and live token tracking.
-- Provide the canonical Rust token/pool state used by `eth_token_server`,
+- Provide the canonical Rust token/pool state used by `eth_chain_server`,
   mempool context, and alpha reads.
 
 ## Owns
@@ -25,7 +25,7 @@ block-level token updates.
 - Raw RPC tracing, Reth DB access, or transaction/block decoding; use
   `tx_processor`, `tx_simulator`, and `reth_chain_query`.
 - Live process hosting, HTTP/SSE views, or endpoint DTOs; use
-  `eth_token_server`.
+  `eth_chain_server`.
 - Strategy decisions or mempool signal decisions.
 - Python compatibility layers; expose stable Rust APIs first, then bind through
   `pyreth` only when needed.
@@ -36,7 +36,7 @@ block-level token updates.
 ProcessedBlock / ProcessedTransaction
   -> BlockTokenProcessor applies txs in block/index order
   -> token registry + tracked token index + pool state + health/network state
-  -> eth_token_server live/range views
+  -> eth_chain_server live/range views
   -> mempool_processor context and alpha market events
 ```
 
@@ -68,7 +68,7 @@ cargo run -p eth_token --example uniswap_v2_pool_replay_reserves
   incomplete compared with V2.
 - Same-block complex deployments can require exact metadata/pool replay; avoid
   assuming token metadata is stable before the processed block is fully applied.
-- UI/API callers should use explicit view DTOs from `eth_token_server`, not raw
+- UI/API callers should use explicit view DTOs from `eth_chain_server`, not raw
   internal token structs.
 - Do not recreate log decoding here. If a field needs receipt/log/trace truth,
   add it to `tx_processor` first and consume the processed fact here.

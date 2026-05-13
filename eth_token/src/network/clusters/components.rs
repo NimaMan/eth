@@ -32,7 +32,10 @@ impl ComponentAnalyzer {
     }
 
     /// Summarize each component by total PnL and member count.
-    pub fn summarize_components(&self, _components: &BTreeMap<NetworkNodeId, String>) -> Vec<NetworkComponent> {
+    pub fn summarize_components(
+        &self,
+        _components: &BTreeMap<NetworkNodeId, String>,
+    ) -> Vec<NetworkComponent> {
         // TODO: Implement component summarization
         vec![]
     }

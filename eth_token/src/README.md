@@ -20,7 +20,7 @@ transaction/block facts and should not recreate tracing or decoding logic.
 
 - Receipt/log/trace decoding. Add decoded facts to `tx_processor` first.
 - Direct Reth DB queries except through owner crate APIs.
-- HTTP DTOs or runtime hosting; use `eth_token_server`.
+- HTTP DTOs or runtime hosting; use `eth_chain_server`.
 
 ## Data Flow
 
@@ -28,7 +28,7 @@ transaction/block facts and should not recreate tracing or decoding logic.
 tx_processor::ProcessedBlock
   -> tracking::block_processor applies txs in block order
   -> erc20 + pools + state + health + network updates
-  -> eth_token_server view DTOs
+  -> eth_chain_server view DTOs
 ```
 
 ## Block Simulation State Reuse

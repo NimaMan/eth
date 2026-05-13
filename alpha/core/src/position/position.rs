@@ -49,6 +49,13 @@ pub struct Position {
     /// Used for honest baseline PnL even when no exit is attempted.
     #[serde(default)]
     pub drained: bool,
+    /// Last sell failure seen for this position, if any.
+    #[serde(default)]
+    pub exit_failure_reason: Option<String>,
+    /// False when the latest sell failure is simulator infrastructure rather
+    /// than a retryable chain outcome.
+    #[serde(default = "default_exit_retryable")]
+    pub exit_retryable: bool,
 }
 
 impl Position {
@@ -66,6 +73,8 @@ impl Position {
             entry_token_raw_amount: None,
             entry_block: None,
             drained: false,
+            exit_failure_reason: None,
+            exit_retryable: true,
         }
     }
 
@@ -84,7 +93,7 @@ impl Position {
                 | PositionState::SellFailed
                 | PositionState::SellCancelled,
                 OrderSide::Sell,
-            ) => {
+            ) if self.exit_retryable => {
                 self.state = PositionState::SellIntentCreated;
                 Ok(())
             }
@@ -144,6 +153,12 @@ impl Position {
             && self.state == PositionState::SellSubmitted
         {
             self.state = PositionState::SellFailed;
+            self.exit_failure_reason = report.error.clone();
+            self.exit_retryable = report
+                .error
+                .as_deref()
+                .map(is_retryable_exit_failure)
+                .unwrap_or(true);
             return Ok(());
         }
 
@@ -165,6 +180,8 @@ impl Position {
             && self.state == PositionState::SellSubmitted
         {
             self.state = PositionState::SellCancelled;
+            self.exit_failure_reason = None;
+            self.exit_retryable = true;
             return Ok(());
         }
 
@@ -193,6 +210,8 @@ impl Position {
                 .map(|amount| amount.to_decimal());
             self.entry_token_raw_amount = report.token_amount.clone();
             self.entry_block = report.block_number;
+            self.exit_failure_reason = None;
+            self.exit_retryable = true;
             return Ok(());
         }
 
@@ -203,6 +222,8 @@ impl Position {
             if let Some(amount) = &report.filled_amount {
                 self.exit_proceeds = Some(amount_to_decimal(amount));
             }
+            self.exit_failure_reason = None;
+            self.exit_retryable = true;
             return Ok(());
         }
 
@@ -229,7 +250,7 @@ impl Position {
     }
 
     pub fn can_submit_exit(&self) -> bool {
-        self.state.can_submit_exit()
+        self.state.can_submit_exit() && self.exit_retryable
     }
 
     pub fn is_closed(&self) -> bool {
@@ -239,6 +260,16 @@ impl Position {
     pub fn mark_scammed(&mut self) {
         self.state = PositionState::Scammed;
     }
+}
+
+fn default_exit_retryable() -> bool {
+    true
+}
+
+fn is_retryable_exit_failure(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    !(normalized.contains("unsupported balance storage layout")
+        || normalized.contains("unable to inject synthetic erc20 balance"))
 }
 
 /// Convert an Amount (U256 raw + decimals) to a DecimalAmount.

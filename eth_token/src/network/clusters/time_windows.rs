@@ -21,10 +21,7 @@ impl TimeWindowClusterDetector {
     }
 
     /// Find addresses that traded together in a window.
-    pub fn detect_coactivity(
-        &self,
-        _window_size_blocks: u64,
-    ) -> Vec<TimeWindowCluster> {
+    pub fn detect_coactivity(&self, _window_size_blocks: u64) -> Vec<TimeWindowCluster> {
         // TODO: Implement time-window coactivity detection
         vec![]
     }

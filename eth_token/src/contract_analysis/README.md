@@ -11,7 +11,7 @@ display that evidence.
 - `contract_analysis` owns structured token-contract evidence.
 - `chain_metadata` and `reth_chain_query` own raw chain reads and view calls.
 - `health` can turn evidence into policy decisions later.
-- `eth_token_server` only exposes reports through API DTOs.
+- `eth_chain_server` only exposes reports through API DTOs.
 - `token_lab` consumes reports to choose investigation cases.
 
 ## Current Scope

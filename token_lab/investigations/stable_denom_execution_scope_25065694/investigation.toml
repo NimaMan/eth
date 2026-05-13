@@ -1,0 +1,27 @@
+title = "Stable-denom execution scope in 15k historical baseline"
+status = "fixed"
+previous_run_id = "hist-snipe-all-poolonly-15k-v3-ur-decoded-20260513-132029"
+fixed_run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "execution denom scope"
+classification = "non_weth_denom_excluded_until_quote_conversion"
+
+[[tokens]]
+token = "0x87Bd4293e71129114adAF975E1b07fe21a3D19bc"
+pool = "0xc980d6f68d8b9d85ab8a4ee3c27d8192512a8d67"
+block = 25070469
+protocol = "uniswap-v2"
+denom = "USDC"
+denom_address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+result = "tradeable with 6-decimal quote sizes; excluded from ETH-denominated executable baseline"
+
+[[tokens]]
+token = "0xdEe8895C3a604E97437A7b5286B18B9BF7Fed116"
+pool = "0x2e42a99de77713391ea0af5b279e521f28d49076"
+block = 25079195
+protocol = "uniswap-v2"
+denom = "USDT"
+denom_address = "0xdac17f958d2ee523a2206206994597c13d831ec7"
+result = "tradeable with 6-decimal quote sizes at entry block; excluded from ETH-denominated executable baseline"

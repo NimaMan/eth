@@ -5,8 +5,7 @@ use alloy_sol_types::{sol, SolCall, SolValue};
 
 const COMMAND_V3_SWAP_EXACT_IN: u8 = 0x00;
 const COMMAND_UNWRAP_WETH: u8 = 0x0c;
-const UNIVERSAL_ROUTER_ADDRESS_THIS: Address =
-    address!("0000000000000000000000000000000000000002");
+const UNIVERSAL_ROUTER_ADDRESS_THIS: Address = address!("0000000000000000000000000000000000000002");
 
 sol! {
     function execute(bytes commands, bytes[] inputs, uint256 deadline);
@@ -604,11 +603,11 @@ mod tests {
 
         let data = tx.data.unwrap();
         assert_eq!(&data[..4], executeCall::SELECTOR);
-        assert!(data.windows(2).any(|window| {
-            window == [COMMAND_V3_SWAP_EXACT_IN, COMMAND_UNWRAP_WETH]
-        }));
-        assert!(data.windows(32).any(|window| {
-            window == UNIVERSAL_ROUTER_ADDRESS_THIS.into_word().as_slice()
-        }));
+        assert!(data
+            .windows(2)
+            .any(|window| { window == [COMMAND_V3_SWAP_EXACT_IN, COMMAND_UNWRAP_WETH] }));
+        assert!(data
+            .windows(32)
+            .any(|window| { window == UNIVERSAL_ROUTER_ADDRESS_THIS.into_word().as_slice() }));
     }
 }

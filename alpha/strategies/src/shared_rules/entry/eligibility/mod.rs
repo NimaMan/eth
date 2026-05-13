@@ -1,12 +1,14 @@
+use alloy_primitives::{address, Address};
 use eth_alpha_core::market::{PoolProtocol, PoolSnapshot};
 use eth_pool_classification::{
-    PoolClassificationConfig, PoolClassificationInput, classify_pool_with_config,
+    classify_pool_with_config, PoolClassificationConfig, PoolClassificationInput,
 };
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::baseline::snipe_all::rule::RuleDecision;
 
 pub const RULE_NAME: &str = "entry.eligibility";
+const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 
 /// Evaluate whether a pool is eligible for entry.
 ///
@@ -51,6 +53,13 @@ pub fn evaluate(pool: &PoolSnapshot, config: &PoolClassificationConfig) -> RuleD
 }
 
 fn unsupported_execution_route_reason(pool: &PoolSnapshot) -> Option<&'static str> {
+    let Some(denom_address) = pool.denom_address else {
+        return Some("unsupported_execution_missing_denom");
+    };
+    if !denom_address.is_zero() && denom_address != WETH_ADDRESS {
+        return Some("unsupported_execution_denom");
+    }
+
     if pool.protocol == PoolProtocol::UniswapV4 {
         let Some(v4) = pool.uniswap_v4.as_ref() else {
             return Some("unsupported_v4_missing_pool_key");
@@ -66,7 +75,7 @@ fn unsupported_execution_route_reason(pool: &PoolSnapshot) -> Option<&'static st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, address};
+    use alloy_primitives::{address, B256};
     use eth_alpha_core::{
         ids::TokenPoolId,
         market::{PoolSnapshot, UniswapV4PoolKeySnapshot},
@@ -132,6 +141,45 @@ mod tests {
             decision,
             RuleDecision::hold(RULE_NAME, "unsupported_v4_missing_pool_key")
         );
+    }
+
+    #[test]
+    fn rejects_missing_denom_for_execution() {
+        let mut pool = eligible_pool();
+        pool.denom_address = None;
+
+        let decision = evaluate(&pool, &PoolClassificationConfig::default());
+
+        assert_eq!(
+            decision,
+            RuleDecision::hold(RULE_NAME, "unsupported_execution_missing_denom")
+        );
+    }
+
+    #[test]
+    fn rejects_non_weth_denom_for_execution() {
+        let mut pool = eligible_pool();
+        pool.denom_address = Some(address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"));
+        pool.denom_symbol = Some("USDC".to_string());
+        pool.denom_reserve = Decimal::from(10_000u64);
+
+        let decision = evaluate(&pool, &PoolClassificationConfig::default());
+
+        assert_eq!(
+            decision,
+            RuleDecision::hold(RULE_NAME, "unsupported_execution_denom")
+        );
+    }
+
+    #[test]
+    fn allows_native_eth_denom_for_execution() {
+        let mut pool = eligible_pool();
+        pool.denom_address = Some(Address::ZERO);
+        pool.denom_symbol = Some("ETH".to_string());
+
+        let decision = evaluate(&pool, &PoolClassificationConfig::default());
+
+        assert_eq!(decision, RuleDecision::Enter { rule: RULE_NAME });
     }
 
     #[test]

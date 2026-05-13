@@ -340,7 +340,9 @@ where
         position.apply_execution_report_with_price(&report, fill_price)?;
 
         self.store.upsert_position(&position).await?;
-        self.store.record_execution_report(&report).await?;
+        self.store
+            .record_order_execution_report(&position.id, intent.side, &report)
+            .await?;
         if intent.side == OrderSide::Sell
             && matches!(
                 report_status,

@@ -1,6 +1,6 @@
 //! HTTP wire types for the token server API and observation payloads.
 //!
-//! These types mirror the JSON responses from `eth_token_server` and are used
+//! These types mirror the JSON responses from `eth_chain_server` and are used
 //! by both the live trader (`eth_alpha_trader`) and the backtest replay logic
 //! to convert wire representations into `eth_alpha_core` domain types.
 
@@ -80,8 +80,14 @@ pub struct PoolWire {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PoolRuntimeStateWire {
+    #[serde(default)]
     pub last_update_block: Option<u64>,
+    #[serde(default)]
     pub last_sync_block: Option<u64>,
+    #[serde(default)]
+    pub can_buy: Option<bool>,
+    #[serde(default)]
+    pub can_sell: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -149,8 +155,16 @@ impl PoolWire {
             fee_tier: self.fee_tier,
             uniswap_v4: self.uniswap_v4_pool_key()?,
             latest_block,
-            can_buy: self.can_buy,
-            can_sell: self.can_sell,
+            can_buy: self
+                .runtime_state
+                .as_ref()
+                .and_then(|state| state.can_buy)
+                .unwrap_or(self.can_buy),
+            can_sell: self
+                .runtime_state
+                .as_ref()
+                .and_then(|state| state.can_sell)
+                .unwrap_or(self.can_sell),
             is_scam: self.is_scam,
         })
     }
@@ -303,9 +317,8 @@ pub fn parse_protocol(value: &str) -> PoolProtocol {
         "sushi" | "sushiswap" | "sushi_v2" | "sushi-v2" => {
             PoolProtocol::Unknown("sushi".to_string())
         }
-        "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" => {
-            PoolProtocol::PancakeSwapV2
-        }
+        "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" | "pancakeswap_v2"
+        | "pancakeswap-v2" => PoolProtocol::PancakeSwapV2,
         other => PoolProtocol::Unknown(other.to_string()),
     }
 }
@@ -334,4 +347,74 @@ pub fn required_pool_float(value: Option<f64>, field: &str, pool: &PoolWire) -> 
 
 pub fn decimal_from_f64(value: f64) -> Decimal {
     Decimal::from_f64(value).unwrap_or(Decimal::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pool_wire_with_flags(top_level_can_buy: bool, top_level_can_sell: bool) -> PoolWire {
+        PoolWire {
+            token_address: "0x1111111111111111111111111111111111111111".to_string(),
+            pool_address: "0x2222222222222222222222222222222222222222".to_string(),
+            protocol: "UNISWAP-V2".to_string(),
+            pool_id: None,
+            pool_manager_address: None,
+            currency0: None,
+            currency1: None,
+            fee_tier: None,
+            tick_spacing: None,
+            hooks: None,
+            denom_address: Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".to_string()),
+            denom_symbol: Some("WETH".to_string()),
+            currency: None,
+            denom_reserve: Some(1.0),
+            token_reserve: Some(100.0),
+            price: Some(0.01),
+            creation_block: Some(10),
+            latest_block_number: Some(12),
+            runtime_state: None,
+            can_buy: top_level_can_buy,
+            can_sell: top_level_can_sell,
+            is_scam: false,
+        }
+    }
+
+    #[test]
+    fn pool_snapshot_prefers_runtime_state_trading_flags() {
+        let mut wire = pool_wire_with_flags(true, true);
+        wire.runtime_state = Some(PoolRuntimeStateWire {
+            last_update_block: Some(12),
+            last_sync_block: Some(12),
+            can_buy: Some(false),
+            can_sell: Some(false),
+        });
+
+        let snapshot = wire.to_pool_snapshot().expect("pool snapshot");
+
+        assert!(!snapshot.can_buy);
+        assert!(!snapshot.can_sell);
+    }
+
+    #[test]
+    fn pool_snapshot_falls_back_to_top_level_trading_flags() {
+        let snapshot = pool_wire_with_flags(true, false)
+            .to_pool_snapshot()
+            .expect("pool snapshot");
+
+        assert!(snapshot.can_buy);
+        assert!(!snapshot.can_sell);
+    }
+
+    #[test]
+    fn parse_protocol_accepts_pancakeswap_v2_spellings() {
+        assert_eq!(
+            parse_protocol("pancakeswap-v2"),
+            PoolProtocol::PancakeSwapV2
+        );
+        assert_eq!(
+            parse_protocol("pancakeswap_v2"),
+            PoolProtocol::PancakeSwapV2
+        );
+    }
 }

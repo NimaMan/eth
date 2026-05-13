@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use crate::{
     error::Result,
     execution::ExecutionReport,
-    order::OrderIntent,
+    ids::PositionId,
+    order::{OrderIntent, OrderSide},
     position::{Position, PositionSnapshot},
     risk::RiskEvent,
 };
@@ -17,6 +18,24 @@ pub trait TradingStore: Send + Sync {
     async fn record_order_intent(&self, intent: &OrderIntent) -> Result<()>;
 
     async fn record_execution_report(&self, report: &ExecutionReport) -> Result<()>;
+
+    async fn record_position_execution_report(
+        &self,
+        _position_id: &PositionId,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        self.record_execution_report(report).await
+    }
+
+    async fn record_order_execution_report(
+        &self,
+        position_id: &PositionId,
+        _side: OrderSide,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        self.record_position_execution_report(position_id, report)
+            .await
+    }
 
     async fn record_risk_event(&self, _event: &RiskEvent) -> Result<()> {
         Ok(())

@@ -1,0 +1,20 @@
+title = "Sell proceeds recipient-net attribution in 15k historical baseline"
+status = "fixed"
+previous_run_id = "hist-snipe-all-poolonly-15k-weth-only-20260513-134623"
+fixed_run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "sell proceeds accounting"
+classification = "recipient_net_precedes_gross_pool_output"
+
+[[tokens]]
+token = "0x12a77658112Cf42914cB614D13653ed5852DA1e5"
+pool = "0x08368cfb1b69f5821ec0e8340bee726568f8d662"
+entry_block = 25077695
+exit_block = 25077896
+protocol = "uniswap-v2"
+old_sell_proceeds_wei = "9030898526198050656"
+new_sell_proceeds_wei = "3762855185725959110"
+third_party_auto_swap_wei = "5268043340472091546"
+result = "gross pool-output sell accounting counted WETH paid to a third-party auto-swap recipient; corrected accounting uses strategy recipient net proceeds"

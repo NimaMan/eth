@@ -11,6 +11,8 @@ pub struct StrategyReport {
     pub concentration: PnlConcentration,
     pub issue_flags: Vec<IssueFlag>,
     pub failures: Vec<FailureBucket>,
+    pub buy_failed_entries: Vec<BuyFailedEntry>,
+    pub open_failed_exits: Vec<OpenFailedExit>,
     pub protocols: Vec<ProtocolBucket>,
     pub top_winners: Vec<PositionRank>,
     pub worst_losers: Vec<PositionRank>,
@@ -62,6 +64,32 @@ pub struct FailureBucket {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuyFailedEntry {
+    pub token_address: String,
+    pub pool_address: String,
+    pub failed_block: Option<i64>,
+    pub protocol: String,
+    pub denom_symbol: String,
+    pub observed_can_buy: Option<bool>,
+    pub observed_can_sell: Option<bool>,
+    pub error_class: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OpenFailedExit {
+    pub token_address: String,
+    pub pool_address: String,
+    pub entry_block: Option<i64>,
+    pub failed_reports: i64,
+    pub first_failed_block: Option<i64>,
+    pub last_failed_block: Option<i64>,
+    pub latest_snapshot_block: Option<i64>,
+    pub current_value_eth: Option<String>,
+    pub pnl_eth: Option<String>,
+    pub error_class: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtocolBucket {
     pub protocol: String,
     pub denom_symbol: String,
@@ -86,6 +114,9 @@ pub async fn analyze_strategy(pool: &PgPool, run_id: &str, limit: i64) -> Result
     let summary = load_summary(pool, run_id).await?;
     let concentration = load_concentration(pool, run_id).await?;
     let failures = load_failures(pool, run_id).await?;
+    let buy_failed_entries =
+        load_buy_failed_entries(pool, run_id, run.replay_run_id.as_deref(), limit).await?;
+    let open_failed_exits = load_open_failed_exits(pool, run_id, limit).await?;
     let protocols = load_protocols(pool, run_id, run.replay_run_id.as_deref()).await?;
     let top_winners = load_ranked_positions(pool, run_id, limit, "DESC").await?;
     let worst_losers = load_ranked_positions(pool, run_id, limit, "ASC").await?;
@@ -97,6 +128,8 @@ pub async fn analyze_strategy(pool: &PgPool, run_id: &str, limit: i64) -> Result
         concentration,
         issue_flags,
         failures,
+        buy_failed_entries,
+        open_failed_exits,
         protocols,
         top_winners,
         worst_losers,
@@ -273,6 +306,72 @@ pub fn print_strategy_report(report: &StrategyReport) {
         println!();
     }
 
+    if !report.buy_failed_entries.is_empty() {
+        println!("## Buy Failed Entries");
+        render::print_table(
+            &[
+                "token", "block", "protocol", "denom", "obs buy", "obs sell", "error",
+            ],
+            &report
+                .buy_failed_entries
+                .iter()
+                .map(|row| {
+                    vec![
+                        short(&row.token_address),
+                        row.failed_block
+                            .map(|block| block.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        row.protocol.clone(),
+                        row.denom_symbol.clone(),
+                        render_bool(row.observed_can_buy),
+                        render_bool(row.observed_can_sell),
+                        row.error_class.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        println!();
+    }
+
+    if !report.open_failed_exits.is_empty() {
+        println!("## Open Failed Exits");
+        render::print_table(
+            &[
+                "token",
+                "entry",
+                "first fail",
+                "last fail",
+                "reports",
+                "value",
+                "pnl",
+                "error",
+            ],
+            &report
+                .open_failed_exits
+                .iter()
+                .map(|row| {
+                    vec![
+                        short(&row.token_address),
+                        row.entry_block
+                            .map(|block| block.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        row.first_failed_block
+                            .map(|block| block.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        row.last_failed_block
+                            .map(|block| block.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        row.failed_reports.to_string(),
+                        render::fmt_opt(&row.current_value_eth),
+                        render::fmt_opt(&row.pnl_eth),
+                        row.error_class.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        println!();
+    }
+
     println!("## Top Winners");
     print_rank_table(&report.top_winners);
     println!();
@@ -310,6 +409,14 @@ fn short(value: &str) -> String {
         return value.to_string();
     }
     format!("{}...{}", &value[..8], &value[value.len() - 6..])
+}
+
+fn render_bool(value: Option<bool>) -> String {
+    match value {
+        Some(true) => "yes".to_string(),
+        Some(false) => "no".to_string(),
+        None => "-".to_string(),
+    }
 }
 
 fn issue_flags(
@@ -573,6 +680,156 @@ async fn load_failures(pool: &PgPool, run_id: &str) -> Result<Vec<FailureBucket>
         .collect()
 }
 
+async fn load_buy_failed_entries(
+    pool: &PgPool,
+    run_id: &str,
+    replay_run_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<BuyFailedEntry>> {
+    let rows = sqlx::query(
+        r#"
+        WITH failed AS (
+            SELECT run_id, position_id, block_number, error
+            FROM alpha_trading.execution_reports
+            WHERE run_id = $1
+              AND order_side = 'buy'
+              AND status = 'failed'
+        )
+        SELECT
+            p.token_address,
+            p.pool_address,
+            f.block_number AS failed_block,
+            coalesce(so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
+            coalesce(so.payload->'pool'->>'denom_symbol', so.payload->'pool'->>'currency', '<missing>') AS denom_symbol,
+            (so.payload->'pool'->>'can_buy')::boolean AS can_buy,
+            (so.payload->'pool'->>'can_sell')::boolean AS can_sell,
+            CASE
+                WHEN f.error LIKE 'Universal Router V4 buy transaction failed%'
+                    THEN 'v4 universal router buy reverted'
+                WHEN f.error LIKE 'Buy transaction failed:%'
+                    THEN replace(f.error, 'Buy transaction failed: ', '')
+                ELSE coalesce(left(f.error, 96), '<none>')
+            END AS error_class
+        FROM failed f
+        JOIN alpha_trading.positions p USING (run_id, position_id)
+        LEFT JOIN alpha_trading.strategy_observations so
+          ON so.run_id = $2
+         AND so.event_source = 'pool_update'
+         AND so.block_number = f.block_number
+         AND lower(so.token_address) = lower(p.token_address)
+         AND so.pool_address = p.pool_address
+        WHERE p.run_id = $1
+        ORDER BY f.block_number, p.token_address, p.pool_address
+        LIMIT $3
+        "#,
+    )
+    .bind(run_id)
+    .bind(replay_run_id.unwrap_or(""))
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .wrap_err("failed to load buy failed entries")?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(BuyFailedEntry {
+                token_address: row.try_get("token_address")?,
+                pool_address: row.try_get("pool_address")?,
+                failed_block: row.try_get("failed_block")?,
+                protocol: row.try_get("protocol")?,
+                denom_symbol: row.try_get("denom_symbol")?,
+                observed_can_buy: row.try_get("can_buy")?,
+                observed_can_sell: row.try_get("can_sell")?,
+                error_class: row.try_get("error_class")?,
+            })
+        })
+        .collect()
+}
+
+async fn load_open_failed_exits(
+    pool: &PgPool,
+    run_id: &str,
+    limit: i64,
+) -> Result<Vec<OpenFailedExit>> {
+    let rows = sqlx::query(
+        r#"
+        WITH latest AS (
+            SELECT DISTINCT ON (ps.run_id, ps.position_id)
+                   ps.run_id,
+                   ps.position_id,
+                   NULLIF(ps.current_value_eth, '')::numeric AS current_value_eth,
+                   NULLIF(ps.realized_profit_eth, '')::numeric
+                     + NULLIF(ps.unrealized_profit_eth, '')::numeric AS pnl,
+                   ps.block_number AS snapshot_block
+            FROM alpha_trading.position_snapshots ps
+            WHERE ps.run_id = $1
+            ORDER BY ps.run_id, ps.position_id, ps.block_number DESC NULLS LAST, ps.id DESC
+        ),
+        failed AS (
+            SELECT
+                run_id,
+                position_id,
+                count(*) AS failed_reports,
+                min(block_number) AS first_failed_block,
+                max(block_number) AS last_failed_block,
+                string_agg(
+                    DISTINCT CASE
+                        WHEN error LIKE '%TRANSFER_FROM_FAILED%' THEN 'TRANSFER_FROM_FAILED'
+                        WHEN error LIKE '%Empty revert payload%' THEN 'empty_revert'
+                        ELSE coalesce(left(error, 80), '<none>')
+                    END,
+                    ' | '
+                ) AS error_class
+            FROM alpha_trading.execution_reports
+            WHERE run_id = $1
+              AND order_side = 'sell'
+              AND status = 'failed'
+            GROUP BY run_id, position_id
+        )
+        SELECT
+            p.token_address,
+            p.pool_address,
+            (p.payload->>'entry_block')::bigint AS entry_block,
+            f.failed_reports,
+            f.first_failed_block,
+            f.last_failed_block,
+            l.snapshot_block,
+            l.current_value_eth::text AS current_value_eth,
+            l.pnl::text AS pnl_eth,
+            f.error_class
+        FROM alpha_trading.positions p
+        JOIN failed f USING (run_id, position_id)
+        LEFT JOIN latest l USING (run_id, position_id)
+        WHERE p.run_id = $1
+          AND p.state = 'sell_failed'
+        ORDER BY f.first_failed_block, p.token_address, p.pool_address
+        LIMIT $2
+        "#,
+    )
+    .bind(run_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .wrap_err("failed to load open failed exits")?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(OpenFailedExit {
+                token_address: row.try_get("token_address")?,
+                pool_address: row.try_get("pool_address")?,
+                entry_block: row.try_get("entry_block")?,
+                failed_reports: row.try_get("failed_reports")?,
+                first_failed_block: row.try_get("first_failed_block")?,
+                last_failed_block: row.try_get("last_failed_block")?,
+                latest_snapshot_block: row.try_get("snapshot_block")?,
+                current_value_eth: row.try_get("current_value_eth")?,
+                pnl_eth: row.try_get("pnl_eth")?,
+                error_class: row.try_get("error_class")?,
+            })
+        })
+        .collect()
+}
+
 async fn load_protocols(
     pool: &PgPool,
     run_id: &str,
@@ -588,6 +845,8 @@ async fn load_protocols(
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND payload ? 'entry_block'
+              AND payload->>'entry_block' IS NOT NULL
+              AND state <> 'buy_failed'
         )
         SELECT
             coalesce(so.payload->'pool'->>'protocol', '<no observation>') AS protocol,

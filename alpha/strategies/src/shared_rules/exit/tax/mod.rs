@@ -16,10 +16,7 @@ pub fn evaluate(
     event: &RiskEvent,
 ) -> RuleDecision {
     if !matches!(event.kind, RiskKind::TaxChange | RiskKind::Honeypot) {
-        return RuleDecision::hold(
-            RULE_NAME,
-            "risk event is not tax change or honeypot",
-        );
+        return RuleDecision::hold(RULE_NAME, "risk event is not tax change or honeypot");
     }
 
     let Some(pool_address) = event

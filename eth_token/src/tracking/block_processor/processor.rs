@@ -143,6 +143,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                direct_state_only: false,
                 profile_run_id: Some("live"),
             },
         )
@@ -205,6 +206,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                direct_state_only: false,
                 profile_run_id: Some("live"),
             },
         )
@@ -288,13 +290,35 @@ impl BlockTokenProcessor {
         P: TokenDiscoveryProvider,
     {
         let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
+        self.process_block_with_discovery_provider_and_live_pool_simulator_sessions(
+            block,
+            discovery_provider,
+            pool_simulator,
+            &block_sessions,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn process_block_with_discovery_provider_and_live_pool_simulator_sessions<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+        block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
+        direct_state_only: bool,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             discovery_provider,
             discovery_provider,
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
-                block_sessions: &block_sessions,
+                block_sessions,
+                direct_state_only,
                 profile_run_id: Some("live"),
             },
         )
@@ -357,6 +381,7 @@ impl BlockTokenProcessor {
             PoolTradingSimulationMode::LiveBlockSession {
                 pool_simulator,
                 block_sessions: &block_sessions,
+                direct_state_only: false,
                 profile_run_id: Some("live"),
             },
         )

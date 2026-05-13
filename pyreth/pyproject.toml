@@ -33,3 +33,4 @@ Issues = "https://github.com/yourusername/pyreth/issues"
 
 [tool.maturin]
 module-name = "pyreth"
+python-source = "."

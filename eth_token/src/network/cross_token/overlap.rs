@@ -20,11 +20,7 @@ impl OverlapCalculator {
         Self
     }
 
-    pub fn compute_overlap(
-        &self,
-        _token_a: Address,
-        _token_b: Address,
-    ) -> Option<NetworkOverlap> {
+    pub fn compute_overlap(&self, _token_a: Address, _token_b: Address) -> Option<NetworkOverlap> {
         // TODO: Implement overlap calculation
         None
     }
