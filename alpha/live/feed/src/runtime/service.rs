@@ -16,7 +16,7 @@ use eth_token::chain_metadata::{
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::json;
-use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{broadcast, watch, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
     load_processed_block, BlockProcessor, LivePoolBuySellSimulator, LiveProcessedBlockProvider,
     LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter,
@@ -84,6 +84,7 @@ struct LiveTokenRuntimeInner {
     next_id: AtomicU64,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     event_tx: broadcast::Sender<LiveTokenEvent>,
+    shutdown_tx: watch::Sender<bool>,
 }
 
 #[async_trait]
@@ -102,6 +103,7 @@ impl LiveTokenRuntime {
     ) -> Self {
         let history_limit = config.history_limit;
         let (event_tx, _) = broadcast::channel(1024);
+        let (shutdown_tx, _) = watch::channel(false);
         Self {
             inner: Arc::new(LiveTokenRuntimeInner {
                 config,
@@ -112,6 +114,7 @@ impl LiveTokenRuntime {
                 next_id: AtomicU64::new(1),
                 task: Mutex::new(None),
                 event_tx,
+                shutdown_tx,
             }),
         }
     }
@@ -132,6 +135,7 @@ impl LiveTokenRuntime {
 
         let request = self.resolve_request(request)?;
         self.inner.stop_requested.store(false, Ordering::SeqCst);
+        let _ = self.inner.shutdown_tx.send(false);
 
         {
             let mut state = self.inner.state.write().await;
@@ -186,6 +190,7 @@ impl LiveTokenRuntime {
 
     pub async fn stop(&self) -> LiveTokenProgress {
         self.inner.stop_requested.store(true, Ordering::SeqCst);
+        let _ = self.inner.shutdown_tx.send(true);
         let mut state = self.inner.state.write().await;
         match state.progress.status {
             LiveTokenStatus::Warming | LiveTokenStatus::Live => {
@@ -369,8 +374,6 @@ impl LiveTokenRuntime {
             &self.inner.config.redis_url,
             &self.inner.config.live_block_stream,
             keys::latest_block_number_key(),
-            self.inner.config.stream_block_ms,
-            self.inner.config.stream_count,
         ) {
             Ok(stream) => stream,
             Err(error) => {
@@ -418,6 +421,7 @@ impl LiveTokenRuntime {
         };
 
         let mut last_stream_id = "$".to_string();
+        let mut shutdown_rx = self.inner.shutdown_tx.subscribe();
         loop {
             if self.inner.stop_requested.load(Ordering::SeqCst) {
                 self.mark_stopped().await;
@@ -450,25 +454,40 @@ impl LiveTokenRuntime {
                 return;
             }
 
-            let events = match stream.read_after(&last_stream_id).await {
-                Ok(events) => events,
-                Err(error) => {
-                    tracing::error!(
-                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                        live_id = %request.id,
-                        last_stream_id = %last_stream_id,
-                        error = %error,
-                        "live token runtime failed to read redis stream"
-                    );
-                    self.mark_failed(live_error_from_report(
-                        None,
-                        None,
-                        None,
-                        &error,
-                        phase_context("redis_stream_read"),
-                    ))
-                    .await;
-                    return;
+            let events = tokio::select! {
+                biased;
+
+                changed = shutdown_rx.changed() => {
+                    let should_stop = changed.is_err() || *shutdown_rx.borrow();
+                    if should_stop {
+                        self.mark_stopped().await;
+                        return;
+                    }
+                    continue;
+                }
+
+                read = stream.read_after(&last_stream_id) => {
+                    match read {
+                        Ok(events) => events,
+                        Err(error) => {
+                            tracing::error!(
+                                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                                live_id = %request.id,
+                                last_stream_id = %last_stream_id,
+                                error = %error,
+                                "live token runtime failed to read redis stream"
+                            );
+                            self.mark_failed(live_error_from_report(
+                                None,
+                                None,
+                                None,
+                                &error,
+                                phase_context("redis_stream_read"),
+                            ))
+                            .await;
+                            return;
+                        }
+                    }
                 }
             };
 

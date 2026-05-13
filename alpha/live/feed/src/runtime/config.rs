@@ -7,8 +7,6 @@ pub struct LiveTokenRuntimeConfig {
     pub default_warmup_blocks: u64,
     pub redis_url: String,
     pub live_block_stream: String,
-    pub stream_block_ms: usize,
-    pub stream_count: usize,
     pub block_apply_timeout_ms: u64,
 }
 
@@ -19,8 +17,6 @@ impl Default for LiveTokenRuntimeConfig {
             default_warmup_blocks: 7_000,
             redis_url: "redis://127.0.0.1:6379/0".to_string(),
             live_block_stream: keys::processed_block_stream_key().to_string(),
-            stream_block_ms: 5_000,
-            stream_count: 100,
             block_apply_timeout_ms: 3_000,
         }
     }

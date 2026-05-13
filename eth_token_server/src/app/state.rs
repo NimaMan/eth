@@ -118,8 +118,6 @@ fn live_runtime_config(config: &TokenServerConfig) -> LiveTokenRuntimeConfig {
         default_warmup_blocks: config.live_warmup_blocks,
         redis_url: config.redis_url.clone(),
         live_block_stream: config.live_block_stream.clone(),
-        stream_block_ms: config.live_stream_block_ms,
-        stream_count: config.live_stream_count,
         block_apply_timeout_ms: config.live_block_apply_timeout_ms,
     }
 }

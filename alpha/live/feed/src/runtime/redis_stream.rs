@@ -4,6 +4,10 @@ use redis::streams::{StreamId, StreamReadOptions, StreamReadReply};
 use redis::{AsyncCommands, Client, FromRedisValue, Value};
 use serde::{Deserialize, Serialize};
 
+// Redis XREAD BLOCK 0 sleeps until the live block processor publishes the next
+// stream event. The event is emitted after the processed block is written.
+const BLOCK_UNTIL_EVENT_MS: usize = 0;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RedisBlockStreamEvent {
     pub stream_id: String,
@@ -15,8 +19,6 @@ pub struct RedisBlockStream {
     client: Client,
     stream_key: String,
     latest_block_key: String,
-    block_ms: usize,
-    count: usize,
 }
 
 impl RedisBlockStream {
@@ -24,8 +26,6 @@ impl RedisBlockStream {
         redis_url: impl AsRef<str>,
         stream_key: impl Into<String>,
         latest_block_key: impl Into<String>,
-        block_ms: usize,
-        count: usize,
     ) -> Result<Self> {
         let client = Client::open(redis_url.as_ref())
             .map_err(|err| eyre!("failed to create redis client: {}", err))?;
@@ -33,8 +33,6 @@ impl RedisBlockStream {
             client,
             stream_key: stream_key.into(),
             latest_block_key: latest_block_key.into(),
-            block_ms,
-            count: count.max(1),
         })
     }
 
@@ -55,9 +53,7 @@ impl RedisBlockStream {
 
     pub async fn read_after(&self, last_stream_id: &str) -> Result<Vec<RedisBlockStreamEvent>> {
         let mut conn = self.connection().await?;
-        let opts = StreamReadOptions::default()
-            .block(self.block_ms)
-            .count(self.count);
+        let opts = StreamReadOptions::default().block(BLOCK_UNTIL_EVENT_MS);
         let reply: Option<StreamReadReply> = conn
             .xread_options(&[self.stream_key.as_str()], &[last_stream_id], &opts)
             .await
