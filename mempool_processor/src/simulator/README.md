@@ -29,7 +29,7 @@ detection.
 
 - Function classification; use `function_detector` and `tx_router`.
 - Tax/decoded transaction logic; use `tx_processor`.
-- Canonical token/pool state; fetch context from `eth_token_server`.
+- Canonical token/pool state; fetch context from `eth_chain_server`.
 - Signal threshold decisions; use `signal_detector`.
 
 ## Data Flow

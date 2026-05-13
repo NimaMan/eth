@@ -92,7 +92,7 @@ src/
 **TokenTrackingCache** (`token_tracking/cache.rs`):
 - Maintains token metadata and trading status
 - Used by signal manager for trading status filtering
-- Hydrates from `eth_token_server` `/live/tokens` and `/live/pools`
+- Hydrates from `eth_chain_server` `/live/tokens` and `/live/pools`
 
 **Tax Calculation** (`token_tracking/token_parameter_extraction/tax_calculator.rs`):
 - Core functions: `calculate_buy_tax()`, `calculate_sell_tax()`

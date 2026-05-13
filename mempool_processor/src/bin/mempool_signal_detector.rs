@@ -243,8 +243,8 @@ async fn main() -> Result<()> {
     // Initialize components
     info!("\n🔧 Initializing pipeline components...");
 
-    // 1. Token context from eth_token_server
-    info!("📊 Starting token context sync from eth_token_server...");
+    // 1. Token context from eth_chain_server
+    info!("📊 Starting token context sync from eth_chain_server...");
     let source_cfg = &base_config.token_cache_source;
     let token_cache = Arc::new(TokenTrackingCache::new(CacheConfig {
         eth_threshold: source_cfg.eth_threshold,

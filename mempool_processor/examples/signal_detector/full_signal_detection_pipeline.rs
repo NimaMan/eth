@@ -447,8 +447,8 @@ async fn main() -> Result<()> {
     info!("🎯 Target: {} transactions", args.target_count);
     info!("⚠️  Signal detection is DISABLED for this test");
 
-    // Initialize token context from eth_token_server.
-    info!("\n📦 Initializing token context from eth_token_server...");
+    // Initialize token context from eth_chain_server.
+    info!("\n📦 Initializing token context from eth_chain_server...");
     let token_cache = build_token_cache(0.1).await; // 0.1 ETH threshold
 
     // Wait for initial cache population

@@ -4,7 +4,7 @@ use mempool_processor::function_detector::FunctionDetector;
 /// Transaction Router with Token Cache Example
 ///
 /// This example demonstrates the complete pipeline:
-/// 1. Hydrates token/pool context from eth_token_server
+/// 1. Hydrates token/pool context from eth_chain_server
 /// 2. Keeps the local cache updated from token-server notifications
 /// 3. Processes 1000 transactions through IPC → Function Detector → TX Router
 /// 4. Uses token cache to properly classify creator transactions
@@ -60,8 +60,8 @@ async fn main() -> Result<()> {
     writeln!(log_file, "=========================================")?;
     info!("📁 Logging to: {}", log_path.display());
 
-    // Initialize token context from eth_token_server.
-    info!("📊 Initializing token context from eth_token_server...");
+    // Initialize token context from eth_chain_server.
+    info!("📊 Initializing token context from eth_chain_server...");
     let token_cache = build_token_cache(0.1).await; // 0.1 ETH threshold
 
     // Give the first token-server hydrate a moment to populate cache.

@@ -11,7 +11,7 @@ Primary live source:
 
 ```text
 eth_token live tracker
-  -> eth_token_server live HTTP APIs
+  -> eth_chain_server live HTTP APIs
   -> GET /eth/tokens/api/live/tokens
   -> GET /eth/tokens/api/live/pools
   -> TokenTrackingCache
@@ -20,7 +20,7 @@ eth_token live tracker
 Update notification:
 
 ```text
-eth_token_server applies confirmed block
+eth_chain_server applies confirmed block
   -> broadcasts LiveTokenEvent::BlockApplied in process
   -> /eth/tokens/api/live/updates long-poll returns
   -> mempool refreshes /live/tokens + /live/pools

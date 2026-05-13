@@ -24,14 +24,14 @@ simulation, and semantic signal emission.
 - Mempool fetchers and arrival timestamp recording.
 - Function detection, transaction routing, simulation queueing, and per-pool
   pending simulation orchestration.
-- Token-context hydration from `eth_token_server`, including monotonic context
+- Token-context hydration from `eth_chain_server`, including monotonic context
   acceptance rules.
 - The unresolved-intent lane for cache-waiting critical txs.
 - Signal detectors, signal publishing, DB writers, and ZMQ notification output.
 
 ## Does Not Own
 
-- Canonical token/pool state mutation; use `eth_token` via `eth_token_server`.
+- Canonical token/pool state mutation; use `eth_token` via `eth_chain_server`.
 - Core transaction decoding or tax math; consume `tx_processor` facts and
   buy/sell viability results.
 - Raw EVM implementation; use `tx_simulator`.
@@ -77,7 +77,7 @@ Live runtime contracts:
 
 - `live_block_processor` publishes confirmed processed blocks and live state to
   Redis.
-- `eth_token_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
+- `eth_chain_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
   exposes live token/pool context over HTTP.
 - `mempool_signal_detector` consumes Reth pending tx, token-server context, and
   Redis/Reth simulation state, then writes semantic signals to Postgres.
@@ -173,7 +173,7 @@ cargo test -p mempool_processor
 - `simulate_mempool_tx_with_state_changes` is not the canonical rich diff path;
   prefer processed tx/buy-sell facts from `tx_processor`.
 - Live simulation depends on fresh confirmed token context from
-  `eth_token_server`; unknown mappings must go through the unresolved-intent
+  `eth_chain_server`; unknown mappings must go through the unresolved-intent
   lane instead of becoming simulation errors or public signals.
 - Do not duplicate tax or decoding logic here. Route to `tx_processor` and make
   detectors consume its output.

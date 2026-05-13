@@ -12,7 +12,7 @@ signal detectors can reason about.
 
 | Source | What it contributes | Where it is consumed |
 | --- | --- | --- |
-| `eth_token_server` live context | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks, V3 fee tiers, V4 pool display keys | `TokenTrackingCache` (injected into `SimulationManager`) |
+| `eth_chain_server` live context | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks, V3 fee tiers, V4 pool display keys | `TokenTrackingCache` (injected into `SimulationManager`) |
 | Canonical head listener | `SealedHeader` + DB view for the most recent block | `MempoolSimulator`, `LiquidityRemovalSimulator` |
 | Mempool fetcher | Raw transactions plus routing metadata (function detection, category, priority) | `RequestQueue` / flow modules |
 | Unresolved intent store | Critical pending txs that arrived before token/pool mapping was available | Retried by the binary and submitted only after mapping exists |
