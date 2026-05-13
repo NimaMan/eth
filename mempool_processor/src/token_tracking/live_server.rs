@@ -10,7 +10,9 @@ use tracing::{debug, info, warn};
 
 use super::cache::{CacheStatusPolicy, TokenTrackingCache};
 use super::snapshot_apply::apply_snapshot_map_to_cache_with_context;
-use super::types::{Address, Pool, PoolLifecycle, PoolType, Token, TokenWithPools};
+use super::types::{
+    Address, ConcentratedLiquidityPosition, Pool, PoolLifecycle, PoolType, Token, TokenWithPools,
+};
 
 const TOKEN_SERVER_UPDATE_WAIT: Duration = Duration::from_secs(30);
 
@@ -351,6 +353,9 @@ struct LivePoolView {
     can_buy_block: Option<u64>,
     latest_block_number: Option<u64>,
     lp_approved_percentage: f64,
+    lp_total_supply: Option<f64>,
+    lp_token_address: Option<String>,
+    liquidity_positions: Vec<LiveLiquidityPositionView>,
 }
 
 impl LivePoolView {
@@ -385,6 +390,13 @@ impl LivePoolView {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
+            position_manager_address: normalize_optional_address(self.lp_token_address),
+            lp_total_supply: self.lp_total_supply,
+            liquidity_positions: self
+                .liquidity_positions
+                .into_iter()
+                .filter_map(|position| position.into_cache_position(self.lp_total_supply))
+                .collect(),
             last_updated_block: self
                 .latest_block_number
                 .or(self.can_buy_block)
@@ -399,6 +411,49 @@ impl LivePoolView {
             can_buy: self.can_buy,
             can_sell: self.can_sell,
             received_at: Instant::now(),
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct LiveLiquidityPositionView {
+    position_id: String,
+    token_id: Option<String>,
+    owner: String,
+    position_manager_address: Option<String>,
+    liquidity: String,
+    position_share_pct: Option<f64>,
+    tick_lower: Option<i32>,
+    tick_upper: Option<i32>,
+    last_update_block: Option<u64>,
+    last_update_tx: Option<String>,
+}
+
+impl LiveLiquidityPositionView {
+    fn into_cache_position(
+        self,
+        pool_liquidity: Option<f64>,
+    ) -> Option<ConcentratedLiquidityPosition> {
+        if self.position_id.trim().is_empty() || self.owner.trim().is_empty() {
+            return None;
+        }
+        let position_share_pct = self.position_share_pct.or_else(|| {
+            let liquidity = self.liquidity.parse::<f64>().ok()?;
+            let pool_liquidity = pool_liquidity?;
+            (pool_liquidity > 0.0).then_some((liquidity / pool_liquidity) * 100.0)
+        });
+        Some(ConcentratedLiquidityPosition {
+            position_id: self.position_id,
+            token_id: self.token_id,
+            owner: normalize_address(&self.owner)?,
+            position_manager_address: normalize_optional_address(self.position_manager_address),
+            liquidity: self.liquidity,
+            position_share_pct,
+            tick_lower: self.tick_lower,
+            tick_upper: self.tick_upper,
+            last_update_block: self.last_update_block,
+            last_update_tx: self.last_update_tx,
         })
     }
 }

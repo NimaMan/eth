@@ -1,7 +1,7 @@
 use crate::config::TaxDetectionConfig;
+use crate::position_approval_call::decode_position_approval_call;
 use crate::signal_publisher::SignalPublisher;
 use crate::simulator::{BuySellResult, SimulationResult};
-use crate::token_tracking::types::PoolType;
 use crate::token_tracking::TokenTrackingCache;
 use reth_chain_query::to_checksum_address;
 use std::collections::HashSet;
@@ -13,8 +13,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use super::{
-    trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
-    TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
+    build_position_approval_signals, pool_type_label, trading_status_detector::TradingStatusChange,
+    LiquidityDetector, LpApprovalDetector, Signal, TaxDetector, TaxSignalType,
+    TokenSupplyRiskDetector, TradingStatusDetector,
 };
 
 /// Configuration for signal detection
@@ -766,6 +767,36 @@ impl SignalManager {
         tx: &crate::mempool_fetcher::MempoolTransaction,
         category: &crate::tx_router::TransactionCategory,
     ) -> bool {
+        if let (Some(token_cache), Some(position_approval)) =
+            (self.token_cache.as_ref(), decode_position_approval_call(tx))
+        {
+            let position_manager = to_checksum_address(&position_approval.position_manager());
+            if token_cache.is_position_manager(&position_manager).await {
+                let signals =
+                    build_position_approval_signals(token_cache, tx, position_approval).await;
+                if signals.is_empty() {
+                    warn!(
+                        "Position approval {} passed routing but no mapped position/share was found",
+                        tx.hash
+                    );
+                    return false;
+                }
+                let Some(ref publisher) = self.publisher else {
+                    return false;
+                };
+                let mut published = 0usize;
+                let mut pub_guard = publisher.lock().await;
+                for signal in signals {
+                    if let Err(e) = pub_guard.publish(signal).await {
+                        error!("Failed to publish position approval signal: {}", e);
+                    } else {
+                        published += 1;
+                    }
+                }
+                return published > 0;
+            }
+        }
+
         // Check for LP approval
         if let Some(lp_signal) = self
             .lp_approval_detector
@@ -958,22 +989,4 @@ fn format_buy_sell_error(result: &SimulationResult, error: &str) -> String {
             .unwrap_or(false),
         error
     )
-}
-
-fn pool_type_label(pool_type: &PoolType) -> String {
-    match pool_type {
-        PoolType::UniswapV2 => "UNISWAP-V2",
-        PoolType::UniswapV3 => "UNISWAP-V3",
-        PoolType::UniswapV4 => "UNISWAP-V4",
-        PoolType::SushiSwapV2 => "SUSHISWAP-V2",
-        PoolType::SushiSwapV3 => "SUSHISWAP-V3",
-        PoolType::PancakeSwapV2 => "PANCAKESWAP-V2",
-        PoolType::PancakeSwapV3 => "PANCAKESWAP-V3",
-        PoolType::ShibaSwapV2 => "SHIBASWAP-V2",
-        PoolType::FraxswapV2 => "FRAXSWAP-V2",
-        PoolType::Curve => "CURVE",
-        PoolType::Balancer => "BALANCER",
-        PoolType::Unknown => "UNKNOWN",
-    }
-    .to_string()
 }

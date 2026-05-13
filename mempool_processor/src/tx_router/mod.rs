@@ -3,6 +3,7 @@ pub mod creator_tx_router;
 /// Transaction Router Module
 ///
 /// Routes incoming mempool transactions to appropriate simulation strategies
+mod liquidity_intent;
 pub mod tx_router;
 
 pub use tx_router::{

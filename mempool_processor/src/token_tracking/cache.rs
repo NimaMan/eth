@@ -5,7 +5,7 @@
 // 2. Arc-wrapped data for zero-copy reads
 // 3. Indexed lookups for O(1) access
 // 4. Batch updates with single lock acquisition
-
+use alloy_primitives::U256;
 use chrono::Utc;
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
@@ -16,9 +16,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use super::position_index::{
+    add_position_indexes_for_pool, normalize_pool_positions, position_owner_manager_key,
+    position_token_key, remove_position_indexes_for_pool,
+};
 use super::thresholds::threshold_for_symbol;
 pub use super::types::{
-    Address, CacheConfig, Pool, PoolLifecycle, Token, TokenUpdate, TokenWithPools,
+    Address, CacheConfig, ConcentratedPositionApprovalContext, Pool, PoolLifecycle, Token,
+    TokenUpdate, TokenWithPools,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -94,6 +99,10 @@ pub struct TokenTrackingCache {
     creator_to_tokens: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
     token_to_pools: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
     pool_to_token: Arc<RwLock<HashMap<Address, Address>>>,
+    position_manager_to_pools: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
+    position_token_to_context: Arc<RwLock<HashMap<String, ConcentratedPositionApprovalContext>>>,
+    position_owner_manager_to_context:
+        Arc<RwLock<HashMap<String, Vec<ConcentratedPositionApprovalContext>>>>,
 
     // Pre-computed sets for fast filtering
     active_creators: Arc<RwLock<HashSet<Address>>>,
@@ -119,6 +128,9 @@ impl TokenTrackingCache {
             creator_to_tokens: Arc::new(RwLock::new(HashMap::new())),
             token_to_pools: Arc::new(RwLock::new(HashMap::new())),
             pool_to_token: Arc::new(RwLock::new(HashMap::new())),
+            position_manager_to_pools: Arc::new(RwLock::new(HashMap::new())),
+            position_token_to_context: Arc::new(RwLock::new(HashMap::new())),
+            position_owner_manager_to_context: Arc::new(RwLock::new(HashMap::new())),
             active_creators: Arc::new(RwLock::new(HashSet::new())),
             active_pools: Arc::new(RwLock::new(HashSet::new())),
             high_liquidity_pools: Arc::new(RwLock::new(HashSet::new())),
@@ -162,6 +174,32 @@ impl TokenTrackingCache {
         let address = normalize_address(address);
         let pools = self.active_pools.read().await;
         pools.contains(&address)
+    }
+
+    pub async fn is_position_manager(&self, address: &Address) -> bool {
+        let address = normalize_address(address);
+        let managers = self.position_manager_to_pools.read().await;
+        managers.contains_key(&address)
+    }
+
+    pub async fn position_context_by_token_id(
+        &self,
+        position_manager: &Address,
+        token_id: U256,
+    ) -> Option<ConcentratedPositionApprovalContext> {
+        let key = position_token_key(position_manager, token_id);
+        let contexts = self.position_token_to_context.read().await;
+        contexts.get(&key).cloned()
+    }
+
+    pub async fn position_contexts_by_owner(
+        &self,
+        position_manager: &Address,
+        owner: &Address,
+    ) -> Vec<ConcentratedPositionApprovalContext> {
+        let key = position_owner_manager_key(position_manager, owner);
+        let contexts = self.position_owner_manager_to_context.read().await;
+        contexts.get(&key).cloned().unwrap_or_default()
     }
 
     /// Get the first token created by an address - O(1) index lookup
@@ -349,6 +387,10 @@ impl TokenTrackingCache {
         let mut creator_to_tokens = self.creator_to_tokens.write().await;
         let mut token_to_pools = self.token_to_pools.write().await;
         let mut pool_to_token = self.pool_to_token.write().await;
+        let mut position_manager_to_pools = self.position_manager_to_pools.write().await;
+        let mut position_token_to_context = self.position_token_to_context.write().await;
+        let mut position_owner_manager_to_context =
+            self.position_owner_manager_to_context.write().await;
         let mut active_creators = self.active_creators.write().await;
         let mut active_pools = self.active_pools.write().await;
         let mut high_liquidity_pools = self.high_liquidity_pools.write().await;
@@ -409,6 +451,12 @@ impl TokenTrackingCache {
             if let Some(old_pools) = token_to_pools.get(&token_addr) {
                 for old_pool in old_pools {
                     pool_to_token.remove(old_pool);
+                    remove_position_indexes_for_pool(
+                        old_pool,
+                        &mut position_manager_to_pools,
+                        &mut position_token_to_context,
+                        &mut position_owner_manager_to_context,
+                    );
                     active_pools.remove(old_pool);
                     high_liquidity_pools.remove(old_pool);
                     scam_pools.remove(old_pool);
@@ -421,16 +469,26 @@ impl TokenTrackingCache {
                 let pool_addr = normalize_address(&pool_addr);
                 pool.address = normalize_address(&pool.address);
                 pool.denom_address = normalize_address(&pool.denom_address);
+                pool.position_manager_address = pool
+                    .position_manager_address
+                    .map(|address| normalize_address(&address));
                 pool.control_addresses = pool
                     .control_addresses
                     .into_iter()
                     .map(|address| normalize_address(&address))
                     .collect();
+                normalize_pool_positions(&mut pool);
                 // Ensure token_address is set
                 pool.token_address = token_addr.clone();
 
                 if pool.is_scam {
                     pool_to_token.remove(&pool_addr);
+                    remove_position_indexes_for_pool(
+                        &pool_addr,
+                        &mut position_manager_to_pools,
+                        &mut position_token_to_context,
+                        &mut position_owner_manager_to_context,
+                    );
                     active_pools.remove(&pool_addr);
                     high_liquidity_pools.remove(&pool_addr);
                     scam_pools.insert(pool_addr.clone());
@@ -447,6 +505,12 @@ impl TokenTrackingCache {
                 pool_addrs.insert(pool_addr.clone());
                 pool_to_token.insert(pool_addr.clone(), token_addr.clone());
                 active_pools.insert(pool_addr.clone());
+                add_position_indexes_for_pool(
+                    &pool,
+                    &mut position_manager_to_pools,
+                    &mut position_token_to_context,
+                    &mut position_owner_manager_to_context,
+                );
 
                 for control_addr in &pool.control_addresses {
                     if control_addr.is_empty() {
@@ -654,6 +718,9 @@ mod tests {
             trading_enabled_tx: Some("0xTRADING".to_string()),
             fee_tier: None,
             pool_id: None,
+            position_manager_address: None,
+            lp_total_supply: None,
+            liquidity_positions: Vec::new(),
             last_updated_block: 2000,
             last_updated_time: 1234567900.0,
             is_scam: false,
@@ -879,6 +946,9 @@ mod tests {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
+            position_manager_address: None,
+            lp_total_supply: None,
+            liquidity_positions: Vec::new(),
             last_updated_block: block_number,
             last_updated_time: 0.0,
             is_scam: false,

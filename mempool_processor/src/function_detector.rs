@@ -7,6 +7,9 @@ use crate::liquidity_approval_call::{
     decode_liquidity_approval_call, is_liquidity_approval_selector,
     liquidity_approval_function_name,
 };
+use crate::position_approval_call::{
+    decode_position_approval_call, is_position_approval_selector, position_approval_function_name,
+};
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{address, Address as AlloyAddress};
 use reth_chain_query::to_checksum_address;
@@ -145,10 +148,22 @@ impl FunctionDetector {
 
         // Approval functions need special handling for LP/BPT/Curve ownership tokens.
         if is_liquidity_approval_selector(selector) {
-            let approve_type = self.classify_liquidity_approval(tx);
+            let approve_type = self.classify_liquidity_or_position_approval(tx);
             return Some(FunctionDetectionResult {
-                function_name: liquidity_approval_function_name(selector).to_string(),
+                function_name: if approve_type == CreatorFunctionType::LiquidityPoolApproval {
+                    position_approval_function_name(selector).to_string()
+                } else {
+                    liquidity_approval_function_name(selector).to_string()
+                },
                 function_type: approve_type,
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        if is_position_approval_selector(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: position_approval_function_name(selector).to_string(),
+                function_type: self.classify_position_approval(tx),
                 selector: selector_hex.to_string(),
             });
         }
@@ -242,10 +257,14 @@ impl FunctionDetector {
     }
 
     /// Classify approvals that can grant control over liquidity ownership tokens.
-    fn classify_liquidity_approval(
+    fn classify_liquidity_or_position_approval(
         &self,
         tx: &crate::mempool_fetcher::MempoolTransaction,
     ) -> CreatorFunctionType {
+        if let CreatorFunctionType::LiquidityPoolApproval = self.classify_position_approval(tx) {
+            return CreatorFunctionType::LiquidityPoolApproval;
+        }
+
         let Some(approval) = decode_liquidity_approval_call(tx) else {
             return CreatorFunctionType::Other("approve".to_string());
         };
@@ -257,6 +276,24 @@ impl FunctionDetector {
 
         if let Some(ref cache) = self.token_cache {
             if futures::executor::block_on(cache.is_pool(&ownership_token)) {
+                return CreatorFunctionType::LiquidityPoolApproval;
+            }
+        }
+
+        CreatorFunctionType::Other("approve".to_string())
+    }
+
+    fn classify_position_approval(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+    ) -> CreatorFunctionType {
+        let Some(approval) = decode_position_approval_call(tx) else {
+            return CreatorFunctionType::Other("approve".to_string());
+        };
+        let position_manager = to_checksum_address(&approval.position_manager());
+
+        if let Some(ref cache) = self.token_cache {
+            if futures::executor::block_on(cache.is_position_manager(&position_manager)) {
                 return CreatorFunctionType::LiquidityPoolApproval;
             }
         }

@@ -7,6 +7,7 @@ pub mod config;
 pub mod db_writers;
 pub mod liquidity_approval_call;
 pub mod mempool_fetcher;
+pub mod position_approval_call;
 pub mod token_tracking;
 
 // Signal processing modules

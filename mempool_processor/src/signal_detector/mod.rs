@@ -1,5 +1,7 @@
 pub mod liquidity_detector;
 pub mod lp_approval_detector;
+mod pool_labels;
+mod position_approval_signal;
 pub mod signal_manager;
 pub mod tax_signal_detector;
 pub mod token_supply_risk_detector;
@@ -29,6 +31,8 @@ pub use liquidity_detector::{
     LiquidityChangeType, LiquidityDetector, LiquiditySignal, SignalType as LiquiditySignalType,
 };
 pub use lp_approval_detector::{LpApprovalDetector, LpApprovalSignal};
+pub(crate) use pool_labels::pool_type_label;
+pub use position_approval_signal::build_position_approval_signals;
 pub use signal_manager::{SignalManager, SignalManagerConfig};
 pub use tax_signal_detector::{TaxDetector, TaxSignal, TaxSignalType};
 pub use token_supply_risk_detector::TokenSupplyRiskDetector;

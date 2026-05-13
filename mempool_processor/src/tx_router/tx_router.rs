@@ -3,13 +3,18 @@ use crate::liquidity_approval_call::{
     is_liquidity_approval_selector,
 };
 use crate::mempool_fetcher::MempoolTransaction;
+use crate::position_approval_call::{decode_position_approval_call, is_position_approval_selector};
 use crate::token_tracking::TokenTrackingCache;
 use crate::unresolved_intents::UnresolvedIntentKind;
-use alloy_primitives::{address, Address as AlloyAddress};
+use alloy_primitives::Address as AlloyAddress;
 use reth_chain_query::to_checksum_address;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use super::liquidity_intent::{
+    is_known_position_manager_candidate, is_protocol_liquidity_removal_candidate,
+    is_v4_modify_liquidity_candidate, liquidity_removal_token_candidates,
+};
 use super::{ContractCreationRouter, CreatorTransactionRouter};
 
 #[derive(Debug, Clone)]
@@ -99,6 +104,14 @@ impl TransactionRouter {
             .filter(|approval| approval.amount != alloy_primitives::U256::ZERO)
             .map(|approval| is_known_liquidity_approval_spender(&approval.spender))
             .unwrap_or(false)
+            || decode_position_approval_call(tx)
+                .map(|approval| {
+                    tx.to
+                        .as_ref()
+                        .map(|_| is_known_position_manager_candidate(&approval.position_manager()))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
         {
             return Some((
                 UnresolvedIntentKind::LpApproval,
@@ -255,6 +268,10 @@ impl TransactionRouter {
         &self,
         tx: &MempoolTransaction,
     ) -> Option<ClassificationResult> {
+        if let Some(classification) = self.classify_tracked_position_approval(tx).await {
+            return Some(classification);
+        }
+
         let approval = decode_liquidity_approval_call(tx)?;
         if approval.amount == alloy_primitives::U256::ZERO {
             return None;
@@ -282,6 +299,42 @@ impl TransactionRouter {
                 creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
                 target_address: pool.address.clone(),
                 target_token: Some(pool.token_address.clone()),
+                function_type: CreatorFunctionType::LiquidityPoolApproval,
+            },
+            priority: SimulationPriority::Critical,
+            requires_simulation: false,
+            requires_buy_sell_test: false,
+        })
+    }
+
+    async fn classify_tracked_position_approval(
+        &self,
+        tx: &MempoolTransaction,
+    ) -> Option<ClassificationResult> {
+        let approval = decode_position_approval_call(tx)?;
+        let Some(ref cache) = self.token_cache else {
+            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
+        let position_manager = to_checksum_address(&approval.position_manager());
+        if !is_known_position_manager_candidate(&approval.position_manager())
+            && !cache.is_position_manager(&position_manager).await
+        {
+            return None;
+        }
+        if !cache.is_position_manager(&position_manager).await {
+            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+
+        self.lp_tracked_pool_approvals
+            .fetch_add(1, Ordering::Relaxed);
+
+        Some(ClassificationResult {
+            category: TransactionCategory::CreatorTransaction {
+                creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+                target_address: position_manager,
+                target_token: None,
                 function_type: CreatorFunctionType::LiquidityPoolApproval,
             },
             priority: SimulationPriority::Critical,
@@ -413,7 +466,9 @@ impl TransactionRouter {
 
         let is_approval = input_data
             .get(0..4)
-            .map(is_liquidity_approval_selector)
+            .map(|selector| {
+                is_liquidity_approval_selector(selector) || is_position_approval_selector(selector)
+            })
             .unwrap_or(false);
 
         ClassificationResult {
@@ -452,52 +507,6 @@ fn priority_for_creator_function(function_type: &CreatorFunctionType) -> Simulat
         CreatorFunctionType::TokenSupplyModification => SimulationPriority::Critical,
         CreatorFunctionType::Other(_) => SimulationPriority::High,
     }
-}
-
-fn liquidity_removal_token_candidates(input: &[u8]) -> Vec<String> {
-    (0..2)
-        .filter_map(|param_idx| calldata_address_param(input, param_idx))
-        .collect()
-}
-
-fn calldata_address_param(input: &[u8], param_idx: usize) -> Option<String> {
-    let start = 4 + param_idx * 32 + 12;
-    let end = start + 20;
-    if input.len() < end {
-        return None;
-    }
-    Some(format!("0x{}", hex::encode(&input[start..end])))
-}
-
-fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
-    let Some(selector) = tx.input.get(0..4) else {
-        return false;
-    };
-
-    matches!(
-        selector,
-        [0x0c, 0x49, 0xcc, 0xbe]
-            | [0xdd, 0x46, 0x50, 0x8f]
-            | [0xa3, 0x55, 0xde, 0x88]
-            | [0x0d, 0x4f, 0x31, 0x9d]
-    ) || (selector == [0xac, 0x96, 0x50, 0xd8].as_slice()
-        && tx
-            .to
-            .as_ref()
-            .map(|to| {
-                AlloyAddress::from_slice(to) == address!("C36442b4a4522E871399CD717aBDD847Ab11FE88")
-            })
-            .unwrap_or(false))
-}
-
-fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool {
-    let Some(selector) = tx.input.get(0..4) else {
-        return false;
-    };
-    matches!(
-        selector,
-        [0xdd, 0x46, 0x50, 0x8f] | [0xa3, 0x55, 0xde, 0x88] | [0x0d, 0x4f, 0x31, 0x9d]
-    )
 }
 
 #[cfg(test)]
@@ -915,6 +924,9 @@ mod tests {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
+            position_manager_address: None,
+            lp_total_supply: None,
+            liquidity_positions: Vec::new(),
             last_updated_block: 1,
             last_updated_time: 0.0,
             is_scam: false,

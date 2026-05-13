@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod live_server;
+mod position_index;
 mod snapshot_apply;
 mod thresholds;
 pub mod token_parameter_extraction;

@@ -144,6 +144,12 @@ pub struct Pool {
     // Metadata
     pub fee_tier: Option<u32>,
     pub pool_id: Option<String>,
+    #[serde(default)]
+    pub position_manager_address: Option<Address>,
+    #[serde(default)]
+    pub lp_total_supply: Option<f64>,
+    #[serde(default)]
+    pub liquidity_positions: Vec<ConcentratedLiquidityPosition>,
     #[serde(alias = "latest_block_number")]
     pub last_updated_block: BlockNumber,
     #[serde(alias = "last_update_time")]
@@ -173,6 +179,43 @@ pub struct Pool {
     // Local cache metadata
     #[serde(skip, default = "std::time::Instant::now")]
     pub received_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConcentratedLiquidityPosition {
+    pub position_id: String,
+    #[serde(default)]
+    pub token_id: Option<String>,
+    pub owner: Address,
+    #[serde(default)]
+    pub position_manager_address: Option<Address>,
+    pub liquidity: String,
+    #[serde(default)]
+    pub position_share_pct: Option<f64>,
+    #[serde(default)]
+    pub tick_lower: Option<i32>,
+    #[serde(default)]
+    pub tick_upper: Option<i32>,
+    #[serde(default)]
+    pub last_update_block: Option<BlockNumber>,
+    #[serde(default)]
+    pub last_update_tx: Option<TxHash>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConcentratedPositionApprovalContext {
+    pub token_address: Address,
+    pub pool_address: Address,
+    pub pool_type: PoolType,
+    pub denom_address: Address,
+    pub denom_currency: String,
+    pub position_manager_address: Address,
+    pub position_id: String,
+    pub token_id: Option<String>,
+    pub owner: Address,
+    pub position_liquidity: String,
+    pub pool_liquidity: Option<String>,
+    pub position_share_pct: Option<f64>,
 }
 
 /// Tax change record
