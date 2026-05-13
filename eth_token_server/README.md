@@ -32,7 +32,9 @@ Agent operating map for the runtime/API layer around `eth_token`.
 processed-block disk cache + Redis eth/live/blocks
   -> eth_live_feed warmup/live tail
   -> eth_token block application
+  -> LiveTokenEvent::BlockApplied broadcast
   -> in-memory token/pool views
+  -> /live/updates wakeups plus /live/tokens and /live/pools reads
   -> HTTP/SSE clients, mempool context, alpha polling
 ```
 
@@ -47,13 +49,22 @@ Live runtime contracts:
   Redis.
 - `eth_token_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
   exposes live token/pool context over HTTP.
-- `mempool_signal_detector` consumes token-server context plus Reth/Redis
-  simulation state, then persists pending-transaction signals to Postgres.
+- `mempool_signal_detector` consumes `/live/tokens` and `/live/pools` for
+  token context. `/live/updates` is a notification-only wakeup so it can refresh
+  that context immediately after token-server applies a block.
 - `eth_alpha_trader` consumes token-server APIs and persisted mempool signals.
 - ASENA reads token-server/trade APIs only.
 
-The mempool signal endpoints are read-only Postgres views. ZMQ and signal logs
-are diagnostics; they are not the token-server or ASENA source of truth.
+The mempool signal endpoints read `live_trading.signal_events` plus typed detail
+tables. The JSON response keeps the old `pool_address` field name for clients,
+but it is backed by protocol-aware `pool_identifier` values such as an EVM pool
+address, `pool_manager#pool_id`, or `vault#pool_id`. ZMQ and signal logs are
+diagnostics; they are not the token-server or ASENA source of truth.
+
+Known live-tail bottleneck: V2 pool metadata lookups can become expensive when
+they fall back through Redis live-state snapshots. See
+[`docs/live-v2-metadata-bottleneck.md`](docs/live-v2-metadata-bottleneck.md)
+for evidence, root cause, and the staged fix plan.
 
 ## Range Run Performance Path
 
@@ -127,12 +138,13 @@ run id, pid, root path, run path, and expected file list:
 ```text
 run_manifest.json                 run metadata and expected log files
 server.log                         server lifecycle plus warnings/errors
+events.jsonl                       structured warnings/errors and panic details
 live_token_tracker.jsonl           live warmup/tail progress and failures
 token_pipeline_profile.jsonl       token pipeline profile rows
 pool_buy_sell_sim_failures.jsonl   pool buy/sell simulator warnings/errors only
 simulation_failures.jsonl          other simulator warnings/errors
 pipeline_issues.jsonl              structured operational issues for Bogaz/ops
-pipeline_health.jsonl              structured health snapshots emitted by ops reads
+pipeline_health.jsonl              structured health heartbeat and ops reads
 pipeline_bottlenecks.jsonl         structured slow-path samples
 ```
 
@@ -148,7 +160,7 @@ GET /eth/tokens/api/ops/bottlenecks
 Uniswap V3 factory/configuration mismatch render as one issue group with an
 occurrence count instead of many raw transaction rows.
 
-`token_pipeline_profile.jsonl` contains three targets:
+`token_pipeline_profile.jsonl` contains these targets:
 
 - `token_range_apply_profile`: range-runner wall time around processor take,
   token apply, state update, and processed-block disk cache read.
@@ -156,9 +168,9 @@ occurrence count instead of many raw transaction rows.
   token-applier aggregate totals for the block, including candidate-token
   counts, candidate simulation-pool counts, actual simulated-pool counts, and
   the range `run_id` when the block was processed by a range run.
-- `token_sim_session_profile`: one row per pool simulation branch, including
-  whether a historical/live simulator session was created or reused. These rows
-  also carry the range `run_id` or `live` for live processing.
+- `token_sim_session_profile`: optional per-pool simulation branch rows. Set
+  `TOKEN_SIM_SESSION_PROFILE=1` when investigating simulator session reuse;
+  normal runs omit these rows to keep profile logs focused on block-level cost.
 - `live_token_apply_profile`: live warmup/tail wall time around state-lock wait,
   in-place token block processing, retention, progress/event update, and
   processed-block cache read/write timing.

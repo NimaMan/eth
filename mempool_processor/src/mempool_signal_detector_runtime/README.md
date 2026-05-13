@@ -36,8 +36,8 @@ Reth pending tx stream
        runs per-pool buy/approve/sell checks where supported
        builds SimulationResult
   -> SignalManager
-       emits semantic TradingEnabled / Tax / Honeypot / LiquidityRemoval /
-       LpApproval signals
+       emits trading_enabled / tax_change / sell_blocked /
+       liquidity_removal / lp_position_approval / token_supply_risk events
   -> SignalPublisher
        writes Postgres rows, semantic logs, and ZMQ topics
 ```
@@ -99,8 +99,8 @@ Interval logs include unresolved `pending`, `in_flight`, `recorded`,
 Fast paths:
 
 - Known token creator/control transactions are simulated by priority.
-- Known V2/Sushi LP approvals to routers or Permit2 are published immediately as
-  early rug setup signals.
+- Known V2-style LP approvals to routers or Permit2 are published immediately
+  only when the mapped pool exposes a computable LP ownership share.
 - Known liquidity removals go through the dedicated liquidity-removal flow.
 
 Cache-wait paths:
@@ -117,6 +117,8 @@ Unsupported paths:
   mapped.
 - V4 trading-enabled entry signals are disabled until full buy/approve/sell
   simulation is implemented and succeeds.
+- Balancer pool identity may be `vault#pool_id`; it is also a string identity,
+  not an EVM address.
 
 ## Simulation And Signals
 
@@ -127,13 +129,15 @@ Unsupported paths:
 
 Signal semantics:
 
-- `TradingEnabled`: buy, approve, and sell succeed for the pool with acceptable
+- `trading_enabled`: buy, approve, and sell succeed for the pool with acceptable
   tax.
-- `Honeypot`: buy/approve succeed but sell fails for the same pool.
-- `TaxSignal`: buy/sell tax enters high or extreme buckets, or crosses
+- `sell_blocked`: buy/approve succeed but sell fails for the same pool.
+- `tax_change`: buy/sell tax enters high or extreme buckets, or crosses
   configured thresholds.
-- `LiquidityRemoval`: tracked pool drain/removal risk.
-- `LpApproval`: tracked LP/pool token approval to known router/Permit2.
+- `liquidity_removal`: tracked pool drain/removal risk.
+- `lp_position_approval`: protocol-specific ownership share approval, such as
+  ERC20 LP/BPT/Curve LP share or NFT position-liquidity share.
+- `token_supply_risk`: token-level hidden mint or supply manipulation risk.
 
 Successful mined tx replay mismatches are classified as
 `replay_context_mismatch`; they are diagnostic context mismatches, not
@@ -147,13 +151,14 @@ Live runs require Postgres signal persistence unless
 ZMQ topics are diagnostic/low-latency fanout:
 
 - `trading_enabled`
-- `honeypot_signal`
+- `sell_blocked_signal`
 - `tax_signal`
 - `liquidity_removal`
 - `lp_approval`
+- `token_supply_risk`
 
 The stable consumer path for token-server, ASENA, and alpha is the persisted
-`live_trading.*` signal store.
+`live_trading.signal_events` signal store plus typed detail tables.
 
 ## Log Structure
 
@@ -168,10 +173,11 @@ logs/mempool_processor/signal_detector_YYYY-MM-DD_HH-MM-SS/
 ├── unresolved_intents.log       # internal cache-wait lane
 └── signals/
     ├── trading_enabled.log      # semantic entry signals
-    ├── honeypot_signals.log     # semantic cannot-sell signals
+    ├── sell_blocked_signals.log # semantic cannot-sell signals
     ├── tax_signals.log          # semantic tax risk signals
     ├── liquidity_removals.log   # semantic removal/drain signals
     ├── lp_approval_signals.log  # semantic LP approval signals
+    ├── token_supply_risk_signals.log
     └── signal_manager.log       # publication summaries
 ```
 

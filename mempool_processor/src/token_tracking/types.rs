@@ -27,6 +27,22 @@ pub enum PoolType {
     UniswapV3,
     #[serde(rename = "UNISWAP-V4")]
     UniswapV4,
+    #[serde(rename = "SUSHISWAP-V2")]
+    SushiSwapV2,
+    #[serde(rename = "SUSHISWAP-V3")]
+    SushiSwapV3,
+    #[serde(rename = "PANCAKESWAP-V2")]
+    PancakeSwapV2,
+    #[serde(rename = "PANCAKESWAP-V3")]
+    PancakeSwapV3,
+    #[serde(rename = "SHIBASWAP-V2")]
+    ShibaSwapV2,
+    #[serde(rename = "FRAXSWAP-V2")]
+    FraxswapV2,
+    #[serde(rename = "CURVE")]
+    Curve,
+    #[serde(rename = "BALANCER")]
+    Balancer,
     #[serde(other)]
     Unknown,
 }

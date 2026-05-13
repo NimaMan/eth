@@ -464,6 +464,14 @@ fn cache_pool_type_label(pool_type: &CachePoolType) -> &'static str {
         CachePoolType::UniswapV2 => "UNISWAP-V2",
         CachePoolType::UniswapV3 => "UNISWAP-V3",
         CachePoolType::UniswapV4 => "UNISWAP-V4",
+        CachePoolType::SushiSwapV2 => "SUSHISWAP-V2",
+        CachePoolType::SushiSwapV3 => "SUSHISWAP-V3",
+        CachePoolType::PancakeSwapV2 => "PANCAKESWAP-V2",
+        CachePoolType::PancakeSwapV3 => "PANCAKESWAP-V3",
+        CachePoolType::ShibaSwapV2 => "SHIBASWAP-V2",
+        CachePoolType::FraxswapV2 => "FRAXSWAP-V2",
+        CachePoolType::Curve => "CURVE",
+        CachePoolType::Balancer => "BALANCER",
         CachePoolType::Unknown => "UNKNOWN",
     }
 }
@@ -471,6 +479,10 @@ fn cache_pool_type_label(pool_type: &CachePoolType) -> &'static str {
 fn simulation_pool_type(pool_state: &PoolCandidate) -> Result<PoolType, String> {
     match &pool_state.pool_type {
         CachePoolType::UniswapV2 | CachePoolType::Unknown => Ok(PoolType::UniswapV2),
+        CachePoolType::SushiSwapV2 => Ok(PoolType::SushiSwap),
+        CachePoolType::PancakeSwapV2 => Ok(PoolType::PancakeSwapV2),
+        CachePoolType::ShibaSwapV2 => Ok(PoolType::ShibaSwapV2),
+        CachePoolType::FraxswapV2 => Ok(PoolType::FraxswapV2),
         CachePoolType::UniswapV3 => {
             let fee_tier = pool_state.fee_tier.ok_or_else(|| {
                 format!(
@@ -480,6 +492,27 @@ fn simulation_pool_type(pool_state: &PoolCandidate) -> Result<PoolType, String> 
             })?;
             Ok(PoolType::UniswapV3 { fee_tier })
         }
+        CachePoolType::SushiSwapV3 => {
+            let fee_tier = pool_state.fee_tier.ok_or_else(|| {
+                format!(
+                    "SushiSwap V3 pool {} is missing fee_tier in TokenTrackingCache",
+                    pool_state.address
+                )
+            })?;
+            Ok(PoolType::SushiSwapV3 { fee_tier })
+        }
+        CachePoolType::PancakeSwapV3 => Err(format!(
+            "PancakeSwap V3 pool {} cannot emit trading-enabled signals until buy/approve/sell simulation supports Pancake V3 routers",
+            pool_state.address
+        )),
+        CachePoolType::Curve => Err(format!(
+            "Curve pool {} cannot emit trading-enabled signals until Curve buy/approve/sell simulation is supported",
+            pool_state.address
+        )),
+        CachePoolType::Balancer => Err(format!(
+            "Balancer pool {} cannot emit trading-enabled signals until Balancer buy/approve/sell simulation is supported",
+            pool_state.address
+        )),
         CachePoolType::UniswapV4 => Err(format!(
             "Uniswap V4 pool {} is missing full pool-key simulation config in TokenTrackingCache",
             pool_state

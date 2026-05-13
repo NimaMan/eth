@@ -11,13 +11,13 @@ simulation, and semantic signal emission.
 - Queue critical pending intents whose token/pool mapping has not reached the
   confirmed live-token context yet, then retry them as soon as the mapping is
   available.
-- Persist and publish semantic signals such as trading enabled, tax bucket
-  risk, honeypot/sell-blocked risk, LP approval, and liquidity removal.
-- Treat protocol support explicitly: V2/Sushi LP approvals are early-warning
-  signals, V2/Sushi and V3 pools can be buy/sell probed when metadata is
-  present, V4 removal intent uses `pool_manager#pool_id` identifiers, and V4
-  trading-entry signals stay disabled until buy/approve/sell simulation is fully
-  supported.
+- Persist and publish explicit semantic events: `trading_enabled`,
+  `sell_blocked`, `tax_change`, `liquidity_removal`, `lp_position_approval`,
+  and `token_supply_risk`.
+- Treat protocol support explicitly: V2-style Uniswap/Sushi/Pancake/Shiba/Frax
+  LP approvals use ERC20 LP share, V3-style Uniswap/Sushi/Pancake approvals use
+  position-liquidity share when mapped, Balancer uses BPT share, Curve uses LP
+  share, and V4/Balancer composite identifiers stay strings.
 
 ## Owns
 
@@ -59,11 +59,12 @@ Reth IPC pending tx
   -> Postgres rows + semantic signal logs + ZMQ tcp://127.0.0.1:5556
 ```
 
-Entry-signal rule: publish `TradingEnabled` only when the specific pool has
-successful buy, approve, and sell simulation. Risk-signal rule: publish scam,
-liquidity-removal, tax, and LP-approval signals only after the tx is mapped to a
-tracked token/pool and the decoder or simulator confirms the risk. Cache waits
-are internal telemetry, not public signals.
+Entry-signal rule: publish `trading_enabled` only when the specific pool has
+successful buy, approve, and sell simulation. Risk-signal rule: publish
+sell-blocked, liquidity-removal, tax, supply-risk, and LP-position-approval
+events only after the tx is mapped to a tracked token/pool and the decoder or
+simulator confirms the risk. Cache waits are internal telemetry, not public
+signals.
 
 ## Live Pipeline Boundary
 
@@ -99,16 +100,18 @@ Failure isolation rules:
 - Live token-server snapshots are accepted while `status=warming` until the
   first live context is accepted. After that, only `status=live` snapshots are
   accepted, and lower-block snapshots are rejected and counted.
-- ZMQ/log output is diagnostic; persisted Postgres rows are the source of truth
-  for token-server, ASENA, and alpha.
+- ZMQ/log output is diagnostic; persisted `live_trading.signal_events` rows are
+  the source of truth for token-server, ASENA, and alpha. Typed detail tables
+  hang off `signal_id` for analytics.
 
 ## Live Persistence Rule
 
 For live runs, Postgres signal persistence is required. token-server and ASENA
-read mempool signals from `live_trading.*`; ZMQ and signal logs are diagnostic
-outputs. `mempool_signal_detector` loads `MEMPOOL_DATABASE_URL` from the process
-environment or the shared `ETH_CONFIG_PATH` config file and refuses to start
-without it unless `--allow-database-disabled` is passed for a diagnostic run.
+read mempool signals from `live_trading.signal_events` plus typed detail tables;
+ZMQ and signal logs are diagnostic outputs. `mempool_signal_detector` loads
+`MEMPOOL_DATABASE_URL` from the process environment or the shared
+`ETH_CONFIG_PATH` config file and refuses to start without it unless
+`--allow-database-disabled` is passed for a diagnostic run.
 
 ## Logging Contract
 
@@ -123,10 +126,11 @@ mapping yet" are not simulation errors; they are tracked through
 The `signals/` subdirectory is semantic only:
 
 - `trading_enabled.log`
-- `honeypot_signals.log`
+- `sell_blocked_signals.log`
 - `tax_signals.log` for actual tax risk signals, not every tax calculation
 - `liquidity_removals.log`
 - `lp_approval_signals.log`
+- `token_supply_risk_signals.log`
 - `signal_manager.log` for emitted signals and publication summaries
 
 Run-root diagnostics:

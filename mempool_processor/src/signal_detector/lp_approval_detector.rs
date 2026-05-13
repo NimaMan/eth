@@ -4,9 +4,8 @@
 /// which is typically the precursor to a rug pull (liquidity removal)
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::TransactionCategory;
-use alloy_primitives::{address, Address, U256};
+use alloy_primitives::{Address, U256};
 use chrono::Utc;
-use reth_chain_query::common_addresses::ROUTERS;
 use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -49,8 +48,17 @@ pub struct LpApprovalSignal {
     pub pool_type: String,
     pub denom_address: Option<String>,
     pub denom_currency: Option<String>,
+    pub denom_decimals: Option<u8>,
     pub spender_address: String,
     pub approval_percentage: Option<f64>,
+    pub approved_share_pct: Option<f64>,
+    pub approval_model: Option<String>,
+    pub lp_total_supply: Option<String>,
+    pub position_manager: Option<String>,
+    pub position_id: Option<String>,
+    pub position_liquidity: Option<String>,
+    pub pool_liquidity: Option<String>,
+    pub position_share_pct: Option<f64>,
     pub previous_allowance: Option<f64>,
     pub approver_address: String,
     pub creator_address: String,
@@ -92,10 +100,6 @@ impl LpApprovalDetector {
         // Extract amount from calldata
         let amount = U256::from_be_slice(&tx.input[36..68]);
 
-        if !is_known_lp_approval_spender(&router_address) {
-            return None;
-        }
-
         let router_hex = to_checksum_address(&router_address);
 
         // Derive approver and LP token address directly from transaction fields.
@@ -119,8 +123,17 @@ impl LpApprovalDetector {
             pool_type: "UNKNOWN".to_string(),
             denom_address: None,
             denom_currency: None,
+            denom_decimals: None,
             spender_address: router_hex.clone(),
             approval_percentage: None,
+            approved_share_pct: None,
+            approval_model: None,
+            lp_total_supply: None,
+            position_manager: None,
+            position_id: None,
+            position_liquidity: None,
+            pool_liquidity: None,
+            position_share_pct: None,
             previous_allowance: None,
             approver_address: approver.clone(),
             creator_address: approver.clone(),
@@ -130,9 +143,4 @@ impl LpApprovalDetector {
     }
     /// Log database write for tracking
     pub fn log_db_write(&mut self, _signal: &LpApprovalSignal, _success: bool) {}
-}
-
-fn is_known_lp_approval_spender(spender: &Address) -> bool {
-    *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
-        || ROUTERS.values().any(|router| router == spender)
 }

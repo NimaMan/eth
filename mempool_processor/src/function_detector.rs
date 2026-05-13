@@ -5,7 +5,7 @@
 
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{address, Address as AlloyAddress};
-use reth_chain_query::common_addresses::ROUTERS;
+use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
 use reth_chain_query::to_checksum_address;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -231,13 +231,11 @@ impl FunctionDetector {
             return CreatorFunctionType::Other("approve".to_string());
         }
 
-        // Only check pool if router is being approved
         let Some(spender) = approval_spender(&tx.input) else {
             return CreatorFunctionType::Other("approve".to_string());
         };
-        if !is_known_lp_approval_spender(&spender) {
-            return CreatorFunctionType::Other("approve".to_string());
-        }
+        let spender_is_known = is_known_lp_approval_spender(&spender);
+        let spender_addr = to_checksum_address(&spender);
 
         // Check if the approve is being called on an LP token contract
         if let Some(to_bytes) = &tx.to {
@@ -246,9 +244,10 @@ impl FunctionDetector {
             // Check if the 'to' address is a pool (LP token)
             if let Some(ref cache) = self.token_cache {
                 let is_pool = futures::executor::block_on(cache.is_pool(&to_addr));
+                let spender_is_tracked_pool =
+                    futures::executor::block_on(cache.is_pool(&spender_addr));
 
-                if is_pool {
-                    // Anyone approving router to spend LP tokens = liquidity removal preparation
+                if is_pool && (spender_is_known || spender_is_tracked_pool) {
                     return CreatorFunctionType::LiquidityPoolApproval;
                 }
             }
@@ -268,6 +267,7 @@ fn approval_spender(input: &[u8]) -> Option<AlloyAddress> {
 
 fn is_known_lp_approval_spender(spender: &AlloyAddress) -> bool {
     *spender == address!("000000000022D473030F116dDEE9F6B43aC78BA3")
+        || *spender == POOL_FACTORIES["balancer_vault"]
         || ROUTERS.values().any(|router| router == spender)
 }
 

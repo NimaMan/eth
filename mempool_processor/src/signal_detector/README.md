@@ -16,15 +16,15 @@ Signals are semantic trading/risk events defined in `signal_detector/types.rs` a
   - tx_hash, token_address, pool_address, pool_type
   - creator_address, buy_tax, sell_tax, timestamp
 
-2) Honeypot (topic: `honeypot_signal`)
+2) SellBlocked (topic: `sell_blocked_signal`)
 - Trigger: pool simulation can buy and approve, but cannot sell.
-- Payload (HoneypotSignal):
+- Payload:
   - tx_hash, token_address, pool_address, pool_type, creator_address
   - can_buy, can_sell, buy_tax, sell_tax, failure_reason, confidence, timestamp
 - This is intentionally separate from tax. A sell-blocked pool is a trading
   status failure, not a tax bucket transition.
 
-3) TaxSignal (topic: `tax_signal`)
+3) TaxChange (topic: `tax_signal`)
 - Trigger: tax moves into a risky bucket, exceeds configured thresholds, changes bucket, or matches a suspicious pattern.
 - Payload (TaxSignalRecord):
   - tx_hash, token_address, pool_address, pool_type, creator_address
@@ -45,13 +45,21 @@ Signals are semantic trading/risk events defined in `signal_detector/types.rs` a
   `LOW` for measured smaller removals, and `UNKNOWN` when protocol intent maps
   to a tracked pool before reserve impact can be measured.
 
-5) LpApproval (topic: `lp_approval`)
+5) LpPositionApproval (topic: `lp_approval`)
 - Trigger: non‑simulated LP token approval transactions for tracked pools,
   regardless of whether the approver is the token creator.
 - Payload (LpApprovalSignal):
   - tx_hash, creator/approver, lp_token_address, router_address, amount
   - token_address, pool_address, pool_type
   - denom_address, denom_currency, approval_percentage (when known)
+  - protocol-specific share fields: approved_share_pct for ERC20 LP/BPT/Curve
+    LP, or position_share_pct for V3/V4 NFT position ownership.
+
+6) TokenSupplyRisk (topic: `token_supply_risk`)
+- Trigger: token-level hidden mint or supply manipulation context.
+- Payload:
+  - tx_hash, token_address, risk_type, risk_details, actor_address,
+    block_number, confidence, timestamp
 
 ## Detectors
 Detection happens inside `signal_manager.rs`, which coordinates the following:
@@ -65,8 +73,8 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
   - Handles tax bucket risks, tax changes, and suspicious tax patterns
   - Produces TaxSignalRecord for publishing as `tax_signal`
 
-- Honeypot detection (`signal_manager.rs`)
-  - Emits `honeypot_signal` only for buy-then-stuck results:
+- Sell-blocked detection (`signal_manager.rs`)
+  - Emits `sell_blocked_signal` only for buy-then-stuck results:
     `can_buy=true`, `can_approve=true`, `can_sell=false`
   - Dedupes per `(token_address, pool_address)` during the process lifetime
 
@@ -76,22 +84,24 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 
 - LpApprovalDetector (`lp_approval_detector.rs`)
   - Checks non‑simulated transactions classified as tracked-pool LP approvals
-  - Emits LpApproval signals directly through SignalManager
-  - Uses calldata decoding only; LP approval transactions are not simulated
+  - Emits `lp_position_approval` signals directly through SignalManager
+  - Public signals require token/pool mapping and a computable ownership share
 
 ## Publishing
 
 - ZMQ
   - Endpoint: `tcp://127.0.0.1:5556`
-  - Topics: `trading_enabled`, `honeypot_signal`, `tax_signal`, `liquidity_removal`, `lp_approval`
+  - Topics: `trading_enabled`, `sell_blocked_signal`, `tax_signal`,
+    `liquidity_removal`, `lp_approval`, `token_supply_risk`
   - Format: JSON serialized signal structs
 
 - Semantic signal logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
-  - `honeypot_signals.log`
+  - `sell_blocked_signals.log`
   - `tax_signals.log` (actual tax risk signals only)
   - `liquidity_removals.log`
   - `lp_approval_signals.log`
+  - `token_supply_risk_signals.log`
   - `signal_manager.log` (emitted signals and publication summaries)
 
 - Simulation diagnostics
@@ -101,7 +111,9 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
     simulations and buy/sell branch errors such as failed tax calculation.
 
 - Database
-  - Live runs require signal persistence through the unified database writer.
+  - Live runs write `live_trading.signal_events` plus typed detail tables.
+  - Sell-blocked and supply-risk facts are explicit event kinds, not vague scam
+    rows.
   - Use `--allow-database-disabled` only for diagnostic ZMQ/log-only runs.
 
 ## Processing Flow (Per Pool)
@@ -140,8 +152,11 @@ enriches the payload from `TokenTrackingCache` before publishing.
 - LP approval diagnostics are included in the periodic mempool health output:
   router approvals seen, tracked pool approvals, pool cache misses, LP approvals
   published, and DB write errors.
-- V2/Sushi LP approvals are actionable early sell signals. V3
-  `decreaseLiquidity` and V3 pool burn events are treated as direct
+- V2-style Uniswap/Sushi/Pancake/Shiba/Frax approvals are actionable only when
+  the ERC20 LP share is known. Balancer BPT and Curve LP approvals follow the
+  same percentage rule. V3/V4 NFT approvals require mapped position-liquidity
+  share before becoming public signals.
+- V3 `decreaseLiquidity` and V3 pool burn events are treated as direct
   liquidity-removal risk when they map to a tracked token/pool. V4 negative
   `ModifyLiquidity` events are emitted as unknown-severity removal risk when
   they map to the tracked `pool_manager#pool_id` key. V4 simulation/PnL is still

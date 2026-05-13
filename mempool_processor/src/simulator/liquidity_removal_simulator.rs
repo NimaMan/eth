@@ -334,6 +334,7 @@ impl LiquidityRemovalSimulator {
         // 3) Compute drain from deltas (deterministic, cache-backed pools only)
         let drain = self.compute_pool_drain(&address_balance_changes).await;
         let protocol_removal = self.protocol_removal_from_processed(&processed).await;
+        let tx_protocol_removal = self.protocol_removal_from_unsigned_tx(&unsigned_tx).await;
 
         let (
             pool_address,
@@ -360,6 +361,18 @@ impl LiquidityRemovalSimulator {
                 true,
             )
         } else if let Some(candidate) = protocol_removal {
+            (
+                candidate.pool_address,
+                Some(candidate.pool_identifier),
+                Some(candidate.pool_type),
+                Some(candidate.token_address),
+                Some(candidate.function_name.to_string()),
+                0.0,
+                0.0,
+                0.0,
+                false,
+            )
+        } else if let Some(candidate) = tx_protocol_removal {
             (
                 candidate.pool_address,
                 Some(candidate.pool_identifier),
@@ -475,7 +488,7 @@ impl LiquidityRemovalSimulator {
             let Some(pool_state) = cache.get_pool(&pool_identifier).await else {
                 continue;
             };
-            if !matches!(pool_state.pool_type, CachePoolType::UniswapV3) {
+            if !is_concentrated_v3_pool(&pool_state.pool_type) {
                 continue;
             }
             let Some(token_address) = parse_address(&pool_state.token_address) else {
@@ -498,7 +511,7 @@ impl LiquidityRemovalSimulator {
             let Some(pool_state) = cache.get_pool(&pool_identifier).await else {
                 continue;
             };
-            if !matches!(pool_state.pool_type, CachePoolType::UniswapV3) {
+            if !is_concentrated_v3_pool(&pool_state.pool_type) {
                 continue;
             }
             let Some(token_address) = parse_address(&pool_state.token_address) else {
@@ -534,6 +547,50 @@ impl LiquidityRemovalSimulator {
                 pool_type: pool_type_label(&pool_state.pool_type).to_string(),
                 token_address,
                 function_name: "modifyLiquidity",
+            });
+        }
+
+        None
+    }
+
+    async fn protocol_removal_from_unsigned_tx(
+        &self,
+        unsigned_tx: &UnsignedTransaction,
+    ) -> Option<ProtocolRemovalInfo> {
+        let cache = self.token_cache.as_ref()?;
+        let to = unsigned_tx.to?;
+        let data = unsigned_tx.data.as_ref()?;
+        let selector = data.get(0..4)?;
+        let target_identifier = to_checksum_address(&to);
+
+        if is_curve_remove_liquidity_selector(selector) {
+            let pool_state = cache.get_pool(&target_identifier).await?;
+            if !matches!(pool_state.pool_type, CachePoolType::Curve) {
+                return None;
+            }
+            let token_address = parse_address(&pool_state.token_address)?;
+            return Some(ProtocolRemovalInfo {
+                pool_address: Some(to),
+                pool_identifier: pool_state.address.clone(),
+                pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                token_address,
+                function_name: "remove_liquidity",
+            });
+        }
+
+        if selector == [0x8b, 0xdb, 0x39, 0x13].as_slice() && data.len() >= 36 {
+            let pool_identifier = format!("{}#0x{}", target_identifier, hex::encode(&data[4..36]));
+            let pool_state = cache.get_pool(&pool_identifier).await?;
+            if !matches!(pool_state.pool_type, CachePoolType::Balancer) {
+                return None;
+            }
+            let token_address = parse_address(&pool_state.token_address)?;
+            return Some(ProtocolRemovalInfo {
+                pool_address: None,
+                pool_identifier: pool_state.address.clone(),
+                pool_type: pool_type_label(&pool_state.pool_type).to_string(),
+                token_address,
+                function_name: "exitPool",
             });
         }
 
@@ -744,8 +801,30 @@ fn pool_type_label(pool_type: &CachePoolType) -> &'static str {
         CachePoolType::UniswapV2 => "UNISWAP-V2",
         CachePoolType::UniswapV3 => "UNISWAP-V3",
         CachePoolType::UniswapV4 => "UNISWAP-V4",
+        CachePoolType::SushiSwapV2 => "SUSHISWAP-V2",
+        CachePoolType::SushiSwapV3 => "SUSHISWAP-V3",
+        CachePoolType::PancakeSwapV2 => "PANCAKESWAP-V2",
+        CachePoolType::PancakeSwapV3 => "PANCAKESWAP-V3",
+        CachePoolType::ShibaSwapV2 => "SHIBASWAP-V2",
+        CachePoolType::FraxswapV2 => "FRAXSWAP-V2",
+        CachePoolType::Curve => "CURVE",
+        CachePoolType::Balancer => "BALANCER",
         CachePoolType::Unknown => "UNKNOWN",
     }
+}
+
+fn is_concentrated_v3_pool(pool_type: &CachePoolType) -> bool {
+    matches!(
+        pool_type,
+        CachePoolType::UniswapV3 | CachePoolType::SushiSwapV3 | CachePoolType::PancakeSwapV3
+    )
+}
+
+fn is_curve_remove_liquidity_selector(selector: &[u8]) -> bool {
+    matches!(
+        selector,
+        [0x1a, 0x4d, 0x01, 0xd2] | [0x51, 0x7a, 0x55, 0xa3] | [0x5b, 0x36, 0x38, 0x9c]
+    )
 }
 
 fn v4_event_display_key(pool_manager: Address, pool_id: alloy_primitives::B256) -> String {

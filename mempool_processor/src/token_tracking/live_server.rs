@@ -404,10 +404,23 @@ impl LivePoolView {
 }
 
 fn parse_pool_type(value: &str) -> PoolType {
-    match value.to_ascii_uppercase().as_str() {
+    let normalized = value
+        .trim()
+        .to_ascii_uppercase()
+        .replace('_', "-")
+        .replace(' ', "-");
+    match normalized.as_str() {
         "UNISWAP-V2" | "V2" => PoolType::UniswapV2,
         "UNISWAP-V3" | "V3" => PoolType::UniswapV3,
         "UNISWAP-V4" | "V4" => PoolType::UniswapV4,
+        "SUSHISWAP-V2" | "SUSHISWAP" | "SUSHI-V2" => PoolType::SushiSwapV2,
+        "SUSHISWAP-V3" | "SUSHI-V3" => PoolType::SushiSwapV3,
+        "PANCAKESWAP-V2" | "PANCAKESWAP" | "PANCAKE-V2" => PoolType::PancakeSwapV2,
+        "PANCAKESWAP-V3" | "PANCAKE-V3" => PoolType::PancakeSwapV3,
+        "SHIBASWAP-V2" | "SHIBASWAP" => PoolType::ShibaSwapV2,
+        "FRAXSWAP-V2" | "FRAXSWAP" => PoolType::FraxswapV2,
+        "CURVE" | "CURVE-V1" => PoolType::Curve,
+        "BALANCER" | "BALANCER-V2" => PoolType::Balancer,
         _ => PoolType::Unknown,
     }
 }
@@ -478,5 +491,34 @@ mod tests {
 
         assert_eq!(pool.pool_type, PoolType::UniswapV2);
         assert_eq!(pool.lifecycle, PoolLifecycle::Active);
+    }
+
+    #[test]
+    fn maps_multi_protocol_pool_labels_to_cache_types() {
+        let cases = [
+            ("SUSHISWAP-V2", PoolType::SushiSwapV2),
+            ("SUSHISWAP-V3", PoolType::SushiSwapV3),
+            ("PANCAKESWAP-V2", PoolType::PancakeSwapV2),
+            ("PANCAKESWAP-V3", PoolType::PancakeSwapV3),
+            ("SHIBASWAP-V2", PoolType::ShibaSwapV2),
+            ("FRAXSWAP-V2", PoolType::FraxswapV2),
+            ("CURVE", PoolType::Curve),
+            ("BALANCER", PoolType::Balancer),
+        ];
+
+        for (protocol, expected) in cases {
+            let pool = LivePoolView {
+                token_address: "0xABC".to_string(),
+                pool_address: "0xPOOL".to_string(),
+                protocol: protocol.to_string(),
+                currency: "USDC".to_string(),
+                denom_address: "0xUSDC".to_string(),
+                ..Default::default()
+            }
+            .into_cache_pool()
+            .expect("pool mapped");
+
+            assert_eq!(pool.pool_type, expected);
+        }
     }
 }

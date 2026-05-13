@@ -611,7 +611,7 @@ async fn main() -> Result<()> {
             let manager_stats = simulation_manager.stats().await;
 
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SELL_BLOCKED:{} SUPPLY_RISK:{} | Published:{} ZMQ:{} DB:{} Err:{}",
                 total,
                 delta,
                 rate,
@@ -622,7 +622,8 @@ async fn main() -> Result<()> {
                 publisher_stats.liquidity_removals,
                 publisher_stats.lp_approvals,
                 publisher_stats.tax_signals,
-                publisher_stats.honeypot_signals,
+                publisher_stats.sell_blocked_signals,
+                publisher_stats.token_supply_risks,
                 publisher_stats.total_published,
                 publisher_stats.zmq_published,
                 publisher_stats.db_written,
@@ -726,12 +727,13 @@ async fn main() -> Result<()> {
         publisher.get_stats()
     };
     info!(
-        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} HONEYPOT:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
+        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} SELL_BLOCKED:{} SUPPLY_RISK:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
         publisher_stats.trading_enabled,
         publisher_stats.liquidity_removals,
         publisher_stats.lp_approvals,
         publisher_stats.tax_signals,
-        publisher_stats.honeypot_signals,
+        publisher_stats.sell_blocked_signals,
+        publisher_stats.token_supply_risks,
         publisher_stats.total_published,
         publisher_stats.zmq_published,
         publisher_stats.logs_written,

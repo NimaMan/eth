@@ -16,7 +16,7 @@ pub(crate) struct ServiceMetrics {
     pub(crate) simulation_errors: AtomicU64,
     pub(crate) trading_enabled_signals: Arc<AtomicU64>,
     pub(crate) liquidity_removal_signals: Arc<AtomicU64>,
-    pub(crate) honeypot_signals: Arc<AtomicU64>,
+    pub(crate) sell_blocked_signals: Arc<AtomicU64>,
     pub(crate) tax_change_signals: Arc<AtomicU64>,
     detection_latencies: Arc<Mutex<Vec<Duration>>>,
     simulation_times: Arc<Mutex<Vec<Duration>>>,
@@ -35,7 +35,7 @@ impl ServiceMetrics {
             simulation_errors: AtomicU64::new(0),
             trading_enabled_signals: Arc::new(AtomicU64::new(0)),
             liquidity_removal_signals: Arc::new(AtomicU64::new(0)),
-            honeypot_signals: Arc::new(AtomicU64::new(0)),
+            sell_blocked_signals: Arc::new(AtomicU64::new(0)),
             tax_change_signals: Arc::new(AtomicU64::new(0)),
             detection_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
             simulation_times: Arc::new(Mutex::new(Vec::with_capacity(1000))),
@@ -77,7 +77,7 @@ impl ServiceMetrics {
         let rate = total as f64 / elapsed.as_secs_f64();
 
         format!(
-            "TX: {} ({:.1}/s) | Detect: {}us/{}us | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims done/actionable_err:{}/{} | Signals: TE:{} LR:{} HP:{} TC:{}",
+            "TX: {} ({:.1}/s) | Detect: {}us/{}us | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims done/actionable_err:{}/{} | Signals: TE:{} LR:{} SELL_BLOCKED:{} TC:{}",
             total,
             rate,
             avg_detect.as_micros(),
@@ -90,7 +90,7 @@ impl ServiceMetrics {
             sim_errors,
             self.trading_enabled_signals.load(Ordering::Relaxed),
             self.liquidity_removal_signals.load(Ordering::Relaxed),
-            self.honeypot_signals.load(Ordering::Relaxed),
+            self.sell_blocked_signals.load(Ordering::Relaxed),
             self.tax_change_signals.load(Ordering::Relaxed),
         )
     }

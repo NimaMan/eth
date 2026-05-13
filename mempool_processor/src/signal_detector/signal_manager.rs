@@ -3,7 +3,6 @@ use crate::signal_publisher::SignalPublisher;
 use crate::simulator::{BuySellResult, SimulationResult};
 use crate::token_tracking::types::PoolType;
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::U256;
 use reth_chain_query::to_checksum_address;
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -235,7 +234,7 @@ impl SignalManager {
                 }
                 Signal::Honeypot(s) => {
                     format!(
-                        "[{}] SIGNAL_DETECTED | HONEYPOT | {} | token: {} | pool: {} | pool_type: {} | creator: {} | can_buy: {} | can_sell: {}",
+                        "[{}] SIGNAL_DETECTED | SELL_BLOCKED | {} | token: {} | pool: {} | pool_type: {} | creator: {} | can_buy: {} | can_sell: {}",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                         s.tx_hash,
                         s.token_address,
@@ -262,18 +261,26 @@ impl SignalManager {
                         s.function_name
                     )
                 }
+                Signal::TokenSupplyRisk(s) => {
+                    format!(
+                        "[{}] SIGNAL_DETECTED | TOKEN_SUPPLY_RISK | {} | token: {} | risk_type: {} | actor: {} | block: {}",
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        s.tx_hash.as_deref().unwrap_or("none"),
+                        s.token_address,
+                        s.risk_type,
+                        s.actor_address.as_deref().unwrap_or("unknown"),
+                        s.block_number
+                            .map(|block| block.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    )
+                }
             };
 
             writeln!(file, "{}", log_entry).ok();
         }
     }
 
-    /// Process simulation result to detect signals
-    ///
-    /// CRITICAL: This function is called ONCE PER POOL
-    /// - Each pool's SimulationResult is processed independently
-    /// - Generates signals specific to the (token, pool) pair
-    /// - Pool address and type are extracted from the result
+    /// Process one pool-specific simulation result into publishable signals.
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
         if let Some(ref err) = result.error {
             if !is_cache_wait_error(err)
@@ -285,8 +292,10 @@ impl SignalManager {
         }
 
         let mut signals = Vec::new();
+        let result_pool_address = result.pool_address.map(|addr| to_checksum_address(&addr));
+        let pool_context =
+            pool_context_for_address(&self.token_cache, result_pool_address.as_deref()).await;
 
-        // First, extract key values from simulation result
         let buy_sell_result = result.buy_sell_result();
         let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &buy_sell_result {
             self.log_buy_sell_simulation_errors(result, buy_sell);
@@ -311,7 +320,7 @@ impl SignalManager {
             ) {
                 if let (Some(token_address), Some(pool_address)) = (
                     token_address_from_simulation_result(result),
-                    result.pool_address.map(|addr| to_checksum_address(&addr)),
+                    result_pool_address.clone(),
                 ) {
                     if self
                         .emitted_honeypot_pairs
@@ -331,6 +340,15 @@ impl SignalManager {
                                 token_address,
                                 pool_address,
                                 pool_type,
+                                denom_address: pool_context
+                                    .as_ref()
+                                    .map(|context| context.denom_address.clone()),
+                                denom_currency: pool_context
+                                    .as_ref()
+                                    .map(|context| context.denom_currency.clone()),
+                                denom_decimals: pool_context
+                                    .as_ref()
+                                    .and_then(|context| context.denom_decimals),
                                 creator_address,
                                 can_buy: buy_sell.can_buy,
                                 can_sell: buy_sell.can_sell,
@@ -346,10 +364,8 @@ impl SignalManager {
             }
         }
 
-        // STEP 1: Tax detector (NOW ACTIVE) - Run to get tax signals
         let tax_signals = self.tax_signal_detector.detect(result);
 
-        // Extract tax values from simulation result (calculated in simulation_manager)
         let (calculated_buy_tax, calculated_sell_tax) =
             if let Some(ref buy_sell) = result.buy_sell_result() {
                 (buy_sell.buy_tax, buy_sell.sell_tax)
@@ -357,9 +373,6 @@ impl SignalManager {
                 (None, None)
             };
 
-        // Trim: omit granular TAX_RESULT lines in signal_manager.log
-
-        // Process tax signals to create actual signal records
         for tax_signal in &tax_signals {
             let (signal_type, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold) =
                 match tax_signal.signal_type {
@@ -375,34 +388,26 @@ impl SignalManager {
                     TaxSignalType::SuspiciousPattern => ("SuspiciousPattern", false, false),
                 };
 
-            // Check trading status from token cache before logging TAX_SIGNAL
             let should_log_tax_signal = if let Some(ref token_cache) = self.token_cache {
-                // Check if trading is enabled on any pool for this token
                 let pools = token_cache
                     .get_pools_for_token(&tax_signal.token_address)
                     .await;
                 let trading_enabled = pools.iter().any(|p| p.trading_enabled);
 
                 if trading_enabled {
-                    // Trading is enabled - always log TAX_SIGNAL
                     true
                 } else if let Some(ref bs) = buy_sell_result {
-                    // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
                     bs.can_buy || bs.can_sell
                 } else {
-                    // Can't determine buy/sell capability - skip
                     false
                 }
             } else {
-                // No token cache - log all TAX_SIGNALS
                 true
             };
 
             if should_log_tax_signal {
-                // Create pool-specific tax signal
-                let pool_address = result
-                    .pool_address
-                    .map(|addr| to_checksum_address(&addr))
+                let pool_address = result_pool_address
+                    .clone()
                     .unwrap_or_else(|| "unknown".to_string());
                 let pool_type = result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
                 let creator_address = creator_address_from_simulation_result(result);
@@ -433,6 +438,15 @@ impl SignalManager {
                         token_address: tax_signal.token_address.clone(),
                         pool_address,
                         pool_type,
+                        denom_address: pool_context
+                            .as_ref()
+                            .map(|context| context.denom_address.clone()),
+                        denom_currency: pool_context
+                            .as_ref()
+                            .map(|context| context.denom_currency.clone()),
+                        denom_decimals: pool_context
+                            .as_ref()
+                            .and_then(|context| context.denom_decimals),
                         creator_address,
                         signal_type: signal_type.to_string(),
                         signal_details: tax_signal.details.clone(),
@@ -454,14 +468,11 @@ impl SignalManager {
             }
         }
 
-        // STEP 2: Trading status detector (ACTIVE) - Now with tax values
-        // Check for trading status changes or detect already-enabled trading
         if let Some(trading_signal) = self
             .trading_status_detector
             .detect(result, calculated_buy_tax, calculated_sell_tax)
             .await
         {
-            // Always log what we detected
             let status_msg = match trading_signal.status_change {
                 TradingStatusChange::TradingEnabled => {
                     // Check if this is a detection of already-enabled trading
@@ -488,9 +499,8 @@ impl SignalManager {
                 TradingStatusChange::TradingEnabled => {
                     // CRITICAL: Create pool-specific trading enabled signal
                     // Each pool gets its own signal with unique pool_address
-                    let pool_address = result
-                        .pool_address
-                        .map(|addr| to_checksum_address(&addr))
+                    let pool_address = result_pool_address
+                        .clone()
                         .unwrap_or_else(|| "unknown".to_string());
                     let pool_type = result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
 
@@ -500,6 +510,15 @@ impl SignalManager {
                             token_address: trading_signal.token_address.clone(),
                             pool_address, // Now includes the specific pool
                             pool_type,    // Pool type (V2, V3, V4)
+                            denom_address: pool_context
+                                .as_ref()
+                                .map(|context| context.denom_address.clone()),
+                            denom_currency: pool_context
+                                .as_ref()
+                                .map(|context| context.denom_currency.clone()),
+                            denom_decimals: pool_context
+                                .as_ref()
+                                .and_then(|context| context.denom_decimals),
                             creator_address: trading_signal.executor.clone(),
                             buy_tax: calculated_buy_tax.unwrap_or(0.0),
                             sell_tax: calculated_sell_tax.unwrap_or(0.0),
@@ -510,14 +529,8 @@ impl SignalManager {
                 _ => {}
             }
         } else {
-            // No signal is emitted for the common no-change path. Success and
-            // no-change counts are captured by interval metrics.
         }
 
-        // STEP 3: Liquidity detector - Check for pool drains and liquidity removals
-        // Use tx_state_changes which has the actual transaction state changes
-
-        // Parse sender address
         if let Some(from_address) =
             alloy_primitives::Address::try_from(result.request.tx.from.as_slice()).ok()
         {
@@ -630,10 +643,23 @@ impl SignalManager {
 
             // Emit unified LiquidityRemoval signals
             for liq_signal in liquidity_signals {
+                let liquidity_pool_context =
+                    pool_context_for_address(&self.token_cache, Some(&liq_signal.pool_address))
+                        .await
+                        .or_else(|| pool_context.clone());
                 let removal_signal = crate::signal_detector::LiquidityRemovalSignal {
                     tx_hash: liq_signal.tx_hash.clone(),
                     pool_address: liq_signal.pool_address.clone(),
                     pool_type: liq_signal.pool_type.clone(),
+                    denom_address: liquidity_pool_context
+                        .as_ref()
+                        .map(|context| context.denom_address.clone()),
+                    denom_currency: liquidity_pool_context
+                        .as_ref()
+                        .map(|context| context.denom_currency.clone()),
+                    denom_decimals: liquidity_pool_context
+                        .as_ref()
+                        .and_then(|context| context.denom_decimals),
                     token_address: Some(liq_signal.token_address.clone()),
                     remover_address: liq_signal.from_address.clone(),
                     function_name: liq_signal.function_name.clone().unwrap_or_else(|| {
@@ -771,17 +797,18 @@ impl SignalManager {
                 enriched_signal.pool_type = pool_type_label(&pool_state.pool_type);
                 enriched_signal.denom_address = Some(pool_state.denom_address.clone());
                 enriched_signal.denom_currency = Some(pool_state.denom_currency.clone());
+                enriched_signal.denom_decimals = None;
                 if let Some(pct) = pool_state.lp_tokens_approved_percentage {
                     enriched_signal.approval_percentage = Some(pct.min(100.0));
+                    enriched_signal.approved_share_pct = Some(pct.min(100.0));
                 }
 
-                // Fallback: treat max approval as 100%
-                if enriched_signal.approval_percentage.is_none()
-                    && enriched_signal.amount == U256::MAX
+                if enriched_signal
+                    .approved_share_pct
+                    .or(enriched_signal.position_share_pct)
+                    .or(enriched_signal.approval_percentage)
+                    .is_none()
                 {
-                    enriched_signal.approval_percentage = Some(100.0);
-                }
-                if enriched_signal.approval_percentage.is_none() {
                     warn!(
                         "LP approval {} cannot be published without approved LP percentage",
                         lp_signal.tx_hash
@@ -824,6 +851,38 @@ fn token_address_from_simulation_result(result: &SimulationResult) -> Option<Str
         crate::tx_router::TransactionCategory::ContractCreation {
             contract_address, ..
         } => Some(contract_address.clone()),
+        _ => None,
+    }
+}
+
+#[derive(Clone)]
+struct SignalPoolContext {
+    denom_address: String,
+    denom_currency: String,
+    denom_decimals: Option<u8>,
+}
+
+async fn pool_context_for_address(
+    token_cache: &Option<Arc<TokenTrackingCache>>,
+    pool_identifier: Option<&str>,
+) -> Option<SignalPoolContext> {
+    let cache = token_cache.as_ref()?;
+    let pool_identifier = pool_identifier?;
+    let pool = cache.get_pool_by_address(pool_identifier).await?;
+    Some(SignalPoolContext {
+        denom_address: pool.denom_address.clone(),
+        denom_currency: pool.denom_currency.clone(),
+        denom_decimals: known_denom_decimals(&pool.denom_currency, &pool.denom_address),
+    })
+}
+
+fn known_denom_decimals(symbol: &str, address: &str) -> Option<u8> {
+    match symbol.trim().to_ascii_uppercase().as_str() {
+        "ETH" | "WETH" | "DAI" | "USDE" => Some(18),
+        "USDC" | "USDT" | "EUROC" | "EURC" => Some(6),
+        _ if address.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000") => Some(18),
+        _ if address.eq_ignore_ascii_case("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") => Some(18),
+        _ if address.eq_ignore_ascii_case("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") => Some(6),
         _ => None,
     }
 }
@@ -900,6 +959,14 @@ fn pool_type_label(pool_type: &PoolType) -> String {
         PoolType::UniswapV2 => "UNISWAP-V2",
         PoolType::UniswapV3 => "UNISWAP-V3",
         PoolType::UniswapV4 => "UNISWAP-V4",
+        PoolType::SushiSwapV2 => "SUSHISWAP-V2",
+        PoolType::SushiSwapV3 => "SUSHISWAP-V3",
+        PoolType::PancakeSwapV2 => "PANCAKESWAP-V2",
+        PoolType::PancakeSwapV3 => "PANCAKESWAP-V3",
+        PoolType::ShibaSwapV2 => "SHIBASWAP-V2",
+        PoolType::FraxswapV2 => "FRAXSWAP-V2",
+        PoolType::Curve => "CURVE",
+        PoolType::Balancer => "BALANCER",
         PoolType::Unknown => "UNKNOWN",
     }
     .to_string()

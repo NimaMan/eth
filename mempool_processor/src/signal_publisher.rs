@@ -1,4 +1,3 @@
-use alloy_primitives::U256;
 use chrono::Utc;
 use eyre::{eyre, Result};
 use std::fs::OpenOptions;
@@ -76,9 +75,10 @@ pub struct SignalPublisher {
 struct LogFiles {
     trading_enabled: std::fs::File,
     tax_signals: std::fs::File,
-    honeypot_signals: std::fs::File,
+    sell_blocked_signals: std::fs::File,
     liquidity_removal: std::fs::File,
     lp_approval: std::fs::File,
+    token_supply_risk: std::fs::File,
 }
 
 /// Publisher statistics
@@ -87,9 +87,10 @@ pub struct PublisherStats {
     pub total_published: std::sync::atomic::AtomicU64,
     pub trading_enabled: std::sync::atomic::AtomicU64,
     pub tax_signals: std::sync::atomic::AtomicU64,
-    pub honeypot_signals: std::sync::atomic::AtomicU64,
+    pub sell_blocked_signals: std::sync::atomic::AtomicU64,
     pub liquidity_removals: std::sync::atomic::AtomicU64,
     pub lp_approvals: std::sync::atomic::AtomicU64,
+    pub token_supply_risks: std::sync::atomic::AtomicU64,
     pub zmq_published: std::sync::atomic::AtomicU64,
     pub logs_written: std::sync::atomic::AtomicU64,
     pub db_written: std::sync::atomic::AtomicU64,
@@ -179,10 +180,10 @@ impl SignalPublisher {
             .append(true)
             .open(log_dir.join("tax_signals.log"))?;
 
-        let honeypot_signals = OpenOptions::new()
+        let sell_blocked_signals = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join("honeypot_signals.log"))?;
+            .open(log_dir.join("sell_blocked_signals.log"))?;
 
         let liquidity_removal = OpenOptions::new()
             .create(true)
@@ -194,12 +195,18 @@ impl SignalPublisher {
             .append(true)
             .open(log_dir.join("lp_approval_signals.log"))?;
 
+        let token_supply_risk = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("token_supply_risk_signals.log"))?;
+
         Ok(LogFiles {
             trading_enabled,
             tax_signals,
-            honeypot_signals,
+            sell_blocked_signals,
             liquidity_removal,
             lp_approval,
+            token_supply_risk,
         })
     }
 
@@ -275,7 +282,7 @@ impl SignalPublisher {
             }
             Signal::Honeypot(_) => {
                 self.stats
-                    .honeypot_signals
+                    .sell_blocked_signals
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             Signal::LiquidityRemoval(_) => {
@@ -286,6 +293,11 @@ impl SignalPublisher {
             Signal::LpApproval(_) => {
                 self.stats
                     .lp_approvals
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            Signal::TokenSupplyRisk(_) => {
+                self.stats
+                    .token_supply_risks
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -324,9 +336,10 @@ impl SignalPublisher {
         let (topic, json_data) = match signal {
             Signal::TradingEnabled(s) => ("trading_enabled", serde_json::to_string(s)?),
             Signal::TaxSignal(s) => ("tax_signal", serde_json::to_string(s)?),
-            Signal::Honeypot(s) => ("honeypot_signal", serde_json::to_string(s)?),
+            Signal::Honeypot(s) => ("sell_blocked_signal", serde_json::to_string(s)?),
             Signal::LiquidityRemoval(s) => ("liquidity_removal", serde_json::to_string(s)?),
             Signal::LpApproval(s) => ("lp_approval", serde_json::to_string(s)?),
+            Signal::TokenSupplyRisk(s) => ("token_supply_risk", serde_json::to_string(s)?),
         };
 
         // Log what we're about to send
@@ -395,8 +408,8 @@ impl SignalPublisher {
             }
             Signal::Honeypot(s) => {
                 writeln!(
-                    self.log_files.honeypot_signals,
-                    "[{}] HONEYPOT_SIGNAL | Token: {} | Pool: {} | PoolType: {} | Creator: {} | CanBuy: {} | CanSell: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
+                    self.log_files.sell_blocked_signals,
+                    "[{}] SELL_BLOCKED | Token: {} | Pool: {} | PoolType: {} | Creator: {} | CanBuy: {} | CanSell: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
                     timestamp,
                     s.token_address,
                     s.pool_address,
@@ -408,7 +421,7 @@ impl SignalPublisher {
                     s.sell_tax.unwrap_or(-1.0),
                     s.tx_hash
                 )?;
-                self.log_files.honeypot_signals.flush()?;
+                self.log_files.sell_blocked_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
                 let eth_info = s
@@ -439,15 +452,10 @@ impl SignalPublisher {
             }
             Signal::LpApproval(s) => {
                 let percent_str = s
-                    .approval_percentage
+                    .approved_share_pct
+                    .or(s.position_share_pct)
+                    .or(s.approval_percentage)
                     .map(|pct| format!("{:.2}%", pct.min(100.0)))
-                    .or_else(|| {
-                        if s.amount == U256::MAX {
-                            Some("100.00%".to_string())
-                        } else {
-                            None
-                        }
-                    })
                     .unwrap_or_else(|| "N/A".to_string());
 
                 writeln!(
@@ -463,6 +471,23 @@ impl SignalPublisher {
                     s.tx_hash
                 )?;
                 self.log_files.lp_approval.flush()?;
+            }
+            Signal::TokenSupplyRisk(s) => {
+                writeln!(
+                    self.log_files.token_supply_risk,
+                    "[{}] TOKEN_SUPPLY_RISK | Token: {} | RiskType: {} | Actor: {} | Block: {} | Confidence: {:.3} | TxHash: {} | Details: {}",
+                    timestamp,
+                    s.token_address,
+                    s.risk_type,
+                    s.actor_address.as_deref().unwrap_or("unknown"),
+                    s.block_number
+                        .map(|block| block.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    s.confidence,
+                    s.tx_hash.as_deref().unwrap_or("none"),
+                    s.risk_details
+                )?;
+                self.log_files.token_supply_risk.flush()?;
             }
         }
 
@@ -487,9 +512,9 @@ impl SignalPublisher {
                 .stats
                 .tax_signals
                 .load(std::sync::atomic::Ordering::Relaxed),
-            honeypot_signals: self
+            sell_blocked_signals: self
                 .stats
-                .honeypot_signals
+                .sell_blocked_signals
                 .load(std::sync::atomic::Ordering::Relaxed),
             liquidity_removals: self
                 .stats
@@ -498,6 +523,10 @@ impl SignalPublisher {
             lp_approvals: self
                 .stats
                 .lp_approvals
+                .load(std::sync::atomic::Ordering::Relaxed),
+            token_supply_risks: self
+                .stats
+                .token_supply_risks
                 .load(std::sync::atomic::Ordering::Relaxed),
             zmq_published: self
                 .stats
@@ -526,9 +555,10 @@ pub struct PublisherStatsSnapshot {
     pub total_published: u64,
     pub trading_enabled: u64,
     pub tax_signals: u64,
-    pub honeypot_signals: u64,
+    pub sell_blocked_signals: u64,
     pub liquidity_removals: u64,
     pub lp_approvals: u64,
+    pub token_supply_risks: u64,
     pub zmq_published: u64,
     pub logs_written: u64,
     pub db_written: u64,

@@ -23,10 +23,11 @@ pub struct MempoolSignalQuery {
 pub enum MempoolSignalKind {
     All,
     TradingEnabled,
-    Honeypot,
+    SellBlocked,
     Tax,
     LiquidityRemoval,
-    LpApproval,
+    LpPositionApproval,
+    TokenSupplyRisk,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +71,8 @@ impl MempoolSignalStore {
         kind: MempoolSignalKind,
         query: MempoolSignalQuery,
     ) -> Result<MempoolSignalsResponse> {
+        ensure_signal_events_table(&self.pool).await?;
+
         let limit = query
             .limit
             .unwrap_or(self.default_limit)
@@ -98,13 +101,25 @@ impl MempoolSignalKind {
     pub fn from_path(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "trading-enabled" | "trading_enabled" | "trading" => Some(Self::TradingEnabled),
-            "honeypot" | "honeypots" | "honeypot-signal" | "honeypot_signal" | "sell-blocked"
-            | "sell_blocked" => Some(Self::Honeypot),
-            "tax" | "tax-signals" | "tax_signals" => Some(Self::Tax),
+            "honeypot"
+            | "honeypots"
+            | "honeypot-signal"
+            | "honeypot_signal"
+            | "sell-blocked"
+            | "sell_blocked"
+            | "sell-blocked-signal"
+            | "sell_blocked_signal" => Some(Self::SellBlocked),
+            "tax" | "tax-signals" | "tax_signals" | "tax-change" | "tax_change" => Some(Self::Tax),
             "liquidity-removals" | "liquidity_removals" | "liquidity-removal"
             | "liquidity_removal" | "liquidity" => Some(Self::LiquidityRemoval),
-            "lp-approvals" | "lp_approvals" | "lp-approval" | "lp_approval" => {
-                Some(Self::LpApproval)
+            "lp-approvals"
+            | "lp_approvals"
+            | "lp-approval"
+            | "lp_approval"
+            | "lp-position-approval"
+            | "lp_position_approval" => Some(Self::LpPositionApproval),
+            "token-supply-risk" | "token_supply_risk" | "supply-risk" | "supply_risk" => {
+                Some(Self::TokenSupplyRisk)
             }
             "all" => Some(Self::All),
             _ => None,
@@ -115,239 +130,97 @@ impl MempoolSignalKind {
         match self {
             Self::All => "all",
             Self::TradingEnabled => "trading_enabled",
-            Self::Honeypot => "honeypot_signal",
+            Self::SellBlocked => "sell_blocked_signal",
             Self::Tax => "tax_signal",
             Self::LiquidityRemoval => "liquidity_removal",
-            Self::LpApproval => "lp_approval",
+            Self::LpPositionApproval => "lp_position_approval",
+            Self::TokenSupplyRisk => "token_supply_risk",
+        }
+    }
+
+    fn event_filter(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::TradingEnabled => Some("event_kind = 'trading_enabled'"),
+            Self::SellBlocked => Some("event_kind = 'sell_blocked'"),
+            Self::Tax => Some("event_kind = 'tax_change'"),
+            Self::LiquidityRemoval => Some("event_kind = 'liquidity_removal'"),
+            Self::LpPositionApproval => Some("event_kind = 'lp_position_approval'"),
+            Self::TokenSupplyRisk => Some("event_kind = 'token_supply_risk'"),
         }
     }
 }
 
 fn signal_sql(kind: MempoolSignalKind) -> String {
-    let body = match kind {
-        MempoolSignalKind::All => format!(
-            "{} UNION ALL {} UNION ALL {} UNION ALL {} UNION ALL {}",
-            trading_enabled_select(),
-            honeypot_select(),
-            tax_select(),
-            liquidity_removal_select(),
-            lp_approval_select()
-        ),
-        MempoolSignalKind::TradingEnabled => trading_enabled_select().to_string(),
-        MempoolSignalKind::Honeypot => honeypot_select().to_string(),
-        MempoolSignalKind::Tax => tax_select().to_string(),
-        MempoolSignalKind::LiquidityRemoval => liquidity_removal_select().to_string(),
-        MempoolSignalKind::LpApproval => lp_approval_select().to_string(),
-    };
+    let event_filter = kind
+        .event_filter()
+        .map(|filter| format!("AND {filter}"))
+        .unwrap_or_default();
 
     format!(
-        "SELECT signal_id, signal_type, detection_timestamp, detection_tx_hash, \
-         token_address, pool_address, pool_type, creator_address, subject_address, \
-         headline, value_1, value_2, flag, payload \
-         FROM ({body}) signals \
-         WHERE ($2::bigint IS NULL OR sort_timestamp >= (NOW()::timestamp - ($2::bigint * INTERVAL '1 day'))) \
-         ORDER BY sort_timestamp DESC LIMIT $1"
+        r#"
+        SELECT
+            signal_id::text AS signal_id,
+            public_signal_type AS signal_type,
+            detection_timestamp::text AS detection_timestamp,
+            pending_tx_hash AS detection_tx_hash,
+            token_address,
+            pool_identifier AS pool_address,
+            pool_protocol AS pool_type,
+            actor_address AS creator_address,
+            subject_address,
+            headline,
+            value_1,
+            value_2,
+            flag,
+            payload::text AS payload
+        FROM live_trading.signal_events
+        WHERE ($2::bigint IS NULL OR detection_timestamp >= (NOW() - ($2::bigint * INTERVAL '1 day')))
+        {event_filter}
+        ORDER BY detection_timestamp DESC
+        LIMIT $1
+        "#
     )
 }
 
-fn trading_enabled_select() -> &'static str {
-    r#"
-    SELECT
-        signal_id::text AS signal_id,
-        'trading_enabled' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        pool_type,
-        creator_address,
-        creator_address AS subject_address,
-        'Trading enabled' AS headline,
-        buy_tax_at_signal::text AS value_1,
-        sell_tax_at_signal::text AS value_2,
-        NULL::text AS flag,
-        jsonb_build_object(
-            'buy_tax_at_signal', buy_tax_at_signal::text,
-            'sell_tax_at_signal', sell_tax_at_signal::text,
-            'price_ratio', price_ratio::text,
-            'denom_reserve_at_signal', denom_reserve_at_signal::text,
-            'token_reserve_at_signal', token_reserve_at_signal::text,
-            'owner_address', owner_address,
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.trading_enabled_signals
-    "#
-}
+async fn ensure_signal_events_table(pool: &PgPool) -> Result<()> {
+    for ddl in [
+        r#"CREATE SCHEMA IF NOT EXISTS live_trading"#,
+        r#"
+        CREATE TABLE IF NOT EXISTS live_trading.signal_events (
+            signal_id BIGSERIAL PRIMARY KEY,
+            event_kind TEXT NOT NULL,
+            public_signal_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            token_address TEXT,
+            pool_identifier TEXT,
+            pool_protocol TEXT,
+            denom_address TEXT,
+            denom_currency TEXT,
+            denom_decimals INTEGER,
+            detection_timestamp TIMESTAMPTZ NOT NULL,
+            pending_tx_hash TEXT,
+            actor_address TEXT,
+            subject_address TEXT,
+            headline TEXT,
+            value_1 TEXT,
+            value_2 TEXT,
+            flag TEXT,
+            payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            dedupe_key TEXT NOT NULL,
+            signal_source TEXT NOT NULL DEFAULT 'mempool',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS signal_events_dedupe_key_uidx
+            ON live_trading.signal_events (dedupe_key)
+        "#,
+    ] {
+        sqlx::query(ddl).execute(pool).await?;
+    }
 
-fn honeypot_select() -> &'static str {
-    r#"
-    SELECT
-        signal_id::text AS signal_id,
-        'honeypot_signal' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        COALESCE(scam_details->>'pool_type', 'UNKNOWN') AS pool_type,
-        scammer_address AS creator_address,
-        scammer_address AS subject_address,
-        'Legacy sell-blocked signal' AS headline,
-        scam_details->>'buy_tax' AS value_1,
-        scam_details->>'sell_tax' AS value_2,
-        'true'::text AS flag,
-        jsonb_build_object(
-            'signal_type', scam_type,
-            'signal_details', 'Pool can be bought but cannot be sold',
-            'confidence', '0.95',
-            'buy_tax_at_signal', scam_details->>'buy_tax',
-            'sell_tax_at_signal', scam_details->>'sell_tax',
-            'can_buy', scam_details->>'can_buy',
-            'can_sell', scam_details->>'can_sell',
-            'failure_reason', scam_details->>'failure_reason',
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.scam_signals
-    WHERE scam_type IN ('honeypot', 'cant_sell')
-
-    UNION ALL
-
-    SELECT
-        signal_id::text AS signal_id,
-        'honeypot_signal' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        pool_type,
-        creator_address,
-        creator_address AS subject_address,
-        'Honeypot / cannot sell' AS headline,
-        buy_tax_at_signal::text AS value_1,
-        sell_tax_at_signal::text AS value_2,
-        cant_sell::text AS flag,
-        jsonb_build_object(
-            'signal_type', signal_type,
-            'signal_details', signal_details,
-            'confidence', confidence::text,
-            'buy_tax_at_signal', buy_tax_at_signal::text,
-            'sell_tax_at_signal', sell_tax_at_signal::text,
-            'can_buy', NULL::boolean,
-            'can_sell', false,
-            'legacy_source', 'tax_signals',
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.tax_signals
-    WHERE cant_sell
-    "#
-}
-
-fn tax_select() -> &'static str {
-    r#"
-    SELECT
-        signal_id::text AS signal_id,
-        'tax_signal' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        pool_type,
-        creator_address,
-        creator_address AS subject_address,
-        signal_type AS headline,
-        buy_tax_at_signal::text AS value_1,
-        sell_tax_at_signal::text AS value_2,
-        combined_tax_bucket_to AS flag,
-        jsonb_build_object(
-            'signal_type', signal_type,
-            'signal_details', signal_details,
-            'confidence', confidence::text,
-            'buy_tax_at_signal', buy_tax_at_signal::text,
-            'sell_tax_at_signal', sell_tax_at_signal::text,
-            'buy_tax_bucket_from', buy_tax_bucket_from,
-            'buy_tax_bucket_to', buy_tax_bucket_to,
-            'sell_tax_bucket_from', sell_tax_bucket_from,
-            'sell_tax_bucket_to', sell_tax_bucket_to,
-            'combined_tax_bucket_from', combined_tax_bucket_from,
-            'combined_tax_bucket_to', combined_tax_bucket_to,
-            'buy_tax_exceeds_threshold', buy_tax_exceeds_threshold,
-            'sell_tax_exceeds_threshold', sell_tax_exceeds_threshold,
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.tax_signals
-    WHERE NOT COALESCE(cant_sell, false)
-    "#
-}
-
-fn liquidity_removal_select() -> &'static str {
-    r#"
-    SELECT
-        signal_id::text AS signal_id,
-        'liquidity_removal' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        pool_type,
-        creator_address,
-        creator_address AS subject_address,
-        concat(pool_drain_risk_level, ' liquidity removal') AS headline,
-        liquidity_removed_eth::text AS value_1,
-        remaining_liquidity_eth::text AS value_2,
-        pool_drain_risk_level AS flag,
-        jsonb_build_object(
-            'liquidity_removed_eth', liquidity_removed_eth::text,
-            'liquidity_removed_token', liquidity_removed_token::text,
-            'remaining_liquidity_eth', remaining_liquidity_eth::text,
-            'remaining_liquidity_token', remaining_liquidity_token::text,
-            'removal_percentage', removal_percentage::text,
-            'pool_drain_risk_level', pool_drain_risk_level,
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.liquidity_removal_signals
-    "#
-}
-
-fn lp_approval_select() -> &'static str {
-    r#"
-    SELECT
-        signal_id::text AS signal_id,
-        'lp_approval' AS signal_type,
-        detection_timestamp::text AS detection_timestamp,
-        detection_tx_hash,
-        token_address,
-        pool_address,
-        pool_type,
-        creator_address,
-        approved_spender AS subject_address,
-        CASE
-            WHEN approval_percentage >= 99.99 THEN 'Full LP approval'
-            ELSE 'LP approval ' || to_char(approval_percentage, 'FM999990.00') || '%'
-        END AS headline,
-        approval_percentage::text AS value_1,
-        NULL::text AS value_2,
-        COALESCE(approval_percentage >= 99.99, false)::text AS flag,
-        jsonb_build_object(
-            'approved_spender', approved_spender,
-            'approval_percentage', approval_percentage,
-            'is_full_approval', COALESCE(approval_percentage >= 99.99, false),
-            'approval_type', approval_type,
-            'signal_source', signal_source,
-            'created_at', created_at::text
-        )::text AS payload,
-        detection_timestamp AS sort_timestamp
-    FROM live_trading.lp_approval_signals
-    WHERE approval_percentage IS NOT NULL
-    "#
+    Ok(())
 }
 
 fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
@@ -383,4 +256,34 @@ fn text(row: &sqlx::postgres::PgRow, column: &str) -> Result<String> {
 fn optional_text(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<String>> {
     row.try_get::<Option<String>, _>(column)
         .map_err(|err| eyre!("failed to read {column}: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{signal_sql, MempoolSignalKind};
+
+    #[test]
+    fn old_signal_filters_map_to_explicit_event_kinds() {
+        assert_eq!(
+            MempoolSignalKind::from_path("honeypot"),
+            Some(MempoolSignalKind::SellBlocked)
+        );
+        assert_eq!(
+            MempoolSignalKind::from_path("lp-approval"),
+            Some(MempoolSignalKind::LpPositionApproval)
+        );
+        assert_eq!(
+            MempoolSignalKind::from_path("token-supply-risk"),
+            Some(MempoolSignalKind::TokenSupplyRisk)
+        );
+    }
+
+    #[test]
+    fn signal_api_reads_canonical_event_table() {
+        let sql = signal_sql(MempoolSignalKind::SellBlocked);
+        assert!(sql.contains("FROM live_trading.signal_events"));
+        assert!(sql.contains("pool_identifier AS pool_address"));
+        assert!(sql.contains("pool_protocol AS pool_type"));
+        assert!(sql.contains("event_kind = 'sell_blocked'"));
+    }
 }

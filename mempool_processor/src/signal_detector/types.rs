@@ -16,6 +16,7 @@ pub enum Signal {
     Honeypot(HoneypotSignal),
     LiquidityRemoval(LiquidityRemovalSignal),
     LpApproval(LpApprovalSignal),
+    TokenSupplyRisk(TokenSupplyRiskSignal),
 }
 
 /// Trading enabled signal
@@ -28,6 +29,12 @@ pub struct TradingEnabledSignal {
     pub token_address: String,
     pub pool_address: String, // Each signal is for a specific pool
     pub pool_type: String,    // V2, V3, V4
+    #[serde(default)]
+    pub denom_address: Option<String>,
+    #[serde(default)]
+    pub denom_currency: Option<String>,
+    #[serde(default)]
+    pub denom_decimals: Option<u8>,
     pub creator_address: String,
     pub buy_tax: f64,
     pub sell_tax: f64,
@@ -69,6 +76,12 @@ pub struct HoneypotSignal {
     pub token_address: String,
     pub pool_address: String,
     pub pool_type: String,
+    #[serde(default)]
+    pub denom_address: Option<String>,
+    #[serde(default)]
+    pub denom_currency: Option<String>,
+    #[serde(default)]
+    pub denom_decimals: Option<u8>,
     pub creator_address: String,
     pub can_buy: bool,
     pub can_sell: bool,
@@ -88,6 +101,12 @@ pub struct LiquidityRemovalSignal {
     pub tx_hash: String,
     pub pool_address: String,
     pub pool_type: String, // V2, V3, V4
+    #[serde(default)]
+    pub denom_address: Option<String>,
+    #[serde(default)]
+    pub denom_currency: Option<String>,
+    #[serde(default)]
+    pub denom_decimals: Option<u8>,
     pub token_address: Option<String>,
     pub remover_address: String,
     pub function_name: String,
@@ -107,6 +126,12 @@ pub struct TaxSignalRecord {
     pub token_address: String,
     pub pool_address: String,
     pub pool_type: String,
+    #[serde(default)]
+    pub denom_address: Option<String>,
+    #[serde(default)]
+    pub denom_currency: Option<String>,
+    #[serde(default)]
+    pub denom_decimals: Option<u8>,
     pub creator_address: String,
     pub signal_type: String, // "TaxBucketRisk", "TaxChange", "SuspiciousPattern"
     pub signal_details: String,
@@ -122,5 +147,18 @@ pub struct TaxSignalRecord {
     pub buy_tax_exceeds_threshold: bool,
     pub sell_tax_exceeds_threshold: bool,
     pub cant_sell: bool,
+    pub timestamp: u64,
+}
+
+/// Token-level supply or mint-control risk surfaced from live token context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSupplyRiskSignal {
+    pub tx_hash: Option<String>,
+    pub token_address: String,
+    pub risk_type: String,
+    pub risk_details: String,
+    pub actor_address: Option<String>,
+    pub block_number: Option<u64>,
+    pub confidence: f64,
     pub timestamp: u64,
 }

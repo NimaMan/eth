@@ -59,10 +59,8 @@ src/
 │       └── tax_calculator_from_...    # Alternate approach (unused)
 ├── signal_publisher.rs                # Log & ZMQ publishing (ACTIVE)
 ├── db_writers/                       # Database persistence
-│   ├── trading_signal_writer.rs       # Trading enabled signals
-│   ├── tax_signal_writer.rs           # Tax signals
-│   ├── scam_signal_writer.rs          # Honeypot/sell-blocked signals
-│   └── liquidity_removal_...rs        # Liquidity signals
+│   ├── unified_signal_writer.rs       # signal_events + typed detail tables
+│   └── mempool_timestamp_tracker.rs   # arrival-time persistence
 └── config.rs                         # Configuration types
 ```
 
@@ -106,13 +104,14 @@ src/
 **SignalPublisher** (`signal_publisher.rs`):
 - Writes to separate log files per signal type:
   - `trading_enabled.log` - TRADING_ENABLED entries only
-  - `honeypot_signals.log` - HONEYPOT_SIGNAL entries
+  - `sell_blocked_signals.log` - SELL_BLOCKED entries
   - `tax_signals.log` - TAX_SIGNAL tax bucket risk entries
   - `liquidity_removals.log` - Pool drain signals
-  - Scam alerts are included in `liquidity_removals.log`
+  - `lp_approval_signals.log` - protocol-share LP approval signals
+  - `token_supply_risk_signals.log` - token-level supply risks
 - ZMQ multipart publishing to tcp://127.0.0.1:5556
-- Database writing via db_writers/; required for live runs because token-server
-  and ASENA read persisted signals
+- Database writing via `live_trading.signal_events`; required for live runs
+  because token-server and ASENA read persisted signals
 
 **Simulation diagnostics**:
 - `simulation_errors.log` at the run root is the focused artifact for failed
@@ -131,7 +130,7 @@ src/
 2. Calculate tokens received vs expected (calculate_buy_tax)
 3. Simulate sell transaction → state changes  
 4. Calculate ETH received vs expected (calculate_sell_tax)
-5. Generate HONEYPOT_SIGNAL only if can_buy=true, can_approve=true, can_sell=false
+5. Generate SELL_BLOCKED only if can_buy=true, can_approve=true, can_sell=false
 6. Generate TAX_SIGNAL only for tax bucket/threshold risks:
    - trading_enabled = true, OR
    - trading_enabled = false AND (can_buy OR can_sell)
@@ -139,8 +138,8 @@ src/
 
 ### Signal Generation Rules
 - **Per-pool signals**: Each (token, pool) pair generates independent signals
-- **Trading status filtering**: Uses token cache to reduce honeypot noise
-- **Tax thresholds**: High/extreme tax buckets or configured tax thresholds = `tax_signal`; buy succeeds and sell fails = `honeypot_signal`
+- **Trading status filtering**: Uses token cache to reduce sell-blocked noise
+- **Tax thresholds**: High/extreme tax buckets or configured tax thresholds = `tax_signal`; buy succeeds and sell fails = `sell_blocked_signal`
 - **Simulation fallback**: 0.01 ETH buy amount, fallback to 0.001 ETH on failure
 
 ### Performance Optimizations
