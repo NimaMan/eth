@@ -1,6 +1,7 @@
 use super::pool_metadata_lookup::is_optional_uniswap_v2_pool_metadata_miss;
 use super::trading_status_update::{
-    current_block_simulation_pool_addresses, should_simulate_at_current_block,
+    current_block_simulation_pool_addresses, is_optional_direct_live_pool_simulation_error,
+    should_simulate_at_current_block,
 };
 use super::{pool_metadata_timeout_for_trading_simulation, PoolTradingSimulationMode};
 
@@ -63,6 +64,26 @@ fn live_header_gap_is_optional_pool_metadata_miss() {
     ));
     assert!(is_optional_uniswap_v2_pool_metadata_miss(
         "live chain cache not configured"
+    ));
+}
+
+#[test]
+fn direct_live_context_misses_are_optional_pool_simulation_errors() {
+    assert!(is_optional_direct_live_pool_simulation_error(
+        true,
+        "while executing Uniswap V4 simulation step weth_deposit: live chain cache not configured"
+    ));
+    assert!(is_optional_direct_live_pool_simulation_error(
+        true,
+        "missing live block header for 25092345"
+    ));
+    assert!(!is_optional_direct_live_pool_simulation_error(
+        false,
+        "live chain cache not configured"
+    ));
+    assert!(!is_optional_direct_live_pool_simulation_error(
+        true,
+        "transaction validation error: lack of funds"
     ));
 }
 

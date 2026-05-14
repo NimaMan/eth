@@ -245,6 +245,27 @@ pub(super) async fn simulate_updated_v2_pools(
                 );
             }
             Err(error) => {
+                let error_detail = format!("{error:#}");
+                if is_optional_direct_live_pool_simulation_error(
+                    trading_simulation.uses_direct_live_state_only(),
+                    &error_detail,
+                ) {
+                    tracing::debug!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        pool_kind = "v2",
+                        block_number = tx.block_number,
+                        tx_index = tx.tx_index,
+                        tx_hash = %tx_hash,
+                        token_address = %token_address,
+                        pool_address = %pool_address,
+                        force_simulation,
+                        action = "pool_trading_simulation",
+                        result = "skipped",
+                        reason = %error,
+                        "skipping direct live v2 pool trading simulation because optional live context is unavailable"
+                    );
+                    continue;
+                }
                 tracing::warn!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
@@ -466,6 +487,27 @@ pub(super) async fn simulate_updated_v3_pools(
                 );
             }
             Err(error) => {
+                let error_detail = format!("{error:#}");
+                if is_optional_direct_live_pool_simulation_error(
+                    trading_simulation.uses_direct_live_state_only(),
+                    &error_detail,
+                ) {
+                    tracing::debug!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        pool_kind = "v3",
+                        block_number = tx.block_number,
+                        tx_index = tx.tx_index,
+                        tx_hash = %tx_hash,
+                        token_address = %token_address,
+                        pool_address = %pool_address,
+                        force_simulation,
+                        action = "pool_trading_simulation",
+                        result = "skipped",
+                        reason = %error,
+                        "skipping direct live v3 pool trading simulation because optional live context is unavailable"
+                    );
+                    continue;
+                }
                 tracing::warn!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
@@ -693,6 +735,27 @@ pub(super) async fn simulate_updated_v4_pools(
                 );
             }
             Err(error) => {
+                let error_detail = format!("{error:#}");
+                if is_optional_direct_live_pool_simulation_error(
+                    trading_simulation.uses_direct_live_state_only(),
+                    &error_detail,
+                ) {
+                    tracing::debug!(
+                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                        pool_kind = "v4",
+                        block_number = tx.block_number,
+                        tx_index = tx.tx_index,
+                        tx_hash = %tx_hash,
+                        token_address = %token_address,
+                        pool_key = %pool_key,
+                        force_simulation,
+                        action = "pool_trading_simulation",
+                        result = "skipped",
+                        reason = %error,
+                        "skipping direct live v4 pool trading simulation because optional live context is unavailable"
+                    );
+                    continue;
+                }
                 tracing::warn!(
                     target: "pool_buy_sell_sim",
                     block_number = tx.block_number,
@@ -1082,6 +1145,15 @@ fn missing_live_current_block_header(
 ) -> bool {
     pool_config.block_header.is_none()
         && state_session_block_number(pool_config, tx) == tx.block_number
+}
+
+pub(super) fn is_optional_direct_live_pool_simulation_error(
+    direct_state_only: bool,
+    message: &str,
+) -> bool {
+    direct_state_only
+        && (message.contains("live chain cache not configured")
+            || message.contains("missing live block header"))
 }
 
 pub(super) fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {

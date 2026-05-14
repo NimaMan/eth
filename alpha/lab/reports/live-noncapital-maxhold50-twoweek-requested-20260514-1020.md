@@ -307,3 +307,95 @@ Read: persistence and API access work. The next evidence step is to rerun the
 full `maxhold50+risk exits` candidate through this ledger path, then use the
 frontend/API to audit top winners, worst losers, skipped entries, and failed
 exits without ad hoc SQL.
+
+## Full Decision-Ledger Candidate Run
+
+Run ID:
+`live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053`
+
+This reran the current candidate, `maxhold50+risk exits`, after decision-ledger
+persistence was added.
+
+Requested window: `24,991,500..25,092,298` (`100,799` blocks, still a
+two-week-requested partial-coverage replay because usable pool observations
+start at `25,066,498`).
+
+```bash
+RUN_ID=live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053
+RUST_LOG=info cargo run --release -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --run-id "$RUN_ID" \
+  --replay-run-id snipe-all-v1-chain-sim-live-v4 \
+  --from-block 24991500 \
+  --to-block 25092298 \
+  --skip-primed \
+  --include-mempool-signals \
+  --buy-amount-wei 10000000000000000 \
+  --min-liquidity-eth 0.5 \
+  --min-liquidity-usd 1000 \
+  --max-hold-blocks 50 \
+  --exit-liquidity-removal \
+  --exit-lp-approval \
+  --exit-tax \
+  --exit-scam
+```
+
+Backtest completion:
+
+```text
+events_processed=128242
+reports_generated=1091
+confirmed_reports=985
+failed_reports=106
+positions=534
+open_positions=59
+```
+
+Strategy Lab result:
+
+| Metric | Value |
+| --- | ---: |
+| Total PnL ETH | 12.927265783819489334 |
+| PnL ex top 10 ETH | 5.964572908101519810 |
+| Buy failed positions | 12 |
+| Sell failed positions | 59 |
+| Snapshots | 8,907 |
+| Open without snapshot | 0 |
+
+Decision-ledger coverage:
+
+| Metric | Value |
+| --- | ---: |
+| Strategy decisions | 27,889 |
+| Decisions with reason | 27,889 |
+| Actionable decisions | 1,091 |
+
+Largest decision buckets:
+
+| Event source | Action | Reason | Rows |
+| --- | --- | --- | ---: |
+| `market` | `hold` | `entry.buy_eligible_pool_once:pool already bought` | 13,915 |
+| `market` | `hold` | `position_open_no_exit` | 7,793 |
+| `market` | `hold` | `entry.eligibility:unsupported_v4_hooks` | 2,137 |
+| `market` | `hold` | `entry.eligibility:low_liquidity` | 1,146 |
+| `market` | `hold` | `entry.blocked_by_active_risk` | 1,002 |
+| `market` | `submit_buy` | `entry.buy_eligible_pool_once` | 534 |
+| `position_monitor` | `submit_sell` | `exit.max_hold` | 446 |
+| `risk` | `hold` | `risk.no_exit_rule_matched` | 294 |
+| `market` | `submit_sell` | `exit.max_hold` | 106 |
+| `risk` | `submit_sell` | `exit.lp_approval` | 3 |
+| `risk` | `submit_sell` | `exit.liquidity_removal` | 2 |
+
+Audit read:
+
+- Top 10 winners all have entry decision `entry.buy_eligible_pool_once`, exit
+  decision `exit.max_hold`, and confirmed sell reports.
+- Worst 10 losers all have entry decision `entry.buy_eligible_pool_once` and
+  exit decision `exit.max_hold`; five have confirmed sells at `-0.01 ETH`, and
+  five are still `sell_failed` with `TransferHelper: TRANSFER_FROM_FAILED`.
+- The chain-server endpoint is live after rebuild/restart:
+  `/eth/tokens/api/alpha/runs/live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053/decisions`.
+
+Read: the current candidate is now auditable through persisted decisions. It is
+still not real-deployment ready because the same `59` failed exits remain and
+the replay is still partial coverage rather than a complete two-week historical
+observation window.
