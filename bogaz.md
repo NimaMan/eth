@@ -69,13 +69,52 @@ Finished means:
   sizing, retry cadence, exit restrictions, stale-data thresholds, simulation
   freshness, and kill switch behavior.
 
+## Current Workstream
+
+Build the live non-capital backtest version of the real strategy evidence
+layer.
+
+This workstream should produce a current-regime estimate for the candidate
+policy, not a final real-execution approval. It must make coverage explicit:
+the latest replay source currently reaches live blocks, but its historical
+observation coverage starts at block `25,066,498`, so a true two-week replay
+requires either a longer durable observation source or a historical observation
+builder.
+
+Finished means:
+
+- The candidate policy is run against the latest available live observation
+  source with a fixed block window and run id.
+- The report states the requested window, actual observation coverage, and
+  whether the run is a full two-week replay or a partial current-regime replay.
+- Strategy Lab output is available for summary, concentration, top 10, worst
+  10, buy failures, and open failed exits.
+- Any missing data needed for a true two-week replay is recorded as the next
+  limiting factor.
+
+Latest evidence:
+
+- `live-noncapital-maxhold50-twoweek-requested-20260514-1020` ran the current
+  best candidate, `snipe-all-v1` with `--max-hold-blocks 50`, against requested
+  window `24,991,345..25,092,144`.
+- The run completed with `127,878` events, `1,089` execution reports, `983`
+  confirmed reports, `106` failed reports, `533` positions, and `59` open
+  positions.
+- Strategy Lab reports total PnL `+12.876052023155642365 ETH`, PnL excluding
+  top 10 `+5.913359147437672841 ETH`, `12` buy-failed positions, and `59`
+  sell-failed positions.
+- The report is
+  `alpha/lab/reports/live-noncapital-maxhold50-twoweek-requested-20260514-1020.md`.
+- Coverage is still partial: the requested two-week window starts at
+  `24,991,345`, but usable pool observations start at `25,066,498`.
+
 ## Active Bottlenecks
 
 | Order | Bottleneck | Owner | Evidence | Next Action |
 | --- | --- | --- | --- | --- |
-| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is now real live deployment, not a no-capital endpoint. The current evidence is still incomplete: we need a selected policy, exact two-week backtest, live shadow/live-backtest comparison, trade audit, and explicit execution gates before the policy can be trusted with real orders. | Define the production policy candidate, run the exact last-two-week backtest, run the same policy in live shadow mode, and make the frontend review show top 10/worst 10 positions plus every decision reason. |
-| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | Latest 15k baseline PnL is concentrated in a few winners. Excluding the top five positions previously moved PnL from positive to roughly flat/negative, so the broad baseline is still mostly measuring infrastructure and tail winners. | Continue the strategy comparison work, but promote the winner only if the two-week backtest and live shadow/live-backtest agree. Preserve skip reasons, entry inputs, exit reasons, and PnL snapshots for frontend review. |
-| 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | Prior probes classified failed exits into retry-later, address-specific restriction, chunk-size/anti-whale, no observed sell evidence, and drained-liquidity V3 cases. Strategy-side position monitoring still needs continuous exit policy instead of one-shot max-hold behavior. | Keep monitoring continuous in strategy state. Add retry cadence, chunked exits, pool-approved exits, and no-observed-sell exposure limits as explicit strategies/policies before real deployment. |
+| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live non-capital evidence is `maxhold50`: `+12.876052023155642365 ETH` total PnL and `+5.913359147437672841 ETH` excluding top 10 on the latest partial two-week-requested replay. Evidence is still incomplete for real orders because the run is partial coverage, has `59` sell-failed positions, and lacks complete decision-ledger explainability. | Treat `maxhold50` as the current candidate, then resolve failed-exit policy, decision-ledger gaps, and full two-week observation coverage before real execution handoff. |
+| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | The latest `maxhold50` live non-capital run stays positive after excluding top 10, unlike the older 15k/200-block hold baselines. Concentration is improved but not enough by itself for production: top-10 and worst-10 spot checks passed mechanically, but full decision reasons are not yet persisted for every trade. | Keep `maxhold50` as the current baseline candidate. Compare any new policy against this run's PnL, concentration, failed exits, and top/worst audit quality. |
+| 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest `maxhold50` run has `59` sell-failed positions. The dominant failure bucket is `TransferHelper: TRANSFER_FROM_FAILED` with `88` reports; worst-position spot check shows full loss after the pool fell to near-zero reserve and became non-buyable/non-sellable. | Keep monitoring continuous in strategy state. Add retry cadence, chunked exits, pool-approved exits, and no-observed-sell exposure limits as explicit strategies/policies before real deployment. |
 | 4 | **Decision ledger completeness** | `alpha/engine`, `alpha/store`, frontend | Execution reports now carry more fill context, but the strategy decision ledger still does not persist every rule input and skip/action reason needed for explainable frontend review and real execution approval. | Persist decisions keyed by run, strategy, token, pool, rule id, inputs, action, execution report, exit reason, and PnL snapshot. The frontend must be able to audit every real-deployment candidate trade. |
 | 5 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
 | 6 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
@@ -136,25 +175,32 @@ Recent checks that passed during this cleanup:
 
 ## Immediate Next Actions
 
-1. Define the real production strategy candidate and its execution gates:
+1. Decide whether the next blocker is policy quality or missing historical
+   observation coverage for a true two-week replay.
+2. Implement the next failed-exit policy improvement against the `maxhold50`
+   baseline: retry cadence, chunked exits, pool-approved exits, or
+   no-observed-sell exposure limits.
+3. Add decision-ledger rows for the missing entry/skip/exit rule explanations
+   so the frontend can audit the candidate without ad hoc SQL or Token Lab spot
+   checks.
+4. Define the real production strategy candidate and its execution gates:
    sizing, max exposure, retry cadence, stale-data threshold, simulation
    freshness threshold, exit restrictions, and kill switch behavior.
-2. Backtest the selected candidate over the exact last two-week block window and
-   keep the run reproducible from the frontend.
-3. Run the same policy in live shadow/live-backtest mode against the current
+5. Backtest the selected candidate over the exact last two-week block window and
+   keep the run reproducible from the frontend once observation coverage exists.
+6. Run the same policy in live shadow/live-backtest mode against the current
    chain-server and mempool pipeline. Treat this as a rough current-regime
    estimate and drift detector, not as the deployment target.
-4. Review the top 10 and worst 10 positions with full decision-ledger context.
-5. Reproduce the block `25,091,919` V3 pool identity miss and restore
+7. Reproduce the block `25,091,919` V3 pool identity miss and restore
    chain-server soak expectations to `tx_failures=0` and `pipeline_issues=0`.
-6. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
+8. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
    on-demand position-manager backfill before public signal publication.
-7. Add a mempool readiness wait against chain-server HTTP health.
-8. Run a longer chain-server and mempool soak:
+9. Add a mempool readiness wait against chain-server HTTP health.
+10. Run a longer chain-server and mempool soak:
    chain-server must keep `tx_failures=0` and `pipeline_issues=0`, while
    mempool simulation target lag should stay within the accepted threshold.
-9. Remove or feature-gate legacy Redis modules only after the production
+11. Remove or feature-gate legacy Redis modules only after the production
    mempool path no longer needs any Redis-compatible fallback.
-10. Continue the broader strategy comparison as supporting evidence, but let the
+12. Continue the broader strategy comparison as supporting evidence, but let the
    exact two-week backtest and live shadow/live-backtest drive the real
    deployment decision.
