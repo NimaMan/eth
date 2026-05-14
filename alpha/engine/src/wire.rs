@@ -291,7 +291,14 @@ pub fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSe
     match signal.signal_type.as_str() {
         "trading_enabled" => (RiskKind::TradingEnabled, RiskSeverity::Info),
         "liquidity_removal" => (RiskKind::LiquidityRemoval, RiskSeverity::Critical),
-        "lp_approval" => (RiskKind::LpApproval, RiskSeverity::Warning),
+        "lp_approval" | "lp_position_approval" => (
+            RiskKind::LpApproval,
+            if signal_flag_is_true(signal) {
+                RiskSeverity::Critical
+            } else {
+                RiskSeverity::Warning
+            },
+        ),
         "honeypot_signal" | "sell_blocked_signal" => (RiskKind::Honeypot, RiskSeverity::Critical),
         "tax_signal" => {
             let critical = signal
@@ -310,6 +317,19 @@ pub fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSe
         }
         other => (RiskKind::Custom(other.to_string()), RiskSeverity::Warning),
     }
+}
+
+fn signal_flag_is_true(signal: &MempoolSignalWire) -> bool {
+    signal
+        .flag
+        .as_deref()
+        .map(|flag| {
+            matches!(
+                flag.trim().to_ascii_lowercase().as_str(),
+                "true" | "critical"
+            )
+        })
+        .unwrap_or(false)
 }
 
 pub fn is_critical_tax_bucket(bucket: &str) -> bool {
@@ -468,5 +488,27 @@ mod tests {
             parse_protocol("pancakeswap_v2"),
             PoolProtocol::PancakeSwapV2
         );
+    }
+
+    #[test]
+    fn lp_position_approval_flag_true_maps_to_critical_lp_approval() {
+        let signal = MempoolSignalWire {
+            signal_id: "1".to_string(),
+            signal_type: "lp_position_approval".to_string(),
+            detection_timestamp: None,
+            detection_tx_hash: None,
+            token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            headline: None,
+            flag: Some("true".to_string()),
+        };
+
+        let event = signal
+            .to_risk_event()
+            .expect("risk event")
+            .expect("non-empty event");
+
+        assert_eq!(event.kind, RiskKind::LpApproval);
+        assert_eq!(event.severity, RiskSeverity::Critical);
     }
 }

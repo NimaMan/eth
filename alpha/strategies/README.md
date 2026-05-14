@@ -7,11 +7,51 @@ This crate contains built-in strategies. Strategies are decision logic only.
 ## Current Implementations
 
 - `MarketTrackerStrategy`: submits one chain-sim buy per tradable pool or `TradingEnabled` risk event, then suppresses repeat buys for that pool. It blocks itself when a matching critical risk is active.
-- `SnipeAllStrategy`: first live no-capital chain-sim policy. It buys every newly observed eligible live pool once and exits a matching open position when a liquidity-removal risk event arrives.
+- `SnipeAllStrategy`: regular Snipe All policy. It buys every newly observed eligible pool once; exit rules are configurable and include liquidity-removal, LP approval, tax/honeypot, and scam risk events.
+- `LiveSnipeAllStrategy`: live runtime wrapper under `baseline/snipe_all/live/`. It composes the regular Snipe All policy and is the only Snipe All type registered by the current live trader.
 
 ## Snipe All V1
 
 `SnipeAllStrategy` is intentionally simple and explicit. Mempool signals are assumed to be a normal part of every serious strategy, so the strategy name describes the entry posture rather than the signal source.
+
+Current layout:
+
+```text
+baseline/snipe_all/
+  config.rs
+  strategy.rs
+  live/
+    config.rs
+    strategy.rs
+```
+
+Any strategy that runs against current live token tracking must have a `live/`
+module. Rust does not use class inheritance here; the live side composes the
+regular side and delegates shared policy behavior to it. Historical replay uses
+the regular side directly.
+
+## Live And Historical Sides
+
+Each strategy should be written as one policy with two runtime sides:
+
+- Regular/historical side: replay stored confirmed-chain observations, and
+  include stored mempool signal rows only when the backtest config opts in.
+  When stored mempool rows are included, call the run mempool-aware historical
+  replay, not live.
+- Live side: consume confirmed-chain observations plus live mempool signals as
+  current actionable inputs.
+
+The difference between live and historical is therefore input timing. Live can
+act on mempool signals before the confirmed pool snapshot reflects the risky
+transaction; historical replay can only test that behavior when the stored
+signal stream is included. After inputs arrive, behavior is strategy-specific.
+
+Initial live backtest strategy candidates:
+
+- Liquidity-removal exit: buy from the normal entry policy, then exit a matching
+  open position as soon as a mempool liquidity-removal signal arrives.
+- Critical LP-approval exit: buy from the normal entry policy, then exit a
+  matching open position as soon as a critical pool LP approval signal arrives.
 
 Entry:
 
@@ -23,8 +63,12 @@ Entry:
 
 Exit:
 
-- Sell a matching open position on `RiskKind::LiquidityRemoval`.
-- `LpApproval`, creator-flow labels, and tax/honeypot rules are scaffolded as named rule modules but currently hold.
+- Sell a matching open position on enabled exit risk kinds such as
+  `RiskKind::LiquidityRemoval`, `RiskKind::LpApproval`, `RiskKind::TaxChange`,
+  `RiskKind::Honeypot`, and `RiskKind::ScamConfirmed`.
+- Keep liquidity-removal and critical LP-approval exits as explicit strategy
+  variants or run configs first so each live/historical pair can be backtested
+  independently.
 
 Planned rule growth:
 
@@ -36,6 +80,8 @@ Planned rule growth:
 ## Responsibilities
 
 - Implement `eth_alpha_core::Strategy`.
+- Return a strategy name from config, not a hardcoded implementation name, so
+  multiple variants can run in one engine without sharing positions or PnL.
 - Read `StrategyContext`, market snapshots, risk state, and current portfolio state.
 - Return `StrategyDecision`.
 - Keep strategy-local parameters and lightweight memory.

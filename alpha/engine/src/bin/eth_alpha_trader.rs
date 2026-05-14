@@ -27,7 +27,7 @@ use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
-use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
+use eth_strategies::{LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -37,6 +37,7 @@ use tracing::{info, warn};
 
 const STRATEGY_NAME: &str = "snipe-all-v1";
 const STRATEGY_LABEL: &str = "Snipe All v1";
+const STRATEGY_RUNTIME: &str = "live";
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
@@ -182,7 +183,9 @@ async fn main() -> Result<()> {
             execution_mode,
             json!({
                 "strategy_name": STRATEGY_NAME,
+                "strategy_impl": STRATEGY_NAME,
                 "strategy_label": STRATEGY_LABEL,
+                "strategy_runtime": STRATEGY_RUNTIME,
                 "execution_model": "chain_state_evm_simulation",
                 "token_server_url": &token_server_url,
                 "reth_datadir": &reth_datadir,
@@ -233,21 +236,23 @@ async fn main() -> Result<()> {
         .as_deref()
         .and_then(|s| Decimal::from_str(s).ok());
 
-    engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
-        buy_amount: Amount {
-            raw: buy_wei,
-            decimals: 18,
-        },
-        sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
-        min_denom_reserve: min_liquidity_eth,
-        min_stable_denom_reserve: min_liquidity_usd,
-        stop_loss_ratio,
-        take_profit_ratio,
-        max_hold_blocks: args.max_hold_blocks,
-        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-        max_exit_retries: args.max_exit_retries,
-        ..SnipeAllConfig::default()
-    })));
+    engine.add_strategy(Box::new(LiveSnipeAllStrategy::new(
+        LiveSnipeAllConfig::new(SnipeAllConfig {
+            buy_amount: Amount {
+                raw: buy_wei,
+                decimals: 18,
+            },
+            sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
+            min_denom_reserve: min_liquidity_eth,
+            min_stable_denom_reserve: min_liquidity_usd,
+            stop_loss_ratio,
+            take_profit_ratio,
+            max_hold_blocks: args.max_hold_blocks,
+            exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+            max_exit_retries: args.max_exit_retries,
+            ..SnipeAllConfig::default()
+        }),
+    )));
 
     let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids) = load_persisted_watermarks(&store).await?;

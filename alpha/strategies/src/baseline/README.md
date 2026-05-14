@@ -10,6 +10,14 @@ reference against which selective strategies are measured.
 |----------|------|-------------|
 | Snipe All v1 | `snipe_all/` | Buy every eligible pool once (0.01 ETH). Exit on liquidity-removal / tax / LP-approval / scam signals. |
 
+## Live Runtime Convention
+
+Any baseline strategy that runs against the current live token tracker must put
+its live runtime side under that strategy's `live/` folder. The regular side
+stays in the strategy root and is used by historical replay. Stored mempool
+signal replay is mempool-aware history; only current token tracking plus current
+mempool signals is a live run.
+
 ## Backtest Validation Findings
 
 All measurements below use the EVM-backed backtest with `--skip-primed`

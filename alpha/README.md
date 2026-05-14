@@ -21,7 +21,7 @@ events, and persists decisions before execution.
 | `block_tx_rank/` | `eth_block_tx_rank` | Rough block-position and gas-before estimates from recent mined transaction fees. |
 | `strategies/` | `eth_strategies` | Concrete strategy rules such as `SnipeAllStrategy`. |
 | `store/` | `eth_alpha_store` | Durable run, observation, order, execution, position, and risk records. |
-| `live/state/` | `eth_live_state` | Redis live-state schemas and protocol types. |
+| `live/state/` | `eth_live_state` | Legacy live-state schemas and protocol types. |
 | `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
 | `backtest/` | planned | Historical replay over the same core strategy contracts. |
 | `mempool_risk/` | planned | Future crate boundary for pending-risk events; current service is `mempool_processor`. |
@@ -38,9 +38,8 @@ events, and persists decisions before execution.
 ## Data Flow
 
 ```text
-tx_processor live_block_processor
-  -> Redis eth/live/blocks + processed-block disk cache
-  -> eth_chain_server live token/pool views
+ eth_chain_server LiveChainRuntime
+  -> direct processed-block feed + live token/pool views
   -> eth_alpha_trader polls /live/status, /live/pools, /mempool/signals
   -> future real adapter checks eth_block_tx_rank before tx_executor
   -> strategy_observations + orders + reports + positions + risk events
@@ -54,6 +53,14 @@ Snipe All currently supports ETH/WETH and USD-stable quote pools. Use separate
 floors for each family: WETH-denominated pools are not comparable to
 USDC/USDT/DAI pools by raw reserve amount.
 
+Live strategies should be documented as one policy with two sides. The
+regular/historical side replays stored confirmed-chain observations and only
+includes mempool signals when stored signal rows are selected. That stored
+signal replay is mempool-aware history, not live. The live side consumes the
+same confirmed-chain updates plus current mempool signals and must live under a
+strategy-local `live/` module. The first isolated variants are
+liquidity-removal exit and critical LP-approval exit.
+
 ## Where To Look First
 
 | Need | Start here |
@@ -62,9 +69,9 @@ USDC/USDT/DAI pools by raw reserve amount.
 | Strategy runtime and execution adapter behavior | `engine/README.md`, `engine/src/lib.rs` |
 | Durable decision ledger | `store/README.md`, Postgres `alpha_trading.*` tables |
 | Mined-block transaction rank estimates | `block_tx_rank/README.md`, `block_tx_rank/src/lib.rs` |
-| Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/snipe_all/` |
+| Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/baseline/snipe_all/` |
 | Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
-| Redis live-state contract | `live/state/README.md`, `live/state/src/` |
+| Legacy live-state contract | `live/state/README.md`, `live/state/src/` |
 | Service wiring | `engine/src/bin/eth_alpha_trader.rs` |
 
 ## Bottleneck Management

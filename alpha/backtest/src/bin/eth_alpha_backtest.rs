@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use eth_alpha_backtest::{adapter::BacktestAdapter, runner::run_backtest};
 use eth_alpha_core::amount::Amount;
-use eth_alpha_core::ids::PoolAddress;
+use eth_alpha_core::ids::{PoolAddress, StrategyName};
 use eth_alpha_core::market::PoolSnapshot;
 use eth_alpha_engine::wire::{MempoolSignalWire, PoolWire};
 use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy};
@@ -27,9 +27,17 @@ struct Args {
     #[arg(long)]
     run_id: Option<String>,
 
-    /// Strategy to run.
+    /// Strategy instance name to persist on orders, positions, and reports.
     #[arg(long, default_value = "snipe-all-v1")]
     strategy_name: String,
+
+    /// Strategy implementation to instantiate.
+    #[arg(long, default_value = "snipe-all-v1")]
+    strategy_impl: String,
+
+    /// Named mempool-aware historical strategy suite to run in one replay pass.
+    #[arg(long)]
+    strategy_suite: Option<String>,
 
     /// Existing live chain-sim run_id to replay from `strategy_observations`.
     #[arg(long)]
@@ -67,6 +75,10 @@ struct Args {
     /// Enable LP-approval exits (default: disabled for quantification).
     #[arg(long, default_value_t = false)]
     exit_lp_approval: bool,
+
+    /// Only exit on LP approvals promoted to critical severity.
+    #[arg(long, default_value_t = false)]
+    exit_lp_approval_critical_only: bool,
 
     /// Enable scam/critical-risk exits (default: disabled for quantification).
     #[arg(long, default_value_t = false)]
@@ -109,6 +121,41 @@ struct Args {
     execution_delay_blocks: u64,
 }
 
+#[derive(Clone, Debug)]
+struct BacktestStrategySpec {
+    strategy_name: String,
+    strategy_impl: String,
+    exit_liquidity_removal: bool,
+    exit_tax: bool,
+    exit_lp_approval: bool,
+    exit_lp_approval_critical_only: bool,
+    exit_scam: bool,
+    stop_loss_ratio: Option<String>,
+    take_profit_ratio: Option<String>,
+    max_hold_blocks: Option<u64>,
+    exit_retry_interval_blocks: Option<u64>,
+    max_exit_retries: Option<u32>,
+}
+
+impl BacktestStrategySpec {
+    fn config_json(&self) -> Value {
+        serde_json::json!({
+            "strategy_name": self.strategy_name,
+            "strategy_impl": self.strategy_impl,
+            "exit_liquidity_removal": self.exit_liquidity_removal,
+            "exit_tax": self.exit_tax,
+            "exit_lp_approval": self.exit_lp_approval,
+            "exit_lp_approval_critical_only": self.exit_lp_approval_critical_only,
+            "exit_scam": self.exit_scam,
+            "stop_loss_ratio": self.stop_loss_ratio,
+            "take_profit_ratio": self.take_profit_ratio,
+            "max_hold_blocks": self.max_hold_blocks,
+            "exit_retry_interval_blocks": self.exit_retry_interval_blocks,
+            "max_exit_retries": self.max_exit_retries,
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -123,6 +170,7 @@ async fn main() -> Result<()> {
     let reth_datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
 
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
+    let strategy_specs = build_strategy_specs(&args)?;
 
     let buy_amount = Amount {
         raw: alloy_primitives::U256::from_str_radix(&args.buy_amount_wei, 10)
@@ -143,6 +191,11 @@ async fn main() -> Result<()> {
             "backtest",
             serde_json::json!({
                 "strategy_name": args.strategy_name,
+                "strategy_impl": args.strategy_impl,
+                "strategy_runtime": "historical",
+                "strategy_input_timing": if args.include_mempool_signals { "mempool-aware-history" } else { "confirmed-history" },
+                "strategy_suite": args.strategy_suite,
+                "strategies": strategy_specs.iter().map(BacktestStrategySpec::config_json).collect::<Vec<_>>(),
                 "replay_run_id": args.replay_run_id,
                 "from_block": args.from_block,
                 "to_block": args.to_block,
@@ -154,6 +207,7 @@ async fn main() -> Result<()> {
                 "exit_liquidity_removal": args.exit_liquidity_removal,
                 "exit_tax": args.exit_tax,
                 "exit_lp_approval": args.exit_lp_approval,
+                "exit_lp_approval_critical_only": args.exit_lp_approval_critical_only,
                 "exit_scam": args.exit_scam,
                 "stop_loss_ratio": args.stop_loss_ratio,
                 "take_profit_ratio": args.take_profit_ratio,
@@ -201,6 +255,7 @@ async fn main() -> Result<()> {
         events,
         adapter,
         run_id,
+        strategy_specs,
         buy_amount,
         min_liquidity_eth,
         min_liquidity_usd,
@@ -462,6 +517,7 @@ async fn run_backtest_with_adapter<A>(
     events: Vec<eth_alpha_engine::EngineEvent>,
     adapter: A,
     run_id: String,
+    strategy_specs: Vec<BacktestStrategySpec>,
     buy_amount: Amount,
     min_liquidity_eth: Decimal,
     min_liquidity_usd: Decimal,
@@ -471,44 +527,53 @@ where
 {
     let mut engine = AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter.clone());
 
-    match args.strategy_name.as_str() {
-        "snipe-all-v1" => {
-            let stop_loss_ratio = args
-                .stop_loss_ratio
-                .as_deref()
-                .and_then(|s| Decimal::from_str(s).ok());
-            let take_profit_ratio = args
-                .take_profit_ratio
-                .as_deref()
-                .and_then(|s| Decimal::from_str(s).ok());
+    for spec in &strategy_specs {
+        match spec.strategy_impl.as_str() {
+            "snipe-all-v1" => {
+                let stop_loss_ratio = spec
+                    .stop_loss_ratio
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str(s).ok());
+                let take_profit_ratio = spec
+                    .take_profit_ratio
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str(s).ok());
 
-            engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
-                buy_amount,
-                sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
-                min_denom_reserve: min_liquidity_eth,
-                min_stable_denom_reserve: min_liquidity_usd,
-                exit_on_liquidity_removal: args.exit_liquidity_removal,
-                exit_on_tax: args.exit_tax,
-                exit_on_lp_approval: args.exit_lp_approval,
-                exit_on_scam: args.exit_scam,
-                stop_loss_ratio,
-                take_profit_ratio,
-                max_hold_blocks: args.max_hold_blocks,
-                exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-                max_exit_retries: args.max_exit_retries,
-                ..SnipeAllConfig::default()
-            })));
+                engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
+                    strategy_name: StrategyName(spec.strategy_name.clone()),
+                    buy_amount: buy_amount.clone(),
+                    sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
+                    min_denom_reserve: min_liquidity_eth,
+                    min_stable_denom_reserve: min_liquidity_usd,
+                    exit_on_liquidity_removal: spec.exit_liquidity_removal,
+                    exit_on_tax: spec.exit_tax,
+                    exit_on_lp_approval: spec.exit_lp_approval,
+                    exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
+                    exit_on_scam: spec.exit_scam,
+                    stop_loss_ratio,
+                    take_profit_ratio,
+                    max_hold_blocks: spec.max_hold_blocks,
+                    exit_retry_interval_blocks: spec.exit_retry_interval_blocks,
+                    max_exit_retries: spec.max_exit_retries,
+                    ..SnipeAllConfig::default()
+                })));
+            }
+            other => {
+                return Err(eyre::eyre!("unsupported strategy implementation: {other}"));
+            }
         }
-        other => {
-            return Err(eyre::eyre!("unsupported strategy: {other}"));
-        }
+    }
+
+    if strategy_specs.is_empty() {
+        return Err(eyre::eyre!("no strategies configured"));
     }
 
     info!(
         run_id = %run_id,
         replay_run_id = %args.replay_run_id,
         event_count = events.len(),
-        strategy = %args.strategy_name,
+        strategy_count = strategy_specs.len(),
+        strategy_suite = ?args.strategy_suite,
         "starting backtest"
     );
 
@@ -527,6 +592,7 @@ where
                 "failed_reports": result.failed_reports,
                 "positions": total_positions,
                 "open_positions": open_positions,
+                "strategy_count": strategy_specs.len(),
             }),
         )
         .await
@@ -544,6 +610,68 @@ where
     );
 
     Ok(())
+}
+
+fn build_strategy_specs(args: &Args) -> Result<Vec<BacktestStrategySpec>> {
+    if let Some(suite) = args.strategy_suite.as_deref() {
+        return match suite {
+            "mempool-history-exits" => Ok(mempool_history_exit_suite_specs(args)),
+            other => Err(eyre::eyre!("unsupported strategy suite: {other}")),
+        };
+    }
+
+    Ok(vec![BacktestStrategySpec {
+        strategy_name: args.strategy_name.clone(),
+        strategy_impl: args.strategy_impl.clone(),
+        exit_liquidity_removal: args.exit_liquidity_removal,
+        exit_tax: args.exit_tax,
+        exit_lp_approval: args.exit_lp_approval,
+        exit_lp_approval_critical_only: args.exit_lp_approval_critical_only,
+        exit_scam: args.exit_scam,
+        stop_loss_ratio: args.stop_loss_ratio.clone(),
+        take_profit_ratio: args.take_profit_ratio.clone(),
+        max_hold_blocks: args.max_hold_blocks,
+        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+        max_exit_retries: args.max_exit_retries,
+    }])
+}
+
+fn mempool_history_exit_suite_specs(args: &Args) -> Vec<BacktestStrategySpec> {
+    [10_u64, 20, 50]
+        .into_iter()
+        .flat_map(|max_hold_blocks| {
+            [
+                BacktestStrategySpec {
+                    strategy_name: format!("snipe-all-maxhold{max_hold_blocks}-liq-exit"),
+                    strategy_impl: "snipe-all-v1".to_string(),
+                    exit_liquidity_removal: true,
+                    exit_tax: false,
+                    exit_lp_approval: false,
+                    exit_lp_approval_critical_only: false,
+                    exit_scam: false,
+                    stop_loss_ratio: args.stop_loss_ratio.clone(),
+                    take_profit_ratio: args.take_profit_ratio.clone(),
+                    max_hold_blocks: Some(max_hold_blocks),
+                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+                    max_exit_retries: args.max_exit_retries,
+                },
+                BacktestStrategySpec {
+                    strategy_name: format!("snipe-all-maxhold{max_hold_blocks}-critical-lp-exit"),
+                    strategy_impl: "snipe-all-v1".to_string(),
+                    exit_liquidity_removal: false,
+                    exit_tax: false,
+                    exit_lp_approval: true,
+                    exit_lp_approval_critical_only: true,
+                    exit_scam: false,
+                    stop_loss_ratio: args.stop_loss_ratio.clone(),
+                    take_profit_ratio: args.take_profit_ratio.clone(),
+                    max_hold_blocks: Some(max_hold_blocks),
+                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+                    max_exit_retries: args.max_exit_retries,
+                },
+            ]
+        })
+        .collect()
 }
 
 fn default_run_id() -> String {

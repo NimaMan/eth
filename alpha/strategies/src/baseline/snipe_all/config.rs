@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
-    ids::{PortfolioId, WalletId},
+    ids::{PortfolioId, StrategyName, WalletId},
     market::PoolSnapshot,
 };
 use eth_pool_classification::{
@@ -12,6 +12,7 @@ use rust_decimal::{prelude::ToPrimitive, Decimal};
 
 #[derive(Clone, Debug)]
 pub struct SnipeAllConfig {
+    pub strategy_name: StrategyName,
     pub portfolio_id: PortfolioId,
     pub wallet_id: WalletId,
     pub buy_amount: Amount,
@@ -25,6 +26,7 @@ pub struct SnipeAllConfig {
     pub exit_on_liquidity_removal: bool,
     pub exit_on_tax: bool,
     pub exit_on_lp_approval: bool,
+    pub exit_on_critical_lp_approval_only: bool,
     pub exit_on_scam: bool,
     /// Asymmetric price-ratio exits.
     /// Sell if price drops to this ratio of entry price (e.g., 0.7 = -30% stop-loss).
@@ -51,6 +53,7 @@ impl Default for SnipeAllConfig {
             decimals: 18,
         };
         Self {
+            strategy_name: StrategyName("snipe-all-v1".to_string()),
             portfolio_id: PortfolioId("chain-sim".to_string()),
             wallet_id: WalletId("chain-sim-wallet".to_string()),
             sell_fraction: DecimalAmount::from(1),
@@ -66,6 +69,7 @@ impl Default for SnipeAllConfig {
             exit_on_liquidity_removal: true,
             exit_on_tax: true,
             exit_on_lp_approval: true,
+            exit_on_critical_lp_approval_only: false,
             exit_on_scam: true,
             stop_loss_ratio: None,
             take_profit_ratio: None,

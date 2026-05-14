@@ -134,6 +134,32 @@ prepared transaction.
 runs in `chain-sim` mode, polls the Rust token server, and consumes:
 
 - `/live/pools` as confirmed market updates.
+- `/mempool/signals?since_days=14` as speculative risk events.
+
+The trader registers strategy wrappers from each strategy's `live/` module. For
+Snipe All that is `LiveSnipeAllStrategy`, which composes the regular
+`SnipeAllStrategy` policy while marking the runtime side in code and run config.
+
+## Live Strategy Model
+
+The engine should treat live and historical strategy runs as the same strategy
+policy over different event streams:
+
+- Historical side: stored confirmed-chain observations, plus stored mempool
+  signals only when replay enabled them.
+- Live side: confirmed-chain observations plus live mempool signals as current
+  actionable inputs.
+
+The runtime-level difference is that live can act on mempool signals before the
+confirmed pool snapshot reflects the risky transaction. The strategy decides
+what that signal means. The first live strategy variants to isolate are:
+
+- Exit immediately on a matching mempool liquidity-removal signal.
+- Exit immediately on a matching critical pool LP approval signal.
+
+Only the current token-tracking runtime should be called live. Stored-signal
+replay in `eth_alpha_backtest` is mempool-aware historical replay, even when it
+tests the same mempool-triggered exits.
 
 Operational events use the shared `eth_ops_events` schema. The
 trader reads `ALPHA_TRADER_LOG_DIR` from `blockchains/eth/config.env` and writes
@@ -148,7 +174,6 @@ The directory contains `pipeline_health.jsonl`, `pipeline_issues.jsonl`, and
 as `stage=alpha_trader`, `component=token_server_poll`, and
 `code=alpha_trader_poll_failed`; regular loop heartbeats are emitted as
 `PipelineHealth` records.
-- `/mempool/signals?since_days=14` as speculative risk events.
 
 Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:
 

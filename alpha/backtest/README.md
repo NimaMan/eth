@@ -36,6 +36,30 @@ StrategyDecision
 
 The Python version had separate `BacktestStrategyEngine` and `LiveStrategyEngine` paths with duplicated state transitions. This crate removes that duplication.
 
+## Live Strategy Parity
+
+A live strategy and its historical backtest should use the same strategy policy.
+The difference is the event stream:
+
+- Historical side: replay stored confirmed-chain observations from
+  `strategy_observations`; mempool signals are included only when the run opts
+  into replaying stored signal rows.
+- Live side: consume confirmed-chain observations plus live mempool signals as
+  current actionable inputs.
+
+Mempool timing is the main live-only advantage. A live strategy can exit on a
+liquidity-removal or critical LP-approval signal before the confirmed pool state
+shows the effect. Historical backtests can test the same rule only when the
+signal was captured and replayed; that is mempool-aware historical replay, not a
+live run.
+
+Initial live/historical strategy pairs to backtest:
+
+- Liquidity-removal exit: exit a matching open position immediately on a
+  mempool liquidity-removal signal.
+- Critical LP-approval exit: exit a matching open position immediately on a
+  critical pool LP approval signal.
+
 ## Block-Level Execution Model
 
 The token pipeline updates market state at block level. A backtest step runs as:
@@ -46,8 +70,9 @@ processed block N
   -> eth_alpha_engine handles MarketEvent
   -> strategy decides from the block N snapshot
   -> engine creates OrderIntent
-  -> ChainSimExecutionAdapter runs the swap against block N state via EVM
-  -> ExecutionReport updates order and position state
+  -> submitted lifecycle report is recorded at block N
+  -> ChainSimExecutionAdapter runs the swap against post-block N+1 state by default
+  -> confirmed/failed ExecutionReport updates order and position state at N+1
 ```
 
 Do not treat a strategy decision as if it had been known before every transaction in the same block unless the replay input explicitly provides transaction-level ordering.
@@ -67,6 +92,8 @@ Backtests use the same EVM simulation path as live chain-sim trading:
 
 ```bash
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --strategy-impl snipe-all-v1 \
+  --strategy-name snipe-all-v1 \
   --replay-run-id "alpha-trader-1715350000-12345" \
   --buy-amount-wei 10000000000000000 \
   --min-liquidity-eth 0.5 \
@@ -80,21 +107,26 @@ The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
 
 | Flag | Description |
 |------|-------------|
-| `--database-url` | Postgres connection string |
 | `--replay-run-id` | Existing live chain-sim run to replay from `strategy_observations` |
 
 ### Optional arguments
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--reth-datadir` | Path to synced Reth database | `/home/nima/storage/samsung8tb/ethereum/reth` |
+| `--strategy-impl` | Strategy implementation to instantiate | `snipe-all-v1` |
+| `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all-v1` |
+| `--strategy-suite mempool-history-exits` | Run the six maxhold 10/20/50 liquidity-removal and critical-LP exit variants in one replay pass | disabled |
 | `--from-block` | Start block (inclusive) | first observation |
 | `--to-block` | End block (inclusive) | last observation |
 | `--skip-primed` | Skip warmup observations | false |
 | `--include-mempool-signals` | Replay stored mempool risk signals | false |
+| `--exit-lp-approval-critical-only` | Single-strategy mode only: ignore non-critical LP approval signals | false |
 | `--stop-loss-ratio` | Stop-loss trigger ratio | disabled |
 | `--take-profit-ratio` | Take-profit trigger ratio | disabled |
 | `--max-hold-blocks` | Force exit after N blocks | disabled |
+
+Suite mode still records one `trader_runs` row, but orders, positions,
+strategy decisions, and derived PnL stay separated by `strategy_name`.
 
 ## Architecture
 

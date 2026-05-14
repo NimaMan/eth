@@ -234,7 +234,7 @@ fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) 
 
 impl Strategy for SnipeAllStrategy {
     fn name(&self) -> StrategyName {
-        StrategyName("snipe-all-v1".to_string())
+        self.config.strategy_name.clone()
     }
 
     fn on_market_event(
@@ -343,6 +343,12 @@ impl Strategy for SnipeAllStrategy {
         }
 
         if self.config.exit_on_lp_approval {
+            if self.config.exit_on_critical_lp_approval_only
+                && event.kind == RiskKind::LpApproval
+                && event.severity != RiskSeverity::Critical
+            {
+                return Ok(StrategyDecision::hold("exit.lp_approval_not_critical"));
+            }
             if let RuleDecision::Exit { .. } =
                 shared_rules::exit::lp_approval::evaluate(ctx, &strategy_name, event)
             {
@@ -542,6 +548,19 @@ mod tests {
             })
             .unwrap();
         position
+    }
+
+    #[test]
+    fn uses_configured_strategy_name() {
+        let strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            strategy_name: StrategyName("snipe-all-maxhold20-liq-exit".to_string()),
+            ..SnipeAllConfig::default()
+        });
+
+        assert_eq!(
+            strategy.name(),
+            StrategyName("snipe-all-maxhold20-liq-exit".to_string())
+        );
     }
 
     #[test]
