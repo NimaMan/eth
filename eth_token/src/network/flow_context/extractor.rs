@@ -54,6 +54,20 @@ impl FlowContextObservation {
         self
     }
 
+    pub fn with_amount(
+        mut self,
+        asset: Option<String>,
+        symbol: Option<String>,
+        raw_amount: Option<String>,
+        scaled_amount: Option<f64>,
+    ) -> Self {
+        self.asset = asset;
+        self.symbol = symbol;
+        self.raw_amount = raw_amount;
+        self.scaled_amount = scaled_amount.filter(|amount| amount.is_finite());
+        self
+    }
+
     pub fn evidence(&self, description: impl Into<String>) -> FlowContextEvidence {
         let mut evidence = FlowContextEvidence::new(self.observation.clone());
         evidence.asset = self.asset.clone();

@@ -11,6 +11,7 @@ pub mod promotion;
 pub mod scoring;
 pub mod seeds;
 pub mod snapshot;
+pub mod tx_fund_flow;
 pub mod windows;
 
 pub use builder::FlowContextBuilder;
@@ -22,6 +23,7 @@ pub use model::{
     SuppressedHub,
 };
 pub use seeds::{select_flow_context_seeds, FlowContextSeed, FlowContextSeedKind};
+pub use tx_fund_flow::{TxFundFlowObservationConfig, TxFundFlowObservationExtractor};
 
 #[cfg(test)]
 mod tests;

@@ -63,6 +63,26 @@ RawTokenNetworkGraph
   -> optional promotion into inferred token-network edges
 ```
 
+## Concrete `tx_fund_flow` Adapter
+
+`tx_fund_flow.rs` is the production adapter for the current pipeline. The token
+network still owns seed and window selection; this adapter only consumes the
+processed blocks loaded for those selected windows.
+
+Default behavior:
+
+- runs `tx_fund_flow::extract_fund_flows_from_processed_tx` per processed tx;
+- emits `FlowContextObservation` for direct ETH and internal ETH flows;
+- emits ERC-20 observations only for known denomination assets such as WETH and
+  stables from `DENOM_ADDRESSES`;
+- requires at least one endpoint to be a token-selected seed address;
+- skips failed transactions, gas payments, zero-address flows, and unknown
+  non-denomination token transfers unless explicitly configured otherwise.
+
+That keeps the first concrete pass focused on the signals we care about most:
+shared funders, shared sinks, and direct denomination movement around token
+actors.
+
 ## Output Semantics
 
 `FlowContextLayer` is not a replacement for `RawTokenNetworkGraph`.
@@ -100,6 +120,8 @@ model/risk layer needs to know why two addresses are connected.
 - `index_query.rs`: address participation query trait.
 - `block_loader.rs`: processed block loading trait.
 - `extractor.rs`: fund-flow observation extraction trait and aggregation.
+- `tx_fund_flow.rs`: concrete adapter from `tx_fund_flow` movements into
+  `FlowContextObservation`.
 - `builder.rs`: orchestration.
 - `hub_filter.rs`: noisy-node suppression.
 - `scoring.rs`: confidence scoring.

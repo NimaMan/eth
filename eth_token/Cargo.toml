@@ -14,6 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing = "0.1"
+tx_fund_flow-core-types = { path = "../tx_fund_flow/src/core_types" }
+tx_fund_flow-fundflownetwork = { path = "../tx_fund_flow/src/fundflownetwork" }
 tx_processor = { path = "../tx_processor" }
 
 [[example]]
