@@ -27,6 +27,8 @@ pub struct SellSwapResult {
     pub tokens_sold: U256,
     pub denom_received: U256,
     pub sell_transaction: ProcessedTransaction,
+    pub gas_used: u64,
+    pub gas_cost: U256,
     pub block_number: u64,
     pub failure_reason: Option<String>,
 }

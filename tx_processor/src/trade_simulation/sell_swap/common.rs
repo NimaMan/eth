@@ -33,10 +33,44 @@ pub(super) fn format_failure_with_revert(prefix: &str, revert_reason: Option<&st
     }
 }
 
+pub(super) fn fee_totals(transactions: &[&ProcessedTransaction]) -> (u64, U256) {
+    transactions
+        .iter()
+        .fold((0_u64, U256::ZERO), |(gas_used, gas_cost), transaction| {
+            (
+                gas_used.saturating_add(transaction.fees.gas_used),
+                gas_cost.saturating_add(transaction.fees.tx_fee),
+            )
+        })
+}
+
 pub(super) fn failed_sell_result(
     config: &PoolBuySellParameters,
     tokens_to_sell: U256,
     processed: ProcessedTransaction,
+    block: u64,
+    message: &str,
+    revert_reason: Option<&str>,
+) -> SellSwapResult {
+    let (gas_used, gas_cost) = fee_totals(&[&processed]);
+    failed_sell_result_with_fees(
+        config,
+        tokens_to_sell,
+        processed,
+        gas_used,
+        gas_cost,
+        block,
+        message,
+        revert_reason,
+    )
+}
+
+pub(super) fn failed_sell_result_with_fees(
+    config: &PoolBuySellParameters,
+    tokens_to_sell: U256,
+    processed: ProcessedTransaction,
+    gas_used: u64,
+    gas_cost: U256,
     block: u64,
     message: &str,
     revert_reason: Option<&str>,
@@ -50,6 +84,8 @@ pub(super) fn failed_sell_result(
         tokens_sold: tokens_to_sell,
         denom_received: U256::ZERO,
         sell_transaction: processed,
+        gas_used,
+        gas_cost,
         block_number: block,
         failure_reason: Some(format_failure_with_revert(message, revert_reason)),
     }

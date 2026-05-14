@@ -89,12 +89,14 @@ async fn simulate_buy_at_block(
     };
 
     if !result.success {
-        return Ok(failed_report_at(
+        return Ok(failed_report_at_with_gas(
             order_id,
             result
                 .failure_reason
                 .unwrap_or("buy simulation failed".to_string()),
             block,
+            Some(result.buy_transaction.fees.gas_used),
+            Some(result.buy_transaction.fees.tx_fee),
         ));
     }
 
@@ -111,6 +113,7 @@ async fn simulate_buy_at_block(
         filled_amount: Some(intent.amount),
         token_amount: Some(token_amount),
         gas_used: Some(result.buy_transaction.fees.gas_used),
+        gas_cost: Some(gas_cost_amount(result.buy_transaction.fees.tx_fee)),
         error: None,
     })
 }
@@ -175,12 +178,14 @@ async fn simulate_sell_at_block(
     };
 
     if !result.success {
-        return Ok(failed_report_at(
+        return Ok(failed_report_at_with_gas(
             order_id,
             result
                 .failure_reason
                 .unwrap_or("sell simulation failed".to_string()),
             block,
+            Some(result.gas_used),
+            Some(result.gas_cost),
         ));
     }
 
@@ -196,7 +201,8 @@ async fn simulate_sell_at_block(
         block_number: Some(block),
         filled_amount: Some(denom_received),
         token_amount: None,
-        gas_used: Some(result.sell_transaction.fees.gas_used),
+        gas_used: Some(result.gas_used),
+        gas_cost: Some(gas_cost_amount(result.gas_cost)),
         error: None,
     })
 }
@@ -218,6 +224,7 @@ pub struct ChainSimExecutionAdapter {
     pools: Arc<Mutex<HashMap<PoolAddress, PoolSnapshot>>>,
     portfolio: Arc<Mutex<PortfolioState>>,
     current_block: Arc<AtomicU64>,
+    execution_delay_blocks: u64,
 }
 
 impl ChainSimExecutionAdapter {
@@ -230,6 +237,7 @@ impl ChainSimExecutionAdapter {
             pools: Arc::new(Mutex::new(HashMap::new())),
             portfolio: Arc::new(Mutex::new(PortfolioState::default())),
             current_block: Arc::new(AtomicU64::new(0)),
+            execution_delay_blocks: 0,
         })
     }
 
@@ -246,7 +254,16 @@ impl ChainSimExecutionAdapter {
             pools: Arc::new(Mutex::new(HashMap::new())),
             portfolio: Arc::new(Mutex::new(PortfolioState::default())),
             current_block: Arc::new(AtomicU64::new(0)),
+            execution_delay_blocks: 0,
         })
+    }
+
+    /// Delay final simulated fills by this many blocks after the observed
+    /// decision block. A delay of 1 models observing block N, submitting at N,
+    /// and filling against post-block N+1 state.
+    pub fn with_execution_delay_blocks(mut self, delay_blocks: u64) -> Self {
+        self.execution_delay_blocks = delay_blocks;
+        self
     }
 
     /// Shared handle to the live pool map.
@@ -271,22 +288,29 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-{order_seq}", self.order_prefix));
 
-        let block = self.current_block.load(Ordering::Relaxed);
+        let observed_block = self.current_block.load(Ordering::Relaxed);
         let pool = {
             let pools = self.pools.lock().expect("pool lock");
             let Some(pool) = pools.get(&intent.pool_address).cloned() else {
-                return Ok(if block == 0 {
+                return Ok(if observed_block == 0 {
                     failed_report(order_id, "pool not in simulation state")
                 } else {
-                    failed_report_at(order_id, "pool not in simulation state", block)
+                    failed_report_at(order_id, "pool not in simulation state", observed_block)
                 });
             };
             pool
         };
 
-        if block == 0 {
+        if observed_block == 0 {
             return Ok(failed_report(order_id, "current block not set"));
         }
+        let Some(execution_block) = observed_block.checked_add(self.execution_delay_blocks) else {
+            return Ok(failed_report_at(
+                order_id,
+                "execution block overflow",
+                observed_block,
+            ));
+        };
 
         match intent.side {
             OrderSide::Buy => {
@@ -296,7 +320,7 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    block,
+                    execution_block,
                 )
                 .await
             }
@@ -307,7 +331,7 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
                     order_id,
                     intent,
                     &pool,
-                    block,
+                    execution_block,
                     &self.portfolio,
                 )
                 .await
@@ -601,6 +625,19 @@ fn failed_report_at(order_id: OrderId, reason: impl Into<String>, block: u64) ->
     failed_report_with_block(order_id, reason, Some(block))
 }
 
+fn failed_report_at_with_gas(
+    order_id: OrderId,
+    reason: impl Into<String>,
+    block: u64,
+    gas_used: Option<u64>,
+    gas_cost: Option<U256>,
+) -> ExecutionReport {
+    let mut report = failed_report_with_block(order_id, reason, Some(block));
+    report.gas_used = gas_used;
+    report.gas_cost = gas_cost.map(gas_cost_amount);
+    report
+}
+
 fn failed_report_with_block(
     order_id: OrderId,
     reason: impl Into<String>,
@@ -614,8 +651,13 @@ fn failed_report_with_block(
         filled_amount: None,
         token_amount: None,
         gas_used: None,
+        gas_cost: None,
         error: Some(reason.into()),
     }
+}
+
+fn gas_cost_amount(raw: U256) -> Amount {
+    Amount { raw, decimals: 18 }
 }
 
 fn sell_intent_for_position(position: &Position) -> Option<OrderIntent> {
@@ -700,6 +742,7 @@ mod tests {
             filled_amount: None,
             token_amount: None,
             gas_used: Some(123),
+            gas_cost: None,
             error: Some("unable to inject synthetic ERC20 balance".to_string()),
         };
 

@@ -28,6 +28,7 @@ fn buy_must_submit_before_confirm() {
         filled_amount: Some(Amount::zero(18)),
         token_amount: None,
         gas_used: Some(21_000),
+        gas_cost: None,
         error: None,
     };
 
@@ -53,6 +54,7 @@ fn buy_submit_confirm_flow_reaches_buy_confirmed() {
             filled_amount: Some(Amount::zero(18)),
             token_amount: None,
             gas_used: Some(21_000),
+            gas_cost: None,
             error: None,
         })
         .unwrap();
@@ -86,6 +88,7 @@ fn failed_buy_has_no_exposure() {
             filled_amount: None,
             token_amount: None,
             gas_used: None,
+            gas_cost: None,
             error: Some("reverted".to_string()),
         })
         .unwrap();
@@ -114,6 +117,7 @@ fn failed_sell_keeps_exposure_and_can_retry() {
             filled_amount: Some(Amount::zero(18)),
             token_amount: Some(Amount::zero(18)),
             gas_used: Some(21_000),
+            gas_cost: None,
             error: None,
         })
         .unwrap();
@@ -131,6 +135,7 @@ fn failed_sell_keeps_exposure_and_can_retry() {
             filled_amount: None,
             token_amount: None,
             gas_used: None,
+            gas_cost: None,
             error: Some("locked".to_string()),
         })
         .unwrap();
@@ -165,6 +170,7 @@ fn simulator_infra_sell_failure_keeps_exposure_but_blocks_retry() {
             filled_amount: Some(Amount::zero(18)),
             token_amount: Some(Amount::zero(18)),
             gas_used: Some(21_000),
+            gas_cost: None,
             error: None,
         })
         .unwrap();
@@ -182,6 +188,7 @@ fn simulator_infra_sell_failure_keeps_exposure_but_blocks_retry() {
             filled_amount: None,
             token_amount: None,
             gas_used: None,
+            gas_cost: None,
             error: Some(
                 "unable to inject synthetic ERC20 balance: unsupported balance storage layout"
                     .to_string(),

@@ -515,6 +515,7 @@ mod tests {
                     decimals: 9,
                 }),
                 gas_used: Some(21_000),
+                gas_cost: None,
                 error: None,
             })
             .unwrap();
@@ -536,6 +537,7 @@ mod tests {
                 filled_amount: None,
                 token_amount: None,
                 gas_used: Some(21_000),
+                gas_cost: None,
                 error: Some("temporary sell failure".to_string()),
             })
             .unwrap();
@@ -683,6 +685,7 @@ mod tests {
                 filled_amount: None,
                 token_amount: None,
                 gas_used: Some(21_000),
+                gas_cost: None,
                 error: Some("temporary sell failure".to_string()),
             })
             .unwrap();

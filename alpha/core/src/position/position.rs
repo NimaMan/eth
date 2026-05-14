@@ -45,6 +45,9 @@ pub struct Position {
     /// Used for time-based exits (e.g., max hold duration).
     #[serde(default)]
     pub entry_block: Option<BlockNumber>,
+    /// Total ETH spent on execution gas for this position.
+    #[serde(default)]
+    pub gas_cost_eth: DecimalAmount,
     /// True if the pool was drained/scammed while position was open.
     /// Used for honest baseline PnL even when no exit is attempted.
     #[serde(default)]
@@ -78,6 +81,7 @@ impl Position {
             entry_token_amount: None,
             entry_token_raw_amount: None,
             entry_block: None,
+            gas_cost_eth: DecimalAmount::ZERO,
             drained: false,
             exit_failure_reason: None,
             exit_failure_count: 0,
@@ -141,6 +145,9 @@ impl Position {
         report: &ExecutionReport,
         fill_price: Option<DecimalAmount>,
     ) -> Result<()> {
+        if let Some(gas_cost) = &report.gas_cost {
+            self.gas_cost_eth += gas_cost.to_decimal();
+        }
         match report.status {
             ExecutionStatus::Confirmed => self.apply_confirmed_report(report, fill_price),
             ExecutionStatus::Failed => self.apply_failed_report(report),
@@ -246,8 +253,8 @@ impl Position {
     /// Total realized PnL for a closed position.
     pub fn realized_pnl(&self) -> DecimalAmount {
         match (self.entry_cost_basis, self.exit_proceeds) {
-            (Some(cost), Some(proceeds)) => proceeds - cost,
-            _ => DecimalAmount::ZERO,
+            (Some(cost), Some(proceeds)) => proceeds - cost - self.gas_cost_eth,
+            _ => -self.gas_cost_eth,
         }
     }
 

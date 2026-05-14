@@ -102,6 +102,11 @@ struct Args {
     /// Maximum failed exit reports before retry stops. Requires retry interval to matter.
     #[arg(long)]
     max_exit_retries: Option<u32>,
+
+    /// Blocks between signal observation/submission and simulated confirmation.
+    /// Default 1 means observe N, submit at N, fill against post-block N+1 state.
+    #[arg(long, default_value_t = 1)]
+    execution_delay_blocks: u64,
 }
 
 #[tokio::main]
@@ -155,6 +160,7 @@ async fn main() -> Result<()> {
                 "max_hold_blocks": args.max_hold_blocks,
                 "exit_retry_interval_blocks": args.exit_retry_interval_blocks,
                 "max_exit_retries": args.max_exit_retries,
+                "execution_delay_blocks": args.execution_delay_blocks,
             }),
         )
         .await
@@ -185,7 +191,8 @@ async fn main() -> Result<()> {
         simulator,
         tx_processor,
         run_id.clone(),
-    )?;
+    )?
+    .with_execution_delay_blocks(args.execution_delay_blocks);
     let adapter = ChainSimBacktestAdapter::new(inner);
 
     run_backtest_with_adapter(

@@ -13,8 +13,8 @@ use crate::tx_processor::TxProcessor;
 
 use super::balance_setup::{log_token_balance_setup, prepare_seller_token_balance};
 use super::common::{
-    apply_sell_fee_policy, failed_sell_result, format_failure_with_revert, permit2_amount, PERMIT2,
-    PERMIT2_EXPIRATION, SELLER_ETH_FUND,
+    apply_sell_fee_policy, failed_sell_result, failed_sell_result_with_fees, fee_totals,
+    format_failure_with_revert, permit2_amount, PERMIT2, PERMIT2_EXPIRATION, SELLER_ETH_FUND,
 };
 use super::denom_output::extract_denom_received;
 use super::SellSwapResult;
@@ -100,10 +100,14 @@ pub(super) async fn simulate_universal_router_v3_sell(
         )
         .await?;
     if !permit2_approve_sim.success {
-        return Ok(failed_sell_result(
+        let (gas_used, gas_cost) =
+            fee_totals(&[&token_approve_processed, &permit2_approve_processed]);
+        return Ok(failed_sell_result_with_fees(
             &config,
             tokens_to_sell,
             permit2_approve_processed,
+            gas_used,
+            gas_cost,
             block,
             "Permit2 approval for Universal Router failed",
             permit2_approve_sim.revert_reason.as_deref(),
@@ -129,6 +133,11 @@ pub(super) async fn simulate_universal_router_v3_sell(
     let processed = tx_processor
         .process_transaction_from_simulation_result(&sell_tx, &sell_sim, block, 2)
         .await?;
+    let (gas_used, gas_cost) = fee_totals(&[
+        &token_approve_processed,
+        &permit2_approve_processed,
+        &processed,
+    ]);
     let denom_received = extract_denom_received(
         &processed,
         seller_address,
@@ -147,6 +156,8 @@ pub(super) async fn simulate_universal_router_v3_sell(
         tokens_sold: tokens_to_sell,
         denom_received,
         sell_transaction: processed,
+        gas_used,
+        gas_cost,
         block_number: block,
         failure_reason: if success {
             None

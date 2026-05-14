@@ -24,5 +24,7 @@ pub struct ExecutionReport {
     /// For buys only: tokens received from the swap (from simulation or on-chain data).
     pub token_amount: Option<Amount>,
     pub gas_used: Option<u64>,
+    #[serde(default)]
+    pub gas_cost: Option<Amount>,
     pub error: Option<String>,
 }

@@ -14,8 +14,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
-    error::Result,
+    error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
+    ids::PositionId,
     market::{MarketEvent, MarketSnapshotRef, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
@@ -44,6 +45,13 @@ pub struct PositionValueSimulation {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct PendingExecutionReport {
+    position_id: PositionId,
+    side: OrderSide,
+    report: ExecutionReport,
+}
+
 #[async_trait]
 pub trait EngineExecutionAdapter: Send + Sync {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport>;
@@ -70,6 +78,8 @@ where
     risk_policy: R,
     store: S,
     execution: E,
+    current_event_block: Option<u64>,
+    pending_execution_reports: Vec<PendingExecutionReport>,
 }
 
 impl<E, R, S> AlphaEngine<E, R, S>
@@ -87,6 +97,8 @@ where
             risk_policy,
             store,
             execution,
+            current_event_block: None,
+            pending_execution_reports: Vec::new(),
         }
     }
 
@@ -112,10 +124,18 @@ where
     }
 
     pub async fn handle_event(&mut self, event: EngineEvent) -> Result<Vec<ExecutionReport>> {
+        self.current_event_block = engine_event_block(&event);
         match event {
             EngineEvent::Market(event) => {
                 self.apply_market_event(&event);
-                self.run_market_strategies(&event).await
+                let mut reports = if let MarketEvent::BlockCompleted { block_number, .. } = &event {
+                    self.apply_due_pending_execution_reports(*block_number)
+                        .await?
+                } else {
+                    Vec::new()
+                };
+                reports.extend(self.run_market_strategies(&event).await?);
+                Ok(reports)
             }
             EngineEvent::Risk(event) => {
                 self.active_risks.push(event.clone());
@@ -127,6 +147,11 @@ where
                 Ok(vec![report])
             }
         }
+    }
+
+    pub async fn flush_pending_executions(&mut self) -> Result<Vec<ExecutionReport>> {
+        let pending = std::mem::take(&mut self.pending_execution_reports);
+        self.apply_pending_execution_reports(pending).await
     }
 
     fn apply_market_event(&mut self, event: &MarketEvent) {
@@ -432,66 +457,119 @@ where
         self.store.record_order_intent(&intent).await?;
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
-                let report = self.execute_intent(intent).await?;
-                Ok(vec![report])
+                self.execute_intent(intent).await
             }
-            RiskDecision::ForceExit { intent, .. } => {
-                let report = self.execute_intent(*intent).await?;
-                Ok(vec![report])
-            }
+            RiskDecision::ForceExit { intent, .. } => self.execute_intent(*intent).await,
             RiskDecision::Reject { .. } | RiskDecision::CancelOpenOrders { .. } => Ok(Vec::new()),
         }
     }
 
-    async fn execute_intent(&mut self, intent: OrderIntent) -> Result<ExecutionReport> {
+    async fn execute_intent(&mut self, intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
         let mut position = self.position_for_intent(&intent);
         position.mark_intent_created(intent.side)?;
         let report = self.execution.execute(intent.clone()).await?;
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
         self.store.upsert_position(&position).await?;
+        let submission_block = self
+            .current_event_block
+            .or_else(|| self.market.as_ref().map(|m| m.block_number));
+        let mut reports = Vec::new();
         if report.status != ExecutionStatus::Submitted {
-            let submitted_report = submitted_report_for(
-                &report,
-                report
-                    .block_number
-                    .or_else(|| self.market.as_ref().map(|m| m.block_number)),
-            );
+            let submitted_report =
+                submitted_report_for(&report, submission_block.or(report.block_number));
             self.store
                 .record_order_execution_report(&position.id, intent.side, &submitted_report)
                 .await?;
+            reports.push(submitted_report);
         }
-        let report_status = report.status.clone();
 
-        // Chain-sim buys provide both cost basis and token amount, so entry
-        // price is derived only from the simulated fill.
-        let fill_price = match intent.side {
-            OrderSide::Buy => {
-                if let (Some(cost), Some(tokens)) = (&report.filled_amount, &report.token_amount) {
-                    let cost_dec = cost.to_decimal();
-                    let token_dec = tokens.to_decimal();
-                    if !token_dec.is_zero() {
-                        Some(cost_dec / token_dec)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+        self.store.upsert_position(&position).await?;
+        let position_id = position.id.clone();
+        self.portfolio
+            .positions
+            .insert(position.id.clone(), position);
+
+        if should_defer_report(submission_block, &report) {
+            self.pending_execution_reports.push(PendingExecutionReport {
+                position_id,
+                side: intent.side,
+                report,
+            });
+        } else {
+            self.apply_final_execution_report(&position_id, intent.side, &report)
+                .await?;
+            reports.push(report);
+        }
+
+        Ok(reports)
+    }
+
+    async fn apply_due_pending_execution_reports(
+        &mut self,
+        block_number: u64,
+    ) -> Result<Vec<ExecutionReport>> {
+        let mut due = Vec::new();
+        let mut remaining = Vec::new();
+        for pending in self.pending_execution_reports.drain(..) {
+            let is_due = pending
+                .report
+                .block_number
+                .map(|execution_block| execution_block <= block_number)
+                .unwrap_or(true);
+            if is_due {
+                due.push(pending);
+            } else {
+                remaining.push(pending);
             }
-            OrderSide::Sell => None,
-        };
-        position.apply_execution_report_with_price(&report, fill_price)?;
+        }
+        self.pending_execution_reports = remaining;
+        self.apply_pending_execution_reports(due).await
+    }
+
+    async fn apply_pending_execution_reports(
+        &mut self,
+        mut pending_reports: Vec<PendingExecutionReport>,
+    ) -> Result<Vec<ExecutionReport>> {
+        pending_reports.sort_by_key(|pending| pending.report.block_number.unwrap_or_default());
+        let mut reports = Vec::with_capacity(pending_reports.len());
+        for pending in pending_reports {
+            self.apply_final_execution_report(&pending.position_id, pending.side, &pending.report)
+                .await?;
+            reports.push(pending.report);
+        }
+        Ok(reports)
+    }
+
+    async fn apply_final_execution_report(
+        &mut self,
+        position_id: &PositionId,
+        side: OrderSide,
+        report: &ExecutionReport,
+    ) -> Result<()> {
+        let mut position = self
+            .portfolio
+            .positions
+            .get(position_id)
+            .cloned()
+            .ok_or_else(|| {
+                AlphaCoreError::InvalidPositionTransition(format!(
+                    "execution report {} has no matching position {}",
+                    report.order_id.0, position_id.0
+                ))
+            })?;
+        let report_status = report.status.clone();
+        let fill_price = fill_price_for_report(side, report);
+        position.apply_execution_report_with_price(report, fill_price)?;
 
         self.store.upsert_position(&position).await?;
         self.store
-            .record_order_execution_report(&position.id, intent.side, &report)
+            .record_order_execution_report(&position.id, side, report)
             .await?;
-        if intent.side == OrderSide::Sell
-            && matches!(
-                report_status,
-                ExecutionStatus::Failed | ExecutionStatus::Cancelled
-            )
-        {
+
+        if matches!(
+            report_status,
+            ExecutionStatus::Failed | ExecutionStatus::Cancelled
+        ) {
             let snapshot = zero_value_snapshot(
                 &position,
                 report
@@ -504,10 +582,10 @@ where
             let snapshot = PositionSnapshot {
                 position_id: position.id.clone(),
                 state: position.state.clone(),
-                block_number: self
-                    .market
-                    .as_ref()
-                    .map(|m| m.block_number)
+                block_number: report
+                    .block_number
+                    .or(self.current_event_block)
+                    .or_else(|| self.market.as_ref().map(|m| m.block_number))
                     .unwrap_or_default(),
                 current_value_eth: DecimalAmount::ZERO,
                 realized_profit_eth: position.realized_pnl(),
@@ -524,10 +602,11 @@ where
             };
             self.store.append_position_snapshot(&snapshot).await?;
         }
+
         self.portfolio
             .positions
             .insert(position.id.clone(), position);
-        Ok(report)
+        Ok(())
     }
 
     fn position_for_intent(&self, intent: &OrderIntent) -> Position {
@@ -556,7 +635,47 @@ fn submitted_report_for(report: &ExecutionReport, block_number: Option<u64>) -> 
         filled_amount: None,
         token_amount: None,
         gas_used: None,
+        gas_cost: None,
         error: None,
+    }
+}
+
+fn should_defer_report(submission_block: Option<u64>, report: &ExecutionReport) -> bool {
+    if matches!(
+        report.status,
+        ExecutionStatus::Submitted | ExecutionStatus::Pending
+    ) {
+        return false;
+    }
+    match (submission_block, report.block_number) {
+        (Some(submitted_at), Some(executed_at)) => executed_at > submitted_at,
+        _ => false,
+    }
+}
+
+fn fill_price_for_report(side: OrderSide, report: &ExecutionReport) -> Option<DecimalAmount> {
+    if side != OrderSide::Buy {
+        return None;
+    }
+    let (Some(cost), Some(tokens)) = (&report.filled_amount, &report.token_amount) else {
+        return None;
+    };
+    let token_dec = tokens.to_decimal();
+    if token_dec.is_zero() {
+        return None;
+    }
+    Some(cost.to_decimal() / token_dec)
+}
+
+fn engine_event_block(event: &EngineEvent) -> Option<u64> {
+    match event {
+        EngineEvent::Market(
+            MarketEvent::TokenUpdated { block_number, .. }
+            | MarketEvent::PoolUpdated { block_number, .. }
+            | MarketEvent::BlockCompleted { block_number, .. },
+        ) => Some(*block_number),
+        EngineEvent::Risk(risk) => risk.observed_block,
+        EngineEvent::Execution(report) => report.block_number,
     }
 }
 
@@ -845,10 +964,14 @@ mod tests {
                 order_id: eth_alpha_core::ids::OrderId("test-order".to_string()),
                 status: ExecutionStatus::Confirmed,
                 tx_hash: None,
-                block_number: Some(1),
+                block_number: Some(2),
                 filled_amount: Some(intent.amount.clone()),
                 token_amount: Some(intent.amount),
                 gas_used: Some(21_000),
+                gas_cost: Some(Amount {
+                    raw: U256::from(21_000_000u64),
+                    decimals: 18,
+                }),
                 error: None,
             })
         }
@@ -892,12 +1015,20 @@ mod tests {
             .unwrap();
 
         assert_eq!(reports.len(), 1);
-        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+        assert_eq!(reports[0].status, ExecutionStatus::Submitted);
         assert_eq!(store.order_intents().len(), 1);
+        assert_eq!(store.positions()[0].state, PositionState::BuySubmitted);
+
+        let reports = engine.flush_pending_executions().await.unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+
         let execution_reports = store.execution_reports();
         assert_eq!(execution_reports.len(), 2);
         assert_eq!(execution_reports[0].status, ExecutionStatus::Submitted);
+        assert_eq!(execution_reports[0].block_number, Some(1));
         assert_eq!(execution_reports[1].status, ExecutionStatus::Confirmed);
+        assert_eq!(execution_reports[1].block_number, Some(2));
         assert_eq!(store.positions().len(), 1);
         let decisions = store.strategy_decisions();
         assert_eq!(decisions.len(), 1);

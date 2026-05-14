@@ -26,6 +26,7 @@ pub struct RunSummary {
     pub buy_failed_positions: i64,
     pub sell_failed_positions: i64,
     pub entry_cost_eth: String,
+    pub gas_cost_eth: String,
     pub execution_reports: i64,
     pub confirmed_reports: i64,
     pub failed_reports: i64,
@@ -180,6 +181,10 @@ pub fn print_strategy_report(report: &StrategyReport) {
             vec![
                 "entry cost ETH".to_string(),
                 report.summary.entry_cost_eth.clone(),
+            ],
+            vec![
+                "gas cost ETH".to_string(),
+                report.summary.gas_cost_eth.clone(),
             ],
             vec![
                 "latest current value ETH".to_string(),
@@ -506,7 +511,17 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
             SELECT
                 count(*) AS execution_reports,
                 count(*) FILTER (WHERE status = 'confirmed') AS confirmed_reports,
-                count(*) FILTER (WHERE status = 'failed') AS failed_reports
+                count(*) FILTER (WHERE status = 'failed') AS failed_reports,
+                coalesce(
+                    sum(
+                        NULLIF(payload #>> '{gas_cost,raw}', '')::numeric
+                        / power(
+                            10::numeric,
+                            coalesce(NULLIF(payload #>> '{gas_cost,decimals}', '')::int, 18)
+                        )
+                    ),
+                    0
+                ) AS gas_cost_eth
             FROM alpha_trading.execution_reports
             WHERE run_id = $1
         ),
@@ -559,6 +574,7 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
             rollup.buy_failed_positions,
             rollup.sell_failed_positions,
             rollup.entry_cost_eth::text AS entry_cost_eth,
+            execs.gas_cost_eth::text AS gas_cost_eth,
             rollup.latest_current_value_eth::text AS latest_current_value_eth,
             rollup.realized_pnl_eth::text AS realized_pnl_eth,
             rollup.unrealized_pnl_eth::text AS unrealized_pnl_eth,
@@ -586,6 +602,7 @@ async fn load_summary(pool: &PgPool, run_id: &str) -> Result<RunSummary> {
         buy_failed_positions: row.try_get("buy_failed_positions")?,
         sell_failed_positions: row.try_get("sell_failed_positions")?,
         entry_cost_eth: row.try_get("entry_cost_eth")?,
+        gas_cost_eth: row.try_get("gas_cost_eth")?,
         execution_reports: row.try_get("execution_reports")?,
         confirmed_reports: row.try_get("confirmed_reports")?,
         failed_reports: row.try_get("failed_reports")?,

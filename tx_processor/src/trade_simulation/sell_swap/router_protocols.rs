@@ -9,7 +9,8 @@ use crate::tx_processor::TxProcessor;
 
 use super::balance_setup::{log_token_balance_setup, prepare_seller_token_balance};
 use super::common::{
-    apply_sell_fee_policy, failed_sell_result, format_failure_with_revert, SELLER_ETH_FUND,
+    apply_sell_fee_policy, failed_sell_result, fee_totals, format_failure_with_revert,
+    SELLER_ETH_FUND,
 };
 use super::denom_output::extract_denom_received;
 use super::SellSwapResult;
@@ -106,6 +107,7 @@ pub(super) async fn simulate_router_protocol_sell(
     let processed = tx_processor
         .process_transaction_from_simulation_result(&sell_tx, &sell_sim, block, 1)
         .await?;
+    let (gas_used, gas_cost) = fee_totals(&[&approve_processed, &processed]);
 
     let denom_received = extract_denom_received(
         &processed,
@@ -125,6 +127,8 @@ pub(super) async fn simulate_router_protocol_sell(
         tokens_sold: tokens_to_sell,
         denom_received,
         sell_transaction: processed,
+        gas_used,
+        gas_cost,
         block_number: block,
         failure_reason: if success {
             None

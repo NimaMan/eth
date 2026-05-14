@@ -210,30 +210,68 @@ Latest evidence:
   denom reserve. These are not attractive missed entries; the issue is that
   pre-buy eligibility accepted them too early.
 - After separating observed-flow evidence from direct trading flags, the
-  candidate was regenerated as
-  `live-noncapital-maxhold20-riskbundle-v4runtimeflags-twoweek-requested-20260514-104701Z`
-  over requested window `24,991,500..25,092,869`. The old replay source has no
-  stored `runtime_state.can_buy/can_sell` flags, so alpha replay now treats V4
-  observations without runtime flags as not buyable/sellable instead of falling
-  back to old top-level fields. The regenerated run completed with `129,607`
-  events, `427` positions, `849` final reports, `1,698` lifecycle reports,
+  candidate was regenerated over the full available replay source range as
+  `live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z`
+  (`25,066,498..25,092,922`). The old replay source has no stored
+  `runtime_state.can_buy/can_sell` flags for any protocol: `25,548` V2 pool
+  observations, `6,079` V4 observations, `125` V3 observations, `16`
+  PancakeSwap V2 observations, and `6` SushiSwap V2 observations all lack those
+  runtime fields. The run completed with `54,705` replay events after skipping
+  primed rows, `427` positions, `849` final reports, `1,698` lifecycle reports,
   `822` confirmed final reports, `27` failed final reports, and `22` open
   sell-failed positions. Strategy Lab reports total PnL
   `+10.937447237497281828 ETH` and PnL excluding top 10
-  `+7.536792525330448299 ETH`. Confirmed buys are now `418` Uniswap V2,
-  `3` Uniswap V3, `1` PancakeSwap V2, and `0` Uniswap V4. Failed buys dropped
-  from `12` to `5`: `3` V2 `TRANSFER_FAILED` and `2` V3 `TF`; the `7` V4
-  Universal Router failures are gone.
+  `+7.536792525330448299 ETH`. Confirmed buys are `421` Uniswap V2, `5`
+  Uniswap V3, and `1` PancakeSwap V2. Failed buys are `3` Uniswap V2
+  `TRANSFER_FAILED` and `2` Uniswap V3 `TF`; failed sells are `21` Uniswap V2
+  and `1` PancakeSwap V2. V4 entries are now skipped by eligibility
+  (`2,834` `cannot_buy`, `2,137` unsupported hooks, `330` low liquidity, `59`
+  unsupported execution denom), so the prior V4 Universal Router failed buys are
+  gone.
+- On `2026-05-14`, all previous `mode='backtest'` alpha trading runs were
+  deleted so stale immediate-fill evidence would not be confused with the new
+  delayed-execution pipeline.
+- Historical backtests now model order lifecycle as: observe/submit at block
+  `N`, keep the position in submitted state, simulate the final fill against
+  post-block `N+1` state, then apply the confirmation/failure at block `N+1`.
+  The default backtest setting is `execution_delay_blocks=1`.
+- The requested 70K window was rerun with delayed execution as:
+  `live-noncapital-maxhold10-riskbundle-delay1-gas-70k-20260514-codex`,
+  `live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex`, and
+  `live-noncapital-maxhold50-riskbundle-delay1-gas-70k-20260514-codex`
+  (`25,023,119..25,093,118`, replay source coverage still effectively starts
+  at `25,066,498`). All three runs have `848` submitted orders and `848` final
+  reports, with every final report exactly one block after its submitted report.
+  `maxhold20+risk exits` is the current delayed-execution baseline: `427`
+  positions, `818` confirmed final reports, `30` failed final reports, `6`
+  buy-failed positions, `24` sell-failed positions, total PnL
+  `+9.931652664322816296 ETH`, PnL excluding top 10
+  `+6.095495393711597006 ETH`, and gas cost
+  `0.067717287466098780 ETH`. For comparison, `maxhold10` has total PnL
+  `+7.717126603610147479 ETH`, ex-top-10
+  `+5.521981359283359240 ETH`, gas cost
+  `0.068500126422544811 ETH`, `6` buy failures, and `11` sell failures;
+  `maxhold50` has total PnL `+10.121840425237639146 ETH`, ex-top-10
+  `+5.106975460246661598 ETH`, gas cost `0.068732659614350100 ETH`,
+  `6` buy failures, and `56` sell failures.
+  PnL reconciles as confirmed sell proceeds minus closed-position entry costs
+  minus open failed-exit cost marked to zero, minus simulated gas cost from
+  execution reports. The current fee policy prices gas at the replay block base
+  fee with zero priority fee, so live deployment still needs an explicit
+  priority-fee assumption.
+  Sample lifecycle check for token `0x929fA6d5e0870B4c16641C4C3F774A08C390e597`
+  in the `maxhold20` run: buy submitted `25,080,051`, buy confirmed
+  `25,080,052`; sell submitted `25,080,073`, sell confirmed `25,080,074`.
 
 ## Active Bottlenecks
 
 | Order | Bottleneck | Owner | Evidence | Next Action |
 | --- | --- | --- | --- | --- |
-| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned no-capital evidence is now the V4-runtime-guarded `maxhold20+risk exits` rerun: `+10.937447237497281828 ETH` total PnL, `+7.536792525330448299 ETH` excluding top 10, `5` buy-failed positions, and `22` sell-failed positions. Evidence is still incomplete for real orders because the source observation coverage starts at `25,066,498`, older observations lack runtime trading flags, and execution gates are not finalized. | Treat this rerun as the current no-capital candidate. Review it in Asena, then resolve remaining fixed-size entry failures, failed-exit policy, and real execution gates before handoff. |
-| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | V4-runtime-guarded `maxhold20+risk exits` keeps nearly the same total and ex-top-10 PnL as the prior candidate while removing all V4 failed buys. `maxhold10` still reduces sell-failed positions further, but gives up more total and ex-top-10 PnL. | Keep `maxhold20+risk exits` as the baseline candidate. Compare any new policy against this run's PnL, concentration, failed buys, failed exits, and decision-ledger audit quality. |
-| 3 | **Buy-entry eligibility correctness** | `eth_chain_server`, `alpha/engine`, `alpha/backtest`, `alpha/strategies` | V4 observed-flow-only entries are fixed for new chain-server snapshots and old replays: V4 observations without runtime direct-route flags are not treated as buyable/sellable. Failed buys dropped from `12` to `5`; the remaining `3` V2 and `2` V3 failures are fixed-size failures where representative probes fail at `0.01 ETH` but pass at `0.001 ETH`. | Decide adaptive sizing or a strict fixed-size route gate for V2/V3. Keep V4 runtime-flag requirement in place until observations are rebuilt with direct-route probes. |
-| 4 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest guarded rerun still has `22` open sell-failed positions. Prior sell-failure analysis showed mostly rug timing: failed exits later had reserve below `0.1 ETH`, `can_sell=false`, and `is_scam=true`, with median transition age `29` blocks. Retry-only did not recover exits. | Do not promote retry-only. Next policies should test stronger early warning from LP approvals/liquidity-removal mapping, stop-loss/reserve-drop exits, and entry filters for pools without robust observed sell support. |
-| 5 | **Strategy-review lifecycle completeness** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | Submitted order lifecycle rows are now persisted for new runs and exposed through chain-server reports with `position_id` and `order_side`. The frontend historical backtest detail view renders `Lifecycle` and `Decision Audit` tabs. The full candidate run `live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z` verifies submitted/final rows for buy and sell and exposes top/worst audit rows in the frontend. | Review the candidate in Asena, especially the 24 sell-failed positions and worst 10 decision audit rows. Any next policy must improve against this lifecycle-enabled baseline. |
+| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned no-capital evidence is now the delayed-execution, gas-inclusive 70K `maxhold20+risk exits` run: `+9.931652664322816296 ETH` total PnL, `+6.095495393711597006 ETH` excluding top 10, `0.067717287466098780 ETH` gas cost, `6` buy-failed positions, and `24` sell-failed positions. Evidence is still incomplete for real orders because the source observation coverage starts at `25,066,498`, older observations lack runtime trading flags across all protocols, priority-fee assumptions are not finalized, and execution gates are not finalized. | Treat this delayed gas-inclusive run as the current no-capital candidate. Review it in Asena, then resolve remaining fixed-size entry failures, failed-exit policy, priority-fee accounting, and real execution gates before handoff. |
+| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | Delayed `maxhold20+risk exits` remains the best balance: it has higher ex-top-10 PnL than delayed `maxhold10` and delayed `maxhold50`, while avoiding the much larger `56` sell-failed tail in `maxhold50`. `maxhold10` reduces sell failures to `11` but gives up total and ex-top-10 PnL. | Keep delayed `maxhold20+risk exits` as the baseline candidate. Compare any new policy against this run's PnL, concentration, failed buys, failed exits, and decision-ledger audit quality. |
+| 3 | **Buy-entry eligibility correctness** | `eth_chain_server`, `alpha/engine`, `alpha/backtest`, `alpha/strategies` | Observed-flow-only entries are fixed for new chain-server snapshots, and old replays now surface missing runtime flags as replay-data quality debt instead of silently treating them as direct-route eligibility. The delayed 70K runs have `6` failed buys: `4` V2 `TRANSFER_FAILED` and `2` V3 `TF`, still consistent with fixed-size failures where representative probes fail at `0.01 ETH` but pass at `0.001 ETH`. | Decide adaptive sizing or a strict fixed-size route gate at the configured buy amount. Rebuild durable observations with runtime direct-route flags for all protocols, then this replay guard can become a general data-quality assertion instead of a compatibility rule. |
+| 4 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest delayed baseline still has `24` open sell-failed positions. Prior sell-failure analysis showed mostly rug timing: failed exits later had reserve below `0.1 ETH`, `can_sell=false`, and `is_scam=true`, with median transition age `29` blocks. Retry-only did not recover exits. | Do not promote retry-only. Next policies should test stronger early warning from LP approvals/liquidity-removal mapping, stop-loss/reserve-drop exits, and entry filters for pools without robust observed sell support. |
+| 5 | **Strategy-review lifecycle completeness** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | Submitted order lifecycle rows are persisted and exposed through chain-server reports with `position_id` and `order_side`. The frontend historical backtest detail view renders `Lifecycle` and `Decision Audit` tabs. The delayed 70K reruns verify submitted/final rows for all `848` orders per run, with every final row exactly one block after its submitted row. | Review the delayed `maxhold20` candidate in Asena, especially the 24 sell-failed positions, top winners, worst losers, and decision audit rows. Any next policy must improve against this delayed-execution baseline. |
 | 6 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
 | 7 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
 | 8 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
@@ -300,8 +338,12 @@ Recent checks that passed during this cleanup:
 - `cargo check -p eth_alpha_engine -p eth_alpha_store -p eth_chain_server -p eth_alpha_backtest`
 - `npm run build` from `interface/new_Asena`
 - `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id lifecycle-smoke-20260514-095812Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25073540 --to-block 25073620 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
-- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id live-noncapital-maxhold20-riskbundle-v4runtimeflags-twoweek-requested-20260514-104701Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 24991500 --to-block 25092869 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
-- `cargo run -q -p eth_alpha_lab --bin eth_alpha_lab -- strategy --run-id live-noncapital-maxhold20-riskbundle-v4runtimeflags-twoweek-requested-20260514-104701Z --limit 10`
+- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25066498 --to-block 25092922 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
+- `cargo run -q -p eth_alpha_lab --bin eth_alpha_lab -- strategy --run-id live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z --limit 10`
+- `cargo test -p eth_alpha_engine -p eth_alpha_backtest`
+- `cargo build --release -p eth_alpha_backtest -p eth_alpha_lab`
+- `target/release/eth_alpha_backtest --run-id live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25023119 --to-block 25093118 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
+- `target/release/eth_alpha_lab strategy --run-id live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex --limit 10`
 - `cargo check -p eth_chain_server -p eth_token`
 - `cargo build --release -p eth_chain_server --bin eth_chain_server`
 
@@ -313,8 +355,8 @@ Recent checks that passed during this cleanup:
    direct-route probes or a strict route gate at the configured `0.01 ETH` buy
    amount.
 3. Implement the next failed-exit policy improvement against the current
-   `maxhold20+risk exits` baseline: chunked exits, no-observed-sell exposure
-   limits, or earlier risk-driven exits. Retry cadence exists now, but
+   delayed `maxhold20+risk exits` baseline: chunked exits, no-observed-sell
+   exposure limits, or earlier risk-driven exits. Retry cadence exists now, but
    retry-only was not useful in the latest comparison.
 4. Review the lifecycle-enabled candidate in the frontend, including top
    winners, worst losers, skipped entries, lifecycle rows, and failed exits.

@@ -9,7 +9,8 @@ strategy evaluation and backtests.
 - Simulates the transaction against selected Reth/Redis chain state.
 - Records buy token amounts from simulated token balance deltas.
 - Records sell proceeds from simulated denom balance deltas.
-- Records gas used from the simulated transaction.
+- Records gas used and simulated gas cost from execution transactions so
+  backtest PnL can be net of gas.
 - Persists failed execution reports when state, routing, decimals, or swap
   simulation cannot be proven from chain state.
 

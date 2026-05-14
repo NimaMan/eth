@@ -39,21 +39,16 @@ where
         match engine.handle_event(event).await {
             Ok(reports) => {
                 result.events_processed += 1;
-                result.reports_generated += reports.len();
-                for report in &reports {
-                    use eth_alpha_core::execution::ExecutionStatus;
-                    match report.status {
-                        ExecutionStatus::Confirmed => result.confirmed_reports += 1,
-                        ExecutionStatus::Failed => result.failed_reports += 1,
-                        _ => {}
-                    }
-                }
+                record_reports(&mut result, &reports);
             }
             Err(error) => {
                 warn!(error = %error, "engine event handling failed");
             }
         }
     }
+
+    let reports = engine.flush_pending_executions().await?;
+    record_reports(&mut result, &reports);
 
     info!(
         events_processed = result.events_processed,
@@ -64,6 +59,21 @@ where
     );
 
     Ok(result)
+}
+
+fn record_reports(
+    result: &mut BacktestResult,
+    reports: &[eth_alpha_core::execution::ExecutionReport],
+) {
+    result.reports_generated += reports.len();
+    for report in reports {
+        use eth_alpha_core::execution::ExecutionStatus;
+        match report.status {
+            ExecutionStatus::Confirmed => result.confirmed_reports += 1,
+            ExecutionStatus::Failed => result.failed_reports += 1,
+            _ => {}
+        }
+    }
 }
 
 fn update_adapter_state<A: BacktestAdapter>(adapter: &A, event: &EngineEvent) {
