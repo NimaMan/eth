@@ -132,6 +132,7 @@ impl PoolWire {
         let pool_id = TokenPoolId::new(token_address, self.pool_identity());
         let denom_reserve = required_pool_float(self.denom_reserve, "denom_reserve", self)?;
         let token_reserve = self.token_reserve.unwrap_or_default();
+        let protocol = parse_protocol(&self.protocol);
         let Some(latest_block) = self.latest_block_number() else {
             return Err(eyre!(
                 "pool {} for token {} has no latest block",
@@ -139,10 +140,27 @@ impl PoolWire {
                 self.token_address
             ));
         };
+        let runtime_can_buy = self.runtime_state.as_ref().and_then(|state| state.can_buy);
+        let runtime_can_sell = self.runtime_state.as_ref().and_then(|state| state.can_sell);
+        let requires_runtime_trading_flags = matches!(protocol, PoolProtocol::UniswapV4);
+        let can_buy = runtime_can_buy.unwrap_or_else(|| {
+            if requires_runtime_trading_flags {
+                false
+            } else {
+                self.can_buy
+            }
+        });
+        let can_sell = runtime_can_sell.unwrap_or_else(|| {
+            if requires_runtime_trading_flags {
+                false
+            } else {
+                self.can_sell
+            }
+        });
         Ok(PoolSnapshot {
             address: pool_id,
             token_address,
-            protocol: parse_protocol(&self.protocol),
+            protocol,
             denom_address: self
                 .denom_address
                 .as_deref()
@@ -155,16 +173,8 @@ impl PoolWire {
             fee_tier: self.fee_tier,
             uniswap_v4: self.uniswap_v4_pool_key()?,
             latest_block,
-            can_buy: self
-                .runtime_state
-                .as_ref()
-                .and_then(|state| state.can_buy)
-                .unwrap_or(self.can_buy),
-            can_sell: self
-                .runtime_state
-                .as_ref()
-                .and_then(|state| state.can_sell)
-                .unwrap_or(self.can_sell),
+            can_buy,
+            can_sell,
             is_scam: self.is_scam,
         })
     }
@@ -404,6 +414,48 @@ mod tests {
 
         assert!(snapshot.can_buy);
         assert!(!snapshot.can_sell);
+    }
+
+    #[test]
+    fn v4_pool_snapshot_requires_runtime_trading_flags() {
+        let mut wire = pool_wire_with_flags(true, true);
+        wire.protocol = "UNISWAP-V4".to_string();
+        wire.pool_id = Some(format!("0x{:064x}", 1));
+        wire.pool_manager_address = Some("0x3333333333333333333333333333333333333333".to_string());
+        wire.currency0 = Some("0x1111111111111111111111111111111111111111".to_string());
+        wire.currency1 = Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".to_string());
+        wire.fee_tier = Some(3000);
+        wire.tick_spacing = Some(60);
+        wire.hooks = Some("0x0000000000000000000000000000000000000000".to_string());
+
+        let snapshot = wire.to_pool_snapshot().expect("pool snapshot");
+
+        assert!(!snapshot.can_buy);
+        assert!(!snapshot.can_sell);
+    }
+
+    #[test]
+    fn v4_pool_snapshot_uses_runtime_trading_flags_when_present() {
+        let mut wire = pool_wire_with_flags(false, false);
+        wire.protocol = "UNISWAP-V4".to_string();
+        wire.pool_id = Some(format!("0x{:064x}", 1));
+        wire.pool_manager_address = Some("0x3333333333333333333333333333333333333333".to_string());
+        wire.currency0 = Some("0x1111111111111111111111111111111111111111".to_string());
+        wire.currency1 = Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".to_string());
+        wire.fee_tier = Some(3000);
+        wire.tick_spacing = Some(60);
+        wire.hooks = Some("0x0000000000000000000000000000000000000000".to_string());
+        wire.runtime_state = Some(PoolRuntimeStateWire {
+            last_update_block: Some(12),
+            last_sync_block: Some(12),
+            can_buy: Some(true),
+            can_sell: Some(true),
+        });
+
+        let snapshot = wire.to_pool_snapshot().expect("pool snapshot");
+
+        assert!(snapshot.can_buy);
+        assert!(snapshot.can_sell);
     }
 
     #[test]
