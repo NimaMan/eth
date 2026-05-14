@@ -8,6 +8,8 @@ use tx_processor::tx_processor::TxProcessor;
 use tx_processor::ProcessedTransaction;
 use tx_simulator::UnsignedTransaction;
 
+use crate::tx_router::TransactionCategory;
+
 use super::{
     mempool_tx_to_unsigned_tx,
     pending_nonce_dependencies::{sender_nonce, source_hash},
@@ -45,12 +47,7 @@ impl SimulationManager {
             Err(err) => err,
         };
 
-        if is_lack_of_funds_error(&direct_error)
-            && matches!(
-                &request.category,
-                crate::tx_router::TransactionCategory::ContractCreation { .. }
-            )
-        {
+        if should_replay_funding_dependencies(&direct_error, &request.category) {
             return self
                 .replay_funding_dependencies_and_current(
                     request,
@@ -419,6 +416,18 @@ fn is_lack_of_funds_error(error: &eyre::Report) -> bool {
         || message.contains("insufficient funds")
 }
 
+fn should_replay_funding_dependencies(
+    error: &eyre::Report,
+    category: &TransactionCategory,
+) -> bool {
+    is_lack_of_funds_error(error)
+        && matches!(
+            category,
+            TransactionCategory::ContractCreation { .. }
+                | TransactionCategory::CreatorTransaction { .. }
+        )
+}
+
 fn parse_lack_of_funds_required_value(error: &eyre::Report) -> Option<U256> {
     let message = error.to_string();
     let required = message.split("for max fee (").nth(1)?;
@@ -677,4 +686,40 @@ pub(super) fn merge_nonce_dependencies_with_replay_sequence(
         }
     }
     dependencies
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::function_detector::CreatorFunctionType;
+
+    #[test]
+    fn funding_dependency_replay_includes_creator_transactions() {
+        let error = eyre::eyre!(
+            "transaction validation error: lack of funds (187231779595947) for max fee (344019312000000)"
+        );
+        let category = TransactionCategory::CreatorTransaction {
+            creator: "0x62e5d2ca425d637a5bb737e78c3bb0aa2f9d448d".to_string(),
+            target_address: "0xc36442b4a4522e871399cd717abdd847ab11fe88".to_string(),
+            target_token: None,
+            function_type: CreatorFunctionType::LiquidityRemoval,
+        };
+
+        assert!(should_replay_funding_dependencies(&error, &category));
+        assert_eq!(
+            parse_lack_of_funds_required_value(&error),
+            Some(U256::from(344_019_312_000_000u64))
+        );
+    }
+
+    #[test]
+    fn funding_dependency_replay_ignores_regular_transactions() {
+        let error = eyre::eyre!("transaction validation error: lack of funds (1) for max fee (2)");
+        let category = TransactionCategory::Regular {
+            is_transfer: true,
+            is_approval: false,
+        };
+
+        assert!(!should_replay_funding_dependencies(&error, &category));
+    }
 }

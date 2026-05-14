@@ -278,20 +278,20 @@ fn is_stale_pending_nonce_error(error: &str) -> bool {
 }
 
 fn unresolved_intent_kind_for_simulation_result(result: &SimulationResult) -> UnresolvedIntentKind {
+    if result
+        .error
+        .as_deref()
+        .map(|error| error.contains("funding_dependency_wait"))
+        .unwrap_or(false)
+    {
+        return UnresolvedIntentKind::FundingDependency;
+    }
+
     if input_uses_uniswap_v4_modify_liquidity_selector(&result.request.tx.input) {
         return UnresolvedIntentKind::V4ModifyLiquidity;
     }
 
     match &result.request.category {
-        TransactionCategory::ContractCreation { .. }
-            if result
-                .error
-                .as_deref()
-                .map(|error| error.contains("funding_dependency_wait"))
-                .unwrap_or(false) =>
-        {
-            UnresolvedIntentKind::FundingDependency
-        }
         TransactionCategory::CreatorTransaction { function_type, .. } => match function_type {
             CreatorFunctionType::LiquidityPoolApproval => UnresolvedIntentKind::LpApproval,
             CreatorFunctionType::LiquidityRemoval => UnresolvedIntentKind::LiquidityRemoval,

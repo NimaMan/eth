@@ -6,46 +6,54 @@ action. Completed work belongs in focused docs or commit history.
 
 ## Current Runtime Snapshot
 
-Snapshot time: `2026-05-14 12:02 Europe/Amsterdam`.
+Snapshot time: `2026-05-14 20:52 Europe/Amsterdam`.
 
-- Chain server user service: `eth-chain-server.service`, active PID `983942`.
+- Chain server user service: `eth-chain-server.service`, active PID `2480566`.
 - Chain server log run:
-  `logs/eth_chain_server/run-20260514-100043Z-pid-983942`.
-- Chain server live status after restart: `live`, current block `25,092,641`,
-  `786` tracked tokens, `469` tracked pools, `403` V2, `4` V3, `62` V4,
-  `1` token tx failure, `last_block_source=live_block_update`.
-- Chain server issue log:
-  `run-20260514-100043Z-pid-983942/pipeline_issues.jsonl` has `1` row:
-  a `token_transaction_update_failed` warning at block `25,091,919`, tx
-  `0xd3612113d9f53737c1a6e2892456329d032c73f368e080ad28d9acc6b0067881`,
-  because no Uniswap V3 pool was found for token
-  `0x8Ef699477219710Ac4540919A374621f1f855510` against WETH at fee tier `100`.
-- A transient post-restart failure at block `25,092,345` with detail
-  `live chain cache not configured` was fixed. Direct live pool simulations now
-  skip optional legacy live-cache/header misses instead of counting the token
-  transaction as failed. The fresh run has no such pipeline issue for that
-  block.
+  `logs/eth_chain_server/run-20260514-164337Z-pid-2480566`.
+- Chain server live status: `live`, current block `25,095,289`, `735`
+  tracked tokens, `471` tracked pools, `426` V2, `5` V3, `40` V4,
+  `115` token tx failures, `last_error=null`.
+- Live pool API split is deployed and working:
+  `/eth/tokens/api/live/pools` returns `471` retained pools,
+  `/eth/tokens/api/live/pools/active` returns `37` non-scam pools, and
+  `/eth/tokens/api/live/pools/scam` returns `434` scam pools. The default
+  response also includes `total_count`, `active_count`, and `scam_count`.
+- The dominant chain-server issue has changed from one V3 pool identity miss to
+  repeated live token-apply failures with detail
+  `missing local Reth block header for <current block - 1>`. Recent examples
+  include block `25,095,236`, tx indexes `158` and `166`. Those example txs are
+  contract creations; they are separate from the mined Uniswap V3 WBTC/USDT
+  remove/collect tx investigated below.
 - Mempool user service: `eth-mempool-signal-detector.service`, active PID
-  `557236`.
+  `1947012`.
 - Mempool log run:
-  `logs/mempool_processor/signal_detector_2026-05-14_10-08-44`.
-- Mempool startup now logs:
-  `Live data Redis: disabled; simulations use local Reth historical context`.
-- Mempool token cache follows chain-server snapshots through HTTP. Latest
-  observed fetch was `block=25092084, tokens=832, pools=499`; the external
-  update log advanced through `@block 25092084`.
-- Mempool simulation target now follows local Reth historical context. The new
-  diagnostic line reports
-  `Latest simulation block target: 25092083 source=LocalHistoricalContext reth_finished=25092083 historical_context=25092083 live_head=None tracked_state=None`.
-- The old stale target `25091681` was caused by long-lived read-only
-  `TxSimulator` instances not enabling Reth read-only sync, so their static-file
-  header index stayed pinned to the block visible at process start.
-- The repeated LP-position approval warning in the previous mempool run was for
-  tx `0x229f8213791cc1f4b86711c174cca1bba28ca4e25ae1e733a670bd7cee3376db`,
-  a Uniswap V4 PositionManager approval for token id `0x42422`. That token id
-  was not present in the tracked position index, so no public LP-position
-  approval signal could be enriched. The retry path is now kept out of WARN logs;
-  `unresolved_intents.log` remains the record for these pending mappings.
+  `logs/mempool_processor/signal_detector_2026-05-14_16-12-52`.
+- Mempool token context is live at chain-server block `25,095,289`, but its
+  local additive cache reports `985` tokens and `57` pools while chain-server
+  reports `735` tokens and `37` active pools. This suggests the mempool cache is
+  retaining stale token/pool entries across chain-server live retention.
+- Mempool has processed `213,673` tx in the current run with `3,207/3,207`
+  simulations completed, `0` queue drops, and `1` actionable simulation error.
+- Current-run public mempool signals: `6` published and DB-written:
+  `2` `trading_enabled` and `4` `liquidity_removal`. Latest signal is
+  `liquidity_removal` tx
+  `0xece23beaf9264cee5960901c21bbc94d4c77789a1bbb4f7fc8e60e0ab7b16b3d`
+  on pool `0x1edf76d14d59f5b120d71f4541f85d00e3dee58b`, removing
+  `1.193374091004322457` WETH and leaving `0.000120721183061612`.
+- The single actionable mempool simulation error is tx
+  `0x0ad45126157ceba0ffc7e0864f0235394edbb2cdbea9f4aa40fac8012dd0a73e`,
+  a mined Uniswap V3 NonfungiblePositionManager multicall that removed and
+  collected WBTC/USDT liquidity. The pre-mine simulation ran at block
+  `25,094,878` and failed sender balance validation because the sender did not
+  yet have enough ETH for max gas. The transaction later mined successfully in
+  block `25,094,880` only after an inbound ETH funding tx in block
+  `25,094,879`. The target tx was recorded by the mempool arrival index at
+  `2026-05-14T17:30:18.250Z`; the funding tx was not recorded, so this is an
+  unseen funding-dependency gap, not a V3 pool/protocol failure.
+- LP approval publication is still blocked: latest counters show `5,596`
+  ERC20 approval ingress txs, `0` ownership hits, `9` position approvals,
+  `3` manager hits, and `0` public LP approval signals.
 - These are user systemd services. In non-login shells, use
   `XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user ...` to inspect them;
   plain system-level `systemctl` will not show these unit names.
@@ -273,12 +281,14 @@ Latest evidence:
 | 4 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest delayed baseline still has `24` open sell-failed positions. Prior sell-failure analysis showed mostly rug timing: failed exits later had reserve below `0.1 ETH`, `can_sell=false`, and `is_scam=true`, with median transition age `29` blocks. Retry-only did not recover exits. | Do not promote retry-only. Next policies should test stronger early warning from LP approvals/liquidity-removal mapping, stop-loss/reserve-drop exits, and entry filters for pools without robust observed sell support. |
 | 5 | **Strategy-review lifecycle completeness** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | Submitted order lifecycle rows are persisted and exposed through chain-server reports with `position_id` and `order_side`. The frontend historical backtest detail view renders `Lifecycle` and `Decision Audit` tabs. The delayed 70K reruns verify submitted/final rows for all `848` orders per run, with every final row exactly one block after its submitted row. | Review the delayed `maxhold20` candidate in Asena, especially the 24 sell-failed positions, top winners, worst losers, and decision audit rows. Any next policy must improve against this delayed-execution baseline. |
 | 6 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
-| 7 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
-| 8 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
-| 9 | **Residual Redis code outside the production chain-server path** | `tx_simulator`, `tx_processor`, `alpha/live/state`, docs | Production chain-server live token tracking no longer uses Redis and `TxSimulator::new()` no longer auto-attaches Redis. Mempool startup no longer accepts a Redis live cache. Legacy modules still exist: `tx_simulator::live_chain_cache`, `live_data_registry`, `tx_processor::live::{redis_block_publisher, block_notifier}`, `LiveProcessedBlockProvider`, and `alpha/live/state` Redis key contracts. | Decide which legacy Redis pieces are still needed for diagnostics or compatibility. Feature-gate or remove unused production exports after the mempool simulator freshness fix is in place. Update READMEs that still describe Redis as a normal runtime dependency. |
-| 10 | **Mempool startup ordering** | `mempool_processor`, systemd units | On restart, mempool starts after the chain-server process, but before the HTTP listener is ready. It logs one `Connection refused` hydrate failure, then waits for token cache population and recovers. This is noisy and can delay startup diagnostics. | Add a readiness wait or health-check loop before first hydrate, or use a chain-server health endpoint in service startup. Keep the current retry path, but make the first connection-refused warning less alarming if startup is still inside the grace window. |
-| 11 | **Strict processed-block replay readiness** | `tx_processor`, `tx_simulator`, `reth_chain_query` | Prior warmup/live replay hit mined transaction validation failures such as `lack of funds` when local state context lagged or was sparse. Current chain-server run has one V3 identity failure, but no stale-Reth validation failure. | Keep block processing strict. Add readiness/parity regression checks around historical context startup and known problematic blocks `25,078,746` and `25,033,700`. |
-| 12 | **Token candidate-selection scaling** | `eth_token` | The current live run is mostly healthy, but the known algorithmic risk remains: V3/V4 ERC721 transfer/approval candidates can scan tracked registry state instead of using a position-manager/token-id index. This can reappear as tracked pool count grows. | Implement indexed V3/V4 LP-position and approval lookup keyed by position manager, token id, owner, and operator. Candidate selection should scale with events in the transaction, not total tracked tokens/pools. |
+| 7 | **Live previous-block header miss** | `eth_token`, `eth_chain_server`, `tx_processor` | The current chain-server run has `115` token tx failures. The dominant issue is `missing local Reth block header for <current block - 1>` during live token apply, not a pool identity miss. Recent failures include block `25,095,236`, tx indexes `158` and `166`; those txs are contract creations, so the header miss is broader than V3 liquidity actions. This indicates a live previous-block context/header lookup path is still reading only local Reth historical context when the needed latest header should be available from the live block update path. | Reproduce one header miss and trace the exact header lookup. The correct live options are only: use the local Reth DB when the parent header is already committed, or use the live block/processed-block context when the parent is ahead of local historical context. No Redis or silent fallback. |
+| 8 | **Mempool token cache is not an authoritative replacement snapshot** | `mempool_processor`, `eth_chain_server` | Chain-server reports `735` live tokens and `37` active pools, while the mempool cache reports `985` tokens and `57` pools at the same live context block. The mempool cache applies snapshots additively, so tokens/pools removed by chain-server retention can remain routable in the mempool context. | Make live-token-server snapshot application authoritative for the mempool cache: remove token/pool/creator/index entries absent from the accepted live snapshot while preserving monotonic block/status checks. Then recheck signal routing counts against `/live/pools/active` and `/live/pools/scam`. |
+| 9 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The current mempool run saw `5,596` ERC20 approval ingress txs, `9` position approval txs, `3` position-manager hits, and `0` public LP approval signals. Public LP approval signals are blocked because ownership/position share mapping is missing or not computable for many candidate approvals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
+| 10 | **Mempool scam-protection signal coverage** | `mempool_processor`, `eth_chain_server`, `alpha` | The current run has `6` published signals: `2` trading-enabled and `4` liquidity-removal, all DB-written. That confirms the end-to-end signal path works, but no LP approvals, tax changes, sell-blocked, or token-supply-risk signals have published yet. | Keep monitoring signal distribution. Prioritize LP approval mapping and V3/V4 liquidity-modify mapping because those are the fastest pre-rug exits for open positions. |
+| 11 | **Mempool funding dependency visibility gaps** | `mempool_processor`, `tx_simulator`, `reth_chain_query` | The one current actionable simulation error is mined tx `0x0ad45126157ceba0ffc7e0864f0235394edbb2cdbea9f4aa40fac8012dd0a73e`, a Uniswap V3 WBTC/USDT remove/collect multicall. We simulated it at block `25,094,878` and failed max-gas balance validation. The sender was funded in block `25,094,879` by tx `0x30936be70a4f81d2be5d966d5bb3a9bfc1e54c325d126a24b4013a29b775a6ad`, then the target mined in block `25,094,880`. The arrival index recorded the target but not the funding tx, so the dependency replay lane had no visible funding to include. Code now routes lack-of-funds creator transactions through the funding dependency lane, matching contract creations. | Rebuild/restart the mempool processor and verify future V3/V4 creator-control lack-of-funds cases appear as `funding_dependency` unresolved diagnostics, not actionable `SIMULATION_ERROR` rows. Keep visible funding replay for mempool-seen inbound ETH transfers. |
+| 12 | **Residual Redis code outside the production chain-server path** | `alpha/live/state`, docs | Production chain-server live token tracking no longer uses Redis. `tx_simulator` no longer owns Redis live-cache state, and tx_processor no longer includes the Redis live publisher/provider path. The remaining Redis-shaped contract is the old `alpha/live/state` key layout plus any docs that describe it as normal runtime infrastructure. | Keep production paths Redis-free. Decide whether `alpha/live/state` is still needed for diagnostics, then remove or feature-gate it and finish stale-doc cleanup. |
+| 13 | **Mempool startup ordering** | `mempool_processor`, systemd units | On restart, mempool starts after the chain-server process, but before the HTTP listener is ready. It logs one `Connection refused` hydrate failure, then waits for token cache population and recovers. This is noisy and can delay startup diagnostics. | Add a readiness wait or health-check loop before first hydrate, or use a chain-server health endpoint in service startup. Keep the current retry path, but make the first connection-refused warning less alarming if startup is still inside the grace window. |
+| 14 | **Token candidate-selection scaling** | `eth_token` | The current live run is mostly healthy outside the header miss class, but the known algorithmic risk remains: V3/V4 ERC721 transfer/approval candidates can scan tracked registry state instead of using a position-manager/token-id index. This can reappear as tracked pool count grows. | Implement indexed V3/V4 LP-position and approval lookup keyed by position manager, token id, owner, and operator. Candidate selection should scale with events in the transaction, not total tracked tokens/pools. |
 
 ## Redis Cleanup Status
 
@@ -290,8 +300,11 @@ Done:
   not tail `eth/live/blocks` or load live blocks through
   `LiveProcessedBlockProvider`.
 - `TxSimulator::new()` and `TxSimulator::with_provider_factory()` no longer
-  auto-attach Redis live state. Redis live cache is explicit opt-in via
-  `with_default_live_chain_cache()` or `with_live_chain_cache(...)`.
+  auto-attach Redis live state; tx_simulator no longer exposes the Redis live
+  cache modules.
+- `tx_processor` no longer includes the old Redis live publisher/provider or
+  `live_block_processor` binary. Confirmed processed blocks now come through
+  `eth_chain_server`'s direct live runtime and processed-block replay store.
 - `mempool_signal_detector` no longer constructs a Redis `LiveChainCache` at
   startup and no longer has `simulation.live_data_redis_url` in its config.
 - Long-lived `TxSimulator::new()` instances enable Reth read-only sync, so
@@ -311,12 +324,6 @@ Done:
 
 Still present by design or migration debt:
 
-- `tx_simulator/src/block_context/live_chain_cache/` and
-  `live_data_registry/` remain as legacy Redis snapshot helpers.
-- `tx_processor/src/live/redis_block_publisher.rs`,
-  `tx_processor/src/live/block_notifier.rs`, and
-  `tx_processor/src/processed_tx_provider/block/live.rs` still implement the
-  old Redis block transport.
 - `alpha/live/state` still owns the old `eth/live/...` Redis key contract.
 - Several READMEs and docs still describe Redis as a normal live-state path.
 
@@ -370,16 +377,22 @@ Recent checks that passed during this cleanup:
 7. Run the same policy in live shadow/live-backtest mode against the current
    chain-server and mempool pipeline. Treat this as a rough current-regime
    estimate and drift detector, not as the deployment target.
-8. Reproduce the block `25,091,919` V3 pool identity miss and restore
-   chain-server soak expectations to `tx_failures=0` and `pipeline_issues=0`.
-9. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
+8. Reproduce the live previous-block header miss, starting with block
+   `25,095,236` tx indexes `158` and `166`, and restore chain-server soak
+   expectations to `tx_failures=0` and `pipeline_issues=0`.
+9. Make mempool live token-cache snapshot application authoritative so stale
+   retained tokens/pools do not remain routable after chain-server retention.
+10. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
    on-demand position-manager backfill before public signal publication.
-10. Add a mempool readiness wait against chain-server HTTP health.
-11. Run a longer chain-server and mempool soak:
+11. Add a mempool readiness wait against chain-server HTTP health.
+12. Rebuild/restart the mempool processor after the funding-dependency fix, then
+   verify mined-success creator-control lack-of-funds cases no longer appear in
+   `simulation_errors.log`.
+13. Run a longer chain-server and mempool soak:
    chain-server must keep `tx_failures=0` and `pipeline_issues=0`, while
    mempool simulation target lag should stay within the accepted threshold.
-12. Remove or feature-gate legacy Redis modules only after the production
+14. Remove or feature-gate legacy Redis modules only after the production
    mempool path no longer needs any Redis-compatible fallback.
-13. Continue the broader strategy comparison as supporting evidence, but let the
+15. Continue the broader strategy comparison as supporting evidence, but let the
    exact two-week backtest and live shadow/live-backtest drive the real
    deployment decision.

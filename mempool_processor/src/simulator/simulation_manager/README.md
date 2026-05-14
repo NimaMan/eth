@@ -62,11 +62,12 @@ simulation_manager/
 
 3. **Preserve fresh-wallet funding order**
    `pending_funding_dependencies` records visible inbound ETH transfers keyed
-   by recipient. When a fresh contract creation fails with `lack of funds` at
-   the selected base block, the manager replays the matching funding txs first
-   and then the deployment. If the funding tx was private or not visible in our
-   public mempool feed, the result is classified as a funding dependency gap
-   rather than an actionable simulation error.
+   by recipient. When a contract creation or creator-control transaction fails
+   with `lack of funds` at the selected base block, the manager replays the
+   matching funding txs first and then the target transaction. If the funding tx
+   was private or not visible in our public mempool feed, the result is
+   classified as a funding dependency gap rather than an actionable simulation
+   error.
 
 4. **Simulate creator activity per pool**
    Every creator transaction is run through the mempool simulator and then
