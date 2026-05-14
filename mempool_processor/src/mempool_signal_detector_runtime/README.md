@@ -190,8 +190,9 @@ should not appear there after the unresolved-intent path is active.
 - Mempool ingress: received/dropped IPC counts and simulation queue depth.
 - Simulation submitted/ok/error totals.
 - Signal counts and publisher errors.
-- LP approval path: router approvals, tracked approvals, cache misses,
-  published count, DB errors.
+- LP approval path: newly seen ingress transactions are reported separately
+  from unresolved-lane retry attempts, with ERC20 LP, concentrated-position,
+  mapping-hit, cache-miss, published, and DB-error counts.
 - Token cache: token/pool/creator counts plus context block/status/source and
   stale/non-live rejection counters.
 - Unresolved intents: pending, in-flight, resolved, expired, dropped,

@@ -7,71 +7,26 @@ use crate::token_tracking::TokenTrackingCache;
 use crate::unresolved_intents::UnresolvedIntentKind;
 use alloy_primitives::Address as AlloyAddress;
 use reth_chain_query::to_checksum_address;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::liquidity_intent::{
+use super::liquidity::{
     is_known_position_manager_candidate, is_protocol_liquidity_removal_candidate,
     is_v4_modify_liquidity_candidate, liquidity_removal_token_candidates,
 };
+use super::metrics::{LpApprovalRouterStats, RouteOrigin, RouterMetrics};
+use super::types::{
+    priority_for_creator_function, should_route_tracked_token_call, ClassificationResult,
+    SimulationPriority, TransactionCategory,
+};
 use super::{ContractCreationRouter, CreatorTransactionRouter};
 
-#[derive(Debug, Clone)]
-pub enum TransactionCategory {
-    ContractCreation {
-        deployer: String,
-        contract_address: String,
-        is_token: bool,
-        has_liquidity_in_calldata: bool,
-    },
-    CreatorTransaction {
-        creator: String,
-        target_address: String,
-        target_token: Option<String>,
-        function_type: CreatorFunctionType,
-    },
-    Regular {
-        is_transfer: bool,
-        is_approval: bool,
-    },
-}
-
 pub use crate::function_detector::CreatorFunctionType;
-
-#[derive(Debug, Clone)]
-pub struct ClassificationResult {
-    pub category: TransactionCategory,
-    pub priority: SimulationPriority,
-    pub requires_simulation: bool,
-    pub requires_buy_sell_test: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct LpApprovalRouterStats {
-    pub erc20_approval_calls_seen: u64,
-    pub ownership_token_pool_hits: u64,
-    pub position_approval_calls_seen: u64,
-    pub position_manager_hits: u64,
-    pub pool_cache_misses: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SimulationPriority {
-    Critical = 0,
-    High = 1,
-    Normal = 2,
-    Low = 3,
-}
 
 pub struct TransactionRouter {
     contract_router: ContractCreationRouter,
     creator_router: CreatorTransactionRouter,
     token_cache: Option<Arc<TokenTrackingCache>>,
-    lp_erc20_approval_calls_seen: AtomicU64,
-    lp_ownership_token_pool_hits: AtomicU64,
-    lp_position_approval_calls_seen: AtomicU64,
-    lp_position_manager_hits: AtomicU64,
-    lp_pool_cache_misses: AtomicU64,
+    metrics: RouterMetrics,
 }
 
 impl TransactionRouter {
@@ -80,24 +35,22 @@ impl TransactionRouter {
             contract_router: ContractCreationRouter::new(),
             creator_router: CreatorTransactionRouter::new(token_cache.clone()),
             token_cache,
-            lp_erc20_approval_calls_seen: AtomicU64::new(0),
-            lp_ownership_token_pool_hits: AtomicU64::new(0),
-            lp_position_approval_calls_seen: AtomicU64::new(0),
-            lp_position_manager_hits: AtomicU64::new(0),
-            lp_pool_cache_misses: AtomicU64::new(0),
+            metrics: RouterMetrics::default(),
         }
     }
 
     pub fn lp_approval_stats(&self) -> LpApprovalRouterStats {
-        LpApprovalRouterStats {
-            erc20_approval_calls_seen: self.lp_erc20_approval_calls_seen.load(Ordering::Relaxed),
-            ownership_token_pool_hits: self.lp_ownership_token_pool_hits.load(Ordering::Relaxed),
-            position_approval_calls_seen: self
-                .lp_position_approval_calls_seen
-                .load(Ordering::Relaxed),
-            position_manager_hits: self.lp_position_manager_hits.load(Ordering::Relaxed),
-            pool_cache_misses: self.lp_pool_cache_misses.load(Ordering::Relaxed),
-        }
+        self.metrics.lp_approval_stats()
+    }
+
+    pub fn observe_route(
+        &self,
+        tx: &MempoolTransaction,
+        classification: &ClassificationResult,
+        origin: RouteOrigin,
+    ) {
+        self.metrics
+            .observe_classification(tx, classification, origin);
     }
 
     pub fn unresolved_intent_for(
@@ -285,11 +238,7 @@ impl TransactionRouter {
             return None;
         }
 
-        self.lp_erc20_approval_calls_seen
-            .fetch_add(1, Ordering::Relaxed);
-
         let Some(ref cache) = self.token_cache else {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
         let target_address = to_checksum_address(&approval.ownership_token);
@@ -298,12 +247,8 @@ impl TransactionRouter {
             .get_pool_by_liquidity_ownership_token(&target_address)
             .await
         else {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-
-        self.lp_ownership_token_pool_hits
-            .fetch_add(1, Ordering::Relaxed);
 
         Some(ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
@@ -324,7 +269,6 @@ impl TransactionRouter {
     ) -> Option<ClassificationResult> {
         let approval = decode_position_approval_call(tx)?;
         let Some(ref cache) = self.token_cache else {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
         let position_manager = to_checksum_address(&approval.position_manager());
@@ -333,15 +277,9 @@ impl TransactionRouter {
         {
             return None;
         }
-        self.lp_position_approval_calls_seen
-            .fetch_add(1, Ordering::Relaxed);
         if !cache.is_position_manager(&position_manager).await {
-            self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         }
-
-        self.lp_position_manager_hits
-            .fetch_add(1, Ordering::Relaxed);
 
         Some(ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
@@ -496,34 +434,8 @@ impl TransactionRouter {
     }
 }
 
-fn should_route_tracked_token_call(function_type: &CreatorFunctionType) -> bool {
-    matches!(
-        function_type,
-        CreatorFunctionType::TradingControl
-            | CreatorFunctionType::TaxModification
-            | CreatorFunctionType::MaxWalletLimit
-            | CreatorFunctionType::OwnershipChange
-            | CreatorFunctionType::LiquidityPoolApproval
-            | CreatorFunctionType::TokenSupplyModification
-    )
-}
-
-fn priority_for_creator_function(function_type: &CreatorFunctionType) -> SimulationPriority {
-    match function_type {
-        CreatorFunctionType::TaxModification => SimulationPriority::Critical,
-        CreatorFunctionType::TradingControl => SimulationPriority::Critical,
-        CreatorFunctionType::OwnershipChange => SimulationPriority::High,
-        CreatorFunctionType::LiquidityAddition => SimulationPriority::High,
-        CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical,
-        CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
-        CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
-        CreatorFunctionType::TokenSupplyModification => SimulationPriority::Critical,
-        CreatorFunctionType::Other(_) => SimulationPriority::High,
-    }
-}
-
 #[cfg(test)]
-#[path = "tx_router_protocol_tests.rs"]
+#[path = "tests/protocol.rs"]
 mod protocol_tests;
 
 #[cfg(test)]
@@ -536,8 +448,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ClassificationResult, CreatorFunctionType, SimulationPriority, TransactionCategory,
-        TransactionRouter,
+        ClassificationResult, CreatorFunctionType, RouteOrigin, SimulationPriority,
+        TransactionCategory, TransactionRouter,
     };
     use crate::mempool_fetcher::MempoolTransaction;
     use crate::token_tracking::types::PoolLifecycle;
@@ -713,6 +625,7 @@ mod tests {
         assert_eq!(classification.priority, SimulationPriority::Critical);
         assert!(!classification.requires_simulation);
         assert!(!classification.requires_buy_sell_test);
+        router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
         match classification.category {
             TransactionCategory::CreatorTransaction {
                 target_address,
@@ -728,9 +641,9 @@ mod tests {
         }
 
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.erc20_approval_calls_seen, 1);
-        assert_eq!(stats.ownership_token_pool_hits, 1);
-        assert_eq!(stats.pool_cache_misses, 0);
+        assert_eq!(stats.ingress_erc20_approval_txs, 1);
+        assert_eq!(stats.ingress_ownership_token_pool_hits, 1);
+        assert_eq!(stats.ingress_pool_cache_miss_txs, 0);
     }
 
     #[tokio::test]
@@ -764,10 +677,44 @@ mod tests {
             }
         ));
 
+        router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.erc20_approval_calls_seen, 1);
-        assert_eq!(stats.ownership_token_pool_hits, 0);
-        assert_eq!(stats.pool_cache_misses, 1);
+        assert_eq!(stats.ingress_erc20_approval_txs, 1);
+        assert_eq!(stats.ingress_ownership_token_pool_hits, 0);
+        assert_eq!(stats.ingress_pool_cache_miss_txs, 1);
+    }
+
+    #[tokio::test]
+    async fn separates_ingress_tx_counts_from_unresolved_retry_attempts() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x5555555555555555555555555555555555555555")),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(1u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+        };
+
+        let classification = router.classify(&tx).await;
+        router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
+        router.observe_route(&tx, &classification, RouteOrigin::UnresolvedRetry);
+
+        let stats = router.lp_approval_stats();
+        assert_eq!(stats.ingress_erc20_approval_txs, 1);
+        assert_eq!(stats.ingress_pool_cache_miss_txs, 1);
+        assert_eq!(stats.retry_erc20_approval_attempts, 1);
+        assert_eq!(stats.retry_pool_cache_miss_attempts, 1);
     }
 
     #[tokio::test]
@@ -880,10 +827,11 @@ mod tests {
         assert!(!classification.requires_simulation);
         assert!(!classification.requires_buy_sell_test);
 
+        router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.erc20_approval_calls_seen, 1);
-        assert_eq!(stats.ownership_token_pool_hits, 0);
-        assert_eq!(stats.pool_cache_misses, 1);
+        assert_eq!(stats.ingress_erc20_approval_txs, 1);
+        assert_eq!(stats.ingress_ownership_token_pool_hits, 0);
+        assert_eq!(stats.ingress_pool_cache_miss_txs, 1);
     }
 
     async fn hydrate_token(cache: &TokenTrackingCache, token_address: &str) {

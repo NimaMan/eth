@@ -10,7 +10,7 @@ use mempool_processor::{
     simulator::{
         MempoolSimulator, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
     },
-    tx_router::{TransactionCategory, TransactionRouter},
+    tx_router::{RouteOrigin, TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
 };
 use tokio::sync::mpsc;
@@ -109,6 +109,7 @@ pub(crate) async fn retry_cache_waiting_unresolved_intents(
     let intents = unresolved_intent_store.take_ready_for_retry().await;
     for intent in intents {
         let classification = tx_router.classify(&intent.tx).await;
+        tx_router.observe_route(&intent.tx, &classification, RouteOrigin::UnresolvedRetry);
         if let Some((_kind, reason)) = tx_router.unresolved_intent_for(&intent.tx, &classification)
         {
             unresolved_intent_store

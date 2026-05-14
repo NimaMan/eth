@@ -52,7 +52,7 @@ use mempool_processor::{
         hydrate_cache_from_live_token_server, start_live_token_server_cache_sync, CacheConfig,
         TokenTrackingCache,
     },
-    tx_router::{TransactionCategory, TransactionRouter},
+    tx_router::{RouteOrigin, TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
 };
 
@@ -504,6 +504,7 @@ async fn main() -> Result<()> {
                     .await;
 
                 let classification = tx_router.classify(&tx).await;
+                tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
                 match &classification.category {
                     TransactionCategory::ContractCreation { .. }
                     | TransactionCategory::CreatorTransaction { .. } => {}
@@ -638,12 +639,17 @@ async fn main() -> Result<()> {
             }
             let lp_approval_stats = tx_router.lp_approval_stats();
             info!(
-                "📊 LP approval path: erc20_approval_calls={} ownership_token_pool_hits={} position_approval_calls={} position_manager_hits={} pool_cache_misses={} published={} db_errors={}",
-                lp_approval_stats.erc20_approval_calls_seen,
-                lp_approval_stats.ownership_token_pool_hits,
-                lp_approval_stats.position_approval_calls_seen,
-                lp_approval_stats.position_manager_hits,
-                lp_approval_stats.pool_cache_misses,
+                "📊 LP approval path: ingress_txs erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | retry_attempts erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | published={} db_errors={}",
+                lp_approval_stats.ingress_erc20_approval_txs,
+                lp_approval_stats.ingress_ownership_token_pool_hits,
+                lp_approval_stats.ingress_position_approval_txs,
+                lp_approval_stats.ingress_position_manager_hits,
+                lp_approval_stats.ingress_pool_cache_miss_txs,
+                lp_approval_stats.retry_erc20_approval_attempts,
+                lp_approval_stats.retry_ownership_token_pool_hits,
+                lp_approval_stats.retry_position_approval_attempts,
+                lp_approval_stats.retry_position_manager_hits,
+                lp_approval_stats.retry_pool_cache_miss_attempts,
                 publisher_stats.lp_approvals,
                 publisher_stats.db_errors
             );

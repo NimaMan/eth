@@ -1,7 +1,7 @@
 use crate::mempool_fetcher::MempoolTransaction;
 use alloy_primitives::{address, Address as AlloyAddress};
 
-pub(super) fn liquidity_removal_token_candidates(input: &[u8]) -> Vec<String> {
+pub(crate) fn liquidity_removal_token_candidates(input: &[u8]) -> Vec<String> {
     (0..2)
         .filter_map(|param_idx| calldata_address_param(input, param_idx))
         .collect()
@@ -16,7 +16,7 @@ fn calldata_address_param(input: &[u8], param_idx: usize) -> Option<String> {
     Some(format!("0x{}", hex::encode(&input[start..end])))
 }
 
-pub(super) fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
+pub(crate) fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -> bool {
     let Some(selector) = tx.input.get(0..4) else {
         return false;
     };
@@ -37,7 +37,7 @@ pub(super) fn is_protocol_liquidity_removal_candidate(tx: &MempoolTransaction) -
             .unwrap_or(false))
 }
 
-pub(super) fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool {
+pub(crate) fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool {
     let Some(selector) = tx.input.get(0..4) else {
         return false;
     };
@@ -47,7 +47,7 @@ pub(super) fn is_v4_modify_liquidity_candidate(tx: &MempoolTransaction) -> bool 
     )
 }
 
-pub(super) fn is_known_position_manager_candidate(address: &AlloyAddress) -> bool {
+pub(crate) fn is_known_position_manager_candidate(address: &AlloyAddress) -> bool {
     *address == address!("C36442b4a4522E871399CD717aBDD847Ab11FE88")
         || *address == address!("bd216513d74c8cf14cf4747e6aaa6420ff64ee9e")
 }
