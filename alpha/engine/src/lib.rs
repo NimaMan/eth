@@ -448,6 +448,18 @@ where
         position.mark_intent_created(intent.side)?;
         let report = self.execution.execute(intent.clone()).await?;
         position.mark_order_submitted(report.order_id.clone(), intent.side)?;
+        self.store.upsert_position(&position).await?;
+        if report.status != ExecutionStatus::Submitted {
+            let submitted_report = submitted_report_for(
+                &report,
+                report
+                    .block_number
+                    .or_else(|| self.market.as_ref().map(|m| m.block_number)),
+            );
+            self.store
+                .record_order_execution_report(&position.id, intent.side, &submitted_report)
+                .await?;
+        }
         let report_status = report.status.clone();
 
         // Chain-sim buys provide both cost basis and token amount, so entry
@@ -532,6 +544,19 @@ where
             .get(&id)
             .cloned()
             .unwrap_or_else(|| Position::new(id, key))
+    }
+}
+
+fn submitted_report_for(report: &ExecutionReport, block_number: Option<u64>) -> ExecutionReport {
+    ExecutionReport {
+        order_id: report.order_id.clone(),
+        status: ExecutionStatus::Submitted,
+        tx_hash: report.tx_hash,
+        block_number,
+        filled_amount: None,
+        token_amount: None,
+        gas_used: None,
+        error: None,
     }
 }
 
@@ -711,10 +736,15 @@ impl MemoryTradingStore {
 #[async_trait]
 impl TradingStore for MemoryTradingStore {
     async fn upsert_position(&self, position: &Position) -> Result<()> {
-        self.positions
-            .lock()
-            .expect("store lock")
-            .push(position.clone());
+        let mut positions = self.positions.lock().expect("store lock");
+        if let Some(existing) = positions
+            .iter_mut()
+            .find(|existing| existing.id == position.id)
+        {
+            *existing = position.clone();
+        } else {
+            positions.push(position.clone());
+        }
         Ok(())
     }
 
@@ -864,7 +894,10 @@ mod tests {
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
         assert_eq!(store.order_intents().len(), 1);
-        assert_eq!(store.execution_reports().len(), 1);
+        let execution_reports = store.execution_reports();
+        assert_eq!(execution_reports.len(), 2);
+        assert_eq!(execution_reports[0].status, ExecutionStatus::Submitted);
+        assert_eq!(execution_reports[1].status, ExecutionStatus::Confirmed);
         assert_eq!(store.positions().len(), 1);
         let decisions = store.strategy_decisions();
         assert_eq!(decisions.len(), 1);

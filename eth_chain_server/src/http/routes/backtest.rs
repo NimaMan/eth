@@ -73,7 +73,7 @@ pub(super) async fn run_execution_reports(
 ) -> Result<warp::reply::Response, Infallible> {
     match state
         .alpha_trading
-        .run_execution_reports(&run_id, 100)
+        .run_execution_reports(&run_id, 250)
         .await
     {
         Ok(reports) => Ok(json_response(&reports, StatusCode::OK)),

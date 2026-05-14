@@ -159,6 +159,8 @@ pub struct OrderIntentView {
 #[derive(Debug, Serialize)]
 pub struct ExecutionReportView {
     pub id: i64,
+    pub position_id: Option<String>,
+    pub order_side: Option<String>,
     pub order_id: String,
     pub status: String,
     pub tx_hash: Option<String>,
@@ -696,12 +698,12 @@ impl AlphaTradingStore {
     ) -> Result<Vec<ExecutionReportView>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, order_id, status, tx_hash, block_number, filled_amount_raw,
+            SELECT id, position_id, order_side, order_id, status, tx_hash, block_number, filled_amount_raw,
                    filled_amount_decimals, gas_used, error,
                    created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.execution_reports
             WHERE run_id = $1
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT $2
             "#,
         )
@@ -974,6 +976,8 @@ fn row_to_order(row: &sqlx::postgres::PgRow) -> Result<OrderIntentView> {
 fn row_to_execution_report(row: &sqlx::postgres::PgRow) -> Result<ExecutionReportView> {
     Ok(ExecutionReportView {
         id: int(row, "id")?,
+        position_id: optional_text(row, "position_id")?,
+        order_side: optional_text(row, "order_side")?,
         order_id: text(row, "order_id")?,
         status: text(row, "status")?,
         tx_hash: optional_text(row, "tx_hash")?,

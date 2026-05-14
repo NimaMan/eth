@@ -6,16 +6,16 @@ action. Completed work belongs in focused docs or commit history.
 
 ## Current Runtime Snapshot
 
-Snapshot time: `2026-05-14 11:19 Europe/Amsterdam`.
+Snapshot time: `2026-05-14 12:02 Europe/Amsterdam`.
 
-- Chain server user service: `eth-chain-server.service`, active PID `795094`.
+- Chain server user service: `eth-chain-server.service`, active PID `983942`.
 - Chain server log run:
-  `logs/eth_chain_server/run-20260514-091629Z-pid-795094`.
-- Chain server live status: `live`, current block `25,092,430`, `796`
-  tracked tokens, `477` tracked pools, `406` V2, `5` V3, `66` V4,
+  `logs/eth_chain_server/run-20260514-100043Z-pid-983942`.
+- Chain server live status after restart: `live`, current block `25,092,641`,
+  `786` tracked tokens, `469` tracked pools, `403` V2, `4` V3, `62` V4,
   `1` token tx failure, `last_block_source=live_block_update`.
 - Chain server issue log:
-  `run-20260514-091629Z-pid-795094/pipeline_issues.jsonl` has `1` row:
+  `run-20260514-100043Z-pid-983942/pipeline_issues.jsonl` has `1` row:
   a `token_transaction_update_failed` warning at block `25,091,919`, tx
   `0xd3612113d9f53737c1a6e2892456329d032c73f368e080ad28d9acc6b0067881`,
   because no Uniswap V3 pool was found for token
@@ -167,6 +167,27 @@ Latest evidence:
   `/eth/tokens/api/alpha/runs/{run_id}/decision-audit`. For the full candidate
   run it returns `20` rows: `10` top and `10` worst positions with entry reason,
   exit reason, sell report status, PnL, and ROI.
+- Order lifecycle persistence now records a `submitted` execution report before
+  the simulated final report when the adapter returns `confirmed` or `failed`
+  directly. The smoke run
+  `lifecycle-smoke-20260514-095812Z` wrote `12` `buy/submitted`, `12`
+  `buy/confirmed`, `10` `sell/submitted`, `9` `sell/confirmed`, and `1`
+  `sell/failed` report. This makes the position lifecycle visible without
+  changing existing chain-sim PnL semantics.
+- Chain-server report APIs now expose `position_id` and `order_side`, and the
+  Asena historical backtest detail route has `Lifecycle` and `Decision Audit`
+  tabs. The lifecycle tab groups execution reports into steps such as
+  `buy_submitted`, `buy_confirmed`, `sell_submitted`, and `sell_failed`.
+  Existing candidate runs need to be rerun to show submitted rows because older
+  runs only persisted final execution reports.
+- The current `maxhold20+risk exits` candidate was rerun as
+  `live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z`
+  over requested window `24,991,500..25,092,658`. It completed with `129,121`
+  events, `546` positions, `1,080` final execution reports, `1,080`
+  submitted lifecycle rows, `1,044` confirmed final reports, `36` failed final
+  reports, and `24` open sell-failed positions. Strategy Lab reports total PnL
+  `+10.937672043030798303 ETH` and PnL excluding top 10
+  `+7.537017330863964774 ETH`.
 
 ## Active Bottlenecks
 
@@ -175,7 +196,7 @@ Latest evidence:
 | 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned no-capital evidence is now `maxhold20+risk exits` after the failed-exit retry fix: `+10.906166875635052281 ETH` total PnL, `+7.505512163468218752 ETH` excluding top 10, and `23` sell-failed positions on the latest partial two-week-requested replay. Evidence is still incomplete for real orders because the run is partial coverage, still has failed exits, and lacks final execution gates. | Treat `maxhold20+risk exits` as the current no-capital candidate, then resolve remaining failed-exit policy, add frontend decision joins, and restore full two-week observation coverage before real execution handoff. |
 | 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | `maxhold20+risk exits` improves ex-top-10 PnL versus `maxhold50` (`+7.505512163468218752 ETH` vs `+5.964572908101519810 ETH`) while reducing sell-failed positions from `59` to `23`. `maxhold10` reduces sell-failed positions further to `9`, but gives up more total and ex-top-10 PnL. | Keep `maxhold20+risk exits` as the current baseline candidate. Compare any new policy against this run's PnL, concentration, failed exits, and decision-ledger audit quality. |
 | 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The sell-failure root cause is mostly rug timing: `53/59` maxhold50 failures later showed reserve below `0.1 ETH`, `can_sell=false`, and `is_scam=true`, with median transition age `29` blocks. Retry-only did not recover exits. A strategy-side bug also let failed exits resubmit from market max-hold events; this is fixed so retries are centralized in `on_position_monitor`. | Do not promote retry-only. Next policies should test stronger early warning from LP approvals/liquidity-removal mapping, stop-loss/reserve-drop exits, and entry filters for pools without robust observed sell support. |
-| 4 | **Decision-ledger frontend audit view** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | The alpha engine now emits `alpha_trading.strategy_decisions` rows for market, risk, and position-monitor decisions. Chain-server exposes raw decisions at `/eth/tokens/api/alpha/runs/{run_id}/decisions` and a joined top/worst read model at `/eth/tokens/api/alpha/runs/{run_id}/decision-audit`. The remaining gap is rendering this joined audit in the frontend. | Add the frontend view for the decision-audit endpoint and make it link positions, execution reports, exit failures, and PnL snapshots for top/worst review. |
+| 4 | **Strategy-review lifecycle completeness** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | Submitted order lifecycle rows are now persisted for new runs and exposed through chain-server reports with `position_id` and `order_side`. The frontend historical backtest detail view renders `Lifecycle` and `Decision Audit` tabs. The full candidate run `live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z` verifies submitted/final rows for buy and sell and exposes top/worst audit rows in the frontend. | Review the candidate in Asena, especially the 24 sell-failed positions and worst 10 decision audit rows. Any next policy must improve against this lifecycle-enabled baseline. |
 | 5 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
 | 6 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
 | 7 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
@@ -237,7 +258,13 @@ Recent checks that passed during this cleanup:
 - `cargo check -p mempool_processor`
 - `cargo build -p eth_chain_server -p mempool_processor --release --bin eth_chain_server --bin mempool_signal_detector`
 - `cargo run -p tx_simulator --release --example verify_database_setup`
-- `cargo test -p eth_token token_update_router --lib`
+- `cargo fmt --check`
+- `cargo test -p eth_alpha_engine --lib`
+- `cargo check -p eth_alpha_engine -p eth_alpha_store -p eth_chain_server -p eth_alpha_backtest`
+- `npm run build` from `interface/new_Asena`
+- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id lifecycle-smoke-20260514-095812Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25073540 --to-block 25073620 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
+- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 24991500 --to-block 25092658 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
+- `cargo run -q -p eth_alpha_lab --bin eth_alpha_lab -- strategy --run-id live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z --limit 10`
 - `cargo check -p eth_chain_server -p eth_token`
 - `cargo build --release -p eth_chain_server --bin eth_chain_server`
 
@@ -245,13 +272,14 @@ Recent checks that passed during this cleanup:
 
 1. Decide whether the next blocker is policy quality or missing historical
    observation coverage for a true two-week replay.
-2. Implement the next failed-exit policy improvement against the `maxhold50`
-   baseline: chunked exits, no-observed-sell exposure limits, or earlier
-   risk-driven exits. Retry cadence exists now, but retry-only was not useful in
-   the latest comparison.
-3. Add the frontend view for the candidate decision-audit endpoint so top
-   winners, worst losers, skipped entries, and failed exits can be reviewed
-   without ad hoc SQL or Token Lab spot checks.
+2. Implement the next failed-exit policy improvement against the current
+   `maxhold20+risk exits` baseline: chunked exits, no-observed-sell exposure
+   limits, or earlier risk-driven exits. Retry cadence exists now, but
+   retry-only was not useful in the latest comparison.
+3. Review the lifecycle-enabled candidate in the frontend, including top
+   winners, worst losers, skipped entries, lifecycle rows, and failed exits.
+   Use that review to decide whether the next policy change is an exit rule,
+   entry filter, or missing historical coverage task.
 4. Define the real production strategy candidate and its execution gates:
    sizing, max exposure, retry cadence, stale-data threshold, simulation
    freshness threshold, exit restrictions, and kill switch behavior.
