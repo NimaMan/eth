@@ -6,6 +6,7 @@ Rust-only examples for validating and inspecting token-state processing.
 
 - `replay/`: Process historical blocks and rebuild token or pool state from `tx_processor` output.
 - `validation/`: Compare reconstructed token state against direct chain reads.
+- `network/`: Build token-network and second-order flow-context inspection outputs.
 - `analysis/`: Human-readable inspections for lifecycle, liquidity, and health.
 - `fixtures/`: Known token/pool/block ranges reused by examples.
 
@@ -33,6 +34,26 @@ cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- \
 ```
 
 Set `RETH_DATADIR` or pass `--datadir` when the default local Reth path is not available.
+
+### `token_network_flow_context`
+
+Uses the RethIndex address-block participation index to find candidate token
+blocks, loads full processed blocks through `ProcessedBlockProvider`, builds the
+token network, then expands the selected token-network seed addresses into the
+second-order fund-flow context layer.
+
+```bash
+cargo run -p eth_token --example token_network_flow_context -- \
+  --token 0x133a79c66bc8789cf4d081159654aa378004541c \
+  --start 23000000 \
+  --end 23100000 \
+  --max-token-blocks 256 \
+  --max-seeds 16 \
+  --max-blocks-per-address 64
+```
+
+Requires `reth_index/address_to_blocks` to be populated for the token and seed
+addresses. By default it reads `RETH_INDEX_DIR` or `<RETH_DATADIR>/reth_index`.
 
 ### `uniswap_v2_lp_tracker_parity`
 

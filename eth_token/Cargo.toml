@@ -29,3 +29,7 @@ path = "examples/validation/uniswap_v2_lp_tracker_parity.rs"
 [[example]]
 name = "token_tracking_range"
 path = "examples/tracking/token_tracking_range.rs"
+
+[[example]]
+name = "token_network_flow_context"
+path = "examples/network/token_network_flow_context.rs"
