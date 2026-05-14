@@ -68,7 +68,8 @@ impl TxSimulator {
                 .with_read_only(true)
                 .build()?,
             reth_tasks::Runtime::test(),
-        )?;
+        )?
+        .with_read_only_sync(true);
 
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 

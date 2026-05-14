@@ -18,7 +18,8 @@ use crate::common::convert::ipc_to_unsigned_tx;
 use crate::mempool_fetcher::MempoolTransaction;
 use tx_processor::PoolBuySellParameters;
 use tx_simulator::{
-    LiveTxSimulator, SimulationResult as TxSimResult, TxSimulator, UnsignedTransaction,
+    LiveStateStatus, LiveTxSimulator, SimulationResult as TxSimResult, TxSimulator,
+    UnsignedTransaction,
 };
 
 /// Mempool simulator that manages both mempool transaction and pool buy/sell simulations
@@ -226,6 +227,11 @@ impl MempoolSimulator {
     /// Expose the current block number the simulator will target.
     pub async fn latest_simulation_block(&self) -> Result<u64> {
         self.resolve_simulation_block_number().await
+    }
+
+    /// Expose full state-selection diagnostics for live simulation.
+    pub async fn latest_simulation_status(&self) -> Result<LiveStateStatus> {
+        self.live_tx_simulator.latest_state_status().await
     }
 }
 

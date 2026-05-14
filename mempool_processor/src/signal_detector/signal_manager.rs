@@ -775,8 +775,8 @@ impl SignalManager {
                 let signals =
                     build_position_approval_signals(token_cache, tx, position_approval).await;
                 if signals.is_empty() {
-                    warn!(
-                        "Position approval {} passed routing but no mapped position/share was found",
+                    debug!(
+                        "Position approval {} passed routing but no mapped tracked position/share was found",
                         tx.hash
                     );
                     return false;

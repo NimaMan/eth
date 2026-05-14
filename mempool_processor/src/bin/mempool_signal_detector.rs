@@ -674,11 +674,17 @@ async fn main() -> Result<()> {
             last_report_total = total;
 
             let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-            match mempool_simulator.latest_simulation_block().await {
-                Ok(latest_block) => {
+            match mempool_simulator.latest_simulation_status().await {
+                Ok(status) => {
                     let line = format!(
-                        "[{}]  INFO 📡 Latest simulation block target: {}",
-                        timestamp, latest_block
+                        "[{}]  INFO 📡 Latest simulation block target: {} source={:?} reth_finished={} historical_context={} live_head={:?} tracked_state={:?}",
+                        timestamp,
+                        status.selected_block_number,
+                        status.source,
+                        status.latest_reth_finished_block_number,
+                        status.latest_historical_context_block_number,
+                        status.latest_live_block_number,
+                        status.latest_tracked_state_block_number
                     );
                     append_line_to_file(&external_data_log_path, &line);
                 }
