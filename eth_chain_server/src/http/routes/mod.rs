@@ -3,6 +3,7 @@ mod backtest;
 mod health;
 mod live;
 mod mempool;
+mod network_analysis;
 mod ops;
 mod range;
 mod token_activity;
@@ -22,7 +23,7 @@ pub fn routes(
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(["content-type"])
-        .allow_methods(["GET", "POST", "OPTIONS"]);
+        .allow_methods(["GET", "POST", "DELETE", "OPTIONS"]);
 
     api(state).with(cors)
 }
@@ -148,6 +149,28 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(warp::query::<TokenActivityBlocksQuery>())
             .and(with_state(state.clone()))
             .and_then(token_activity::activity_blocks);
+
+    let network_analysis_start = warp::path!("eth" / "tokens" / "api" / "network-analysis")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(network_analysis::start);
+
+    let network_analysis_list = warp::path!("eth" / "tokens" / "api" / "network-analysis")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(network_analysis::list);
+
+    let network_analysis_get = warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(network_analysis::get);
+
+    let network_analysis_cancel =
+        warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
+            .and(warp::delete())
+            .and(with_state(state.clone()))
+            .and_then(network_analysis::cancel);
 
     let alpha_strategies = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies")
         .and(warp::get())
@@ -291,6 +314,10 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(network_analysis_start)
+        .or(network_analysis_list)
+        .or(network_analysis_get)
+        .or(network_analysis_cancel)
         .or(alpha_strategy_performance)
         .or(alpha_strategy_reset)
         .or(alpha_gas_rank_estimate)

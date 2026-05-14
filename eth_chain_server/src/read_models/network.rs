@@ -5,7 +5,7 @@ use eth_token::erc20::ERC20Token;
 use eth_token::network::{
     activity::AddressActivitySummary,
     graph::RawTokenNetworkGraph,
-    model::{NetworkEdgeKind, NetworkNode, NetworkNodeId},
+    model::{NetworkEdge, NetworkEdgeKind, NetworkNode, NetworkNodeId},
 };
 use serde::Serialize;
 
@@ -108,8 +108,17 @@ impl TokenNetworkGraphView {
         graph: &RawTokenNetworkGraph,
         summary_by_node: &BTreeMap<String, AddressActivitySummary>,
     ) -> Self {
-        let mut scored_nodes = graph
-            .nodes
+        let edges = graph.edges.values().cloned().collect::<Vec<_>>();
+        Self::from_parts(&graph.nodes, &edges, summary_by_node)
+    }
+
+    pub fn from_parts(
+        nodes_by_id: &BTreeMap<String, NetworkNode>,
+        edges: &[NetworkEdge],
+        summary_by_node: &BTreeMap<String, AddressActivitySummary>,
+    ) -> Self {
+        let input_edge_count = edges.len();
+        let mut scored_nodes = nodes_by_id
             .values()
             .map(|node| {
                 let key = node.id.stable_key();
@@ -134,9 +143,8 @@ impl TokenNetworkGraphView {
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
 
-        let mut edges = graph
-            .edges
-            .values()
+        let mut edges = edges
+            .iter()
             .filter(|edge| {
                 selected_node_ids.contains(&edge.source().stable_key())
                     && selected_node_ids.contains(&edge.target().stable_key())
@@ -155,8 +163,8 @@ impl TokenNetworkGraphView {
         edges.truncate(MAX_GRAPH_EDGES);
 
         Self {
-            omitted_node_count: graph.nodes.len().saturating_sub(nodes.len()),
-            omitted_edge_count: graph.edges.len().saturating_sub(visible_edge_candidates)
+            omitted_node_count: nodes_by_id.len().saturating_sub(nodes.len()),
+            omitted_edge_count: input_edge_count.saturating_sub(visible_edge_candidates)
                 + visible_edge_candidates.saturating_sub(edges.len()),
             nodes,
             edges,

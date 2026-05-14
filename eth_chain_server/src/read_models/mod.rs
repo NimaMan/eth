@@ -4,6 +4,7 @@ pub mod error;
 pub mod gas_rank;
 pub mod live;
 pub mod network;
+pub mod network_analysis;
 pub mod ops;
 pub mod pool;
 pub mod run;

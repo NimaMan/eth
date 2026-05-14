@@ -14,7 +14,7 @@ pub mod snapshot;
 pub mod tx_fund_flow;
 pub mod windows;
 
-pub use builder::FlowContextBuilder;
+pub use builder::{build_layer_from_observations, FlowContextBuildArtifacts, FlowContextBuilder};
 pub use config::FlowContextConfig;
 pub use extractor::{FlowContextObservation, FlowObservationExtractor};
 pub use model::{

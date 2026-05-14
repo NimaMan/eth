@@ -9,7 +9,7 @@ use crate::network::graph::RawTokenNetworkGraph;
 use super::{
     block_loader::ProcessedBlockLoader,
     config::FlowContextConfig,
-    extractor::{aggregate_flow_context_edges, FlowObservationExtractor},
+    extractor::{aggregate_flow_context_edges, FlowContextObservation, FlowObservationExtractor},
     hub_filter::suppress_noisy_hubs,
     index_query::AddressParticipationQuery,
     model::{
@@ -20,6 +20,17 @@ use super::{
     seeds::{select_flow_context_seeds, FlowContextSeed},
     windows::build_flow_context_windows,
 };
+
+/// Full build output for callers that need to inspect or replay the raw
+/// observations, such as block-by-block timeline views.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowContextBuildArtifacts {
+    pub layer: FlowContextLayer,
+    pub seeds: Vec<FlowContextSeed>,
+    pub seed_addresses: BTreeSet<String>,
+    pub selected_block_numbers: Vec<u64>,
+    pub observations: Vec<FlowContextObservation>,
+}
 
 /// Builds a `FlowContextLayer` from pluggable index, block, and extraction
 /// adapters.
@@ -46,6 +57,13 @@ where
     }
 
     pub fn build(&self, graph: &RawTokenNetworkGraph) -> Result<FlowContextLayer> {
+        Ok(self.build_with_artifacts(graph)?.layer)
+    }
+
+    pub fn build_with_artifacts(
+        &self,
+        graph: &RawTokenNetworkGraph,
+    ) -> Result<FlowContextBuildArtifacts> {
         let seeds = select_flow_context_seeds(graph, &self.config);
         let seed_addresses = seeds
             .iter()
@@ -67,32 +85,56 @@ where
         let observations = self
             .extractor
             .extract_observations(&blocks, &seed_addresses)?;
-        let edges = aggregate_flow_context_edges(&observations, &seed_addresses, &self.config);
-        let filtered = suppress_noisy_hubs(edges, &seed_addresses, &self.config);
-        let mut edges = filtered.edges;
-        score_edges(&mut edges);
+        let layer = build_layer_from_observations(
+            &self.config,
+            &seeds,
+            &seed_addresses,
+            block_numbers.len(),
+            &observations,
+        );
 
-        let mut nodes = nodes_from_seeds_and_edges(&seeds, &edges);
-        nodes.sort_by(|left, right| {
-            left.address
-                .cmp(&right.address)
-                .then_with(|| left.role.cmp(&right.role))
-        });
-
-        let mut clusters = build_connector_clusters(&edges);
-        for cluster in &mut clusters {
-            score_cluster(cluster, &edges);
-        }
-
-        Ok(FlowContextLayer {
-            seed_count: seeds.len(),
-            inspected_block_count: block_numbers.len(),
-            nodes,
-            edges,
-            paths: Vec::new(),
-            clusters,
-            suppressed_hubs: filtered.suppressed_hubs,
+        Ok(FlowContextBuildArtifacts {
+            layer,
+            seeds,
+            seed_addresses,
+            selected_block_numbers: block_numbers,
+            observations,
         })
+    }
+}
+
+pub fn build_layer_from_observations(
+    config: &FlowContextConfig,
+    seeds: &[FlowContextSeed],
+    seed_addresses: &BTreeSet<String>,
+    inspected_block_count: usize,
+    observations: &[FlowContextObservation],
+) -> FlowContextLayer {
+    let edges = aggregate_flow_context_edges(observations, seed_addresses, config);
+    let filtered = suppress_noisy_hubs(edges, seed_addresses, config);
+    let mut edges = filtered.edges;
+    score_edges(&mut edges);
+
+    let mut nodes = nodes_from_seeds_and_edges(seeds, &edges);
+    nodes.sort_by(|left, right| {
+        left.address
+            .cmp(&right.address)
+            .then_with(|| left.role.cmp(&right.role))
+    });
+
+    let mut clusters = build_connector_clusters(&edges);
+    for cluster in &mut clusters {
+        score_cluster(cluster, &edges);
+    }
+
+    FlowContextLayer {
+        seed_count: seeds.len(),
+        inspected_block_count,
+        nodes,
+        edges,
+        paths: Vec::new(),
+        clusters,
+        suppressed_hubs: filtered.suppressed_hubs,
     }
 }
 
