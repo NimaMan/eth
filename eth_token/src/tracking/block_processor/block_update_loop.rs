@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use tx_processor::ProcessedBlock;
 
-use crate::chain_metadata::{TokenMetadataProvider, UniswapV2PoolMetadataProvider};
+use crate::chain_metadata::{
+    TokenMetadataProvider, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadataProvider,
+};
 use crate::tracking::token_update_router::{PendingPoolSimulationMap, PoolTradingSimulationMode};
 use crate::tracking::{hash_string, TokenBlockUpdateReport, TokenTransactionUpdateError};
 
@@ -359,7 +361,7 @@ impl BlockTokenProcessor {
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
-        V: UniswapV2PoolMetadataProvider,
+        V: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         let block_started = Instant::now();
         let block_number = block.header.number;

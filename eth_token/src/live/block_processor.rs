@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use tx_processor::{BlockStateSession, LivePoolBuySellSimulator, ProcessedBlock};
 
 use crate::chain_metadata::{
-    TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolMetadataProvider,
+    TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolIdentityProvider,
+    UniswapV2PoolMetadataProvider,
 };
 use crate::tracking::{
     BlockTokenProcessor, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
@@ -147,7 +148,7 @@ impl LiveBlockTokenProcessor {
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
-        V: UniswapV2PoolMetadataProvider,
+        V: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         self.block_processor
             .process_block_with_token_and_pool_discovery_providers_and_live_pool_simulator(

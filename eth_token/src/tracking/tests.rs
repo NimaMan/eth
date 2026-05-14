@@ -17,8 +17,8 @@ use tx_processor::{PoolType, ProcessedBlock, ProcessedBlockTransactions, Process
 
 use crate::chain_metadata::{
     StaticTokenMetadataProvider, StaticUniswapV2PoolMetadataProvider, TokenMetadataLookup,
-    TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
-    UniswapV2PoolMetadataProvider,
+    TokenMetadataProvider, UniswapV2PoolIdentity, UniswapV2PoolIdentityProvider,
+    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 use crate::pools::{PoolTradingSimulationConfig, SUSHISWAP_V2_PROTOCOL, SUSHISWAP_V3_PROTOCOL};
 
@@ -78,6 +78,15 @@ impl UniswapV2PoolMetadataProvider for NonV2PoolMetadataProvider {
     }
 }
 
+impl UniswapV2PoolIdentityProvider for NonV2PoolMetadataProvider {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        _lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
+        Box::pin(async { Err(eyre::eyre!("token0() view call failed or empty output")) })
+    }
+}
+
 #[derive(Clone)]
 struct RecordingV2PoolMetadataProvider {
     lookups: Rc<RefCell<usize>>,
@@ -88,6 +97,18 @@ impl UniswapV2PoolMetadataProvider for RecordingV2PoolMetadataProvider {
         &'a self,
         _lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
+        Box::pin(async move {
+            *self.lookups.borrow_mut() += 1;
+            Ok(None)
+        })
+    }
+}
+
+impl UniswapV2PoolIdentityProvider for RecordingV2PoolMetadataProvider {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        _lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
         Box::pin(async move {
             *self.lookups.borrow_mut() += 1;
             Ok(None)

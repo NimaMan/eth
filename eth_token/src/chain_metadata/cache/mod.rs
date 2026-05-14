@@ -3,15 +3,36 @@ use std::sync::Mutex;
 
 use alloy_primitives::Address;
 
-use super::UniswapV2PoolMetadata;
+use super::{UniswapV2PoolIdentity, UniswapV2PoolMetadata};
 
 #[derive(Debug, Default)]
 pub(crate) struct RethChainMetadataCache {
+    v2_pool_identity: Mutex<HashMap<Address, Option<UniswapV2PoolIdentity>>>,
     v2_pool_metadata: Mutex<HashMap<Address, Option<UniswapV2PoolMetadata>>>,
     token_decimals: Mutex<HashMap<Address, u8>>,
 }
 
 impl RethChainMetadataCache {
+    pub(crate) fn v2_pool_identity(
+        &self,
+        pool_address: Address,
+    ) -> Option<Option<UniswapV2PoolIdentity>> {
+        self.v2_pool_identity
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&pool_address).cloned())
+    }
+
+    pub(crate) fn remember_v2_pool_identity(
+        &self,
+        pool_address: Address,
+        identity: Option<UniswapV2PoolIdentity>,
+    ) {
+        if let Ok(mut cache) = self.v2_pool_identity.lock() {
+            cache.insert(pool_address, identity);
+        }
+    }
+
     pub(crate) fn v2_pool_metadata(
         &self,
         pool_address: Address,

@@ -7,7 +7,8 @@ use tx_processor::{
 };
 
 use crate::chain_metadata::{
-    TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolMetadataProvider,
+    TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolIdentityProvider,
+    UniswapV2PoolMetadataProvider,
 };
 use crate::network::graph::RawTokenNetworkGraph;
 use crate::tracking::token_update_router::PoolTradingSimulationMode;
@@ -334,7 +335,7 @@ impl BlockTokenProcessor {
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
-        V: UniswapV2PoolMetadataProvider,
+        V: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         if self.is_live_mode {
             return self.live_mode_historical_simulator_report(
@@ -371,7 +372,7 @@ impl BlockTokenProcessor {
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
-        V: UniswapV2PoolMetadataProvider,
+        V: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         let block_sessions: Mutex<BTreeMap<u64, BlockStateSession>> = Mutex::new(BTreeMap::new());
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
@@ -397,7 +398,7 @@ impl BlockTokenProcessor {
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
-        V: UniswapV2PoolMetadataProvider,
+        V: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,

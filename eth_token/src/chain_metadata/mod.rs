@@ -11,6 +11,7 @@ pub use static_provider::{
     StaticUniswapV2PoolMetadataProvider,
 };
 pub use types::{
-    TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider, UniswapV2PoolMetadata,
-    UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+    TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider, UniswapV2PoolIdentity,
+    UniswapV2PoolIdentityProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
+    UniswapV2PoolMetadataProvider,
 };

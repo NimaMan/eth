@@ -5,15 +5,19 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256};
 use eyre::Result;
 use reth_chain_query::common_addresses::KnownV2Protocol;
-use reth_chain_query::dex::fetch_uniswap_v2_pair_address;
+use reth_chain_query::dex::{
+    compute_fraxswap_v2_pool, compute_pancakeswap_v2_pool, compute_shibaswap_v2_pool,
+    compute_sushiswap_pool, compute_uniswap_v2_pool,
+};
 use reth_chain_query::RethQueryProvider;
 
 use crate::erc20::ERC20TokenMetadata;
 
 use super::cache::RethChainMetadataCache;
 use super::types::{
-    address_string, TokenMetadataLookup, TokenMetadataProvider, UniswapV2PoolMetadata,
-    UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+    address_string, TokenMetadataLookup, TokenMetadataProvider, UniswapV2PoolIdentity,
+    UniswapV2PoolIdentityProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
+    UniswapV2PoolMetadataProvider,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +78,15 @@ impl UniswapV2PoolMetadataProvider for RethChainMetadataProvider<'_> {
     }
 }
 
+impl UniswapV2PoolIdentityProvider for RethChainMetadataProvider<'_> {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
+        Box::pin(async move { uniswap_v2_pool_identity(self.provider, &self.cache, lookup).await })
+    }
+}
+
 pub struct LiveRethChainMetadataProvider<'a> {
     provider: &'a RethQueryProvider,
     cache: Arc<RethChainMetadataCache>,
@@ -105,6 +118,15 @@ impl UniswapV2PoolMetadataProvider for LiveRethChainMetadataProvider<'_> {
         lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
         Box::pin(async move { uniswap_v2_pool_metadata(self.provider, &self.cache, lookup).await })
+    }
+}
+
+impl UniswapV2PoolIdentityProvider for LiveRethChainMetadataProvider<'_> {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
+        Box::pin(async move { uniswap_v2_pool_identity(self.provider, &self.cache, lookup).await })
     }
 }
 
@@ -147,12 +169,58 @@ async fn uniswap_v2_pool_metadata(
         ));
     }
 
+    let Some(identity) = uniswap_v2_pool_identity(provider, cache, lookup).await? else {
+        return Ok(None);
+    };
+    let token0: Address = identity.token0.parse()?;
+    let token1: Address = identity.token1.parse()?;
+
+    let (token0_decimals, token1_decimals) = tokio::try_join!(
+        cached_token_decimals(provider, cache, token0, lookup.block_number),
+        cached_token_decimals(provider, cache, token1, lookup.block_number),
+    )?;
+
+    let metadata = UniswapV2PoolMetadata::new_with_protocol(
+        identity.protocol,
+        address_string(&lookup.pool_address),
+        identity.token0,
+        identity.token1,
+        token0_decimals,
+        token1_decimals,
+    );
+    cache.remember_v2_pool_metadata(lookup.pool_address, Some(metadata.clone()));
+
+    Ok(filter_uniswap_v2_pool_metadata(
+        Some(metadata),
+        lookup.tracked_token_address,
+    ))
+}
+
+async fn uniswap_v2_pool_identity(
+    provider: &RethQueryProvider,
+    cache: &RethChainMetadataCache,
+    lookup: &UniswapV2PoolMetadataLookup,
+) -> Result<Option<UniswapV2PoolIdentity>> {
+    if let Some(metadata) = cache.v2_pool_metadata(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_identity(
+            metadata.as_ref().map(UniswapV2PoolIdentity::from),
+            lookup.tracked_token_address,
+        ));
+    }
+
+    if let Some(identity) = cache.v2_pool_identity(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_identity(
+            identity,
+            lookup.tracked_token_address,
+        ));
+    }
+
     let (token0, token1) = provider
         .uni_v2_get_tokens(lookup.pool_address, Some(lookup.block_number))
         .await?;
 
     if is_native_eth_sentinel(&token0) || is_native_eth_sentinel(&token1) {
-        cache.remember_v2_pool_metadata(lookup.pool_address, None);
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
         return Ok(None);
     }
 
@@ -170,18 +238,11 @@ async fn uniswap_v2_pool_metadata(
             tx_hash = %lookup.transaction_hash,
             "skipped unknown v2-style pool factory"
         );
-        cache.remember_v2_pool_metadata(lookup.pool_address, None);
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
         return Ok(None);
     };
 
-    let resolved_pair = fetch_uniswap_v2_pair_address(
-        provider.simulator().as_ref(),
-        protocol.factory(),
-        token0,
-        token1,
-        Some(lookup.block_number),
-    )
-    .await?;
+    let resolved_pair = compute_known_v2_protocol_pool_address(protocol, token0, token1);
     if !is_known_v2_protocol_pool(lookup.pool_address, resolved_pair) {
         tracing::debug!(
             pool_address = %lookup.pool_address,
@@ -195,27 +256,20 @@ async fn uniswap_v2_pool_metadata(
             tx_hash = %lookup.transaction_hash,
             "skipped mismatched known v2 pool"
         );
-        cache.remember_v2_pool_metadata(lookup.pool_address, None);
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
         return Ok(None);
     }
 
-    let (token0_decimals, token1_decimals) = tokio::try_join!(
-        cached_token_decimals(provider, cache, token0, lookup.block_number),
-        cached_token_decimals(provider, cache, token1, lookup.block_number),
-    )?;
-
-    let metadata = UniswapV2PoolMetadata::new_with_protocol(
+    let identity = UniswapV2PoolIdentity::new_with_protocol(
         protocol,
         address_string(&lookup.pool_address),
         address_string(&token0),
         address_string(&token1),
-        token0_decimals,
-        token1_decimals,
     );
-    cache.remember_v2_pool_metadata(lookup.pool_address, Some(metadata.clone()));
+    cache.remember_v2_pool_identity(lookup.pool_address, Some(identity.clone()));
 
-    Ok(filter_uniswap_v2_pool_metadata(
-        Some(metadata),
+    Ok(filter_uniswap_v2_pool_identity(
+        Some(identity),
         lookup.tracked_token_address,
     ))
 }
@@ -234,6 +288,19 @@ async fn cached_token_decimals(
         .await?;
     cache.remember_token_decimals(token_address, decimals);
     Ok(decimals)
+}
+
+fn filter_uniswap_v2_pool_identity(
+    identity: Option<UniswapV2PoolIdentity>,
+    tracked_token_address: Option<alloy_primitives::Address>,
+) -> Option<UniswapV2PoolIdentity> {
+    let Some(tracked_token_address) = tracked_token_address else {
+        return identity;
+    };
+    identity.filter(|identity| {
+        identity.token0 == address_string(&tracked_token_address)
+            || identity.token1 == address_string(&tracked_token_address)
+    })
 }
 
 fn filter_uniswap_v2_pool_metadata(
@@ -255,6 +322,20 @@ fn is_native_eth_sentinel(address: &alloy_primitives::Address) -> bool {
 
 fn is_known_v2_protocol_pool(pool_address: Address, resolved_pair: Address) -> bool {
     !resolved_pair.is_zero() && resolved_pair == pool_address
+}
+
+fn compute_known_v2_protocol_pool_address(
+    protocol: KnownV2Protocol,
+    token0: Address,
+    token1: Address,
+) -> Address {
+    match protocol {
+        KnownV2Protocol::UniswapV2 => compute_uniswap_v2_pool(token0, token1),
+        KnownV2Protocol::SushiSwapV2 => compute_sushiswap_pool(token0, token1),
+        KnownV2Protocol::PancakeSwapV2 => compute_pancakeswap_v2_pool(token0, token1),
+        KnownV2Protocol::ShibaSwapV2 => compute_shibaswap_v2_pool(token0, token1),
+        KnownV2Protocol::FraxswapV2 => compute_fraxswap_v2_pool(token0, token1),
+    }
 }
 
 fn is_optional_token_metadata_read_error(message: &str) -> bool {

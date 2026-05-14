@@ -37,6 +37,30 @@ pub struct UniswapV2PoolMetadataLookup {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UniswapV2PoolIdentity {
+    pub protocol: KnownV2Protocol,
+    pub pool_address: String,
+    pub token0: String,
+    pub token1: String,
+}
+
+impl UniswapV2PoolIdentity {
+    pub fn new_with_protocol(
+        protocol: KnownV2Protocol,
+        pool_address: impl Into<String>,
+        token0: impl Into<String>,
+        token1: impl Into<String>,
+    ) -> Self {
+        Self {
+            protocol,
+            pool_address: normalize_address(pool_address.into()),
+            token0: normalize_address(token0.into()),
+            token1: normalize_address(token1.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniswapV2PoolMetadata {
     pub protocol: KnownV2Protocol,
     pub pool_address: String,
@@ -83,6 +107,24 @@ impl UniswapV2PoolMetadata {
     }
 }
 
+impl From<&UniswapV2PoolMetadata> for UniswapV2PoolIdentity {
+    fn from(metadata: &UniswapV2PoolMetadata) -> Self {
+        Self::new_with_protocol(
+            metadata.protocol,
+            metadata.pool_address.clone(),
+            metadata.token0.clone(),
+            metadata.token1.clone(),
+        )
+    }
+}
+
+pub trait UniswapV2PoolIdentityProvider {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>>;
+}
+
 pub trait UniswapV2PoolMetadataProvider {
     fn uniswap_v2_pool_metadata<'a>(
         &'a self,
@@ -90,9 +132,15 @@ pub trait UniswapV2PoolMetadataProvider {
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>>;
 }
 
-pub trait TokenDiscoveryProvider: TokenMetadataProvider + UniswapV2PoolMetadataProvider {}
+pub trait TokenDiscoveryProvider:
+    TokenMetadataProvider + UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider
+{
+}
 
-impl<T> TokenDiscoveryProvider for T where T: TokenMetadataProvider + UniswapV2PoolMetadataProvider {}
+impl<T> TokenDiscoveryProvider for T where
+    T: TokenMetadataProvider + UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider
+{
+}
 
 pub(crate) fn address_string(address: &Address) -> String {
     format!("{address:#x}")

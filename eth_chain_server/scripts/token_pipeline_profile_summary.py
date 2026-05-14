@@ -45,6 +45,28 @@ NUMERIC_FIELDS = {
     "finalize_ms",
     "applier_candidate_us",
     "applier_candidate_ms",
+    "applier_candidate_routing_addresses_us",
+    "applier_candidate_routing_addresses_ms",
+    "applier_candidate_resolve_addresses_us",
+    "applier_candidate_resolve_addresses_ms",
+    "applier_candidate_v4_pool_keys_us",
+    "applier_candidate_v4_pool_keys_ms",
+    "applier_candidate_v3_position_transfer_us",
+    "applier_candidate_v3_position_transfer_ms",
+    "applier_candidate_v4_position_transfer_us",
+    "applier_candidate_v4_position_transfer_ms",
+    "applier_candidate_v4_position_approval_us",
+    "applier_candidate_v4_position_approval_ms",
+    "applier_candidate_v2_pair_created_us",
+    "applier_candidate_v2_pair_created_ms",
+    "applier_candidate_v2_pool_event_scan_us",
+    "applier_candidate_v2_pool_event_scan_ms",
+    "applier_candidate_v2_transfer_route_us",
+    "applier_candidate_v2_transfer_route_ms",
+    "applier_candidate_v2_identity_lookup_us",
+    "applier_candidate_v2_identity_lookup_ms",
+    "applier_candidate_finalize_us",
+    "applier_candidate_finalize_ms",
     "applier_token_state_us",
     "applier_token_state_ms",
     "applier_pool_discovery_us",
@@ -74,6 +96,14 @@ NUMERIC_FIELDS = {
     "processed_blocks",
     "applier_candidate_tx_count",
     "applier_candidate_tokens",
+    "applier_candidate_routing_addresses",
+    "applier_candidate_v4_pool_keys",
+    "applier_candidate_v2_pool_events",
+    "applier_candidate_v2_transfer_route_hits",
+    "applier_candidate_v2_identity_lookups",
+    "applier_candidate_v2_identity_hits",
+    "applier_candidate_v2_identity_skipped_by_transfer",
+    "applier_candidate_position_scan_tokens",
     "applier_visited_tokens",
     "applier_token_state_updates",
     "applier_token_control_replays",
@@ -165,6 +195,25 @@ def main() -> int:
     print_summary(rows, "router_us", scale=1_000, unit="ms")
     print_summary(rows, "router_residual_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_routing_addresses_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_resolve_addresses_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v4_pool_keys_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v3_position_transfer_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v4_position_transfer_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v4_position_approval_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v2_pair_created_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v2_pool_event_scan_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v2_transfer_route_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v2_identity_lookup_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_finalize_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_routing_addresses")
+    print_summary(rows, "applier_candidate_v4_pool_keys")
+    print_summary(rows, "applier_candidate_v2_pool_events")
+    print_summary(rows, "applier_candidate_v2_transfer_route_hits")
+    print_summary(rows, "applier_candidate_v2_identity_lookups")
+    print_summary(rows, "applier_candidate_v2_identity_hits")
+    print_summary(rows, "applier_candidate_v2_identity_skipped_by_transfer")
+    print_summary(rows, "applier_candidate_position_scan_tokens")
     print_summary(rows, "applier_pool_discovery_us", scale=1_000, unit="ms")
     print_summary(rows, "simulation_total_us", scale=1_000, unit="ms")
     print_summary(rows, "historical_session_create_us", scale=1_000, unit="ms")
@@ -328,6 +377,13 @@ def print_top(rows: list[dict[str, object]], count: int, key: str) -> None:
         "simulation_total_us",
         "router_residual_us",
         "applier_candidate_us",
+        "applier_candidate_routing_addresses_us",
+        "applier_candidate_resolve_addresses_us",
+        "applier_candidate_v3_position_transfer_us",
+        "applier_candidate_v4_position_transfer_us",
+        "applier_candidate_v4_position_approval_us",
+        "applier_candidate_v2_transfer_route_us",
+        "applier_candidate_v2_identity_lookup_us",
         "applier_pool_discovery_us",
         "historical_branch_us",
         "historical_session_creates",

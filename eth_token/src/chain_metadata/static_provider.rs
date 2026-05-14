@@ -8,7 +8,8 @@ use crate::erc20::ERC20TokenMetadata;
 
 use super::types::{
     address_string, normalize_address, TokenMetadataLookup, TokenMetadataProvider,
-    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+    UniswapV2PoolIdentity, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadata,
+    UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -81,6 +82,21 @@ impl UniswapV2PoolMetadataProvider for StaticUniswapV2PoolMetadataProvider {
     }
 }
 
+impl UniswapV2PoolIdentityProvider for StaticUniswapV2PoolMetadataProvider {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
+        Box::pin(async move {
+            Ok(self
+                .metadata
+                .get(&address_string(&lookup.pool_address))
+                .map(UniswapV2PoolIdentity::from)
+                .filter(|identity| matches_tracked_token(identity, lookup)))
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct NoopUniswapV2PoolMetadataProvider;
 
@@ -91,4 +107,24 @@ impl UniswapV2PoolMetadataProvider for NoopUniswapV2PoolMetadataProvider {
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
         Box::pin(async { Ok(None) })
     }
+}
+
+impl UniswapV2PoolIdentityProvider for NoopUniswapV2PoolMetadataProvider {
+    fn uniswap_v2_pool_identity<'a>(
+        &'a self,
+        _lookup: &'a UniswapV2PoolMetadataLookup,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+fn matches_tracked_token(
+    identity: &UniswapV2PoolIdentity,
+    lookup: &UniswapV2PoolMetadataLookup,
+) -> bool {
+    let Some(tracked_token_address) = lookup.tracked_token_address else {
+        return true;
+    };
+    let tracked = address_string(&tracked_token_address);
+    identity.token0 == tracked || identity.token1 == tracked
 }

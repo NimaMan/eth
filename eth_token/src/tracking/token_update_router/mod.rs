@@ -9,7 +9,7 @@ use tx_processor::{
     ProcessedTransaction,
 };
 
-use crate::chain_metadata::UniswapV2PoolMetadataProvider;
+use crate::chain_metadata::{UniswapV2PoolIdentityProvider, UniswapV2PoolMetadataProvider};
 use reth_chain_query::provider::BlockHeader;
 
 use super::replay_context::triggers::tx_is_token_control_replay_candidate;
@@ -22,6 +22,7 @@ mod pool_state_update;
 mod token_candidates;
 mod token_state_update;
 mod trading_status_update;
+mod v2_pool_candidate_router;
 
 #[cfg(test)]
 mod tests;
@@ -30,7 +31,10 @@ use pool_state_update::{
     has_protocol_pool_changes, update_touched_v2_pools, update_touched_v3_pools,
     update_touched_v4_pools,
 };
-use token_candidates::{candidate_token_addresses, candidate_token_addresses_with_pool_discovery};
+use token_candidates::{
+    candidate_token_addresses, candidate_token_addresses_with_pool_discovery,
+    candidate_token_addresses_with_pool_discovery_and_profile, CandidateTokenAddressProfile,
+};
 use token_state_update::touches_token_state;
 use trading_status_update::{
     current_block_simulation_pool_addresses, should_simulate_v2_trading,
@@ -41,6 +45,17 @@ use trading_status_update::{
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProcessedTokenUpdateProfile {
     pub candidate_us: u128,
+    pub candidate_routing_addresses_us: u128,
+    pub candidate_resolve_addresses_us: u128,
+    pub candidate_v4_pool_keys_us: u128,
+    pub candidate_v3_position_transfer_us: u128,
+    pub candidate_v4_position_transfer_us: u128,
+    pub candidate_v4_position_approval_us: u128,
+    pub candidate_v2_pair_created_us: u128,
+    pub candidate_v2_pool_event_scan_us: u128,
+    pub candidate_v2_transfer_route_us: u128,
+    pub candidate_v2_identity_lookup_us: u128,
+    pub candidate_finalize_us: u128,
     pub token_state_us: u128,
     pub pool_discovery_us: u128,
     pub pool_update_us: u128,
@@ -50,6 +65,14 @@ pub(crate) struct ProcessedTokenUpdateProfile {
     pub report_us: u128,
     pub candidate_tx_count: usize,
     pub candidate_tokens: usize,
+    pub candidate_routing_addresses: usize,
+    pub candidate_v4_pool_keys: usize,
+    pub candidate_v2_pool_events: usize,
+    pub candidate_v2_transfer_route_hits: usize,
+    pub candidate_v2_identity_lookups: usize,
+    pub candidate_v2_identity_hits: usize,
+    pub candidate_v2_identity_skipped_by_transfer: usize,
+    pub candidate_position_scan_tokens: usize,
     pub visited_tokens: usize,
     pub token_state_updates: usize,
     pub token_control_replays: usize,
@@ -63,6 +86,30 @@ pub(crate) struct ProcessedTokenUpdateProfile {
     pub simulated_v2_pools: usize,
     pub simulated_v3_pools: usize,
     pub simulated_v4_pools: usize,
+}
+
+impl ProcessedTokenUpdateProfile {
+    fn record_candidate_address_profile(&mut self, profile: CandidateTokenAddressProfile) {
+        self.candidate_routing_addresses_us += profile.routing_addresses_us;
+        self.candidate_resolve_addresses_us += profile.resolve_addresses_us;
+        self.candidate_v4_pool_keys_us += profile.v4_pool_keys_us;
+        self.candidate_v3_position_transfer_us += profile.v3_position_transfer_us;
+        self.candidate_v4_position_transfer_us += profile.v4_position_transfer_us;
+        self.candidate_v4_position_approval_us += profile.v4_position_approval_us;
+        self.candidate_v2_pair_created_us += profile.v2_pair_created_us;
+        self.candidate_v2_pool_event_scan_us += profile.v2_pool_event_scan_us;
+        self.candidate_v2_transfer_route_us += profile.v2_transfer_route_us;
+        self.candidate_v2_identity_lookup_us += profile.v2_identity_lookup_us;
+        self.candidate_finalize_us += profile.finalize_us;
+        self.candidate_routing_addresses += profile.routing_address_count;
+        self.candidate_v4_pool_keys += profile.v4_pool_key_count;
+        self.candidate_v2_pool_events += profile.v2_pool_event_count;
+        self.candidate_v2_transfer_route_hits += profile.v2_transfer_route_hits;
+        self.candidate_v2_identity_lookups += profile.v2_identity_lookups;
+        self.candidate_v2_identity_hits += profile.v2_identity_hits;
+        self.candidate_v2_identity_skipped_by_transfer += profile.v2_identity_skipped_by_transfer;
+        self.candidate_position_scan_tokens += profile.position_scan_tokens;
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -441,7 +488,7 @@ impl ProcessedTokenUpdateRouter {
         pool_metadata_provider: &P,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
-        P: UniswapV2PoolMetadataProvider,
+        P: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         let token_addresses = candidate_token_addresses_with_pool_discovery(
             registry,
@@ -525,7 +572,7 @@ impl ProcessedTokenUpdateRouter {
         pool_simulator: &PoolBuySellSimulator,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
-        P: UniswapV2PoolMetadataProvider,
+        P: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         self.update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
             registry,
@@ -552,7 +599,7 @@ impl ProcessedTokenUpdateRouter {
         block_sessions: &Mutex<BTreeMap<u64, BlockStateSession>>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
-        P: UniswapV2PoolMetadataProvider,
+        P: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         self.update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
             registry,
@@ -586,7 +633,7 @@ impl ProcessedTokenUpdateRouter {
         mut pending_simulations: Option<&mut PendingPoolSimulationMap>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
-        P: UniswapV2PoolMetadataProvider,
+        P: UniswapV2PoolIdentityProvider + UniswapV2PoolMetadataProvider,
     {
         if !tx.status {
             return Ok(Vec::new());
@@ -595,16 +642,18 @@ impl ProcessedTokenUpdateRouter {
         let pool_metadata_timeout =
             pool_metadata_timeout_for_trading_simulation(trading_simulation);
         let candidate_started = Instant::now();
-        let token_addresses = candidate_token_addresses_with_pool_discovery(
-            registry,
-            token_index,
-            tx,
-            pool_metadata_provider,
-            pool_metadata_timeout,
-        )
-        .await?;
+        let (token_addresses, candidate_address_profile) =
+            candidate_token_addresses_with_pool_discovery_and_profile(
+                registry,
+                token_index,
+                tx,
+                pool_metadata_provider,
+                pool_metadata_timeout,
+            )
+            .await?;
         if let Some(profile) = profile.as_deref_mut() {
             profile.candidate_us += elapsed_micros(candidate_started);
+            profile.record_candidate_address_profile(candidate_address_profile);
             profile.candidate_tx_count += 1;
             profile.candidate_tokens += token_addresses.len();
         }

@@ -68,6 +68,37 @@ pub(in crate::tracking::block_processor) fn log_block_token_processor_profile(
         finalize_ms = micros_to_millis(profile.finalize_us),
         applier_candidate_us = applier.candidate_us,
         applier_candidate_ms = micros_to_millis(applier.candidate_us),
+        applier_candidate_routing_addresses_us = applier.candidate_routing_addresses_us,
+        applier_candidate_routing_addresses_ms =
+            micros_to_millis(applier.candidate_routing_addresses_us),
+        applier_candidate_resolve_addresses_us = applier.candidate_resolve_addresses_us,
+        applier_candidate_resolve_addresses_ms =
+            micros_to_millis(applier.candidate_resolve_addresses_us),
+        applier_candidate_v4_pool_keys_us = applier.candidate_v4_pool_keys_us,
+        applier_candidate_v4_pool_keys_ms = micros_to_millis(applier.candidate_v4_pool_keys_us),
+        applier_candidate_v3_position_transfer_us = applier.candidate_v3_position_transfer_us,
+        applier_candidate_v3_position_transfer_ms =
+            micros_to_millis(applier.candidate_v3_position_transfer_us),
+        applier_candidate_v4_position_transfer_us = applier.candidate_v4_position_transfer_us,
+        applier_candidate_v4_position_transfer_ms =
+            micros_to_millis(applier.candidate_v4_position_transfer_us),
+        applier_candidate_v4_position_approval_us = applier.candidate_v4_position_approval_us,
+        applier_candidate_v4_position_approval_ms =
+            micros_to_millis(applier.candidate_v4_position_approval_us),
+        applier_candidate_v2_pair_created_us = applier.candidate_v2_pair_created_us,
+        applier_candidate_v2_pair_created_ms =
+            micros_to_millis(applier.candidate_v2_pair_created_us),
+        applier_candidate_v2_pool_event_scan_us = applier.candidate_v2_pool_event_scan_us,
+        applier_candidate_v2_pool_event_scan_ms =
+            micros_to_millis(applier.candidate_v2_pool_event_scan_us),
+        applier_candidate_v2_transfer_route_us = applier.candidate_v2_transfer_route_us,
+        applier_candidate_v2_transfer_route_ms =
+            micros_to_millis(applier.candidate_v2_transfer_route_us),
+        applier_candidate_v2_identity_lookup_us = applier.candidate_v2_identity_lookup_us,
+        applier_candidate_v2_identity_lookup_ms =
+            micros_to_millis(applier.candidate_v2_identity_lookup_us),
+        applier_candidate_finalize_us = applier.candidate_finalize_us,
+        applier_candidate_finalize_ms = micros_to_millis(applier.candidate_finalize_us),
         applier_token_state_us = applier.token_state_us,
         applier_token_state_ms = micros_to_millis(applier.token_state_us),
         applier_pool_discovery_us = applier.pool_discovery_us,
@@ -84,6 +115,15 @@ pub(in crate::tracking::block_processor) fn log_block_token_processor_profile(
         applier_report_ms = micros_to_millis(applier.report_us),
         applier_candidate_tx_count = applier.candidate_tx_count,
         applier_candidate_tokens = applier.candidate_tokens,
+        applier_candidate_routing_addresses = applier.candidate_routing_addresses,
+        applier_candidate_v4_pool_keys = applier.candidate_v4_pool_keys,
+        applier_candidate_v2_pool_events = applier.candidate_v2_pool_events,
+        applier_candidate_v2_transfer_route_hits = applier.candidate_v2_transfer_route_hits,
+        applier_candidate_v2_identity_lookups = applier.candidate_v2_identity_lookups,
+        applier_candidate_v2_identity_hits = applier.candidate_v2_identity_hits,
+        applier_candidate_v2_identity_skipped_by_transfer =
+            applier.candidate_v2_identity_skipped_by_transfer,
+        applier_candidate_position_scan_tokens = applier.candidate_position_scan_tokens,
         applier_visited_tokens = applier.visited_tokens,
         applier_token_state_updates = applier.token_state_updates,
         applier_token_control_replays = applier.token_control_replays,

@@ -3,11 +3,95 @@ use std::time::{Duration, Instant};
 use eyre::Result;
 
 use crate::chain_metadata::{
-    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+    UniswapV2PoolIdentity, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadata,
+    UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 use crate::tracking::{address_string, hash_string};
 
 use super::LIVE_TOKEN_TRACKER_LOG_TARGET;
+
+pub(super) async fn optional_uniswap_v2_pool_identity<P>(
+    pool_identity_provider: &P,
+    lookup: UniswapV2PoolMetadataLookup,
+    metadata_timeout: Option<Duration>,
+) -> Result<Option<UniswapV2PoolIdentity>>
+where
+    P: UniswapV2PoolIdentityProvider,
+{
+    let started = Instant::now();
+    tracing::debug!(
+        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+        block_number = lookup.block_number,
+        tx_index = lookup.tx_index,
+        tx_hash = %hash_string(&lookup.transaction_hash),
+        pool_address = %address_string(&lookup.pool_address),
+        action = "uniswap_v2_pool_identity_lookup",
+        result = "started",
+        "live uniswap v2 pool identity lookup started"
+    );
+    let identity_result = if let Some(timeout) = metadata_timeout {
+        match tokio::time::timeout(
+            timeout,
+            pool_identity_provider.uniswap_v2_pool_identity(&lookup),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!(
+                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                    block_number = lookup.block_number,
+                    tx_index = lookup.tx_index,
+                    tx_hash = %hash_string(&lookup.transaction_hash),
+                    pool_address = %address_string(&lookup.pool_address),
+                    timeout_ms = timeout.as_millis(),
+                    action = "uniswap_v2_pool_identity_lookup",
+                    result = "timeout",
+                    "live uniswap v2 pool identity lookup timed out"
+                );
+                return Ok(None);
+            }
+        }
+    } else {
+        pool_identity_provider
+            .uniswap_v2_pool_identity(&lookup)
+            .await
+    };
+
+    match identity_result {
+        Ok(identity) => {
+            tracing::debug!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number = lookup.block_number,
+                tx_index = lookup.tx_index,
+                tx_hash = %hash_string(&lookup.transaction_hash),
+                pool_address = %address_string(&lookup.pool_address),
+                elapsed_ms = started.elapsed().as_millis(),
+                found = identity.is_some(),
+                action = "uniswap_v2_pool_identity_lookup",
+                result = "ok",
+                "live uniswap v2 pool identity lookup completed"
+            );
+            Ok(identity)
+        }
+        Err(error) if is_optional_uniswap_v2_pool_metadata_miss(&error.to_string()) => {
+            tracing::debug!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number = lookup.block_number,
+                tx_index = lookup.tx_index,
+                tx_hash = %hash_string(&lookup.transaction_hash),
+                pool_address = %address_string(&lookup.pool_address),
+                elapsed_ms = started.elapsed().as_millis(),
+                action = "uniswap_v2_pool_identity_lookup",
+                result = "miss",
+                reason = %error,
+                "live uniswap v2 pool identity lookup missed"
+            );
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
 
 pub(super) async fn optional_uniswap_v2_pool_metadata<P>(
     pool_metadata_provider: &P,
