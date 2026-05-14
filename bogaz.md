@@ -45,20 +45,45 @@ Snapshot time: `2026-05-14 10:10 Europe/Amsterdam`.
   `XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user ...` to inspect them;
   plain system-level `systemctl` will not show these unit names.
 
+## Current Main Goal
+
+Deploy a real ETH strategy whose policy has been validated by reproducible
+recent backtests, live shadow/live-backtest evidence, and audited trade-level
+decisions.
+
+The non-capital path is not the deployment target. It is the calibration layer:
+use it to estimate policy behavior against current live data, compare it with
+historical backtests, and catch signal/simulation drift before real execution.
+
+Finished means:
+
+- A production strategy policy is selected from the current strategy set.
+- The selected policy is backtested over the exact last two-week block window.
+- The same policy has live shadow/live-backtest evidence against the current
+  chain-server and mempool pipeline.
+- Top 10 and worst 10 positions are reviewed with entry reason, skip reason,
+  exit reason, gas/slippage assumptions, and PnL snapshot.
+- The decision ledger can explain every buy, skip, retry, exit, and failed
+  simulation needed for frontend review.
+- Execution gates are explicit before real orders are sent: max exposure,
+  sizing, retry cadence, exit restrictions, stale-data thresholds, simulation
+  freshness, and kill switch behavior.
+
 ## Active Bottlenecks
 
 | Order | Bottleneck | Owner | Evidence | Next Action |
 | --- | --- | --- | --- | --- |
-| 1 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
-| 2 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
-| 3 | **Residual Redis code outside the production chain-server path** | `tx_simulator`, `tx_processor`, `alpha/live/state`, docs | Production chain-server live token tracking no longer uses Redis and `TxSimulator::new()` no longer auto-attaches Redis. Mempool startup no longer accepts a Redis live cache. Legacy modules still exist: `tx_simulator::live_chain_cache`, `live_data_registry`, `tx_processor::live::{redis_block_publisher, block_notifier}`, `LiveProcessedBlockProvider`, and `alpha/live/state` Redis key contracts. | Decide which legacy Redis pieces are still needed for diagnostics or compatibility. Feature-gate or remove unused production exports after the mempool simulator freshness fix is in place. Update READMEs that still describe Redis as a normal runtime dependency. |
-| 4 | **Mempool startup ordering** | `mempool_processor`, systemd units | On restart, mempool starts after the chain-server process, but before the HTTP listener is ready. It logs one `Connection refused` hydrate failure, then waits for token cache population and recovers. This is noisy and can delay startup diagnostics. | Add a readiness wait or health-check loop before first hydrate, or use a chain-server health endpoint in service startup. Keep the current retry path, but make the first connection-refused warning less alarming if startup is still inside the grace window. |
-| 5 | **Strict processed-block replay readiness** | `tx_processor`, `tx_simulator`, `reth_chain_query` | Prior warmup/live replay hit mined transaction validation failures such as `lack of funds` when local state context lagged or was sparse. Current chain-server run has one V3 identity failure, but no stale-Reth validation failure. | Keep block processing strict. Add readiness/parity regression checks around historical context startup and known problematic blocks `25,078,746` and `25,033,700`. |
-| 6 | **Token candidate-selection scaling** | `eth_token` | The current live run is mostly healthy, but the known algorithmic risk remains: V3/V4 ERC721 transfer/approval candidates can scan tracked registry state instead of using a position-manager/token-id index. This can reappear as tracked pool count grows. | Implement indexed V3/V4 LP-position and approval lookup keyed by position manager, token id, owner, and operator. Candidate selection should scale with events in the transaction, not total tracked tokens/pools. |
-| 7 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | Latest 15k baseline PnL is concentrated in a few winners. Excluding the top five positions previously moved PnL from positive to roughly flat/negative, so the broad baseline is still mostly measuring infrastructure and tail winners. | Continue the five-strategy 70k comparison work. For each strategy, inspect top 10 and worst 10 positions and preserve skip reasons, entry inputs, exit reasons, and PnL snapshots for frontend review. |
-| 8 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | Prior probes classified failed exits into retry-later, address-specific restriction, chunk-size/anti-whale, no observed sell evidence, and drained-liquidity V3 cases. Strategy-side position monitoring still needs continuous exit policy instead of one-shot max-hold behavior. | Keep monitoring continuous in strategy state. Add retry cadence, chunked exits, pool-approved exits, and no-observed-sell exposure limits as explicit strategies/policies. |
-| 9 | **Decision ledger completeness** | `alpha/engine`, `alpha/store`, frontend | Execution reports now carry more fill context, but the strategy decision ledger still does not persist every rule input and skip/action reason needed for explainable frontend review. | Persist decisions keyed by run, strategy, token, pool, rule id, inputs, action, execution report, exit reason, and PnL snapshot. |
-| 10 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real capital should remain blocked until live no-capital simulation freshness, strategy profitability, and decision auditing are stable. | Keep real execution separate. Only wire execution after live simulation freshness and strategy auditability are verified. |
+| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is now real live deployment, not a no-capital endpoint. The current evidence is still incomplete: we need a selected policy, exact two-week backtest, live shadow/live-backtest comparison, trade audit, and explicit execution gates before the policy can be trusted with real orders. | Define the production policy candidate, run the exact last-two-week backtest, run the same policy in live shadow mode, and make the frontend review show top 10/worst 10 positions plus every decision reason. |
+| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | Latest 15k baseline PnL is concentrated in a few winners. Excluding the top five positions previously moved PnL from positive to roughly flat/negative, so the broad baseline is still mostly measuring infrastructure and tail winners. | Continue the strategy comparison work, but promote the winner only if the two-week backtest and live shadow/live-backtest agree. Preserve skip reasons, entry inputs, exit reasons, and PnL snapshots for frontend review. |
+| 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | Prior probes classified failed exits into retry-later, address-specific restriction, chunk-size/anti-whale, no observed sell evidence, and drained-liquidity V3 cases. Strategy-side position monitoring still needs continuous exit policy instead of one-shot max-hold behavior. | Keep monitoring continuous in strategy state. Add retry cadence, chunked exits, pool-approved exits, and no-observed-sell exposure limits as explicit strategies/policies before real deployment. |
+| 4 | **Decision ledger completeness** | `alpha/engine`, `alpha/store`, frontend | Execution reports now carry more fill context, but the strategy decision ledger still does not persist every rule input and skip/action reason needed for explainable frontend review and real execution approval. | Persist decisions keyed by run, strategy, token, pool, rule id, inputs, action, execution report, exit reason, and PnL snapshot. The frontend must be able to audit every real-deployment candidate trade. |
+| 5 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
+| 6 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
+| 7 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
+| 8 | **Residual Redis code outside the production chain-server path** | `tx_simulator`, `tx_processor`, `alpha/live/state`, docs | Production chain-server live token tracking no longer uses Redis and `TxSimulator::new()` no longer auto-attaches Redis. Mempool startup no longer accepts a Redis live cache. Legacy modules still exist: `tx_simulator::live_chain_cache`, `live_data_registry`, `tx_processor::live::{redis_block_publisher, block_notifier}`, `LiveProcessedBlockProvider`, and `alpha/live/state` Redis key contracts. | Decide which legacy Redis pieces are still needed for diagnostics or compatibility. Feature-gate or remove unused production exports after the mempool simulator freshness fix is in place. Update READMEs that still describe Redis as a normal runtime dependency. |
+| 9 | **Mempool startup ordering** | `mempool_processor`, systemd units | On restart, mempool starts after the chain-server process, but before the HTTP listener is ready. It logs one `Connection refused` hydrate failure, then waits for token cache population and recovers. This is noisy and can delay startup diagnostics. | Add a readiness wait or health-check loop before first hydrate, or use a chain-server health endpoint in service startup. Keep the current retry path, but make the first connection-refused warning less alarming if startup is still inside the grace window. |
+| 10 | **Strict processed-block replay readiness** | `tx_processor`, `tx_simulator`, `reth_chain_query` | Prior warmup/live replay hit mined transaction validation failures such as `lack of funds` when local state context lagged or was sparse. Current chain-server run has one V3 identity failure, but no stale-Reth validation failure. | Keep block processing strict. Add readiness/parity regression checks around historical context startup and known problematic blocks `25,078,746` and `25,033,700`. |
+| 11 | **Token candidate-selection scaling** | `eth_token` | The current live run is mostly healthy, but the known algorithmic risk remains: V3/V4 ERC721 transfer/approval candidates can scan tracked registry state instead of using a position-manager/token-id index. This can reappear as tracked pool count grows. | Implement indexed V3/V4 LP-position and approval lookup keyed by position manager, token id, owner, and operator. Candidate selection should scale with events in the transaction, not total tracked tokens/pools. |
 
 ## Redis Cleanup Status
 
@@ -111,15 +136,25 @@ Recent checks that passed during this cleanup:
 
 ## Immediate Next Actions
 
-1. Reproduce the block `25,091,919` V3 pool identity miss and restore
+1. Define the real production strategy candidate and its execution gates:
+   sizing, max exposure, retry cadence, stale-data threshold, simulation
+   freshness threshold, exit restrictions, and kill switch behavior.
+2. Backtest the selected candidate over the exact last two-week block window and
+   keep the run reproducible from the frontend.
+3. Run the same policy in live shadow/live-backtest mode against the current
+   chain-server and mempool pipeline. Treat this as a rough current-regime
+   estimate and drift detector, not as the deployment target.
+4. Review the top 10 and worst 10 positions with full decision-ledger context.
+5. Reproduce the block `25,091,919` V3 pool identity miss and restore
    chain-server soak expectations to `tx_failures=0` and `pipeline_issues=0`.
-2. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
+6. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
    on-demand position-manager backfill before public signal publication.
-3. Add a mempool readiness wait against chain-server HTTP health.
-4. Run a longer chain-server and mempool soak:
+7. Add a mempool readiness wait against chain-server HTTP health.
+8. Run a longer chain-server and mempool soak:
    chain-server must keep `tx_failures=0` and `pipeline_issues=0`, while
    mempool simulation target lag should stay within the accepted threshold.
-5. Remove or feature-gate legacy Redis modules only after the production
+9. Remove or feature-gate legacy Redis modules only after the production
    mempool path no longer needs any Redis-compatible fallback.
-6. Continue the 70k strategy comparison and frontend review using complete
-   top-10/worst-10 position diagnostics.
+10. Continue the broader strategy comparison as supporting evidence, but let the
+   exact two-week backtest and live shadow/live-backtest drive the real
+   deployment decision.
