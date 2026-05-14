@@ -1,7 +1,7 @@
 [Unit]
 Description=Ethereum mempool signal detector
-Wants=network-online.target reth.service eth-chain-server.service
-After=network-online.target reth.service eth-chain-server.service
+Wants=network-online.target eth-chain-server.service
+After=network-online.target eth-chain-server.service
 StartLimitIntervalSec=0
 
 [Service]
