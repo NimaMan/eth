@@ -741,6 +741,7 @@ fn build_pool_rollups(
         } else {
             rollup.updated_epoch = Some(generated_at_unix_secs as i64);
         }
+        let mut realized_from_reports = false;
         if let Some(order_id) = position.entry_order_id.as_deref() {
             if let Some(reports) = report_by_order.get(order_id) {
                 let entry_value_eth = rollup.add_reports(reports, ReportSide::Buy);
@@ -749,6 +750,7 @@ fn build_pool_rollups(
                         let exit_value_eth = confirmed_filled_eth(exit_reports);
                         if entry_value_eth > 0.0 && exit_value_eth > 0.0 {
                             rollup.add_realized_pnl(entry_value_eth, exit_value_eth);
+                            realized_from_reports = true;
                         }
                     }
                 }
@@ -760,7 +762,15 @@ fn build_pool_rollups(
             }
         }
         if let Some(snapshot) = snapshot_by_position.get(&position.position_id) {
-            rollup.add_snapshot(snapshot);
+            if realized_from_reports {
+                // Snapshot realized PnL already captured from execution reports;
+                // only use snapshot for current value and unrealized PnL.
+                rollup.snapshot_count += 1;
+                rollup.current_value_eth += snapshot.current_value_eth.unwrap_or(0.0);
+                rollup.unrealized_pnl_eth += snapshot.unrealized_profit_eth.unwrap_or(0.0);
+            } else {
+                rollup.add_snapshot(snapshot);
+            }
         }
     }
 

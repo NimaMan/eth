@@ -13,6 +13,15 @@ const MAX_PNL_ROWS: usize = 100;
 const MAX_GRAPH_NODES: usize = 80;
 const MAX_GRAPH_EDGES: usize = 160;
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TokenNetworkPnlTotals {
+    pub num_tx: u64,
+    pub bribes: f64,
+    pub realized_profit: f64,
+    pub unrealized_profit: f64,
+    pub total_profit: f64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenNetworkView {
     pub node_count: usize,
@@ -21,6 +30,7 @@ pub struct TokenNetworkView {
     pub applied_batches: u64,
     pub pnl_rows: Vec<AddressActivitySummary>,
     pub pnl_omitted_count: usize,
+    pub pnl_totals: TokenNetworkPnlTotals,
     pub graph: TokenNetworkGraphView,
 }
 
@@ -65,28 +75,38 @@ impl TokenNetworkView {
                 applied_batches: 0,
                 pnl_rows: Vec::new(),
                 pnl_omitted_count: 0,
+                pnl_totals: TokenNetworkPnlTotals::default(),
                 graph: TokenNetworkGraphView::default(),
             };
         };
 
         let latest_price = latest_token_price(token);
         let total_supply = token.total_supply_scaled();
-        let mut pnl_rows = graph
+        let all_summaries: Vec<AddressActivitySummary> = graph
             .address_activity
             .values()
             .map(|activity| activity.summary(latest_price, total_supply))
-            .collect::<Vec<_>>();
+            .collect();
+        let mut pnl_rows = all_summaries.clone();
         pnl_rows.sort_by(compare_pnl_rows);
         let pnl_omitted_count = pnl_rows.len().saturating_sub(MAX_PNL_ROWS);
         pnl_rows.truncate(MAX_PNL_ROWS);
 
-        let summary_by_node = graph
-            .address_activity
-            .values()
-            .map(|activity| {
-                let summary = activity.summary(latest_price, total_supply);
-                (summary.node_id.stable_key(), summary)
-            })
+        let pnl_totals = all_summaries.iter().fold(
+            TokenNetworkPnlTotals::default(),
+            |mut totals, summary| {
+                totals.num_tx += summary.num_tx;
+                totals.bribes += summary.bribe_amount;
+                totals.realized_profit += summary.pnl.realized_profit;
+                totals.unrealized_profit += summary.pnl.unrealized_profit;
+                totals.total_profit += summary.pnl.total_profit;
+                totals
+            },
+        );
+
+        let summary_by_node = all_summaries
+            .into_iter()
+            .map(|summary| (summary.node_id.stable_key(), summary))
             .collect::<BTreeMap<_, _>>();
 
         let graph_view = TokenNetworkGraphView::from_graph(graph, &summary_by_node);
@@ -98,6 +118,7 @@ impl TokenNetworkView {
             applied_batches: graph.applied_batches,
             pnl_rows,
             pnl_omitted_count,
+            pnl_totals,
             graph: graph_view,
         }
     }
