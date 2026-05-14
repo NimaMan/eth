@@ -4,6 +4,7 @@ use crate::tx_router::{CreatorFunctionType, TransactionCategory};
 
 use super::{
     logging::{log_signal_dispatch_result, log_signal_dispatch_start},
+    nonce_dependency_replay::merge_nonce_dependencies_with_replay_sequence,
     pending_sequences::sequence_key_from_request,
     SimulationManager, SimulationResult, TxSimulationJob,
 };
@@ -26,21 +27,33 @@ impl SimulationManager {
             liquidity_removal_result: None,
         };
 
-        let processed = match self.build_processed_transaction(request, true).await {
-            Ok(tx) => tx,
+        let processed_with_dependencies = match self
+            .build_processed_transaction_with_nonce_dependencies(request, true)
+            .await
+        {
+            Ok(processed) => processed,
             Err(err) => {
                 aggregate_result.error =
                     Some(format!("Failed to process creator transaction: {}", err));
                 return aggregate_result;
             }
         };
+        let processed = processed_with_dependencies.transaction.clone();
 
         let replay_sequence =
             if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
-                self.record_pending_transaction(key, request.tx_hash, processed.clone(), now)
-                    .await
+                let stored_sequence = self
+                    .record_pending_transaction(key, request.tx_hash, processed.clone(), now)
+                    .await;
+                merge_nonce_dependencies_with_replay_sequence(
+                    processed_with_dependencies.dependencies,
+                    stored_sequence,
+                )
             } else {
-                vec![processed.clone()]
+                merge_nonce_dependencies_with_replay_sequence(
+                    processed_with_dependencies.dependencies,
+                    vec![processed.clone()],
+                )
             };
 
         if let TransactionCategory::CreatorTransaction { function_type, .. } = &request.category {

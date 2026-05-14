@@ -4,6 +4,8 @@ mod creator_buy_sell_flow;
 mod liquidity_removal_flow;
 mod logging;
 mod manager;
+mod nonce_dependency_replay;
+mod pending_nonce_dependencies;
 mod pending_sequences;
 mod pool_buy_sell_flow;
 mod replay_context;
@@ -15,5 +17,6 @@ pub(crate) use super::{
     QueueStats, SimulationQueue,
 };
 pub use manager::SimulationManager;
+pub use nonce_dependency_replay::is_pending_nonce_dependency_error;
 pub use request_queue::ManagerStats;
 pub use types::{BuySellResult, SimulationResult, SimulationType, TxSimulationJob};

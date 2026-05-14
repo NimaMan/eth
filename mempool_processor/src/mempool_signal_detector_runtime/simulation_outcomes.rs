@@ -8,7 +8,8 @@ use mempool_processor::{
     function_detector::CreatorFunctionType,
     mempool_fetcher::MempoolTransaction,
     simulator::{
-        MempoolSimulator, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
+        is_pending_nonce_dependency_error, MempoolSimulator, SimulationManager, SimulationResult,
+        SimulationType, TxSimulationJob,
     },
     tx_router::{RouteOrigin, TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
@@ -57,6 +58,17 @@ pub(crate) async fn drain_completed_simulation_outcomes(
                     .await;
                 warn!(
                     "Replay context mismatch for {} classified outside simulation error path: {}",
+                    result.request.tx.hash, error
+                );
+                continue;
+            }
+
+            if is_pending_nonce_dependency_error(error) {
+                unresolved_intent_store
+                    .resolve(&result.request.tx.hash)
+                    .await;
+                warn!(
+                    "Pending nonce dependency gap for {} classified outside simulation error path: {}",
                     result.request.tx.hash, error
                 );
                 continue;

@@ -1,9 +1,10 @@
 use super::block_pruner::spawn_block_pruner;
 use super::logging::log_simulation_start;
+use super::pending_nonce_dependencies::{PendingNonceDependencies, PendingNonceDependencyStats};
 use super::pending_sequences::{PendingSequences, SequenceKey};
 use super::request_queue::{ManagerStats, RequestQueue};
 use super::types::{SimulationResult, TxSimulationJob};
-use super::{mempool_tx_to_unsigned_tx, LiquidityRemovalSimulator, MempoolSimulator};
+use super::{LiquidityRemovalSimulator, MempoolSimulator};
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::TransactionCategory;
@@ -33,7 +34,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time;
-use tracing::{error, warn};
+use tracing::warn;
 use tx_processor::ProcessedTransaction;
 
 /// Manager for transaction simulations
@@ -49,6 +50,8 @@ pub struct SimulationManager {
 
     // Pending processed transactions keyed by creator/token.
     pub(super) pending_sequences: PendingSequences,
+    // Raw same-sender nonce dependencies used only to replay pending tx prefixes.
+    pub(super) pending_nonce_dependencies: PendingNonceDependencies,
 }
 
 impl SimulationManager {
@@ -70,6 +73,7 @@ impl SimulationManager {
         liquidity_removal_simulator.set_token_cache(token_cache.clone());
 
         let pending_sequences = PendingSequences::new();
+        let pending_nonce_dependencies = PendingNonceDependencies::new();
 
         let tx_simulator_for_task = mempool_simulator.get_tx_simulator();
         let _ = spawn_block_pruner(tx_simulator_for_task, pending_sequences.clone());
@@ -81,6 +85,7 @@ impl SimulationManager {
             signal_manager: Arc::new(Mutex::new(signal_manager)),
             token_cache,
             pending_sequences,
+            pending_nonce_dependencies,
         }
     }
 
@@ -155,6 +160,19 @@ impl SimulationManager {
         self.request_queue.stats().await
     }
 
+    pub async fn record_pending_nonce_dependency(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+    ) {
+        self.pending_nonce_dependencies
+            .record(tx.clone(), Instant::now())
+            .await;
+    }
+
+    pub async fn pending_nonce_dependency_stats(&self) -> PendingNonceDependencyStats {
+        self.pending_nonce_dependencies.stats().await
+    }
+
     /// Simulate a single request
     async fn simulate_request(&self, request: TxSimulationJob) -> SimulationResult {
         log_simulation_start(&request);
@@ -199,21 +217,9 @@ impl SimulationManager {
         request: &TxSimulationJob,
         retry_on_missing_header: bool,
     ) -> EyreResult<ProcessedTransaction> {
-        let unsigned_tx = mempool_tx_to_unsigned_tx(&request.tx)?;
-        let block_number = match self.mempool_simulator.latest_simulation_block().await {
-            Ok(number) => Some(number),
-            Err(err) => {
-                error!(
-                    "Failed to resolve simulation block for liquidity removal: {}",
-                    err
-                );
-                None
-            }
-        };
-
-        self.liquidity_removal_simulator
-            .process_with_optional_retry(unsigned_tx, block_number, retry_on_missing_header)
+        self.build_processed_transaction_with_nonce_dependencies(request, retry_on_missing_header)
             .await
+            .map(|processed| processed.transaction)
     }
 
     pub(super) async fn record_pending_transaction(
@@ -230,5 +236,6 @@ impl SimulationManager {
 
     async fn prune_expired_sequences(&self, now: Instant) {
         self.pending_sequences.prune_expired(now).await;
+        self.pending_nonce_dependencies.prune_expired(now).await;
     }
 }

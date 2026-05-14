@@ -33,6 +33,7 @@ pub use mempool_simulator::{
 };
 pub use pool_buy_sell_simulator::{PoolBuySellSimulator, PoolSimulationResult};
 pub use simulation_manager::{
-    BuySellResult, SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
+    is_pending_nonce_dependency_error, BuySellResult, SimulationManager, SimulationResult,
+    SimulationType, TxSimulationJob,
 };
 pub use simulation_queue::{QueueStats, SimulationQueue};

@@ -52,7 +52,15 @@ simulation_manager/
    entries expire after roughly two seconds rather than waiting for future
    blocks.
 
-2. **Simulate creator activity per pool**
+2. **Preserve sender nonce order**
+   `pending_nonce_dependencies` records raw mempool transactions by
+   `(sender, nonce)` for a bounded dependency window. When Reth state says the
+   target tx nonce is too high, the manager replays the contiguous pending
+   prefix first, then the target tx, and only then runs pool probes. This is not
+   a signal retry lane; it is execution context needed to mimic chain ordering
+   when users submit several transactions before the next block.
+
+3. **Simulate creator activity per pool**
    Every creator transaction is run through the mempool simulator and then
    replayed through `pool_buy_sell_flow` to test each relevant pool reported by
    the token tracker (WETH/token, USDC/token, …). This is how we observe the
@@ -61,13 +69,13 @@ simulation_manager/
    metadata. V4 buy/sell probes remain disabled until the cache exposes the full
    V4 pool-key config required by `tx_processor`.
 
-3. **Track new deployments until token-server catches up**
+4. **Track new deployments until token-server catches up**
    `contract_creation_flow` processes deployment transactions, tries to resolve
    the contract address, and records the processed tx under `(creator, token)`.
    When token-server later exposes definitive pool information for that token we
    already have the creator context on our side.
 
-4. **Keep cache waits out of simulation errors**
+5. **Keep cache waits out of simulation errors**
    LP approvals, liquidity removals, creator-control calls, and V4
    modify-liquidity txs can arrive before token-server has published the mapped
    token/pool. Those txs are retried outside the manager only inside the short
@@ -75,7 +83,7 @@ simulation_manager/
    `unresolved_cache_context` result means "wait for
    context", not "the pool failed".
 
-5. **Surface liquidity threats immediately**
+6. **Surface liquidity threats immediately**
    Liquidity removal signals are handled in their own flow so they can run even
    when buy/sell probes are skipped. V2/Sushi removals use reserve deltas when
    available. V3 removals map processed pool burn/decrease events back to the
@@ -84,7 +92,7 @@ simulation_manager/
    before mining, the signal is still emitted as unknown severity instead of
    being mislabeled as low risk.
 
-6. **Feed downstream detectors**
+7. **Feed downstream detectors**
    Every flow ultimately builds a `SimulationResult` and passes it to
    `SignalManager`. The detectors compare the result with the cached “last known”
    token state to decide whether to emit `TradingEnabled`, `HighTax`, or

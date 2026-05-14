@@ -505,6 +505,9 @@ async fn main() -> Result<()> {
                 metrics
                     .add_detection_latency(Duration::from_nanos(tx.detection_ns))
                     .await;
+                simulation_manager
+                    .record_pending_nonce_dependency(&tx)
+                    .await;
 
                 let classification = tx_router.classify(&tx).await;
                 tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
@@ -681,6 +684,18 @@ async fn main() -> Result<()> {
                 unresolved_stats.expired_total,
                 unresolved_stats.dropped_total,
                 unresolved_stats.cache_wait_avg_ms
+            );
+            let nonce_dependency_stats = simulation_manager.pending_nonce_dependency_stats().await;
+            info!(
+                "📊 Pending nonce dependencies: senders={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
+                nonce_dependency_stats.senders,
+                nonce_dependency_stats.transactions,
+                nonce_dependency_stats.recorded,
+                nonce_dependency_stats.replaced,
+                nonce_dependency_stats.lookups,
+                nonce_dependency_stats.hits,
+                nonce_dependency_stats.gaps,
+                nonce_dependency_stats.expired
             );
             last_report_total = total;
 
