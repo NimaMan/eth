@@ -83,14 +83,16 @@ an unresolved intent instead of a public signal or simulation error.
 
 Critical cache-wait examples:
 
-- LP approval where the LP/pool token is not mapped yet.
+- Known position-manager approval where the token id / owner position is not
+  mapped yet. Generic ERC20 approvals are not queued as possible LP approvals.
 - Liquidity removal where the token/pool cannot be resolved yet.
 - Creator-control tx where the creator/target mapping is not present yet.
 - V4 modify-liquidity tx whose composite pool id is not mapped yet.
 
-Once the cache accepts a newer token-server snapshot, the unresolved-intent lane
-retries those txs and routes them through the normal direct-publish or
-simulation paths.
+The unresolved-intent lane is intentionally short-lived for mempool risk: it
+may retry those txs for the same pending window, but should expire within one
+or two seconds. If token/pool context arrives only after the tx is mined, the
+confirmed block pipeline owns that later context.
 
 ## Scam And Retention Semantics
 

@@ -18,7 +18,11 @@ use tx_processor::ProcessedTransaction;
 /// Maximum number of helper transactions we keep per (creator, token) sequence.
 const PENDING_SEQUENCE_LIMIT: usize = 6;
 /// Time-to-live for helpers that remain unmined.
-const PENDING_SEQUENCE_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+///
+/// This is a mempool-only bridge for same-window helper txs. If the sequence is
+/// still not usable after a couple of seconds, confirmed block processing should
+/// provide the later context instead of keeping stale pending state alive.
+const PENDING_SEQUENCE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SequenceKey {

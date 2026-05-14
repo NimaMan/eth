@@ -57,6 +57,9 @@ use mempool_processor::{
 };
 
 const MEMPOOL_ALLOW_DATABASE_DISABLED_ENV: &str = "MEMPOOL_ALLOW_DATABASE_DISABLED";
+const UNRESOLVED_INTENT_MAX_ENTRIES: usize = 20_000;
+const UNRESOLVED_INTENT_MAX_LIFETIME: Duration = Duration::from_secs(2);
+const UNRESOLVED_INTENT_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -449,9 +452,9 @@ async fn main() -> Result<()> {
         .append(true)
         .open(simulation_error_log_path.as_ref())?;
     let unresolved_intent_store = UnresolvedIntentStore::new(
-        20_000,
-        Duration::from_secs(10 * 60),
-        Duration::from_secs(2),
+        UNRESOLVED_INTENT_MAX_ENTRIES,
+        UNRESOLVED_INTENT_MAX_LIFETIME,
+        UNRESOLVED_INTENT_RETRY_INTERVAL,
         run_dir.join("unresolved_intents.log"),
     );
 

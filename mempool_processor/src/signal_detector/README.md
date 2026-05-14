@@ -150,8 +150,8 @@ enriches the payload from `TokenTrackingCache` before publishing.
 - Publishing is best‑effort and non‑blocking, but DB writes are required for
   live product runs because token-server and ASENA read persisted signals.
 - LP approval diagnostics are included in the periodic mempool health output:
-  router approvals seen, tracked pool approvals, pool cache misses, LP approvals
-  published, and DB write errors.
+  ingress approval txs, short unresolved retry attempts, tracked pool/position
+  hits, cache misses, LP approvals published, and DB write errors.
 - V2-style Uniswap/Sushi/Pancake/Shiba/Frax approvals are actionable only when
   the ERC20 LP share is known. Balancer BPT and Curve LP approvals follow the
   same percentage rule. V3/V4 NFT approvals require mapped position-liquidity

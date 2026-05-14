@@ -48,7 +48,9 @@ simulation_manager/
    `pending_sequences` records the processed transactions that ran just before a
    creator tx. This is what allows buy/sell probes to re-use already-seen state
    (approvals, routing setup, etc.) even before token-server publishes the next
-   mined block snapshot.
+   mined block snapshot. This is intentionally a same-mempool-window cache:
+   entries expire after roughly two seconds rather than waiting for future
+   blocks.
 
 2. **Simulate creator activity per pool**
    Every creator transaction is run through the mempool simulator and then
@@ -68,8 +70,9 @@ simulation_manager/
 4. **Keep cache waits out of simulation errors**
    LP approvals, liquidity removals, creator-control calls, and V4
    modify-liquidity txs can arrive before token-server has published the mapped
-   token/pool. Those txs are retried outside the manager until mapped. Inside
-   simulation flows, an `unresolved_cache_context` result means "wait for
+   token/pool. Those txs are retried outside the manager only inside the short
+   unresolved-intent window. Inside simulation flows, an
+   `unresolved_cache_context` result means "wait for
    context", not "the pool failed".
 
 5. **Surface liquidity threats immediately**

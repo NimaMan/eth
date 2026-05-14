@@ -318,7 +318,7 @@ mod tests {
             "unresolved_intents_test_{}.log",
             std::process::id()
         ));
-        let store = UnresolvedIntentStore::new(8, Duration::from_secs(600), Duration::ZERO, &path);
+        let store = UnresolvedIntentStore::new(8, Duration::from_secs(2), Duration::ZERO, &path);
 
         let tx = test_tx("0xtx");
         assert!(

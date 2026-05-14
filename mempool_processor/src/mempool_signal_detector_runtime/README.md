@@ -28,7 +28,7 @@ Reth pending tx stream
          -> simulation queue or LP-approval fast path
        unresolved critical tx
          -> UnresolvedIntentStore
-         -> retry against newer token cache
+         -> retry against current token cache for the short pending window
        ordinary tx
          -> ignored after accounting
   -> SimulationManager
@@ -78,18 +78,22 @@ reported as simulation errors.
 
 Queued intent kinds:
 
-- LP approvals against pools/LP tokens that are not mapped yet.
+- Known position-manager approvals whose token id / owner position is not
+  mapped yet. Generic ERC20 approvals are not queued as possible LP approvals.
 - Liquidity removals whose token/pool cannot be mapped yet.
 - Creator-control calls waiting for target-token context.
 - V4 modify-liquidity calls.
 
-The store is bounded and uses a 10 minute TTL. It periodically retries intents
-against the current token cache. When a mapping appears, the tx is routed to the
+The store is bounded and short-lived: current live settings keep an unresolved
+pending tx for at most two seconds and retry every 250ms against the current
+token cache. This lane is only a same-mempool-window bridge, not a post-block
+retry system. When a mapping appears inside that window, the tx is routed to the
 same path it would have used if the mapping had been present originally:
 
 - Known LP approval: publish immediately without simulation.
 - Liquidity removal / creator-control / V4 removal: submit to simulation.
-- Still unmapped: keep pending until the retry interval or TTL expiry.
+- Still unmapped after the short cache-wait window: expire it and let confirmed
+  block processing provide any later token/pool context.
 
 Interval logs include unresolved `pending`, `in_flight`, `recorded`,
 `resolved`, `expired`, `dropped`, and average cache-wait timing.
@@ -227,8 +231,8 @@ Healthy live behavior looks like:
 - Token-server snapshots are monotonic by block; `warming` is accepted only
   before the first `live` context.
 - Simulation queue depth returns to zero between bursts.
-- LP approval cache misses do not grow without corresponding unresolved-intent
-  telemetry.
+- Generic ERC20 LP-approval cache misses do not become unresolved intents;
+  unresolved retry attempts stay bounded by the short cache-wait window.
 - Liquidity-removal cache waits appear in `unresolved_intents.log`, not
   `simulation_errors.log`.
 - V4 `pool_manager#pool_id` identifiers pass through as strings.

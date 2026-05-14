@@ -26,7 +26,7 @@ simulation, and semantic signal emission.
   pending simulation orchestration.
 - Token-context hydration from `eth_chain_server`, including monotonic context
   acceptance rules.
-- The unresolved-intent lane for cache-waiting critical txs.
+- The short unresolved-intent lane for cache-waiting critical txs.
 - Signal detectors, signal publishing, DB writers, and ZMQ notification output.
 
 ## Does Not Own
@@ -47,10 +47,10 @@ Reth IPC pending tx
        | known token/pool critical tx
        |   -> simulation queue or direct LP-approval publication
        |
-       | unresolved LP approval / removal / creator control / V4 modify-liquidity
+       | short cache-wait position approval / removal / creator control / V4 modify-liquidity
        |   -> unresolved intent store
-       |   -> retry against newer token cache
-       |   -> simulation queue or direct LP-approval publication once mapped
+       |   -> retry against current token cache for at most a couple seconds
+       |   -> simulation queue or direct position-approval publication once mapped
        |
        ` ordinary tx
            -> drop after arrival accounting
@@ -75,12 +75,10 @@ pending-transaction routing, simulation, and semantic signal persistence.
 
 Live runtime contracts:
 
-- `live_block_processor` publishes confirmed processed blocks and live state to
-  Redis.
-- `eth_chain_server` consumes disk-cache/Redis blocks, applies `eth_token`, and
-  exposes live token/pool context over HTTP.
+- `eth_chain_server` processes confirmed blocks, applies `eth_token`, persists
+  processed blocks, and exposes live token/pool context over HTTP.
 - `mempool_signal_detector` consumes Reth pending tx, token-server context, and
-  Redis/Reth simulation state, then writes semantic signals to Postgres.
+  local Reth-backed simulation state, then writes semantic signals to Postgres.
 - `eth_alpha_trader` consumes token-server APIs and persisted mempool signals.
 - ASENA reads token-server/trade APIs only; it should not consume ZMQ/logs
   directly.
@@ -89,9 +87,9 @@ Failure isolation rules:
 
 - Pending-tx bursts or simulation failures must not stop token-server live
   block tracking.
-- Live simulations can use only local Reth historical state or Redis live state.
-  If neither source has the needed block/state, fail with a source-specific
-  error.
+- Live simulations use local Reth historical state or direct live state sessions
+  supplied by the live chain runtime. If the needed block/state is unavailable,
+  fail with a source-specific error.
 - Mempool token context comes only from token-server `/live/tokens` and
   `/live/pools`. `/live/updates` is a notification-only long-poll wakeup: when
   token-server broadcasts `BlockApplied`, the request returns and mempool
@@ -173,7 +171,8 @@ cargo test -p mempool_processor
 - `simulate_mempool_tx_with_state_changes` is not the canonical rich diff path;
   prefer processed tx/buy-sell facts from `tx_processor`.
 - Live simulation depends on fresh confirmed token context from
-  `eth_chain_server`; unknown mappings must go through the unresolved-intent
-  lane instead of becoming simulation errors or public signals.
+  `eth_chain_server`; unknown mappings may wait only in the short unresolved
+  lane. If they are still unmapped after that same-mempool-window check, let
+  confirmed block processing provide the later context.
 - Do not duplicate tax or decoding logic here. Route to `tx_processor` and make
   detectors consume its output.

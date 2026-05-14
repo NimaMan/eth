@@ -62,21 +62,18 @@ impl TransactionRouter {
             return None;
         }
 
-        if decode_liquidity_approval_call(tx)
-            .filter(|approval| approval.amount != alloy_primitives::U256::ZERO)
-            .is_some()
-            || decode_position_approval_call(tx)
-                .map(|approval| {
-                    tx.to
-                        .as_ref()
-                        .map(|_| is_known_position_manager_candidate(&approval.position_manager()))
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false)
+        if decode_position_approval_call(tx)
+            .map(|approval| {
+                tx.to
+                    .as_ref()
+                    .map(|_| is_known_position_manager_candidate(&approval.position_manager()))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
         {
             return Some((
                 UnresolvedIntentKind::LpApproval,
-                "LP approval target is not in token cache yet",
+                "position approval target is not in token cache yet",
             ));
         }
 
@@ -718,7 +715,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exposes_unresolved_lp_approval_intent_on_cache_miss() {
+    async fn does_not_queue_plain_erc20_approval_cache_miss_as_unresolved_lp_intent() {
         let cache = Arc::new(TokenTrackingCache::with_defaults());
         let router = TransactionRouter::new(Some(cache));
         let tx = MempoolTransaction {
@@ -740,13 +737,40 @@ mod tests {
         };
 
         let classification = router.classify(&tx).await;
-        let (kind, _) = router
+        assert!(router.unresolved_intent_for(&tx, &classification).is_none());
+    }
+
+    #[tokio::test]
+    async fn exposes_short_unresolved_position_approval_intent_on_cache_miss() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0xC36442b4a4522E871399CD717aBDD847Ab11FE88")),
+            input: approve_calldata(
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                U256::from(42u64),
+            ),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["approve".to_string()],
+            function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+        };
+
+        let classification = router.classify(&tx).await;
+        let (kind, reason) = router
             .unresolved_intent_for(&tx, &classification)
-            .expect("LP approval should become unresolved intent");
+            .expect("known position-manager approval should enter short unresolved lane");
         assert_eq!(
             kind,
             crate::unresolved_intents::UnresolvedIntentKind::LpApproval
         );
+        assert!(reason.contains("position approval"));
     }
 
     #[tokio::test]
