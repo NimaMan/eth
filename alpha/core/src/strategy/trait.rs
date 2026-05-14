@@ -22,4 +22,12 @@ pub trait Strategy: Send {
     ) -> Result<StrategyDecision> {
         Ok(StrategyDecision::Hold)
     }
+
+    fn on_position_monitor(
+        &mut self,
+        _ctx: &StrategyContext<'_>,
+        _block_number: u64,
+    ) -> Result<Vec<StrategyDecision>> {
+        Ok(Vec::new())
+    }
 }

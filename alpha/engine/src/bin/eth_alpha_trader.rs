@@ -39,6 +39,7 @@ const STRATEGY_NAME: &str = "snipe-all-v1";
 const STRATEGY_LABEL: &str = "Snipe All v1";
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
+const POSITION_MONITOR_SOURCE: &str = "position_monitor";
 const ALPHA_DATABASE_URL_CONFIG: &str = "ALPHA_DATABASE_URL";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
 const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
@@ -239,6 +240,7 @@ async fn main() -> Result<()> {
     let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids) = load_persisted_watermarks(&store).await?;
     let mut primed = false;
+    let mut last_position_monitor_block: Option<u64> = None;
     let mut shutdown = ShutdownSignals::new()?;
 
     info!(
@@ -346,6 +348,7 @@ async fn main() -> Result<()> {
 
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
+        let mut position_monitor_events = 0usize;
         let mut reports = 0usize;
 
         for pool_wire in pools.pools {
@@ -507,6 +510,47 @@ async fn main() -> Result<()> {
             }
         }
 
+        if !suppress_events && (!first_poll || args.replay_current) {
+            if let Some(block_number) = status.progress.current_block {
+                let should_monitor = last_position_monitor_block
+                    .map(|previous| block_number > previous)
+                    .unwrap_or(true);
+                if should_monitor {
+                    let event = MarketEvent::BlockCompleted {
+                        block_number,
+                        updated_tokens: 0,
+                        updated_pools: market_events,
+                    };
+                    let event_reports = engine.handle_event(EngineEvent::Market(event)).await?;
+                    let report_count = event_reports.len();
+                    record_position_monitor_observation(
+                        &store,
+                        block_number,
+                        "checked",
+                        report_count,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "reports": reports_payload(&event_reports) }),
+                    )
+                    .await?;
+                    reports += report_count;
+                    position_monitor_events += 1;
+                    last_position_monitor_block = Some(block_number);
+                    for report in event_reports {
+                        info!(
+                            order_id = %report.order_id.0,
+                            status = ?report.status,
+                            block_number = ?report.block_number,
+                            gas_used = ?report.gas_used,
+                            error = ?report.error,
+                            "chain-sim position monitor execution report"
+                        );
+                    }
+                }
+            }
+        }
+
         if first_poll && !args.replay_current {
             info!(
                 pools = seen_pool_blocks.len(),
@@ -551,6 +595,7 @@ async fn main() -> Result<()> {
             signal_count = signals.count,
             market_events,
             risk_events,
+            position_monitor_events,
             reports,
             positions = engine.portfolio().active_position_count(),
             chain_sim_selected_block = chain_state_status.as_ref().ok().map(|state| state.selected_block_number),
@@ -576,6 +621,7 @@ async fn main() -> Result<()> {
             "signal_count": signals.count,
             "market_events": market_events,
             "risk_events": risk_events,
+            "position_monitor_events": position_monitor_events,
             "reports": reports,
             "positions": engine.portfolio().active_position_count(),
         });
@@ -610,6 +656,10 @@ async fn main() -> Result<()> {
         health
             .metrics
             .insert("risk_events".to_string(), json!(risk_events));
+        health.metrics.insert(
+            "position_monitor_events".to_string(),
+            json!(position_monitor_events),
+        );
         health.metrics.insert("reports".to_string(), json!(reports));
         health.metrics.insert(
             "positions".to_string(),
@@ -717,6 +767,7 @@ async fn load_persisted_watermarks(
             MEMPOOL_SIGNAL_SOURCE => {
                 signal_ids.insert(cursor.event_key);
             }
+            POSITION_MONITOR_SOURCE => {}
             _ => {}
         }
     }
@@ -780,6 +831,42 @@ async fn record_pool_observation(
         .wrap_err("failed to record pool strategy observation")
 }
 
+async fn record_position_monitor_observation(
+    store: &PostgresTradingStore,
+    block_number: u64,
+    decision: &str,
+    report_count: usize,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
+    store
+        .record_strategy_observation(StrategyObservationRecord {
+            strategy_name: STRATEGY_NAME.to_string(),
+            event_source: POSITION_MONITOR_SOURCE.to_string(),
+            event_key: format!("position_monitor:{block_number}"),
+            token_address: None,
+            pool_address: None,
+            block_number: Some(block_number),
+            event_timestamp: None,
+            decision: decision.to_string(),
+            report_count,
+            payload: json!({
+                "block_number": block_number,
+                "first_poll": first_poll,
+                "suppress_events": suppress_events,
+                "live_status": status.progress.status,
+                "live_current_block": status.progress.current_block,
+                "live_blocks_processed": status.progress.blocks_processed,
+                "live_warmup_total_blocks": status.progress.warmup_total_blocks,
+                "extra": extra,
+            }),
+        })
+        .await
+        .wrap_err("failed to record position monitor strategy observation")
+}
+
 async fn record_signal_observation(
     store: &PostgresTradingStore,
     signal: &MempoolSignalWire,
@@ -797,7 +884,7 @@ async fn record_signal_observation(
             event_key: signal.signal_id.clone(),
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            block_number: None,
+            block_number: status.progress.current_block,
             event_timestamp: signal.detection_timestamp.clone(),
             decision: decision.to_string(),
             report_count,

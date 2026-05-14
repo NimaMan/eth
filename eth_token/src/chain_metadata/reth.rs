@@ -265,6 +265,7 @@ fn is_optional_token_metadata_read_error(message: &str) -> bool {
         || message.contains("Failed to get token decimals")
         || message.contains("Token decimals call")
         || message.contains("missing live block header")
+        || message.contains("live chain cache not configured")
 }
 
 #[cfg(test)]
@@ -345,6 +346,9 @@ mod tests {
         ));
         assert!(is_optional_token_metadata_read_error(
             "missing live block header for block 123"
+        ));
+        assert!(is_optional_token_metadata_read_error(
+            "live chain cache not configured"
         ));
         assert!(!is_optional_token_metadata_read_error(
             "transaction validation error: lack of funds"

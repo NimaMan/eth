@@ -174,6 +174,9 @@ where
         let mut decisions = Vec::with_capacity(self.strategies.len());
         for strategy in &mut self.strategies {
             decisions.push(strategy.on_market_event(&ctx, event)?);
+            if let MarketEvent::BlockCompleted { block_number, .. } = event {
+                decisions.extend(strategy.on_position_monitor(&ctx, *block_number)?);
+            }
         }
         let reports = self.apply_decisions(decisions).await?;
         self.snapshot_open_positions_for_pool(event).await?;

@@ -118,8 +118,14 @@ pub(crate) enum PoolTradingSimulationMode<'a> {
 }
 
 impl<'a> PoolTradingSimulationMode<'a> {
-    fn is_live(self) -> bool {
-        matches!(self, Self::LiveBlockSession { .. })
+    fn uses_direct_live_state_only(self) -> bool {
+        matches!(
+            self,
+            Self::LiveBlockSession {
+                direct_state_only: true,
+                ..
+            }
+        )
     }
 
     pub(crate) fn profile_run_id(self) -> Option<&'a str> {
@@ -586,11 +592,8 @@ impl ProcessedTokenUpdateRouter {
             return Ok(Vec::new());
         }
 
-        let pool_metadata_timeout = if trading_simulation.is_live() {
-            Some(Duration::from_millis(LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS))
-        } else {
-            None
-        };
+        let pool_metadata_timeout =
+            pool_metadata_timeout_for_trading_simulation(trading_simulation);
         let candidate_started = Instant::now();
         let token_addresses = candidate_token_addresses_with_pool_discovery(
             registry,
@@ -1076,4 +1079,14 @@ fn collect_pending_pool_simulation(
 
 fn elapsed_micros(started: Instant) -> u128 {
     started.elapsed().as_micros()
+}
+
+fn pool_metadata_timeout_for_trading_simulation(
+    trading_simulation: PoolTradingSimulationMode<'_>,
+) -> Option<Duration> {
+    if trading_simulation.uses_direct_live_state_only() {
+        Some(Duration::from_millis(LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS))
+    } else {
+        None
+    }
 }

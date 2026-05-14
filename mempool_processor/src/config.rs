@@ -23,7 +23,6 @@ pub const MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV: &str = "MEMPOOL_TOKEN_CACHE_ETH
 pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
 pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
-pub const LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
 
 /// Default location of the local Reth data directory used by the processor.
 pub const DEFAULT_RETH_DATA_DIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
@@ -35,7 +34,6 @@ pub const DEFAULT_ETH_RPC_URL: &str = "http://127.0.0.1:8545";
 pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the shared Ethereum workspace.
 pub const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/mempool_processor";
-pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 pub const MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV: &str = "MEMPOOL_LIVE_TOKEN_SERVER_URL";
 pub const DEFAULT_LIVE_TOKEN_SERVER_URL: &str = "http://127.0.0.1:8765";
 
@@ -77,12 +75,6 @@ pub fn reth_ipc_path_from_env() -> String {
 pub fn eth_rpc_url_from_env() -> String {
     config_value(&[ETH_RPC_URL_ENV, RETH_HTTP_RPC_ENV])
         .unwrap_or_else(|| DEFAULT_ETH_RPC_URL.to_string())
-}
-
-/// Redis URL for live chain state used by ahead-of-MDBX simulations.
-pub fn live_data_redis_url_from_env() -> String {
-    config_value(&[LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV])
-        .unwrap_or_else(|| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
 }
 
 /// Log directory for the mempool processor.
@@ -199,10 +191,6 @@ fn unquote(value: &str) -> &str {
 
 fn default_simulation_workers() -> usize {
     DEFAULT_SIM_WORKERS
-}
-
-fn default_live_data_redis_url() -> String {
-    live_data_redis_url_from_env()
 }
 
 fn default_live_token_server_url() -> Option<String> {
@@ -357,10 +345,6 @@ pub struct SimulationConfig {
 
     /// Minimum value for simulation (in ETH)
     pub min_value_eth: f64,
-
-    /// Redis URL used to hydrate live chain data for ahead-of-MDBX simulations
-    #[serde(default = "default_live_data_redis_url")]
-    pub live_data_redis_url: String,
 }
 
 /// Database configuration
@@ -477,7 +461,6 @@ impl Default for MempoolProcessorConfig {
                 max_queue_size: 1000,
                 skip_simple_transfers: true,
                 min_value_eth: 0.01,
-                live_data_redis_url: live_data_redis_url_from_env(),
             },
 
             database: DatabaseConfig {
@@ -535,7 +518,6 @@ impl MempoolProcessorConfig {
             }
         }
 
-        config.simulation.live_data_redis_url = live_data_redis_url_from_env();
         config.logging.log_dir = mempool_log_dir_from_env();
 
         if let Some(endpoint) = config_value(&[MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV]) {

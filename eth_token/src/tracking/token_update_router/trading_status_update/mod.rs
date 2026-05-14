@@ -154,7 +154,7 @@ pub(super) async fn simulate_updated_v2_pools(
                 direct_state_only,
                 profile_run_id,
             } => {
-                let chain = live_block_state_session_chain(
+                let Some(chain) = live_block_state_session_chain(
                     block_sessions,
                     pool_simulator,
                     &pool_config,
@@ -164,7 +164,10 @@ pub(super) async fn simulate_updated_v2_pools(
                     direct_state_only,
                     profile_run_id,
                 )
-                .await?;
+                .await?
+                else {
+                    continue;
+                };
                 let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -381,7 +384,7 @@ pub(super) async fn simulate_updated_v3_pools(
                 direct_state_only,
                 profile_run_id,
             } => {
-                let chain = live_block_state_session_chain(
+                let Some(chain) = live_block_state_session_chain(
                     block_sessions,
                     pool_simulator,
                     &pool_config,
@@ -391,7 +394,10 @@ pub(super) async fn simulate_updated_v3_pools(
                     direct_state_only,
                     profile_run_id,
                 )
-                .await?;
+                .await?
+                else {
+                    continue;
+                };
                 let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -605,7 +611,7 @@ pub(super) async fn simulate_updated_v4_pools(
                 direct_state_only,
                 profile_run_id,
             } => {
-                let chain = live_block_state_session_chain(
+                let Some(chain) = live_block_state_session_chain(
                     block_sessions,
                     pool_simulator,
                     &pool_config,
@@ -615,7 +621,10 @@ pub(super) async fn simulate_updated_v4_pools(
                     direct_state_only,
                     profile_run_id,
                 )
-                .await?;
+                .await?
+                else {
+                    continue;
+                };
                 let pool_config = pool_config_for_state_session(pool_config, tx);
                 let timeout = Duration::from_millis(LIVE_POOL_SIMULATION_TIMEOUT_MS);
                 match tokio::time::timeout(
@@ -855,7 +864,7 @@ async fn live_block_state_session_chain(
     pool_id: &str,
     direct_state_only: bool,
     profile_run_id: Option<&str>,
-) -> Result<UnsignedTxChainSimulation> {
+) -> Result<Option<UnsignedTxChainSimulation>> {
     let block_number = state_session_block_number(pool_config, tx);
     let needs_session = !block_sessions
         .lock()
@@ -865,13 +874,18 @@ async fn live_block_state_session_chain(
     let mut session_created = false;
 
     if needs_session {
-        if direct_state_only && block_number == tx.block_number {
-            return Err(eyre!(
-                "direct live block state session missing block={} for {} pool={}",
-                block_number,
+        if direct_state_only {
+            tracing::debug!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number = tx.block_number,
+                state_session_block_number = block_number,
+                tx_index = tx.tx_index,
+                tx_hash = %hash_string(&tx.hash),
                 pool_kind,
-                pool_id
-            ));
+                pool_id = %pool_id,
+                "skipping live pool trading simulation because direct state session is unavailable"
+            );
+            return Ok(None);
         }
         if missing_live_current_block_header(pool_config, tx) {
             return Err(eyre!(
@@ -953,7 +967,7 @@ async fn live_block_state_session_chain(
             "token simulation session profile"
         );
     }
-    Ok(chain)
+    Ok(Some(chain))
 }
 
 async fn historical_block_state_session_chain(

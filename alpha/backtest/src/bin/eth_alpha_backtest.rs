@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -203,21 +203,25 @@ async fn load_events_from_observations(
     from_block: Option<u64>,
     to_block: Option<u64>,
 ) -> Result<Vec<eth_alpha_engine::EngineEvent>> {
-    let mut query = String::from(
-        "SELECT event_source, event_key, block_number, payload
+    let replay_block_expr =
+        "COALESCE(block_number, NULLIF(payload->>'live_current_block', '')::BIGINT)";
+    let mut query = format!(
+        "SELECT event_source, event_key, block_number, payload, {replay_block_expr} AS replay_block
          FROM alpha_trading.strategy_observations
          WHERE run_id = $1",
     );
     if from_block.is_some() {
-        query.push_str(" AND block_number >= $2");
+        query.push_str(&format!(" AND {replay_block_expr} >= $2"));
     }
     if to_block.is_some() {
         query.push_str(&format!(
-            " AND block_number <= ${}",
+            " AND {replay_block_expr} <= ${}",
             if from_block.is_some() { 3 } else { 2 }
         ));
     }
-    query.push_str(" ORDER BY block_number ASC NULLS LAST, first_seen_at ASC");
+    query.push_str(&format!(
+        " ORDER BY {replay_block_expr} ASC NULLS LAST, first_seen_at ASC"
+    ));
 
     let mut q = sqlx::query(&query).bind(replay_run_id);
     if let Some(b) = from_block {
@@ -237,6 +241,7 @@ async fn load_events_from_observations(
     for row in &rows {
         let event_source: String = row.try_get("event_source")?;
         let payload: Value = row.try_get("payload")?;
+        let replay_block: Option<i64> = row.try_get("replay_block")?;
 
         if skip_primed && payload.get("suppress_events").and_then(|v| v.as_bool()) == Some(true) {
             skipped += 1;
@@ -292,7 +297,10 @@ async fn load_events_from_observations(
                     }
                 };
                 match signal_wire.to_risk_event() {
-                    Ok(Some(risk_event)) => {
+                    Ok(Some(mut risk_event)) => {
+                        risk_event.observed_block = risk_event
+                            .observed_block
+                            .or_else(|| replay_block.and_then(|block| u64::try_from(block).ok()));
                         events.push(eth_alpha_engine::EngineEvent::Risk(risk_event));
                     }
                     Ok(None) => {}
@@ -317,7 +325,81 @@ async fn load_events_from_observations(
         );
     }
 
-    Ok(events)
+    Ok(add_block_completed_events(events, from_block, to_block))
+}
+
+fn add_block_completed_events(
+    events: Vec<eth_alpha_engine::EngineEvent>,
+    from_block: Option<u64>,
+    to_block: Option<u64>,
+) -> Vec<eth_alpha_engine::EngineEvent> {
+    let mut by_block: BTreeMap<u64, Vec<eth_alpha_engine::EngineEvent>> = BTreeMap::new();
+    let mut without_block = Vec::new();
+
+    for event in events {
+        if let Some(block) = event_block(&event) {
+            by_block.entry(block).or_default().push(event);
+        } else {
+            without_block.push(event);
+        }
+    }
+
+    let Some(first_event_block) = by_block.keys().next().copied() else {
+        return without_block;
+    };
+    let Some(last_event_block) = by_block.keys().next_back().copied() else {
+        return without_block;
+    };
+    let start_block = from_block.unwrap_or(first_event_block);
+    let end_block = to_block.unwrap_or(last_event_block);
+    if start_block > end_block {
+        return without_block;
+    }
+
+    let mut expanded = Vec::with_capacity(
+        without_block
+            .len()
+            .saturating_add(by_block.values().map(Vec::len).sum())
+            .saturating_add((end_block - start_block + 1) as usize),
+    );
+    for block in start_block..=end_block {
+        let mut updated_pools = 0usize;
+        if let Some(block_events) = by_block.remove(&block) {
+            updated_pools = block_events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        event,
+                        eth_alpha_engine::EngineEvent::Market(
+                            eth_alpha_core::market::MarketEvent::PoolUpdated { .. }
+                        )
+                    )
+                })
+                .count();
+            expanded.extend(block_events);
+        }
+        expanded.push(eth_alpha_engine::EngineEvent::Market(
+            eth_alpha_core::market::MarketEvent::BlockCompleted {
+                block_number: block,
+                updated_tokens: 0,
+                updated_pools,
+            },
+        ));
+    }
+    expanded.extend(without_block);
+    expanded
+}
+
+fn event_block(event: &eth_alpha_engine::EngineEvent) -> Option<u64> {
+    match event {
+        eth_alpha_engine::EngineEvent::Market(
+            eth_alpha_core::market::MarketEvent::PoolUpdated { block_number, .. }
+            | eth_alpha_core::market::MarketEvent::TokenUpdated { block_number, .. }
+            | eth_alpha_core::market::MarketEvent::BlockCompleted { block_number, .. },
+        ) => Some(*block_number),
+        eth_alpha_engine::EngineEvent::Risk(risk) => risk.observed_block,
+        eth_alpha_engine::EngineEvent::Execution(report) => report.block_number,
+    }
 }
 
 #[derive(Clone)]

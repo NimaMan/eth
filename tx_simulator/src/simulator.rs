@@ -72,14 +72,18 @@ impl TxSimulator {
 
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
-        let mut simulator = Self {
+        let simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
         };
-        simulator.attach_default_live_chain_cache();
         Ok(simulator)
+    }
+
+    /// Create a simulator and explicitly attach the legacy Redis live-chain cache.
+    pub fn new_with_default_live_chain_cache(reth_datadir: &str) -> Result<Self> {
+        Ok(Self::new(reth_datadir)?.with_default_live_chain_cache())
     }
 
     /// Create new simulator with an existing provider factory
@@ -89,14 +93,25 @@ impl TxSimulator {
         let chain_spec = provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
 
-        let mut simulator = Self {
+        let simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
         };
-        simulator.attach_default_live_chain_cache();
         Ok(simulator)
+    }
+
+    /// Create from a provider factory and explicitly attach the legacy Redis live-chain cache.
+    pub fn with_provider_factory_and_default_live_chain_cache(
+        provider_factory: EthereumProviderFactory,
+    ) -> Result<Self> {
+        Ok(Self::with_provider_factory(provider_factory)?.with_default_live_chain_cache())
+    }
+
+    pub fn with_default_live_chain_cache(mut self) -> Self {
+        self.attach_default_live_chain_cache();
+        self
     }
 
     pub fn with_live_chain_cache(mut self, cache: LiveChainCache) -> Self {

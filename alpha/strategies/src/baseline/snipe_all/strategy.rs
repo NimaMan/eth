@@ -3,7 +3,7 @@ use eth_alpha_core::{
     ids::{PoolAddress, StrategyName, TokenAddress},
     market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
-    position::Position,
+    position::{Position, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
     Result, Strategy, StrategyContext, StrategyDecision,
 };
@@ -78,6 +78,26 @@ impl SnipeAllStrategy {
             side: OrderSide::Sell,
             token_address,
             pool_address,
+            amount: token_amount,
+            route: None,
+            max_slippage_bps: self.config.max_slippage_bps,
+            deadline_secs: self.config.deadline_secs,
+        })
+    }
+
+    fn sell_position(&self, position: &Position) -> StrategyDecision {
+        let Some(token_amount) = sell_amount_from_position(position, self.config.sell_fraction)
+        else {
+            return StrategyDecision::Hold;
+        };
+
+        StrategyDecision::SubmitOrder(OrderIntent {
+            portfolio_id: self.config.portfolio_id.clone(),
+            wallet_id: self.config.wallet_id.clone(),
+            strategy_name: self.name(),
+            side: OrderSide::Sell,
+            token_address: position.key.token_address,
+            pool_address: position.key.pool_address.clone(),
             amount: token_amount,
             route: None,
             max_slippage_bps: self.config.max_slippage_bps,
@@ -289,6 +309,39 @@ impl Strategy for SnipeAllStrategy {
 
         Ok(StrategyDecision::Hold)
     }
+
+    fn on_position_monitor(
+        &mut self,
+        ctx: &StrategyContext<'_>,
+        block_number: u64,
+    ) -> Result<Vec<StrategyDecision>> {
+        let Some(max_hold) = self.config.max_hold_blocks else {
+            return Ok(Vec::new());
+        };
+        let strategy_name = self.name();
+        let mut positions = ctx
+            .portfolio
+            .positions
+            .values()
+            .filter(|position| {
+                position.key.strategy_name == strategy_name
+                    && position.state == PositionState::BuyConfirmed
+                    && position.can_submit_exit()
+                    && position
+                        .entry_block
+                        .map(|entry_block| block_number > entry_block + max_hold)
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        positions.sort_by(|left, right| left.id.0.cmp(&right.id.0));
+
+        Ok(positions
+            .iter()
+            .map(|position| self.sell_position(position))
+            .filter(|decision| !matches!(decision, StrategyDecision::Hold))
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -307,13 +360,16 @@ mod tests {
 
     use super::*;
 
+    const WETH_ADDRESS: Address =
+        alloy_primitives::address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+
     fn pool() -> PoolSnapshot {
         let token_address = Address::repeat_byte(0x11);
         PoolSnapshot {
             address: TokenPoolId::new(token_address, Address::repeat_byte(0x22).to_string()),
             token_address,
             protocol: PoolProtocol::UniswapV2,
-            denom_address: Some(Address::repeat_byte(0x33)),
+            denom_address: Some(WETH_ADDRESS),
             denom_symbol: Some("WETH".to_string()),
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
@@ -420,6 +476,107 @@ mod tests {
             )
             .unwrap();
         assert_eq!(repeat, StrategyDecision::Hold);
+    }
+
+    #[test]
+    fn position_monitor_exits_after_max_hold_without_pool_update() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 202,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(200),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let decisions = strategy.on_position_monitor(&ctx, 202).unwrap();
+
+        assert_eq!(decisions.len(), 1);
+        match &decisions[0] {
+            StrategyDecision::SubmitOrder(intent) => {
+                assert_eq!(intent.side, OrderSide::Sell);
+                assert_eq!(intent.pool_address, pool.address);
+            }
+            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+                panic!("expected sell order")
+            }
+        }
+    }
+
+    #[test]
+    fn position_monitor_holds_until_max_hold_is_exceeded() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 201,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(200),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let decisions = strategy.on_position_monitor(&ctx, 201).unwrap();
+
+        assert!(decisions.is_empty());
+    }
+
+    #[test]
+    fn position_monitor_does_not_retry_failed_exit_every_block() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 250,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(200),
+            ..SnipeAllConfig::default()
+        });
+        let mut position = confirmed_position(&strategy, &pool);
+        position.mark_intent_created(OrderSide::Sell).unwrap();
+        position
+            .mark_order_submitted(OrderId("sell-1".to_string()), OrderSide::Sell)
+            .unwrap();
+        position
+            .apply_execution_report(&ExecutionReport {
+                order_id: OrderId("sell-1".to_string()),
+                status: ExecutionStatus::Failed,
+                tx_hash: None,
+                block_number: Some(202),
+                filled_amount: None,
+                token_amount: None,
+                gas_used: Some(21_000),
+                error: Some("temporary sell failure".to_string()),
+            })
+            .unwrap();
+        assert!(position.can_submit_exit());
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let decisions = strategy.on_position_monitor(&ctx, 250).unwrap();
+
+        assert!(decisions.is_empty());
     }
 
     #[test]
@@ -594,6 +751,44 @@ mod tests {
             pending_tx_hash: None,
             observed_block: Some(2),
             message: "liquidity removal".to_string(),
+        };
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+        match decision {
+            StrategyDecision::SubmitOrder(intent) => {
+                assert_eq!(intent.side, OrderSide::Sell);
+                assert_eq!(intent.pool_address, pool.address);
+            }
+            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+                panic!("expected sell order")
+            }
+        }
+    }
+
+    #[test]
+    fn sells_open_position_on_lp_approval() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let risk = RiskEvent {
+            kind: RiskKind::LpApproval,
+            severity: RiskSeverity::Warning,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            pending_tx_hash: None,
+            observed_block: Some(2),
+            message: "lp approval".to_string(),
         };
 
         let decision = strategy.on_risk_event(&ctx, &risk).unwrap();

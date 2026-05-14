@@ -2,7 +2,7 @@ use super::pool_metadata_lookup::is_optional_uniswap_v2_pool_metadata_miss;
 use super::trading_status_update::{
     current_block_simulation_pool_addresses, should_simulate_at_current_block,
 };
-use super::PoolTradingSimulationMode;
+use super::{pool_metadata_timeout_for_trading_simulation, PoolTradingSimulationMode};
 
 #[test]
 fn discovered_current_block_pool_uses_current_block_state() {
@@ -22,6 +22,13 @@ fn existing_pool_without_current_discovery_uses_parent_replay() {
         &[],
         PoolTradingSimulationMode::Noop
     ));
+}
+
+#[test]
+fn non_direct_live_modes_do_not_timeout_v2_pool_metadata() {
+    assert!(
+        pool_metadata_timeout_for_trading_simulation(PoolTradingSimulationMode::Noop).is_none()
+    );
 }
 
 #[test]
@@ -53,6 +60,9 @@ fn forced_token_control_simulates_all_pools_at_current_block() {
 fn live_header_gap_is_optional_pool_metadata_miss() {
     assert!(is_optional_uniswap_v2_pool_metadata_miss(
         "missing live block header for 25050934"
+    ));
+    assert!(is_optional_uniswap_v2_pool_metadata_miss(
+        "live chain cache not configured"
     ));
 }
 

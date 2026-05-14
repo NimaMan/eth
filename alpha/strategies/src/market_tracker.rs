@@ -186,13 +186,16 @@ mod tests {
 
     use super::*;
 
+    const WETH_ADDRESS: Address =
+        alloy_primitives::address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+
     fn pool() -> PoolSnapshot {
         let token_address = Address::repeat_byte(0x11);
         PoolSnapshot {
             address: TokenPoolId::new(token_address, Address::repeat_byte(0x22).to_string()),
             token_address,
             protocol: PoolProtocol::UniswapV2,
-            denom_address: Some(Address::repeat_byte(0x33)),
+            denom_address: Some(WETH_ADDRESS),
             denom_symbol: Some("WETH".to_string()),
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),

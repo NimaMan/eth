@@ -55,7 +55,6 @@ use mempool_processor::{
     tx_router::{TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
 };
-use tx_simulator::LiveChainCache;
 
 const MEMPOOL_ALLOW_DATABASE_DISABLED_ENV: &str = "MEMPOOL_ALLOW_DATABASE_DISABLED";
 
@@ -207,22 +206,7 @@ async fn main() -> Result<()> {
     );
 
     info!("  Report Interval: {}s", cfg_report_interval);
-    let live_chain_cache = match LiveChainCache::new(&base_config.simulation.live_data_redis_url) {
-        Ok(cache) => {
-            info!(
-                "  Live data Redis: {}",
-                base_config.simulation.live_data_redis_url
-            );
-            Some(cache)
-        }
-        Err(err) => {
-            warn!(
-                "Live chain cache unavailable ({}); simulations will use MDBX-only context",
-                err
-            );
-            None
-        }
-    };
+    info!("  Live data Redis: disabled; simulations use local Reth historical context");
     info!("================================");
 
     let allow_database_disabled =
@@ -313,7 +297,7 @@ async fn main() -> Result<()> {
 
     // 5. Mempool Simulator (single database connection)
     info!("🧪 Initializing mempool simulator...");
-    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path, live_chain_cache)?);
+    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path)?);
     info!("✅ Mempool simulator initialized");
 
     // Initialize arrival recorder only after simulator (to reuse provider).

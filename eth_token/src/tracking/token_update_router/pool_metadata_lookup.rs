@@ -102,4 +102,5 @@ pub(super) fn is_optional_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
         || message.contains("Failed to get token decimals")
         || message.contains("Token decimals call")
         || message.contains("missing live block header")
+        || message.contains("live chain cache not configured")
 }

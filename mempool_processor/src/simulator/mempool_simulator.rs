@@ -18,8 +18,7 @@ use crate::common::convert::ipc_to_unsigned_tx;
 use crate::mempool_fetcher::MempoolTransaction;
 use tx_processor::PoolBuySellParameters;
 use tx_simulator::{
-    LiveChainCache, LiveTxSimulator, SimulationResult as TxSimResult, TxSimulator,
-    UnsignedTransaction,
+    LiveTxSimulator, SimulationResult as TxSimResult, TxSimulator, UnsignedTransaction,
 };
 
 /// Mempool simulator that manages both mempool transaction and pool buy/sell simulations
@@ -59,15 +58,10 @@ pub struct AddressStateChange {
 
 impl MempoolSimulator {
     /// Create a new mempool simulator
-    pub fn new(datadir: &str, live_cache: Option<LiveChainCache>) -> Result<Self> {
+    pub fn new(datadir: &str) -> Result<Self> {
         info!("Initializing mempool simulator...");
 
-        // Create the TxSimulator directly
-        let mut simulator = TxSimulator::new(datadir)?;
-        if let Some(cache) = live_cache {
-            simulator = simulator.with_live_chain_cache(cache);
-        }
-        let tx_simulator = Arc::new(simulator);
+        let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
         let live_tx_simulator = LiveTxSimulator::from_simulator(tx_simulator.clone());
 
         // Create pool simulator with the same TxSimulator
@@ -102,19 +96,10 @@ impl MempoolSimulator {
     }
 
     /// Create with custom buyer address
-    pub fn with_custom_buyer(
-        datadir: &str,
-        buyer_address: Address,
-        live_cache: Option<LiveChainCache>,
-    ) -> Result<Self> {
+    pub fn with_custom_buyer(datadir: &str, buyer_address: Address) -> Result<Self> {
         info!("Initializing mempool simulator with custom buyer...");
 
-        // Create the TxSimulator directly
-        let mut simulator = TxSimulator::new(datadir)?;
-        if let Some(cache) = live_cache {
-            simulator = simulator.with_live_chain_cache(cache);
-        }
-        let tx_simulator = Arc::new(simulator);
+        let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
         let live_tx_simulator = LiveTxSimulator::from_simulator(tx_simulator.clone());
 
         // Create pool simulator with custom buyer and default amount

@@ -41,6 +41,6 @@ fn has_open_matching_position(
     ctx.portfolio.positions.values().any(|position| {
         &position.key.pool_address == pool_address
             && position.key.strategy_name == *strategy_name
-            && !position.state.is_terminal()
+            && position.can_submit_exit()
     })
 }
