@@ -6,6 +6,7 @@ pub mod config;
 pub mod cross_token;
 pub mod enrichment;
 pub mod flow;
+pub mod flow_context;
 pub mod graph;
 pub mod ingest;
 pub mod model;
