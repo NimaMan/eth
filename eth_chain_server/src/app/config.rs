@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use eyre::{eyre, Result};
 
@@ -36,6 +37,8 @@ const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 1_000_000;
 const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 3_000;
 const DEFAULT_MEMPOOL_SIGNAL_LIMIT: i64 = 200;
 
+static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
 #[derive(Clone, Debug)]
 pub struct ChainServerConfig {
     pub bind: SocketAddr,
@@ -58,6 +61,11 @@ pub struct ChainServerConfig {
 impl ChainServerConfig {
     pub fn from_config_file() -> Result<Self> {
         let config = load_config_env()?;
+        Self::from_config_values(&config)
+    }
+
+    pub fn from_config_path(path: impl AsRef<Path>) -> Result<Self> {
+        let config = load_config_env_from_path(path.as_ref())?;
         Self::from_config_values(&config)
     }
 
@@ -173,6 +181,19 @@ impl ChainServerConfig {
     }
 }
 
+pub fn set_config_path(path: impl Into<PathBuf>) -> Result<()> {
+    CONFIG_PATH
+        .set(path.into())
+        .map_err(|path| eyre!("config path already set to {}", path.display()))
+}
+
+pub fn active_config_path() -> PathBuf {
+    CONFIG_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(default_config_path)
+}
+
 pub fn shared_config_value(key: &str) -> Result<Option<String>> {
     let config = load_config_env()?;
     Ok(config
@@ -196,14 +217,17 @@ fn default_reth_index_dir(reth_datadir: &std::path::Path) -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
-fn eth_config_path() -> PathBuf {
+fn default_config_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("config.env")
 }
 
 fn load_config_env() -> Result<HashMap<String, String>> {
-    let path = eth_config_path();
+    load_config_env_from_path(&active_config_path())
+}
+
+fn load_config_env_from_path(path: &Path) -> Result<HashMap<String, String>> {
     let contents = fs::read_to_string(&path).map_err(|err| {
         eyre!(
             "failed to read shared config file {}: {err}",
@@ -262,7 +286,7 @@ fn required_config_string(config: &HashMap<String, String>, key: &str) -> Result
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .ok_or_else(|| eyre!("{key} must be set in {}", eth_config_path().display()))
+        .ok_or_else(|| eyre!("{key} must be set in {}", active_config_path().display()))
 }
 
 fn config_value<'a>(config: &'a HashMap<String, String>, key: &str) -> Option<String> {

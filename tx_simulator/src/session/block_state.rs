@@ -80,7 +80,7 @@ impl BlockStateSession {
 
 impl TxSimulator {
     /// Open a block-scoped state session for repeated branch simulations at a
-    /// single historical or live-cache block state.
+    /// single historical block state.
     pub async fn block_state_session(&self, block_number: u64) -> Result<BlockStateSession> {
         BlockStateSession::new(Arc::new(self.clone()), block_number).await
     }
@@ -94,8 +94,8 @@ impl TxSimulator {
         BlockStateSession::new_with_header(Arc::new(self.clone()), block_number, block_header).await
     }
 
-    /// Open a block-scoped state session from exact live prestate diffs without
-    /// reading Redis live-state snapshots.
+    /// Open a block-scoped state session from exact live prestate diffs supplied
+    /// by the caller.
     pub async fn block_state_session_from_prestate_diffs(
         &self,
         block_number: u64,

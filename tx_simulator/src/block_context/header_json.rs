@@ -230,7 +230,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_sparse_live_cache_header_with_defaults() {
+    fn parses_sparse_header_with_defaults() {
         let json = r#"{
             "hash":"0x388d37af4c7981688e3a1052d1abe72bd958e1a8234426b897949e2aaa8195ac",
             "parentHash":"0xfe6c04f8e0c61fa10642f82e597ff81aea8d5258b232b37b80276f1b7dd2c67d",

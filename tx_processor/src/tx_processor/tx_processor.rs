@@ -305,33 +305,9 @@ impl TxProcessor {
         processed_tx.signed_authorizations = signed_authorizations;
         processed_tx.eth_transfers = eth_transfers;
 
-        let mut erc20_contracts = HashSet::new();
-        for transfer in &processed_tx.erc20_transfers {
-            erc20_contracts.insert(transfer.token_address);
-        }
-        for approval in &processed_tx.erc20_approval_events {
-            erc20_contracts.insert(approval.token_address);
-        }
+        let mut erc20_contracts = Self::collect_erc20_contracts(&processed_tx);
         for approval in &processed_tx.approval_for_all_events {
             processed_tx.erc721_contracts.insert(approval.token_address);
-        }
-        for event in &processed_tx.trading_enabled_events {
-            erc20_contracts.insert(event.token_address);
-        }
-        for event in &processed_tx.trading_disabled_events {
-            erc20_contracts.insert(event.token_address);
-        }
-        for pool_created in &processed_tx.uniswap_v3_pools {
-            erc20_contracts.insert(pool_created.token0);
-            erc20_contracts.insert(pool_created.token1);
-        }
-        for permit in &processed_tx.permit2_events {
-            erc20_contracts.insert(permit.token);
-        }
-        for deposit in &processed_tx.deposit_events {
-            if let Some(token) = deposit.token_address {
-                erc20_contracts.insert(token);
-            }
         }
         // Align with Python processor: exclude canonical WETH from the ERC20 contract set.
         let weth = alloy_primitives::address!("0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2");
@@ -666,6 +642,39 @@ impl TxProcessor {
         }
     }
 
+    fn collect_erc20_contracts(processed_tx: &ProcessedTransaction) -> HashSet<Address> {
+        let mut erc20_contracts = HashSet::new();
+        for transfer in &processed_tx.erc20_transfers {
+            erc20_contracts.insert(transfer.token_address);
+        }
+        for approval in &processed_tx.erc20_approval_events {
+            erc20_contracts.insert(approval.token_address);
+        }
+        for event in &processed_tx.trading_enabled_events {
+            erc20_contracts.insert(event.token_address);
+        }
+        for event in &processed_tx.trading_disabled_events {
+            erc20_contracts.insert(event.token_address);
+        }
+        for pool_created in &processed_tx.uniswap_v2_pair_created_events {
+            erc20_contracts.insert(pool_created.token0);
+            erc20_contracts.insert(pool_created.token1);
+        }
+        for pool_created in &processed_tx.uniswap_v3_pools {
+            erc20_contracts.insert(pool_created.token0);
+            erc20_contracts.insert(pool_created.token1);
+        }
+        for permit in &processed_tx.permit2_events {
+            erc20_contracts.insert(permit.token);
+        }
+        for deposit in &processed_tx.deposit_events {
+            if let Some(token) = deposit.token_address {
+                erc20_contracts.insert(token);
+            }
+        }
+        erc20_contracts
+    }
+
     fn is_add_liquidity_action(&self, tx: &ProcessedTransaction) -> bool {
         self.is_add_liquidity_action_v2(tx) || self.is_add_liquidity_action_v3(tx)
     }
@@ -745,5 +754,70 @@ impl TxProcessor {
 impl Default for TxProcessor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, b256};
+
+    use crate::tx_processor::data_models::{UniswapV2PairCreatedEvent, UniswapV3PoolCreatedEvent};
+
+    fn tx() -> ProcessedTransaction {
+        ProcessedTransaction::new(
+            b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            1,
+            1_700,
+            0,
+            address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            None,
+            U256::ZERO,
+            true,
+            0,
+            2,
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn erc20_contracts_include_v2_pair_created_tokens() {
+        let mut tx = tx();
+        let token0 = address!("1111111111111111111111111111111111111111");
+        let token1 = address!("2222222222222222222222222222222222222222");
+        tx.uniswap_v2_pair_created_events
+            .push(UniswapV2PairCreatedEvent {
+                pair_address: address!("3333333333333333333333333333333333333333"),
+                token0,
+                token1,
+                factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
+                log_index: 0,
+            });
+
+        let contracts = TxProcessor::collect_erc20_contracts(&tx);
+
+        assert!(contracts.contains(&token0));
+        assert!(contracts.contains(&token1));
+    }
+
+    #[test]
+    fn erc20_contracts_include_v3_pool_created_tokens() {
+        let mut tx = tx();
+        let token0 = address!("1111111111111111111111111111111111111111");
+        let token1 = address!("2222222222222222222222222222222222222222");
+        tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+            factory_address: address!("1f98431c8ad98523631ae4a59f267346ea31f984"),
+            token0,
+            token1,
+            fee: 3_000,
+            tick_spacing: 60,
+            pool: address!("3333333333333333333333333333333333333333"),
+            log_index: 0,
+        });
+
+        let contracts = TxProcessor::collect_erc20_contracts(&tx);
+
+        assert!(contracts.contains(&token0));
+        assert!(contracts.contains(&token1));
     }
 }

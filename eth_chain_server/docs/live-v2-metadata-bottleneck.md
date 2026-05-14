@@ -46,19 +46,25 @@ The live token tracker applies a processed block through `eth_token`:
 eth_live_feed runtime
   -> BlockTokenProcessor::process_block_live...
   -> ProcessedTokenUpdateRouter
-  -> optional_uniswap_v2_pool_metadata(...)
-  -> RethChainMetadataProvider::uniswap_v2_pool_metadata(...)
+  -> optional_uniswap_v2_pool_identity(...) for candidate routing
+  -> optional_uniswap_v2_pool_metadata(...) only when registering a pool
+  -> RethChainMetadataProvider::uniswap_v2_pool_identity/metadata(...)
   -> RethQueryProvider::uni_v2_get_tokens(...)
   -> TxSimulator::simulate_view_function(...)
   -> BlockContextLoader::load_block_context(...)
 ```
 
-The V2 metadata lookup may issue several view calls:
+As of 2026-05-14, candidate routing uses the cheaper identity path. It may issue:
 
 - `token0()`
 - `token1()`
 - `factory()`
-- factory `getPair(token0, token1)`
+
+Known V2 protocol validation is local CREATE2 pair-address calculation. It
+should not simulate factory `getPair(token0, token1)` in the candidate path.
+
+Full V2 metadata is still used when a pool is actually registered, and may issue:
+
 - token decimals for each side
 
 Today those view calls are not using one block-scoped context. If the block is
@@ -102,10 +108,10 @@ When both components run on the same host and can be owned by the same runtime,
 that write/read/deserialize cycle is the wrong data path for live-tail token
 tracking.
 
-So a "cheap" V2 metadata lookup can fetch, deserialize, and merge a roughly
-335MB live-state snapshot just to run a `token0()` or `token1()` view call. That
-is not an acceptable live hot path. The problem is not only timeout length; the
-data path itself is backwards.
+So a "cheap" V2 identity or metadata lookup can fetch, deserialize, and merge a
+roughly 335MB live-state snapshot just to run a `token0()` or `token1()` view
+call. That is not an acceptable live hot path. The problem is not only timeout
+length; the data path itself is backwards.
 
 ## Real Fix Assessment
 

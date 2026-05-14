@@ -45,13 +45,17 @@ Useful overrides:
 TOKEN_PROFILE_BIND=127.0.0.1:8766
 TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server_profile_post_block
 TOKEN_PROFILE_LOG_RUN_ID=profile_25052270_25059269
-ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
+TOKEN_PROFILE_BASE_CONFIG=/home/nima/code/crypto/blockchains/eth/config.env
+TOKEN_PROFILE_CONFIG=/tmp/eth_chain_server_profile_post_block.env
+TOKEN_PROFILE_DEFAULT_BLOCKS=7000
 ```
 
 The script writes a temporary config to
 `/tmp/eth_chain_server_profile_post_block.env` by copying the shared config and
 overriding only the isolated bind address, log root, log run id, and live
-auto-start setting.
+auto-start setting. The profiled `eth_chain_server` is launched with
+`--config <temporary-config>`, so runtime values still come from a config file
+instead of ambient process environment variables.
 
 The process log files are written under:
 
@@ -70,6 +74,241 @@ After the run, the per-block CSV is written to:
 ```text
 /tmp/token_pipeline_profile_<run_id>_<start>_<end>.csv
 ```
+
+## Captured Partial Result: 25018863-25088862
+
+Captured on 2026-05-14 from the active 70K token-builder run:
+
+```text
+log=/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server/run-20260514-064919Z-pid-309313/token_pipeline_profile.jsonl
+csv=/tmp/token_pipeline_profile_run-1_partial.csv
+processed_blocks=22,950 / 70,000
+range=25,018,863 - 25,088,862
+```
+
+Summary:
+
+```text
+disk_cache_read=83.085s total, 3.62ms avg/block, p95=7ms, p99=9ms, max=32ms
+block_apply_wall=165.961s total, 7.23ms avg/block, p95=19.86ms, p99=52.04ms, max=251.98ms
+token_apply=164.999s total, 7.19ms avg/block, p95=19.80ms, p99=52.00ms, max=251.91ms
+token_apply_minus_simulation=71.112s total, 3.10ms avg/block, p95=7.87ms, p99=12.67ms
+state_mutation_no_candidate_no_sim=6.640s total, 0.29ms avg/block, p95=0.90ms, p99=1.68ms
+simulation_total=93.886s total, 4.09ms avg/block, p95=14.53ms, p99=45.98ms
+candidate_routing=42.720s total, 1.86ms avg/block, p95=5.92ms, p99=10.90ms
+```
+
+Interpretation:
+
+The token aggregate mutation itself is not the bottleneck. On this sample it is
+about `0.29ms/block`; even at 70K blocks that is only about 20 seconds. The
+meaningful per-block costs are processed-block cache read/deserialization,
+candidate routing, and post-block pool simulation.
+
+Projected 70K cost from this partial run:
+
+```text
+disk cache reads only:          ~4.2 min
+token apply only:               ~8.4 min
+cache read + token apply:       ~12.6 min
+token apply without simulation: ~3.6 min
+state mutation only:            ~20 sec
+```
+
+This means a heavy persisted token-env store is not justified only to avoid
+token-state rebuild cost. A lightweight in-memory range environment over cached
+processed blocks is the better first step.
+
+## Processed-Block Cache Placement
+
+Current config on 2026-05-14:
+
+```text
+PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
+cache_size=8.24GiB
+cache_files=50,216
+avg_file_size=172KiB
+mount=/home/nima/storage/samsung8tb
+device=Samsung SSD 9100 PRO 8TB
+```
+
+The root filesystem is mounted on the 4TB Gen5 drive:
+
+```text
+mount=/
+device=CT4000T705SSD5
+free_space=~1.1TiB
+```
+
+Tradeoff estimates using the partial 70K profile:
+
+```text
+Keep processed blocks in RAM:
+  best possible saving is the measured disk_cache_read cost.
+  upper-bound saving: ~3.62ms/block, ~4.2 min over 70K blocks.
+  projected cache+apply time drops from ~12.6 min to ~8.4 min.
+
+Move cache to the 4TB Gen5 root SSD:
+  current cache is already on a fast NVMe SSD, so gains may be modest.
+  if reads drop from 3.62ms to 1.8ms/block, saving is ~2.1 min over 70K.
+  if reads drop to 1.0ms/block, saving is ~3.1 min over 70K.
+  benchmark before moving; this timing includes file open, decompression, and
+  deserialization, not only raw storage latency.
+```
+
+For repeated strategy comparison, the stronger optimization is to build the
+token range once and keep that range state in memory while multiple strategies
+consume it. RAM-caching processed blocks helps rebuild speed, but it does not
+remove candidate routing or pool simulation.
+
+### 1K Cache Placement A/B
+
+Captured on 2026-05-14 using the same contiguous 1K processed-block slice:
+
+```text
+range=25,011,176 - 25,012,175
+source=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
+gen5_copy=/home/nima/eth-processed-block-cache-gen5-profile
+copied_size=139MiB
+```
+
+Command shape:
+
+```bash
+cargo run --manifest-path blockchains/eth/Cargo.toml \
+  -p eth_chain_server --release \
+  --example processed_block_disk_cache_size -- \
+  --cache-dir <cache-dir> \
+  --start 25011176 \
+  --end 25012175 \
+  --read-only
+```
+
+Four alternating read-only passes:
+
+```text
+Samsung 9100 PRO 8TB cache:
+  avg read_ms/block:    3.307
+  median read_ms/block: 2.885
+  p95 read_ms/block:    6.793
+  wall_ms/block:        0.472
+
+4TB Gen5 root SSD copy:
+  avg read_ms/block:    3.405
+  median read_ms/block: 3.022
+  p95 read_ms/block:    7.067
+  wall_ms/block:        0.489
+```
+
+Interpretation:
+
+Moving the processed-block cache from the current 8TB Samsung NVMe to the 4TB
+Gen5 root SSD did not improve this workload. The difference is within normal
+run-to-run noise, and the current cache was slightly faster on this sample. The
+measured cache-read cost is likely dominated by many small-file opens,
+decompression, deserialization, and OS page-cache behavior more than raw SSD
+bandwidth.
+
+RAM can still save at most the cache-read component. For this 1K slice, that is
+about `3.3ms/block` by individual read timing, while the parallel wall-clock
+read path is about `0.47-0.49ms/block`.
+
+## V2 Candidate Routing Profile: 25011176-25012175
+
+Captured on 2026-05-14 after splitting V2 candidate routing into a cheap pool
+identity path and a full pool metadata path.
+
+```bash
+START_BLOCK=25011176 \
+END_BLOCK=25012175 \
+TOKEN_PROFILE_BIND=127.0.0.1:8771 \
+TOKEN_PROFILE_LOG_DIR=/home/nima/code/crypto/blockchains/eth/logs/eth_chain_server_profile_v2_candidate_fix \
+TOKEN_PROFILE_LOG_RUN_ID=profile_v2_candidate_fix_1k_<timestamp> \
+  blockchains/eth/eth_token/examples/profile/run_token_pipeline_profile.sh
+```
+
+Output CSV:
+
+```text
+/tmp/token_pipeline_profile_run-1_25011176_25012175.csv
+```
+
+The relevant before/after comparison on the same 1K block range:
+
+```text
+before:
+  router=5.00ms/block avg
+  candidate routing=4.87ms/block avg
+  V2 metadata lookup path=4.64ms/block avg
+
+after:
+  router=2.79ms/block avg
+  candidate routing=2.58ms/block avg
+  V2 identity lookup path=2.36ms/block avg
+```
+
+The fixed requirement is that candidate routing only needs V2 pool identity:
+`token0`, `token1`, and validated known V2 protocol. Full metadata, especially
+token decimals, is only needed when the pool is actually registered on a tracked
+token. The candidate path also validates known V2 pairs with local CREATE2
+address calculation instead of simulating factory `getPair(token0, token1)`.
+
+The important remaining counts from the after profile:
+
+```text
+V2 pool events=12,443
+V2 identity lookup attempts=10,742
+V2 identity hits=10,331
+transfer-routed skips=52
+known-pool/index skips=1,649
+candidate tokens=3,553
+update reports=3,961
+```
+
+Transfer-based routing was therefore not the main win: it skipped only 52 of
+10,742 identity attempts. The large improvement came from making the fallback
+identity lookup cheaper by removing decimals and simulated factory reads from
+candidate routing.
+
+### Remaining V2 Candidate Patterns
+
+The same 1K CSV shows a few follow-up opportunities:
+
+```text
+registry_tokens=0:
+  blocks=26
+  identity_lookups=335
+  identity_time=183ms
+
+registry_tokens<=5:
+  blocks=79
+  identity_lookups=1,059
+  identity_time=454ms
+
+candidate_tokens=0:
+  blocks=160
+  identity_lookups=1,579
+  identity_time=477ms
+
+indexed_pools=0:
+  blocks=28
+  identity_lookups=367
+  identity_time=192ms
+```
+
+The safest immediate optimization is to skip unknown-V2-pool identity lookup
+when there are no tracked tokens in the registry/index. With no tracked token,
+no V2 pool identity can produce a candidate. On this 1K slice that would remove
+335 identity attempts and about 183ms.
+
+The broader pattern is repeated unknown V2 pools that return a valid identity
+but do not resolve to a tracked token. A larger optimization would be a
+candidate-router cache for "irrelevant V2 pool for the current token-index
+generation." That cache must be invalidated whenever a new token is indexed or
+retention changes the tracked set, otherwise it can hide a pool that becomes
+relevant later. This should be kept separate from the chain metadata cache:
+metadata cache answers "what is this pool?", while candidate cache answers "can
+this pool currently route to a tracked token?"
 
 ## Captured Result: 25052270-25059269
 

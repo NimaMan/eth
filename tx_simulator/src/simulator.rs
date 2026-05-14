@@ -1,5 +1,4 @@
-use crate::block_context::{self, BlockContext, BlockContextLoader, BlockStateProvider};
-use crate::live_chain_cache::LiveChainCache;
+use crate::block_context::{BlockContext, BlockContextLoader};
 use crate::types::SimulationDefaults;
 use eyre::{eyre, Result};
 use std::future::Future;
@@ -10,7 +9,6 @@ use std::path::Path;
 /// for initialization and database access.
 use std::sync::{Arc, OnceLock};
 use tokio::{runtime::Runtime, task};
-use tracing::warn;
 
 // Core Reth imports
 use reth_chainspec::{ChainSpec, ChainSpecProvider, MAINNET};
@@ -35,7 +33,6 @@ pub struct TxSimulator {
     pub(crate) provider_factory: EthereumProviderFactory,
     pub(crate) evm_config: EthEvmConfig,
     pub(crate) defaults: SimulationDefaults,
-    pub(crate) live_chain_cache: Option<Arc<LiveChainCache>>,
 }
 
 impl TxSimulator {
@@ -77,14 +74,8 @@ impl TxSimulator {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
-            live_chain_cache: None,
         };
         Ok(simulator)
-    }
-
-    /// Create a simulator and explicitly attach the legacy Redis live-chain cache.
-    pub fn new_with_default_live_chain_cache(reth_datadir: &str) -> Result<Self> {
-        Ok(Self::new(reth_datadir)?.with_default_live_chain_cache())
     }
 
     /// Create new simulator with an existing provider factory
@@ -98,26 +89,8 @@ impl TxSimulator {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
-            live_chain_cache: None,
         };
         Ok(simulator)
-    }
-
-    /// Create from a provider factory and explicitly attach the legacy Redis live-chain cache.
-    pub fn with_provider_factory_and_default_live_chain_cache(
-        provider_factory: EthereumProviderFactory,
-    ) -> Result<Self> {
-        Ok(Self::with_provider_factory(provider_factory)?.with_default_live_chain_cache())
-    }
-
-    pub fn with_default_live_chain_cache(mut self) -> Self {
-        self.attach_default_live_chain_cache();
-        self
-    }
-
-    pub fn with_live_chain_cache(mut self, cache: LiveChainCache) -> Self {
-        self.live_chain_cache = Some(Arc::new(cache));
-        self
     }
 
     /// Current simulator defaults (fees, view call behaviour)
@@ -156,13 +129,13 @@ impl TxSimulator {
     }
 
     /// Latest block for which the simulator can build context directly from
-    /// local Reth providers without Redis live data.
+    /// local Reth providers.
     ///
     /// Historical simulation needs both executed state and the block header. In
     /// live mode those two views do not always advance at the same instant:
     /// `best_block_number()` follows the Finish stage, while headers are read
     /// through static files. The minimum is the highest DB-backed block that is
-    /// safe to select without falling back to Redis.
+    /// safe to select as local historical context.
     pub fn latest_historical_context_block_number(&self) -> Result<u64> {
         let latest_reth_finished = self.get_latest_block()?;
         let latest_static_header = self.latest_static_header_block_number()?;
@@ -212,13 +185,7 @@ impl TxSimulator {
     /// Returns a StateProvider that gives access to all blockchain state at that block
     pub fn get_chain_state_at_block(&self, block_number: u64) -> Result<StateProviderBox> {
         let context = self.load_block_context_blocking(block_number, None)?;
-        match context.state {
-            BlockStateProvider::Historical(state) => Ok(state),
-            BlockStateProvider::LiveFork(_) => Err(eyre!(
-                "State for block {} only exists in the live cache; use simulation APIs instead",
-                block_number
-            )),
-        }
+        Ok(context.state)
     }
 
     /// Get block metadata (timestamp, gas_limit, gas_used, base_fee)
@@ -234,18 +201,6 @@ impl TxSimulator {
 }
 
 impl TxSimulator {
-    pub fn live_chain_cache(&self) -> Option<Arc<LiveChainCache>> {
-        self.live_chain_cache.clone()
-    }
-
-    /// Returns the latest block number advertised by the live cache, if any.
-    pub async fn live_latest_block_number(&self) -> Result<Option<u64>> {
-        let Some(cache) = self.live_chain_cache() else {
-            return Ok(None);
-        };
-        cache.latest_block_number().await
-    }
-
     /// Helper accessor for the shared chain data loader.
     pub fn block_context_loader(&self) -> BlockContextLoader<'_> {
         BlockContextLoader::new(self)
@@ -273,25 +228,6 @@ impl TxSimulator {
             self.block_context_loader()
                 .load_block_context(block_number, header_hint),
         )
-    }
-
-    fn attach_default_live_chain_cache(&mut self) {
-        if self.live_chain_cache.is_some() {
-            return;
-        }
-
-        let redis_url = block_context::resolve_live_data_redis_url();
-        match LiveChainCache::new(&redis_url) {
-            Ok(cache) => {
-                self.live_chain_cache = Some(Arc::new(cache));
-            }
-            Err(err) => {
-                warn!(
-                    "failed to initialize live chain cache at {}: {}",
-                    redis_url, err
-                );
-            }
-        }
     }
 }
 

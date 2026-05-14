@@ -35,9 +35,6 @@ Signed chain:
 - block/trace_block_transactions.rs: Trace all txs in a block
 - block/verify_block_trace_rpc_equivalence.rs: Compare local traces with RPC
 
-## Block Context Diagnostics
-- block_context/live_block_replay_window.rs: Inspect the live Redis cache window and replay metadata/state for a recent block
-
 ## Running
 - Ensure a synced Reth DB is available. Examples resolve it from `RETH_DATADIR`,
   then `RETH_DB_PATH`, then the repository-level `../../config.env`.

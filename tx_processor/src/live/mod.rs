@@ -5,6 +5,7 @@ pub mod live_block_processor;
 pub mod live_block_service;
 pub mod processed_block_replay_store_sink;
 pub mod redis_block_publisher;
+pub(crate) mod redis_keys;
 
 pub use block_logger::BlockProcessingLogger;
 pub use block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot};

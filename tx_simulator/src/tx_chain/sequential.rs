@@ -12,7 +12,7 @@
 /// For interactive, step-by-step simulation where you need to inspect results
 /// between transactions, use SimulationChain instead.
 use crate::{
-    block_context::{BlockContext, BlockStateProvider},
+    block_context::BlockContext,
     revert::decode_revert_reason,
     simulator::EthereumProviderFactory,
     simulator::TxSimulator,
@@ -283,18 +283,15 @@ impl TxSimulator {
     }
 
     fn forked_state_from_context(block_number: u64, context: BlockContext) -> Result<ForkedState> {
-        match context.state {
-            BlockStateProvider::Historical(state) => {
-                let db = CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(state)));
-                Ok(ForkedState {
-                    db,
-                    block_number,
-                    block_header: context.header,
-                    nonces: HashMap::new(),
-                })
-            }
-            BlockStateProvider::LiveFork(fork) => Ok(fork),
-        }
+        let db = CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(
+            context.state,
+        )));
+        Ok(ForkedState {
+            db,
+            block_number,
+            block_header: context.header,
+            nonces: HashMap::new(),
+        })
     }
 
     /// Simulate a transaction on a forked state with full trace

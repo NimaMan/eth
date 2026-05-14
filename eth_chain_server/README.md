@@ -66,8 +66,8 @@ but it is backed by protocol-aware `pool_identifier` values such as an EVM pool
 address, `pool_manager#pool_id`, or `vault#pool_id`. ZMQ and signal logs are
 diagnostics; they are not the chain-server or ASENA source of truth.
 
-Resolved live-tail bottleneck target: V2 pool metadata lookups became expensive
-when they fell back through Redis live-state snapshots. See
+Resolved live-tail bottleneck target: V2 pool identity/metadata lookups became
+expensive when they fell back through Redis live-state snapshots. See
 [`docs/live-v2-metadata-bottleneck.md`](docs/live-v2-metadata-bottleneck.md)
 for evidence and the migration plan that led to the direct handoff.
 
@@ -92,6 +92,14 @@ simulation requests are coalesced by `(token, pool_kind, pool_id)`, and one
 historical post-block `BlockStateSession` is opened lazily per block that needs
 pool simulation. If a block with `simulations_attempted=0` is slow, the
 bottleneck is not simulation state loading.
+
+Candidate routing is also a measured part of token apply. For unknown V2
+`Swap`/`Sync`/`Mint`/`Burn` pair addresses, `eth_token` should use the cheap V2
+pool identity path (`token0`, `token1`, known protocol validation) before full
+metadata. Full metadata includes decimals and is only needed when registering a
+pool on a tracked token. The profile summary exposes the split as
+`applier_candidate_v2_transfer_route_*` and
+`applier_candidate_v2_identity_lookup_*`.
 
 The current range state keeps `BlockTokenProcessor` inside `RangeIndexState`
 behind one `RwLock`. This has two performance consequences:
@@ -172,7 +180,9 @@ occurrence count instead of many raw transaction rows.
 - `token_block_processor_profile`: block-token-processor phase totals and
   token-applier aggregate totals for the block, including candidate-token
   counts, candidate simulation-pool counts, actual simulated-pool counts, and
-  the range `run_id` when the block was processed by a range run.
+  the range `run_id` when the block was processed by a range run. V2 candidate
+  fields distinguish pair-created routing, ERC-20-transfer routing, and V2 pool
+  identity lookup so metadata regressions are visible at block granularity.
 - `token_sim_session_profile`: optional per-pool simulation branch rows. Set
   `TOKEN_SIM_SESSION_PROFILE=1` when investigating simulator session reuse;
   normal runs omit these rows to keep profile logs focused on block-level cost.
@@ -227,10 +237,15 @@ folders above.
 
 ```bash
 cargo run -p eth_chain_server
+cargo run -p eth_chain_server -- --config /home/nima/code/crypto/blockchains/eth/config.env
 curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/live/status
 cargo run -p eth_chain_server --example processed_block_disk_cache_size -- --fill-missing-then-read
 ```
+
+Runtime values come from the config file. `--config <path>` is only a path
+selector for isolated runs such as profiling; it is not an environment fallback.
+Without `--config`, the server reads `blockchains/eth/config.env`.
 
 Key config defaults come from `config.env`:
 

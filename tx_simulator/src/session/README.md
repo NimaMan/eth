@@ -4,12 +4,13 @@ The `session` module is the preferred high-level surface for long-lived simulati
 
 ### SimulationSession
 
-`TxSimulator::simulation_session*` creates one forked state from MDBX or tracked live state.
+`TxSimulator::simulation_session*` creates one forked state from local Reth historical context.
 After creation, each `step_*` call executes synchronously on that warm fork and commits only to
 the in-memory overlay.
 
-Live pipelines should usually call `LiveTxSimulator::start_latest_session()` instead. That
-selects local historical context when caught up, otherwise the live block processor's tracked state.
+Live pipelines should usually call `LiveTxSimulator::start_latest_session()` when they need latest
+local historical context, or `block_state_session_from_prestate_diffs` when they already hold live
+block headers and `prestateTracer` diffMode output.
 
 Use it when a workflow can contain any sequence of:
 

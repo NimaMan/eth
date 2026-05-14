@@ -9,11 +9,11 @@ use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use reth_chain_query::provider::BlockHeader;
 use serde::Deserialize;
-use tx_simulator::block_context::live_data_registry::keys;
 
 use super::compact::CompactProcessedTransaction;
 use super::load::{LoadedProcessedBlock, ProcessedBlockProvider};
 use super::replay_store::ProcessedBlockReplayStoreWriter;
+use crate::live::redis_keys as keys;
 use crate::{BlockProcessor, ProcessedBlock, ProcessedBlockSource};
 
 #[derive(Clone)]

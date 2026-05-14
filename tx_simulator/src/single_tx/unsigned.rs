@@ -5,7 +5,7 @@
 /// RPC. The "full trace" helpers enable step recording so `FullSimulationResult::struct_logs` is populated,
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
-    block_context::{BlockContext, BlockStateProvider},
+    block_context::BlockContext,
     revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
@@ -223,16 +223,8 @@ impl TxSimulator {
         context: BlockContext,
         trace_mode: UnsignedTraceMode,
     ) -> Result<UnsignedExecutionResult> {
-        match context.state {
-            BlockStateProvider::Historical(state) => {
-                self.execute_on_state_provider(unsigned_tx, context.header, state, trace_mode)
-                    .await
-            }
-            BlockStateProvider::LiveFork(fork_state) => {
-                self.execute_on_live_fork(unsigned_tx, fork_state, trace_mode)
-                    .await
-            }
-        }
+        self.execute_on_state_provider(unsigned_tx, context.header, context.state, trace_mode)
+            .await
     }
 
     async fn execute_on_state_provider(
@@ -256,41 +248,6 @@ impl TxSimulator {
                 .await
                 .map(|full| Self::execution_from_full_result(full, true)),
         }
-    }
-
-    async fn execute_on_live_fork(
-        &self,
-        unsigned_tx: UnsignedTransaction,
-        mut forked_state: ForkedState,
-        trace_mode: UnsignedTraceMode,
-    ) -> Result<UnsignedExecutionResult> {
-        let simulator = self.clone();
-        task::spawn_blocking(move || match trace_mode {
-            UnsignedTraceMode::None => {
-                simulator.simulate_on_fork_plain_execution(&mut forked_state, unsigned_tx)
-            }
-            UnsignedTraceMode::Call { .. } => {
-                let block_number = forked_state.block_number;
-                let mut full = simulator.simulate_on_fork_with_trace(
-                    &mut forked_state,
-                    unsigned_tx,
-                    block_number,
-                )?;
-                full.struct_logs = None;
-                Ok(Self::execution_from_full_result(full, false))
-            }
-            UnsignedTraceMode::Full { .. } => {
-                let block_number = forked_state.block_number;
-                let full = simulator.simulate_on_fork_with_trace(
-                    &mut forked_state,
-                    unsigned_tx,
-                    block_number,
-                )?;
-                Ok(Self::execution_from_full_result(full, true))
-            }
-        })
-        .await
-        .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
     }
 
     async fn prepare_block_context(&self, block_number: u64) -> Result<BlockContext> {

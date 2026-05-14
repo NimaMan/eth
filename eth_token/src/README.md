@@ -66,5 +66,9 @@ for individual pool checks.
 - Active parity path: ERC-20 plus known V2-router-compatible token/pool tracking.
 - Highest-traffic modules: `erc20`, `pools::uniswap::v2`, `state`,
   and `tracking`.
+- Candidate routing is part of the parity surface: it decides which tracked
+  tokens and pools are updated for each processed transaction. Unknown V2 pair
+  events should use cheap pool identity lookup only; full pool metadata and
+  decimals belong to actual pool registration.
 - `health` and `network` should consume stabilized token/pool facts; do not
   move core pool lifecycle logic there.

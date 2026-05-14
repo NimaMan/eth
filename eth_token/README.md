@@ -66,6 +66,10 @@ cargo run -p eth_token --example uniswap_v2_pool_replay_reserves
 
 - V2 tracking is the active parity surface; V3/V4 pool state and discovery are
   incomplete compared with V2.
+- V2 candidate routing is intentionally split from full pool metadata. For
+  unknown V2 pair events, candidate discovery should read only pool identity
+  (`token0`, `token1`, protocol validation). Fetch decimals only when a pool is
+  registered on a tracked token.
 - Same-block complex deployments can require exact metadata/pool replay; avoid
   assuming token metadata is stable before the processed block is fully applied.
 - UI/API callers should use explicit view DTOs from `eth_chain_server`, not raw

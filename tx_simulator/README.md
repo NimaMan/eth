@@ -28,7 +28,7 @@ kept as one monolithic simulator file:
 | `src/single_tx/` | Isolated signed, unsigned, and parallel transaction simulation |
 | `src/tx_chain/` | Stateful signed/unsigned chains and one-shot sequential transaction batches |
 | `src/session/` | Higher-level mixed signed/unsigned sessions and block replay state |
-| `src/block_context/` | Header/state loading across MDBX and live Redis-backed block context |
+| `src/block_context/` | Header/state loading from local Reth plus direct prestate-diff overlays for live callers |
 | `src/block_trace/` | Full block tracing, call-frame extraction, and profiling |
 | `src/contract_simulation/` | Read-only contract calls, calldata helpers, and simple output decoding |
 | `src/revert/` | Revert payload decoding and simulation revert reason normalization |
@@ -41,8 +41,8 @@ kept as one monolithic simulator file:
 - Single-tx simulation in `src/single_tx/`.
 - Sequential signed/unsigned transaction chains in `src/tx_chain/`.
 - Block tracing and replay in `src/block_trace/`.
-- Live-head replay using the shared live chain cache in `src/live/` and
-  `src/block_context/`.
+- Live/latest-state simulation selection in `src/live/` and direct block state
+  sessions from caller-supplied prestate diffs in `src/block_context/`.
 - Revert decoding, trace shape conversion, and low-level tx builders needed for
   simulator examples.
 
@@ -65,8 +65,9 @@ Reth MDBX + canonical headers
   -> tx_processor, reth_chain_query, mempool_processor, pyreth
 ```
 
-Live simulation uses local historical context when it is caught up. For heads
-ahead of that context, `LiveTxSimulator` hydrates from the live chain cache.
+Live simulation uses local historical context when it is caught up. Live
+pipelines that already hold block headers and `prestateTracer` diffMode output
+can open direct block state sessions from those inputs.
 
 ## Where To Look First
 
@@ -78,7 +79,7 @@ ahead of that context, `LiveTxSimulator` hydrates from the live chain cache.
 | Signed tx simulation | `src/single_tx/signed.rs` |
 | Stateful tx chains | `src/tx_chain/unsigned.rs`, `src/tx_chain/signed.rs` |
 | Block traces and parity | `src/block_trace/`, `examples/block/` |
-| Live state replay | `src/live/`, `src/block_context/` |
+| Latest/direct live state sessions | `src/live/`, `src/block_context/` |
 | Revert/debug helpers | `src/revert/`, `src/tracers/` |
 
 ## Tests And Commands

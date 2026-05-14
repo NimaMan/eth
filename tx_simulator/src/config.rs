@@ -14,7 +14,6 @@ pub mod repo {
     pub const RETH_WS_RPC_ENV: &str = "RETH_WS_RPC";
     pub const LIGHTHOUSE_DATADIR_ENV: &str = "LIGHTHOUSE_DATADIR";
     pub const JWT_PATH_ENV: &str = "JWT_PATH";
-    pub const LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
 
     pub const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
     pub const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
@@ -22,7 +21,6 @@ pub mod repo {
     pub const DEFAULT_RETH_WS_RPC: &str = "ws://127.0.0.1:8546";
     pub const DEFAULT_LIGHTHOUSE_DATADIR: &str = "/home/nima/.lighthouse";
     pub const DEFAULT_JWT_PATH: &str = "/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex";
-    pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 
     /// Path to the shared Ethereum workspace config.
     ///
@@ -84,13 +82,6 @@ pub mod repo {
 
     pub fn jwt_path() -> Result<String> {
         resolve_value(&[JWT_PATH_ENV], DEFAULT_JWT_PATH)
-    }
-
-    pub fn live_data_redis_url() -> Result<String> {
-        resolve_value(
-            &[LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV],
-            DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL,
-        )
     }
 
     fn resolve_value(keys: &[&str], default: &str) -> Result<String> {
@@ -172,7 +163,6 @@ pub mod repo {
                 RETH_HTTP_RPC=http://127.0.0.1:8545
                 RETH_WS_RPC=ws://127.0.0.1:8546
                 JWT_PATH="/mnt/eth/jwt.hex"
-                LIVE_BLOCKCHAIN_DATA_REDIS_URL='redis://127.0.0.1:6379/0'
                 "#,
             )
             .expect("config should parse");
@@ -181,10 +171,6 @@ pub mod repo {
             assert_eq!(values["RETH_HTTP_RPC"], "http://127.0.0.1:8545");
             assert_eq!(values["RETH_WS_RPC"], "ws://127.0.0.1:8546");
             assert_eq!(values["JWT_PATH"], "/mnt/eth/jwt.hex");
-            assert_eq!(
-                values["LIVE_BLOCKCHAIN_DATA_REDIS_URL"],
-                "redis://127.0.0.1:6379/0"
-            );
         }
 
         #[test]

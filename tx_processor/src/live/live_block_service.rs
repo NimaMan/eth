@@ -1,19 +1,12 @@
 use std::{env, path::PathBuf, sync::Arc};
 
-use alloy_primitives::B256;
-use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
-use std::str::FromStr;
-use tx_simulator::{
-    block_context::live_data_registry::{keys, ChainStateSnapshot},
-    TxSimulator,
-};
 
 use crate::live::{
     block_logger::BlockProcessingLogger,
     block_notifier::RedisBlockNotifier,
-    block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
+    block_snapshot::build_live_block_snapshot,
     live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig},
     processed_block_replay_store_sink::LiveProcessedBlockReplayStoreSink,
     redis_block_publisher::RedisBlockPublisher,
@@ -23,7 +16,6 @@ use crate::live::{
 pub struct LiveBlockService {
     processor: LiveBlockProcessor,
     publisher: Option<RedisBlockPublisher>,
-    state_simulator: Option<Arc<TxSimulator>>,
     notifier: Option<RedisBlockNotifier>,
     logger: Option<BlockProcessingLogger>,
     processed_block_replay_store: Option<LiveProcessedBlockReplayStoreSink>,
@@ -38,7 +30,6 @@ impl LiveBlockService {
         log_path: Option<PathBuf>,
         reth_datadir: PathBuf,
     ) -> Result<Self> {
-        let state_simulator = redis_url.as_ref().map(|_| provider.simulator().clone());
         let chain_id = provider.chain_id();
         let processor = LiveBlockProcessor::connect(provider, processor_config).await?;
         let publisher = match redis_url.as_ref() {
@@ -78,7 +69,6 @@ impl LiveBlockService {
         Ok(Self {
             processor,
             publisher,
-            state_simulator,
             notifier,
             logger,
             processed_block_replay_store,
@@ -140,38 +130,7 @@ impl LiveBlockService {
         if let Some(publisher) = &self.publisher {
             match build_live_block_snapshot(&processed.processed_block) {
                 Ok(snapshot) => {
-                    let state_snapshot = match (
-                        self.state_simulator.as_ref(),
-                        processed.state_diffs.as_deref(),
-                    ) {
-                        (Some(simulator), Some(state_diffs)) => {
-                            match build_chain_state_snapshot(simulator, &snapshot, state_diffs)
-                                .await
-                            {
-                                Ok(snapshot) => Some(snapshot),
-                                Err(err) => {
-                                    tracing::warn!(
-                                        block_number = processed.execution_info.block_number,
-                                        "failed to build tracked live state: {}",
-                                        err
-                                    );
-                                    None
-                                }
-                            }
-                        }
-                        (Some(_), None) => {
-                            tracing::warn!(
-                                block_number = processed.execution_info.block_number,
-                                "state diffs unavailable; tracked live state will not be advanced"
-                            );
-                            None
-                        }
-                        (None, _) => None,
-                    };
-                    if let Err(err) = publisher
-                        .publish_snapshot(&snapshot, state_snapshot.as_ref())
-                        .await
-                    {
+                    if let Err(err) = publisher.publish_snapshot(&snapshot).await {
                         tracing::warn!(
                             block_number = processed.execution_info.block_number,
                             "failed to publish live block snapshot: {}",
@@ -234,42 +193,7 @@ fn redis_processed_block_stream() -> String {
     env::var("ETH_PROCESSED_BLOCK_STREAM")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| keys::processed_block_stream_key().to_string())
-}
-
-async fn build_chain_state_snapshot(
-    simulator: &TxSimulator,
-    block_snapshot: &LiveBlockSnapshot,
-    state_diffs: &[PreStateFrame],
-) -> Result<ChainStateSnapshot> {
-    let header_payload = block_snapshot.header_json.as_deref().ok_or_else(|| {
-        eyre::eyre!(
-            "live block {} did not include a header payload",
-            block_snapshot.block_number
-        )
-    })?;
-    let parent_hash = block_snapshot.parent_hash.as_deref().ok_or_else(|| {
-        eyre::eyre!(
-            "live block {} did not include a parent hash",
-            block_snapshot.block_number
-        )
-    })?;
-    let block_hash = parse_b256(&block_snapshot.block_hash, "block hash")?;
-    let parent_hash = parse_b256(parent_hash, "parent hash")?;
-
-    simulator
-        .build_live_state_snapshot_from_prestate_diffs(
-            block_snapshot.block_number,
-            block_hash,
-            parent_hash,
-            header_payload,
-            state_diffs,
-        )
-        .await
-}
-
-fn parse_b256(value: &str, label: &str) -> Result<B256> {
-    B256::from_str(value).map_err(|err| eyre::eyre!("invalid {} {}: {}", label, value, err))
+        .unwrap_or_else(|| crate::live::redis_keys::processed_block_stream_key().to_string())
 }
 
 fn env_usize(keys: &[&str]) -> Option<usize> {

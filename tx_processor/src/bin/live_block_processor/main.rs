@@ -12,6 +12,7 @@ use tx_processor::live::{LiveBlockProcessorConfig, LiveBlockService};
 use tx_simulator::config::repo;
 
 const LIVE_BLOCK_WARMUP_BLOCKS: usize = 5;
+const DEFAULT_REDIS_URL: &str = "redis://localhost:6379/0";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,7 +24,7 @@ async fn main() -> Result<()> {
     let reth_datadir = repo::reth_datadir()?;
     let execution_rpc = env_or_config("EXECUTION_RPC", repo::reth_http_rpc)?;
     let execution_ws = env_or_config("EXECUTION_WS", repo::reth_ws_rpc)?;
-    let redis_url = Some(env_or_config("REDIS_URL", repo::live_data_redis_url)?);
+    let redis_url = Some(redis_url_from_env_or_default());
     let notifier_channel = env::var("REDIS_BLOCK_CHANNEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -129,4 +130,10 @@ where
         }
     }
     resolver()
+}
+
+fn redis_url_from_env_or_default() -> String {
+    non_empty_env("REDIS_URL")
+        .or_else(|| non_empty_env("LIVE_BLOCKCHAIN_DATA_REDIS_URL"))
+        .unwrap_or_else(|| DEFAULT_REDIS_URL.to_string())
 }

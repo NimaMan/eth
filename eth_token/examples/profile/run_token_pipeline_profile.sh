@@ -10,10 +10,11 @@ TOKEN_PROFILE_BIND=${TOKEN_PROFILE_BIND:-127.0.0.1:8766}
 TOKEN_PROFILE_LOG_DIR=${TOKEN_PROFILE_LOG_DIR:-$ETH_ROOT/logs/eth_chain_server_profile_post_block}
 TOKEN_PROFILE_LOG_RUN_ID=${TOKEN_PROFILE_LOG_RUN_ID:-profile_${START_BLOCK}_${END_BLOCK}_$(date +%s)_$$}
 TOKEN_PROFILE_API_PREFIX=${TOKEN_PROFILE_API_PREFIX:-/eth/tokens/api}
-BASE_CONFIG=${ETH_CONFIG_PATH:-$ETH_ROOT/config.env}
-PROFILE_ENV=${TOKEN_PROFILE_ENV:-/tmp/eth_chain_server_profile_post_block.env}
+TOKEN_PROFILE_DEFAULT_BLOCKS=${TOKEN_PROFILE_DEFAULT_BLOCKS:-7000}
+BASE_CONFIG=${TOKEN_PROFILE_BASE_CONFIG:-$ETH_ROOT/config.env}
+PROFILE_CONFIG=${TOKEN_PROFILE_CONFIG:-/tmp/eth_chain_server_profile_post_block.env}
 
-python3 - "$BASE_CONFIG" "$PROFILE_ENV" "$TOKEN_PROFILE_BIND" "$TOKEN_PROFILE_LOG_DIR" "$TOKEN_PROFILE_LOG_RUN_ID" <<'PY'
+python3 - "$BASE_CONFIG" "$PROFILE_CONFIG" "$TOKEN_PROFILE_BIND" "$TOKEN_PROFILE_LOG_DIR" "$TOKEN_PROFILE_LOG_RUN_ID" "$TOKEN_PROFILE_DEFAULT_BLOCKS" <<'PY'
 from pathlib import Path
 import sys
 
@@ -22,12 +23,13 @@ dest = Path(sys.argv[2])
 bind = sys.argv[3]
 log_dir = sys.argv[4]
 log_run_id = sys.argv[5]
+default_blocks = sys.argv[6]
 
 overrides = {
     "CHAIN_SERVER_BIND": bind,
     "CHAIN_SERVER_LOG_DIR": log_dir,
     "CHAIN_SERVER_LOG_RUN_ID": log_run_id,
-    "CHAIN_SERVER_DEFAULT_BLOCKS": str(int(__import__("os").environ.get("CHAIN_SERVER_DEFAULT_BLOCKS", "7000"))),
+    "CHAIN_SERVER_DEFAULT_BLOCKS": str(int(default_blocks)),
     "CHAIN_SERVER_AUTO_START_LIVE": "false",
 }
 
@@ -50,7 +52,7 @@ PY
 
 cargo build --manifest-path "$ETH_ROOT/Cargo.toml" -p eth_chain_server --release
 
-ETH_CONFIG_PATH="$PROFILE_ENV" "$ETH_ROOT/target/release/eth_chain_server" &
+"$ETH_ROOT/target/release/eth_chain_server" --config "$PROFILE_CONFIG" &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 

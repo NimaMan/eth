@@ -3,10 +3,9 @@
 /// This module contains methods for simulating fully signed transactions
 /// with valid signatures (v, r, s).
 use crate::{
-    block_context::BlockStateProvider,
     revert::decode_revert_reason,
     simulator::TxSimulator,
-    tx_chain::sequential::{ForkedState, SharedStateProvider, SharedStateProviderDatabase},
+    tx_chain::sequential::{SharedStateProvider, SharedStateProviderDatabase},
     types::{FullSimulationResult, SimulationResult},
 };
 use eyre::Result;
@@ -174,41 +173,14 @@ impl TxSimulator {
         let context = simulator.load_block_context_blocking(block_number, None)?;
         let block_header = context.header;
 
-        match context.state {
-            BlockStateProvider::Historical(state) => {
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(state)));
-                Self::run_signed_execution_on_db(
-                    simulator,
-                    tx,
-                    block_header,
-                    &mut db,
-                    inspector_config,
-                    trace_mode,
-                )
-            }
-            BlockStateProvider::LiveFork(mut fork) => Self::run_signed_execution_on_fork(
-                simulator,
-                tx,
-                &mut fork,
-                inspector_config,
-                trace_mode,
-            ),
-        }
-    }
-
-    fn run_signed_execution_on_fork(
-        simulator: TxSimulator,
-        tx: TransactionSigned,
-        fork: &mut ForkedState,
-        inspector_config: TracingInspectorConfig,
-        trace_mode: SignedTraceMode,
-    ) -> Result<SignedExecutionResult> {
+        let mut db = CacheDB::new(StateProviderDatabase::new(SharedStateProvider::new(
+            context.state,
+        )));
         Self::run_signed_execution_on_db(
             simulator,
             tx,
-            fork.block_header.clone(),
-            &mut fork.db,
+            block_header,
+            &mut db,
             inspector_config,
             trace_mode,
         )

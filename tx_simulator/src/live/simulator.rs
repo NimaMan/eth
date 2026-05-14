@@ -8,9 +8,9 @@ use std::sync::Arc;
 /// Source selected for live-first state.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LiveStateSource {
-    /// State comes from local Reth providers without Redis live replay.
+    /// State comes from local Reth providers.
     LocalHistoricalContext,
-    /// State comes from the live block processor's tracked state.
+    /// State comes from a tracked live-state provider.
     TrackedLiveState,
 }
 
@@ -38,8 +38,9 @@ impl LiveStateStatus {
 /// Live-first transaction simulator for latency-sensitive trading paths.
 ///
 /// `TxSimulator` remains the general-purpose historical/direct-DB engine. This
-/// wrapper keeps the live rule simple: use MDBX when it is caught up; otherwise
-/// use the state tracked by the live block processor.
+/// wrapper selects the latest locally readable historical context. In-process
+/// live block runtimes that already have exact prestate diffs should use
+/// `TxSimulator::block_state_session_from_prestate_diffs` directly.
 #[derive(Clone)]
 pub struct LiveTxSimulator {
     simulator: Arc<TxSimulator>,
@@ -60,8 +61,7 @@ impl LiveTxSimulator {
         Arc::clone(&self.simulator)
     }
 
-    /// Latest block for which we have state: MDBX when caught up, otherwise the
-    /// live block processor's tracked state.
+    /// Latest block for which this wrapper can open a simulation session.
     pub async fn latest_state_block_number(&self) -> Result<u64> {
         Ok(self.latest_state_status().await?.selected_block_number)
     }
@@ -70,28 +70,12 @@ impl LiveTxSimulator {
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
         let latest_reth_finished = self.latest_reth_finished_block_number()?;
         let latest_historical_context = self.latest_historical_context_block_number()?;
-        let Some(cache) = self.simulator.live_chain_cache() else {
-            return select_state_status(
-                latest_reth_finished,
-                latest_historical_context,
-                None,
-                None,
-            );
-        };
-
-        let latest_live = cache.latest_block_number().await?;
-        let latest_tracked_state = cache.latest_chain_state_block_number().await?;
-        select_state_status(
-            latest_reth_finished,
-            latest_historical_context,
-            latest_live,
-            latest_tracked_state,
-        )
+        select_state_status(latest_reth_finished, latest_historical_context, None, None)
     }
 
-    /// Latest block announced in the live Redis cache, if any.
+    /// Latest block announced by an external live-state source.
     pub async fn latest_live_block_number(&self) -> Result<Option<u64>> {
-        self.simulator.live_latest_block_number().await
+        Ok(None)
     }
 
     /// Latest block reported by Reth's Finish stage.
@@ -102,7 +86,7 @@ impl LiveTxSimulator {
     /// Compatibility alias for callers that still use the old name.
     ///
     /// This is raw Reth Finish-stage progress, not necessarily the latest block
-    /// whose header/state context is readable without Redis.
+    /// whose header/state context is readable from local Reth.
     pub fn latest_persisted_block_number(&self) -> Result<u64> {
         self.latest_reth_finished_block_number()
     }
@@ -112,7 +96,7 @@ impl LiveTxSimulator {
         self.simulator.latest_historical_context_block_number()
     }
 
-    /// Start a stateful simulation chain at the latest tracked state block.
+    /// Start a stateful simulation chain at the latest selected state block.
     pub async fn start_latest_chain(&self) -> Result<UnsignedTxChainSimulation> {
         let block_number = self.latest_state_status().await?.selected_block_number;
         self.simulator
@@ -143,7 +127,7 @@ impl LiveTxSimulator {
             .await
     }
 
-    /// Simulate one unsigned transaction against the latest tracked state.
+    /// Simulate one unsigned transaction against the latest selected state.
     pub async fn simulate_transaction(
         &self,
         transaction: UnsignedTransaction,
@@ -152,7 +136,7 @@ impl LiveTxSimulator {
         session.step_unsigned(transaction)
     }
 
-    /// Simulate one signed transaction against the latest tracked state.
+    /// Simulate one signed transaction against the latest selected state.
     pub async fn simulate_signed_transaction(
         &self,
         transaction: &SignedTransaction,
@@ -161,7 +145,7 @@ impl LiveTxSimulator {
         session.step_signed(transaction)
     }
 
-    /// Simulate a sequence of unsigned transactions against the latest tracked state.
+    /// Simulate a sequence of unsigned transactions against the latest selected state.
     pub async fn simulate_sequence(
         &self,
         transactions: Vec<UnsignedTransaction>,
@@ -174,7 +158,7 @@ impl LiveTxSimulator {
         Ok(results)
     }
 
-    /// Simulate a mixed signed/unsigned sequence against the latest tracked state.
+    /// Simulate a mixed signed/unsigned sequence against the latest selected state.
     pub async fn simulate_mixed_sequence(
         &self,
         transactions: Vec<SessionTransaction>,
