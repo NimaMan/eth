@@ -113,3 +113,20 @@ pub(super) async fn run_strategy_decisions(
         )),
     }
 }
+
+pub(super) async fn run_position_decision_audit(
+    run_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .run_position_decision_audit(&run_id, 10)
+        .await
+    {
+        Ok(rows) => Ok(json_response(&rows, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load run position decision audit: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}

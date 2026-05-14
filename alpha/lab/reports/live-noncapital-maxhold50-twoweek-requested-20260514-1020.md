@@ -394,6 +394,10 @@ Audit read:
   five are still `sell_failed` with `TransferHelper: TRANSFER_FROM_FAILED`.
 - The chain-server endpoint is live after rebuild/restart:
   `/eth/tokens/api/alpha/runs/live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053/decisions`.
+- The joined audit endpoint is also live:
+  `/eth/tokens/api/alpha/runs/live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053/decision-audit`.
+  It returns `20` rows, `10` top and `10` worst, with entry reason, exit reason,
+  sell report status, PnL, and ROI.
 
 Read: the current candidate is now auditable through persisted decisions. It is
 still not real-deployment ready because the same `59` failed exits remain and

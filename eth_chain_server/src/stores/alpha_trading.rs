@@ -201,6 +201,28 @@ pub struct StrategyDecisionView {
     pub payload: Value,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PositionDecisionAuditView {
+    pub bucket: String,
+    pub rank: i64,
+    pub position_id: String,
+    pub token_address: String,
+    pub pool_address: String,
+    pub state: String,
+    pub entry_block: Option<i64>,
+    pub snapshot_block: Option<i64>,
+    pub pnl_eth: Option<String>,
+    pub roi: Option<String>,
+    pub entry_reason: Option<String>,
+    pub entry_decision_block: Option<i64>,
+    pub exit_reason: Option<String>,
+    pub exit_decision_block: Option<i64>,
+    pub exit_decision_source: Option<String>,
+    pub sell_status: Option<String>,
+    pub sell_report_block: Option<i64>,
+    pub sell_error: Option<String>,
+}
+
 #[derive(Default)]
 struct StrategyCounts {
     positions: i64,
@@ -734,6 +756,100 @@ impl AlphaTradingStore {
 
         rows.iter().map(row_to_strategy_decision).collect()
     }
+
+    pub async fn run_position_decision_audit(
+        &self,
+        run_id: &str,
+        limit: i64,
+    ) -> Result<Vec<PositionDecisionAuditView>> {
+        let limit = clamp_limit(limit);
+        let rows = sqlx::query(
+            r#"
+            WITH latest AS (
+                SELECT DISTINCT ON (run_id, position_id)
+                       run_id, position_id,
+                       block_number AS snapshot_block,
+                       (realized_profit_eth::numeric + unrealized_profit_eth::numeric)::text AS pnl_eth,
+                       roi::text AS roi
+                FROM alpha_trading.position_snapshots
+                WHERE run_id = $1
+                ORDER BY run_id, position_id, block_number DESC
+            ),
+            base AS (
+                SELECT p.run_id, p.position_id, p.token_address, p.pool_address, p.state,
+                       NULLIF(p.payload->>'entry_block', '')::bigint AS entry_block,
+                       latest.snapshot_block,
+                       latest.pnl_eth,
+                       latest.roi,
+                       ROW_NUMBER() OVER (
+                           ORDER BY latest.pnl_eth::numeric DESC NULLS LAST, p.token_address
+                       ) AS top_rank,
+                       ROW_NUMBER() OVER (
+                           ORDER BY latest.pnl_eth::numeric ASC NULLS LAST, p.token_address
+                       ) AS worst_rank
+                FROM alpha_trading.positions p
+                JOIN latest USING (run_id, position_id)
+                WHERE p.run_id = $1
+            ),
+            sample AS (
+                SELECT 'top'::text AS bucket, top_rank AS rank, *
+                FROM base
+                WHERE top_rank <= $2
+                UNION ALL
+                SELECT 'worst'::text AS bucket, worst_rank AS rank, *
+                FROM base
+                WHERE worst_rank <= $2
+            ),
+            buy_decision AS (
+                SELECT DISTINCT ON (token_address, pool_address)
+                       token_address, pool_address,
+                       block_number AS entry_decision_block,
+                       reason AS entry_reason
+                FROM alpha_trading.strategy_decisions
+                WHERE run_id = $1 AND action = 'submit_buy'
+                ORDER BY token_address, pool_address, block_number, id
+            ),
+            sell_decision AS (
+                SELECT DISTINCT ON (token_address, pool_address)
+                       token_address, pool_address,
+                       block_number AS exit_decision_block,
+                       reason AS exit_reason,
+                       event_source AS exit_decision_source
+                FROM alpha_trading.strategy_decisions
+                WHERE run_id = $1 AND action = 'submit_sell'
+                ORDER BY token_address, pool_address, block_number, id
+            ),
+            sell_report AS (
+                SELECT DISTINCT ON (position_id)
+                       position_id,
+                       status AS sell_status,
+                       block_number AS sell_report_block,
+                       error AS sell_error
+                FROM alpha_trading.execution_reports
+                WHERE run_id = $1 AND order_side = 'sell'
+                ORDER BY position_id, created_at DESC, id DESC
+            )
+            SELECT sample.bucket, sample.rank, sample.position_id,
+                   sample.token_address, sample.pool_address, sample.state,
+                   sample.entry_block, sample.snapshot_block, sample.pnl_eth, sample.roi,
+                   buy_decision.entry_reason, buy_decision.entry_decision_block,
+                   sell_decision.exit_reason, sell_decision.exit_decision_block,
+                   sell_decision.exit_decision_source,
+                   sell_report.sell_status, sell_report.sell_report_block, sell_report.sell_error
+            FROM sample
+            LEFT JOIN buy_decision USING (token_address, pool_address)
+            LEFT JOIN sell_decision USING (token_address, pool_address)
+            LEFT JOIN sell_report USING (position_id)
+            ORDER BY sample.bucket, sample.rank
+            "#,
+        )
+        .bind(run_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.iter().map(row_to_position_decision_audit).collect()
+    }
 }
 
 fn summary_from_run(run: Option<&TraderRunView>, counts: StrategyCounts) -> AlphaStrategySummary {
@@ -900,6 +1016,31 @@ fn row_to_strategy_decision(row: &sqlx::postgres::PgRow) -> Result<StrategyDecis
         order_side: optional_text(row, "order_side")?,
         created_at: text(row, "created_at")?,
         payload: json_text(row, "payload")?,
+    })
+}
+
+fn row_to_position_decision_audit(
+    row: &sqlx::postgres::PgRow,
+) -> Result<PositionDecisionAuditView> {
+    Ok(PositionDecisionAuditView {
+        bucket: text(row, "bucket")?,
+        rank: int(row, "rank")?,
+        position_id: text(row, "position_id")?,
+        token_address: text(row, "token_address")?,
+        pool_address: text(row, "pool_address")?,
+        state: text(row, "state")?,
+        entry_block: optional_int(row, "entry_block")?,
+        snapshot_block: optional_int(row, "snapshot_block")?,
+        pnl_eth: optional_text(row, "pnl_eth")?,
+        roi: optional_text(row, "roi")?,
+        entry_reason: optional_text(row, "entry_reason")?,
+        entry_decision_block: optional_int(row, "entry_decision_block")?,
+        exit_reason: optional_text(row, "exit_reason")?,
+        exit_decision_block: optional_int(row, "exit_decision_block")?,
+        exit_decision_source: optional_text(row, "exit_decision_source")?,
+        sell_status: optional_text(row, "sell_status")?,
+        sell_report_block: optional_int(row, "sell_report_block")?,
+        sell_error: optional_text(row, "sell_error")?,
     })
 }
 
