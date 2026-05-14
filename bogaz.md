@@ -107,6 +107,11 @@ Latest evidence:
   `alpha/lab/reports/live-noncapital-maxhold50-twoweek-requested-20260514-1020.md`.
 - Coverage is still partial: the requested two-week window starts at
   `24,991,345`, but usable pool observations start at `25,066,498`.
+- A bounded retry comparison,
+  `live-noncapital-maxhold50-retry20x3-twoweek-requested-20260514-1030`,
+  was run after adding opt-in retry cadence. It left PnL and open exposure
+  unchanged while increasing failed reports from `106` to `214`, so retry-only
+  is not the next useful policy.
 
 ## Active Bottlenecks
 
@@ -114,7 +119,7 @@ Latest evidence:
 | --- | --- | --- | --- | --- |
 | 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live non-capital evidence is `maxhold50`: `+12.876052023155642365 ETH` total PnL and `+5.913359147437672841 ETH` excluding top 10 on the latest partial two-week-requested replay. Evidence is still incomplete for real orders because the run is partial coverage, has `59` sell-failed positions, and lacks complete decision-ledger explainability. | Treat `maxhold50` as the current candidate, then resolve failed-exit policy, decision-ledger gaps, and full two-week observation coverage before real execution handoff. |
 | 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | The latest `maxhold50` live non-capital run stays positive after excluding top 10, unlike the older 15k/200-block hold baselines. Concentration is improved but not enough by itself for production: top-10 and worst-10 spot checks passed mechanically, but full decision reasons are not yet persisted for every trade. | Keep `maxhold50` as the current baseline candidate. Compare any new policy against this run's PnL, concentration, failed exits, and top/worst audit quality. |
-| 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest `maxhold50` run has `59` sell-failed positions. The dominant failure bucket is `TransferHelper: TRANSFER_FROM_FAILED` with `88` reports; worst-position spot check shows full loss after the pool fell to near-zero reserve and became non-buyable/non-sellable. | Keep monitoring continuous in strategy state. Add retry cadence, chunked exits, pool-approved exits, and no-observed-sell exposure limits as explicit strategies/policies before real deployment. |
+| 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest `maxhold50` run has `59` sell-failed positions. The dominant failure bucket is `TransferHelper: TRANSFER_FROM_FAILED` with `88` reports; worst-position spot check shows full loss after the pool fell to near-zero reserve and became non-buyable/non-sellable. An opt-in retry-only policy (`20` block interval, `3` failed-report cap) did not recover exits and doubled failed reports. | Keep retry support available for controlled experiments, but do not promote retry-only. Next policies should test chunked exits, no-observed-sell filtering, and earlier risk exits before pools become unsellable. |
 | 4 | **Decision ledger completeness** | `alpha/engine`, `alpha/store`, frontend | Execution reports now carry more fill context, but the strategy decision ledger still does not persist every rule input and skip/action reason needed for explainable frontend review and real execution approval. | Persist decisions keyed by run, strategy, token, pool, rule id, inputs, action, execution report, exit reason, and PnL snapshot. The frontend must be able to audit every real-deployment candidate trade. |
 | 5 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
 | 6 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
@@ -178,8 +183,9 @@ Recent checks that passed during this cleanup:
 1. Decide whether the next blocker is policy quality or missing historical
    observation coverage for a true two-week replay.
 2. Implement the next failed-exit policy improvement against the `maxhold50`
-   baseline: retry cadence, chunked exits, pool-approved exits, or
-   no-observed-sell exposure limits.
+   baseline: chunked exits, no-observed-sell exposure limits, or earlier
+   risk-driven exits. Retry cadence exists now, but retry-only was not useful in
+   the latest comparison.
 3. Add decision-ledger rows for the missing entry/skip/exit rule explanations
    so the frontend can audit the candidate without ad hoc SQL or Token Lab spot
    checks.

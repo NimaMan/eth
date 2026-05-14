@@ -36,6 +36,12 @@ pub struct SnipeAllConfig {
     /// Force sell after this many blocks regardless of price.
     /// None = disabled (hold indefinitely).
     pub max_hold_blocks: Option<u64>,
+    /// Retry a failed exit after this many blocks.
+    /// None = disabled, preserving the no-retry baseline.
+    pub exit_retry_interval_blocks: Option<u64>,
+    /// Maximum failed exit reports to allow before the strategy stops retrying.
+    /// None = unlimited while the failure remains retryable.
+    pub max_exit_retries: Option<u32>,
 }
 
 impl Default for SnipeAllConfig {
@@ -64,6 +70,8 @@ impl Default for SnipeAllConfig {
             stop_loss_ratio: None,
             take_profit_ratio: None,
             max_hold_blocks: None,
+            exit_retry_interval_blocks: None,
+            max_exit_retries: None,
         }
     }
 }

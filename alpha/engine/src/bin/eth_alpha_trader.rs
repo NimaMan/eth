@@ -95,6 +95,14 @@ struct Args {
     /// E.g., 3.0 = sell at +200% profit. Disabled by default.
     #[arg(long)]
     take_profit_ratio: Option<String>,
+
+    /// Retry failed exits after this many blocks. Disabled by default.
+    #[arg(long)]
+    exit_retry_interval_blocks: Option<u64>,
+
+    /// Maximum failed exit reports before retry stops. Requires retry interval to matter.
+    #[arg(long)]
+    max_exit_retries: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -185,6 +193,8 @@ async fn main() -> Result<()> {
                 "min_liquidity_eth": &args.min_liquidity_eth,
                 "min_liquidity_usd": &args.min_liquidity_usd,
                 "replay_current": args.replay_current,
+                "exit_retry_interval_blocks": args.exit_retry_interval_blocks,
+                "max_exit_retries": args.max_exit_retries,
             }),
         )
         .await
@@ -234,6 +244,8 @@ async fn main() -> Result<()> {
         stop_loss_ratio,
         take_profit_ratio,
         max_hold_blocks: args.max_hold_blocks,
+        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+        max_exit_retries: args.max_exit_retries,
         ..SnipeAllConfig::default()
     })));
 

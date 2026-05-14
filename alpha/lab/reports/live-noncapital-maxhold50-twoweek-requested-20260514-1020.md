@@ -144,3 +144,42 @@ mechanics match the expected 51-block monitor behavior.
 
 It is not ready for real execution. The next blocker is failed-exit policy and
 decision-ledger explainability, followed by true two-week replay coverage.
+
+## Retry Comparison
+
+After this baseline, bounded failed-exit retry support was added behind explicit
+CLI flags and tested with:
+
+```bash
+RUN_ID=live-noncapital-maxhold50-retry20x3-twoweek-requested-20260514-1030
+RUST_LOG=info cargo run --release -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --run-id "$RUN_ID" \
+  --replay-run-id snipe-all-v1-chain-sim-live-v4 \
+  --from-block 24991345 \
+  --to-block 25092144 \
+  --skip-primed \
+  --buy-amount-wei 10000000000000000 \
+  --min-liquidity-eth 0.5 \
+  --min-liquidity-usd 1000 \
+  --max-hold-blocks 50 \
+  --exit-retry-interval-blocks 20 \
+  --max-exit-retries 3
+```
+
+Result:
+
+| Metric | Baseline | Retry 20x3 |
+| --- | ---: | ---: |
+| Execution reports | 1,089 | 1,197 |
+| Confirmed reports | 983 | 983 |
+| Failed reports | 106 | 214 |
+| Positions | 533 | 533 |
+| Open positions | 59 | 59 |
+| Sell-failed positions | 59 | 59 |
+| Total PnL ETH | 12.876052023155642365 | 12.876052023155642365 |
+| PnL ex top 10 ETH | 5.913359147437672841 | 5.913359147437672841 |
+
+Read: bounded retry worked mechanically but did not recover stuck exits in this
+window. It only added failed reports. Do not promote retry-only as the next
+policy; the next useful policy needs chunk sizing, no-observed-sell filtering,
+or earlier risk exits before the pool becomes unsellable.

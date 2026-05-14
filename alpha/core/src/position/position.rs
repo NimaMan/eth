@@ -52,6 +52,12 @@ pub struct Position {
     /// Last sell failure seen for this position, if any.
     #[serde(default)]
     pub exit_failure_reason: Option<String>,
+    /// Number of failed sell reports seen for this position.
+    #[serde(default)]
+    pub exit_failure_count: u32,
+    /// Block number of the latest failed sell report, if known.
+    #[serde(default)]
+    pub last_exit_failure_block: Option<BlockNumber>,
     /// False when the latest sell failure is simulator infrastructure rather
     /// than a retryable chain outcome.
     #[serde(default = "default_exit_retryable")]
@@ -74,6 +80,8 @@ impl Position {
             entry_block: None,
             drained: false,
             exit_failure_reason: None,
+            exit_failure_count: 0,
+            last_exit_failure_block: None,
             exit_retryable: true,
         }
     }
@@ -154,6 +162,8 @@ impl Position {
         {
             self.state = PositionState::SellFailed;
             self.exit_failure_reason = report.error.clone();
+            self.exit_failure_count = self.exit_failure_count.saturating_add(1);
+            self.last_exit_failure_block = report.block_number;
             self.exit_retryable = report
                 .error
                 .as_deref()

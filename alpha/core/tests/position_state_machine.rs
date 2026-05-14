@@ -139,6 +139,8 @@ fn failed_sell_keeps_exposure_and_can_retry() {
     assert!(position.has_exposure());
     assert!(position.can_submit_exit());
     assert!(!position.state.is_terminal());
+    assert_eq!(position.exit_failure_count, 1);
+    assert_eq!(position.last_exit_failure_block, Some(2));
 
     assert!(position.mark_intent_created(OrderSide::Sell).is_ok());
     assert_eq!(position.state, PositionState::SellIntentCreated);
@@ -191,6 +193,8 @@ fn simulator_infra_sell_failure_keeps_exposure_but_blocks_retry() {
     assert!(position.has_exposure());
     assert!(!position.can_submit_exit());
     assert!(!position.state.is_terminal());
+    assert_eq!(position.exit_failure_count, 1);
+    assert_eq!(position.last_exit_failure_block, Some(2));
     assert_eq!(
         position.exit_failure_reason.as_deref(),
         Some("unable to inject synthetic ERC20 balance: unsupported balance storage layout")
