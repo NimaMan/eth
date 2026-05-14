@@ -56,17 +56,6 @@ pub struct TokenView {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TokenActivitySummary {
-    pub total_recent_tx: u32,
-    pub total_recent_buy_by_denom: BTreeMap<String, f64>,
-    pub total_recent_sell_by_denom: BTreeMap<String, f64>,
-    pub total_recent_bribe_eth: f64,
-    pub first_block: Option<u64>,
-    pub last_block: Option<u64>,
-    pub row_count: usize,
-}
-
-#[derive(Clone, Debug, Serialize)]
 pub struct TokenDetailResponse {
     pub run_id: String,
     pub token: ERC20Token,
@@ -76,7 +65,6 @@ pub struct TokenDetailResponse {
     pub network: TokenNetworkView,
     pub contract_analysis: ContractAnalysisReport,
     pub denom_symbols: BTreeMap<String, String>,
-    pub activity_summary: TokenActivitySummary,
 }
 
 impl TokenView {
@@ -146,12 +134,21 @@ pub(crate) fn token_summary_with_pool_views(
         if summary.scam_label.is_none() {
             summary.scam_label = Some("liquidity_removal".to_string());
         }
+        if summary.scam_mechanism.is_none() {
+            if let Some(pool) = pool_views.iter().find(|pool| pool.scam_mechanism.is_some()) {
+                summary.scam_mechanism = pool.scam_mechanism.clone();
+                summary.scam_mechanism_label = pool.scam_mechanism_label.clone();
+                summary.scam_label = pool.scam_label.clone().or(summary.scam_label);
+            }
+        }
     }
 
     for pool in pool_views {
         if let Some(snapshot) = summary.current_prices.get_mut(&pool.pool_address) {
             snapshot.is_scam = pool.is_scam;
             snapshot.scam_label = pool.scam_label.clone();
+            snapshot.scam_mechanism = pool.scam_mechanism.clone();
+            snapshot.scam_mechanism_label = pool.scam_mechanism_label.clone();
             snapshot.liquidity_removal = pool.liquidity_removal;
             snapshot.liquidity_removal_label = pool.liquidity_removal_label.clone();
         }
@@ -231,41 +228,6 @@ pub fn build_denom_symbols(token: &ERC20Token) -> BTreeMap<String, String> {
     symbols
 }
 
-pub fn build_activity_summary(token: &ERC20Token) -> TokenActivitySummary {
-    let recent = token.activity.recent_blocks(50);
-    let row_count = recent.len();
-    let total_recent_tx = recent.iter().map(|b| b.num_tx).sum();
-    let mut total_recent_buy_by_denom: BTreeMap<String, f64> = BTreeMap::new();
-    let mut total_recent_sell_by_denom: BTreeMap<String, f64> = BTreeMap::new();
-    let total_recent_bribe_eth = recent.iter().map(|b| b.total_bribe_eth).sum();
-
-    for block in &recent {
-        for (denom, amount) in &block.buy_volume_by_denom {
-            *total_recent_buy_by_denom
-                .entry(denom.clone())
-                .or_insert(0.0) += amount;
-        }
-        for (denom, amount) in &block.sell_volume_by_denom {
-            *total_recent_sell_by_denom
-                .entry(denom.clone())
-                .or_insert(0.0) += amount;
-        }
-    }
-
-    let first_block = recent.iter().map(|b| b.block_number).min();
-    let last_block = recent.iter().map(|b| b.block_number).max();
-
-    TokenActivitySummary {
-        total_recent_tx,
-        total_recent_buy_by_denom,
-        total_recent_sell_by_denom,
-        total_recent_bribe_eth,
-        first_block,
-        last_block,
-        row_count,
-    }
-}
-
 pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<TokenDetailResponse> {
     let state = run.state.read().await;
     let address = normalize_address(token_address);
@@ -277,7 +239,6 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let summary = token_summary_with_pool_views(token, &pools);
     let contract_analysis = contract_analysis_with_pool_views(token, &pools);
     let denom_symbols = build_denom_symbols(token);
-    let activity_summary = build_activity_summary(token);
 
     Some(TokenDetailResponse {
         run_id: run.id.clone(),
@@ -288,7 +249,6 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
         network,
         contract_analysis,
         denom_symbols,
-        activity_summary,
     })
 }
 

@@ -103,6 +103,50 @@ impl TokenActivityTracker {
         self.record_latest(block_number, timestamp);
     }
 
+    pub fn record_token_transfer(
+        &mut self,
+        tx_hash: impl AsRef<str>,
+        block_number: u64,
+        timestamp: Option<u64>,
+        count: u32,
+    ) {
+        if count == 0 {
+            return;
+        }
+        self.record_transaction(tx_hash.as_ref(), None, block_number, timestamp);
+        let tx_hash = normalize_key(tx_hash);
+        if let Some(tx) = self.transactions_by_hash.get_mut(&tx_hash) {
+            tx.token_transfer_count = tx.token_transfer_count.saturating_add(count);
+        }
+        self.block_mut(block_number, timestamp).token_transfer_count = self
+            .block_mut(block_number, timestamp)
+            .token_transfer_count
+            .saturating_add(count);
+        self.record_latest(block_number, timestamp);
+    }
+
+    pub fn record_denom_transfer(
+        &mut self,
+        tx_hash: impl AsRef<str>,
+        block_number: u64,
+        timestamp: Option<u64>,
+        count: u32,
+    ) {
+        if count == 0 {
+            return;
+        }
+        self.record_transaction(tx_hash.as_ref(), None, block_number, timestamp);
+        let tx_hash = normalize_key(tx_hash);
+        if let Some(tx) = self.transactions_by_hash.get_mut(&tx_hash) {
+            tx.denom_transfer_count = tx.denom_transfer_count.saturating_add(count);
+        }
+        self.block_mut(block_number, timestamp).denom_transfer_count = self
+            .block_mut(block_number, timestamp)
+            .denom_transfer_count
+            .saturating_add(count);
+        self.record_latest(block_number, timestamp);
+    }
+
     pub fn recent_blocks(&self, limit: usize) -> Vec<TokenBlockActivity> {
         if limit == 0 {
             return Vec::new();

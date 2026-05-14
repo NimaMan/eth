@@ -3,7 +3,7 @@ mod events;
 use std::collections::{HashMap, HashSet};
 
 use eyre::{eyre, Result};
-use reth_chain_query::common_addresses::KnownV2Protocol;
+use reth_chain_query::common_addresses::{KnownV2Protocol, DENOM_ADDRESSES};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
@@ -475,8 +475,10 @@ impl ERC20Token {
             transaction.block_timestamp,
         );
         self.record_bribe_activity_from_processed_transaction(transaction)?;
+        self.record_transfer_activity_from_processed_transaction(transaction);
         self.transfer_tracker
             .update_from_processed_transaction(transaction)?;
+        self.record_pair_token_transfers_from_processed_transaction(transaction)?;
         self.status_manager.update_from_processed_transaction(
             transaction,
             self.transfer_tracker.total_supply_from_transfers,
@@ -553,6 +555,98 @@ impl ERC20Token {
             Some(transaction.block_timestamp),
             amount_eth,
         );
+        Ok(())
+    }
+
+    fn record_transfer_activity_from_processed_transaction(
+        &mut self,
+        transaction: &ProcessedTransaction,
+    ) {
+        let mut token_transfer_count = 0u32;
+        let mut denom_transfer_count = 0u32;
+        let token_address = normalize_address_string(&self.contract_address);
+
+        for transfer in &transaction.erc20_transfers {
+            if same_address(&transfer.token_address, &token_address) {
+                token_transfer_count = token_transfer_count.saturating_add(1);
+            } else if DENOM_ADDRESSES.contains_key(&transfer.token_address) {
+                denom_transfer_count = denom_transfer_count.saturating_add(1);
+            }
+        }
+
+        if token_transfer_count > 0 {
+            self.activity.record_token_transfer(
+                hash_string(&transaction.hash),
+                transaction.block_number,
+                Some(transaction.block_timestamp),
+                token_transfer_count,
+            );
+        }
+        if denom_transfer_count > 0 {
+            self.activity.record_denom_transfer(
+                hash_string(&transaction.hash),
+                transaction.block_number,
+                Some(transaction.block_timestamp),
+                denom_transfer_count,
+            );
+        }
+    }
+
+    fn record_pair_token_transfers_from_processed_transaction(
+        &mut self,
+        transaction: &ProcessedTransaction,
+    ) -> Result<()> {
+        if self.v2_pools.is_empty() {
+            return Ok(());
+        }
+
+        let token_address = normalize_address_string(&self.contract_address);
+        let pool_addresses: Vec<String> = self.v2_pools.keys().cloned().collect();
+        let tx_hash = hash_string(&transaction.hash);
+        let mut records = Vec::new();
+
+        for transfer in &transaction.erc20_transfers {
+            if !same_address(&transfer.token_address, &token_address) {
+                continue;
+            }
+
+            let from_address = address_string(&transfer.from_address);
+            let to_address = address_string(&transfer.to_address);
+            let from_normalized = normalize_address(&from_address);
+            let to_normalized = normalize_address(&to_address);
+            let touched_pool = pool_addresses.iter().find(|pool_address| {
+                from_normalized == **pool_address || to_normalized == **pool_address
+            });
+            let Some(pool_address) = touched_pool else {
+                continue;
+            };
+
+            let amount = scale_raw_units(transfer.amount.to_string(), self.decimals)?;
+            records.push((
+                pool_address.clone(),
+                from_address,
+                to_address,
+                amount,
+                transfer.log_index,
+                transaction_has_v2_pool_event(transaction, pool_address),
+            ));
+        }
+
+        for (pool_address, from_address, to_address, amount, log_index, has_pool_event) in records {
+            if let Some(pool) = self.v2_pools.get_mut(&pool_address) {
+                pool.base.record_pair_token_transfer(
+                    from_address,
+                    to_address,
+                    amount,
+                    transaction.block_number,
+                    transaction.block_timestamp,
+                    tx_hash.clone(),
+                    Some(log_index),
+                    has_pool_event,
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -752,17 +846,46 @@ impl ERC20Token {
     }
 
     pub fn is_scam(&self) -> bool {
-        self.hidden_mint_detected() || self.liquidity_removal_pool_count() > 0
+        self.hidden_mint_detected()
+            || self.all_pool_bases().iter().any(|pool| {
+                pool.has_liquidity_removal() || pool.inferred_scam_mechanism().is_some()
+            })
     }
 
     pub fn scam_label(&self) -> Option<String> {
         self.status_manager.scam_label.clone().or_else(|| {
             self.all_pool_bases().into_iter().find_map(|pool| {
-                pool.scam_label.clone().or_else(|| {
-                    pool.has_liquidity_removal()
-                        .then(|| "liquidity_removal".to_string())
-                })
+                pool.scam_label
+                    .clone()
+                    .or_else(|| {
+                        pool.inferred_scam_mechanism()
+                            .map(|mechanism| mechanism.label)
+                    })
+                    .or_else(|| {
+                        pool.has_liquidity_removal()
+                            .then(|| "liquidity_removal".to_string())
+                    })
             })
+        })
+    }
+
+    pub fn scam_mechanism(&self) -> Option<String> {
+        if self.hidden_mint_detected() {
+            return Some("hidden_mint_supply_expansion".to_string());
+        }
+        self.all_pool_bases().into_iter().find_map(|pool| {
+            pool.inferred_scam_mechanism()
+                .map(|mechanism| mechanism.mechanism)
+        })
+    }
+
+    pub fn scam_mechanism_label(&self) -> Option<String> {
+        if self.hidden_mint_detected() {
+            return Some("Hidden Mint Supply Expansion".to_string());
+        }
+        self.all_pool_bases().into_iter().find_map(|pool| {
+            pool.inferred_scam_mechanism()
+                .map(|mechanism| mechanism.label)
         })
     }
 
@@ -913,6 +1036,8 @@ impl ERC20Token {
             token_life_cycle_status: self.token_life_cycle_status.clone(),
             is_scam: self.is_scam(),
             scam_label: self.scam_label(),
+            scam_mechanism: self.scam_mechanism(),
+            scam_mechanism_label: self.scam_mechanism_label(),
             hidden_mint_detected: self.hidden_mint_detected(),
             hidden_mint_block: self.hidden_mint_block(),
             hidden_mint_tx: self.hidden_mint_tx(),
@@ -949,7 +1074,7 @@ impl ERC20Token {
     pub(crate) fn refresh_lifecycle_status(&mut self) {
         if self.hidden_mint_detected() {
             self.token_life_cycle_status = Some(TokenLifecycleState::InactiveHiddenMint);
-        } else if self.liquidity_removal_pool_count() > 0 {
+        } else if self.is_scam() {
             self.token_life_cycle_status = Some(TokenLifecycleState::InactiveOther);
         } else if self.trading_enabled() {
             self.token_life_cycle_status = Some(TokenLifecycleState::TradingEnabled);
@@ -1007,6 +1132,25 @@ impl ERC20Token {
         pools.extend(self.balancer_pools.values().map(|pool| &pool.base));
         pools
     }
+}
+
+fn transaction_has_v2_pool_event(transaction: &ProcessedTransaction, pool_address: &str) -> bool {
+    transaction
+        .uniswap_v2_syncs
+        .iter()
+        .any(|event| same_address(&event.pair_address, pool_address))
+        || transaction
+            .uniswap_v2_swaps
+            .iter()
+            .any(|event| same_address(&event.pair_address, pool_address))
+        || transaction
+            .uniswap_v2_mints
+            .iter()
+            .any(|event| same_address(&event.pair_address, pool_address))
+        || transaction
+            .uniswap_v2_burns
+            .iter()
+            .any(|event| same_address(&event.pair_address, pool_address))
 }
 
 #[cfg(test)]

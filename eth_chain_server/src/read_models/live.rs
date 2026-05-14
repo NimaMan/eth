@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::erc20::{ERC20Token, TokenSummary};
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
-use crate::read_models::token::{TokenActivitySummary, TokenView};
+use crate::read_models::token::TokenView;
 use crate::read_models::{network::TokenNetworkView, pool::PoolView};
 use crate::recent_blocks::{RecentLiveBlocks, RecentProcessedBlock};
 
@@ -34,14 +34,45 @@ pub struct LiveTokenDetailResponse {
     pub pools: Vec<PoolView>,
     pub network: TokenNetworkView,
     pub denom_symbols: BTreeMap<String, String>,
-    pub activity_summary: TokenActivitySummary,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LivePoolListResponse {
     pub progress: LiveTrackerProgress,
+    pub filter: LivePoolStatusFilter,
     pub count: usize,
+    pub total_count: usize,
+    pub active_count: usize,
+    pub scam_count: usize,
     pub pools: Vec<PoolView>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LivePoolStatusFilter {
+    All,
+    Active,
+    Scam,
+}
+
+impl Default for LivePoolStatusFilter {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl LivePoolStatusFilter {
+    fn matches_scam_flag(self, is_scam: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::Active => !is_scam,
+            Self::Scam => is_scam,
+        }
+    }
+
+    fn matches(self, pool: &PoolView) -> bool {
+        self.matches_scam_flag(pool.is_scam)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -111,7 +142,6 @@ pub async fn token_detail(
     let pools = PoolView::from_token_pools_with_activity(token, &recent_activity);
     let summary = crate::read_models::token::token_summary_with_pool_views(token, &pools);
     let denom_symbols = crate::read_models::token::build_denom_symbols(token);
-    let activity_summary = crate::read_models::token::build_activity_summary(token);
 
     Some(LiveTokenDetailResponse {
         progress: state.progress.clone(),
@@ -121,17 +151,24 @@ pub async fn token_detail(
         pools,
         network,
         denom_symbols,
-        activity_summary,
     })
 }
 
-pub async fn pool_list(tracker: &LiveTracker) -> LivePoolListResponse {
+pub async fn pool_list(
+    tracker: &LiveTracker,
+    filter: LivePoolStatusFilter,
+) -> LivePoolListResponse {
     let state = tracker.state().await;
     let mut pools = Vec::new();
 
     for token in state.processor.registry().tokens.values() {
         pools.extend(PoolView::from_token_pool_summaries(token));
     }
+
+    let total_count = pools.len();
+    let scam_count = pools.iter().filter(|pool| pool.is_scam).count();
+    let active_count = total_count.saturating_sub(scam_count);
+    pools.retain(|pool| filter.matches(pool));
 
     pools.sort_by(|left, right| {
         left.token_address
@@ -141,8 +178,27 @@ pub async fn pool_list(tracker: &LiveTracker) -> LivePoolListResponse {
 
     LivePoolListResponse {
         progress: state.progress.clone(),
+        filter,
         count: pools.len(),
+        total_count,
+        active_count,
+        scam_count,
         pools,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_status_filter_matches_expected_pool_sets() {
+        assert!(LivePoolStatusFilter::All.matches_scam_flag(false));
+        assert!(LivePoolStatusFilter::All.matches_scam_flag(true));
+        assert!(LivePoolStatusFilter::Active.matches_scam_flag(false));
+        assert!(!LivePoolStatusFilter::Active.matches_scam_flag(true));
+        assert!(!LivePoolStatusFilter::Scam.matches_scam_flag(false));
+        assert!(LivePoolStatusFilter::Scam.matches_scam_flag(true));
     }
 }
 
