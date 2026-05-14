@@ -50,11 +50,13 @@ Snapshot time: `2026-05-14 11:19 Europe/Amsterdam`.
   `XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user ...` to inspect them;
   plain system-level `systemctl` will not show these unit names.
 
-## Current Main Goal
+## Bogaz Destination Goal
 
 Deploy a real ETH strategy whose policy has been validated by reproducible
 recent backtests, live shadow/live-backtest evidence, and audited trade-level
 decisions.
+
+This is the Bogaz roadmap target, not the current Codex execution target.
 
 The non-capital path is not the deployment target. It is the calibration layer:
 use it to estimate policy behavior against current live data, compare it with
@@ -74,7 +76,7 @@ Finished means:
   sizing, retry cadence, exit restrictions, stale-data thresholds, simulation
   freshness, and kill switch behavior.
 
-## Current Workstream
+## Codex Current Goal
 
 Build the live non-capital backtest version of the real strategy evidence
 layer.
