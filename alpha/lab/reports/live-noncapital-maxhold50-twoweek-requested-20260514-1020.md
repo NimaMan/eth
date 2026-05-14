@@ -183,3 +183,65 @@ Read: bounded retry worked mechanically but did not recover stuck exits in this
 window. It only added failed reports. Do not promote retry-only as the next
 policy; the next useful policy needs chunk sizing, no-observed-sell filtering,
 or earlier risk exits before the pool becomes unsellable.
+
+## Risk-Exit Comparison
+
+Risk exits were tested on the same fixed window with stored mempool signals:
+
+```bash
+RUN_ID=live-noncapital-maxhold50-riskbundle-twoweek-requested-20260514-1040
+RUST_LOG=info cargo run --release -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --run-id "$RUN_ID" \
+  --replay-run-id snipe-all-v1-chain-sim-live-v4 \
+  --from-block 24991345 \
+  --to-block 25092144 \
+  --skip-primed \
+  --include-mempool-signals \
+  --buy-amount-wei 10000000000000000 \
+  --min-liquidity-eth 0.5 \
+  --min-liquidity-usd 1000 \
+  --max-hold-blocks 50 \
+  --exit-liquidity-removal \
+  --exit-lp-approval \
+  --exit-tax \
+  --exit-scam
+```
+
+Result:
+
+| Metric | Baseline | Risk exits |
+| --- | ---: | ---: |
+| Events processed | 127,878 | 128,177 |
+| Execution reports | 1,089 | 1,089 |
+| Confirmed reports | 983 | 983 |
+| Failed reports | 106 | 106 |
+| Positions | 533 | 533 |
+| Open positions | 59 | 59 |
+| Sell-failed positions | 59 | 59 |
+| Total PnL ETH | 12.876052023155642365 | 12.928123726556627169 |
+| PnL ex top 10 ETH | 5.913359147437672841 | 5.965430850838657645 |
+
+Stored risk events in this window:
+
+| Kind | Rows |
+| --- | ---: |
+| `liquidity_removal` | 147 |
+| `trading_enabled` | 110 |
+| `lp_approval` | 30 |
+| `honeypot` | 9 |
+| `lp_position_approval` | 2 |
+| `token_supply_risk` | 1 |
+
+The risk exits moved five confirmed sells earlier, by up to `51` blocks:
+
+| Token | Baseline sell | Risk sell | Realized delta ETH | Trigger |
+| --- | ---: | ---: | ---: | --- |
+| `0x6E56F828ef252c421f8b0A9626f80C926B755e12` | 25,079,575 | 25,079,531 | 0.021424671956346074 | LP approval before draining liquidity removal |
+| `0x09e0cB4FEdB355cAAE434ed7d96B4e55CA09dF9D` | 25,086,955 | 25,086,919 | 0.012276370212185453 | LP approval before draining liquidity removal |
+| `0x9360FE6A77D01d570c84b014C2f0EE6BCB6053D0` | 25,079,300 | 25,079,256 | 0.012092134162705496 | Draining liquidity removal |
+| `0x501ea6842A1afFBD61346F55f8CAD555027d6A9e` | 25,091,507 | 25,091,491 | 0.010544757418775174 | Liquidity removal |
+| `0x78865820143927656C5898F602bb2716061F9baa` | 25,086,580 | 25,086,529 | -0.004266230349027393 | LP approval |
+
+Read: risk exits should be part of the current live-aligned candidate. They
+helped slightly and are already closer to live trader behavior than pool-only
+max-hold. They do not solve the main failed-exit exposure issue.
