@@ -144,6 +144,12 @@ pub struct Pool {
     // Metadata
     pub fee_tier: Option<u32>,
     pub pool_id: Option<String>,
+    /// ERC20-style liquidity ownership token for V2 LP/BPT/Curve LP approvals.
+    ///
+    /// For V2-style pools this is normally the pool address. For Balancer this
+    /// is the BPT address when it differs from the vault#pool_id identifier.
+    #[serde(default)]
+    pub lp_token_address: Option<Address>,
     #[serde(default)]
     pub position_manager_address: Option<Address>,
     #[serde(default)]

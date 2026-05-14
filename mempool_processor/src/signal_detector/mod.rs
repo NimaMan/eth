@@ -1,5 +1,6 @@
 pub mod liquidity_detector;
 pub mod lp_approval_detector;
+mod lp_approval_enrichment;
 mod pool_labels;
 mod position_approval_signal;
 pub mod signal_manager;
@@ -31,6 +32,7 @@ pub use liquidity_detector::{
     LiquidityChangeType, LiquidityDetector, LiquiditySignal, SignalType as LiquiditySignalType,
 };
 pub use lp_approval_detector::{LpApprovalDetector, LpApprovalSignal};
+pub(crate) use lp_approval_enrichment::enrich_erc20_liquidity_approval;
 pub(crate) use pool_labels::pool_type_label;
 pub use position_approval_signal::build_position_approval_signals;
 pub use signal_manager::{SignalManager, SignalManagerConfig};

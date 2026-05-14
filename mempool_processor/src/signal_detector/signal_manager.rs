@@ -13,9 +13,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use super::{
-    build_position_approval_signals, pool_type_label, trading_status_detector::TradingStatusChange,
-    LiquidityDetector, LpApprovalDetector, Signal, TaxDetector, TaxSignalType,
-    TokenSupplyRiskDetector, TradingStatusDetector,
+    build_position_approval_signals, enrich_erc20_liquidity_approval,
+    trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
+    TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
 };
 
 /// Configuration for signal detection
@@ -804,9 +804,6 @@ impl SignalManager {
         {
             // Publish the signal immediately if we have a publisher
             if let Some(ref publisher) = self.publisher {
-                // Create an LP approval signal
-                let mut enriched_signal = lp_signal.clone();
-
                 // LP approvals are actionable only when the LP token is a tracked pool.
                 // Refuse un-enriched signals to keep regular ERC20 approvals out of
                 // the liquidity-removal early-warning stream.
@@ -818,39 +815,23 @@ impl SignalManager {
                     return false;
                 };
                 let Some(pool_state) = token_cache
-                    .get_pool_by_address(&lp_signal.pool_address)
+                    .get_pool_by_liquidity_ownership_token(&lp_signal.lp_token_address)
                     .await
                 else {
                     warn!(
-                        "LP approval {} passed routing but pool {} was not found in cache during enrichment",
-                        lp_signal.tx_hash, lp_signal.pool_address
+                        "LP approval {} passed routing but ownership token {} was not found in cache during enrichment",
+                        lp_signal.tx_hash, lp_signal.lp_token_address
                     );
                     return false;
                 };
 
-                enriched_signal.token_address = pool_state.token_address.clone();
-                enriched_signal.pool_address = pool_state.address.clone();
-                enriched_signal.lp_token_address = pool_state.address.clone();
-                enriched_signal.pool_type = pool_type_label(&pool_state.pool_type);
-                enriched_signal.denom_address = Some(pool_state.denom_address.clone());
-                enriched_signal.denom_currency = Some(pool_state.denom_currency.clone());
-                enriched_signal.denom_decimals = None;
-                if let Some(pct) = pool_state.lp_tokens_approved_percentage {
-                    enriched_signal.approval_percentage = Some(pct.min(100.0));
-                    enriched_signal.approved_share_pct = Some(pct.min(100.0));
-                }
-
-                if enriched_signal
-                    .approved_share_pct
-                    .or(enriched_signal.position_share_pct)
-                    .or(enriched_signal.approval_percentage)
-                    .is_none()
-                {
+                let enriched_signal =
+                    enrich_erc20_liquidity_approval(lp_signal.clone(), &pool_state);
+                if enriched_signal.approved_share_pct.is_none() {
                     warn!(
-                        "LP approval {} cannot be published without approved LP percentage",
-                        lp_signal.tx_hash
+                        "LP approval {} is mapped to pool {} but cannot compute approved share; publishing unquantified pool-risk signal",
+                        lp_signal.tx_hash, enriched_signal.pool_address
                     );
-                    return false;
                 }
 
                 let signal = Signal::LpApproval(enriched_signal.clone());

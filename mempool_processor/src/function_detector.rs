@@ -149,8 +149,9 @@ impl FunctionDetector {
         // Approval functions need special handling for LP/BPT/Curve ownership tokens.
         if is_liquidity_approval_selector(selector) {
             let approve_type = self.classify_liquidity_or_position_approval(tx);
+            let is_position_approval = decode_position_approval_call(tx).is_some();
             return Some(FunctionDetectionResult {
-                function_name: if approve_type == CreatorFunctionType::LiquidityPoolApproval {
+                function_name: if is_position_approval {
                     position_approval_function_name(selector).to_string()
                 } else {
                     liquidity_approval_function_name(selector).to_string()
@@ -275,7 +276,7 @@ impl FunctionDetector {
         let ownership_token = to_checksum_address(&approval.ownership_token);
 
         if let Some(ref cache) = self.token_cache {
-            if futures::executor::block_on(cache.is_pool(&ownership_token)) {
+            if futures::executor::block_on(cache.is_liquidity_ownership_token(&ownership_token)) {
                 return CreatorFunctionType::LiquidityPoolApproval;
             }
         }

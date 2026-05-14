@@ -362,6 +362,12 @@ impl LivePoolView {
     fn into_cache_pool(self) -> Option<Pool> {
         let token_address = normalize_address(&self.token_address)?;
         let address = normalize_address(&self.pool_address)?;
+        let pool_type = parse_pool_type(&self.protocol);
+        let live_lp_token_address = normalize_optional_address(self.lp_token_address);
+        let lp_token_address =
+            liquidity_ownership_token_for_pool(&pool_type, &address, live_lp_token_address.clone());
+        let position_manager_address =
+            concentrated_position_manager_for_pool(&pool_type, live_lp_token_address);
         let denom_address = normalize_address(&self.denom_address).unwrap_or_default();
         let denom_currency = self
             .denom_symbol
@@ -380,7 +386,7 @@ impl LivePoolView {
         Some(Pool {
             address,
             token_address,
-            pool_type: parse_pool_type(&self.protocol),
+            pool_type,
             token_reserve: self.token_reserve,
             eth_reserve: self.denom_reserve,
             denom_currency,
@@ -390,7 +396,8 @@ impl LivePoolView {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
-            position_manager_address: normalize_optional_address(self.lp_token_address),
+            lp_token_address,
+            position_manager_address,
             lp_total_supply: self.lp_total_supply,
             liquidity_positions: self
                 .liquidity_positions
@@ -480,6 +487,66 @@ fn parse_pool_type(value: &str) -> PoolType {
     }
 }
 
+fn liquidity_ownership_token_for_pool(
+    pool_type: &PoolType,
+    pool_identifier: &str,
+    live_lp_token_address: Option<String>,
+) -> Option<String> {
+    match pool_type {
+        PoolType::UniswapV2
+        | PoolType::SushiSwapV2
+        | PoolType::PancakeSwapV2
+        | PoolType::ShibaSwapV2
+        | PoolType::FraxswapV2 => live_lp_token_address.or_else(|| evm_address(pool_identifier)),
+        PoolType::Curve => live_lp_token_address.or_else(|| evm_address(pool_identifier)),
+        PoolType::Balancer => live_lp_token_address
+            .or_else(|| balancer_bpt_address_from_pool_identifier(pool_identifier))
+            .or_else(|| evm_address(pool_identifier)),
+        PoolType::UniswapV3
+        | PoolType::SushiSwapV3
+        | PoolType::PancakeSwapV3
+        | PoolType::UniswapV4 => None,
+        PoolType::Unknown => live_lp_token_address.or_else(|| evm_address(pool_identifier)),
+    }
+}
+
+fn concentrated_position_manager_for_pool(
+    pool_type: &PoolType,
+    live_lp_token_address: Option<String>,
+) -> Option<String> {
+    match pool_type {
+        PoolType::UniswapV3
+        | PoolType::SushiSwapV3
+        | PoolType::PancakeSwapV3
+        | PoolType::UniswapV4 => live_lp_token_address,
+        _ => None,
+    }
+}
+
+fn balancer_bpt_address_from_pool_identifier(pool_identifier: &str) -> Option<String> {
+    let (_, pool_id) = pool_identifier.split_once('#')?;
+    let pool_id = pool_id.trim().strip_prefix("0x").unwrap_or(pool_id.trim());
+    if pool_id.len() < 40
+        || !pool_id
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some(format!("0x{}", &pool_id[..40]).to_ascii_lowercase())
+}
+
+fn evm_address(value: &str) -> Option<String> {
+    let value = value.trim();
+    let hex = value.strip_prefix("0x").unwrap_or(value);
+    if hex.len() == 40 && hex.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(format!("0x{hex}").to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
 fn normalize_optional_address(value: Option<String>) -> Option<String> {
     value.and_then(|value| normalize_address(&value))
 }
@@ -502,7 +569,7 @@ fn default_if_empty(value: String, default: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{endpoint, LivePoolView, LiveTokenView};
+    use super::{balancer_bpt_address_from_pool_identifier, endpoint, LivePoolView, LiveTokenView};
     use crate::token_tracking::types::{PoolLifecycle, PoolType};
 
     #[test]
@@ -575,5 +642,15 @@ mod tests {
 
             assert_eq!(pool.pool_type, expected);
         }
+    }
+
+    #[test]
+    fn derives_balancer_bpt_address_from_composite_pool_identifier() {
+        let pool_identifier = "0xba12222222228d8ba445958a75a0704d566bf2c8#0x1234567890abcdef1234567890abcdef12345678000200000000000000000001";
+
+        assert_eq!(
+            balancer_bpt_address_from_pool_identifier(pool_identifier).as_deref(),
+            Some("0x1234567890abcdef1234567890abcdef12345678")
+        );
     }
 }

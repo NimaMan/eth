@@ -10,7 +10,7 @@ use serde_json::json;
 use super::{CreatorFunctionType, SimulationPriority, TransactionCategory, TransactionRouter};
 use crate::liquidity_approval_call::{PERMIT2_ADDRESS, PERMIT2_APPROVE_SELECTOR};
 use crate::mempool_fetcher::MempoolTransaction;
-use crate::position_approval_call::SET_APPROVAL_FOR_ALL_SELECTOR;
+use crate::position_approval_call::{ERC721_PERMIT_SELECTOR, SET_APPROVAL_FOR_ALL_SELECTOR};
 use crate::token_tracking::types::{ConcentratedLiquidityPosition, PoolLifecycle};
 use crate::token_tracking::{
     Pool, PoolType, Token, TokenTrackingCache, TokenUpdate, TokenWithPools,
@@ -94,6 +94,43 @@ async fn routes_tracked_lp_approval_to_unknown_spender() {
 }
 
 #[tokio::test]
+async fn routes_tracked_lp_increase_allowance_as_pool_risk() {
+    let cache = Arc::new(TokenTrackingCache::with_defaults());
+    let token_address = "0x1111111111111111111111111111111111111111".to_string();
+    let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+    hydrate_token_with_pool(&cache, &token_address, &pool_address).await;
+
+    let router = TransactionRouter::new(Some(cache));
+    let tx = MempoolTransaction {
+        hash: "0xtx".to_string(),
+        data: json!({}),
+        detection_ns: 0,
+        detection_time: Instant::now(),
+        latency_ns: 0,
+        from: address_bytes("0x2222222222222222222222222222222222222222"),
+        to: Some(address_bytes(&pool_address)),
+        input: increase_allowance_calldata(
+            "0x9999999999999999999999999999999999999999",
+            U256::from(1_000_000u64),
+        ),
+        value: U256::ZERO,
+        gas_price: Some(U256::ZERO),
+        functions: vec!["increaseAllowance".to_string()],
+        function_category: Some(CreatorFunctionType::Other("increaseAllowance".to_string())),
+    };
+
+    let classification = router.classify(&tx).await;
+    assert_eq!(classification.priority, SimulationPriority::Critical);
+    assert!(matches!(
+        classification.category,
+        TransactionCategory::CreatorTransaction {
+            function_type: CreatorFunctionType::LiquidityPoolApproval,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn routes_permit2_approval_when_ownership_token_is_tracked_pool() {
     let cache = Arc::new(TokenTrackingCache::with_defaults());
     let token_address = "0x1111111111111111111111111111111111111111".to_string();
@@ -133,6 +170,58 @@ async fn routes_permit2_approval_when_ownership_token_is_tracked_pool() {
 }
 
 #[tokio::test]
+async fn routes_curve_lp_token_approval_when_lp_token_differs_from_pool_address() {
+    let cache = Arc::new(TokenTrackingCache::with_defaults());
+    let token_address = "0x1111111111111111111111111111111111111111".to_string();
+    let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+    let lp_token_address = "0x5555555555555555555555555555555555555555".to_string();
+    hydrate_token_with_pool_config(
+        &cache,
+        &token_address,
+        &pool_address,
+        PoolType::Curve,
+        Some(lp_token_address.clone()),
+    )
+    .await;
+
+    let router = TransactionRouter::new(Some(cache));
+    let tx = MempoolTransaction {
+        hash: "0xtx".to_string(),
+        data: json!({}),
+        detection_ns: 0,
+        detection_time: Instant::now(),
+        latency_ns: 0,
+        from: address_bytes("0x2222222222222222222222222222222222222222"),
+        to: Some(address_bytes(&lp_token_address)),
+        input: approve_calldata(
+            "0x9999999999999999999999999999999999999999",
+            U256::from(1_000_000u64),
+        ),
+        value: U256::ZERO,
+        gas_price: Some(U256::ZERO),
+        functions: vec!["approve".to_string()],
+        function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+    };
+
+    let classification = router.classify(&tx).await;
+    assert_eq!(classification.priority, SimulationPriority::Critical);
+    assert!(!classification.requires_simulation);
+    match classification.category {
+        TransactionCategory::CreatorTransaction {
+            target_address,
+            target_token,
+            function_type,
+            ..
+        } => {
+            assert_eq!(target_address, pool_address);
+            assert_eq!(target_token.as_deref(), Some(token_address.as_str()));
+            assert_eq!(function_type, CreatorFunctionType::LiquidityPoolApproval);
+        }
+        other => panic!("unexpected category: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn routes_concentrated_position_approval_when_token_id_is_mapped() {
     let cache = Arc::new(TokenTrackingCache::with_defaults());
     let token_address = "0x1111111111111111111111111111111111111111".to_string();
@@ -163,6 +252,51 @@ async fn routes_concentrated_position_approval_when_token_id_is_mapped() {
         gas_price: Some(U256::ZERO),
         functions: vec!["approve".to_string()],
         function_category: Some(CreatorFunctionType::Other("approve".to_string())),
+    };
+
+    let classification = router.classify(&tx).await;
+    assert_eq!(classification.priority, SimulationPriority::Critical);
+    assert!(!classification.requires_simulation);
+    assert!(matches!(
+        classification.category,
+        TransactionCategory::CreatorTransaction {
+            function_type: CreatorFunctionType::LiquidityPoolApproval,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn routes_concentrated_position_permit_when_token_id_is_mapped() {
+    let cache = Arc::new(TokenTrackingCache::with_defaults());
+    let token_address = "0x1111111111111111111111111111111111111111".to_string();
+    let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+    let position_manager = "0xc36442b4a4522e871399cd717abdd847ab11fe88".to_string();
+    hydrate_token_with_concentrated_position(
+        &cache,
+        &token_address,
+        &pool_address,
+        &position_manager,
+    )
+    .await;
+
+    let router = TransactionRouter::new(Some(cache));
+    let tx = MempoolTransaction {
+        hash: "0xtx".to_string(),
+        data: json!({}),
+        detection_ns: 0,
+        detection_time: Instant::now(),
+        latency_ns: 0,
+        from: address_bytes("0x2222222222222222222222222222222222222222"),
+        to: Some(address_bytes(&position_manager)),
+        input: position_permit_calldata(
+            "0x9999999999999999999999999999999999999999",
+            U256::from(42u64),
+        ),
+        value: U256::ZERO,
+        gas_price: Some(U256::ZERO),
+        functions: vec!["permit".to_string()],
+        function_category: Some(CreatorFunctionType::Other("permit".to_string())),
     };
 
     let classification = router.classify(&tx).await;
@@ -263,6 +397,17 @@ async fn hydrate_token_with_pool(
     token_address: &str,
     pool_address: &str,
 ) {
+    hydrate_token_with_pool_config(cache, token_address, pool_address, PoolType::Balancer, None)
+        .await;
+}
+
+async fn hydrate_token_with_pool_config(
+    cache: &TokenTrackingCache,
+    token_address: &str,
+    pool_address: &str,
+    pool_type: PoolType,
+    lp_token_address: Option<String>,
+) {
     let creator_address = "0x3333333333333333333333333333333333333333".to_string();
     let token = Token {
         address: token_address.to_string(),
@@ -290,7 +435,7 @@ async fn hydrate_token_with_pool(
     let pool = Pool {
         address: pool_address.to_string(),
         token_address: token_address.to_string(),
-        pool_type: PoolType::Balancer,
+        pool_type,
         token_reserve: 1_000.0,
         eth_reserve: 1.0,
         denom_currency: "ETH".to_string(),
@@ -300,6 +445,7 @@ async fn hydrate_token_with_pool(
         trading_enabled_tx: None,
         fee_tier: None,
         pool_id: None,
+        lp_token_address,
         position_manager_address: None,
         lp_total_supply: None,
         liquidity_positions: Vec::new(),
@@ -374,6 +520,7 @@ async fn hydrate_token_with_concentrated_position(
         trading_enabled_tx: None,
         fee_tier: Some(3000),
         pool_id: None,
+        lp_token_address: None,
         position_manager_address: Some(position_manager.to_string()),
         lp_total_supply: Some(1000.0),
         liquidity_positions: vec![ConcentratedLiquidityPosition {
@@ -424,6 +571,26 @@ fn approve_calldata(spender: &str, amount: U256) -> Vec<u8> {
     input.extend_from_slice(&[0u8; 12]);
     input.extend_from_slice(&address_bytes(spender));
     input.extend_from_slice(&amount.to_be_bytes::<32>());
+    input
+}
+
+fn increase_allowance_calldata(spender: &str, amount: U256) -> Vec<u8> {
+    let mut input = hex::decode("39509351").unwrap();
+    input.extend_from_slice(&[0u8; 12]);
+    input.extend_from_slice(&address_bytes(spender));
+    input.extend_from_slice(&amount.to_be_bytes::<32>());
+    input
+}
+
+fn position_permit_calldata(spender: &str, token_id: U256) -> Vec<u8> {
+    let mut input = ERC721_PERMIT_SELECTOR.to_vec();
+    input.extend_from_slice(&[0u8; 12]);
+    input.extend_from_slice(&address_bytes(spender));
+    input.extend_from_slice(&token_id.to_be_bytes::<32>());
+    input.extend_from_slice(&U256::from(1234u64).to_be_bytes::<32>());
+    input.extend_from_slice(&U256::from(27u64).to_be_bytes::<32>());
+    input.extend_from_slice(&[0x11; 32]);
+    input.extend_from_slice(&[0x22; 32]);
     input
 }
 

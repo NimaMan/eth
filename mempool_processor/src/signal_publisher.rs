@@ -455,7 +455,7 @@ impl SignalPublisher {
                     .approved_share_pct
                     .or(s.position_share_pct)
                     .or(s.approval_percentage)
-                    .map(|pct| format!("{:.2}%", pct.min(100.0)))
+                    .map(|pct| format!("{:.2}%", normalized_display_percent(pct)))
                     .unwrap_or_else(|| "N/A".to_string());
 
                 writeln!(
@@ -564,4 +564,13 @@ pub struct PublisherStatsSnapshot {
     pub db_written: u64,
     pub db_errors: u64,
     pub errors: u64,
+}
+
+fn normalized_display_percent(value: f64) -> f64 {
+    let value = value.clamp(0.0, 100.0);
+    if value.abs() < 0.0000001 {
+        0.0
+    } else {
+        value
+    }
 }

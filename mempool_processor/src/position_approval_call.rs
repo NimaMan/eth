@@ -2,11 +2,18 @@ use crate::mempool_fetcher::MempoolTransaction;
 use alloy_primitives::{Address, U256};
 
 pub const ERC721_APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
+pub const ERC721_PERMIT_SELECTOR: [u8; 4] = [0x7a, 0xc2, 0xff, 0x7b];
+pub const ERC721_PERMIT_BYTES_SELECTOR: [u8; 4] = [0x74, 0x5a, 0x41, 0xbc];
 pub const SET_APPROVAL_FOR_ALL_SELECTOR: [u8; 4] = [0xa2, 0x2c, 0xb4, 0x65];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PositionApprovalCall {
     SinglePosition {
+        position_manager: Address,
+        spender: Address,
+        token_id: U256,
+    },
+    PermitPosition {
         position_manager: Address,
         spender: Address,
         token_id: U256,
@@ -22,6 +29,9 @@ impl PositionApprovalCall {
     pub fn position_manager(&self) -> Address {
         match self {
             Self::SinglePosition {
+                position_manager, ..
+            }
+            | Self::PermitPosition {
                 position_manager, ..
             }
             | Self::OperatorForAll {
@@ -45,6 +55,18 @@ pub fn decode_position_approval_call(tx: &MempoolTransaction) -> Option<Position
         });
     }
 
+    if selector == ERC721_PERMIT_SELECTOR.as_slice()
+        || selector == ERC721_PERMIT_BYTES_SELECTOR.as_slice()
+    {
+        let spender = calldata_address_param(&tx.input, 0)?;
+        let token_id = calldata_u256_param(&tx.input, 1)?;
+        return Some(PositionApprovalCall::PermitPosition {
+            position_manager: to,
+            spender,
+            token_id,
+        });
+    }
+
     if selector == SET_APPROVAL_FOR_ALL_SELECTOR.as_slice() {
         let operator = calldata_address_param(&tx.input, 0)?;
         let approved = calldata_u256_param(&tx.input, 1)? != U256::ZERO;
@@ -60,12 +82,18 @@ pub fn decode_position_approval_call(tx: &MempoolTransaction) -> Option<Position
 
 pub fn is_position_approval_selector(selector: &[u8]) -> bool {
     selector == ERC721_APPROVE_SELECTOR.as_slice()
+        || selector == ERC721_PERMIT_SELECTOR.as_slice()
+        || selector == ERC721_PERMIT_BYTES_SELECTOR.as_slice()
         || selector == SET_APPROVAL_FOR_ALL_SELECTOR.as_slice()
 }
 
 pub fn position_approval_function_name(selector: &[u8]) -> &'static str {
     if selector == SET_APPROVAL_FOR_ALL_SELECTOR.as_slice() {
         "setApprovalForAll"
+    } else if selector == ERC721_PERMIT_SELECTOR.as_slice()
+        || selector == ERC721_PERMIT_BYTES_SELECTOR.as_slice()
+    {
+        "permit"
     } else {
         "approve"
     }
@@ -135,6 +163,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn decodes_position_permit_approval() {
+        let manager = address!("1111111111111111111111111111111111111111");
+        let spender = address!("2222222222222222222222222222222222222222");
+        let tx = tx(manager, permit_calldata(spender, U256::from(42u64)));
+
+        let call = decode_position_approval_call(&tx).expect("position permit");
+
+        assert_eq!(
+            call,
+            PositionApprovalCall::PermitPosition {
+                position_manager: manager,
+                spender,
+                token_id: U256::from(42u64)
+            }
+        );
+    }
+
     fn tx(to: Address, input: Vec<u8>) -> MempoolTransaction {
         MempoolTransaction {
             hash: "0xtx".to_string(),
@@ -163,6 +209,17 @@ mod tests {
         let mut input = SET_APPROVAL_FOR_ALL_SELECTOR.to_vec();
         input.extend_from_slice(&pad_address(operator));
         input.extend_from_slice(&U256::from(approved as u8).to_be_bytes::<32>());
+        input
+    }
+
+    fn permit_calldata(spender: Address, token_id: U256) -> Vec<u8> {
+        let mut input = ERC721_PERMIT_SELECTOR.to_vec();
+        input.extend_from_slice(&pad_address(spender));
+        input.extend_from_slice(&token_id.to_be_bytes::<32>());
+        input.extend_from_slice(&U256::from(1234u64).to_be_bytes::<32>());
+        input.extend_from_slice(&U256::from(27u64).to_be_bytes::<32>());
+        input.extend_from_slice(&[0x11; 32]);
+        input.extend_from_slice(&[0x22; 32]);
         input
     }
 

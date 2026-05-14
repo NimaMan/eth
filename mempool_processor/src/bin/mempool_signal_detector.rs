@@ -638,9 +638,11 @@ async fn main() -> Result<()> {
             }
             let lp_approval_stats = tx_router.lp_approval_stats();
             info!(
-                "📊 LP approval path: router_approvals={} tracked_pool_approvals={} pool_cache_misses={} published={} db_errors={}",
-                lp_approval_stats.router_approvals_seen,
-                lp_approval_stats.tracked_pool_approvals,
+                "📊 LP approval path: erc20_approval_calls={} ownership_token_pool_hits={} position_approval_calls={} position_manager_hits={} pool_cache_misses={} published={} db_errors={}",
+                lp_approval_stats.erc20_approval_calls_seen,
+                lp_approval_stats.ownership_token_pool_hits,
+                lp_approval_stats.position_approval_calls_seen,
+                lp_approval_stats.position_manager_hits,
                 lp_approval_stats.pool_cache_misses,
                 publisher_stats.lp_approvals,
                 publisher_stats.db_errors

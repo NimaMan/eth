@@ -3,12 +3,16 @@ use alloy_primitives::{address, Address, U256};
 use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
 
 pub const ERC20_APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
+pub const ERC20_INCREASE_ALLOWANCE_SELECTOR: [u8; 4] = [0x39, 0x50, 0x93, 0x51];
+pub const ERC20_PERMIT_SELECTOR: [u8; 4] = [0xd5, 0x05, 0xac, 0xcf];
 pub const PERMIT2_APPROVE_SELECTOR: [u8; 4] = [0x87, 0x51, 0x7c, 0x45];
 pub const PERMIT2_ADDRESS: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiquidityApprovalProtocol {
     Erc20Approve,
+    Erc20IncreaseAllowance,
+    Erc20Permit,
     Permit2Approve,
 }
 
@@ -35,6 +39,30 @@ pub fn decode_liquidity_approval_call(tx: &MempoolTransaction) -> Option<Liquidi
         });
     }
 
+    if selector == ERC20_INCREASE_ALLOWANCE_SELECTOR.as_slice() {
+        let ownership_token = tx.to.as_ref().map(|to| Address::from_slice(to))?;
+        let spender = calldata_address_param(&tx.input, 0)?;
+        let amount = calldata_u256_param(&tx.input, 1)?;
+        return Some(LiquidityApprovalCall {
+            ownership_token,
+            spender,
+            amount,
+            protocol: LiquidityApprovalProtocol::Erc20IncreaseAllowance,
+        });
+    }
+
+    if selector == ERC20_PERMIT_SELECTOR.as_slice() {
+        let ownership_token = tx.to.as_ref().map(|to| Address::from_slice(to))?;
+        let spender = calldata_address_param(&tx.input, 1)?;
+        let amount = calldata_u256_param(&tx.input, 2)?;
+        return Some(LiquidityApprovalCall {
+            ownership_token,
+            spender,
+            amount,
+            protocol: LiquidityApprovalProtocol::Erc20Permit,
+        });
+    }
+
     if selector == PERMIT2_APPROVE_SELECTOR.as_slice() {
         let to = tx.to.as_ref().map(|to| Address::from_slice(to))?;
         if to != PERMIT2_ADDRESS {
@@ -55,12 +83,19 @@ pub fn decode_liquidity_approval_call(tx: &MempoolTransaction) -> Option<Liquidi
 }
 
 pub fn is_liquidity_approval_selector(selector: &[u8]) -> bool {
-    selector == ERC20_APPROVE_SELECTOR.as_slice() || selector == PERMIT2_APPROVE_SELECTOR.as_slice()
+    selector == ERC20_APPROVE_SELECTOR.as_slice()
+        || selector == ERC20_INCREASE_ALLOWANCE_SELECTOR.as_slice()
+        || selector == ERC20_PERMIT_SELECTOR.as_slice()
+        || selector == PERMIT2_APPROVE_SELECTOR.as_slice()
 }
 
 pub fn liquidity_approval_function_name(selector: &[u8]) -> &'static str {
     if selector == PERMIT2_APPROVE_SELECTOR.as_slice() {
         "permit2_approve"
+    } else if selector == ERC20_INCREASE_ALLOWANCE_SELECTOR.as_slice() {
+        "increaseAllowance"
+    } else if selector == ERC20_PERMIT_SELECTOR.as_slice() {
+        "permit"
     } else {
         "approve"
     }
@@ -126,6 +161,41 @@ mod tests {
         assert!(decode_liquidity_approval_call(&tx).is_none());
     }
 
+    #[test]
+    fn decodes_erc20_permit_liquidity_approval_call() {
+        let lp_token = address!("1111111111111111111111111111111111111111");
+        let owner = address!("2222222222222222222222222222222222222222");
+        let spender = address!("3333333333333333333333333333333333333333");
+        let tx = tx(Some(lp_token), erc20_permit_calldata(owner, spender));
+
+        let call = decode_liquidity_approval_call(&tx).expect("erc20 permit");
+
+        assert_eq!(call.protocol, LiquidityApprovalProtocol::Erc20Permit);
+        assert_eq!(call.ownership_token, lp_token);
+        assert_eq!(call.spender, spender);
+        assert_eq!(call.amount, U256::from(1000u64));
+    }
+
+    #[test]
+    fn decodes_increase_allowance_as_liquidity_approval_call() {
+        let lp_token = address!("1111111111111111111111111111111111111111");
+        let spender = address!("2222222222222222222222222222222222222222");
+        let tx = tx(
+            Some(lp_token),
+            increase_allowance_calldata(spender, U256::from(1000u64)),
+        );
+
+        let call = decode_liquidity_approval_call(&tx).expect("increase allowance");
+
+        assert_eq!(
+            call.protocol,
+            LiquidityApprovalProtocol::Erc20IncreaseAllowance
+        );
+        assert_eq!(call.ownership_token, lp_token);
+        assert_eq!(call.spender, spender);
+        assert_eq!(call.amount, U256::from(1000u64));
+    }
+
     fn tx(to: Option<Address>, input: Vec<u8>) -> MempoolTransaction {
         MempoolTransaction {
             hash: "0xtx".to_string(),
@@ -149,6 +219,25 @@ mod tests {
         input.extend_from_slice(&pad_address(spender));
         input.extend_from_slice(&U256::from(1000u64).to_be_bytes::<32>());
         input.extend_from_slice(&U256::from(1234u64).to_be_bytes::<32>());
+        input
+    }
+
+    fn erc20_permit_calldata(owner: Address, spender: Address) -> Vec<u8> {
+        let mut input = ERC20_PERMIT_SELECTOR.to_vec();
+        input.extend_from_slice(&pad_address(owner));
+        input.extend_from_slice(&pad_address(spender));
+        input.extend_from_slice(&U256::from(1000u64).to_be_bytes::<32>());
+        input.extend_from_slice(&U256::from(1234u64).to_be_bytes::<32>());
+        input.extend_from_slice(&U256::from(27u64).to_be_bytes::<32>());
+        input.extend_from_slice(&[0x11; 32]);
+        input.extend_from_slice(&[0x22; 32]);
+        input
+    }
+
+    fn increase_allowance_calldata(spender: Address, amount: U256) -> Vec<u8> {
+        let mut input = ERC20_INCREASE_ALLOWANCE_SELECTOR.to_vec();
+        input.extend_from_slice(&pad_address(spender));
+        input.extend_from_slice(&amount.to_be_bytes::<32>());
         input
     }
 

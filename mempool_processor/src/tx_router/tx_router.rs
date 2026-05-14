@@ -1,6 +1,5 @@
 use crate::liquidity_approval_call::{
-    decode_liquidity_approval_call, is_known_liquidity_approval_spender,
-    is_liquidity_approval_selector,
+    decode_liquidity_approval_call, is_liquidity_approval_selector,
 };
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::position_approval_call::{decode_position_approval_call, is_position_approval_selector};
@@ -49,8 +48,10 @@ pub struct ClassificationResult {
 
 #[derive(Debug, Clone, Default)]
 pub struct LpApprovalRouterStats {
-    pub router_approvals_seen: u64,
-    pub tracked_pool_approvals: u64,
+    pub erc20_approval_calls_seen: u64,
+    pub ownership_token_pool_hits: u64,
+    pub position_approval_calls_seen: u64,
+    pub position_manager_hits: u64,
     pub pool_cache_misses: u64,
 }
 
@@ -66,8 +67,10 @@ pub struct TransactionRouter {
     contract_router: ContractCreationRouter,
     creator_router: CreatorTransactionRouter,
     token_cache: Option<Arc<TokenTrackingCache>>,
-    lp_router_approvals_seen: AtomicU64,
-    lp_tracked_pool_approvals: AtomicU64,
+    lp_erc20_approval_calls_seen: AtomicU64,
+    lp_ownership_token_pool_hits: AtomicU64,
+    lp_position_approval_calls_seen: AtomicU64,
+    lp_position_manager_hits: AtomicU64,
     lp_pool_cache_misses: AtomicU64,
 }
 
@@ -77,16 +80,22 @@ impl TransactionRouter {
             contract_router: ContractCreationRouter::new(),
             creator_router: CreatorTransactionRouter::new(token_cache.clone()),
             token_cache,
-            lp_router_approvals_seen: AtomicU64::new(0),
-            lp_tracked_pool_approvals: AtomicU64::new(0),
+            lp_erc20_approval_calls_seen: AtomicU64::new(0),
+            lp_ownership_token_pool_hits: AtomicU64::new(0),
+            lp_position_approval_calls_seen: AtomicU64::new(0),
+            lp_position_manager_hits: AtomicU64::new(0),
             lp_pool_cache_misses: AtomicU64::new(0),
         }
     }
 
     pub fn lp_approval_stats(&self) -> LpApprovalRouterStats {
         LpApprovalRouterStats {
-            router_approvals_seen: self.lp_router_approvals_seen.load(Ordering::Relaxed),
-            tracked_pool_approvals: self.lp_tracked_pool_approvals.load(Ordering::Relaxed),
+            erc20_approval_calls_seen: self.lp_erc20_approval_calls_seen.load(Ordering::Relaxed),
+            ownership_token_pool_hits: self.lp_ownership_token_pool_hits.load(Ordering::Relaxed),
+            position_approval_calls_seen: self
+                .lp_position_approval_calls_seen
+                .load(Ordering::Relaxed),
+            position_manager_hits: self.lp_position_manager_hits.load(Ordering::Relaxed),
             pool_cache_misses: self.lp_pool_cache_misses.load(Ordering::Relaxed),
         }
     }
@@ -102,8 +111,7 @@ impl TransactionRouter {
 
         if decode_liquidity_approval_call(tx)
             .filter(|approval| approval.amount != alloy_primitives::U256::ZERO)
-            .map(|approval| is_known_liquidity_approval_spender(&approval.spender))
-            .unwrap_or(false)
+            .is_some()
             || decode_position_approval_call(tx)
                 .map(|approval| {
                     tx.to
@@ -277,7 +285,7 @@ impl TransactionRouter {
             return None;
         }
 
-        self.lp_router_approvals_seen
+        self.lp_erc20_approval_calls_seen
             .fetch_add(1, Ordering::Relaxed);
 
         let Some(ref cache) = self.token_cache else {
@@ -286,12 +294,15 @@ impl TransactionRouter {
         };
         let target_address = to_checksum_address(&approval.ownership_token);
 
-        let Some(pool) = cache.get_pool_by_address(&target_address).await else {
+        let Some(pool) = cache
+            .get_pool_by_liquidity_ownership_token(&target_address)
+            .await
+        else {
             self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
 
-        self.lp_tracked_pool_approvals
+        self.lp_ownership_token_pool_hits
             .fetch_add(1, Ordering::Relaxed);
 
         Some(ClassificationResult {
@@ -322,12 +333,14 @@ impl TransactionRouter {
         {
             return None;
         }
+        self.lp_position_approval_calls_seen
+            .fetch_add(1, Ordering::Relaxed);
         if !cache.is_position_manager(&position_manager).await {
             self.lp_pool_cache_misses.fetch_add(1, Ordering::Relaxed);
             return None;
         }
 
-        self.lp_tracked_pool_approvals
+        self.lp_position_manager_hits
             .fetch_add(1, Ordering::Relaxed);
 
         Some(ClassificationResult {
@@ -715,8 +728,8 @@ mod tests {
         }
 
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.router_approvals_seen, 1);
-        assert_eq!(stats.tracked_pool_approvals, 1);
+        assert_eq!(stats.erc20_approval_calls_seen, 1);
+        assert_eq!(stats.ownership_token_pool_hits, 1);
         assert_eq!(stats.pool_cache_misses, 0);
     }
 
@@ -752,8 +765,8 @@ mod tests {
         ));
 
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.router_approvals_seen, 1);
-        assert_eq!(stats.tracked_pool_approvals, 0);
+        assert_eq!(stats.erc20_approval_calls_seen, 1);
+        assert_eq!(stats.ownership_token_pool_hits, 0);
         assert_eq!(stats.pool_cache_misses, 1);
     }
 
@@ -868,8 +881,8 @@ mod tests {
         assert!(!classification.requires_buy_sell_test);
 
         let stats = router.lp_approval_stats();
-        assert_eq!(stats.router_approvals_seen, 1);
-        assert_eq!(stats.tracked_pool_approvals, 0);
+        assert_eq!(stats.erc20_approval_calls_seen, 1);
+        assert_eq!(stats.ownership_token_pool_hits, 0);
         assert_eq!(stats.pool_cache_misses, 1);
     }
 
@@ -924,6 +937,7 @@ mod tests {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
+            lp_token_address: None,
             position_manager_address: None,
             lp_total_supply: None,
             liquidity_positions: Vec::new(),

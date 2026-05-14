@@ -17,6 +17,11 @@ pub async fn build_position_approval_signals(
             position_manager,
             spender,
             token_id,
+        }
+        | PositionApprovalCall::PermitPosition {
+            position_manager,
+            spender,
+            token_id,
         } => {
             let manager = to_checksum_address(&position_manager);
             let contexts = token_cache
@@ -46,7 +51,6 @@ pub async fn build_position_approval_signals(
     contexts
         .into_iter()
         .filter_map(|context| {
-            let share_pct = context.position_share_pct?;
             Some(Signal::LpApproval(LpApprovalSignal {
                 tx_hash: tx.hash.clone(),
                 creator: approver.clone(),
@@ -61,15 +65,15 @@ pub async fn build_position_approval_signals(
                 denom_currency: Some(context.denom_currency),
                 denom_decimals: None,
                 spender_address: spender_address.clone(),
-                approval_percentage: Some(share_pct),
-                approved_share_pct: Some(share_pct),
+                approval_percentage: context.position_share_pct,
+                approved_share_pct: context.position_share_pct,
                 approval_model: Some("position_liquidity_share".to_string()),
                 lp_total_supply: context.pool_liquidity.clone(),
                 position_manager: Some(context.position_manager_address),
                 position_id: Some(context.position_id),
                 position_liquidity: Some(context.position_liquidity),
                 pool_liquidity: context.pool_liquidity,
-                position_share_pct: Some(share_pct),
+                position_share_pct: context.position_share_pct,
                 previous_allowance: None,
                 approver_address: approver.clone(),
                 creator_address: context.owner,

@@ -16,11 +16,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use super::liquidity_ownership::liquidity_ownership_token_addresses;
+use super::pool_filters::{pool_is_viable, pool_liquidity_threshold};
 use super::position_index::{
     add_position_indexes_for_pool, normalize_pool_positions, position_owner_manager_key,
     position_token_key, remove_position_indexes_for_pool,
 };
-use super::thresholds::threshold_for_symbol;
 pub use super::types::{
     Address, CacheConfig, ConcentratedPositionApprovalContext, Pool, PoolLifecycle, Token,
     TokenUpdate, TokenWithPools,
@@ -99,6 +100,7 @@ pub struct TokenTrackingCache {
     creator_to_tokens: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
     token_to_pools: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
     pool_to_token: Arc<RwLock<HashMap<Address, Address>>>,
+    ownership_token_to_pool: Arc<RwLock<HashMap<Address, Address>>>,
     position_manager_to_pools: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
     position_token_to_context: Arc<RwLock<HashMap<String, ConcentratedPositionApprovalContext>>>,
     position_owner_manager_to_context:
@@ -128,6 +130,7 @@ impl TokenTrackingCache {
             creator_to_tokens: Arc::new(RwLock::new(HashMap::new())),
             token_to_pools: Arc::new(RwLock::new(HashMap::new())),
             pool_to_token: Arc::new(RwLock::new(HashMap::new())),
+            ownership_token_to_pool: Arc::new(RwLock::new(HashMap::new())),
             position_manager_to_pools: Arc::new(RwLock::new(HashMap::new())),
             position_token_to_context: Arc::new(RwLock::new(HashMap::new())),
             position_owner_manager_to_context: Arc::new(RwLock::new(HashMap::new())),
@@ -174,6 +177,28 @@ impl TokenTrackingCache {
         let address = normalize_address(address);
         let pools = self.active_pools.read().await;
         pools.contains(&address)
+    }
+
+    pub async fn is_liquidity_ownership_token(&self, address: &Address) -> bool {
+        let address = normalize_address(address);
+        let ownership_tokens = self.ownership_token_to_pool.read().await;
+        ownership_tokens.contains_key(&address)
+    }
+
+    pub async fn get_pool_by_liquidity_ownership_token(
+        &self,
+        address: &Address,
+    ) -> Option<Arc<Pool>> {
+        let address = normalize_address(address);
+        let pool_address = {
+            let ownership_tokens = self.ownership_token_to_pool.read().await;
+            ownership_tokens.get(&address).cloned()
+        };
+
+        match pool_address {
+            Some(pool_address) => self.get_pool(&pool_address).await,
+            None => self.get_pool(&address).await,
+        }
     }
 
     pub async fn is_position_manager(&self, address: &Address) -> bool {
@@ -387,6 +412,7 @@ impl TokenTrackingCache {
         let mut creator_to_tokens = self.creator_to_tokens.write().await;
         let mut token_to_pools = self.token_to_pools.write().await;
         let mut pool_to_token = self.pool_to_token.write().await;
+        let mut ownership_token_to_pool = self.ownership_token_to_pool.write().await;
         let mut position_manager_to_pools = self.position_manager_to_pools.write().await;
         let mut position_token_to_context = self.position_token_to_context.write().await;
         let mut position_owner_manager_to_context =
@@ -451,6 +477,7 @@ impl TokenTrackingCache {
             if let Some(old_pools) = token_to_pools.get(&token_addr) {
                 for old_pool in old_pools {
                     pool_to_token.remove(old_pool);
+                    ownership_token_to_pool.retain(|_, mapped_pool| mapped_pool != old_pool);
                     remove_position_indexes_for_pool(
                         old_pool,
                         &mut position_manager_to_pools,
@@ -471,6 +498,9 @@ impl TokenTrackingCache {
                 pool.denom_address = normalize_address(&pool.denom_address);
                 pool.position_manager_address = pool
                     .position_manager_address
+                    .map(|address| normalize_address(&address));
+                pool.lp_token_address = pool
+                    .lp_token_address
                     .map(|address| normalize_address(&address));
                 pool.control_addresses = pool
                     .control_addresses
@@ -505,6 +535,9 @@ impl TokenTrackingCache {
                 pool_addrs.insert(pool_addr.clone());
                 pool_to_token.insert(pool_addr.clone(), token_addr.clone());
                 active_pools.insert(pool_addr.clone());
+                for ownership_token in liquidity_ownership_token_addresses(&pool) {
+                    ownership_token_to_pool.insert(ownership_token, pool_addr.clone());
+                }
                 add_position_indexes_for_pool(
                     &pool,
                     &mut position_manager_to_pools,
@@ -634,39 +667,6 @@ pub struct UpdateResult {
     pub creators_added: usize,
 }
 
-fn pool_is_viable(pool: &Pool, fallback_eth_threshold: f64) -> bool {
-    match pool.lifecycle {
-        PoolLifecycle::LiquidityDeposited | PoolLifecycle::Active => true,
-        PoolLifecycle::Scam | PoolLifecycle::Evicted => false,
-        PoolLifecycle::Discovered | PoolLifecycle::Unknown => {
-            pool.eth_reserve >= pool_liquidity_threshold(pool, fallback_eth_threshold)
-        }
-    }
-}
-
-fn pool_liquidity_threshold(pool: &Pool, fallback_eth_threshold: f64) -> f64 {
-    let symbol = pool.denom_currency.trim();
-    if !symbol.is_empty() {
-        if let Some(threshold) = threshold_for_symbol(symbol) {
-            return threshold;
-        }
-
-        if symbol.eq_ignore_ascii_case("ETH") {
-            return fallback_eth_threshold;
-        }
-    }
-
-    // Treat the zero address as native ETH in V4 pools
-    if pool
-        .denom_address
-        .eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
-    {
-        return fallback_eth_threshold;
-    }
-
-    fallback_eth_threshold
-}
-
 fn normalize_address(address: &str) -> String {
     address.trim().to_ascii_lowercase()
 }
@@ -718,6 +718,7 @@ mod tests {
             trading_enabled_tx: Some("0xTRADING".to_string()),
             fee_tier: None,
             pool_id: None,
+            lp_token_address: None,
             position_manager_address: None,
             lp_total_supply: None,
             liquidity_positions: Vec::new(),
@@ -946,6 +947,7 @@ mod tests {
             trading_enabled_tx: None,
             fee_tier: None,
             pool_id: None,
+            lp_token_address: None,
             position_manager_address: None,
             lp_total_supply: None,
             liquidity_positions: Vec::new(),
