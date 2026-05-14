@@ -260,13 +260,20 @@ impl Strategy for SnipeAllStrategy {
         }) {
             self.state.mark_bought(pool.address.clone());
 
-            // Evaluate proactive price-ratio / time-based exits.
-            if let Some(decision) = self.evaluate_proactive_exit(ctx, position, pool, *block_number)
-            {
-                return Ok(decision);
+            if position.state == PositionState::BuyConfirmed {
+                // Evaluate proactive price-ratio / time-based exits.
+                if let Some(decision) =
+                    self.evaluate_proactive_exit(ctx, position, pool, *block_number)
+                {
+                    return Ok(decision);
+                }
+
+                return Ok(StrategyDecision::hold("position_open_no_exit"));
             }
 
-            return Ok(StrategyDecision::hold("position_open_no_exit"));
+            return Ok(StrategyDecision::hold(
+                "position_exit_waiting_for_retry_policy",
+            ));
         }
 
         // 1. Shared eligibility gate: reject ineligible pools first.
@@ -686,6 +693,43 @@ mod tests {
         let decisions = strategy.on_position_monitor(&ctx, 250).unwrap();
 
         assert!(decisions.is_empty());
+    }
+
+    #[test]
+    fn market_event_does_not_retry_failed_exit_without_retry_policy() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 250,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(200),
+            ..SnipeAllConfig::default()
+        });
+        let position = failed_exit_position(&strategy, &pool);
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 250,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("position_exit_waiting_for_retry_policy")
+        );
     }
 
     #[test]

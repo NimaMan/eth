@@ -403,3 +403,29 @@ Read: the current candidate is now auditable through persisted decisions. It is
 still not real-deployment ready because the same `59` failed exits remain and
 the replay is still partial coverage rather than a complete two-week historical
 observation window.
+
+## Max-Hold Failure Investigation and Shorter Hold Variants
+
+The sell-failed maxhold50 positions are mostly not ordinary temporary retry
+cases. In the full decision-ledger run, `53` of `59` sell-failed positions later
+showed pool observations with reserve below `0.1 ETH`, `can_sell=false`, and
+`is_scam=true` before the maxhold50 exit. The transition age distribution was
+`{6,22,29,41,50}` blocks after entry, so maxhold50 frequently waits through the
+rug transition.
+
+I also fixed the strategy-side retry boundary: failed exits no longer resubmit
+from market-event max-hold logic. Explicit retry cadence remains owned by
+`on_position_monitor`.
+
+Same requested replay window, risk exits enabled, after the retry-boundary fix:
+
+| Run | Total PnL ETH | PnL ex top 10 ETH | Sell confirmed | Sell failed | Failed reports |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `maxhold10-retryfix` | 7.710342857256795193 | 5.661370663780626751 | 513 | 9 | 21 |
+| `maxhold20-retryfix` | 10.906166875635052281 | 7.505512163468218752 | 499 | 23 | 35 |
+| `maxhold50-decisions` | 12.927265783819489334 | 5.964572908101519810 | 463 | 59 | 106 |
+
+Read: `maxhold20+risk exits` is the better current no-capital candidate than
+`maxhold50`: it reduces sell-failed positions materially and improves ex-top-10
+PnL, while giving up some top-winner upside. `maxhold10` is safer on sell
+failures but exits winners too early for the current evidence set.
