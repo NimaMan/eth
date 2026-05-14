@@ -45,6 +45,22 @@ impl SimulationManager {
             Err(err) => err,
         };
 
+        if is_lack_of_funds_error(&direct_error)
+            && matches!(
+                &request.category,
+                crate::tx_router::TransactionCategory::ContractCreation { .. }
+            )
+        {
+            return self
+                .replay_funding_dependencies_and_current(
+                    request,
+                    unsigned_tx,
+                    &direct_error,
+                    block_number,
+                )
+                .await;
+        }
+
         if !is_nonce_too_high_error(&direct_error) {
             return Err(direct_error);
         }
@@ -261,6 +277,133 @@ impl SimulationManager {
             dependencies,
         })
     }
+
+    async fn replay_funding_dependencies_and_current(
+        &self,
+        request: &TxSimulationJob,
+        current_unsigned: UnsignedTransaction,
+        direct_error: &eyre::Report,
+        block_number: Option<u64>,
+    ) -> EyreResult<ProcessedWithNonceDependencies> {
+        let sender = current_unsigned
+            .from
+            .ok_or_else(|| eyre!("funding_dependency_gap: transaction has no sender"))?;
+        let required_value = parse_lack_of_funds_required_value(direct_error);
+        let lookup = self
+            .pending_funding_dependencies
+            .funding_for(sender, required_value, Instant::now())
+            .await;
+
+        if lookup.transactions.is_empty()
+            || lookup
+                .required_value
+                .map(|required| lookup.total_value < required)
+                .unwrap_or(false)
+        {
+            return Err(eyre!(
+                "funding_dependency_wait: sender {sender:#x} required_value={} visible_funding={} funding_txs={} original_error={direct_error}",
+                lookup
+                    .required_value
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                lookup.total_value,
+                lookup.transactions.len()
+            ));
+        }
+
+        let block = block_number
+            .ok_or_else(|| eyre!("funding_dependency_gap: simulation block is unavailable"))?;
+        let mut chain = self
+            .mempool_simulator
+            .get_tx_simulator()
+            .start_simulation_chain(Some(block))
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "funding_dependency_gap: failed to start funding replay chain at block {block}"
+                )
+            })?;
+        let processor = TxProcessor::new();
+        let mut dependencies = Vec::with_capacity(lookup.transactions.len());
+
+        for (idx, funding_tx) in lookup.transactions.iter().enumerate() {
+            let funding_unsigned = mempool_tx_to_unsigned_tx(funding_tx)?;
+            let simulation = chain
+                .step_with_trace(funding_unsigned.clone())
+                .await
+                .wrap_err_with(|| {
+                    format!(
+                        "funding_dependency_gap: failed replaying funding tx={} for target={} block={}",
+                        funding_tx.hash, request.tx.hash, block
+                    )
+                })?;
+
+            if !simulation.success {
+                return Err(eyre!(
+                    "funding_dependency_gap: funding tx={} reverted before target={} revert={:?}",
+                    funding_tx.hash,
+                    request.tx.hash,
+                    simulation.revert_reason
+                ));
+            }
+
+            if let Ok(processed) = processor
+                .process_transaction_from_simulation_result(
+                    &funding_unsigned,
+                    &simulation,
+                    block,
+                    idx as u64,
+                )
+                .await
+            {
+                dependencies.push(processed);
+            }
+        }
+
+        let current_simulation = chain
+            .step_with_trace(current_unsigned.clone())
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "funding_dependency_gap: failed replaying target tx={} after {} visible funding txs at block={}",
+                    request.tx.hash,
+                    lookup.transactions.len(),
+                    block
+                )
+            })?;
+        let current = processor
+            .process_transaction_from_simulation_result(
+                &current_unsigned,
+                &current_simulation,
+                block,
+                lookup.transactions.len() as u64,
+            )
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "funding_dependency_gap: failed processing target tx={} after funding replay at block={}",
+                    request.tx.hash, block
+                )
+            })?;
+
+        tracing::info!(
+            tx_hash = %request.tx.hash,
+            sender = %format!("{sender:#x}"),
+            block,
+            funding_tx_count = lookup.transactions.len(),
+            visible_funding_value = %lookup.total_value,
+            required_value = %lookup
+                .required_value
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "replayed visible inbound funding before target transaction"
+        );
+
+        Ok(ProcessedWithNonceDependencies {
+            transaction: current,
+            dependencies,
+        })
+    }
 }
 
 fn is_nonce_too_high_error(error: &eyre::Report) -> bool {
@@ -268,6 +411,25 @@ fn is_nonce_too_high_error(error: &eyre::Report) -> bool {
     message.contains("transaction validation error: nonce")
         && message.contains("too high")
         && message.contains("expected")
+}
+
+fn is_lack_of_funds_error(error: &eyre::Report) -> bool {
+    let message = error.to_string();
+    message.contains("transaction validation error: lack of funds")
+        || message.contains("insufficient funds")
+}
+
+fn parse_lack_of_funds_required_value(error: &eyre::Report) -> Option<U256> {
+    let message = error.to_string();
+    let required = message.split("for max fee (").nth(1)?;
+    let digits = required
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    U256::from_str_radix(&digits, 10).ok()
 }
 
 fn parse_expected_nonce(error: &eyre::Report) -> Option<u64> {
@@ -495,6 +657,10 @@ pub fn is_pending_nonce_dependency_error(error: &str) -> bool {
         || (error.contains("transaction validation error: nonce")
             && error.contains("too high")
             && error.contains("expected"))
+}
+
+pub fn is_funding_dependency_error(error: &str) -> bool {
+    error.contains("funding_dependency_wait") || error.contains("funding_dependency_gap")
 }
 
 pub(super) fn merge_nonce_dependencies_with_replay_sequence(

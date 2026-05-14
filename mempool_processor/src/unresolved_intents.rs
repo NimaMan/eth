@@ -13,6 +13,7 @@ pub enum UnresolvedIntentKind {
     LiquidityRemoval,
     CreatorControl,
     V4ModifyLiquidity,
+    FundingDependency,
 }
 
 impl UnresolvedIntentKind {
@@ -22,6 +23,7 @@ impl UnresolvedIntentKind {
             Self::LiquidityRemoval => "liquidity_removal",
             Self::CreatorControl => "creator_control",
             Self::V4ModifyLiquidity => "v4_modify_liquidity",
+            Self::FundingDependency => "funding_dependency",
         }
     }
 }

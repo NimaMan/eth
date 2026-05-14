@@ -33,6 +33,7 @@ Reth pending tx stream
          -> ignored after accounting
   -> SimulationManager
        replays tx against live state
+       replays visible sender-nonce and inbound-funding dependencies first
        runs per-pool buy/approve/sell checks where supported
        builds SimulationResult
   -> SignalManager
@@ -83,6 +84,7 @@ Queued intent kinds:
 - Liquidity removals whose token/pool cannot be mapped yet.
 - Creator-control calls waiting for target-token context.
 - V4 modify-liquidity calls.
+- Fresh-wallet contract creations waiting for visible inbound ETH funding.
 
 The store is bounded and short-lived: current live settings keep an unresolved
 pending tx for at most two seconds and retry every 250ms against the current
@@ -112,6 +114,11 @@ Cache-wait paths:
 - Critical txs without token/pool mapping go to `UnresolvedIntentStore`.
 - Cache-wait errors use `unresolved_cache_context` semantics and do not belong
   in `simulation_errors.log`.
+- `funding_dependency_wait` means the target tx cannot pay at the selected base
+  block yet and is waiting briefly for an inbound funding tx already visible in
+  the public mempool. `funding_dependency_gap` means the required funding was
+  not publicly visible or could not be replayed; it is diagnostic context, not
+  an actionable simulation failure.
 
 Unsupported paths:
 

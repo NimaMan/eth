@@ -1,5 +1,8 @@
 use super::block_pruner::spawn_block_pruner;
 use super::logging::log_simulation_start;
+use super::pending_funding_dependencies::{
+    PendingFundingDependencies, PendingFundingDependencyStats,
+};
 use super::pending_nonce_dependencies::{PendingNonceDependencies, PendingNonceDependencyStats};
 use super::pending_sequences::{PendingSequences, SequenceKey};
 use super::request_queue::{ManagerStats, RequestQueue};
@@ -52,6 +55,8 @@ pub struct SimulationManager {
     pub(super) pending_sequences: PendingSequences,
     // Raw same-sender nonce dependencies used only to replay pending tx prefixes.
     pub(super) pending_nonce_dependencies: PendingNonceDependencies,
+    // Raw inbound value transfers used to replay visible fresh-wallet funding.
+    pub(super) pending_funding_dependencies: PendingFundingDependencies,
 }
 
 impl SimulationManager {
@@ -74,6 +79,7 @@ impl SimulationManager {
 
         let pending_sequences = PendingSequences::new();
         let pending_nonce_dependencies = PendingNonceDependencies::new();
+        let pending_funding_dependencies = PendingFundingDependencies::new();
 
         let tx_simulator_for_task = mempool_simulator.get_tx_simulator();
         let _ = spawn_block_pruner(tx_simulator_for_task, pending_sequences.clone());
@@ -86,6 +92,7 @@ impl SimulationManager {
             token_cache,
             pending_sequences,
             pending_nonce_dependencies,
+            pending_funding_dependencies,
         }
     }
 
@@ -173,6 +180,19 @@ impl SimulationManager {
         self.pending_nonce_dependencies.stats().await
     }
 
+    pub async fn record_pending_funding_dependency(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+    ) {
+        self.pending_funding_dependencies
+            .record(tx.clone(), Instant::now())
+            .await;
+    }
+
+    pub async fn pending_funding_dependency_stats(&self) -> PendingFundingDependencyStats {
+        self.pending_funding_dependencies.stats().await
+    }
+
     /// Simulate a single request
     async fn simulate_request(&self, request: TxSimulationJob) -> SimulationResult {
         log_simulation_start(&request);
@@ -237,5 +257,6 @@ impl SimulationManager {
     async fn prune_expired_sequences(&self, now: Instant) {
         self.pending_sequences.prune_expired(now).await;
         self.pending_nonce_dependencies.prune_expired(now).await;
+        self.pending_funding_dependencies.prune_expired(now).await;
     }
 }

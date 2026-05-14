@@ -7,7 +7,7 @@ use crate::liquidity_approval_call::decode_liquidity_approval_call;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::position_approval_call::decode_position_approval_call;
 
-use super::liquidity::is_known_position_manager_candidate;
+use super::protocol::is_known_position_manager_candidate;
 use super::types::{ClassificationResult, TransactionCategory};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

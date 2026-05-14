@@ -508,6 +508,9 @@ async fn main() -> Result<()> {
                 simulation_manager
                     .record_pending_nonce_dependency(&tx)
                     .await;
+                simulation_manager
+                    .record_pending_funding_dependency(&tx)
+                    .await;
 
                 let classification = tx_router.classify(&tx).await;
                 tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
@@ -696,6 +699,19 @@ async fn main() -> Result<()> {
                 nonce_dependency_stats.hits,
                 nonce_dependency_stats.gaps,
                 nonce_dependency_stats.expired
+            );
+            let funding_dependency_stats =
+                simulation_manager.pending_funding_dependency_stats().await;
+            info!(
+                "📊 Pending funding dependencies: recipients={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
+                funding_dependency_stats.recipients,
+                funding_dependency_stats.transactions,
+                funding_dependency_stats.recorded,
+                funding_dependency_stats.replaced,
+                funding_dependency_stats.lookups,
+                funding_dependency_stats.hits,
+                funding_dependency_stats.gaps,
+                funding_dependency_stats.expired
             );
             last_report_total = total;
 

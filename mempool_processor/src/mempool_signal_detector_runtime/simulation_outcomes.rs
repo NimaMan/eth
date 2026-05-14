@@ -8,8 +8,8 @@ use mempool_processor::{
     function_detector::CreatorFunctionType,
     mempool_fetcher::MempoolTransaction,
     simulator::{
-        is_pending_nonce_dependency_error, MempoolSimulator, SimulationManager, SimulationResult,
-        SimulationType, TxSimulationJob,
+        is_funding_dependency_error, is_pending_nonce_dependency_error, MempoolSimulator,
+        SimulationManager, SimulationResult, SimulationType, TxSimulationJob,
     },
     tx_router::{RouteOrigin, TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
@@ -69,6 +69,17 @@ pub(crate) async fn drain_completed_simulation_outcomes(
                     .await;
                 warn!(
                     "Pending nonce dependency gap for {} classified outside simulation error path: {}",
+                    result.request.tx.hash, error
+                );
+                continue;
+            }
+
+            if is_funding_dependency_error(error) {
+                unresolved_intent_store
+                    .resolve(&result.request.tx.hash)
+                    .await;
+                warn!(
+                    "Funding dependency gap for {} classified outside simulation error path: {}",
                     result.request.tx.hash, error
                 );
                 continue;
@@ -249,6 +260,7 @@ async fn write_actionable_simulation_error(
 
 fn is_cache_wait_error(error: &str) -> bool {
     error.contains("unresolved_cache_context")
+        || error.contains("funding_dependency_wait")
         || error.contains("No tracked token found for liquidity removal")
         || error.contains("No token address found for creator")
         || error.contains("No pools found for token")
@@ -271,6 +283,15 @@ fn unresolved_intent_kind_for_simulation_result(result: &SimulationResult) -> Un
     }
 
     match &result.request.category {
+        TransactionCategory::ContractCreation { .. }
+            if result
+                .error
+                .as_deref()
+                .map(|error| error.contains("funding_dependency_wait"))
+                .unwrap_or(false) =>
+        {
+            UnresolvedIntentKind::FundingDependency
+        }
         TransactionCategory::CreatorTransaction { function_type, .. } => match function_type {
             CreatorFunctionType::LiquidityPoolApproval => UnresolvedIntentKind::LpApproval,
             CreatorFunctionType::LiquidityRemoval => UnresolvedIntentKind::LiquidityRemoval,

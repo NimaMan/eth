@@ -1,4 +1,4 @@
-use super::CreatorFunctionType;
+use crate::function_detector::CreatorFunctionType;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
 /// Creator Transaction Classifier

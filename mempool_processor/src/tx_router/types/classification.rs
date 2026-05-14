@@ -1,5 +1,7 @@
 use crate::function_detector::CreatorFunctionType;
 
+use super::lane::RouteLane;
+
 #[derive(Debug, Clone)]
 pub enum TransactionCategory {
     ContractCreation {
@@ -23,6 +25,7 @@ pub enum TransactionCategory {
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
     pub category: TransactionCategory,
+    pub lane: RouteLane,
     pub priority: SimulationPriority,
     pub requires_simulation: bool,
     pub requires_buy_sell_test: bool,

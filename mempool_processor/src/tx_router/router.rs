@@ -9,16 +9,17 @@ use alloy_primitives::Address as AlloyAddress;
 use reth_chain_query::to_checksum_address;
 use std::sync::Arc;
 
-use super::liquidity::{
+use super::classify::{ContractCreationRouter, CreatorTransactionRouter};
+use super::lanes::lane_for_creator_transaction;
+use super::metrics::{LpApprovalRouterStats, RouteOrigin, RouterMetrics};
+use super::protocol::{
     is_known_position_manager_candidate, is_protocol_liquidity_removal_candidate,
     is_v4_modify_liquidity_candidate, liquidity_removal_token_candidates,
 };
-use super::metrics::{LpApprovalRouterStats, RouteOrigin, RouterMetrics};
 use super::types::{
     priority_for_creator_function, should_route_tracked_token_call, ClassificationResult,
-    SimulationPriority, TransactionCategory,
+    RouteLane, SimulationPriority, TransactionCategory,
 };
-use super::{ContractCreationRouter, CreatorTransactionRouter};
 
 pub use crate::function_detector::CreatorFunctionType;
 
@@ -172,6 +173,7 @@ impl TransactionRouter {
                         target_token: Some(target_token),
                         function_type: CreatorFunctionType::LiquidityRemoval,
                     },
+                    lane: RouteLane::CurrentTrackedPool,
                     priority: SimulationPriority::Critical,
                     requires_simulation: true,
                     requires_buy_sell_test: true,
@@ -190,6 +192,7 @@ impl TransactionRouter {
                         target_token: None,
                         function_type: CreatorFunctionType::LiquidityRemoval,
                     },
+                    lane: RouteLane::UnresolvedCacheMapping,
                     priority: SimulationPriority::Critical,
                     requires_simulation: true,
                     requires_buy_sell_test: false,
@@ -211,6 +214,7 @@ impl TransactionRouter {
                         target_token: Some(target_token),
                         function_type: function_type.clone(),
                     },
+                    lane: RouteLane::CurrentTrackedToken,
                     priority: priority_for_creator_function(&function_type),
                     requires_simulation: true,
                     requires_buy_sell_test: true,
@@ -254,6 +258,7 @@ impl TransactionRouter {
                 target_token: Some(pool.token_address.clone()),
                 function_type: CreatorFunctionType::LiquidityPoolApproval,
             },
+            lane: RouteLane::CurrentTrackedPool,
             priority: SimulationPriority::Critical,
             requires_simulation: false,
             requires_buy_sell_test: false,
@@ -285,6 +290,7 @@ impl TransactionRouter {
                 target_token: None,
                 function_type: CreatorFunctionType::LiquidityPoolApproval,
             },
+            lane: RouteLane::CurrentTrackedPool,
             priority: SimulationPriority::Critical,
             requires_simulation: false,
             requires_buy_sell_test: false,
@@ -355,6 +361,7 @@ impl TransactionRouter {
                 is_token,
                 has_liquidity_in_calldata: has_liquidity,
             },
+            lane: RouteLane::PendingPoolLifecycle,
             priority: if is_token {
                 SimulationPriority::High
             } else {
@@ -388,17 +395,21 @@ impl TransactionRouter {
         let is_lp_approval = matches!(&function_type, CreatorFunctionType::LiquidityPoolApproval);
         let requires_buy_sell = !is_eth_transfer && !is_lp_approval;
 
+        let category = TransactionCategory::CreatorTransaction {
+            creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+            target_address: tx
+                .to
+                .as_ref()
+                .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
+                .unwrap_or_else(|| "none".to_string()),
+            target_token,
+            function_type,
+        };
+        let lane = lane_for_creator_transaction(&category);
+
         ClassificationResult {
-            category: TransactionCategory::CreatorTransaction {
-                creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
-                target_address: tx
-                    .to
-                    .as_ref()
-                    .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
-                    .unwrap_or_else(|| "none".to_string()),
-                target_token,
-                function_type,
-            },
+            category,
+            lane,
             priority,
             requires_simulation: !is_eth_transfer && !is_lp_approval,
             requires_buy_sell_test: requires_buy_sell,
@@ -424,6 +435,7 @@ impl TransactionRouter {
                 is_transfer,
                 is_approval,
             },
+            lane: RouteLane::Irrelevant,
             priority: SimulationPriority::Low,
             requires_simulation: false,
             requires_buy_sell_test: false,
@@ -445,7 +457,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ClassificationResult, CreatorFunctionType, RouteOrigin, SimulationPriority,
+        ClassificationResult, CreatorFunctionType, RouteLane, RouteOrigin, SimulationPriority,
         TransactionCategory, TransactionRouter,
     };
     use crate::mempool_fetcher::MempoolTransaction;
@@ -478,6 +490,7 @@ mod tests {
 
         let classification = router.classify(&tx).await;
         assert!(classification.requires_simulation);
+        assert_eq!(classification.lane, RouteLane::CurrentTrackedPool);
         match classification.category {
             TransactionCategory::CreatorTransaction {
                 target_token,
@@ -511,6 +524,7 @@ mod tests {
 
         let classification = router.classify(&tx).await;
         assert_eq!(classification.priority, SimulationPriority::Critical);
+        assert_eq!(classification.lane, RouteLane::UnresolvedCacheMapping);
         assert!(classification.requires_simulation);
         assert!(!classification.requires_buy_sell_test);
         match classification.category {
@@ -576,6 +590,7 @@ mod tests {
         assert!(classification.requires_simulation);
         assert!(classification.requires_buy_sell_test);
         assert_eq!(classification.priority, super::SimulationPriority::Critical);
+        assert_eq!(classification.lane, RouteLane::CurrentTrackedToken);
         match classification.category {
             TransactionCategory::CreatorTransaction {
                 creator,
@@ -620,6 +635,7 @@ mod tests {
 
         let classification = router.classify(&tx).await;
         assert_eq!(classification.priority, SimulationPriority::Critical);
+        assert_eq!(classification.lane, RouteLane::CurrentTrackedPool);
         assert!(!classification.requires_simulation);
         assert!(!classification.requires_buy_sell_test);
         router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
@@ -666,6 +682,7 @@ mod tests {
         };
 
         let classification = router.classify(&tx).await;
+        assert_eq!(classification.lane, RouteLane::Irrelevant);
         assert!(matches!(
             classification.category,
             TransactionCategory::Regular {
@@ -802,6 +819,7 @@ mod tests {
                 is_transfer: false,
                 is_approval: false,
             },
+            lane: RouteLane::Irrelevant,
             priority: SimulationPriority::Low,
             requires_simulation: false,
             requires_buy_sell_test: false,
