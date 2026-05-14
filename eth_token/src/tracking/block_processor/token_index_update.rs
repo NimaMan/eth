@@ -41,6 +41,8 @@ impl BlockTokenProcessor {
             status,
             current_block,
         );
+        self.v2_candidate_cache
+            .prune_generations_before(self.token_index.membership_generation());
         self.cleanup_network_graphs_for_index_update(&update);
         update
     }
@@ -52,6 +54,8 @@ impl BlockTokenProcessor {
         let report =
             self.token_index
                 .apply_retention_policy(&mut self.registry, policy, current_block);
+        self.v2_candidate_cache
+            .prune_generations_before(self.token_index.membership_generation());
         self.cleanup_network_graphs_to_registry();
         report
     }
@@ -63,6 +67,8 @@ impl BlockTokenProcessor {
         let report = self
             .token_index
             .apply_live_retention_policy(&mut self.registry, current_block)?;
+        self.v2_candidate_cache
+            .prune_generations_before(self.token_index.membership_generation());
         self.cleanup_network_graphs_to_registry();
         Some(report)
     }

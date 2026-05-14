@@ -41,6 +41,7 @@ use trading_status_update::{
     should_simulate_v3_trading, should_simulate_v4_trading, simulate_updated_v2_pools,
     simulate_updated_v3_pools, simulate_updated_v4_pools, simulation_pool_addresses,
 };
+pub use v2_pool_candidate_router::V2PoolCandidateCache;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProcessedTokenUpdateProfile {
@@ -54,6 +55,7 @@ pub(crate) struct ProcessedTokenUpdateProfile {
     pub candidate_v2_pair_created_us: u128,
     pub candidate_v2_pool_event_scan_us: u128,
     pub candidate_v2_transfer_route_us: u128,
+    pub candidate_v2_cache_route_us: u128,
     pub candidate_v2_identity_lookup_us: u128,
     pub candidate_finalize_us: u128,
     pub token_state_us: u128,
@@ -69,6 +71,9 @@ pub(crate) struct ProcessedTokenUpdateProfile {
     pub candidate_v4_pool_keys: usize,
     pub candidate_v2_pool_events: usize,
     pub candidate_v2_transfer_route_hits: usize,
+    pub candidate_v2_identity_cache_hits: usize,
+    pub candidate_v2_irrelevant_cache_hits: usize,
+    pub candidate_v2_irrelevant_cache_inserts: usize,
     pub candidate_v2_identity_lookups: usize,
     pub candidate_v2_identity_hits: usize,
     pub candidate_v2_identity_skipped_by_transfer: usize,
@@ -99,12 +104,16 @@ impl ProcessedTokenUpdateProfile {
         self.candidate_v2_pair_created_us += profile.v2_pair_created_us;
         self.candidate_v2_pool_event_scan_us += profile.v2_pool_event_scan_us;
         self.candidate_v2_transfer_route_us += profile.v2_transfer_route_us;
+        self.candidate_v2_cache_route_us += profile.v2_cache_route_us;
         self.candidate_v2_identity_lookup_us += profile.v2_identity_lookup_us;
         self.candidate_finalize_us += profile.finalize_us;
         self.candidate_routing_addresses += profile.routing_address_count;
         self.candidate_v4_pool_keys += profile.v4_pool_key_count;
         self.candidate_v2_pool_events += profile.v2_pool_event_count;
         self.candidate_v2_transfer_route_hits += profile.v2_transfer_route_hits;
+        self.candidate_v2_identity_cache_hits += profile.v2_identity_cache_hits;
+        self.candidate_v2_irrelevant_cache_hits += profile.v2_irrelevant_cache_hits;
+        self.candidate_v2_irrelevant_cache_inserts += profile.v2_irrelevant_cache_inserts;
         self.candidate_v2_identity_lookups += profile.v2_identity_lookups;
         self.candidate_v2_identity_hits += profile.v2_identity_hits;
         self.candidate_v2_identity_skipped_by_transfer += profile.v2_identity_skipped_by_transfer;
@@ -583,6 +592,7 @@ impl ProcessedTokenUpdateRouter {
             None,
             None,
             None,
+            None,
         )
         .await
     }
@@ -615,6 +625,7 @@ impl ProcessedTokenUpdateRouter {
             None,
             None,
             None,
+            None,
         )
         .await
     }
@@ -630,6 +641,7 @@ impl ProcessedTokenUpdateRouter {
         trading_simulation: PoolTradingSimulationMode<'_>,
         block_header: Option<&BlockHeader>,
         mut profile: Option<&mut ProcessedTokenUpdateProfile>,
+        mut v2_candidate_cache: Option<&mut V2PoolCandidateCache>,
         mut pending_simulations: Option<&mut PendingPoolSimulationMap>,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
@@ -649,6 +661,7 @@ impl ProcessedTokenUpdateRouter {
                 tx,
                 pool_metadata_provider,
                 pool_metadata_timeout,
+                v2_candidate_cache.as_deref_mut(),
             )
             .await?;
         if let Some(profile) = profile.as_deref_mut() {

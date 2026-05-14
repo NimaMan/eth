@@ -459,6 +459,7 @@ impl BlockTokenProcessor {
                     trading_simulation,
                     Some(&block.header),
                     Some(&mut profile.applier),
+                    Some(&mut self.v2_candidate_cache),
                     pending_simulations_arg,
                 )
                 .await;

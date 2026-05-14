@@ -9,7 +9,9 @@ use crate::chain_metadata::UniswapV2PoolIdentityProvider;
 use crate::pools::uniswap::v4_event_display_key;
 use crate::tracking::{address_string, normalize_address, TokenRegistry, TrackedTokenIndex};
 
-use super::v2_pool_candidate_router::{insert_v2_pool_event_candidates, v2_pool_event_addresses};
+use super::v2_pool_candidate_router::{
+    insert_v2_pool_event_candidates, v2_pool_event_addresses, V2PoolCandidateCache,
+};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct CandidateTokenAddressProfile {
@@ -22,12 +24,16 @@ pub(super) struct CandidateTokenAddressProfile {
     pub v2_pair_created_us: u128,
     pub v2_pool_event_scan_us: u128,
     pub v2_transfer_route_us: u128,
+    pub v2_cache_route_us: u128,
     pub v2_identity_lookup_us: u128,
     pub finalize_us: u128,
     pub routing_address_count: usize,
     pub v4_pool_key_count: usize,
     pub v2_pool_event_count: usize,
     pub v2_transfer_route_hits: usize,
+    pub v2_identity_cache_hits: usize,
+    pub v2_irrelevant_cache_hits: usize,
+    pub v2_irrelevant_cache_inserts: usize,
     pub v2_identity_lookups: usize,
     pub v2_identity_hits: usize,
     pub v2_identity_skipped_by_transfer: usize,
@@ -68,6 +74,7 @@ where
         tx,
         pool_metadata_provider,
         metadata_timeout,
+        None,
     )
     .await?;
     Ok(candidates)
@@ -79,6 +86,7 @@ pub(super) async fn candidate_token_addresses_with_pool_discovery_and_profile<P>
     tx: &ProcessedTransaction,
     pool_metadata_provider: &P,
     metadata_timeout: Option<Duration>,
+    candidate_cache: Option<&mut V2PoolCandidateCache>,
 ) -> Result<(Vec<String>, CandidateTokenAddressProfile)>
 where
     P: UniswapV2PoolIdentityProvider,
@@ -143,14 +151,19 @@ where
         tx,
         pool_metadata_provider,
         metadata_timeout,
+        candidate_cache,
         &mut candidates,
     )
     .await?;
     profile.v2_pool_event_scan_us += v2_profile.pool_event_scan_us;
     profile.v2_transfer_route_us += v2_profile.transfer_route_us;
+    profile.v2_cache_route_us += v2_profile.cache_route_us;
     profile.v2_identity_lookup_us += v2_profile.identity_lookup_us;
     profile.v2_pool_event_count += v2_profile.pool_event_count;
     profile.v2_transfer_route_hits += v2_profile.transfer_route_hits;
+    profile.v2_identity_cache_hits += v2_profile.identity_cache_hits;
+    profile.v2_irrelevant_cache_hits += v2_profile.irrelevant_cache_hits;
+    profile.v2_irrelevant_cache_inserts += v2_profile.irrelevant_cache_inserts;
     profile.v2_identity_lookups += v2_profile.identity_lookups;
     profile.v2_identity_hits += v2_profile.identity_hits;
     profile.v2_identity_skipped_by_transfer += v2_profile.identity_skipped_by_transfer;
@@ -425,6 +438,8 @@ mod tests {
         ERC20TransferEvent, UniswapV2SwapEvent, UniswapV2SyncEvent,
     };
 
+    use reth_chain_query::common_addresses::KnownV2Protocol;
+
     use crate::chain_metadata::{
         UniswapV2PoolIdentity, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadataLookup,
     };
@@ -433,6 +448,7 @@ mod tests {
     #[derive(Clone)]
     struct CountingIdentityProvider {
         lookups: Rc<RefCell<usize>>,
+        identity: Option<UniswapV2PoolIdentity>,
     }
 
     impl UniswapV2PoolIdentityProvider for CountingIdentityProvider {
@@ -442,7 +458,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
             Box::pin(async move {
                 *self.lookups.borrow_mut() += 1;
-                Ok(None)
+                Ok(self.identity.clone())
             })
         }
     }
@@ -538,6 +554,7 @@ mod tests {
         let lookups = Rc::new(RefCell::new(0));
         let provider = CountingIdentityProvider {
             lookups: lookups.clone(),
+            identity: None,
         };
         let candidates =
             candidate_token_addresses_with_pool_discovery(&registry, &index, &tx, &provider, None)
@@ -549,5 +566,135 @@ mod tests {
             vec!["0x1111111111111111111111111111111111111111".to_string()]
         );
         assert_eq!(*lookups.borrow(), 0);
+    }
+
+    #[tokio::test]
+    async fn v2_pool_candidate_cache_skips_repeated_irrelevant_identity_lookup() {
+        let (registry, index) = registry_with_token();
+        let mut tx = tx();
+        let pair = address!("3333333333333333333333333333333333333333");
+        tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+            pair_address: pair,
+            reserve0: U256::from(1_000_u64),
+            reserve1: U256::from(1_000_u64),
+            log_index: 2,
+        });
+
+        let lookups = Rc::new(RefCell::new(0));
+        let provider = CountingIdentityProvider {
+            lookups: lookups.clone(),
+            identity: Some(UniswapV2PoolIdentity {
+                pool_address: "0x3333333333333333333333333333333333333333".to_string(),
+                token0: "0x2222222222222222222222222222222222222222".to_string(),
+                token1: "0x4444444444444444444444444444444444444444".to_string(),
+                protocol: KnownV2Protocol::UniswapV2,
+            }),
+        };
+        let mut cache = V2PoolCandidateCache::default();
+
+        let (first_candidates, first_profile) =
+            candidate_token_addresses_with_pool_discovery_and_profile(
+                &registry,
+                &index,
+                &tx,
+                &provider,
+                None,
+                Some(&mut cache),
+            )
+            .await
+            .unwrap();
+
+        assert!(first_candidates.is_empty());
+        assert_eq!(*lookups.borrow(), 1);
+        assert_eq!(first_profile.v2_identity_lookups, 1);
+        assert_eq!(first_profile.v2_identity_hits, 1);
+        assert_eq!(first_profile.v2_irrelevant_cache_inserts, 1);
+
+        let (second_candidates, second_profile) =
+            candidate_token_addresses_with_pool_discovery_and_profile(
+                &registry,
+                &index,
+                &tx,
+                &provider,
+                None,
+                Some(&mut cache),
+            )
+            .await
+            .unwrap();
+
+        assert!(second_candidates.is_empty());
+        assert_eq!(*lookups.borrow(), 1);
+        assert_eq!(second_profile.v2_identity_lookups, 0);
+        assert_eq!(second_profile.v2_irrelevant_cache_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn v2_pool_candidate_cache_rechecks_irrelevant_pool_after_registry_token_change() {
+        let mut registry = TokenRegistry::new();
+        let index = TrackedTokenIndex::from_registry(&registry, 100);
+        let mut tx = tx();
+        let pair = address!("3333333333333333333333333333333333333333");
+        tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
+            pair_address: pair,
+            reserve0: U256::from(1_000_u64),
+            reserve1: U256::from(1_000_u64),
+            log_index: 2,
+        });
+
+        let lookups = Rc::new(RefCell::new(0));
+        let provider = CountingIdentityProvider {
+            lookups: lookups.clone(),
+            identity: Some(UniswapV2PoolIdentity::new_with_protocol(
+                KnownV2Protocol::UniswapV2,
+                "0x3333333333333333333333333333333333333333",
+                "0x1111111111111111111111111111111111111111",
+                "0x4444444444444444444444444444444444444444",
+            )),
+        };
+        let mut cache = V2PoolCandidateCache::default();
+
+        let (first_candidates, first_profile) =
+            candidate_token_addresses_with_pool_discovery_and_profile(
+                &registry,
+                &index,
+                &tx,
+                &provider,
+                None,
+                Some(&mut cache),
+            )
+            .await
+            .unwrap();
+
+        assert!(first_candidates.is_empty());
+        assert_eq!(*lookups.borrow(), 1);
+        assert_eq!(first_profile.v2_irrelevant_cache_inserts, 1);
+
+        registry.add_token(ERC20TokenMetadata::new(
+            "0x1111111111111111111111111111111111111111",
+            "Token",
+            "TKN",
+            18,
+            "1000",
+        ));
+
+        let (second_candidates, second_profile) =
+            candidate_token_addresses_with_pool_discovery_and_profile(
+                &registry,
+                &index,
+                &tx,
+                &provider,
+                None,
+                Some(&mut cache),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            second_candidates,
+            vec!["0x1111111111111111111111111111111111111111".to_string()]
+        );
+        assert_eq!(*lookups.borrow(), 1);
+        assert_eq!(second_profile.v2_identity_cache_hits, 1);
+        assert_eq!(second_profile.v2_irrelevant_cache_hits, 0);
     }
 }

@@ -296,19 +296,48 @@ indexed_pools=0:
   identity_time=192ms
 ```
 
-The safest immediate optimization is to skip unknown-V2-pool identity lookup
+The safest small optimization would be to skip unknown-V2-pool identity lookup
 when there are no tracked tokens in the registry/index. With no tracked token,
 no V2 pool identity can produce a candidate. On this 1K slice that would remove
 335 identity attempts and about 183ms.
 
-The broader pattern is repeated unknown V2 pools that return a valid identity
-but do not resolve to a tracked token. A larger optimization would be a
-candidate-router cache for "irrelevant V2 pool for the current token-index
-generation." That cache must be invalidated whenever a new token is indexed or
-retention changes the tracked set, otherwise it can hide a pool that becomes
-relevant later. This should be kept separate from the chain metadata cache:
-metadata cache answers "what is this pool?", while candidate cache answers "can
-this pool currently route to a tracked token?"
+The broader pattern was repeated unknown V2 pools that return a valid identity
+but do not resolve to a tracked token. The candidate router now keeps a
+candidate-level cache for two facts:
+
+- pool identity, so repeated V2 events for the same pair can route from
+  `token0`/`token1` without another identity-provider call;
+- "irrelevant for the current candidate set", keyed by token-index generation
+  and registry token count, so a pool that cannot currently route to a token is
+  rechecked when new tokens appear or retention changes the tracked set.
+
+This cache is intentionally separate from the chain metadata cache. Metadata
+cache answers "what is this pool?"; candidate cache answers "can this pool
+currently route to a tracked token?"
+
+Final 1K profile after adding the candidate cache:
+
+```text
+V2 pool events=12,443
+V2 identity lookup attempts=1,949
+V2 identity hits=1,538
+V2 identity cache hits=3,577
+irrelevant cache hits=5,216
+irrelevant cache inserts=5,115
+transfer-routed skips=52
+
+router=3.24ms/block avg
+candidate routing=3.01ms/block avg
+V2 identity lookup path=2.77ms/block avg
+```
+
+Compared with the post-identity-split profile, identity-provider calls dropped
+from 10,742 to 1,949. Wall time did not improve on this sample because the
+removed calls were mostly cheap chain-metadata-cache hits; the remaining
+first-time pool identity reads still dominate the V2 candidate path. Treat this
+cache as correctness and provider-churn cleanup, not as the primary speed fix.
+The next meaningful speed work should target first-time identity reads or avoid
+the V2 identity path entirely when no tracked token can be affected.
 
 ## Captured Result: 25052270-25059269
 

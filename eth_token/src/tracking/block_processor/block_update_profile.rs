@@ -94,6 +94,9 @@ pub(in crate::tracking::block_processor) fn log_block_token_processor_profile(
         applier_candidate_v2_transfer_route_us = applier.candidate_v2_transfer_route_us,
         applier_candidate_v2_transfer_route_ms =
             micros_to_millis(applier.candidate_v2_transfer_route_us),
+        applier_candidate_v2_cache_route_us = applier.candidate_v2_cache_route_us,
+        applier_candidate_v2_cache_route_ms =
+            micros_to_millis(applier.candidate_v2_cache_route_us),
         applier_candidate_v2_identity_lookup_us = applier.candidate_v2_identity_lookup_us,
         applier_candidate_v2_identity_lookup_ms =
             micros_to_millis(applier.candidate_v2_identity_lookup_us),
@@ -119,6 +122,11 @@ pub(in crate::tracking::block_processor) fn log_block_token_processor_profile(
         applier_candidate_v4_pool_keys = applier.candidate_v4_pool_keys,
         applier_candidate_v2_pool_events = applier.candidate_v2_pool_events,
         applier_candidate_v2_transfer_route_hits = applier.candidate_v2_transfer_route_hits,
+        applier_candidate_v2_identity_cache_hits = applier.candidate_v2_identity_cache_hits,
+        applier_candidate_v2_irrelevant_cache_hits =
+            applier.candidate_v2_irrelevant_cache_hits,
+        applier_candidate_v2_irrelevant_cache_inserts =
+            applier.candidate_v2_irrelevant_cache_inserts,
         applier_candidate_v2_identity_lookups = applier.candidate_v2_identity_lookups,
         applier_candidate_v2_identity_hits = applier.candidate_v2_identity_hits,
         applier_candidate_v2_identity_skipped_by_transfer =

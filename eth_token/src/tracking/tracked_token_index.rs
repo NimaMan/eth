@@ -48,6 +48,8 @@ pub struct TrackedTokenIndex {
     token_pool_addresses: HashMap<String, BTreeSet<String>>,
     lru_order: VecDeque<String>,
     sequence: u64,
+    #[serde(default)]
+    membership_generation: u64,
 }
 
 impl TrackedTokenIndex {
@@ -69,6 +71,7 @@ impl TrackedTokenIndex {
             token_pool_addresses: HashMap::new(),
             lru_order: VecDeque::new(),
             sequence: 0,
+            membership_generation: 0,
         }
     }
 
@@ -108,6 +111,9 @@ impl TrackedTokenIndex {
     }
 
     pub fn clear(&mut self) {
+        if !self.entries.is_empty() || !self.pool_to_token.is_empty() {
+            self.membership_generation += 1;
+        }
         self.entries.clear();
         self.pool_to_token.clear();
         self.token_pool_addresses.clear();
@@ -122,6 +128,10 @@ impl TrackedTokenIndex {
 
     pub fn tracked_token_addresses(&self) -> Vec<String> {
         self.lru_order.iter().cloned().collect()
+    }
+
+    pub fn membership_generation(&self) -> u64 {
+        self.membership_generation
     }
 
     pub fn token_for_pool(&self, pool_address: impl AsRef<str>) -> Option<&str> {
@@ -144,6 +154,7 @@ impl TrackedTokenIndex {
         token_status: TrackedTokenStatus,
     ) -> Option<String> {
         let address = normalize_address(&token.contract_address);
+        let was_present = self.entries.contains_key(&address);
         self.sequence += 1;
         let entry = TrackedTokenIndexEntry {
             token_address: address.clone(),
@@ -156,6 +167,9 @@ impl TrackedTokenIndex {
             updated_sequence: self.sequence,
         };
         self.entries.insert(address.clone(), entry);
+        if !was_present {
+            self.membership_generation += 1;
+        }
         self.touch(&address);
         self.update_pool_mapping(token);
         self.evict_if_needed()
@@ -311,6 +325,9 @@ impl TrackedTokenIndex {
     pub fn remove_token(&mut self, token_address: impl AsRef<str>) -> bool {
         let address = normalize_address(token_address);
         let existed = self.entries.remove(&address).is_some();
+        if existed {
+            self.membership_generation += 1;
+        }
         self.lru_order.retain(|candidate| candidate != &address);
         if let Some(pool_addresses) = self.token_pool_addresses.remove(&address) {
             for pool_address in pool_addresses {

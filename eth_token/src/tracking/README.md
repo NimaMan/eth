@@ -85,3 +85,6 @@ The chain metadata cache answers what a pool is. Candidate-level caches should
 answer whether that pool can route to the current tracked-token set. Those are
 different lifetimes: a "not currently relevant" candidate cache must be
 invalidated when new tokens are indexed or retention changes the tracked set.
+It must also account for tokens that have been discovered in `TokenRegistry`
+before the index refresh runs, so the V2 candidate cache keys irrelevant-pool
+entries by both token-index generation and registry token count.

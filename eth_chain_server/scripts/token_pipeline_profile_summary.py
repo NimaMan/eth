@@ -63,6 +63,8 @@ NUMERIC_FIELDS = {
     "applier_candidate_v2_pool_event_scan_ms",
     "applier_candidate_v2_transfer_route_us",
     "applier_candidate_v2_transfer_route_ms",
+    "applier_candidate_v2_cache_route_us",
+    "applier_candidate_v2_cache_route_ms",
     "applier_candidate_v2_identity_lookup_us",
     "applier_candidate_v2_identity_lookup_ms",
     "applier_candidate_finalize_us",
@@ -100,6 +102,9 @@ NUMERIC_FIELDS = {
     "applier_candidate_v4_pool_keys",
     "applier_candidate_v2_pool_events",
     "applier_candidate_v2_transfer_route_hits",
+    "applier_candidate_v2_identity_cache_hits",
+    "applier_candidate_v2_irrelevant_cache_hits",
+    "applier_candidate_v2_irrelevant_cache_inserts",
     "applier_candidate_v2_identity_lookups",
     "applier_candidate_v2_identity_hits",
     "applier_candidate_v2_identity_skipped_by_transfer",
@@ -204,12 +209,16 @@ def main() -> int:
     print_summary(rows, "applier_candidate_v2_pair_created_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_v2_pool_event_scan_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_v2_transfer_route_us", scale=1_000, unit="ms")
+    print_summary(rows, "applier_candidate_v2_cache_route_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_v2_identity_lookup_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_finalize_us", scale=1_000, unit="ms")
     print_summary(rows, "applier_candidate_routing_addresses")
     print_summary(rows, "applier_candidate_v4_pool_keys")
     print_summary(rows, "applier_candidate_v2_pool_events")
     print_summary(rows, "applier_candidate_v2_transfer_route_hits")
+    print_summary(rows, "applier_candidate_v2_identity_cache_hits")
+    print_summary(rows, "applier_candidate_v2_irrelevant_cache_hits")
+    print_summary(rows, "applier_candidate_v2_irrelevant_cache_inserts")
     print_summary(rows, "applier_candidate_v2_identity_lookups")
     print_summary(rows, "applier_candidate_v2_identity_hits")
     print_summary(rows, "applier_candidate_v2_identity_skipped_by_transfer")
@@ -383,6 +392,7 @@ def print_top(rows: list[dict[str, object]], count: int, key: str) -> None:
         "applier_candidate_v4_position_transfer_us",
         "applier_candidate_v4_position_approval_us",
         "applier_candidate_v2_transfer_route_us",
+        "applier_candidate_v2_cache_route_us",
         "applier_candidate_v2_identity_lookup_us",
         "applier_pool_discovery_us",
         "historical_branch_us",

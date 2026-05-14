@@ -99,7 +99,10 @@ pool identity path (`token0`, `token1`, known protocol validation) before full
 metadata. Full metadata includes decimals and is only needed when registering a
 pool on a tracked token. The profile summary exposes the split as
 `applier_candidate_v2_transfer_route_*` and
-`applier_candidate_v2_identity_lookup_*`.
+`applier_candidate_v2_identity_lookup_*`, plus candidate-cache counters such as
+`applier_candidate_v2_identity_cache_hits`,
+`applier_candidate_v2_irrelevant_cache_hits`, and
+`applier_candidate_v2_irrelevant_cache_inserts`.
 
 The current range state keeps `BlockTokenProcessor` inside `RangeIndexState`
 behind one `RwLock`. This has two performance consequences:

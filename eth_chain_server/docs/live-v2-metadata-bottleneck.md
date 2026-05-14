@@ -67,15 +67,15 @@ Full V2 metadata is still used when a pool is actually registered, and may issue
 
 - token decimals for each side
 
-Today those view calls are not using one block-scoped context. If the block is
-ahead of Reth's readable historical state, each call can enter the live context
-loader path independently.
+Before the Redis live-state cleanup, those view calls did not use one
+block-scoped context. If the block was ahead of Reth's readable historical
+state, each call could enter the live context loader path independently.
 
 ## Why It Gets Stuck
 
-`TxSimulator::simulate_view_function` first prepares a block context. For a
-live-tail block, the context loader tries historical state and then falls back to
-Redis live state when historical state is unavailable.
+`TxSimulator::simulate_view_function` first prepares a block context. In the old
+live-tail path, the context loader tried historical state and then fell back to
+Redis live state when historical state was unavailable.
 
 That means a cheap view call can pay for:
 

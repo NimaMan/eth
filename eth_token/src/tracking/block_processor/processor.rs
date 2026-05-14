@@ -11,7 +11,7 @@ use crate::chain_metadata::{
     UniswapV2PoolMetadataProvider,
 };
 use crate::network::graph::RawTokenNetworkGraph;
-use crate::tracking::token_update_router::PoolTradingSimulationMode;
+use crate::tracking::token_update_router::{PoolTradingSimulationMode, V2PoolCandidateCache};
 use crate::tracking::{
     hash_string, LiveTokenRetentionPolicy, ProcessedTokenUpdateRouter, TokenBlockUpdateReport,
     TokenRegistry, TokenTransactionUpdateError, TrackedTokenIndex,
@@ -30,6 +30,8 @@ pub struct BlockTokenProcessor {
     pub registry: TokenRegistry,
     pub update_router: ProcessedTokenUpdateRouter,
     pub token_index: TrackedTokenIndex,
+    #[serde(default, skip)]
+    pub v2_candidate_cache: V2PoolCandidateCache,
     #[serde(default = "default_network_graphs_enabled")]
     pub network_graphs_enabled: bool,
     #[serde(default)]
@@ -59,6 +61,7 @@ impl BlockTokenProcessor {
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
             token_index: token_index_with_limit(token_index_limit),
+            v2_candidate_cache: V2PoolCandidateCache::default(),
             network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
@@ -85,6 +88,7 @@ impl BlockTokenProcessor {
             registry,
             update_router,
             token_index,
+            v2_candidate_cache: V2PoolCandidateCache::default(),
             network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
