@@ -7,6 +7,10 @@ trades, liquidity events, and token control relations. This module builds the
 second-order view around those same actors using non-token fund flows such as
 ETH, WETH, stables, and other known denominations.
 
+This layer is the bridge between a token-specific graph and generic fund-flow
+analytics. It should make relationships visible when the token graph alone only
+shows many apparently unrelated traders touching a pool.
+
 ## Goal
 
 Reveal relationships that are invisible if we only look at the token contract:
@@ -17,6 +21,21 @@ Reveal relationships that are invisible if we only look at the token contract:
 - timing patterns such as funding shortly before first token activity;
 - the filtered backbone after noisy hubs are suppressed.
 
+Typical scam hypothesis:
+
+```text
+operator/control address
+  -> funds several wallets with ETH/WETH/stables
+  -> wallets buy/swap through the token pool
+  -> wallets transfer or churn the token to inflate apparent activity
+  -> wallets sell or remove liquidity
+  -> profits converge to a shared sink
+```
+
+The first-order token graph may only show pool interactions and token transfers.
+The second-order flow context should reveal the funding and cash-out structure
+around those interactions.
+
 ## Boundaries
 
 - Does not mutate `RawTokenNetworkGraph`.
@@ -25,6 +44,8 @@ Reveal relationships that are invisible if we only look at the token contract:
 - Delegates actual fund-flow extraction to adapters around existing
   `tx_fund_flow` and processed-block APIs.
 - Keeps observed background flows separate from inferred cluster/promoted edges.
+- Does not treat "same funder" as proof of same entity. It records evidence,
+  confidence, timing, and path length so downstream risk scoring can decide.
 
 ## Pipeline
 
@@ -41,6 +62,34 @@ RawTokenNetworkGraph
   -> FlowContextLayer
   -> optional promotion into inferred token-network edges
 ```
+
+## Output Semantics
+
+`FlowContextLayer` is not a replacement for `RawTokenNetworkGraph`.
+
+- `FlowContextEdgeKind::DirectDenomFlow` is observed non-token value movement.
+- `SharedFunder`, `SharedSink`, `TemporalFunding`, and `MultiHopFundingPath`
+  are second-order context edges.
+- `promotion.rs` can translate high-confidence context into existing inferred
+  token-network edge kinds such as `Funding`, `SharedIntermediary`, and
+  `TemporalCoactivity`, but promotion must stay explicit.
+- `hub_filter.rs` creates the backbone by suppressing noisy non-seed hubs while
+  preserving `SuppressedHub` records.
+
+## Risk/Graph-ML Use
+
+This layer should eventually feed deterministic risk rules and graph-learning
+experiments. Keep the output typed and evidence-rich:
+
+- node role: seed, funder, sink, intermediary, hub;
+- edge kind: direct flow, shared funder, shared sink, temporal funding, path;
+- confidence and explanation;
+- block/tx/log evidence;
+- amounts and assets;
+- suppressed-hub metadata.
+
+Do not collapse these into untyped "related address" edges too early. The
+model/risk layer needs to know why two addresses are connected.
 
 ## Files
 

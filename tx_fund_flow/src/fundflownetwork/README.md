@@ -41,6 +41,45 @@ seed address
 
 `fundflownetwork_py::PyFundFlowNetworkBuilder.build_from_address` uses this full path. It no longer returns a participant-only graph.
 
+## Token-Network Integration Role
+
+For token-risk work, this crate should provide the second-order fund-flow layer,
+not the token graph itself.
+
+The token graph usually starts with first-order token evidence:
+
+```text
+token contract
+  -> pool
+  -> traders / holders / LP actors / control actors
+```
+
+That graph can show direct token transfers and pool interactions, but it may not
+show that several apparently unrelated traders were funded by the same address
+or cashed out to the same sink. `fundflownetwork` should provide the directed
+non-token value movement needed to discover those hidden relationships.
+
+Expected integration shape:
+
+```text
+eth_token::network::flow_context
+  -> token-relevant seed addresses and block windows
+  -> address-block participation index
+  -> processed blocks / processed transactions
+  -> fundflownetwork extraction and aggregation
+  -> FlowContextLayer edges:
+       DirectDenomFlow
+       SharedFunder
+       SharedSink
+       MultiHopFundingPath
+       TemporalFunding
+```
+
+Important semantic rule: participant co-occurrence is not money movement.
+Directed fund-flow evidence must come from processed transaction facts. Token
+risk code can then decide whether a flow is a funding signal, a cash-out signal,
+a noisy hub link, or an inferred cluster edge.
+
 ## Where To Look First
 
 | Need | Start here |

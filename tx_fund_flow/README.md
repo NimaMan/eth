@@ -32,6 +32,38 @@ seed address / tx_processor ProcessedTransaction / DB-backed query output
   -> Rust examples or fundflownetwork_py bindings
 ```
 
+## Relationship To Token Risk Graphs
+
+`tx_fund_flow` is the generic money-movement engine. It should not become a
+token-risk system, but it is the right source of second-order evidence for one.
+
+The token network in `eth_token/src/network/` owns token-scoped facts:
+
+- token transfers;
+- pool trades;
+- liquidity events;
+- creator/owner/admin/control relations;
+- per-address token activity and PnL proxies.
+
+The token flow-context layer uses `tx_fund_flow` to answer questions that are
+outside the token contract:
+
+- did one upstream address fund several token traders?
+- do profitable token sellers cash out to the same sink?
+- is there a short ETH/WETH/stable path between token actors?
+- did funding happen shortly before first token activity?
+- does the high-signal backbone remain connected after pools, routers, WETH,
+  CEX/bridge hubs, and other noisy nodes are suppressed?
+
+Keep the boundary clean:
+
+- `tx_fund_flow` extracts and aggregates directed fund-flow evidence.
+- `eth_token::network::flow_context` chooses token-relevant seeds/windows and
+  interprets the resulting flows as token-risk context.
+- `eth_token::network::clusters` and future health/risk views decide whether
+  evidence becomes a suspicious cluster, fake-volume signal, or graph-model
+  feature.
+
 ## Where To Look First
 
 | Need | Start here |

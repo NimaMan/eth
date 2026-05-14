@@ -4,6 +4,82 @@
 
 ---
 
+## 0. Layered Mental Model
+
+The token network is not one graph with one meaning. It is a set of evidence
+layers around a token. Each layer answers a different question and has different
+confidence semantics.
+
+### First-Order Token Network
+
+This is the graph we can build directly from token-scoped events:
+
+- token contract node;
+- pool nodes;
+- addresses that hold, transfer, trade, create, control, or provide liquidity;
+- tracked-token transfer edges;
+- pool trade, pool creation, liquidity, LP, and control edges.
+
+This layer is already useful. If an address transfers the tracked token to
+another address, that is direct relationship evidence. If many traders interact
+with the same pool, that is pool activity evidence. But this layer can also be
+misleading if interpreted as entity clustering: a pool is expected to connect
+many unrelated traders, and a router or denomination contract can become a noisy
+hub.
+
+### Second-Order Fund-Flow Context
+
+The more informative scam signals often sit outside the token contract:
+
+- one upstream address funds several wallets before they buy;
+- wallets that look independent in the token graph cash out to the same sink;
+- short ETH/WETH/stable paths connect holders, sellers, or control actors;
+- funding happens shortly before first token activity;
+- profits converge after a coordinated exit.
+
+This belongs in `network/flow_context/`. It should use the token graph only to
+select token-relevant seed addresses and windows. It should then use the
+address-block participation index, processed-block cache, and `tx_fund_flow` to
+extract non-token value movement around those seeds.
+
+### Backbone
+
+The backbone is the high-signal subgraph after suppressing noisy hubs. It should
+preserve evidence that a hub was suppressed, but it should not let pools, WETH,
+routers, CEX/bridge addresses, or token-local supernodes dominate the graph.
+
+The backbone should emphasize:
+
+- direct token transfers between relevant addresses;
+- direct non-token fund flows between token actors;
+- shared funders and shared sinks;
+- short high-confidence flow paths;
+- control and liquidity actor links;
+- timing-aware funding or exit patterns.
+
+### Risk/ML Feature Graph
+
+Long term, the same layers should be usable as features for deterministic risk
+rules or a graph model. A graph neural network should not receive an undifferentiated
+hairball. It should receive typed nodes, typed edges, confidence/evidence
+metadata, time windows, amounts, and hub-suppression signals.
+
+Examples of risk features:
+
+- supply concentration by connected holder cluster;
+- fake-volume candidates: high pool interaction, low net balance change;
+- shared-funder buyer groups;
+- shared-sink profit convergence;
+- creator/control actor trading or liquidity removal;
+- synchronized first buys or coordinated sells;
+- repeated operators across tokens.
+
+Observed evidence and inferred evidence must remain separate. A direct token
+transfer is not the same claim as "same operator." A shared funder is strong
+context, but still an inference unless the path and timing are compelling.
+
+---
+
 ## 1. What Questions Must This Answer?
 
 ### A. Ownership & Control ("Who really owns this?")
@@ -155,6 +231,10 @@
 
 ### Gaps
 - **Cluster analysis is NOT implemented**: The `clusters/` module has empty placeholder files
+- **Flow context scaffold exists, but adapters are not wired**:
+  `network/flow_context/` defines seed/window/extraction/backbone contracts, but
+  the real address-index, processed-block, and `tx_fund_flow` adapters still need
+  implementation.
 - **No temporal analysis**: We store block numbers but don't analyze ordering patterns ("funded then bought")
 - **No external address book**: `Cex`, `Bridge`, `Router` labels exist but are not populated from external data
 - **No pathfinding in token network**: Can't answer "show me how Address A funded Address B" (but `tx_fund_flow` has this!)
@@ -162,7 +242,9 @@
 - **No nonce/gas analysis**: Can't detect fresh wallets or MEV bundles
 - **No approval tracking**: ERC20 Approval events for the token itself are not ingested
 - **No flash loan detection**: No analysis of flash loan initiators or cascading pool interactions
-- **Token network and fund flow are NOT integrated**: Two separate pipelines with no bridge
+- **Token network and fund flow are only contract-integrated**: the
+  `flow_context` seam exists, but production extraction still needs to call
+  `tx_fund_flow`.
 
 ---
 
@@ -245,12 +327,21 @@
 
 ## 7. Immediate Next Steps (Proposed)
 
-1. **Answer the open questions above** → finalize scope
-2. **Implement cluster detection in Rust** (fill the `clusters/` placeholders with Louvain or connected-component analysis)
-3. **Expose cluster IDs + confidence in `TokenNetworkView`**
-4. **Build the Layer 1 + Layer 2 frontend** (control structure + basic cluster coloring)
-5. **Add edge-click evidence panel** (show actual transactions)
-6. **Iterate** based on real token analysis
+1. **Wire `flow_context` to real data**: address-block participation index,
+   processed-block loading, and `tx_fund_flow` extraction.
+2. **Produce a token-specific backbone**: suppress pools, routers, WETH, CEX,
+   bridges, zero/dead addresses, and token-local high-degree hubs while keeping
+   suppression evidence.
+3. **Implement cluster detection in Rust**: direct components first, then
+   shared-funder/shared-sink/temporal clusters as separate evidence layers.
+4. **Expose cluster IDs + confidence in `TokenNetworkView`** and, separately,
+   expose `FlowContextSnapshot` for second-order evidence.
+5. **Build the Layer 1 + Layer 2 frontend**: control structure, direct holder
+   relations, and flow-context overlays/backbone.
+6. **Add edge-click evidence panel**: show actual transactions, amounts,
+   timestamps, and why an edge was inferred.
+7. **Iterate toward risk features**: fake volume, coordinated funding, profit
+   convergence, liquidity removal, and repeat-operator features.
 
 ---
 
