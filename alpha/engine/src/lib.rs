@@ -21,9 +21,10 @@ use eth_alpha_core::{
     portfolio::PortfolioState,
     position::{Position, PositionKey, PositionSnapshot, PositionState},
     risk::{RiskDecision, RiskEvent, RiskKind, RiskPolicy, RiskSeverity},
-    store::TradingStore,
+    store::{StrategyDecisionRecord, TradingStore},
     strategy::{Strategy, StrategyContext, StrategyDecision},
 };
+use serde_json::json;
 
 // Re-export chain-simulation adapters at crate root for convenience.
 pub use execution::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
@@ -172,11 +173,35 @@ where
         };
 
         let mut decisions = Vec::with_capacity(self.strategies.len());
+        let mut market_decisions_to_record = Vec::new();
+        let mut monitor_decisions_to_record = Vec::new();
         for strategy in &mut self.strategies {
-            decisions.push(strategy.on_market_event(&ctx, event)?);
-            if let MarketEvent::BlockCompleted { block_number, .. } = event {
-                decisions.extend(strategy.on_position_monitor(&ctx, *block_number)?);
+            let strategy_name = strategy.name();
+            let decision = strategy.on_market_event(&ctx, event)?;
+            if !matches!(event, MarketEvent::BlockCompleted { .. }) {
+                market_decisions_to_record.push((strategy_name.0.clone(), decision.clone()));
             }
+            decisions.push(decision);
+            if let MarketEvent::BlockCompleted { block_number, .. } = event {
+                let monitor_decisions = strategy.on_position_monitor(&ctx, *block_number)?;
+                for (index, decision) in monitor_decisions.iter().enumerate() {
+                    monitor_decisions_to_record.push((
+                        strategy_name.0.clone(),
+                        *block_number,
+                        index,
+                        decision.clone(),
+                    ));
+                }
+                decisions.extend(monitor_decisions);
+            }
+        }
+        for (strategy_name, decision) in market_decisions_to_record {
+            self.record_strategy_decision(&strategy_name, "market", event, &decision)
+                .await?;
+        }
+        for (strategy_name, block_number, index, decision) in monitor_decisions_to_record {
+            self.record_position_monitor_decision(&strategy_name, block_number, index, &decision)
+                .await?;
         }
         let reports = self.apply_decisions(decisions).await?;
         self.snapshot_open_positions_for_pool(event).await?;
@@ -243,8 +268,16 @@ where
         };
 
         let mut decisions = Vec::with_capacity(self.strategies.len());
+        let mut risk_decisions_to_record = Vec::new();
         for strategy in &mut self.strategies {
-            decisions.push(strategy.on_risk_event(&ctx, event)?);
+            let strategy_name = strategy.name();
+            let decision = strategy.on_risk_event(&ctx, event)?;
+            risk_decisions_to_record.push((strategy_name.0.clone(), decision.clone()));
+            decisions.push(decision);
+        }
+        for (strategy_name, decision) in risk_decisions_to_record {
+            self.record_risk_strategy_decision(&strategy_name, event, &decision)
+                .await?;
         }
         let reports = self.apply_decisions(decisions).await?;
 
@@ -291,13 +324,108 @@ where
         let mut reports = Vec::new();
         for decision in decisions {
             match decision {
-                StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {}
-                StrategyDecision::SubmitOrder(intent) => {
+                StrategyDecision::Hold
+                | StrategyDecision::HoldWithReason { .. }
+                | StrategyDecision::CancelOrders { .. } => {}
+                StrategyDecision::SubmitOrder(intent)
+                | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                     reports.extend(self.execute_if_allowed(intent).await?);
                 }
             }
         }
         Ok(reports)
+    }
+
+    async fn record_strategy_decision(
+        &self,
+        strategy_name: &str,
+        event_source: &str,
+        event: &MarketEvent,
+        decision: &StrategyDecision,
+    ) -> Result<()> {
+        let (block_number, token_address, pool_address, event_key) = match event {
+            MarketEvent::TokenUpdated {
+                block_number,
+                token,
+            } => (
+                Some(*block_number),
+                Some(token.address.to_string()),
+                None,
+                format!("token:{}:{block_number}", token.address),
+            ),
+            MarketEvent::PoolUpdated { block_number, pool } => (
+                Some(*block_number),
+                Some(pool.token_address.to_string()),
+                Some(pool.address.to_string()),
+                format!("pool:{}:{block_number}", pool.address),
+            ),
+            MarketEvent::BlockCompleted { block_number, .. } => (
+                Some(*block_number),
+                self.market
+                    .as_ref()
+                    .map(|market| market.token_address.to_string()),
+                self.market
+                    .as_ref()
+                    .and_then(|market| market.pool_address.as_ref().map(ToString::to_string)),
+                format!("block_completed:{block_number}"),
+            ),
+        };
+        self.store
+            .record_strategy_decision(&strategy_decision_record(
+                strategy_name,
+                event_source,
+                event_key,
+                block_number,
+                token_address,
+                pool_address,
+                decision,
+            ))
+            .await
+    }
+
+    async fn record_position_monitor_decision(
+        &self,
+        strategy_name: &str,
+        block_number: u64,
+        index: usize,
+        decision: &StrategyDecision,
+    ) -> Result<()> {
+        let intent = decision.order_intent();
+        self.store
+            .record_strategy_decision(&strategy_decision_record(
+                strategy_name,
+                "position_monitor",
+                format!("position_monitor:{block_number}:{index}"),
+                Some(block_number),
+                intent.map(|intent| intent.token_address.to_string()),
+                intent.map(|intent| intent.pool_address.to_string()),
+                decision,
+            ))
+            .await
+    }
+
+    async fn record_risk_strategy_decision(
+        &self,
+        strategy_name: &str,
+        event: &RiskEvent,
+        decision: &StrategyDecision,
+    ) -> Result<()> {
+        self.store
+            .record_strategy_decision(&strategy_decision_record(
+                strategy_name,
+                "risk",
+                format!(
+                    "risk:{}:{}:{}",
+                    risk_kind_key(&event.kind),
+                    event.token_address,
+                    event.observed_block.unwrap_or_default()
+                ),
+                event.observed_block,
+                Some(event.token_address.to_string()),
+                event.pool_address.as_ref().map(ToString::to_string),
+                decision,
+            ))
+            .await
     }
 
     async fn execute_if_allowed(&mut self, intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
@@ -453,6 +581,58 @@ fn position_id_for_key(key: &PositionKey) -> eth_alpha_core::ids::PositionId {
     ))
 }
 
+fn strategy_decision_record(
+    strategy_name: &str,
+    event_source: &str,
+    event_key: String,
+    block_number: Option<u64>,
+    token_address: Option<String>,
+    pool_address: Option<String>,
+    decision: &StrategyDecision,
+) -> StrategyDecisionRecord {
+    let order = decision.order_intent();
+    StrategyDecisionRecord {
+        strategy_name: strategy_name.to_string(),
+        event_source: event_source.to_string(),
+        event_key,
+        block_number,
+        token_address: token_address
+            .or_else(|| order.map(|intent| intent.token_address.to_string())),
+        pool_address: pool_address.or_else(|| order.map(|intent| intent.pool_address.to_string())),
+        action: strategy_decision_action(decision).to_string(),
+        reason: decision.reason().map(ToOwned::to_owned),
+        order_side: order.map(|intent| intent.side),
+        payload: json!({
+            "decision": decision,
+        }),
+    }
+}
+
+fn strategy_decision_action(decision: &StrategyDecision) -> &'static str {
+    match decision {
+        StrategyDecision::Hold | StrategyDecision::HoldWithReason { .. } => "hold",
+        StrategyDecision::SubmitOrder(intent)
+        | StrategyDecision::SubmitOrderWithReason { intent, .. } => match intent.side {
+            OrderSide::Buy => "submit_buy",
+            OrderSide::Sell => "submit_sell",
+        },
+        StrategyDecision::CancelOrders { .. } => "cancel_orders",
+    }
+}
+
+fn risk_kind_key(kind: &RiskKind) -> String {
+    match kind {
+        RiskKind::LiquidityRemoval => "liquidity_removal".to_string(),
+        RiskKind::TaxChange => "tax_change".to_string(),
+        RiskKind::Honeypot => "honeypot".to_string(),
+        RiskKind::TradingDisabled => "trading_disabled".to_string(),
+        RiskKind::TradingEnabled => "trading_enabled".to_string(),
+        RiskKind::LpApproval => "lp_approval".to_string(),
+        RiskKind::ScamConfirmed => "scam_confirmed".to_string(),
+        RiskKind::Custom(value) => value.clone(),
+    }
+}
+
 fn zero_value_snapshot(position: &Position, block_number: u64) -> PositionSnapshot {
     let cost = position.entry_cost_basis.unwrap_or_default();
     PositionSnapshot {
@@ -503,6 +683,7 @@ pub struct MemoryTradingStore {
     order_intents: Arc<Mutex<Vec<OrderIntent>>>,
     execution_reports: Arc<Mutex<Vec<ExecutionReport>>>,
     risk_events: Arc<Mutex<Vec<RiskEvent>>>,
+    strategy_decisions: Arc<Mutex<Vec<StrategyDecisionRecord>>>,
 }
 
 impl MemoryTradingStore {
@@ -520,6 +701,10 @@ impl MemoryTradingStore {
 
     pub fn risk_events(&self) -> Vec<RiskEvent> {
         self.risk_events.lock().expect("store lock").clone()
+    }
+
+    pub fn strategy_decisions(&self) -> Vec<StrategyDecisionRecord> {
+        self.strategy_decisions.lock().expect("store lock").clone()
     }
 }
 
@@ -562,6 +747,14 @@ impl TradingStore for MemoryTradingStore {
             .lock()
             .expect("store lock")
             .push(event.clone());
+        Ok(())
+    }
+
+    async fn record_strategy_decision(&self, record: &StrategyDecisionRecord) -> Result<()> {
+        self.strategy_decisions
+            .lock()
+            .expect("store lock")
+            .push(record.clone());
         Ok(())
     }
 }
@@ -673,6 +866,11 @@ mod tests {
         assert_eq!(store.order_intents().len(), 1);
         assert_eq!(store.execution_reports().len(), 1);
         assert_eq!(store.positions().len(), 1);
+        let decisions = store.strategy_decisions();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].event_source, "market");
+        assert_eq!(decisions[0].action, "submit_buy");
+        assert_eq!(decisions[0].order_side, Some(OrderSide::Buy));
         assert_eq!(engine.portfolio().active_position_count(), 1);
     }
 
@@ -705,6 +903,10 @@ mod tests {
         assert!(reports.is_empty());
         assert_eq!(engine.active_risks().len(), 1);
         assert!(store.order_intents().is_empty());
+        let decisions = store.strategy_decisions();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].event_source, "risk");
+        assert_eq!(decisions[0].action, "hold");
     }
 
     #[tokio::test]
@@ -761,5 +963,6 @@ mod tests {
         assert_eq!(store.order_intents().len(), 1);
         assert!(store.execution_reports().is_empty());
         assert!(store.positions().is_empty());
+        assert_eq!(store.strategy_decisions().len(), 2);
     }
 }

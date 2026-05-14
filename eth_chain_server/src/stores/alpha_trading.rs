@@ -30,6 +30,7 @@ pub struct AlphaStrategyDetailResponse {
     pub orders: Vec<OrderIntentView>,
     pub execution_reports: Vec<ExecutionReportView>,
     pub risk_events: Vec<RiskEventView>,
+    pub strategy_decisions: Vec<StrategyDecisionView>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -70,6 +71,7 @@ pub struct AlphaStrategyResetResponse {
     pub order_intents_deleted: u64,
     pub execution_reports_deleted: u64,
     pub risk_events_deleted: u64,
+    pub strategy_decisions_deleted: u64,
     pub strategy_observations_deleted: u64,
     pub requires_trader_restart: bool,
 }
@@ -93,9 +95,11 @@ pub struct AlphaStrategySummary {
     pub orders: i64,
     pub execution_reports: i64,
     pub risk_events: i64,
+    pub strategy_decisions: i64,
     pub latest_order_at: Option<String>,
     pub latest_execution_report_at: Option<String>,
     pub latest_risk_event_at: Option<String>,
+    pub latest_strategy_decision_at: Option<String>,
     pub rules: Vec<StrategyRuleView>,
 }
 
@@ -181,6 +185,22 @@ pub struct RiskEventView {
     pub payload: Value,
 }
 
+#[derive(Debug, Serialize)]
+pub struct StrategyDecisionView {
+    pub id: i64,
+    pub strategy_name: String,
+    pub event_source: String,
+    pub event_key: String,
+    pub block_number: Option<i64>,
+    pub token_address: Option<String>,
+    pub pool_address: Option<String>,
+    pub action: String,
+    pub reason: Option<String>,
+    pub order_side: Option<String>,
+    pub created_at: String,
+    pub payload: Value,
+}
+
 #[derive(Default)]
 struct StrategyCounts {
     positions: i64,
@@ -188,9 +208,11 @@ struct StrategyCounts {
     orders: i64,
     execution_reports: i64,
     risk_events: i64,
+    strategy_decisions: i64,
     latest_order_at: Option<String>,
     latest_execution_report_at: Option<String>,
     latest_risk_event_at: Option<String>,
+    latest_strategy_decision_at: Option<String>,
 }
 
 impl AlphaTradingStore {
@@ -226,6 +248,7 @@ impl AlphaTradingStore {
                 orders: Vec::new(),
                 execution_reports: Vec::new(),
                 risk_events: Vec::new(),
+                strategy_decisions: Vec::new(),
             }));
         };
 
@@ -236,6 +259,7 @@ impl AlphaTradingStore {
             orders: self.orders(&run_id, strategy_id, 100).await?,
             execution_reports: self.run_execution_reports(&run_id, 100).await?,
             risk_events: self.run_risk_events(&run_id, 100).await?,
+            strategy_decisions: self.run_strategy_decisions(&run_id, 100).await?,
         }))
     }
 
@@ -275,6 +299,7 @@ impl AlphaTradingStore {
                 order_intents_deleted: 0,
                 execution_reports_deleted: 0,
                 risk_events_deleted: 0,
+                strategy_decisions_deleted: 0,
                 strategy_observations_deleted: 0,
                 requires_trader_restart: true,
             }));
@@ -313,6 +338,7 @@ impl AlphaTradingStore {
         let mut order_intents_deleted = 0;
         let mut execution_reports_deleted = 0;
         let mut risk_events_deleted = 0;
+        let mut strategy_decisions_deleted = 0;
         let mut strategy_observations_deleted = 0;
 
         if matches!(request.scope, AlphaStrategyResetScope::RunState) {
@@ -346,6 +372,18 @@ impl AlphaTradingStore {
                 "#,
             )
             .bind(&run.run_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+
+            strategy_decisions_deleted = sqlx::query(
+                r#"
+                DELETE FROM alpha_trading.strategy_decisions
+                WHERE run_id = $1 AND strategy_name = $2
+                "#,
+            )
+            .bind(&run.run_id)
+            .bind(strategy_id)
             .execute(&mut *transaction)
             .await?
             .rows_affected();
@@ -391,6 +429,7 @@ impl AlphaTradingStore {
             order_intents_deleted,
             execution_reports_deleted,
             risk_events_deleted,
+            strategy_decisions_deleted,
             strategy_observations_deleted,
             requires_trader_restart: true,
         }))
@@ -503,12 +542,16 @@ impl AlphaTradingStore {
                  WHERE run_id = $1) AS execution_reports,
                 (SELECT COUNT(*) FROM alpha_trading.risk_events
                  WHERE run_id = $1) AS risk_events,
+                (SELECT COUNT(*) FROM alpha_trading.strategy_decisions
+                 WHERE run_id = $1 AND strategy_name = $2) AS strategy_decisions,
                 (SELECT MAX(created_at)::text FROM alpha_trading.order_intents
                  WHERE run_id = $1 AND strategy_name = $2) AS latest_order_at,
                 (SELECT MAX(created_at)::text FROM alpha_trading.execution_reports
                  WHERE run_id = $1) AS latest_execution_report_at,
                 (SELECT MAX(created_at)::text FROM alpha_trading.risk_events
-                 WHERE run_id = $1) AS latest_risk_event_at
+                 WHERE run_id = $1) AS latest_risk_event_at,
+                (SELECT MAX(created_at)::text FROM alpha_trading.strategy_decisions
+                 WHERE run_id = $1 AND strategy_name = $2) AS latest_strategy_decision_at
             "#,
         )
         .bind(run_id)
@@ -522,9 +565,11 @@ impl AlphaTradingStore {
             orders: int(&row, "orders")?,
             execution_reports: int(&row, "execution_reports")?,
             risk_events: int(&row, "risk_events")?,
+            strategy_decisions: int(&row, "strategy_decisions")?,
             latest_order_at: optional_text(&row, "latest_order_at")?,
             latest_execution_report_at: optional_text(&row, "latest_execution_report_at")?,
             latest_risk_event_at: optional_text(&row, "latest_risk_event_at")?,
+            latest_strategy_decision_at: optional_text(&row, "latest_strategy_decision_at")?,
         })
     }
 
@@ -665,6 +710,30 @@ impl AlphaTradingStore {
 
         rows.iter().map(row_to_risk_event).collect()
     }
+
+    pub async fn run_strategy_decisions(
+        &self,
+        run_id: &str,
+        limit: i64,
+    ) -> Result<Vec<StrategyDecisionView>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, strategy_name, event_source, event_key, block_number,
+                   token_address, pool_address, action, reason, order_side,
+                   created_at::text AS created_at, payload::text AS payload
+            FROM alpha_trading.strategy_decisions
+            WHERE run_id = $1
+            ORDER BY id DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(run_id)
+        .bind(clamp_limit(limit))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.iter().map(row_to_strategy_decision).collect()
+    }
 }
 
 fn summary_from_run(run: Option<&TraderRunView>, counts: StrategyCounts) -> AlphaStrategySummary {
@@ -689,9 +758,11 @@ fn summary_from_run(run: Option<&TraderRunView>, counts: StrategyCounts) -> Alph
         orders: counts.orders,
         execution_reports: counts.execution_reports,
         risk_events: counts.risk_events,
+        strategy_decisions: counts.strategy_decisions,
         latest_order_at: counts.latest_order_at,
         latest_execution_report_at: counts.latest_execution_report_at,
         latest_risk_event_at: counts.latest_risk_event_at,
+        latest_strategy_decision_at: counts.latest_strategy_decision_at,
         rules: strategy_rules(),
     }
 }
@@ -810,6 +881,23 @@ fn row_to_risk_event(row: &sqlx::postgres::PgRow) -> Result<RiskEventView> {
         pending_tx_hash: optional_text(row, "pending_tx_hash")?,
         observed_block: optional_int(row, "observed_block")?,
         message: text(row, "message")?,
+        created_at: text(row, "created_at")?,
+        payload: json_text(row, "payload")?,
+    })
+}
+
+fn row_to_strategy_decision(row: &sqlx::postgres::PgRow) -> Result<StrategyDecisionView> {
+    Ok(StrategyDecisionView {
+        id: int(row, "id")?,
+        strategy_name: text(row, "strategy_name")?,
+        event_source: text(row, "event_source")?,
+        event_key: text(row, "event_key")?,
+        block_number: optional_int(row, "block_number")?,
+        token_address: optional_text(row, "token_address")?,
+        pool_address: optional_text(row, "pool_address")?,
+        action: text(row, "action")?,
+        reason: optional_text(row, "reason")?,
+        order_side: optional_text(row, "order_side")?,
         created_at: text(row, "created_at")?,
         payload: json_text(row, "payload")?,
     })

@@ -216,6 +216,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(backtest::run_risk_events);
 
+    let alpha_run_decisions =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "runs" / String / "decisions")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(backtest::run_strategy_decisions);
+
     let progress = warp::path!("eth" / "tokens" / "api" / "runs" / String / "progress")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -284,6 +290,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)
+        .or(alpha_run_decisions)
         .or(alpha_run_risks)
         .or(alpha_run_reports)
         .or(alpha_run_orders)

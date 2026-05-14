@@ -96,3 +96,20 @@ pub(super) async fn run_risk_events(
         )),
     }
 }
+
+pub(super) async fn run_strategy_decisions(
+    run_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .run_strategy_decisions(&run_id, 100)
+        .await
+    {
+        Ok(decisions) => Ok(json_response(&decisions, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load run strategy decisions: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}

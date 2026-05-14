@@ -89,6 +89,9 @@ Finished means:
   whether the run is a full two-week replay or a partial current-regime replay.
 - Strategy Lab output is available for summary, concentration, top 10, worst
   10, buy failures, and open failed exits.
+- The no-capital run persists strategy decision rows for buy, skip, hold, risk
+  check, retry, and exit decisions, and those rows are exposed through the
+  chain-server alpha run API for frontend review.
 - Any missing data needed for a true two-week replay is recorded as the next
   limiting factor.
 
@@ -119,15 +122,20 @@ Latest evidence:
   `+12.928123726556627169 ETH` and PnL excluding top 10 to
   `+5.965430850838657645 ETH`, with the same `59` sell-failed positions.
   Risk exits moved five confirmed sells earlier by up to `51` blocks.
+- Decision-ledger persistence has been added to the alpha engine/store and
+  exposed through chain-server at
+  `/eth/tokens/api/alpha/runs/{run_id}/decisions`. The smoke run
+  `decision-ledger-smoke-20260514-1045` wrote `832` decision rows, all with a
+  reason, including `27` buy submissions and `25` max-hold monitor sells.
 
 ## Active Bottlenecks
 
 | Order | Bottleneck | Owner | Evidence | Next Action |
 | --- | --- | --- | --- | --- |
-| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned non-capital evidence is `maxhold50` with risk exits: `+12.928123726556627169 ETH` total PnL and `+5.965430850838657645 ETH` excluding top 10 on the latest partial two-week-requested replay. Evidence is still incomplete for real orders because the run is partial coverage, has `59` sell-failed positions, and lacks complete decision-ledger explainability. | Treat `maxhold50+risk exits` as the current candidate, then resolve failed-exit policy, decision-ledger gaps, and full two-week observation coverage before real execution handoff. |
-| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | The latest `maxhold50+risk exits` live non-capital run stays positive after excluding top 10, unlike the older 15k/200-block hold baselines. Risk exits moved five sells earlier and improved PnL slightly. Concentration is improved but not enough by itself for production: top-10 and worst-10 spot checks passed mechanically, but full decision reasons are not yet persisted for every trade. | Keep `maxhold50+risk exits` as the current baseline candidate. Compare any new policy against this run's PnL, concentration, failed exits, and top/worst audit quality. |
+| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned non-capital evidence is `maxhold50` with risk exits: `+12.928123726556627169 ETH` total PnL and `+5.965430850838657645 ETH` excluding top 10 on the latest partial two-week-requested replay. Evidence is still incomplete for real orders because the run is partial coverage, has `59` sell-failed positions, and needs the new decision ledger rerun over the full candidate window. | Treat `maxhold50+risk exits` as the current candidate, then resolve failed-exit policy, run the candidate through the decision-ledger path, and restore full two-week observation coverage before real execution handoff. |
+| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | The latest `maxhold50+risk exits` live non-capital run stays positive after excluding top 10, unlike the older 15k/200-block hold baselines. Risk exits moved five sells earlier and improved PnL slightly. Concentration is improved but not enough by itself for production: top-10 and worst-10 spot checks passed mechanically, and the decision-ledger smoke run now proves rule reasons can be persisted. | Keep `maxhold50+risk exits` as the current baseline candidate. Compare any new policy against this run's PnL, concentration, failed exits, and decision-ledger audit quality. |
 | 3 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest `maxhold50` run has `59` sell-failed positions. The dominant failure bucket is `TransferHelper: TRANSFER_FROM_FAILED` with `88` reports; worst-position spot check shows full loss after the pool fell to near-zero reserve and became non-buyable/non-sellable. An opt-in retry-only policy (`20` block interval, `3` failed-report cap) did not recover exits and doubled failed reports. | Keep retry support available for controlled experiments, but do not promote retry-only. Next policies should test chunked exits, no-observed-sell filtering, and earlier risk exits before pools become unsellable. |
-| 4 | **Decision ledger completeness** | `alpha/engine`, `alpha/store`, frontend | Execution reports now carry more fill context, but the strategy decision ledger still does not persist every rule input and skip/action reason needed for explainable frontend review and real execution approval. | Persist decisions keyed by run, strategy, token, pool, rule id, inputs, action, execution report, exit reason, and PnL snapshot. The frontend must be able to audit every real-deployment candidate trade. |
+| 4 | **Decision-ledger candidate coverage** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | The alpha engine now emits `alpha_trading.strategy_decisions` rows for market, risk, and position-monitor decisions. Chain-server exposes them at `/eth/tokens/api/alpha/runs/{run_id}/decisions`, and the smoke run `decision-ledger-smoke-20260514-1045` wrote `832` reasoned decisions. The remaining gap is candidate-window coverage and richer trade joins, not basic persistence. | Rerun `maxhold50+risk exits` through the decision-ledger path, then add frontend views that join decisions to positions, execution reports, exit failures, and PnL snapshots for top/worst review. |
 | 5 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
 | 6 | **Uniswap V3 pool identity miss in live token apply** | `eth_token`, `eth_chain_server` | The fresh chain-server run now has `tx_failures=1` and one `pipeline_issues.jsonl` row. At block `25,091,919`, token transaction apply failed because a Uniswap V3 pool for token `0x8Ef699477219710Ac4540919A374621f1f855510` / WETH / fee tier `100` was not present in the tracked registry when the token update needed it. | Reproduce that block from disk cache/Reth and inspect whether the V3 `PoolCreated` event was missed, filtered out by retention, mis-keyed by token orientation, or unavailable before the token tx. Decide whether this class should be strict failure or optional pending metadata. Chain-server soak should return to `tx_failures=0`. |
 | 7 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The previous mempool run repeatedly retried a V4 PositionManager approval for token id `0x42422`, but the live pool cache had no tracked position context for that id. Current live pools expose 94 V3/V4 pools and only 13 pools with non-empty `liquidity_positions`, so many valid position approvals cannot be enriched into public LP-position approval signals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
@@ -193,9 +201,9 @@ Recent checks that passed during this cleanup:
    baseline: chunked exits, no-observed-sell exposure limits, or earlier
    risk-driven exits. Retry cadence exists now, but retry-only was not useful in
    the latest comparison.
-3. Add decision-ledger rows for the missing entry/skip/exit rule explanations
-   so the frontend can audit the candidate without ad hoc SQL or Token Lab spot
-   checks.
+3. Rerun the candidate policy with the decision ledger enabled over the largest
+   current observation window, then expose the run's decision rows in the
+   frontend without ad hoc SQL or Token Lab spot checks.
 4. Define the real production strategy candidate and its execution gates:
    sizing, max exposure, retry cadence, stale-data threshold, simulation
    freshness threshold, exit restrictions, and kill switch behavior.

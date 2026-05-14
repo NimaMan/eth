@@ -35,20 +35,23 @@ impl SnipeAllStrategy {
         &self.state
     }
 
-    fn buy_pool(&mut self, pool: &PoolSnapshot) -> StrategyDecision {
+    fn buy_pool(&mut self, pool: &PoolSnapshot, reason: impl Into<String>) -> StrategyDecision {
         self.state.mark_bought(pool.address.clone());
-        StrategyDecision::SubmitOrder(OrderIntent {
-            portfolio_id: self.config.portfolio_id.clone(),
-            wallet_id: self.config.wallet_id.clone(),
-            strategy_name: self.name(),
-            side: OrderSide::Buy,
-            token_address: pool.token_address,
-            pool_address: pool.address.clone(),
-            amount: self.config.buy_amount.clone(),
-            route: None,
-            max_slippage_bps: self.config.max_slippage_bps,
-            deadline_secs: self.config.deadline_secs,
-        })
+        StrategyDecision::submit_order(
+            OrderIntent {
+                portfolio_id: self.config.portfolio_id.clone(),
+                wallet_id: self.config.wallet_id.clone(),
+                strategy_name: self.name(),
+                side: OrderSide::Buy,
+                token_address: pool.token_address,
+                pool_address: pool.address.clone(),
+                amount: self.config.buy_amount.clone(),
+                route: None,
+                max_slippage_bps: self.config.max_slippage_bps,
+                deadline_secs: self.config.deadline_secs,
+            },
+            reason,
+        )
     }
 
     fn sell_pool(
@@ -56,6 +59,7 @@ impl SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         token_address: TokenAddress,
         pool_address: PoolAddress,
+        reason: impl Into<String>,
     ) -> StrategyDecision {
         // Look up the open position to determine how many tokens to sell.
         let position = ctx.portfolio.positions.values().find(|p| {
@@ -68,41 +72,47 @@ impl SnipeAllStrategy {
         let Some(token_amount) = position
             .and_then(|position| sell_amount_from_position(position, self.config.sell_fraction))
         else {
-            return StrategyDecision::Hold;
+            return StrategyDecision::hold("exit.no_sellable_position");
         };
 
-        StrategyDecision::SubmitOrder(OrderIntent {
-            portfolio_id: self.config.portfolio_id.clone(),
-            wallet_id: self.config.wallet_id.clone(),
-            strategy_name: self.name(),
-            side: OrderSide::Sell,
-            token_address,
-            pool_address,
-            amount: token_amount,
-            route: None,
-            max_slippage_bps: self.config.max_slippage_bps,
-            deadline_secs: self.config.deadline_secs,
-        })
+        StrategyDecision::submit_order(
+            OrderIntent {
+                portfolio_id: self.config.portfolio_id.clone(),
+                wallet_id: self.config.wallet_id.clone(),
+                strategy_name: self.name(),
+                side: OrderSide::Sell,
+                token_address,
+                pool_address,
+                amount: token_amount,
+                route: None,
+                max_slippage_bps: self.config.max_slippage_bps,
+                deadline_secs: self.config.deadline_secs,
+            },
+            reason,
+        )
     }
 
-    fn sell_position(&self, position: &Position) -> StrategyDecision {
+    fn sell_position(&self, position: &Position, reason: impl Into<String>) -> StrategyDecision {
         let Some(token_amount) = sell_amount_from_position(position, self.config.sell_fraction)
         else {
-            return StrategyDecision::Hold;
+            return StrategyDecision::hold("exit.no_token_amount");
         };
 
-        StrategyDecision::SubmitOrder(OrderIntent {
-            portfolio_id: self.config.portfolio_id.clone(),
-            wallet_id: self.config.wallet_id.clone(),
-            strategy_name: self.name(),
-            side: OrderSide::Sell,
-            token_address: position.key.token_address,
-            pool_address: position.key.pool_address.clone(),
-            amount: token_amount,
-            route: None,
-            max_slippage_bps: self.config.max_slippage_bps,
-            deadline_secs: self.config.deadline_secs,
-        })
+        StrategyDecision::submit_order(
+            OrderIntent {
+                portfolio_id: self.config.portfolio_id.clone(),
+                wallet_id: self.config.wallet_id.clone(),
+                strategy_name: self.name(),
+                side: OrderSide::Sell,
+                token_address: position.key.token_address,
+                pool_address: position.key.pool_address.clone(),
+                amount: token_amount,
+                route: None,
+                max_slippage_bps: self.config.max_slippage_bps,
+                deadline_secs: self.config.deadline_secs,
+            },
+            reason,
+        )
     }
 
     fn should_retry_failed_exit(&self, position: &Position, current_block: u64) -> bool {
@@ -143,7 +153,12 @@ impl SnipeAllStrategy {
         if let Some(max_hold) = self.config.max_hold_blocks {
             if let Some(entry_block) = position.entry_block {
                 if current_block > entry_block + max_hold {
-                    return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+                    return Some(self.sell_pool(
+                        ctx,
+                        pool.token_address,
+                        pool.address.clone(),
+                        "exit.max_hold",
+                    ));
                 }
             }
         }
@@ -166,14 +181,24 @@ impl SnipeAllStrategy {
         // Stop-loss: price fell below threshold ratio.
         if let Some(sl_ratio) = self.config.stop_loss_ratio {
             if price_ratio <= sl_ratio {
-                return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+                return Some(self.sell_pool(
+                    ctx,
+                    pool.token_address,
+                    pool.address.clone(),
+                    "exit.stop_loss",
+                ));
             }
         }
 
         // Take-profit: price rose above threshold ratio.
         if let Some(tp_ratio) = self.config.take_profit_ratio {
             if price_ratio >= tp_ratio {
-                return Some(self.sell_pool(ctx, pool.token_address, pool.address.clone()));
+                return Some(self.sell_pool(
+                    ctx,
+                    pool.token_address,
+                    pool.address.clone(),
+                    "exit.take_profit",
+                ));
             }
         }
 
@@ -221,7 +246,7 @@ impl Strategy for SnipeAllStrategy {
             pool, block_number, ..
         } = event
         else {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("market_event_not_pool_update"));
         };
 
         let strategy_name = self.name();
@@ -241,23 +266,28 @@ impl Strategy for SnipeAllStrategy {
                 return Ok(decision);
             }
 
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("position_open_no_exit"));
         }
 
         // 1. Shared eligibility gate: reject ineligible pools first.
         match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
         {
-            RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
+            RuleDecision::Hold { rule, reason } => {
+                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+            }
             _ => {}
         }
 
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
 
         Ok(match entry::evaluate(&self.state, pool) {
-            RuleDecision::Enter { .. } => self.buy_pool(pool),
-            RuleDecision::Hold { .. } | RuleDecision::Exit { .. } => StrategyDecision::Hold,
+            RuleDecision::Enter { rule } => self.buy_pool(pool, rule),
+            RuleDecision::Hold { rule, reason } => {
+                StrategyDecision::hold(format!("{rule}:{reason}"))
+            }
+            RuleDecision::Exit { rule } => StrategyDecision::hold(format!("{rule}:exit_ignored")),
         })
     }
 
@@ -281,7 +311,12 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
+                    return Ok(self.sell_pool(
+                        ctx,
+                        event.token_address,
+                        pool_address,
+                        "exit.liquidity_removal",
+                    ));
                 }
             }
         }
@@ -295,7 +330,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address, "exit.tax"));
                 }
             }
         }
@@ -309,7 +344,12 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
+                    return Ok(self.sell_pool(
+                        ctx,
+                        event.token_address,
+                        pool_address,
+                        "exit.lp_approval",
+                    ));
                 }
             }
         }
@@ -323,12 +363,12 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    return Ok(self.sell_pool(ctx, event.token_address, pool_address));
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address, "exit.scam"));
                 }
             }
         }
 
-        Ok(StrategyDecision::Hold)
+        Ok(StrategyDecision::hold("risk.no_exit_rule_matched"))
     }
 
     fn on_position_monitor(
@@ -373,8 +413,15 @@ impl Strategy for SnipeAllStrategy {
 
         Ok(positions
             .iter()
-            .map(|position| self.sell_position(position))
-            .filter(|decision| !matches!(decision, StrategyDecision::Hold))
+            .map(|position| {
+                let reason = if position.state == PositionState::SellFailed {
+                    "exit.failed_retry"
+                } else {
+                    "exit.max_hold"
+                };
+                self.sell_position(position, reason)
+            })
+            .filter(|decision| !decision.is_hold())
             .collect())
     }
 }
@@ -513,11 +560,14 @@ mod tests {
             )
             .unwrap();
         match decision {
-            StrategyDecision::SubmitOrder(intent) => {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Buy);
                 assert_eq!(intent.pool_address, pool.address);
             }
-            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
                 panic!("expected buy order")
             }
         }
@@ -531,7 +581,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(repeat, StrategyDecision::Hold);
+        assert!(repeat.is_hold());
     }
 
     #[test]
@@ -558,11 +608,14 @@ mod tests {
 
         assert_eq!(decisions.len(), 1);
         match &decisions[0] {
-            StrategyDecision::SubmitOrder(intent) => {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Sell);
                 assert_eq!(intent.pool_address, pool.address);
             }
-            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
                 panic!("expected sell order")
             }
         }
@@ -660,11 +713,14 @@ mod tests {
 
         assert_eq!(decisions.len(), 1);
         match &decisions[0] {
-            StrategyDecision::SubmitOrder(intent) => {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Sell);
                 assert_eq!(intent.pool_address, pool.address);
             }
-            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
                 panic!("expected retry sell order")
             }
         }
@@ -749,7 +805,7 @@ mod tests {
             )
             .unwrap();
 
-        assert!(matches!(decision, StrategyDecision::SubmitOrder(_)));
+        assert!(decision.order_intent().is_some());
     }
 
     #[test]
@@ -779,7 +835,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(decision, StrategyDecision::Hold);
+        assert!(decision.is_hold());
     }
 
     #[test]
@@ -809,7 +865,7 @@ mod tests {
             )
             .unwrap();
 
-        assert!(matches!(decision, StrategyDecision::SubmitOrder(_)));
+        assert!(decision.order_intent().is_some());
     }
 
     #[test]
@@ -838,7 +894,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(decision, StrategyDecision::Hold);
+        assert!(decision.is_hold());
     }
 
     #[test]
@@ -867,7 +923,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(decision, StrategyDecision::Hold);
+        assert!(decision.is_hold());
     }
 
     #[test]
@@ -898,11 +954,14 @@ mod tests {
 
         let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
         match decision {
-            StrategyDecision::SubmitOrder(intent) => {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Sell);
                 assert_eq!(intent.pool_address, pool.address);
             }
-            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
                 panic!("expected sell order")
             }
         }
@@ -936,11 +995,14 @@ mod tests {
 
         let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
         match decision {
-            StrategyDecision::SubmitOrder(intent) => {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Sell);
                 assert_eq!(intent.pool_address, pool.address);
             }
-            StrategyDecision::Hold | StrategyDecision::CancelOrders { .. } => {
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
                 panic!("expected sell order")
             }
         }

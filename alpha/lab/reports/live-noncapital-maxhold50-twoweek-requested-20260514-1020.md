@@ -245,3 +245,65 @@ The risk exits moved five confirmed sells earlier, by up to `51` blocks:
 Read: risk exits should be part of the current live-aligned candidate. They
 helped slightly and are already closer to live trader behavior than pool-only
 max-hold. They do not solve the main failed-exit exposure issue.
+
+## Decision-Ledger Smoke
+
+After the risk-exit comparison, strategy decisions were made first-class
+records in `alpha_trading.strategy_decisions` and exposed through chain-server:
+
+```text
+/eth/tokens/api/alpha/runs/{run_id}/decisions
+```
+
+Smoke run:
+
+```bash
+RUN_ID=decision-ledger-smoke-20260514-1045
+RUST_LOG=info cargo run --release -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+  --run-id "$RUN_ID" \
+  --replay-run-id snipe-all-v1-chain-sim-live-v4 \
+  --from-block 25091500 \
+  --to-block 25092144 \
+  --skip-primed \
+  --include-mempool-signals \
+  --buy-amount-wei 10000000000000000 \
+  --min-liquidity-eth 0.5 \
+  --min-liquidity-usd 1000 \
+  --max-hold-blocks 50 \
+  --exit-liquidity-removal \
+  --exit-lp-approval \
+  --exit-tax \
+  --exit-scam
+```
+
+Result:
+
+| Metric | Value |
+| --- | ---: |
+| Events processed | 1,452 |
+| Execution reports | 53 |
+| Confirmed reports | 49 |
+| Failed reports | 4 |
+| Positions | 27 |
+| Open positions | 3 |
+| Strategy decisions | 832 |
+| Decisions with reason | 832 |
+| Actionable decisions | 53 |
+
+Top decision reasons:
+
+| Event source | Action | Reason | Rows |
+| --- | --- | --- | ---: |
+| `market` | `hold` | `entry.buy_eligible_pool_once:pool already bought` | 548 |
+| `market` | `hold` | `position_open_no_exit` | 192 |
+| `market` | `submit_buy` | `entry.buy_eligible_pool_once` | 27 |
+| `position_monitor` | `submit_sell` | `exit.max_hold` | 25 |
+| `market` | `hold` | `entry.eligibility:low_liquidity` | 20 |
+| `market` | `hold` | `entry.eligibility:unsupported_v4_hooks` | 11 |
+| `risk` | `hold` | `risk.no_exit_rule_matched` | 8 |
+| `market` | `submit_sell` | `exit.max_hold` | 1 |
+
+Read: persistence and API access work. The next evidence step is to rerun the
+full `maxhold50+risk exits` candidate through this ledger path, then use the
+frontend/API to audit top winners, worst losers, skipped entries, and failed
+exits without ad hoc SQL.

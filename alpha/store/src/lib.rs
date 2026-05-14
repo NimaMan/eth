@@ -11,7 +11,7 @@ use eth_alpha_core::{
     order::{OrderIntent, OrderSide},
     position::{Position, PositionSnapshot, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
-    store::TradingStore,
+    store::{StrategyDecisionRecord, TradingStore},
 };
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -423,6 +423,33 @@ impl TradingStore for PostgresTradingStore {
         .map_err(store_error)?;
         Ok(())
     }
+
+    async fn record_strategy_decision(&self, record: &StrategyDecisionRecord) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.strategy_decisions (
+                run_id, strategy_name, event_source, event_key, block_number,
+                token_address, pool_address, action, reason, order_side, payload, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(&record.strategy_name)
+        .bind(&record.event_source)
+        .bind(&record.event_key)
+        .bind(record.block_number.map(u64_to_i64))
+        .bind(&record.token_address)
+        .bind(&record.pool_address)
+        .bind(&record.action)
+        .bind(&record.reason)
+        .bind(record.order_side.map(order_side_label))
+        .bind(&record.payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
 }
 
 impl PostgresTradingStore {
@@ -703,6 +730,31 @@ const MIGRATIONS: &[&str] = &[
     ON alpha_trading.risk_events (token_address, created_at DESC)
     "#,
     r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.strategy_decisions (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        strategy_name TEXT NOT NULL,
+        event_source TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        block_number BIGINT,
+        token_address TEXT,
+        pool_address TEXT,
+        action TEXT NOT NULL,
+        reason TEXT,
+        order_side TEXT,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS strategy_decisions_run_event_idx
+    ON alpha_trading.strategy_decisions (run_id, event_source, block_number, id)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS strategy_decisions_token_idx
+    ON alpha_trading.strategy_decisions (token_address, created_at DESC)
+    "#,
+    r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.strategy_observations (
         run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
         strategy_name TEXT NOT NULL,
@@ -759,6 +811,7 @@ mod tests {
             "positions",
             "position_snapshots",
             "risk_events",
+            "strategy_decisions",
             "strategy_observations",
         ] {
             assert!(combined.contains(table));

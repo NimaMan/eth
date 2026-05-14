@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde_json::Value;
 
 use crate::{
     error::Result,
@@ -8,6 +9,20 @@ use crate::{
     position::{Position, PositionSnapshot},
     risk::RiskEvent,
 };
+
+#[derive(Clone, Debug)]
+pub struct StrategyDecisionRecord {
+    pub strategy_name: String,
+    pub event_source: String,
+    pub event_key: String,
+    pub block_number: Option<u64>,
+    pub token_address: Option<String>,
+    pub pool_address: Option<String>,
+    pub action: String,
+    pub reason: Option<String>,
+    pub order_side: Option<OrderSide>,
+    pub payload: Value,
+}
 
 #[async_trait]
 pub trait TradingStore: Send + Sync {
@@ -38,6 +53,10 @@ pub trait TradingStore: Send + Sync {
     }
 
     async fn record_risk_event(&self, _event: &RiskEvent) -> Result<()> {
+        Ok(())
+    }
+
+    async fn record_strategy_decision(&self, _record: &StrategyDecisionRecord) -> Result<()> {
         Ok(())
     }
 }
