@@ -46,6 +46,10 @@ pub struct LiveTokenPoolSnapshot {
     pub total_liquidity: f64,
     pub can_buy: bool,
     pub can_sell: bool,
+    #[serde(default)]
+    pub has_observed_buy: bool,
+    #[serde(default)]
+    pub has_observed_sell: bool,
     pub trading_enabled: bool,
     pub trading_enabled_block: Option<u64>,
     pub trading_enabled_tx: Option<String>,
@@ -150,8 +154,8 @@ impl LiveTokenPoolSnapshot {
                 token_reserve: Some(pool.token_reserve()),
                 can_buy: pool.effective_can_buy(),
                 can_sell: pool.effective_can_sell(),
-                cohort_can_buy: Some(pool.state.can_buy || pool.has_observed_buy()),
-                cohort_can_sell: Some(pool.state.can_sell || pool.has_observed_sell()),
+                cohort_can_buy: Some(pool.state.can_buy),
+                cohort_can_sell: Some(pool.state.can_sell),
                 liquidity_removed: explicit_liquidity_removal,
                 creation_block: pool.creation_block,
                 creation_timestamp: pool.creation_timestamp,
@@ -190,6 +194,8 @@ impl LiveTokenPoolSnapshot {
             total_liquidity: pool.state.total_liquidity,
             can_buy: pool.state.can_buy,
             can_sell: pool.state.can_sell,
+            has_observed_buy: pool.has_observed_buy(),
+            has_observed_sell: pool.has_observed_sell(),
             trading_enabled: pool.trading_enabled(),
             trading_enabled_block: pool.can_buy_block,
             trading_enabled_tx: pool.can_buy_tx.clone(),
@@ -285,6 +291,10 @@ mod tests {
         pool.base
             .update_reserves(1_000.0, 1.2, 100, 1_700, "0xSYNC1");
         pool.base.state.record_swap(0.1, 25.0, 0.1, 25.0);
+        pool.base
+            .set_simulated_buy_status(true, 101, "0xBUY", 1_710);
+        pool.base
+            .set_simulated_sell_status(true, None, None, 102, "0xSELL");
         pool.base
             .update_reserves(1_000.0, 0.03, 120, 1_940, "0xDRAIN");
         token

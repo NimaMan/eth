@@ -348,7 +348,7 @@ impl TxSimulator {
     }
 
     /// Start a simulation chain using a caller-supplied canonical header for
-    /// `at_block`. Disk-cache/live catchup callers can already have the block
+    /// `at_block`. Disk-cache catchup callers can already have the block
     /// header even when the read-only static-file provider cannot see it yet.
     pub async fn start_simulation_chain_with_header(
         &self,
@@ -365,19 +365,10 @@ impl TxSimulator {
 
         let latest = self.latest_historical_context_block_number()?;
         if at_block > latest {
-            if let Some(forked_state) = self
-                .block_context_loader()
-                .replay_live_state(at_block, Some(block_header))
-                .await?
-            {
-                return Ok(UnsignedTxChainSimulation::new(
-                    Arc::new(self.clone()),
-                    forked_state,
-                ));
-            }
             return Err(eyre::eyre!(
-                "state for block {} not yet available locally or via live cache",
-                at_block
+                "state for block {} not yet available from local Reth historical context (latest {})",
+                at_block,
+                latest
             ));
         }
 
@@ -400,24 +391,10 @@ impl TxSimulator {
         let block_number = at_block.unwrap_or(latest);
 
         if block_number > latest {
-            if let Some(mut forked_state) = self
-                .block_context_loader()
-                .replay_live_state(block_number, None)
-                .await?
-            {
-                let gas_block = gas_block_number.unwrap_or(block_number);
-                if gas_block != block_number {
-                    self.override_forked_block_header_gas(&mut forked_state, gas_block)
-                        .await?;
-                }
-                return Ok(UnsignedTxChainSimulation::new(
-                    Arc::new(self.clone()),
-                    forked_state,
-                ));
-            }
             return Err(eyre::eyre!(
-                "state for block {} not yet available locally or via live cache",
-                block_number
+                "state for block {} not yet available from local Reth historical context (latest {})",
+                block_number,
+                latest
             ));
         }
 

@@ -496,10 +496,8 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     if config.block_delay > 0 {
         let requested_sell_block = block_number + config.block_delay;
         let latest = simulator
-            .live_latest_block_number()
-            .await?
-            .unwrap_or(simulator.latest_historical_context_block_number()?);
-        let latest = latest.max(block_number);
+            .latest_historical_context_block_number()?
+            .max(block_number);
         let sell_block = if requested_sell_block > latest {
             latest
         } else {

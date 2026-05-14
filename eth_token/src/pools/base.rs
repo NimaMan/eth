@@ -318,11 +318,11 @@ impl BasePool {
     }
 
     pub fn effective_can_buy(&self) -> bool {
-        self.current_liquidity_allows_trading() && (self.state.can_buy || self.has_observed_buy())
+        self.current_liquidity_allows_trading() && self.state.can_buy
     }
 
     pub fn effective_can_sell(&self) -> bool {
-        self.current_liquidity_allows_trading() && (self.state.can_sell || self.has_observed_sell())
+        self.current_liquidity_allows_trading() && self.state.can_sell
     }
 
     pub fn has_observed_buy(&self) -> bool {
@@ -700,7 +700,7 @@ mod tests {
 
         assert!(pool.has_observed_sell());
         assert!(!pool.state.can_sell);
-        assert!(pool.effective_can_sell());
+        assert!(!pool.effective_can_sell());
         assert!(!pool.can_buy_and_sell());
 
         let status = pool.trading_status();
@@ -713,8 +713,8 @@ mod tests {
         let mut pool = weth_pool();
         pool.update_reserves(100.0, 1.0, 10, 1_700, "0xSYNC");
         pool.state.record_swap(1.0, 25.0, 0.1, 10.0);
-        assert!(pool.effective_can_buy());
-        assert!(pool.effective_can_sell());
+        assert!(!pool.effective_can_buy());
+        assert!(!pool.effective_can_sell());
         assert!(!pool.trading_enabled());
 
         pool.update_reserves(100.0, 0.001, 11, 1_712, "0xDUST");

@@ -113,6 +113,8 @@ pub struct PoolView {
     pub supply_ratio_label: Option<String>,
     pub can_buy: bool,
     pub can_sell: bool,
+    pub has_observed_buy: bool,
+    pub has_observed_sell: bool,
     pub trading_enabled: bool,
     pub stage: PoolLifecycle,
     pub buy_tax: Option<f64>,
@@ -557,8 +559,8 @@ impl PoolView {
             token_reserve: Some(base.token_reserve()),
             can_buy: current_trading.can_buy,
             can_sell: current_trading.can_sell,
-            cohort_can_buy: Some(base.state.can_buy || base.has_observed_buy()),
-            cohort_can_sell: Some(base.state.can_sell || base.has_observed_sell()),
+            cohort_can_buy: Some(base.state.can_buy),
+            cohort_can_sell: Some(base.state.can_sell),
             is_scam: explicit_liquidity_removal || matches!(risk.level, PoolRiskLevel::Honeypot),
             hidden_mint: token.hidden_mint_detected(),
             liquidity_removed: explicit_liquidity_removal,
@@ -649,6 +651,8 @@ impl PoolView {
             supply_ratio_label: supply_ratio.label,
             can_buy: current_trading.can_buy,
             can_sell: current_trading.can_sell,
+            has_observed_buy: base.has_observed_buy(),
+            has_observed_sell: base.has_observed_sell(),
             trading_enabled: current_trading.can_buy,
             stage,
             buy_tax,
@@ -842,8 +846,8 @@ fn current_trading_view(
             | PoolLifecycle::Evicted
     );
     CurrentTradingView {
-        can_buy: liquidity_allows_trading && (base.state.can_buy || base.has_observed_buy()),
-        can_sell: liquidity_allows_trading && (base.state.can_sell || base.has_observed_sell()),
+        can_buy: liquidity_allows_trading && base.state.can_buy,
+        can_sell: liquidity_allows_trading && base.state.can_sell,
     }
 }
 
@@ -1307,7 +1311,7 @@ mod tests {
     }
 
     #[test]
-    fn current_trading_view_uses_observed_chain_swaps_as_evidence() {
+    fn current_trading_view_keeps_observed_chain_swaps_separate() {
         let mut pool = UniswapV2Pool::new(
             "0xpool",
             "0xtoken",
@@ -1322,13 +1326,17 @@ mod tests {
 
         let current = current_trading_view(&pool.base, PoolLiquidityLevel::Liquid);
         assert!(current.can_buy);
-        assert!(current.can_sell);
+        assert!(!current.can_sell);
+        assert!(pool.base.has_observed_sell());
         assert!(!pool.base.state.can_sell);
         assert_eq!(
             current_lifecycle_view(&pool.base, current),
-            PoolLifecycle::Trading
+            PoolLifecycle::CannotSell
         );
-        assert_eq!(pool_risk(&pool.base, current).level, PoolRiskLevel::Clear);
+        assert_eq!(
+            pool_risk(&pool.base, current).level,
+            PoolRiskLevel::Honeypot
+        );
     }
 
     #[test]
