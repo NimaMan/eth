@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use alloy_primitives::{address, Address, Bytes, U256};
 use async_trait::async_trait;
@@ -27,6 +28,7 @@ use eth_alpha_core::{
     portfolio::PortfolioState,
     position::Position,
 };
+use tokio::time::sleep;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
     simulate_buy_swap_with_params, simulate_sell_swap_with_params, BuySwapResult,
@@ -41,6 +43,9 @@ const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
 const USDC_ADDRESS: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
 const USDT_ADDRESS: Address = address!("dAC17F958D2ee523a2206206994597C13D831ec7");
 const DAI_ADDRESS: Address = address!("6B175474E89094C44Da98b954EedeAC495271d0F");
+const LIVE_EXECUTION_DELAY_BLOCKS: u64 = 1;
+const LIVE_STATE_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
+const LIVE_STATE_WAIT_INTERVAL: Duration = Duration::from_millis(500);
 
 // ---------------------------------------------------------------------------
 // Shared simulation logic (private)
@@ -159,6 +164,7 @@ async fn simulate_sell_at_block(
         }
     };
 
+    let denom_decimals = params.denom_decimals;
     let result: SellSwapResult = match simulate_sell_swap_with_params(
         simulator.clone(),
         tx_processor.clone(),
@@ -191,7 +197,7 @@ async fn simulate_sell_at_block(
 
     let denom_received = Amount {
         raw: result.denom_received,
-        decimals: 18,
+        decimals: denom_decimals,
     };
 
     Ok(ExecutionReport {
@@ -383,8 +389,10 @@ pub struct LiveChainSimExecutionAdapter {
     tx_processor: Arc<TxProcessor>,
     order_prefix: Arc<str>,
     next_order_id: Arc<AtomicU64>,
+    current_block: Arc<AtomicU64>,
     pools: Arc<Mutex<HashMap<PoolAddress, PoolSnapshot>>>,
     portfolio: Arc<Mutex<PortfolioState>>,
+    execution_delay_blocks: u64,
 }
 
 impl LiveChainSimExecutionAdapter {
@@ -394,8 +402,10 @@ impl LiveChainSimExecutionAdapter {
             tx_processor,
             order_prefix: Arc::<str>::from(unique_order_prefix()),
             next_order_id: Arc::new(AtomicU64::new(0)),
+            current_block: Arc::new(AtomicU64::new(0)),
             pools: Arc::new(Mutex::new(HashMap::new())),
             portfolio: Arc::new(Mutex::new(PortfolioState::default())),
+            execution_delay_blocks: LIVE_EXECUTION_DELAY_BLOCKS,
         })
     }
 
@@ -404,14 +414,34 @@ impl LiveChainSimExecutionAdapter {
         tx_processor: Arc<TxProcessor>,
         prefix: impl Into<String>,
     ) -> Result<Self> {
+        Self::with_prefix_and_next_order_sequence(live_sim, tx_processor, prefix, 0)
+    }
+
+    pub fn with_prefix_and_next_order_sequence(
+        live_sim: LiveTxSimulator,
+        tx_processor: Arc<TxProcessor>,
+        prefix: impl Into<String>,
+        next_order_sequence: u64,
+    ) -> Result<Self> {
         Ok(Self {
             live_sim,
             tx_processor,
             order_prefix: Arc::<str>::from(prefix.into()),
-            next_order_id: Arc::new(AtomicU64::new(0)),
+            next_order_id: Arc::new(AtomicU64::new(next_order_sequence)),
+            current_block: Arc::new(AtomicU64::new(0)),
             pools: Arc::new(Mutex::new(HashMap::new())),
             portfolio: Arc::new(Mutex::new(PortfolioState::default())),
+            execution_delay_blocks: LIVE_EXECUTION_DELAY_BLOCKS,
         })
+    }
+
+    pub fn current_block(&self) -> Arc<AtomicU64> {
+        self.current_block.clone()
+    }
+
+    pub fn with_execution_delay_blocks(mut self, delay_blocks: u64) -> Self {
+        self.execution_delay_blocks = delay_blocks;
+        self
     }
 
     pub fn pools(&self) -> Arc<Mutex<HashMap<PoolAddress, PoolSnapshot>>> {
@@ -425,6 +455,31 @@ impl LiveChainSimExecutionAdapter {
     /// Expose diagnostics about which state source is being used.
     pub async fn state_status(&self) -> eyre::Result<tx_simulator::LiveStateStatus> {
         self.live_sim.latest_state_status().await
+    }
+
+    async fn wait_for_execution_block(
+        &self,
+        target_block: u64,
+    ) -> std::result::Result<u64, String> {
+        let started = Instant::now();
+        loop {
+            match self.live_sim.latest_state_block_number().await {
+                Ok(selected_block) if selected_block >= target_block => return Ok(target_block),
+                Ok(selected_block) if started.elapsed() >= LIVE_STATE_WAIT_TIMEOUT => {
+                    return Err(format!(
+                        "live chain-sim state stale: selected block {selected_block} below required execution block {target_block}"
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if started.elapsed() >= LIVE_STATE_WAIT_TIMEOUT => {
+                    return Err(format!(
+                        "live chain-sim state unavailable before required execution block {target_block}: {error}"
+                    ));
+                }
+                Err(_) => {}
+            }
+            sleep(LIVE_STATE_WAIT_INTERVAL).await;
+        }
     }
 }
 
@@ -442,11 +497,23 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
             pool
         };
 
-        let block = self
-            .live_sim
-            .latest_state_block_number()
-            .await
-            .map_err(|e| eth_alpha_core::error::AlphaCoreError::Execution(e.to_string()))?;
+        let observed_block = self.current_block.load(Ordering::Relaxed);
+        let observed_block = if observed_block > 0 {
+            observed_block
+        } else {
+            pool.latest_block
+        };
+        let Some(target_block) = observed_block.checked_add(self.execution_delay_blocks) else {
+            return Ok(failed_report_at(
+                order_id,
+                "live chain-sim execution block overflow",
+                observed_block,
+            ));
+        };
+        let block = match self.wait_for_execution_block(target_block).await {
+            Ok(block) => block,
+            Err(error) => return Ok(failed_report_at(order_id, error, target_block)),
+        };
 
         let simulator = self.live_sim.simulator();
 

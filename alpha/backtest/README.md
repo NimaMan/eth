@@ -36,29 +36,12 @@ StrategyDecision
 
 The Python version had separate `BacktestStrategyEngine` and `LiveStrategyEngine` paths with duplicated state transitions. This crate removes that duplication.
 
-## Live Strategy Parity
+## Historical Inputs
 
-A live strategy and its historical backtest should use the same strategy policy.
-The difference is the event stream:
-
-- Historical side: replay stored confirmed-chain observations from
-  `strategy_observations`; mempool signals are included only when the run opts
-  into replaying stored signal rows.
-- Live side: consume confirmed-chain observations plus live mempool signals as
-  current actionable inputs.
-
-Mempool timing is the main live-only advantage. A live strategy can exit on a
-liquidity-removal or critical LP-approval signal before the confirmed pool state
-shows the effect. Historical backtests can test the same rule only when the
-signal was captured and replayed; that is mempool-aware historical replay, not a
-live run.
-
-Initial live/historical strategy pairs to backtest:
-
-- Liquidity-removal exit: exit a matching open position immediately on a
-  mempool liquidity-removal signal.
-- Critical LP-approval exit: exit a matching open position immediately on a
-  critical pool LP approval signal.
+Historical backtests replay stored confirmed-chain observations from
+`strategy_observations`. They intentionally ignore stored mempool signal rows so
+the historical result is based on chain history only. Live strategy runners are
+the place for current mempool signals and pre-confirmation risk exits.
 
 ## Block-Level Execution Model
 
@@ -115,12 +98,10 @@ The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
 |------|-------------|---------|
 | `--strategy-impl` | Strategy implementation to instantiate | `snipe-all-v1` |
 | `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all-v1` |
-| `--strategy-suite mempool-history-exits` | Run the six maxhold 10/20/50 liquidity-removal and critical-LP exit variants in one replay pass | disabled |
+| `--strategy-suite historical-maxhold` | Run maxhold 10/20/50 variants in one replay pass | disabled |
 | `--from-block` | Start block (inclusive) | first observation |
 | `--to-block` | End block (inclusive) | last observation |
 | `--skip-primed` | Skip warmup observations | false |
-| `--include-mempool-signals` | Replay stored mempool risk signals | false |
-| `--exit-lp-approval-critical-only` | Single-strategy mode only: ignore non-critical LP approval signals | false |
 | `--stop-loss-ratio` | Stop-loss trigger ratio | disabled |
 | `--take-profit-ratio` | Take-profit trigger ratio | disabled |
 | `--max-hold-blocks` | Force exit after N blocks | disabled |

@@ -31,6 +31,16 @@ impl SnipeAllStrategy {
         }
     }
 
+    pub fn with_bought_pools(
+        config: SnipeAllConfig,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+    ) -> Self {
+        Self {
+            config,
+            state: SnipeAllState::with_bought_pools(bought_pools),
+        }
+    }
+
     pub fn state(&self) -> &SnipeAllState {
         &self.state
     }
@@ -149,10 +159,10 @@ impl SnipeAllStrategy {
             return None;
         }
 
-        // Time-based exit: max hold duration exceeded.
+        // Time-based exit: sell once the configured hold window has elapsed.
         if let Some(max_hold) = self.config.max_hold_blocks {
             if let Some(entry_block) = position.entry_block {
-                if current_block > entry_block + max_hold {
+                if current_block >= entry_block.saturating_add(max_hold) {
                     return Some(self.sell_pool(
                         ctx,
                         pool.token_address,
@@ -411,7 +421,9 @@ impl Strategy for SnipeAllStrategy {
                         position.can_submit_exit()
                             && position
                                 .entry_block
-                                .map(|entry_block| block_number > entry_block + max_hold)
+                                .map(|entry_block| {
+                                    block_number >= entry_block.saturating_add(max_hold)
+                                })
                                 .unwrap_or(false)
                     }
                     PositionState::SellFailed => {
@@ -613,44 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn position_monitor_exits_after_max_hold_without_pool_update() {
-        let pool = pool();
-        let market = MarketSnapshotRef {
-            block_number: 202,
-            token_address: pool.token_address,
-            pool_address: Some(pool.address.clone()),
-            token: None,
-            pool: Some(pool.clone()),
-        };
-        let mut portfolio = PortfolioState::default();
-        let risks = Vec::new();
-        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-            max_hold_blocks: Some(200),
-            ..SnipeAllConfig::default()
-        });
-        let position = confirmed_position(&strategy, &pool);
-        portfolio.positions.insert(position.id.clone(), position);
-        let ctx = ctx(&market, &portfolio, &risks);
-
-        let decisions = strategy.on_position_monitor(&ctx, 202).unwrap();
-
-        assert_eq!(decisions.len(), 1);
-        match &decisions[0] {
-            StrategyDecision::SubmitOrder(intent)
-            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
-                assert_eq!(intent.side, OrderSide::Sell);
-                assert_eq!(intent.pool_address, pool.address);
-            }
-            StrategyDecision::Hold
-            | StrategyDecision::HoldWithReason { .. }
-            | StrategyDecision::CancelOrders { .. } => {
-                panic!("expected sell order")
-            }
-        }
-    }
-
-    #[test]
-    fn position_monitor_holds_until_max_hold_is_exceeded() {
+    fn position_monitor_exits_at_max_hold_without_pool_update() {
         let pool = pool();
         let market = MarketSnapshotRef {
             block_number: 201,
@@ -670,6 +645,43 @@ mod tests {
         let ctx = ctx(&market, &portfolio, &risks);
 
         let decisions = strategy.on_position_monitor(&ctx, 201).unwrap();
+
+        assert_eq!(decisions.len(), 1);
+        match &decisions[0] {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
+                assert_eq!(intent.side, OrderSide::Sell);
+                assert_eq!(intent.pool_address, pool.address);
+            }
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
+                panic!("expected sell order")
+            }
+        }
+    }
+
+    #[test]
+    fn position_monitor_holds_before_max_hold_boundary() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 200,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(200),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let decisions = strategy.on_position_monitor(&ctx, 200).unwrap();
 
         assert!(decisions.is_empty());
     }
@@ -990,6 +1002,41 @@ mod tests {
             )
             .unwrap();
         assert!(decision.is_hold());
+    }
+
+    #[test]
+    fn restored_seen_pool_prevents_duplicate_buy_after_closed_position() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::with_bought_pools(
+            SnipeAllConfig::default(),
+            vec![pool.address.clone()],
+        );
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 2,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("entry.buy_eligible_pool_once:pool already bought")
+        );
     }
 
     #[test]

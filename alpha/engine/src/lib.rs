@@ -9,14 +9,17 @@
 pub mod execution;
 pub mod wire;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
-    ids::PositionId,
+    ids::{PositionId, TokenPoolId},
     market::{MarketEvent, MarketSnapshotRef, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     portfolio::PortfolioState,
@@ -80,6 +83,7 @@ where
     execution: E,
     current_event_block: Option<u64>,
     pending_execution_reports: Vec<PendingExecutionReport>,
+    pool_snapshots: HashMap<TokenPoolId, PoolSnapshot>,
 }
 
 impl<E, R, S> AlphaEngine<E, R, S>
@@ -99,6 +103,7 @@ where
             execution,
             current_event_block: None,
             pending_execution_reports: Vec::new(),
+            pool_snapshots: HashMap::new(),
         }
     }
 
@@ -128,12 +133,9 @@ where
         match event {
             EngineEvent::Market(event) => {
                 self.apply_market_event(&event);
-                let mut reports = if let MarketEvent::BlockCompleted { block_number, .. } = &event {
-                    self.apply_due_pending_execution_reports(*block_number)
-                        .await?
-                } else {
-                    Vec::new()
-                };
+                let mut reports = self
+                    .apply_due_pending_execution_reports(market_event_block(&event))
+                    .await?;
                 reports.extend(self.run_market_strategies(&event).await?);
                 Ok(reports)
             }
@@ -169,6 +171,8 @@ where
                 });
             }
             MarketEvent::PoolUpdated { block_number, pool } => {
+                self.pool_snapshots
+                    .insert(pool.address.clone(), pool.clone());
                 self.market = Some(MarketSnapshotRef {
                     block_number: *block_number,
                     token_address: pool.token_address,
@@ -186,8 +190,16 @@ where
     }
 
     async fn run_market_strategies(&mut self, event: &MarketEvent) -> Result<Vec<ExecutionReport>> {
-        let Some(market) = self.market.clone() else {
-            return Ok(Vec::new());
+        let market = match self.market.clone() {
+            Some(market) => market,
+            None if matches!(event, MarketEvent::BlockCompleted { .. }) => MarketSnapshotRef {
+                block_number: market_event_block(event),
+                token_address: Default::default(),
+                pool_address: None,
+                token: None,
+                pool: None,
+            },
+            None => return Ok(Vec::new()),
         };
         let portfolio = self.portfolio.clone();
         let active_risks = self.active_risks.clone();
@@ -241,7 +253,10 @@ where
             .portfolio
             .positions
             .values()
-            .filter(|position| position.key.pool_address == pool.address && position.has_exposure())
+            .filter(|position| {
+                position.key.pool_address == pool.address
+                    && should_snapshot_position_for_pool(position)
+            })
             .cloned()
             .collect::<Vec<_>>();
 
@@ -251,12 +266,12 @@ where
                     position.state,
                     PositionState::SellFailed | PositionState::SellCancelled
                 ) {
-                Some(zero_value_snapshot(&position, *block_number))
+                Some(zero_value_snapshot(&position, *block_number, Some(pool)))
             } else {
                 self.execution
                     .simulate_position_value(&position, pool)
                     .await?
-                    .map(|value| simulated_value_snapshot(&position, value))
+                    .map(|value| simulated_value_snapshot(&position, value, Some(pool)))
             };
             if let Some(snapshot) = snapshot {
                 self.store.append_position_snapshot(&snapshot).await?;
@@ -313,6 +328,7 @@ where
             RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed
         ) {
             if let Some(ref pool_address) = event.pool_address {
+                let pool_snapshot = self.pool_snapshots.get(pool_address).cloned();
                 for position in self.portfolio.positions.values_mut() {
                     if position.key.pool_address == *pool_address
                         && position.has_exposure()
@@ -332,7 +348,14 @@ where
                             realized_profit_eth: position.realized_pnl(),
                             unrealized_profit_eth: -position.entry_cost_basis.unwrap_or_default(),
                             roi: DecimalAmount::from(-1),
+                            price_to_initial_price_ratio: None,
+                            pool_price_denom_per_token: None,
+                            pool_liquidity_denom: None,
+                            pool_token_reserve: None,
+                            pool_denom_symbol: None,
                         };
+                        let snapshot =
+                            snapshot_with_pool_metrics(snapshot, position, pool_snapshot.as_ref());
                         let _ = self.store.append_position_snapshot(&snapshot).await;
                     }
                 }
@@ -570,15 +593,18 @@ where
             report_status,
             ExecutionStatus::Failed | ExecutionStatus::Cancelled
         ) {
+            let pool = self.pool_snapshots.get(&position.key.pool_address);
             let snapshot = zero_value_snapshot(
                 &position,
                 report
                     .block_number
                     .or_else(|| self.market.as_ref().map(|m| m.block_number))
                     .unwrap_or_default(),
+                pool,
             );
             self.store.append_position_snapshot(&snapshot).await?;
         } else if position.is_closed() {
+            let pool = self.pool_snapshots.get(&position.key.pool_address);
             let snapshot = PositionSnapshot {
                 position_id: position.id.clone(),
                 state: position.state.clone(),
@@ -599,13 +625,42 @@ where
                 } else {
                     DecimalAmount::ZERO
                 },
+                price_to_initial_price_ratio: None,
+                pool_price_denom_per_token: None,
+                pool_liquidity_denom: None,
+                pool_token_reserve: None,
+                pool_denom_symbol: None,
             };
+            let snapshot = snapshot_with_pool_metrics(snapshot, &position, pool);
             self.store.append_position_snapshot(&snapshot).await?;
+        } else if side == OrderSide::Buy && report_status == ExecutionStatus::Confirmed {
+            self.snapshot_confirmed_buy_position(&position).await?;
         }
 
         self.portfolio
             .positions
             .insert(position.id.clone(), position);
+        Ok(())
+    }
+
+    async fn snapshot_confirmed_buy_position(&mut self, position: &Position) -> Result<()> {
+        if position.state != PositionState::BuyConfirmed {
+            return Ok(());
+        }
+
+        let Some(pool) = self.pool_snapshots.get(&position.key.pool_address).cloned() else {
+            return Ok(());
+        };
+
+        if let Some(value) = self
+            .execution
+            .simulate_position_value(position, &pool)
+            .await?
+        {
+            let snapshot = simulated_value_snapshot(position, value, Some(&pool));
+            self.store.append_position_snapshot(&snapshot).await?;
+        }
+
         Ok(())
     }
 
@@ -677,6 +732,22 @@ fn engine_event_block(event: &EngineEvent) -> Option<u64> {
         EngineEvent::Risk(risk) => risk.observed_block,
         EngineEvent::Execution(report) => report.block_number,
     }
+}
+
+fn market_event_block(event: &MarketEvent) -> u64 {
+    match event {
+        MarketEvent::TokenUpdated { block_number, .. }
+        | MarketEvent::PoolUpdated { block_number, .. }
+        | MarketEvent::BlockCompleted { block_number, .. } => *block_number,
+    }
+}
+
+fn should_snapshot_position_for_pool(position: &Position) -> bool {
+    position.drained
+        || matches!(
+            position.state,
+            PositionState::BuyConfirmed | PositionState::SellFailed | PositionState::SellCancelled
+        )
 }
 
 #[derive(Clone, Debug, Default)]
@@ -777,9 +848,13 @@ fn risk_kind_key(kind: &RiskKind) -> String {
     }
 }
 
-fn zero_value_snapshot(position: &Position, block_number: u64) -> PositionSnapshot {
+fn zero_value_snapshot(
+    position: &Position,
+    block_number: u64,
+    pool: Option<&PoolSnapshot>,
+) -> PositionSnapshot {
     let cost = position.entry_cost_basis.unwrap_or_default();
-    PositionSnapshot {
+    let snapshot = PositionSnapshot {
         position_id: position.id.clone(),
         state: position.state.clone(),
         block_number,
@@ -791,17 +866,24 @@ fn zero_value_snapshot(position: &Position, block_number: u64) -> PositionSnapsh
         } else {
             DecimalAmount::from(-1)
         },
-    }
+        price_to_initial_price_ratio: None,
+        pool_price_denom_per_token: None,
+        pool_liquidity_denom: None,
+        pool_token_reserve: None,
+        pool_denom_symbol: None,
+    };
+    snapshot_with_pool_metrics(snapshot, position, pool)
 }
 
 fn simulated_value_snapshot(
     position: &Position,
     simulation: PositionValueSimulation,
+    pool: Option<&PoolSnapshot>,
 ) -> PositionSnapshot {
     let current_value = simulation.current_value.to_decimal();
     let cost = position.entry_cost_basis.unwrap_or_default();
     let realized = position.realized_pnl();
-    PositionSnapshot {
+    let snapshot = PositionSnapshot {
         position_id: position.id.clone(),
         state: position.state.clone(),
         block_number: simulation.block_number,
@@ -817,7 +899,38 @@ fn simulated_value_snapshot(
         } else {
             ((current_value + realized) / cost) - DecimalAmount::from(1)
         },
+        price_to_initial_price_ratio: None,
+        pool_price_denom_per_token: None,
+        pool_liquidity_denom: None,
+        pool_token_reserve: None,
+        pool_denom_symbol: None,
+    };
+    snapshot_with_pool_metrics(snapshot, position, pool)
+}
+
+fn snapshot_with_pool_metrics(
+    mut snapshot: PositionSnapshot,
+    position: &Position,
+    pool: Option<&PoolSnapshot>,
+) -> PositionSnapshot {
+    let Some(pool) = pool else {
+        return snapshot;
+    };
+
+    snapshot.pool_price_denom_per_token = pool.price_denom_per_token;
+    snapshot.pool_liquidity_denom = Some(pool.denom_reserve);
+    snapshot.pool_token_reserve = Some(pool.token_reserve);
+    snapshot.pool_denom_symbol = pool.denom_symbol.clone();
+
+    if let (Some(entry_price), Some(current_price)) =
+        (position.entry_price, pool.price_denom_per_token)
+    {
+        if !entry_price.is_zero() {
+            snapshot.price_to_initial_price_ratio = Some(current_price / entry_price);
+        }
     }
+
+    snapshot
 }
 
 #[derive(Clone, Default)]
@@ -837,6 +950,10 @@ impl MemoryTradingStore {
 
     pub fn order_intents(&self) -> Vec<OrderIntent> {
         self.order_intents.lock().expect("store lock").clone()
+    }
+
+    pub fn snapshots(&self) -> Vec<PositionSnapshot> {
+        self.snapshots.lock().expect("store lock").clone()
     }
 
     pub fn execution_reports(&self) -> Vec<ExecutionReport> {
@@ -914,7 +1031,7 @@ mod tests {
     use eth_alpha_core::{
         amount::Amount,
         execution::ExecutionStatus,
-        ids::{PortfolioId, StrategyName, TokenPoolId, WalletId},
+        ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
         market::{PoolProtocol, PoolSnapshot},
         order::{OrderIntent, OrderSide},
         risk::{RiskKind, RiskSeverity},
@@ -954,6 +1071,121 @@ mod tests {
         }
     }
 
+    struct BuyThenSellWhenConfirmedStrategy;
+
+    impl Strategy for BuyThenSellWhenConfirmedStrategy {
+        fn name(&self) -> StrategyName {
+            StrategyName("buy-then-sell-when-confirmed".to_string())
+        }
+
+        fn on_market_event(
+            &mut self,
+            ctx: &StrategyContext<'_>,
+            _event: &MarketEvent,
+        ) -> Result<StrategyDecision> {
+            let pool = ctx.market.pool.as_ref().expect("pool snapshot");
+            let position = ctx.portfolio.positions.values().find(|position| {
+                position.key.strategy_name == self.name()
+                    && position.key.pool_address == pool.address
+            });
+            if let Some(position) = position {
+                if position.state == PositionState::BuyConfirmed {
+                    let amount = position.entry_token_raw_amount.clone().unwrap_or(Amount {
+                        raw: U256::from(1_000_000u64),
+                        decimals: 18,
+                    });
+                    return Ok(StrategyDecision::submit_order(
+                        OrderIntent {
+                            portfolio_id: PortfolioId("chain-sim".to_string()),
+                            wallet_id: WalletId("chain-sim-wallet".to_string()),
+                            strategy_name: self.name(),
+                            side: OrderSide::Sell,
+                            token_address: pool.token_address,
+                            pool_address: pool.address.clone(),
+                            amount,
+                            route: None,
+                            max_slippage_bps: 500,
+                            deadline_secs: 30,
+                        },
+                        "exit.buy_confirmed",
+                    ));
+                }
+                return Ok(StrategyDecision::hold("position_not_buy_confirmed"));
+            }
+
+            Ok(StrategyDecision::submit_order(
+                OrderIntent {
+                    portfolio_id: PortfolioId("chain-sim".to_string()),
+                    wallet_id: WalletId("chain-sim-wallet".to_string()),
+                    strategy_name: self.name(),
+                    side: OrderSide::Buy,
+                    token_address: pool.token_address,
+                    pool_address: pool.address.clone(),
+                    amount: Amount {
+                        raw: U256::from(1_000_000u64),
+                        decimals: 18,
+                    },
+                    route: None,
+                    max_slippage_bps: 500,
+                    deadline_secs: 30,
+                },
+                "entry.first_pool_update",
+            ))
+        }
+    }
+
+    struct MonitorExitStrategy;
+
+    impl Strategy for MonitorExitStrategy {
+        fn name(&self) -> StrategyName {
+            StrategyName("monitor-exit".to_string())
+        }
+
+        fn on_market_event(
+            &mut self,
+            _ctx: &StrategyContext<'_>,
+            _event: &MarketEvent,
+        ) -> Result<StrategyDecision> {
+            Ok(StrategyDecision::hold("market.noop"))
+        }
+
+        fn on_position_monitor(
+            &mut self,
+            ctx: &StrategyContext<'_>,
+            _block_number: u64,
+        ) -> Result<Vec<StrategyDecision>> {
+            Ok(ctx
+                .portfolio
+                .positions
+                .values()
+                .filter(|position| {
+                    position.key.strategy_name == self.name()
+                        && position.state == PositionState::BuyConfirmed
+                })
+                .map(|position| {
+                    StrategyDecision::submit_order(
+                        OrderIntent {
+                            portfolio_id: position.key.portfolio_id.clone(),
+                            wallet_id: position.key.wallet_id.clone(),
+                            strategy_name: self.name(),
+                            side: OrderSide::Sell,
+                            token_address: position.key.token_address,
+                            pool_address: position.key.pool_address.clone(),
+                            amount: position.entry_token_raw_amount.clone().unwrap_or(Amount {
+                                raw: U256::from(1_000_000u64),
+                                decimals: 18,
+                            }),
+                            route: None,
+                            max_slippage_bps: 500,
+                            deadline_secs: 30,
+                        },
+                        "exit.monitor",
+                    )
+                })
+                .collect())
+        }
+    }
+
     #[derive(Clone, Default)]
     struct ConfirmingTestExecutionAdapter;
 
@@ -975,6 +1207,102 @@ mod tests {
                 error: None,
             })
         }
+
+        async fn simulate_position_value(
+            &self,
+            _position: &Position,
+            _pool: &PoolSnapshot,
+        ) -> Result<Option<PositionValueSimulation>> {
+            Ok(Some(PositionValueSimulation {
+                block_number: 2,
+                current_value: Amount {
+                    raw: U256::from(20_000_000_000_000_000u64),
+                    decimals: 18,
+                },
+                gas_used: Some(21_000),
+                error: None,
+            }))
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct SequencedNextBlockExecutionAdapter {
+        next_order: Arc<Mutex<u64>>,
+    }
+
+    #[async_trait::async_trait]
+    impl EngineExecutionAdapter for SequencedNextBlockExecutionAdapter {
+        async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
+            let mut next_order = self.next_order.lock().expect("adapter lock");
+            let sequence = *next_order;
+            *next_order += 1;
+            drop(next_order);
+
+            Ok(ExecutionReport {
+                order_id: OrderId(format!("test-order-{sequence}")),
+                status: ExecutionStatus::Confirmed,
+                tx_hash: None,
+                block_number: Some(sequence + 2),
+                filled_amount: Some(intent.amount.clone()),
+                token_amount: (intent.side == OrderSide::Buy).then_some(intent.amount),
+                gas_used: Some(21_000),
+                gas_cost: Some(Amount {
+                    raw: U256::from(21_000_000u64),
+                    decimals: 18,
+                }),
+                error: None,
+            })
+        }
+    }
+
+    fn pool_snapshot(token: Address, pool_address: Address, block_number: u64) -> PoolSnapshot {
+        PoolSnapshot {
+            address: TokenPoolId::new(token, pool_address.to_string()),
+            token_address: token,
+            protocol: PoolProtocol::UniswapV2,
+            denom_address: Some(Address::repeat_byte(0x33)),
+            denom_symbol: Some("WETH".to_string()),
+            denom_reserve: Default::default(),
+            token_reserve: Default::default(),
+            price_denom_per_token: None,
+            token_decimals: None,
+            fee_tier: None,
+            uniswap_v4: None,
+            latest_block: block_number,
+            can_buy: true,
+            can_sell: true,
+            is_scam: false,
+        }
+    }
+
+    fn test_position(state: PositionState) -> Position {
+        let token = Address::repeat_byte(0x11);
+        let pool_address = Address::repeat_byte(0x22);
+        let mut position = Position::new(
+            PositionId("test-position".to_string()),
+            PositionKey {
+                portfolio_id: PortfolioId("chain-sim".to_string()),
+                wallet_id: WalletId("chain-sim-wallet".to_string()),
+                strategy_name: StrategyName("strategy".to_string()),
+                token_address: token,
+                pool_address: TokenPoolId::new(token, pool_address.to_string()),
+            },
+        );
+        position.state = state;
+        position
+    }
+
+    #[test]
+    fn submitted_exits_are_not_marked_to_market() {
+        assert!(should_snapshot_position_for_pool(&test_position(
+            PositionState::BuyConfirmed
+        )));
+        assert!(!should_snapshot_position_for_pool(&test_position(
+            PositionState::SellSubmitted
+        )));
+        assert!(should_snapshot_position_for_pool(&test_position(
+            PositionState::SellFailed
+        )));
     }
 
     #[tokio::test]
@@ -1036,6 +1364,139 @@ mod tests {
         assert_eq!(decisions[0].action, "submit_buy");
         assert_eq!(decisions[0].order_side, Some(OrderSide::Buy));
         assert_eq!(engine.portfolio().active_position_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn confirmed_buy_gets_value_snapshot_without_later_pool_update() {
+        let store = MemoryTradingStore::default();
+        let mut engine = AlphaEngine::new(
+            AllowAllRiskPolicy,
+            store.clone(),
+            ConfirmingTestExecutionAdapter,
+        );
+        engine.add_strategy(Box::new(BuyOnMarketStrategy));
+
+        let token = Address::repeat_byte(0x11);
+        let pool_address = Address::repeat_byte(0x22);
+        engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: pool_snapshot(token, pool_address, 1),
+            }))
+            .await
+            .unwrap();
+
+        let reports = engine.flush_pending_executions().await.unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+
+        let snapshots = store.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].state, PositionState::BuyConfirmed);
+        assert_eq!(snapshots[0].block_number, 2);
+        assert_eq!(
+            snapshots[0].current_value_eth,
+            DecimalAmount::from_str_exact("0.02").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_reports_apply_before_later_market_updates() {
+        let store = MemoryTradingStore::default();
+        let mut engine = AlphaEngine::new(
+            AllowAllRiskPolicy,
+            store.clone(),
+            SequencedNextBlockExecutionAdapter::default(),
+        );
+        engine.add_strategy(Box::new(BuyThenSellWhenConfirmedStrategy));
+
+        let token = Address::repeat_byte(0x11);
+        let pool_address = Address::repeat_byte(0x22);
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: pool_snapshot(token, pool_address, 1),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, ExecutionStatus::Submitted);
+        assert_eq!(store.positions()[0].state, PositionState::BuySubmitted);
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 2,
+                pool: pool_snapshot(token, pool_address, 2),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+        assert_eq!(reports[0].block_number, Some(2));
+        assert_eq!(reports[1].status, ExecutionStatus::Submitted);
+        assert_eq!(store.positions()[0].state, PositionState::SellSubmitted);
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 3,
+                pool: pool_snapshot(token, pool_address, 3),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+        assert_eq!(reports[0].block_number, Some(3));
+        assert_eq!(store.positions()[0].state, PositionState::SellConfirmed);
+
+        let snapshots = store.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].state, PositionState::SellConfirmed);
+        assert_eq!(snapshots[0].block_number, 3);
+    }
+
+    #[tokio::test]
+    async fn position_monitor_runs_without_prior_market_after_restore() {
+        let store = MemoryTradingStore::default();
+        let token = Address::repeat_byte(0x11);
+        let pool_address = Address::repeat_byte(0x22);
+        let key = PositionKey {
+            portfolio_id: PortfolioId("chain-sim".to_string()),
+            wallet_id: WalletId("chain-sim-wallet".to_string()),
+            strategy_name: StrategyName("monitor-exit".to_string()),
+            token_address: token,
+            pool_address: TokenPoolId::new(token, pool_address.to_string()),
+        };
+        let mut position = Position::new(position_id_for_key(&key), key);
+        position.state = PositionState::BuyConfirmed;
+        position.entry_token_raw_amount = Some(Amount {
+            raw: U256::from(1_000_000u64),
+            decimals: 18,
+        });
+
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+
+        let mut engine = AlphaEngine::new(
+            AllowAllRiskPolicy,
+            store.clone(),
+            ConfirmingTestExecutionAdapter,
+        )
+        .with_portfolio(portfolio);
+        engine.add_strategy(Box::new(MonitorExitStrategy));
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::BlockCompleted {
+                block_number: 10,
+                updated_tokens: 0,
+                updated_pools: 0,
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].status, ExecutionStatus::Submitted);
+        assert_eq!(reports[1].status, ExecutionStatus::Confirmed);
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@ use eth_alpha_backtest::{adapter::BacktestAdapter, runner::run_backtest};
 use eth_alpha_core::amount::Amount;
 use eth_alpha_core::ids::{PoolAddress, StrategyName};
 use eth_alpha_core::market::PoolSnapshot;
-use eth_alpha_engine::wire::{MempoolSignalWire, PoolWire};
+use eth_alpha_engine::wire::PoolWire;
 use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy};
 use eth_alpha_store::PostgresTradingStore;
 use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
@@ -35,7 +35,7 @@ struct Args {
     #[arg(long, default_value = "snipe-all-v1")]
     strategy_impl: String,
 
-    /// Named mempool-aware historical strategy suite to run in one replay pass.
+    /// Named historical strategy suite to run in one replay pass.
     #[arg(long)]
     strategy_suite: Option<String>,
 
@@ -59,30 +59,6 @@ struct Args {
     /// Live trader skips these; enabling makes backtest apples-to-apples.
     #[arg(long, default_value_t = false)]
     skip_primed: bool,
-
-    /// Replay mempool risk signals. Disabled by default for pool-only historical baselines.
-    #[arg(long, default_value_t = false)]
-    include_mempool_signals: bool,
-
-    /// Enable liquidity-removal exits (default: disabled for quantification).
-    #[arg(long, default_value_t = false)]
-    exit_liquidity_removal: bool,
-
-    /// Enable tax/honeypot exits (default: disabled for quantification).
-    #[arg(long, default_value_t = false)]
-    exit_tax: bool,
-
-    /// Enable LP-approval exits (default: disabled for quantification).
-    #[arg(long, default_value_t = false)]
-    exit_lp_approval: bool,
-
-    /// Only exit on LP approvals promoted to critical severity.
-    #[arg(long, default_value_t = false)]
-    exit_lp_approval_critical_only: bool,
-
-    /// Enable scam/critical-risk exits (default: disabled for quantification).
-    #[arg(long, default_value_t = false)]
-    exit_scam: bool,
 
     /// Start block (inclusive). If not set, starts from first observation.
     #[arg(long)]
@@ -125,11 +101,6 @@ struct Args {
 struct BacktestStrategySpec {
     strategy_name: String,
     strategy_impl: String,
-    exit_liquidity_removal: bool,
-    exit_tax: bool,
-    exit_lp_approval: bool,
-    exit_lp_approval_critical_only: bool,
-    exit_scam: bool,
     stop_loss_ratio: Option<String>,
     take_profit_ratio: Option<String>,
     max_hold_blocks: Option<u64>,
@@ -142,11 +113,6 @@ impl BacktestStrategySpec {
         serde_json::json!({
             "strategy_name": self.strategy_name,
             "strategy_impl": self.strategy_impl,
-            "exit_liquidity_removal": self.exit_liquidity_removal,
-            "exit_tax": self.exit_tax,
-            "exit_lp_approval": self.exit_lp_approval,
-            "exit_lp_approval_critical_only": self.exit_lp_approval_critical_only,
-            "exit_scam": self.exit_scam,
             "stop_loss_ratio": self.stop_loss_ratio,
             "take_profit_ratio": self.take_profit_ratio,
             "max_hold_blocks": self.max_hold_blocks,
@@ -193,22 +159,16 @@ async fn main() -> Result<()> {
                 "strategy_name": args.strategy_name,
                 "strategy_impl": args.strategy_impl,
                 "strategy_runtime": "historical",
-                "strategy_input_timing": if args.include_mempool_signals { "mempool-aware-history" } else { "confirmed-history" },
+                "strategy_input_timing": "confirmed-history",
                 "strategy_suite": args.strategy_suite,
                 "strategies": strategy_specs.iter().map(BacktestStrategySpec::config_json).collect::<Vec<_>>(),
                 "replay_run_id": args.replay_run_id,
                 "from_block": args.from_block,
                 "to_block": args.to_block,
                 "skip_primed": args.skip_primed,
-                "include_mempool_signals": args.include_mempool_signals,
                 "buy_amount_wei": args.buy_amount_wei,
                 "min_liquidity_eth": min_liquidity_eth.to_string(),
                 "min_liquidity_usd": min_liquidity_usd.to_string(),
-                "exit_liquidity_removal": args.exit_liquidity_removal,
-                "exit_tax": args.exit_tax,
-                "exit_lp_approval": args.exit_lp_approval,
-                "exit_lp_approval_critical_only": args.exit_lp_approval_critical_only,
-                "exit_scam": args.exit_scam,
                 "stop_loss_ratio": args.stop_loss_ratio,
                 "take_profit_ratio": args.take_profit_ratio,
                 "max_hold_blocks": args.max_hold_blocks,
@@ -224,7 +184,6 @@ async fn main() -> Result<()> {
         store.pool(),
         &args.replay_run_id,
         args.skip_primed,
-        args.include_mempool_signals,
         args.from_block,
         args.to_block,
     )
@@ -271,7 +230,6 @@ async fn load_events_from_observations(
     pool: &sqlx::PgPool,
     replay_run_id: &str,
     skip_primed: bool,
-    include_mempool_signals: bool,
     from_block: Option<u64>,
     to_block: Option<u64>,
 ) -> Result<Vec<eth_alpha_engine::EngineEvent>> {
@@ -309,12 +267,11 @@ async fn load_events_from_observations(
 
     let mut events = Vec::with_capacity(rows.len());
     let mut skipped = 0usize;
+    let mut skipped_mempool = 0usize;
 
     for row in &rows {
         let event_source: String = row.try_get("event_source")?;
         let payload: Value = row.try_get("payload")?;
-        let replay_block: Option<i64> = row.try_get("replay_block")?;
-
         if skip_primed && payload.get("suppress_events").and_then(|v| v.as_bool()) == Some(true) {
             skipped += 1;
             continue;
@@ -354,33 +311,8 @@ async fn load_events_from_observations(
                 ));
             }
             "mempool_signal" => {
-                if !include_mempool_signals {
-                    skipped += 1;
-                    continue;
-                }
-                let signal_wire: MempoolSignalWire = match serde_json::from_value(
-                    payload.get("signal").cloned().unwrap_or(Value::Null),
-                ) {
-                    Ok(w) => w,
-                    Err(error) => {
-                        tracing::warn!(error = %error, "skipping malformed signal observation");
-                        skipped += 1;
-                        continue;
-                    }
-                };
-                match signal_wire.to_risk_event() {
-                    Ok(Some(mut risk_event)) => {
-                        risk_event.observed_block = risk_event
-                            .observed_block
-                            .or_else(|| replay_block.and_then(|block| u64::try_from(block).ok()));
-                        events.push(eth_alpha_engine::EngineEvent::Risk(risk_event));
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        tracing::warn!(error = %error, "skipping signal with missing fields");
-                        skipped += 1;
-                    }
-                }
+                skipped_mempool += 1;
+                continue;
             }
             other => {
                 tracing::warn!(event_source = %other, "skipping unknown observation source");
@@ -389,11 +321,12 @@ async fn load_events_from_observations(
         }
     }
 
-    if skipped > 0 {
+    if skipped > 0 || skipped_mempool > 0 {
         tracing::info!(
-            skipped,
+            skipped_malformed = skipped,
+            skipped_mempool,
             total = rows.len(),
-            "skipped malformed observations"
+            "skipped historical observations"
         );
     }
 
@@ -545,11 +478,11 @@ where
                     sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
                     min_denom_reserve: min_liquidity_eth,
                     min_stable_denom_reserve: min_liquidity_usd,
-                    exit_on_liquidity_removal: spec.exit_liquidity_removal,
-                    exit_on_tax: spec.exit_tax,
-                    exit_on_lp_approval: spec.exit_lp_approval,
-                    exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
-                    exit_on_scam: spec.exit_scam,
+                    exit_on_liquidity_removal: false,
+                    exit_on_tax: false,
+                    exit_on_lp_approval: false,
+                    exit_on_critical_lp_approval_only: false,
+                    exit_on_scam: false,
                     stop_loss_ratio,
                     take_profit_ratio,
                     max_hold_blocks: spec.max_hold_blocks,
@@ -615,7 +548,10 @@ where
 fn build_strategy_specs(args: &Args) -> Result<Vec<BacktestStrategySpec>> {
     if let Some(suite) = args.strategy_suite.as_deref() {
         return match suite {
-            "mempool-history-exits" => Ok(mempool_history_exit_suite_specs(args)),
+            "historical-maxhold" => Ok(historical_maxhold_suite_specs(args)),
+            "mempool-history-exits" => Err(eyre::eyre!(
+                "strategy suite mempool-history-exits was removed; historical backtests no longer replay mempool signals. Use --strategy-suite historical-maxhold"
+            )),
             other => Err(eyre::eyre!("unsupported strategy suite: {other}")),
         };
     }
@@ -623,11 +559,6 @@ fn build_strategy_specs(args: &Args) -> Result<Vec<BacktestStrategySpec>> {
     Ok(vec![BacktestStrategySpec {
         strategy_name: args.strategy_name.clone(),
         strategy_impl: args.strategy_impl.clone(),
-        exit_liquidity_removal: args.exit_liquidity_removal,
-        exit_tax: args.exit_tax,
-        exit_lp_approval: args.exit_lp_approval,
-        exit_lp_approval_critical_only: args.exit_lp_approval_critical_only,
-        exit_scam: args.exit_scam,
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: args.max_hold_blocks,
@@ -636,40 +567,17 @@ fn build_strategy_specs(args: &Args) -> Result<Vec<BacktestStrategySpec>> {
     }])
 }
 
-fn mempool_history_exit_suite_specs(args: &Args) -> Vec<BacktestStrategySpec> {
+fn historical_maxhold_suite_specs(args: &Args) -> Vec<BacktestStrategySpec> {
     [10_u64, 20, 50]
         .into_iter()
-        .flat_map(|max_hold_blocks| {
-            [
-                BacktestStrategySpec {
-                    strategy_name: format!("snipe-all-maxhold{max_hold_blocks}-liq-exit"),
-                    strategy_impl: "snipe-all-v1".to_string(),
-                    exit_liquidity_removal: true,
-                    exit_tax: false,
-                    exit_lp_approval: false,
-                    exit_lp_approval_critical_only: false,
-                    exit_scam: false,
-                    stop_loss_ratio: args.stop_loss_ratio.clone(),
-                    take_profit_ratio: args.take_profit_ratio.clone(),
-                    max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-                    max_exit_retries: args.max_exit_retries,
-                },
-                BacktestStrategySpec {
-                    strategy_name: format!("snipe-all-maxhold{max_hold_blocks}-critical-lp-exit"),
-                    strategy_impl: "snipe-all-v1".to_string(),
-                    exit_liquidity_removal: false,
-                    exit_tax: false,
-                    exit_lp_approval: true,
-                    exit_lp_approval_critical_only: true,
-                    exit_scam: false,
-                    stop_loss_ratio: args.stop_loss_ratio.clone(),
-                    take_profit_ratio: args.take_profit_ratio.clone(),
-                    max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-                    max_exit_retries: args.max_exit_retries,
-                },
-            ]
+        .map(|max_hold_blocks| BacktestStrategySpec {
+            strategy_name: format!("snipe-all-maxhold{max_hold_blocks}"),
+            strategy_impl: "snipe-all-v1".to_string(),
+            stop_loss_ratio: args.stop_loss_ratio.clone(),
+            take_profit_ratio: args.take_profit_ratio.clone(),
+            max_hold_blocks: Some(max_hold_blocks),
+            exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+            max_exit_retries: args.max_exit_retries,
         })
         .collect()
 }

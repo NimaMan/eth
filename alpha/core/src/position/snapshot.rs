@@ -14,4 +14,14 @@ pub struct PositionSnapshot {
     pub realized_profit_eth: DecimalAmount,
     pub unrealized_profit_eth: DecimalAmount,
     pub roi: DecimalAmount,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_to_initial_price_ratio: Option<DecimalAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_price_denom_per_token: Option<DecimalAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_liquidity_denom: Option<DecimalAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_token_reserve: Option<DecimalAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_denom_symbol: Option<String>,
 }
