@@ -7,5 +7,6 @@ pub mod network;
 pub mod pools;
 pub mod state;
 pub mod token_activity;
+pub mod token_analytics;
 pub mod tracking;
 pub mod utils;

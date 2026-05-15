@@ -12,6 +12,7 @@ transaction/block facts and should not recreate tracing or decoding logic.
 | `state/` | Token transfer state, control-address tracking, and pool-state bridges. |
 | `health/` | Scam, volume, and trading-health scoring. |
 | `network/` | Token address activity, graph construction, and snapshots. |
+| `token_analytics/` | Pool-scoped token analytics feature contracts for active observations. |
 | `tracking/` | Token registry state, tracked-token indexing, block update loop, and token update routing. |
 | `chain_metadata/` | Chain metadata lookup and cache helpers. |
 | `utils/` | Generic helpers with no domain ownership. |
@@ -27,7 +28,9 @@ transaction/block facts and should not recreate tracing or decoding logic.
 ```text
 tx_processor::ProcessedBlock
   -> tracking::block_processor applies txs in block order
-  -> erc20 + pools + state + health + network updates
+  -> erc20 + pools + state + token_activity + network updates
+  -> token_analytics feature views
+  -> health assessment views
   -> eth_chain_server view DTOs
 ```
 
@@ -72,3 +75,6 @@ for individual pool checks.
   decimals belong to actual pool registration.
 - `health` and `network` should consume stabilized token/pool facts; do not
   move core pool lifecycle logic there.
+- `token_analytics` owns the stable feature vocabulary for one token-pool
+  observation. It should not compute future labels; historical labels and target
+  joins belong in `token_lab`.
