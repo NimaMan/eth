@@ -14,7 +14,7 @@ pub use features::{
 };
 pub use observation::{
     ActiveObservationReason, ObservationBlockActivity, ObservationBlockActivitySource,
-    ObservationBlockEventFlags, ObservationPoolTradingState, ObservationTransactionSummary,
-    ObservationTransactionType, TokenPoolCurrentObservation, TokenPoolObservationContext,
-    TokenPoolObservationKey, ACTIVE_OBSERVATION_TARGET_HORIZONS,
+    ObservationBlockEventFlags, ObservationPoolTradingState, ObservationTransactionClassification,
+    ObservationTransactionSummary, ObservationTransactionType, TokenPoolCurrentObservation,
+    TokenPoolObservationContext, TokenPoolObservationKey, ACTIVE_OBSERVATION_TARGET_HORIZONS,
 };

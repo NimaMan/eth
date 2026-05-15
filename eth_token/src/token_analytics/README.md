@@ -30,10 +30,11 @@ labels onto these source features.
 ## Active Observation
 
 An active observation is a block where the token or pool materially changes or
-emits useful signal: swap, mint, burn, sync/reserve update, LP approval,
-LP transfer, token transfer touching the pool, buy/sell volume, bribe, trading
-status change, scam status change, control-address activity, or token-network
-activity. Idle chain blocks do not advance the active observation index.
+emits useful signal: swap, mint, burn, sync/reserve update, token approval,
+LP approval, LP transfer, token transfer touching the pool, buy/sell volume,
+bribe, trading status change, scam status change, control-address activity, or
+token-network activity. Idle chain blocks do not advance the active observation
+index.
 
 ## Observation Folder
 
@@ -49,10 +50,12 @@ activity. Idle chain blocks do not advance the active observation index.
   enablement, pool swaps/mints/burns/syncs, LP transfers, LP approvals,
   liquidity updates, price updates, tax checks, trading status changes, scam
   status changes, and direct liquidity removal.
+- `tx_classification.rs`: stable transaction labels, descriptions, and
+  token/pool-affect flags shared by summaries and downstream renderers.
 - `transaction.rs`: typed transaction summaries for the observation block. A
-  transaction can be a swap, token transfer, denominator transfer, LP transfer,
-  LP approval, mint, burn, sync, trading simulation, tax simulation, bribe,
-  control-address activity, network activity, or other.
+  transaction can be a swap, token approval, token transfer, denominator
+  transfer, LP transfer, LP approval, mint, burn, sync, trading simulation, tax
+  simulation, bribe, control-address activity, network activity, or other.
 
 The existing `token_activity` tracker is still the raw per-token accumulator.
 `token_analytics::observation` is the pool-scoped contract we should build from

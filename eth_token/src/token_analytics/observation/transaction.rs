@@ -2,28 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::{ObservationTransactionClassification, ObservationTransactionType};
 use crate::token_activity::TokenTransactionActivity;
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ObservationTransactionType {
-    Swap,
-    TokenTransfer,
-    DenomTransfer,
-    LpTransfer,
-    LpApproval,
-    PoolMint,
-    PoolBurn,
-    PoolSync,
-    LiquidityUpdate,
-    PriceUpdate,
-    TradingSimulation,
-    TaxSimulation,
-    Bribe,
-    ControlAddressActivity,
-    NetworkActivity,
-    Other,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ObservationTransactionSummary {
@@ -32,10 +12,13 @@ pub struct ObservationTransactionSummary {
     pub timestamp: Option<u64>,
     pub maker: Option<String>,
     pub tx_types: Vec<ObservationTransactionType>,
+    pub classification: ObservationTransactionClassification,
     pub affects_token: bool,
     pub affects_pool: bool,
     pub token_transfer_count: u32,
     pub denom_transfer_count: u32,
+    pub token_approval_count: u32,
+    pub lp_approval_count: u32,
     pub buy_volume_by_denom: BTreeMap<String, f64>,
     pub sell_volume_by_denom: BTreeMap<String, f64>,
     pub total_bribe_eth: f64,
@@ -44,17 +27,31 @@ pub struct ObservationTransactionSummary {
 impl ObservationTransactionSummary {
     pub fn add_type(&mut self, tx_type: ObservationTransactionType) {
         if !self.tx_types.contains(&tx_type) {
+            self.affects_token |= tx_type.affects_token();
+            self.affects_pool |= tx_type.affects_pool();
             self.tx_types.push(tx_type);
         }
+    }
+
+    pub fn refresh_classification(&mut self) {
+        self.classification =
+            ObservationTransactionClassification::from_types(self.tx_types.clone());
+        self.affects_token = self.classification.affects_token;
+        self.affects_pool = self.classification.affects_pool;
     }
 
     pub fn infer_types(&mut self) {
         if self.token_transfer_count > 0 {
             self.add_type(ObservationTransactionType::TokenTransfer);
-            self.affects_token = true;
         }
         if self.denom_transfer_count > 0 {
             self.add_type(ObservationTransactionType::DenomTransfer);
+        }
+        if self.token_approval_count > 0 {
+            self.add_type(ObservationTransactionType::TokenApproval);
+        }
+        if self.lp_approval_count > 0 {
+            self.add_type(ObservationTransactionType::LpApproval);
         }
         if self
             .buy_volume_by_denom
@@ -66,7 +63,6 @@ impl ObservationTransactionSummary {
                 .any(|amount| *amount > 0.0)
         {
             self.add_type(ObservationTransactionType::Swap);
-            self.affects_pool = true;
         }
         if self.total_bribe_eth > 0.0 {
             self.add_type(ObservationTransactionType::Bribe);
@@ -74,6 +70,7 @@ impl ObservationTransactionSummary {
         if self.tx_types.is_empty() {
             self.add_type(ObservationTransactionType::Other);
         }
+        self.refresh_classification();
     }
 }
 
@@ -122,5 +119,33 @@ mod tests {
             .contains(&ObservationTransactionType::Bribe));
         assert!(summary.affects_token);
         assert!(summary.affects_pool);
+        assert_eq!(
+            summary.classification.primary_type,
+            ObservationTransactionType::Swap
+        );
+        assert_eq!(summary.classification.label, "Pool swap");
+    }
+
+    #[test]
+    fn transaction_summary_infers_token_approval_type() {
+        let mut summary = ObservationTransactionSummary {
+            tx_hash: "0xA".to_string(),
+            block_number: 10,
+            token_approval_count: 3,
+            ..Default::default()
+        };
+
+        summary.infer_types();
+
+        assert!(summary
+            .tx_types
+            .contains(&ObservationTransactionType::TokenApproval));
+        assert!(summary.affects_token);
+        assert!(!summary.affects_pool);
+        assert_eq!(
+            summary.classification.primary_type,
+            ObservationTransactionType::TokenApproval
+        );
+        assert_eq!(summary.classification.label, "Token approval");
     }
 }

@@ -1,5 +1,6 @@
 pub mod current;
 pub mod transaction;
+pub mod tx_classification;
 
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +8,8 @@ pub use current::{
     ObservationBlockActivity, ObservationBlockActivitySource, ObservationBlockEventFlags,
     ObservationPoolTradingState, TokenPoolCurrentObservation,
 };
-pub use transaction::{ObservationTransactionSummary, ObservationTransactionType};
+pub use transaction::ObservationTransactionSummary;
+pub use tx_classification::{ObservationTransactionClassification, ObservationTransactionType};
 
 pub const ACTIVE_OBSERVATION_TARGET_HORIZONS: [u16; 12] =
     [1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500];
@@ -88,6 +90,7 @@ pub enum ActiveObservationReason {
     ScamStatusChange,
     LpApproval,
     LpTransfer,
+    TokenApproval,
     TokenTransfer,
     DenomTransfer,
     BuyVolume,
