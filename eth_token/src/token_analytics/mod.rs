@@ -10,10 +10,11 @@ pub mod observation;
 pub use features::{
     FeatureEvidenceBlocks, LpControlFeatures, PoolActivityFeatures, PoolLiquidityFeatures,
     PoolMarketFeatures, TokenAuthorityFeatures, TokenNetworkFeatures, TokenPoolAnalyticsFeatures,
-    TokenStaticFeatures,
+    TokenPoolObservationFeatures, TokenStaticFeatures,
 };
 pub use observation::{
-    ActiveObservationReason, ObservationBlockActivity, ObservationPoolTradingState,
-    ObservationTransactionSummary, ObservationTransactionType, TokenPoolCurrentObservation,
-    TokenPoolObservationContext, TokenPoolObservationKey, ACTIVE_OBSERVATION_TARGET_HORIZONS,
+    ActiveObservationReason, ObservationBlockActivity, ObservationBlockActivitySource,
+    ObservationBlockEventFlags, ObservationPoolTradingState, ObservationTransactionSummary,
+    ObservationTransactionType, TokenPoolCurrentObservation, TokenPoolObservationContext,
+    TokenPoolObservationKey, ACTIVE_OBSERVATION_TARGET_HORIZONS,
 };

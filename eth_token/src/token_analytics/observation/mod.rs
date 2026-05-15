@@ -4,7 +4,8 @@ pub mod transaction;
 use serde::{Deserialize, Serialize};
 
 pub use current::{
-    ObservationBlockActivity, ObservationPoolTradingState, TokenPoolCurrentObservation,
+    ObservationBlockActivity, ObservationBlockActivitySource, ObservationBlockEventFlags,
+    ObservationPoolTradingState, TokenPoolCurrentObservation,
 };
 pub use transaction::{ObservationTransactionSummary, ObservationTransactionType};
 

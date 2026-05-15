@@ -44,7 +44,11 @@ activity. Idle chain blocks do not advance the active observation index.
 - `current.rs`: current block attributes that already exist today:
   transaction count, token transfers, denomination transfers, buy volume,
   sell volume, bribe, plus end-of-block pool trading state (`can_buy`,
-  `can_sell`, effective buy/sell, and tax rates).
+  `can_sell`, effective buy/sell, tax rates, and liquidity-removal state).
+  It also carries event flags for token creation, pool creation, trading
+  enablement, pool swaps/mints/burns/syncs, LP transfers, LP approvals,
+  liquidity updates, price updates, tax checks, trading status changes, scam
+  status changes, and direct liquidity removal.
 - `transaction.rs`: typed transaction summaries for the observation block. A
   transaction can be a swap, token transfer, denominator transfer, LP transfer,
   LP approval, mint, burn, sync, trading simulation, tax simulation, bribe,
@@ -55,6 +59,12 @@ The existing `token_activity` tracker is still the raw per-token accumulator.
 when creating analytics rows. Until the pool-scoped builder is wired, current
 token activity can be converted into observation activity as a compatibility
 source.
+
+Observation activity distinguishes source and completeness. A block that comes
+from an address-participation index, liquidity history, price history, LP
+history, or lifecycle marker may be active even when decoded token-activity
+metrics are not present. Those rows must be marked as incomplete-source rows,
+not as known zero-transaction rows.
 
 The current target horizon constants are kept here as shared metadata:
 

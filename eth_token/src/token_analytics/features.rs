@@ -10,6 +10,26 @@ use super::observation::{
 pub struct TokenPoolAnalyticsFeatures {
     pub key: TokenPoolObservationKey,
     pub observation: TokenPoolObservationContext,
+    pub features: TokenPoolObservationFeatures,
+}
+
+impl TokenPoolAnalyticsFeatures {
+    pub fn as_of_block(&self) -> u64 {
+        self.observation.block_number
+    }
+
+    pub fn latest_evidence_block(&self) -> Option<u64> {
+        self.features.latest_evidence_block()
+    }
+
+    pub fn has_future_evidence_leakage(&self) -> bool {
+        self.features
+            .has_future_evidence_leakage(self.as_of_block())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenPoolObservationFeatures {
     pub token: TokenStaticFeatures,
     pub authority: TokenAuthorityFeatures,
     pub market: PoolMarketFeatures,
@@ -20,18 +40,14 @@ pub struct TokenPoolAnalyticsFeatures {
     pub evidence_blocks: FeatureEvidenceBlocks,
 }
 
-impl TokenPoolAnalyticsFeatures {
-    pub fn as_of_block(&self) -> u64 {
-        self.observation.block_number
-    }
-
+impl TokenPoolObservationFeatures {
     pub fn latest_evidence_block(&self) -> Option<u64> {
         self.evidence_blocks.latest()
     }
 
-    pub fn has_future_evidence_leakage(&self) -> bool {
+    pub fn has_future_evidence_leakage(&self, as_of_block: u64) -> bool {
         self.latest_evidence_block()
-            .is_some_and(|latest| latest > self.as_of_block())
+            .is_some_and(|latest| latest > as_of_block)
     }
 }
 
@@ -66,6 +82,7 @@ impl TokenStaticFeatures {
 pub struct TokenAuthorityFeatures {
     pub creator_address: Option<String>,
     pub current_owner: Option<String>,
+    pub current_owner_is_zero_address: Option<bool>,
     pub current_owner_is_creator: Option<bool>,
     pub ownership_renounced: bool,
     pub renouncement_block: Option<u64>,
@@ -83,10 +100,14 @@ impl TokenAuthorityFeatures {
             .as_deref()
             .zip(current_owner.as_deref())
             .map(|(creator, owner)| creator.eq_ignore_ascii_case(owner));
+        let current_owner_is_zero_address = current_owner
+            .as_deref()
+            .map(|owner| normalize_address(owner) == ZERO_ADDRESS);
 
         Self {
             creator_address,
             current_owner,
+            current_owner_is_zero_address,
             current_owner_is_creator,
             ownership_renounced,
             ..Default::default()
@@ -107,10 +128,15 @@ pub struct PoolMarketFeatures {
     pub effective_can_sell: bool,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
+    pub tax_bucket: Option<String>,
     pub first_observed_buy_block: Option<u64>,
     pub first_observed_sell_block: Option<u64>,
     pub first_failed_sell_block: Option<u64>,
     pub last_trading_failure_class: Option<String>,
+    pub liquidity_removed_as_of: bool,
+    pub liquidity_removal_block_as_of: Option<u64>,
+    pub scam_mechanism_as_of: Option<String>,
+    pub scam_label_as_of: Option<String>,
 }
 
 impl PoolMarketFeatures {
@@ -203,19 +229,39 @@ pub struct LpControlFeatures {
     pub lp_top_holder_share_pct: Option<f64>,
     pub lp_top_holder_is_creator: Option<bool>,
     pub lp_top_holder_is_owner: Option<bool>,
+    pub lp_approval_count_as_of: Option<u32>,
+    pub lp_first_approval_block_as_of: Option<u64>,
     pub lp_holders_with_approvals_count: Option<u32>,
+    pub lp_approved_spender_count_as_of: Option<u32>,
     pub lp_approved_to_router: Option<f64>,
     pub lp_approved_to_router_pct: Option<f64>,
+    pub lp_router_approval_seen_as_of: Option<bool>,
+    pub lp_max_approval_amount_as_of: Option<f64>,
     pub last_lp_approval_block: Option<u64>,
     pub last_lp_approval_timestamp: Option<u64>,
     pub last_lp_approval_owner: Option<String>,
     pub last_lp_approval_spender: Option<String>,
     pub last_lp_approval_is_router: Option<bool>,
+    pub last_lp_approval_owner_is_creator: Option<bool>,
+    pub last_lp_approval_owner_is_current_owner: Option<bool>,
+    pub blocks_from_first_lp_approval_to_as_of: Option<u64>,
+    pub blocks_from_last_lp_approval_to_as_of: Option<u64>,
     pub blocks_from_pool_creation_to_last_lp_approval: Option<i64>,
     pub blocks_from_trading_enabled_to_last_lp_approval: Option<i64>,
+    pub feature_scope: Option<String>,
 }
 
 impl LpControlFeatures {
+    pub fn with_as_of_offsets(mut self, as_of_block: u64) -> Self {
+        self.blocks_from_first_lp_approval_to_as_of = self
+            .lp_first_approval_block_as_of
+            .map(|block| as_of_block.saturating_sub(block));
+        self.blocks_from_last_lp_approval_to_as_of = self
+            .last_lp_approval_block
+            .map(|block| as_of_block.saturating_sub(block));
+        self
+    }
+
     pub fn with_last_approval_offsets(
         mut self,
         pool_creation_block: Option<u64>,
@@ -247,6 +293,25 @@ pub struct PoolActivityFeatures {
     pub cumulative_total_bribe_eth: f64,
     pub first_activity_block: Option<u64>,
     pub last_activity_block: Option<u64>,
+    pub blocks_since_last_activity: Option<u64>,
+    pub activity_density: Option<f64>,
+    pub tx_per_active_observation: Option<f64>,
+    pub net_buy_volume_denom: f64,
+    pub buy_sell_volume_ratio: Option<f64>,
+    pub denom_token_transfer_ratio: Option<f64>,
+    pub active_observations_last_10: Option<u32>,
+    pub tx_count_last_10: Option<u64>,
+    pub active_observations_last_50: Option<u32>,
+    pub tx_count_last_50: Option<u64>,
+    pub active_observations_last_100: Option<u32>,
+    pub tx_count_last_100: Option<u64>,
+    pub active_density_last_10: Option<f64>,
+    pub active_density_last_50: Option<f64>,
+    pub active_density_last_100: Option<f64>,
+    pub tx_share_last_10_to_total: Option<f64>,
+    pub tx_share_last_50_to_total: Option<f64>,
+    pub tx_share_last_100_to_total: Option<f64>,
+    pub feature_scope: Option<String>,
 }
 
 impl PoolActivityFeatures {
@@ -279,8 +344,11 @@ pub struct TokenNetworkFeatures {
     pub many_to_one_transfer_count: Option<u32>,
     pub creator_centrality: Option<f64>,
     pub owner_centrality: Option<f64>,
+    pub node_count: Option<u32>,
+    pub edge_count: Option<u32>,
     pub largest_non_protocol_cluster_size: Option<u32>,
     pub shared_non_protocol_funder_count: Option<u32>,
+    pub feature_scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -345,6 +413,12 @@ fn signed_volume_imbalance(buy: f64, sell: f64) -> Option<f64> {
     }
 }
 
+const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+
+fn normalize_address(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,9 +457,12 @@ mod tests {
     fn detects_future_evidence_leakage() {
         let features = TokenPoolAnalyticsFeatures {
             observation: TokenPoolObservationContext::new(7, 100, None),
-            evidence_blocks: FeatureEvidenceBlocks {
-                liquidity_latest_block: Some(99),
-                network_latest_block: Some(101),
+            features: TokenPoolObservationFeatures {
+                evidence_blocks: FeatureEvidenceBlocks {
+                    liquidity_latest_block: Some(99),
+                    network_latest_block: Some(101),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -401,5 +478,30 @@ mod tests {
         features.set_block_volume(3.0, 1.0);
 
         assert_eq!(features.block_buy_sell_volume_imbalance, Some(0.5));
+    }
+
+    #[test]
+    fn authority_features_detect_zero_owner() {
+        let features = TokenAuthorityFeatures::with_owner_context(
+            Some("0xabc".to_string()),
+            Some(ZERO_ADDRESS.to_string()),
+            true,
+        );
+
+        assert_eq!(features.current_owner_is_zero_address, Some(true));
+        assert_eq!(features.current_owner_is_creator, Some(false));
+    }
+
+    #[test]
+    fn lp_control_features_compute_as_of_offsets() {
+        let features = LpControlFeatures {
+            lp_first_approval_block_as_of: Some(90),
+            last_lp_approval_block: Some(95),
+            ..Default::default()
+        }
+        .with_as_of_offsets(100);
+
+        assert_eq!(features.blocks_from_first_lp_approval_to_as_of, Some(10));
+        assert_eq!(features.blocks_from_last_lp_approval_to_as_of, Some(5));
     }
 }
