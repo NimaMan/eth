@@ -10,7 +10,7 @@ use super::balance_deltas::{
     extract_tokens_received_from_processed_transaction,
 };
 use super::buyer_setup::prepare_buyer_account;
-use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
+use super::failure::{format_failure_with_full_trace, format_failure_with_revert};
 use super::fees::apply_fee_policy;
 use super::prior_replay::replay_prior_transactions;
 use super::results::create_failed_result;
@@ -111,13 +111,12 @@ pub async fn check_can_buy_sell_pool_with_chain(
 ) -> Result<PoolBuySellSimulationResult> {
     config.prior_txs.clear();
     if matches!(config.pool_type, PoolType::UniswapV4) {
-        return check_can_buy_sell_uniswap_v4_with_chain(simulator, tx_processor, config, chain)
-            .await;
+        return check_can_buy_sell_uniswap_v4_with_chain(tx_processor, config, chain).await;
     }
 
     let block_number = match config.block_number {
         Some(b) => b,
-        None => simulator.latest_historical_context_block_number()?,
+        None => chain.current_state().block_number,
     };
     let base_fee = match block_header_hint(&config, block_number)? {
         Some(header) => header.header().base_fee_per_gas.map(|fee| fee as u128),
@@ -224,7 +223,6 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     }
 
     if let Some(failure) = prepare_buyer_account(
-        simulator.clone(),
         &mut chain,
         &config,
         base_fee,
@@ -382,14 +380,8 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
         U256::ZERO
     };
     if !can_buy {
-        let failure_message = enrich_failure_reason_with_trace(
-            &simulator,
-            &buy_tx,
-            block_number,
-            "Buy transaction failed",
-            buy_sim_result.revert_reason.as_deref(),
-        )
-        .await;
+        let failure_message =
+            format_failure_with_full_trace("Buy transaction failed", &buy_sim_result);
 
         return Ok(create_failed_result(
             config,
@@ -607,16 +599,10 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
 
     let failure_reason = if !(can_buy && can_approve && can_sell) {
         if !can_sell {
-            Some(
-                enrich_failure_reason_with_trace(
-                    &simulator,
-                    &sell_tx,
-                    sell_block,
-                    "Simulation failed at step SELL",
-                    sell_sim_result.revert_reason.as_deref(),
-                )
-                .await,
-            )
+            Some(format_failure_with_full_trace(
+                "Simulation failed at step SELL",
+                &sell_sim_result,
+            ))
         } else if !can_approve {
             let prefix = "Simulation failed at step APPROVE";
             Some(format_failure_with_revert(

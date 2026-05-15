@@ -21,7 +21,7 @@ use super::balance_deltas::{
 };
 use super::buyer_setup::prepare_buyer_account;
 use super::entry::block_header_hint;
-use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
+use super::failure::{format_failure_with_full_trace, format_failure_with_revert};
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
@@ -78,7 +78,6 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
     };
 
     check_can_buy_sell_uniswap_v4_with_prepared_chain(
-        simulator,
         tx_processor,
         config,
         block_number,
@@ -89,7 +88,6 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 }
 
 pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
-    simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     mut config: PoolBuySellParameters,
     chain: UnsignedTxChainSimulation,
@@ -106,14 +104,13 @@ pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
 
     let block_number = config
         .block_number
-        .unwrap_or(simulator.latest_historical_context_block_number()?);
+        .unwrap_or_else(|| chain.current_state().block_number);
     let base_fee = match block_header_hint(&config, block_number)? {
         Some(header) => header.header().base_fee_per_gas.map(|fee| fee as u128),
         None => chain.block_base_fee(),
     };
 
     check_can_buy_sell_uniswap_v4_with_prepared_chain(
-        simulator,
         tx_processor,
         config,
         block_number,
@@ -124,7 +121,6 @@ pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
 }
 
 async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
-    simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,
     block_number: u64,
@@ -194,7 +190,6 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
     .await?;
 
     if let Some(failure) = prepare_v4_buy_input(
-        simulator.clone(),
         &mut chain,
         tx_processor.clone(),
         &config,
@@ -237,14 +232,10 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
     .wrap_err("while executing Uniswap V4 buy through Universal Router")?;
 
     if !buy_result.success {
-        let failure_message = enrich_failure_reason_with_trace(
-            &simulator,
-            &buy_tx,
-            block_number,
+        let failure_message = format_failure_with_full_trace(
             "Universal Router V4 buy transaction failed",
-            buy_result.revert_reason.as_deref(),
-        )
-        .await;
+            &buy_result,
+        );
 
         return Ok(create_failed_result(
             config,
@@ -396,14 +387,10 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
     .await
     .wrap_err("while executing Uniswap V4 sell through Universal Router")?;
     if !sell_result.success {
-        let failure_message = enrich_failure_reason_with_trace(
-            &simulator,
-            &sell_tx,
-            block_number,
+        let failure_message = format_failure_with_full_trace(
             "Universal Router V4 sell transaction failed",
-            sell_result.revert_reason.as_deref(),
-        )
-        .await;
+            &sell_result,
+        );
 
         return Ok(create_failed_result(
             config,
@@ -525,7 +512,6 @@ async fn replay_prior_transactions(
 
 #[allow(clippy::too_many_arguments)]
 async fn prepare_v4_buy_input(
-    simulator: Arc<TxSimulator>,
     chain: &mut UnsignedTxChainSimulation,
     tx_processor: Arc<TxProcessor>,
     config: &PoolBuySellParameters,
@@ -575,7 +561,6 @@ async fn prepare_v4_buy_input(
             )));
         }
     } else if let Some(failure) = prepare_buyer_account(
-        simulator,
         chain,
         config,
         base_fee,

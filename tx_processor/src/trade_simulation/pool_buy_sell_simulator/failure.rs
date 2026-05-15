@@ -1,9 +1,8 @@
 use std::convert::TryInto;
-use std::sync::Arc;
 
 use alloy_primitives::{hex, Address, Selector, U256};
 use tx_simulator::types::CallFrame;
-use tx_simulator::{FullSimulationResult, TxSimulator, UnsignedTransaction};
+use tx_simulator::FullSimulationResult;
 
 use tx_simulator::revert::describe_revert_output;
 
@@ -83,96 +82,6 @@ pub(super) fn format_failure_with_full_trace(
     }
 
     message
-}
-
-pub(super) async fn enrich_failure_reason_with_trace(
-    simulator: &Arc<TxSimulator>,
-    tx: &UnsignedTransaction,
-    block_number: u64,
-    base_message: &str,
-    revert_reason: Option<&str>,
-) -> String {
-    let mut reason_opt = revert_reason.map(str::to_string);
-    let mut failure_context: Option<FailureContext> = None;
-    let needs_trace = reason_opt
-        .as_deref()
-        .map(|s| {
-            let trimmed = s.trim();
-            is_uninformative_revert(trimmed) || trimmed.contains("UniswapV2:")
-        })
-        .unwrap_or(true);
-
-    if needs_trace {
-        match simulator
-            .simulate_unsigned_transaction_with_full_trace_at_block(tx.clone(), block_number)
-            .await
-        {
-            Ok(full) => {
-                failure_context = find_failure_context(&full.call_trace, 0);
-
-                if let Some(reason) = extract_reason_from_call_trace(&full.call_trace)
-                    .filter(|reason| !is_uninformative_revert(reason))
-                {
-                    reason_opt = Some(reason);
-                } else if let Some(reason) = full
-                    .revert_reason
-                    .as_ref()
-                    .filter(|reason| !is_uninformative_revert(reason))
-                {
-                    reason_opt = Some(reason.clone());
-                } else if let Some(ctx) = failure_context.as_ref() {
-                    if let Some(reason) = ctx
-                        .reason
-                        .clone()
-                        .filter(|reason| !is_uninformative_revert(reason))
-                    {
-                        reason_opt = Some(reason);
-                    }
-                }
-
-                if reason_opt
-                    .as_deref()
-                    .map(is_uninformative_revert)
-                    .unwrap_or(true)
-                {
-                    if let Some(ctx) = full.revert_context.as_ref() {
-                        reason_opt = Some(format!(
-                            "execution reverted at {} (calldata {} bytes)",
-                            ctx.target, ctx.calldata_len
-                        ));
-                    }
-                }
-
-                if reason_opt
-                    .as_deref()
-                    .map(is_uninformative_revert)
-                    .unwrap_or(true)
-                {
-                    if let Some(ctx) = failure_context.as_ref() {
-                        if let Some(reason) = ctx.reason.clone() {
-                            if !reason.trim().is_empty() {
-                                reason_opt = Some(reason);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                let base = format_failure_with_revert(base_message, revert_reason);
-                return format!("{base} (trace failed: {err})");
-            }
-        }
-    }
-
-    let base = format_failure_with_revert(base_message, reason_opt.as_deref());
-
-    if let Some(ctx) = failure_context {
-        if let Some(extra) = format_failure_context(&ctx) {
-            return format!("{base}; {extra}");
-        }
-    }
-
-    base
 }
 
 fn normalize_revert_text(reason: &str) -> String {

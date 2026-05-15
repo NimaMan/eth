@@ -238,16 +238,16 @@ When extending or debugging the simulator:
 
 1. **Pick the right builder** for the pool type and remember that fee-on-transfer
    tokens must always use “supporting” variants of sell swaps.
-2. **Update both Rust and Python bindings** (`pyreth`) if you add fields to
+2. **Update public exports and serde coverage** if you add fields to
    `PoolBuySellSimulationResult` or change configuration defaults.
 3. **Keep balance extraction in sync** with the naming used by
    `AddressBalanceChangeCalculator`. Currency symbols (WETH→ETH) must match.
 4. **Add regression examples** under `examples/trade_simulation/viability` when you encounter
    a failure pattern. This keeps the token set up-to-date and protects against
    future refactors that regress fee handling.
-5. **Leverage `enrich_failure_reason_with_trace`** when a revert appears. It
-   simulates the failing leg in isolation and decodes the deepest revert so the
-   CLI and notebooks show actionable information.
+5. **Use the active simulation chain for failure details** when a revert
+   appears. Chain-backed helpers already carry the call trace, so avoid
+   standalone historical replays that can escape live block state.
 
 With these pieces aligned, the simulator provides repeatable answers about
 trading viability at any historical block, which is crucial for the trading

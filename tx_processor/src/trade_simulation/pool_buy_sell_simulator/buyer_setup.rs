@@ -1,17 +1,20 @@
 use std::sync::Arc;
 
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
-use reth_chain_query::dex::{fetch_uniswap_v2_pair_address, UNISWAP_V2_FACTORY};
+use reth_chain_query::dex::{
+    encoding::{encode_function_call, encode_two_addresses},
+    UNISWAP_V2_FACTORY,
+};
 use tx_simulator::{
     tx_builders::{
         amm_swap_route::AmmSwapRoute, build_approve_for_route, build_denom_to_token_swap,
         uniswap_v4::build_weth_deposit_tx as build_v4_weth_deposit_tx,
     },
-    TxSimulator, UnsignedTxChainSimulation,
+    UnsignedTxChainSimulation,
 };
 
-use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
+use super::failure::{format_failure_with_full_trace, format_failure_with_revert};
 use super::fees::apply_fee_policy;
 use super::results::create_failed_result;
 use crate::trade_simulation::types::{
@@ -21,9 +24,17 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
 
 const GET_RESERVES_SELECTOR: [u8; 4] = [0x09, 0x02, 0xf1, 0xac];
+const UNISWAP_V2_FACTORY_GET_PAIR: [u8; 4] = [0xe6, 0xa4, 0x39, 0x05];
 const FEE_NUMERATOR: u128 = 997;
 const FEE_DENOMINATOR: u128 = 1000;
 const PREFUND_BUFFER_BPS: u128 = 105; // 5% buffer
+
+fn decode_address_response(output: &[u8], context: &str) -> Result<Address> {
+    if output.len() < 32 {
+        return Err(eyre!("{context} returned output shorter than 32 bytes"));
+    }
+    Ok(Address::from_slice(&output[12..32]))
+}
 
 fn decode_reserves(output: &[u8]) -> Result<(U256, U256)> {
     if output.len() < 64 {
@@ -96,6 +107,66 @@ fn denom_prefund_unavailable_result(
     )
 }
 
+fn fetch_uniswap_v2_pair_address_on_chain(
+    chain: &mut UnsignedTxChainSimulation,
+    token_a: Address,
+    token_b: Address,
+    block_number: u64,
+) -> Result<Address> {
+    let params = encode_two_addresses(token_a, token_b);
+    let call_data = encode_function_call(UNISWAP_V2_FACTORY_GET_PAIR, &params);
+    let response = chain
+        .simulate_view_call(UNISWAP_V2_FACTORY, call_data)
+        .map_err(|err| {
+            eyre!(
+                "Uniswap V2 factory getPair view failed at block {} for token_a={} token_b={}: {}",
+                block_number,
+                token_a,
+                token_b,
+                err
+            )
+        })?;
+
+    if !response.success {
+        return Err(eyre!(
+            "Uniswap V2 factory getPair reverted at block {} for token_a={} token_b={}",
+            block_number,
+            token_a,
+            token_b
+        ));
+    }
+
+    decode_address_response(&response.output, "Uniswap V2 factory getPair")
+}
+
+fn fetch_uniswap_v2_reserves_on_chain(
+    chain: &mut UnsignedTxChainSimulation,
+    pair_address: Address,
+    block_number: u64,
+) -> Result<(U256, U256)> {
+    let reserve_response = chain
+        .simulate_view_call(pair_address, Bytes::from(GET_RESERVES_SELECTOR.to_vec()))
+        .map_err(|err| {
+            eyre!(
+                "failed to fetch reserves for pair {:#x} at block {}: {}",
+                pair_address,
+                block_number,
+                err
+            )
+        })?;
+
+    if !reserve_response.success {
+        return Err(eyre!(
+            "getReserves reverted for pair {:#x} at block {} (calldata len {})",
+            pair_address,
+            block_number,
+            reserve_response.output.len()
+        ));
+    }
+
+    decode_reserves(&reserve_response.output)
+}
+
 async fn execute_weth_deposit(
     chain: &mut UnsignedTxChainSimulation,
     config: &PoolBuySellParameters,
@@ -165,7 +236,6 @@ async fn execute_weth_deposit(
 
 #[allow(clippy::too_many_arguments)]
 async fn prefund_denom_via_weth(
-    simulator: Arc<TxSimulator>,
     chain: &mut UnsignedTxChainSimulation,
     config: &PoolBuySellParameters,
     base_fee: Option<u128>,
@@ -173,34 +243,19 @@ async fn prefund_denom_via_weth(
     block_number: u64,
     prior_tx_results: &mut Vec<ProcessedTransaction>,
 ) -> Result<Option<PoolBuySellSimulationResult>> {
-    let pair_address = fetch_uniswap_v2_pair_address(
-        simulator.as_ref(),
-        UNISWAP_V2_FACTORY,
+    let pair_address = fetch_uniswap_v2_pair_address_on_chain(
+        chain,
         config.denom_address,
         config.weth_address,
-        Some(block_number),
-    )
-    .await?;
+        block_number,
+    )?;
 
     if pair_address.is_zero() {
         return Ok(None);
     }
 
-    let reserves_call = Bytes::from(GET_RESERVES_SELECTOR.to_vec());
-    let reserve_response = simulator
-        .simulate_view_function(pair_address, reserves_call, Some(block_number))
-        .await
-        .map_err(|err| eyre!("failed to fetch reserves for pair {pair_address:#x}: {err}"))?;
-
-    if !reserve_response.success {
-        return Err(eyre!(
-            "getReserves reverted for pair {:#x} (calldata len {})",
-            pair_address,
-            reserve_response.output.len()
-        ));
-    }
-
-    let (reserve0, reserve1) = decode_reserves(&reserve_response.output)?;
+    let (reserve0, reserve1) =
+        fetch_uniswap_v2_reserves_on_chain(chain, pair_address, block_number)?;
     let denom_first = config.denom_address < config.weth_address;
 
     let (reserve_denom, reserve_weth) = if denom_first {
@@ -335,14 +390,8 @@ async fn prefund_denom_via_weth(
     prior_tx_results.push(swap_processed.clone());
 
     if !swap_result.success {
-        let failure_message = enrich_failure_reason_with_trace(
-            &simulator,
-            &swap_tx,
-            block_number,
-            "Denomination top-up swap failed",
-            swap_result.revert_reason.as_deref(),
-        )
-        .await;
+        let failure_message =
+            format_failure_with_full_trace("Denomination top-up swap failed", &swap_result);
         let failure = create_failed_result(
             config.clone(),
             block_number,
@@ -362,7 +411,6 @@ async fn prefund_denom_via_weth(
 }
 
 pub(super) async fn prepare_buyer_account(
-    simulator: Arc<TxSimulator>,
     chain: &mut UnsignedTxChainSimulation,
     config: &PoolBuySellParameters,
     base_fee: Option<u128>,
@@ -389,7 +437,6 @@ pub(super) async fn prepare_buyer_account(
 
     if config.denom_address != config.weth_address {
         if let Some(failure) = prefund_denom_via_weth(
-            simulator,
             chain,
             config,
             base_fee,
