@@ -409,6 +409,28 @@ impl PipelineBottleneckSample {
 }
 
 pub fn classify_live_transaction_error(message: &str) -> PipelineIssue {
+    if message.contains("missing local Reth block header") {
+        let mut issue = PipelineIssue::new(
+            "eth_chain_server",
+            "live_tracker",
+            "token_block_apply",
+            PipelineSeverity::Info,
+            PipelineImpact::BlockLocal,
+            "reth_historical_context_lag",
+            "Reth historical context lag",
+        );
+        issue.fatal = false;
+        issue.retryable = true;
+        if let Some(block_number) = word_after(message, "missing local Reth block header for ") {
+            issue.context.insert(
+                "missing_header_block".to_string(),
+                Value::String(block_number),
+            );
+        }
+        issue.refresh_ids();
+        return issue;
+    }
+
     if message.contains("Uniswap V3 factory reports pool")
         && message.contains("configuration provided")
     {
@@ -678,6 +700,26 @@ mod tests {
         assert_eq!(
             issue.context.get("fee_tier").and_then(Value::as_str),
             Some("10000")
+        );
+    }
+
+    #[test]
+    fn classifies_missing_local_reth_header_as_retryable_context_lag() {
+        let message = "missing local Reth block header for 25098395";
+
+        let issue = classify_live_transaction_error(message);
+
+        assert_eq!(issue.severity, PipelineSeverity::Info);
+        assert_eq!(issue.impact, PipelineImpact::BlockLocal);
+        assert_eq!(issue.code, "reth_historical_context_lag");
+        assert!(issue.retryable);
+        assert!(!issue.fatal);
+        assert_eq!(
+            issue
+                .context
+                .get("missing_header_block")
+                .and_then(Value::as_str),
+            Some("25098395")
         );
     }
 }

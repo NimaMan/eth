@@ -56,7 +56,7 @@ eth_chain_server new-head loop
 
 Warmup replays old confirmed blocks from processed-block cache/Reth. After warmup, the live token runtime no longer tails Redis; the chain server calls `apply_live_block_update` directly for each processed live block.
 
-Warmup replays old confirmed blocks with the regular Reth post-block metadata provider. The pending-aware live metadata provider is only for live tail blocks, where same-block token metadata may need the simulator's pending/live overlay.
+Warmup replays old confirmed blocks with the regular Reth post-block metadata provider. Live tail blocks use the direct live block session built from the processed block header plus RPC state diffs, so same-block token and V2 pool metadata comes from the in-process post-block state before falling back to local Reth. Redis pending replay is not part of this path.
 
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, direct live block application, and read-only consumers.
 

@@ -33,6 +33,7 @@ Agent operating map for the runtime/API layer around `eth_token`.
 processed-block disk cache + live execution RPC/WS
   -> LiveChainRuntime block loop
   -> eth_live_feed warmup/direct LiveBlockUpdate apply
+  -> direct live block-session ring for current headers/state diffs
   -> eth_token block application
   -> LiveTokenEvent::BlockApplied broadcast
   -> RecentLiveBlocks ring
@@ -65,6 +66,21 @@ tables. The JSON response keeps the old `pool_address` field name for clients,
 but it is backed by protocol-aware `pool_identifier` values such as an EVM pool
 address, `pool_manager#pool_id`, or `vault#pool_id`. ZMQ and signal logs are
 diagnostics; they are not the chain-server or ASENA source of truth.
+
+Live pool API shape:
+
+- `GET /eth/tokens/api/live/pools` remains backward-compatible and returns all
+  retained pools.
+- `GET /eth/tokens/api/live/pools?status=active` returns non-scam pools.
+- `GET /eth/tokens/api/live/pools?status=scam` returns scam/liquidity-removal
+  pools.
+- `GET /eth/tokens/api/live/pools/active` and
+  `GET /eth/tokens/api/live/pools/scam` are explicit aliases for clients that
+  should not depend on query strings.
+
+Pool-list responses include `count` for the returned set plus `total_count`,
+`active_count`, and `scam_count`, so clients can show active/scam separation
+without issuing multiple requests.
 
 Resolved live-tail bottleneck target: V2 pool identity/metadata lookups became
 expensive when they fell back through Redis live-state snapshots. See

@@ -1,15 +1,17 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use alloy_primitives::{Address, B256};
-use eyre::Result;
+use alloy_primitives::{Address, Bytes, B256, U256};
+use eyre::{eyre, Result};
 use reth_chain_query::common_addresses::KnownV2Protocol;
 use reth_chain_query::dex::{
     compute_fraxswap_v2_pool, compute_pancakeswap_v2_pool, compute_shibaswap_v2_pool,
     compute_sushiswap_pool, compute_uniswap_v2_pool,
 };
 use reth_chain_query::RethQueryProvider;
+use tx_processor::{BlockStateSession, UnsignedTxChainSimulation};
 
 use crate::erc20::ERC20TokenMetadata;
 
@@ -32,14 +34,18 @@ impl RethMetadataMode {
             // Regular indexing reads the post-block state for same-block
             // deployments, avoiding live Redis pending replay entirely.
             Self::Regular => lookup.block_number,
-            Self::Live => lookup.metadata_block_number,
+            // Live token tracking is co-located with live block processing. The
+            // authoritative live view is the current post-block session; if we
+            // fall back to local Reth, use the same post-block state instead of
+            // the removed parent-state-plus-pending-replay path.
+            Self::Live => lookup.block_number,
         }
     }
 
-    fn pending_tx_hashes(self, lookup: &TokenMetadataLookup) -> Option<Vec<B256>> {
+    fn pending_tx_hashes(self, _lookup: &TokenMetadataLookup) -> Option<Vec<B256>> {
         match self {
             Self::Regular => None,
-            Self::Live => Some(lookup.pending_tx_hashes.clone()),
+            Self::Live => None,
         }
     }
 }
@@ -90,6 +96,7 @@ impl UniswapV2PoolIdentityProvider for RethChainMetadataProvider<'_> {
 pub struct LiveRethChainMetadataProvider<'a> {
     provider: &'a RethQueryProvider,
     cache: Arc<RethChainMetadataCache>,
+    direct_live_block_sessions: Option<&'a Mutex<BTreeMap<u64, BlockStateSession>>>,
 }
 
 impl<'a> LiveRethChainMetadataProvider<'a> {
@@ -97,7 +104,32 @@ impl<'a> LiveRethChainMetadataProvider<'a> {
         Self {
             provider,
             cache: Arc::new(RethChainMetadataCache::default()),
+            direct_live_block_sessions: None,
         }
+    }
+
+    pub fn with_direct_live_block_sessions(
+        provider: &'a RethQueryProvider,
+        direct_live_block_sessions: &'a Mutex<BTreeMap<u64, BlockStateSession>>,
+    ) -> Self {
+        Self {
+            provider,
+            cache: Arc::new(RethChainMetadataCache::default()),
+            direct_live_block_sessions: Some(direct_live_block_sessions),
+        }
+    }
+
+    fn direct_live_chain(&self, block_number: u64) -> Result<Option<UnsignedTxChainSimulation>> {
+        let Some(sessions) = self.direct_live_block_sessions else {
+            return Ok(None);
+        };
+
+        let session = sessions
+            .lock()
+            .map_err(|error| eyre!("direct live block session lock poisoned: {error}"))?
+            .get(&block_number)
+            .cloned();
+        Ok(session.map(|session| session.simulation_chain()))
     }
 }
 
@@ -107,6 +139,10 @@ impl TokenMetadataProvider for LiveRethChainMetadataProvider<'_> {
         lookup: &'a TokenMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<ERC20TokenMetadata>>> + 'a>> {
         Box::pin(async move {
+            if let Some(mut chain) = self.direct_live_chain(lookup.block_number)? {
+                return token_metadata_from_direct_live_chain(&mut chain, lookup);
+            }
+
             token_metadata_with_mode(self.provider, lookup, RethMetadataMode::Live).await
         })
     }
@@ -117,7 +153,17 @@ impl UniswapV2PoolMetadataProvider for LiveRethChainMetadataProvider<'_> {
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>> {
-        Box::pin(async move { uniswap_v2_pool_metadata(self.provider, &self.cache, lookup).await })
+        Box::pin(async move {
+            if let Some(mut chain) = self.direct_live_chain(lookup.block_number)? {
+                return uniswap_v2_pool_metadata_from_direct_live_chain(
+                    &mut chain,
+                    &self.cache,
+                    lookup,
+                );
+            }
+
+            uniswap_v2_pool_metadata(self.provider, &self.cache, lookup).await
+        })
     }
 }
 
@@ -126,7 +172,17 @@ impl UniswapV2PoolIdentityProvider for LiveRethChainMetadataProvider<'_> {
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolIdentity>>> + 'a>> {
-        Box::pin(async move { uniswap_v2_pool_identity(self.provider, &self.cache, lookup).await })
+        Box::pin(async move {
+            if let Some(mut chain) = self.direct_live_chain(lookup.block_number)? {
+                return uniswap_v2_pool_identity_from_direct_live_chain(
+                    &mut chain,
+                    &self.cache,
+                    lookup,
+                );
+            }
+
+            uniswap_v2_pool_identity(self.provider, &self.cache, lookup).await
+        })
     }
 }
 
@@ -157,6 +213,56 @@ async fn token_metadata_with_mode(
     }))
 }
 
+fn token_metadata_from_direct_live_chain(
+    chain: &mut UnsignedTxChainSimulation,
+    lookup: &TokenMetadataLookup,
+) -> Result<Option<ERC20TokenMetadata>> {
+    let address = lookup.token_address;
+    if !chain.account_has_code(address)? {
+        return Ok(None);
+    }
+
+    let Some(total_supply) = direct_uint256_view(chain, address, SELECTOR_TOTAL_SUPPLY)? else {
+        return Ok(None);
+    };
+    if direct_uint256_view(
+        chain,
+        address,
+        calldata_with_address(SELECTOR_BALANCE_OF, Address::ZERO),
+    )?
+    .is_none()
+    {
+        return Ok(None);
+    }
+    if direct_uint256_view(
+        chain,
+        address,
+        calldata_with_two_addresses(SELECTOR_ALLOWANCE, Address::ZERO, Address::ZERO),
+    )?
+    .is_none()
+    {
+        return Ok(None);
+    }
+
+    let Some(decimals) = direct_u8_view(chain, address, SELECTOR_DECIMALS)? else {
+        return Ok(None);
+    };
+    let Some(name) = direct_string_view(chain, address, SELECTOR_NAME)? else {
+        return Ok(None);
+    };
+    let Some(symbol) = direct_string_view(chain, address, SELECTOR_SYMBOL)? else {
+        return Ok(None);
+    };
+
+    Ok(Some(ERC20TokenMetadata {
+        address: address_string(&address),
+        name,
+        symbol,
+        decimals,
+        total_supply: total_supply.to_string(),
+    }))
+}
+
 async fn uniswap_v2_pool_metadata(
     provider: &RethQueryProvider,
     cache: &RethChainMetadataCache,
@@ -179,6 +285,48 @@ async fn uniswap_v2_pool_metadata(
         cached_token_decimals(provider, cache, token0, lookup.block_number),
         cached_token_decimals(provider, cache, token1, lookup.block_number),
     )?;
+
+    let metadata = UniswapV2PoolMetadata::new_with_protocol(
+        identity.protocol,
+        address_string(&lookup.pool_address),
+        identity.token0,
+        identity.token1,
+        token0_decimals,
+        token1_decimals,
+    );
+    cache.remember_v2_pool_metadata(lookup.pool_address, Some(metadata.clone()));
+
+    Ok(filter_uniswap_v2_pool_metadata(
+        Some(metadata),
+        lookup.tracked_token_address,
+    ))
+}
+
+fn uniswap_v2_pool_metadata_from_direct_live_chain(
+    chain: &mut UnsignedTxChainSimulation,
+    cache: &RethChainMetadataCache,
+    lookup: &UniswapV2PoolMetadataLookup,
+) -> Result<Option<UniswapV2PoolMetadata>> {
+    if let Some(metadata) = cache.v2_pool_metadata(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_metadata(
+            metadata,
+            lookup.tracked_token_address,
+        ));
+    }
+
+    let Some(identity) = uniswap_v2_pool_identity_from_direct_live_chain(chain, cache, lookup)?
+    else {
+        return Ok(None);
+    };
+    let token0: Address = identity.token0.parse()?;
+    let token1: Address = identity.token1.parse()?;
+
+    let Some(token0_decimals) = direct_cached_token_decimals(chain, cache, token0)? else {
+        return Ok(None);
+    };
+    let Some(token1_decimals) = direct_cached_token_decimals(chain, cache, token1)? else {
+        return Ok(None);
+    };
 
     let metadata = UniswapV2PoolMetadata::new_with_protocol(
         identity.protocol,
@@ -274,6 +422,92 @@ async fn uniswap_v2_pool_identity(
     ))
 }
 
+fn uniswap_v2_pool_identity_from_direct_live_chain(
+    chain: &mut UnsignedTxChainSimulation,
+    cache: &RethChainMetadataCache,
+    lookup: &UniswapV2PoolMetadataLookup,
+) -> Result<Option<UniswapV2PoolIdentity>> {
+    if let Some(metadata) = cache.v2_pool_metadata(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_identity(
+            metadata.as_ref().map(UniswapV2PoolIdentity::from),
+            lookup.tracked_token_address,
+        ));
+    }
+
+    if let Some(identity) = cache.v2_pool_identity(lookup.pool_address) {
+        return Ok(filter_uniswap_v2_pool_identity(
+            identity,
+            lookup.tracked_token_address,
+        ));
+    }
+
+    let Some(token0) = direct_address_view(chain, lookup.pool_address, SELECTOR_TOKEN0)? else {
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    };
+    let Some(token1) = direct_address_view(chain, lookup.pool_address, SELECTOR_TOKEN1)? else {
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    };
+
+    if is_native_eth_sentinel(&token0) || is_native_eth_sentinel(&token1) {
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    }
+
+    let Some(factory) = direct_address_view(chain, lookup.pool_address, SELECTOR_FACTORY)? else {
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    };
+    let Some(protocol) = KnownV2Protocol::from_factory(factory) else {
+        tracing::debug!(
+            pool_address = %lookup.pool_address,
+            factory = %factory,
+            token0 = %token0,
+            token1 = %token1,
+            block_number = lookup.block_number,
+            tx_index = lookup.tx_index,
+            tx_hash = %lookup.transaction_hash,
+            source = "direct_live_block_session",
+            "skipped unknown v2-style pool factory"
+        );
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    };
+
+    let resolved_pair = compute_known_v2_protocol_pool_address(protocol, token0, token1);
+    if !is_known_v2_protocol_pool(lookup.pool_address, resolved_pair) {
+        tracing::debug!(
+            pool_address = %lookup.pool_address,
+            protocol = protocol.label(),
+            factory = %factory,
+            token0 = %token0,
+            token1 = %token1,
+            resolved_pair = %resolved_pair,
+            block_number = lookup.block_number,
+            tx_index = lookup.tx_index,
+            tx_hash = %lookup.transaction_hash,
+            source = "direct_live_block_session",
+            "skipped mismatched known v2 pool"
+        );
+        cache.remember_v2_pool_identity(lookup.pool_address, None);
+        return Ok(None);
+    }
+
+    let identity = UniswapV2PoolIdentity::new_with_protocol(
+        protocol,
+        address_string(&lookup.pool_address),
+        address_string(&token0),
+        address_string(&token1),
+    );
+    cache.remember_v2_pool_identity(lookup.pool_address, Some(identity.clone()));
+
+    Ok(filter_uniswap_v2_pool_identity(
+        Some(identity),
+        lookup.tracked_token_address,
+    ))
+}
+
 async fn cached_token_decimals(
     provider: &RethQueryProvider,
     cache: &RethChainMetadataCache,
@@ -288,6 +522,22 @@ async fn cached_token_decimals(
         .await?;
     cache.remember_token_decimals(token_address, decimals);
     Ok(decimals)
+}
+
+fn direct_cached_token_decimals(
+    chain: &mut UnsignedTxChainSimulation,
+    cache: &RethChainMetadataCache,
+    token_address: Address,
+) -> Result<Option<u8>> {
+    if let Some(decimals) = cache.token_decimals(token_address) {
+        return Ok(Some(decimals));
+    }
+
+    let Some(decimals) = direct_u8_view(chain, token_address, SELECTOR_DECIMALS)? else {
+        return Ok(None);
+    };
+    cache.remember_token_decimals(token_address, decimals);
+    Ok(Some(decimals))
 }
 
 fn filter_uniswap_v2_pool_identity(
@@ -338,6 +588,146 @@ fn compute_known_v2_protocol_pool_address(
     }
 }
 
+const SELECTOR_TOTAL_SUPPLY: [u8; 4] = [0x18, 0x16, 0x0d, 0xdd];
+const SELECTOR_BALANCE_OF: [u8; 4] = [0x70, 0xa0, 0x82, 0x31];
+const SELECTOR_ALLOWANCE: [u8; 4] = [0xdd, 0x62, 0xed, 0x3e];
+const SELECTOR_DECIMALS: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67];
+const SELECTOR_NAME: [u8; 4] = [0x06, 0xfd, 0xde, 0x03];
+const SELECTOR_SYMBOL: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41];
+const SELECTOR_TOKEN0: [u8; 4] = [0x0d, 0xfe, 0x16, 0x81];
+const SELECTOR_TOKEN1: [u8; 4] = [0xd2, 0x12, 0x20, 0xa7];
+const SELECTOR_FACTORY: [u8; 4] = [0xc4, 0x5a, 0x01, 0x55];
+
+fn direct_uint256_view(
+    chain: &mut UnsignedTxChainSimulation,
+    contract: Address,
+    data: impl Into<Bytes>,
+) -> Result<Option<U256>> {
+    let Some(output) = direct_view_output(chain, contract, data.into())? else {
+        return Ok(None);
+    };
+    if output.len() < 32 {
+        return Ok(None);
+    }
+    Ok(Some(U256::from_be_slice(&output[..32])))
+}
+
+fn direct_u8_view(
+    chain: &mut UnsignedTxChainSimulation,
+    contract: Address,
+    selector: [u8; 4],
+) -> Result<Option<u8>> {
+    let Some(output) = direct_view_output(chain, contract, Bytes::copy_from_slice(&selector))?
+    else {
+        return Ok(None);
+    };
+    if output.len() < 32 {
+        return Ok(None);
+    }
+    Ok(Some(output[31]))
+}
+
+fn direct_string_view(
+    chain: &mut UnsignedTxChainSimulation,
+    contract: Address,
+    selector: [u8; 4],
+) -> Result<Option<String>> {
+    let Some(output) = direct_view_output(chain, contract, Bytes::copy_from_slice(&selector))?
+    else {
+        return Ok(None);
+    };
+    Ok(decode_metadata_string(&output))
+}
+
+fn direct_address_view(
+    chain: &mut UnsignedTxChainSimulation,
+    contract: Address,
+    selector: [u8; 4],
+) -> Result<Option<Address>> {
+    let Some(output) = direct_view_output(chain, contract, Bytes::copy_from_slice(&selector))?
+    else {
+        return Ok(None);
+    };
+    if output.len() < 32 {
+        return Ok(None);
+    }
+    Ok(Some(Address::from_slice(&output[12..32])))
+}
+
+fn direct_view_output(
+    chain: &mut UnsignedTxChainSimulation,
+    contract: Address,
+    data: Bytes,
+) -> Result<Option<Bytes>> {
+    match chain.simulate_view_call(contract, data) {
+        Ok(result) if result.success => Ok(Some(result.output)),
+        Ok(_) => Ok(None),
+        Err(error) => {
+            tracing::debug!(
+                contract = %contract,
+                error = %error,
+                "direct live metadata view call failed"
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn calldata_with_address(selector: [u8; 4], address: Address) -> Bytes {
+    let mut payload = Vec::with_capacity(36);
+    payload.extend_from_slice(&selector);
+    payload.extend_from_slice(&[0u8; 12]);
+    payload.extend_from_slice(address.as_slice());
+    Bytes::from(payload)
+}
+
+fn calldata_with_two_addresses(selector: [u8; 4], first: Address, second: Address) -> Bytes {
+    let mut payload = Vec::with_capacity(68);
+    payload.extend_from_slice(&selector);
+    payload.extend_from_slice(&[0u8; 12]);
+    payload.extend_from_slice(first.as_slice());
+    payload.extend_from_slice(&[0u8; 12]);
+    payload.extend_from_slice(second.as_slice());
+    Bytes::from(payload)
+}
+
+fn decode_metadata_string(output: &[u8]) -> Option<String> {
+    if output.is_empty() {
+        return None;
+    }
+
+    if output.len() >= 64 {
+        let offset = U256::from_be_slice(&output[..32]).to::<usize>();
+        if offset
+            .checked_add(32)
+            .is_some_and(|end| end <= output.len())
+        {
+            let length = U256::from_be_slice(&output[offset..offset + 32]).to::<usize>();
+            let start = offset + 32;
+            if start
+                .checked_add(length)
+                .is_some_and(|end| end <= output.len())
+            {
+                return String::from_utf8(output[start..start + length].to_vec()).ok();
+            }
+        }
+    }
+
+    if output.len() == 32 {
+        let end = output
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let trimmed = &output[..end];
+        if !trimmed.is_empty() {
+            return String::from_utf8(trimmed.to_vec()).ok();
+        }
+    }
+
+    String::from_utf8(output.to_vec()).ok()
+}
+
 fn is_optional_token_metadata_read_error(message: &str) -> bool {
     // Token metadata is optional for discovery. Contracts that do not fully
     // implement ERC-20 metadata should not make block application fail.
@@ -385,17 +775,14 @@ mod tests {
     }
 
     #[test]
-    fn live_mode_uses_parent_state_with_pending_replay() {
+    fn live_mode_uses_post_block_state_without_pending_replay() {
         let lookup = lookup();
 
         assert_eq!(
             RethMetadataMode::Live.token_metadata_block(&lookup),
-            lookup.metadata_block_number
+            lookup.block_number
         );
-        assert_eq!(
-            RethMetadataMode::Live.pending_tx_hashes(&lookup),
-            Some(lookup.pending_tx_hashes.clone())
-        );
+        assert_eq!(RethMetadataMode::Live.pending_tx_hashes(&lookup), None);
     }
 
     #[test]

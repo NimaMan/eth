@@ -563,11 +563,16 @@ impl LiveTokenRuntime {
             .sum();
         let process_block_started = Instant::now();
         let report = if is_live_tail {
+            let live_discovery_provider =
+                LiveRethChainMetadataProvider::with_direct_live_block_sessions(
+                    self.inner.provider.as_ref(),
+                    &live_block_sessions,
+                );
             state
                 .processor
                 .process_block_live_with_discovery_provider_and_sessions(
                     &loaded.block,
-                    discovery_provider,
+                    &live_discovery_provider,
                     pool_simulator,
                     &live_block_sessions,
                     true,

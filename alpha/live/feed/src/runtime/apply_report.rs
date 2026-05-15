@@ -9,6 +9,7 @@ use super::time::now_unix_secs;
 
 const MAX_LIVE_ISSUES: usize = 1_000;
 const MAX_LIVE_BOTTLENECKS: usize = 1_000;
+const MAX_LIVE_ERRORS: usize = 1_000;
 
 pub(super) fn apply_report(
     state: &mut LiveTokenState,
@@ -90,7 +91,8 @@ pub(super) fn apply_report(
         );
         emit_issue(&issue);
         push_issue(state, issue);
-        state.errors.push(
+        push_error(
+            state,
             LiveTokenError::new(
                 Some(report.block_number),
                 Some(error.tx_index),
@@ -133,6 +135,14 @@ pub(super) fn push_bottleneck(state: &mut LiveTokenState, sample: PipelineBottle
     if state.bottlenecks.len() > MAX_LIVE_BOTTLENECKS {
         let excess = state.bottlenecks.len() - MAX_LIVE_BOTTLENECKS;
         state.bottlenecks.drain(0..excess);
+    }
+}
+
+fn push_error(state: &mut LiveTokenState, error: LiveTokenError) {
+    state.errors.push(error);
+    if state.errors.len() > MAX_LIVE_ERRORS {
+        let excess = state.errors.len() - MAX_LIVE_ERRORS;
+        state.errors.drain(0..excess);
     }
 }
 
