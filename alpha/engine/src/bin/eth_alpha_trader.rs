@@ -15,6 +15,8 @@ use eth_alpha_core::{
     ids::{StrategyName, TokenPoolId},
     market::{MarketEvent, PoolSnapshot},
     portfolio::PortfolioState,
+    position::{Position, PositionState},
+    store::TradingStore,
 };
 use eth_alpha_engine::wire::{
     parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalWire,
@@ -28,6 +30,10 @@ use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
+use eth_strategies::shared_rules::live::live_mempool_liquidity_removal_exit::{
+    default_strategy_spec, observation_strategy_name, suite_specs, LiveStrategySpec,
+    LiveStrategySpecOptions, STRATEGY_RUNTIME,
+};
 use eth_strategies::{LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
@@ -36,12 +42,6 @@ use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
 
-const DEFAULT_STRATEGY_NAME: &str = "snipe-all-v1";
-const DEFAULT_STRATEGY_LABEL: &str = "Snipe All v1";
-const STRATEGY_RUNTIME: &str = "live";
-const LIVE_MEMPOOL_EXIT_SUITE: &str = "mempool-live-exits";
-const LEGACY_LIVE_MEMPOOL_EXIT_SUITE: &str = "live-mempool-exits";
-const LIVE_MEMPOOL_EXIT_SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
@@ -110,127 +110,60 @@ struct Args {
     max_exit_retries: Option<u32>,
 
     /// Register a named strategy suite instead of the default single strategy.
-    /// `mempool-live-exits` runs the six true-live mempool exit variants.
+    /// `mempool-live-exits` runs the live mempool liquidity-removal exit variants.
     #[arg(long)]
     strategy_suite: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-struct LiveStrategySpec {
-    strategy_name: String,
-    strategy_impl: String,
-    strategy_label: String,
-    exit_liquidity_removal: bool,
-    exit_tax: bool,
-    exit_lp_approval: bool,
-    exit_lp_approval_critical_only: bool,
-    exit_scam: bool,
-    stop_loss_ratio: Option<String>,
-    take_profit_ratio: Option<String>,
-    max_hold_blocks: Option<u64>,
-    exit_retry_interval_blocks: Option<u64>,
-    max_exit_retries: Option<u32>,
-}
-
-impl LiveStrategySpec {
-    fn config_json(&self) -> Value {
-        json!({
-            "strategy_name": self.strategy_name,
-            "strategy_impl": self.strategy_impl,
-            "strategy_label": self.strategy_label,
-            "strategy_runtime": STRATEGY_RUNTIME,
-            "exit_liquidity_removal": self.exit_liquidity_removal,
-            "exit_tax": self.exit_tax,
-            "exit_lp_approval": self.exit_lp_approval,
-            "exit_lp_approval_critical_only": self.exit_lp_approval_critical_only,
-            "exit_scam": self.exit_scam,
-            "stop_loss_ratio": self.stop_loss_ratio,
-            "take_profit_ratio": self.take_profit_ratio,
-            "max_hold_blocks": self.max_hold_blocks,
-            "exit_retry_interval_blocks": self.exit_retry_interval_blocks,
-            "max_exit_retries": self.max_exit_retries,
-        })
-    }
-}
-
 fn build_strategy_specs(args: &Args) -> Result<Vec<LiveStrategySpec>> {
-    if let Some(suite) = args.strategy_suite.as_deref() {
-        return match suite {
-            LIVE_MEMPOOL_EXIT_SUITE | LEGACY_LIVE_MEMPOOL_EXIT_SUITE => {
-                Ok(mempool_live_exit_suite_specs(args))
-            }
-            other => Err(eyre!("unsupported strategy suite: {other}")),
-        };
-    }
-
-    Ok(vec![LiveStrategySpec {
-        strategy_name: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: DEFAULT_STRATEGY_LABEL.to_string(),
-        exit_liquidity_removal: true,
-        exit_tax: true,
-        exit_lp_approval: true,
-        exit_lp_approval_critical_only: false,
-        exit_scam: true,
+    let options = LiveStrategySpecOptions {
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: args.max_hold_blocks,
         exit_retry_interval_blocks: args.exit_retry_interval_blocks,
         max_exit_retries: args.max_exit_retries,
-    }])
+    };
+
+    if let Some(suite) = args.strategy_suite.as_deref() {
+        return suite_specs(suite, &options).map_err(|error| eyre!(error));
+    }
+
+    Ok(vec![default_strategy_spec(&options)])
 }
 
-fn mempool_live_exit_suite_specs(args: &Args) -> Vec<LiveStrategySpec> {
-    [10_u64, 20, 50]
-        .into_iter()
-        .flat_map(|max_hold_blocks| {
-            [
-                LiveStrategySpec {
-                    strategy_name: format!("snipe-all-live-maxhold{max_hold_blocks}-liq-exit"),
-                    strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-                    strategy_label: format!(
-                        "Snipe All live maxhold {max_hold_blocks} liquidity exit"
-                    ),
-                    exit_liquidity_removal: true,
-                    exit_tax: false,
-                    exit_lp_approval: false,
-                    exit_lp_approval_critical_only: false,
-                    exit_scam: false,
-                    stop_loss_ratio: args.stop_loss_ratio.clone(),
-                    take_profit_ratio: args.take_profit_ratio.clone(),
-                    max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-                    max_exit_retries: args.max_exit_retries,
-                },
-                LiveStrategySpec {
-                    strategy_name: format!(
-                        "snipe-all-live-maxhold{max_hold_blocks}-critical-lp-exit"
-                    ),
-                    strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-                    strategy_label: format!(
-                        "Snipe All live maxhold {max_hold_blocks} critical LP exit"
-                    ),
-                    exit_liquidity_removal: false,
-                    exit_tax: false,
-                    exit_lp_approval: true,
-                    exit_lp_approval_critical_only: true,
-                    exit_scam: false,
-                    stop_loss_ratio: args.stop_loss_ratio.clone(),
-                    take_profit_ratio: args.take_profit_ratio.clone(),
-                    max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-                    max_exit_retries: args.max_exit_retries,
-                },
-            ]
-        })
-        .collect()
+fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
+    json!({
+        "strategy_name": spec.strategy_name,
+        "strategy_impl": spec.strategy_impl,
+        "strategy_label": spec.strategy_label,
+        "strategy_runtime": STRATEGY_RUNTIME,
+        "exit_liquidity_removal": spec.exit_liquidity_removal,
+        "exit_tax": spec.exit_tax,
+        "exit_lp_approval": spec.exit_lp_approval,
+        "exit_lp_approval_critical_only": spec.exit_lp_approval_critical_only,
+        "exit_scam": spec.exit_scam,
+        "stop_loss_ratio": spec.stop_loss_ratio,
+        "take_profit_ratio": spec.take_profit_ratio,
+        "max_hold_blocks": spec.max_hold_blocks,
+        "exit_retry_interval_blocks": spec.exit_retry_interval_blocks,
+        "max_exit_retries": spec.max_exit_retries,
+    })
 }
 
-fn observation_strategy_name(strategy_specs: &[LiveStrategySpec]) -> String {
-    if strategy_specs.len() == 1 {
-        strategy_specs[0].strategy_name.clone()
-    } else {
-        LIVE_MEMPOOL_EXIT_SUITE_OBSERVATION_NAME.to_string()
+fn release_stale_submitted_position(position: &mut Position) -> bool {
+    match position.state {
+        PositionState::SellSubmitted | PositionState::SellIntentCreated => {
+            position.state = PositionState::BuyConfirmed;
+            position.exit_order_id = None;
+            position.exit_failure_reason = None;
+            position.exit_retryable = true;
+            true
+        }
+        PositionState::BuySubmitted | PositionState::BuyIntentCreated => {
+            position.state = PositionState::BuyFailed;
+            true
+        }
+        _ => false,
     }
 }
 
@@ -317,7 +250,7 @@ async fn main() -> Result<()> {
                 "strategy_label": if strategy_specs.len() == 1 { strategy_specs[0].strategy_label.clone() } else { "Mempool Live Exit Suite".to_string() },
                 "strategy_suite": args.strategy_suite.clone(),
                 "strategy_count": strategy_specs.len(),
-                "strategies": strategy_specs.iter().map(LiveStrategySpec::config_json).collect::<Vec<_>>(),
+                "strategies": strategy_specs.iter().map(live_strategy_spec_config_json).collect::<Vec<_>>(),
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "observation_strategy_name": &observation_strategy_name,
                 "execution_model": "chain_state_evm_simulation",
@@ -341,7 +274,20 @@ async fn main() -> Result<()> {
         .await
         .wrap_err("failed to mark stale alpha trader runs")?;
     let mut portfolio = PortfolioState::default();
+    let mut seen_pools_by_strategy = HashMap::new();
+    let mut restored_stale_submitted_positions = 0usize;
     for spec in &strategy_specs {
+        let seen_pools = store
+            .load_seen_pools(&spec.strategy_name)
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "failed to restore seen alpha pools for {}",
+                    spec.strategy_name
+                )
+            })?;
+        seen_pools_by_strategy.insert(spec.strategy_name.clone(), seen_pools);
+
         let restored_positions = store
             .load_active_positions(&spec.strategy_name)
             .await
@@ -351,7 +297,16 @@ async fn main() -> Result<()> {
                     spec.strategy_name
                 )
             })?;
-        for position in restored_positions {
+        for mut position in restored_positions {
+            if release_stale_submitted_position(&mut position) {
+                restored_stale_submitted_positions += 1;
+                store.upsert_position(&position).await.wrap_err_with(|| {
+                    format!(
+                        "failed to persist stale submitted position recovery for {}",
+                        position.id.0
+                    )
+                })?;
+            }
             portfolio.positions.insert(position.id.clone(), position);
         }
     }
@@ -360,9 +315,17 @@ async fn main() -> Result<()> {
     let live_simulator = tx_simulator::LiveTxSimulator::new(&reth_datadir)
         .wrap_err("failed to initialize live chain simulator")?;
     let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
-    let adapter =
-        LiveChainSimExecutionAdapter::with_prefix(live_simulator, tx_processor, run_id.clone())
-            .wrap_err("failed to initialize chain-sim execution adapter")?;
+    let next_order_sequence = store
+        .max_order_sequence_for_prefix(&run_id)
+        .await
+        .wrap_err("failed to restore alpha trader order sequence")?;
+    let adapter = LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
+        live_simulator,
+        tx_processor,
+        run_id.clone(),
+        next_order_sequence,
+    )
+    .wrap_err("failed to initialize chain-sim execution adapter")?;
     let adapter_current_block = adapter.current_block();
     let pool_updates = adapter.pools();
     let state_status_adapter = adapter.clone();
@@ -378,28 +341,33 @@ async fn main() -> Result<()> {
             .take_profit_ratio
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
-        engine.add_strategy(Box::new(LiveSnipeAllStrategy::new(
-            LiveSnipeAllConfig::new(SnipeAllConfig {
-                strategy_name: StrategyName(spec.strategy_name.clone()),
-                buy_amount: Amount {
-                    raw: buy_wei,
-                    decimals: 18,
-                },
-                sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
-                min_denom_reserve: min_liquidity_eth,
-                min_stable_denom_reserve: min_liquidity_usd,
-                stop_loss_ratio,
-                take_profit_ratio,
-                max_hold_blocks: spec.max_hold_blocks,
-                exit_retry_interval_blocks: spec.exit_retry_interval_blocks,
-                max_exit_retries: spec.max_exit_retries,
-                exit_on_liquidity_removal: spec.exit_liquidity_removal,
-                exit_on_tax: spec.exit_tax,
-                exit_on_lp_approval: spec.exit_lp_approval,
-                exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
-                exit_on_scam: spec.exit_scam,
-                ..SnipeAllConfig::default()
-            }),
+        let config = LiveSnipeAllConfig::new(SnipeAllConfig {
+            strategy_name: StrategyName(spec.strategy_name.clone()),
+            buy_amount: Amount {
+                raw: buy_wei,
+                decimals: 18,
+            },
+            sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
+            min_denom_reserve: min_liquidity_eth,
+            min_stable_denom_reserve: min_liquidity_usd,
+            stop_loss_ratio,
+            take_profit_ratio,
+            max_hold_blocks: spec.max_hold_blocks,
+            exit_retry_interval_blocks: spec.exit_retry_interval_blocks,
+            max_exit_retries: spec.max_exit_retries,
+            exit_on_liquidity_removal: spec.exit_liquidity_removal,
+            exit_on_tax: spec.exit_tax,
+            exit_on_lp_approval: spec.exit_lp_approval,
+            exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
+            exit_on_scam: spec.exit_scam,
+            ..SnipeAllConfig::default()
+        });
+        let seen_pools = seen_pools_by_strategy
+            .get(&spec.strategy_name)
+            .cloned()
+            .unwrap_or_default();
+        engine.add_strategy(Box::new(LiveSnipeAllStrategy::with_bought_pools(
+            config, seen_pools,
         )));
     }
 
@@ -422,7 +390,13 @@ async fn main() -> Result<()> {
         replay_current = args.replay_current,
         restored_pool_watermarks = seen_pool_blocks.len(),
         restored_signal_watermarks = seen_signal_ids.len(),
+        restored_seen_pools = seen_pools_by_strategy
+            .values()
+            .map(Vec::len)
+            .sum::<usize>(),
+        restored_stale_submitted_positions,
         restored_positions = restored_position_count,
+        next_order_sequence,
         "starting alpha trader"
     );
 
@@ -521,6 +495,104 @@ async fn main() -> Result<()> {
         let mut position_monitor_events = 0usize;
         let mut reports = 0usize;
 
+        let mut signal_wires = signals.signals;
+        signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
+        for signal in signal_wires {
+            let is_new = seen_signal_ids.insert(signal.signal_id.clone());
+            if !is_new || suppress_events || (first_poll && !args.replay_current) {
+                if is_new {
+                    record_signal_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &signal,
+                        "primed",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        Value::Null,
+                    )
+                    .await?;
+                }
+                continue;
+            }
+            let mut event = match signal.to_risk_event() {
+                Ok(Some(event)) => event,
+                Ok(None) => {
+                    record_signal_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &signal,
+                        "ignored",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "reason": "missing_token_address" }),
+                    )
+                    .await?;
+                    continue;
+                }
+                Err(error) => {
+                    record_signal_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &signal,
+                        "invalid",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "error": error.to_string() }),
+                    )
+                    .await?;
+                    warn!(error = %error, signal_id = %signal.signal_id, "skipping mempool signal");
+                    continue;
+                }
+            };
+            let signal_block = event
+                .observed_block
+                .or(status.progress.current_block)
+                .unwrap_or_default();
+            if signal_block > 0 {
+                if event.observed_block.is_none() {
+                    event.observed_block = Some(signal_block);
+                }
+                adapter_current_block.store(signal_block, Ordering::Relaxed);
+            }
+            let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
+            let report_count = event_reports.len();
+            let decision = if report_count > 0 {
+                "submitted"
+            } else {
+                "hold"
+            };
+            record_signal_observation(
+                &store,
+                &observation_strategy_name,
+                &signal,
+                decision,
+                report_count,
+                first_poll,
+                suppress_events,
+                &status,
+                json!({ "reports": reports_payload(&event_reports) }),
+            )
+            .await?;
+            reports += report_count;
+            risk_events += 1;
+            for report in event_reports {
+                info!(
+                    order_id = %report.order_id.0,
+                    status = ?report.status,
+                    block_number = ?report.block_number,
+                    gas_used = ?report.gas_used,
+                    error = ?report.error,
+                    "chain-sim execution report"
+                );
+            }
+        }
+
         for pool_wire in pools.pools {
             let pool = match pool_wire.to_pool_snapshot() {
                 Ok(pool) => pool,
@@ -530,6 +602,11 @@ async fn main() -> Result<()> {
                 }
             };
             let previous_block = seen_pool_blocks.get(&pool.address).copied();
+            pool_updates
+                .lock()
+                .expect("pool lock")
+                .insert(pool.address.clone(), pool.clone());
+
             let changed = previous_block
                 .map(|previous| pool.latest_block > previous)
                 .unwrap_or(true);
@@ -537,11 +614,6 @@ async fn main() -> Result<()> {
                 continue;
             }
             seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
-
-            pool_updates
-                .lock()
-                .expect("pool lock")
-                .insert(pool.address.clone(), pool.clone());
 
             if suppress_events || (first_poll && !args.replay_current) {
                 record_pool_observation(
@@ -589,99 +661,6 @@ async fn main() -> Result<()> {
             .await?;
             reports += report_count;
             market_events += 1;
-            for report in event_reports {
-                info!(
-                    order_id = %report.order_id.0,
-                    status = ?report.status,
-                    block_number = ?report.block_number,
-                    gas_used = ?report.gas_used,
-                    error = ?report.error,
-                    "chain-sim execution report"
-                );
-            }
-        }
-
-        for signal in signals.signals {
-            let is_new = seen_signal_ids.insert(signal.signal_id.clone());
-            if !is_new || suppress_events || (first_poll && !args.replay_current) {
-                if is_new {
-                    record_signal_observation(
-                        &store,
-                        &observation_strategy_name,
-                        &signal,
-                        "primed",
-                        0,
-                        first_poll,
-                        suppress_events,
-                        &status,
-                        Value::Null,
-                    )
-                    .await?;
-                }
-                continue;
-            }
-            let event = match signal.to_risk_event() {
-                Ok(Some(event)) => event,
-                Ok(None) => {
-                    record_signal_observation(
-                        &store,
-                        &observation_strategy_name,
-                        &signal,
-                        "ignored",
-                        0,
-                        first_poll,
-                        suppress_events,
-                        &status,
-                        json!({ "reason": "missing_token_address" }),
-                    )
-                    .await?;
-                    continue;
-                }
-                Err(error) => {
-                    record_signal_observation(
-                        &store,
-                        &observation_strategy_name,
-                        &signal,
-                        "invalid",
-                        0,
-                        first_poll,
-                        suppress_events,
-                        &status,
-                        json!({ "error": error.to_string() }),
-                    )
-                    .await?;
-                    warn!(error = %error, signal_id = %signal.signal_id, "skipping mempool signal");
-                    continue;
-                }
-            };
-            let signal_block = event
-                .observed_block
-                .or(status.progress.current_block)
-                .unwrap_or_default();
-            if signal_block > 0 {
-                adapter_current_block.store(signal_block, Ordering::Relaxed);
-            }
-            let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
-            let report_count = event_reports.len();
-            let decision = if report_count > 0 {
-                "submitted"
-            } else {
-                "hold"
-            };
-            record_signal_observation(
-                &store,
-                &observation_strategy_name,
-                &signal,
-                decision,
-                report_count,
-                first_poll,
-                suppress_events,
-                &status,
-                json!({ "reports": reports_payload(&event_reports) }),
-            )
-            .await?;
-            reports += report_count;
-            risk_events += 1;
             for report in event_reports {
                 info!(
                     order_id = %report.order_id.0,

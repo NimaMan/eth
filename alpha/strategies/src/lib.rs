@@ -2,7 +2,7 @@
 
 mod baseline;
 mod market_tracker;
-mod shared_rules;
+pub mod shared_rules;
 
 pub use baseline::snipe_all::{
     LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig, SnipeAllStrategy,

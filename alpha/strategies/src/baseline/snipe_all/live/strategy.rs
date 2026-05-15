@@ -1,6 +1,8 @@
 use eth_alpha_core::{
-    ids::StrategyName, market::MarketEvent, risk::RiskEvent, Result, Strategy, StrategyContext,
-    StrategyDecision,
+    ids::{PoolAddress, StrategyName},
+    market::MarketEvent,
+    risk::RiskEvent,
+    Result, Strategy, StrategyContext, StrategyDecision,
 };
 
 use crate::baseline::snipe_all::{LiveSnipeAllConfig, SnipeAllStrategy};
@@ -14,6 +16,15 @@ impl LiveSnipeAllStrategy {
     pub fn new(config: LiveSnipeAllConfig) -> Self {
         Self {
             inner: SnipeAllStrategy::new(config.strategy),
+        }
+    }
+
+    pub fn with_bought_pools(
+        config: LiveSnipeAllConfig,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+    ) -> Self {
+        Self {
+            inner: SnipeAllStrategy::with_bought_pools(config.strategy, bought_pools),
         }
     }
 

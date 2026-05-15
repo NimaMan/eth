@@ -8,6 +8,12 @@ pub struct SnipeAllState {
 }
 
 impl SnipeAllState {
+    pub fn with_bought_pools(pools: impl IntoIterator<Item = PoolAddress>) -> Self {
+        Self {
+            bought_pools: pools.into_iter().collect(),
+        }
+    }
+
     pub fn has_bought(&self, pool: &PoolAddress) -> bool {
         self.bought_pools.contains(pool)
     }

@@ -7,7 +7,7 @@ use eth_alpha_core::{
     amount::Amount,
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
-    ids::PositionId,
+    ids::{PoolAddress, PositionId},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionSnapshot, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -268,6 +268,55 @@ impl PostgresTradingStore {
                 Ok(position)
             })
             .collect()
+    }
+
+    pub async fn load_seen_pools(&self, strategy_name: &str) -> Result<Vec<PoolAddress>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT pool_address
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+              AND strategy_name = $2
+              AND pool_address IS NOT NULL
+            ORDER BY pool_address
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get::<String, _>("pool_address")
+                    .map(PoolAddress::from)
+                    .map_err(store_error)
+            })
+            .collect()
+    }
+
+    pub async fn max_order_sequence_for_prefix(&self, order_prefix: &str) -> Result<u64> {
+        let suffix_start = order_prefix.len() + 2;
+        let like_pattern = format!("{order_prefix}-%");
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(MAX((substring(order_id FROM $3::int))::bigint), 0) AS max_sequence
+            FROM alpha_trading.execution_reports
+            WHERE run_id = $1
+              AND order_id LIKE $2
+              AND substring(order_id FROM $3::int) ~ '^[0-9]+$'
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(like_pattern)
+        .bind(usize_to_i32(suffix_start))
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_error)?;
+        row.try_get::<i64, _>("max_sequence")
+            .map_err(store_error)
+            .map(|value| i64_to_u64(value).unwrap_or_default())
     }
 }
 
