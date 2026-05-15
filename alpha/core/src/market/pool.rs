@@ -35,6 +35,8 @@ pub struct PoolSnapshot {
     pub denom_reserve: DecimalAmount,
     pub token_reserve: DecimalAmount,
     pub price_denom_per_token: Option<DecimalAmount>,
+    pub initial_price_denom_per_token: Option<DecimalAmount>,
+    pub price_ratio_to_initial: Option<DecimalAmount>,
     pub token_decimals: Option<u8>,
     pub fee_tier: Option<u32>,
     pub uniswap_v4: Option<UniswapV4PoolKeySnapshot>,

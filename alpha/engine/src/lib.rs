@@ -348,14 +348,14 @@ where
                             realized_profit_eth: position.realized_pnl(),
                             unrealized_profit_eth: -position.entry_cost_basis.unwrap_or_default(),
                             roi: DecimalAmount::from(-1),
-                            price_to_initial_price_ratio: None,
+                            pool_price_to_initial_price_ratio: None,
+                            pool_initial_price_denom_per_token: None,
                             pool_price_denom_per_token: None,
                             pool_liquidity_denom: None,
                             pool_token_reserve: None,
                             pool_denom_symbol: None,
                         };
-                        let snapshot =
-                            snapshot_with_pool_metrics(snapshot, position, pool_snapshot.as_ref());
+                        let snapshot = snapshot_with_pool_metrics(snapshot, pool_snapshot.as_ref());
                         let _ = self.store.append_position_snapshot(&snapshot).await;
                     }
                 }
@@ -625,13 +625,14 @@ where
                 } else {
                     DecimalAmount::ZERO
                 },
-                price_to_initial_price_ratio: None,
+                pool_price_to_initial_price_ratio: None,
+                pool_initial_price_denom_per_token: None,
                 pool_price_denom_per_token: None,
                 pool_liquidity_denom: None,
                 pool_token_reserve: None,
                 pool_denom_symbol: None,
             };
-            let snapshot = snapshot_with_pool_metrics(snapshot, &position, pool);
+            let snapshot = snapshot_with_pool_metrics(snapshot, pool);
             self.store.append_position_snapshot(&snapshot).await?;
         } else if side == OrderSide::Buy && report_status == ExecutionStatus::Confirmed {
             self.snapshot_confirmed_buy_position(&position).await?;
@@ -866,13 +867,14 @@ fn zero_value_snapshot(
         } else {
             DecimalAmount::from(-1)
         },
-        price_to_initial_price_ratio: None,
+        pool_price_to_initial_price_ratio: None,
+        pool_initial_price_denom_per_token: None,
         pool_price_denom_per_token: None,
         pool_liquidity_denom: None,
         pool_token_reserve: None,
         pool_denom_symbol: None,
     };
-    snapshot_with_pool_metrics(snapshot, position, pool)
+    snapshot_with_pool_metrics(snapshot, pool)
 }
 
 fn simulated_value_snapshot(
@@ -899,36 +901,30 @@ fn simulated_value_snapshot(
         } else {
             ((current_value + realized) / cost) - DecimalAmount::from(1)
         },
-        price_to_initial_price_ratio: None,
+        pool_price_to_initial_price_ratio: None,
+        pool_initial_price_denom_per_token: None,
         pool_price_denom_per_token: None,
         pool_liquidity_denom: None,
         pool_token_reserve: None,
         pool_denom_symbol: None,
     };
-    snapshot_with_pool_metrics(snapshot, position, pool)
+    snapshot_with_pool_metrics(snapshot, pool)
 }
 
 fn snapshot_with_pool_metrics(
     mut snapshot: PositionSnapshot,
-    position: &Position,
     pool: Option<&PoolSnapshot>,
 ) -> PositionSnapshot {
     let Some(pool) = pool else {
         return snapshot;
     };
 
+    snapshot.pool_price_to_initial_price_ratio = pool.price_ratio_to_initial;
+    snapshot.pool_initial_price_denom_per_token = pool.initial_price_denom_per_token;
     snapshot.pool_price_denom_per_token = pool.price_denom_per_token;
     snapshot.pool_liquidity_denom = Some(pool.denom_reserve);
     snapshot.pool_token_reserve = Some(pool.token_reserve);
     snapshot.pool_denom_symbol = pool.denom_symbol.clone();
-
-    if let (Some(entry_price), Some(current_price)) =
-        (position.entry_price, pool.price_denom_per_token)
-    {
-        if !entry_price.is_zero() {
-            snapshot.price_to_initial_price_ratio = Some(current_price / entry_price);
-        }
-    }
 
     snapshot
 }
@@ -1265,6 +1261,8 @@ mod tests {
             denom_reserve: Default::default(),
             token_reserve: Default::default(),
             price_denom_per_token: None,
+            initial_price_denom_per_token: None,
+            price_ratio_to_initial: None,
             token_decimals: None,
             fee_tier: None,
             uniswap_v4: None,
@@ -1330,6 +1328,8 @@ mod tests {
                     denom_reserve: Default::default(),
                     token_reserve: Default::default(),
                     price_denom_per_token: None,
+                    initial_price_denom_per_token: None,
+                    price_ratio_to_initial: None,
                     token_decimals: None,
                     fee_tier: None,
                     uniswap_v4: None,
@@ -1572,6 +1572,8 @@ mod tests {
                     denom_reserve: Default::default(),
                     token_reserve: Default::default(),
                     price_denom_per_token: None,
+                    initial_price_denom_per_token: None,
+                    price_ratio_to_initial: None,
                     token_decimals: None,
                     fee_tier: None,
                     uniswap_v4: None,

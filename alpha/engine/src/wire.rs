@@ -70,6 +70,8 @@ pub struct PoolWire {
     pub denom_reserve: Option<f64>,
     pub token_reserve: Option<f64>,
     pub price: Option<f64>,
+    pub initial_price: Option<f64>,
+    pub price_ratio_to_initial: Option<f64>,
     pub creation_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub runtime_state: Option<PoolRuntimeStateWire>,
@@ -169,6 +171,8 @@ impl PoolWire {
             denom_reserve: decimal_from_f64(denom_reserve),
             token_reserve: decimal_from_f64(token_reserve),
             price_denom_per_token: self.price.map(decimal_from_f64),
+            initial_price_denom_per_token: self.initial_price.map(decimal_from_f64),
+            price_ratio_to_initial: self.price_ratio_to_initial.map(decimal_from_f64),
             token_decimals: None,
             fee_tier: self.fee_tier,
             uniswap_v4: self.uniswap_v4_pool_key()?,
@@ -401,6 +405,8 @@ mod tests {
             denom_reserve: Some(1.0),
             token_reserve: Some(100.0),
             price: Some(0.01),
+            initial_price: Some(0.005),
+            price_ratio_to_initial: Some(2.0),
             creation_block: Some(10),
             latest_block_number: Some(12),
             runtime_state: None,
@@ -424,6 +430,11 @@ mod tests {
 
         assert!(!snapshot.can_buy);
         assert!(!snapshot.can_sell);
+        assert_eq!(
+            snapshot.initial_price_denom_per_token,
+            Some(decimal_from_f64(0.005))
+        );
+        assert_eq!(snapshot.price_ratio_to_initial, Some(decimal_from_f64(2.0)));
     }
 
     #[test]

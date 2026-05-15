@@ -93,6 +93,8 @@ mod tests {
             denom_reserve: Decimal::new(1, 0),
             token_reserve: Decimal::new(100, 0),
             price_denom_per_token: None,
+            initial_price_denom_per_token: None,
+            price_ratio_to_initial: None,
             token_decimals: Some(18),
             fee_tier: None,
             uniswap_v4: None,

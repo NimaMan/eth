@@ -15,7 +15,9 @@ pub struct PositionSnapshot {
     pub unrealized_profit_eth: DecimalAmount,
     pub roi: DecimalAmount,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub price_to_initial_price_ratio: Option<DecimalAmount>,
+    pub pool_price_to_initial_price_ratio: Option<DecimalAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_initial_price_denom_per_token: Option<DecimalAmount>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pool_price_denom_per_token: Option<DecimalAmount>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
