@@ -9,7 +9,7 @@ use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
 use crate::ranges::{RangeIndexJob, RangeIndexState};
-use crate::read_models::{network::TokenNetworkView, pool::PoolView};
+use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenListResponse {

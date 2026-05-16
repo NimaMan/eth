@@ -1,7 +1,7 @@
 use eyre::Report;
 
 #[derive(Debug)]
-pub enum StartNetworkAnalysisError {
+pub enum StartTokenNetworkAnalysisError {
     InvalidRequest(Report),
     Spawn(std::io::Error),
 }

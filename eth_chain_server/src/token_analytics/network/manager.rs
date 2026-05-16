@@ -7,30 +7,30 @@ use tokio::sync::RwLock;
 use tx_processor::ProcessedBlockReplayStoreWriter;
 
 use super::cache::{prune_finished_jobs, DEFAULT_MAX_ANALYSIS_JOBS};
-use super::error::StartNetworkAnalysisError;
-use super::job::NetworkAnalysisJob;
-use super::pipeline::NetworkAnalysisPipeline;
-use super::request::NetworkAnalysisRequest;
+use super::error::StartTokenNetworkAnalysisError;
+use super::job::TokenNetworkAnalysisJob;
+use super::pipeline::TokenNetworkAnalysisPipeline;
+use super::request::TokenNetworkAnalysisRequest;
 
 #[derive(Clone)]
-pub struct NetworkAnalysisManager {
-    inner: Arc<NetworkAnalysisManagerInner>,
+pub struct TokenNetworkAnalysisManager {
+    inner: Arc<TokenNetworkAnalysisManagerInner>,
 }
 
-struct NetworkAnalysisManagerInner {
+struct TokenNetworkAnalysisManagerInner {
     provider: Arc<RethQueryProvider>,
     replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
-    jobs: RwLock<BTreeMap<String, Arc<NetworkAnalysisJob>>>,
+    jobs: RwLock<BTreeMap<String, Arc<TokenNetworkAnalysisJob>>>,
     next_id: AtomicU64,
 }
 
-impl NetworkAnalysisManager {
+impl TokenNetworkAnalysisManager {
     pub fn new(
         provider: Arc<RethQueryProvider>,
         replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     ) -> Self {
         Self {
-            inner: Arc::new(NetworkAnalysisManagerInner {
+            inner: Arc::new(TokenNetworkAnalysisManagerInner {
                 provider,
                 replay_store,
                 jobs: RwLock::new(BTreeMap::new()),
@@ -41,34 +41,37 @@ impl NetworkAnalysisManager {
 
     pub async fn start_analysis(
         &self,
-        request: NetworkAnalysisRequest,
-    ) -> Result<Arc<NetworkAnalysisJob>, StartNetworkAnalysisError> {
+        request: TokenNetworkAnalysisRequest,
+    ) -> Result<Arc<TokenNetworkAnalysisJob>, StartTokenNetworkAnalysisError> {
         let latest = self
             .inner
             .provider
             .get_latest_block()
-            .map_err(StartNetworkAnalysisError::InvalidRequest)?;
+            .map_err(StartTokenNetworkAnalysisError::InvalidRequest)?;
         let request = request
             .resolve(latest)
-            .map_err(StartNetworkAnalysisError::InvalidRequest)?;
+            .map_err(StartTokenNetworkAnalysisError::InvalidRequest)?;
         let id = format!(
-            "network-analysis-{}",
+            "token-network-analysis-{}",
             self.inner.next_id.fetch_add(1, Ordering::SeqCst)
         );
-        let job = Arc::new(NetworkAnalysisJob::new(id.clone(), request.clone()));
+        let job = Arc::new(TokenNetworkAnalysisJob::new(id.clone(), request.clone()));
 
-        let pipeline = NetworkAnalysisPipeline::new(
+        let pipeline = TokenNetworkAnalysisPipeline::new(
             self.inner.provider.clone(),
             self.inner.replay_store.clone(),
         );
         let running_job = job.clone();
+        let runtime_thread_name = format!("token-network-analysis-runtime-{id}");
         std::thread::Builder::new()
-            .name(format!("network-analysis-{id}"))
+            .name(format!("token-network-analysis-{id}"))
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .thread_name(runtime_thread_name)
                     .enable_all()
                     .build()
-                    .expect("failed to build network analysis runtime");
+                    .expect("failed to build token network analysis runtime");
                 runtime.block_on(async move {
                     match pipeline.run(request, running_job.clone()).await {
                         Ok(result) => {
@@ -79,17 +82,17 @@ impl NetworkAnalysisManager {
                             }
                         }
                         Err(error) if running_job.stop_requested() => {
-                            tracing::info!(job_id = %running_job.id, error = %error, "network analysis canceled");
+                            tracing::info!(job_id = %running_job.id, error = %error, "token network analysis canceled");
                             running_job.cancel().await;
                         }
                         Err(error) => {
-                            tracing::warn!(job_id = %running_job.id, error = %error, "network analysis failed");
+                            tracing::warn!(job_id = %running_job.id, error = %error, "token network analysis failed");
                             running_job.fail(error.to_string()).await;
                         }
                     }
                 });
             })
-            .map_err(StartNetworkAnalysisError::Spawn)?;
+            .map_err(StartTokenNetworkAnalysisError::Spawn)?;
 
         {
             let mut jobs = self.inner.jobs.write().await;
@@ -100,15 +103,15 @@ impl NetworkAnalysisManager {
         Ok(job)
     }
 
-    pub async fn get_job(&self, id: &str) -> Option<Arc<NetworkAnalysisJob>> {
+    pub async fn get_job(&self, id: &str) -> Option<Arc<TokenNetworkAnalysisJob>> {
         self.inner.jobs.read().await.get(id).cloned()
     }
 
-    pub async fn list_jobs(&self) -> Vec<Arc<NetworkAnalysisJob>> {
+    pub async fn list_jobs(&self) -> Vec<Arc<TokenNetworkAnalysisJob>> {
         self.inner.jobs.read().await.values().cloned().collect()
     }
 
-    pub async fn cancel_job(&self, id: &str) -> Option<Arc<NetworkAnalysisJob>> {
+    pub async fn cancel_job(&self, id: &str) -> Option<Arc<TokenNetworkAnalysisJob>> {
         let job = self.get_job(id).await?;
         job.request_stop();
         job.cancel().await;

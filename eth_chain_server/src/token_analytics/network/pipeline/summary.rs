@@ -1,25 +1,25 @@
 use eth_token::network::flow_context::FlowContextLayer;
 use serde::Serialize;
 
-use crate::network_analysis::request::ResolvedNetworkAnalysisRequest;
+use crate::token_analytics::network::request::ResolvedTokenNetworkAnalysisRequest;
 
-use super::timeline::NetworkAnalysisTimeline;
+use super::timeline::TokenNetworkAnalysisTimeline;
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NetworkAnalysisResult {
-    pub request: ResolvedNetworkAnalysisRequest,
-    pub token: NetworkAnalysisTokenSummary,
+pub struct TokenNetworkAnalysisResult {
+    pub request: ResolvedTokenNetworkAnalysisRequest,
+    pub token: TokenNetworkAnalysisTokenSummary,
     pub graph: TokenGraphAnalysisSummary,
     pub token_block_count: usize,
     pub context_block_count: usize,
     pub loaded_block_count: usize,
     pub flow_context: FlowContextLayer,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeline: Option<NetworkAnalysisTimeline>,
+    pub timeline: Option<TokenNetworkAnalysisTimeline>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NetworkAnalysisTokenSummary {
+pub struct TokenNetworkAnalysisTokenSummary {
     pub address: String,
     pub name: String,
     pub symbol: String,

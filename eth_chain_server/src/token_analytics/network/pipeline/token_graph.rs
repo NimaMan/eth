@@ -10,10 +10,10 @@ use eyre::{eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{PoolBuySellSimulator, ProcessedBlock};
 
-use super::summary::{NetworkAnalysisTokenSummary, TokenGraphAnalysisSummary};
+use super::summary::{TokenGraphAnalysisSummary, TokenNetworkAnalysisTokenSummary};
 
 pub struct TokenGraphBuildResult {
-    pub token: NetworkAnalysisTokenSummary,
+    pub token: TokenNetworkAnalysisTokenSummary,
     pub graph: RawTokenNetworkGraph,
     pub summary: TokenGraphAnalysisSummary,
 }
@@ -54,7 +54,7 @@ pub async fn build_token_graph(
         address_count: graph.address_activity.len(),
         applied_batches: graph.applied_batches,
     };
-    let token = NetworkAnalysisTokenSummary {
+    let token = TokenNetworkAnalysisTokenSummary {
         address: token.contract_address,
         name: token.name,
         symbol: token.symbol,

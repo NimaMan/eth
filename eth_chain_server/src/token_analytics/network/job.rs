@@ -4,12 +4,12 @@ use chrono::Utc;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use super::pipeline::summary::NetworkAnalysisResult;
-use super::request::ResolvedNetworkAnalysisRequest;
+use super::pipeline::summary::TokenNetworkAnalysisResult;
+use super::request::ResolvedTokenNetworkAnalysisRequest;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NetworkAnalysisStatus {
+pub enum TokenNetworkAnalysisStatus {
     Queued,
     Running,
     Complete,
@@ -18,8 +18,8 @@ pub enum NetworkAnalysisStatus {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NetworkAnalysisProgress {
-    pub status: NetworkAnalysisStatus,
+pub struct TokenNetworkAnalysisProgress {
+    pub status: TokenNetworkAnalysisStatus,
     pub stage: String,
     pub token_blocks_selected: usize,
     pub context_blocks_selected: usize,
@@ -31,29 +31,29 @@ pub struct NetworkAnalysisProgress {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NetworkAnalysisState {
-    pub progress: NetworkAnalysisProgress,
-    pub result: Option<NetworkAnalysisResult>,
+pub struct TokenNetworkAnalysisState {
+    pub progress: TokenNetworkAnalysisProgress,
+    pub result: Option<TokenNetworkAnalysisResult>,
     pub error: Option<String>,
 }
 
 #[derive(Debug)]
-pub struct NetworkAnalysisJob {
+pub struct TokenNetworkAnalysisJob {
     pub id: String,
-    pub request: ResolvedNetworkAnalysisRequest,
-    state: RwLock<NetworkAnalysisState>,
+    pub request: ResolvedTokenNetworkAnalysisRequest,
+    state: RwLock<TokenNetworkAnalysisState>,
     stop_requested: AtomicBool,
 }
 
-impl NetworkAnalysisJob {
-    pub fn new(id: impl Into<String>, request: ResolvedNetworkAnalysisRequest) -> Self {
+impl TokenNetworkAnalysisJob {
+    pub fn new(id: impl Into<String>, request: ResolvedTokenNetworkAnalysisRequest) -> Self {
         let now = now_unix_secs();
         Self {
             id: id.into(),
             request,
-            state: RwLock::new(NetworkAnalysisState {
-                progress: NetworkAnalysisProgress {
-                    status: NetworkAnalysisStatus::Queued,
+            state: RwLock::new(TokenNetworkAnalysisState {
+                progress: TokenNetworkAnalysisProgress {
+                    status: TokenNetworkAnalysisStatus::Queued,
                     stage: "queued".to_string(),
                     token_blocks_selected: 0,
                     context_blocks_selected: 0,
@@ -70,28 +70,28 @@ impl NetworkAnalysisJob {
         }
     }
 
-    pub async fn state(&self) -> NetworkAnalysisState {
+    pub async fn state(&self) -> TokenNetworkAnalysisState {
         self.state.read().await.clone()
     }
 
     pub async fn mark_running(&self, stage: impl Into<String>) {
         self.update_progress(|progress| {
-            progress.status = NetworkAnalysisStatus::Running;
+            progress.status = TokenNetworkAnalysisStatus::Running;
             progress.stage = stage.into();
         })
         .await;
     }
 
-    pub async fn update_progress(&self, update: impl FnOnce(&mut NetworkAnalysisProgress)) {
+    pub async fn update_progress(&self, update: impl FnOnce(&mut TokenNetworkAnalysisProgress)) {
         let mut state = self.state.write().await;
         update(&mut state.progress);
         state.progress.updated_at = now_unix_secs();
     }
 
-    pub async fn complete(&self, result: NetworkAnalysisResult) {
+    pub async fn complete(&self, result: TokenNetworkAnalysisResult) {
         let mut state = self.state.write().await;
         let now = now_unix_secs();
-        state.progress.status = NetworkAnalysisStatus::Complete;
+        state.progress.status = TokenNetworkAnalysisStatus::Complete;
         state.progress.stage = "complete".to_string();
         state.progress.updated_at = now;
         state.progress.finished_at = Some(now);
@@ -102,7 +102,7 @@ impl NetworkAnalysisJob {
     pub async fn fail(&self, error: impl Into<String>) {
         let mut state = self.state.write().await;
         let now = now_unix_secs();
-        state.progress.status = NetworkAnalysisStatus::Failed;
+        state.progress.status = TokenNetworkAnalysisStatus::Failed;
         state.progress.stage = "failed".to_string();
         state.progress.updated_at = now;
         state.progress.finished_at = Some(now);
@@ -112,7 +112,7 @@ impl NetworkAnalysisJob {
     pub async fn cancel(&self) {
         let mut state = self.state.write().await;
         let now = now_unix_secs();
-        state.progress.status = NetworkAnalysisStatus::Canceled;
+        state.progress.status = TokenNetworkAnalysisStatus::Canceled;
         state.progress.stage = "canceled".to_string();
         state.progress.updated_at = now;
         state.progress.finished_at = Some(now);

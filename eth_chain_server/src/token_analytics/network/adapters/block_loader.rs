@@ -4,7 +4,7 @@ use eth_token::network::flow_context::block_loader::ProcessedBlockLoader;
 use eyre::{bail, Result};
 use tx_processor::{ProcessedBlock, ProcessedBlockProvider};
 
-use crate::network_analysis::job::NetworkAnalysisJob;
+use crate::token_analytics::network::job::TokenNetworkAnalysisJob;
 
 #[derive(Clone, Debug)]
 pub struct PreloadedProcessedBlockLoader {
@@ -34,13 +34,13 @@ impl ProcessedBlockLoader for PreloadedProcessedBlockLoader {
 pub async fn load_blocks(
     block_provider: &ProcessedBlockProvider,
     block_numbers: &[u64],
-    job: &NetworkAnalysisJob,
+    job: &TokenNetworkAnalysisJob,
     stage: &str,
 ) -> Result<BTreeMap<u64, ProcessedBlock>> {
     let mut blocks_by_number = BTreeMap::new();
     for block_number in block_numbers {
         if job.stop_requested() {
-            bail!("network analysis canceled");
+            bail!("token network analysis canceled");
         }
 
         job.update_progress(|progress| {

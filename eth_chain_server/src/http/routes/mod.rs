@@ -3,10 +3,10 @@ mod backtest;
 mod health;
 mod live;
 mod mempool;
-mod network_analysis;
 mod ops;
 mod range;
 mod token_activity;
+mod token_analytics;
 
 use std::convert::Infallible;
 
@@ -177,27 +177,53 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(token_activity::activity_blocks);
 
-    let network_analysis_start = warp::path!("eth" / "tokens" / "api" / "network-analysis")
+    let token_network_analysis_start =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "network")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::start);
+
+    let token_network_analysis_list =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "network")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::list);
+
+    let token_network_analysis_get =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "network" / String)
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::get);
+
+    let token_network_analysis_cancel =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "network" / String)
+            .and(warp::delete())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::cancel);
+
+    let legacy_network_analysis_start = warp::path!("eth" / "tokens" / "api" / "network-analysis")
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
-        .and_then(network_analysis::start);
+        .and_then(token_analytics::start);
 
-    let network_analysis_list = warp::path!("eth" / "tokens" / "api" / "network-analysis")
+    let legacy_network_analysis_list = warp::path!("eth" / "tokens" / "api" / "network-analysis")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .and_then(network_analysis::list);
+        .and_then(token_analytics::list);
 
-    let network_analysis_get = warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(network_analysis::get);
+    let legacy_network_analysis_get =
+        warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::get);
 
-    let network_analysis_cancel =
+    let legacy_network_analysis_cancel =
         warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
             .and(warp::delete())
             .and(with_state(state.clone()))
-            .and_then(network_analysis::cancel);
+            .and_then(token_analytics::cancel);
 
     let alpha_strategies = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies")
         .and(warp::get())
@@ -352,10 +378,14 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
-        .or(network_analysis_start)
-        .or(network_analysis_list)
-        .or(network_analysis_get)
-        .or(network_analysis_cancel)
+        .or(token_network_analysis_start)
+        .or(token_network_analysis_list)
+        .or(token_network_analysis_get)
+        .or(token_network_analysis_cancel)
+        .or(legacy_network_analysis_start)
+        .or(legacy_network_analysis_list)
+        .or(legacy_network_analysis_get)
+        .or(legacy_network_analysis_cancel)
         .or(alpha_strategy_performance)
         .or(alpha_strategy_reset)
         .or(alpha_gas_rank_estimate)

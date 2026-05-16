@@ -5,11 +5,11 @@ pub mod error;
 pub mod http;
 pub mod live;
 pub mod memory;
-pub mod network_analysis;
 pub mod ranges;
 pub mod read_models;
 pub mod recent_blocks;
 pub mod stores;
+pub mod token_analytics;
 
 // Compatibility modules for existing examples/tests and any downstream callers.
 pub mod alpha_trading {
@@ -39,7 +39,7 @@ pub mod server {
 
 pub mod views {
     pub use crate::read_models::{
-        activity, cache, error, live, network, network_analysis, ops, pool, run, strategy, token,
+        activity, cache, error, live, ops, pool, run, strategy, surface, token, token_analytics,
     };
 }
 

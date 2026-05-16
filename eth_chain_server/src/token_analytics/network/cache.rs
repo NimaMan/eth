@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::job::{NetworkAnalysisJob, NetworkAnalysisStatus};
+use super::job::{TokenNetworkAnalysisJob, TokenNetworkAnalysisStatus};
 
 pub const DEFAULT_MAX_ANALYSIS_JOBS: usize = 32;
 
 pub async fn prune_finished_jobs(
-    jobs: &mut BTreeMap<String, Arc<NetworkAnalysisJob>>,
+    jobs: &mut BTreeMap<String, Arc<TokenNetworkAnalysisJob>>,
     max_jobs: usize,
 ) {
     if jobs.len() <= max_jobs {
@@ -22,9 +22,9 @@ pub async fn prune_finished_jobs(
         let state = job.state().await;
         if matches!(
             state.progress.status,
-            NetworkAnalysisStatus::Complete
-                | NetworkAnalysisStatus::Failed
-                | NetworkAnalysisStatus::Canceled
+            TokenNetworkAnalysisStatus::Complete
+                | TokenNetworkAnalysisStatus::Failed
+                | TokenNetworkAnalysisStatus::Canceled
         ) {
             finished.push((
                 state

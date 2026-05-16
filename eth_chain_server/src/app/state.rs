@@ -6,11 +6,11 @@ use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
-use crate::network_analysis::NetworkAnalysisManager;
 use crate::ranges::RangeIndexManager;
 use crate::recent_blocks::RecentLiveBlocks;
 use crate::stores::alpha_trading::AlphaTradingStore;
 use crate::stores::mempool_signals::MempoolSignalStore;
+use crate::token_analytics::network::TokenNetworkAnalysisManager;
 use reth_chain_query::reth_index::AddressBlockParticipationWriter;
 use tx_processor::{ProcessedBlockDiskCacheStore, ProcessedBlockReplayStoreWriter};
 
@@ -21,7 +21,7 @@ pub struct ServerState {
     pub range_indexer: RangeIndexManager,
     pub live_tracker: LiveTracker,
     pub live_chain_runtime: LiveChainRuntime,
-    pub network_analysis: NetworkAnalysisManager,
+    pub token_network_analytics: TokenNetworkAnalysisManager,
     pub recent_live_blocks: RecentLiveBlocks,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     pub processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
@@ -70,8 +70,10 @@ impl ServerState {
             live_tracker.clone(),
             processed_block_replay_store.clone(),
         );
-        let network_analysis =
-            NetworkAnalysisManager::new(provider.clone(), processed_block_replay_store.clone());
+        let token_network_analytics = TokenNetworkAnalysisManager::new(
+            provider.clone(),
+            processed_block_replay_store.clone(),
+        );
         let recent_live_blocks = RecentLiveBlocks::new(config.history_limit.max(128));
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
@@ -83,7 +85,7 @@ impl ServerState {
             range_indexer,
             live_tracker,
             live_chain_runtime,
-            network_analysis,
+            token_network_analytics,
             recent_live_blocks,
             processed_block_disk_cache,
             processed_block_replay_store,

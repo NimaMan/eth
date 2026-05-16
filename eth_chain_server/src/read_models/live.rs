@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
 use crate::read_models::surface::{self, PoolSurfaceFilter, TokenPoolSurfaceResponse};
 use crate::read_models::token::TokenView;
-use crate::read_models::{network::TokenNetworkView, pool::PoolView};
+use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
 use crate::recent_blocks::{RecentLiveBlocks, RecentProcessedBlock};
 
 #[derive(Clone, Debug, Serialize)]

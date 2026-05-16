@@ -14,7 +14,7 @@ pub const DEFAULT_LOOKBACK_BLOCKS: u64 = 300;
 pub const DEFAULT_LOOKAHEAD_BLOCKS: u64 = 80;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct NetworkAnalysisRequest {
+pub struct TokenNetworkAnalysisRequest {
     pub token: String,
     #[serde(default)]
     pub start_block: Option<u64>,
@@ -37,7 +37,7 @@ pub struct NetworkAnalysisRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ResolvedNetworkAnalysisRequest {
+pub struct ResolvedTokenNetworkAnalysisRequest {
     pub token: String,
     pub start_block: u64,
     pub end_block: u64,
@@ -50,8 +50,8 @@ pub struct ResolvedNetworkAnalysisRequest {
     pub include_timeline: bool,
 }
 
-impl NetworkAnalysisRequest {
-    pub fn resolve(self, latest_block: u64) -> Result<ResolvedNetworkAnalysisRequest> {
+impl TokenNetworkAnalysisRequest {
+    pub fn resolve(self, latest_block: u64) -> Result<ResolvedTokenNetworkAnalysisRequest> {
         let token = normalize_token(&self.token)?;
         let end_block = self.end_block.unwrap_or(latest_block).min(latest_block);
         let default_start = end_block.saturating_sub(DEFAULT_ANALYSIS_BLOCKS.saturating_sub(1));
@@ -78,7 +78,7 @@ impl NetworkAnalysisRequest {
             "max_blocks_per_address",
         )?;
 
-        Ok(ResolvedNetworkAnalysisRequest {
+        Ok(ResolvedTokenNetworkAnalysisRequest {
             token,
             start_block,
             end_block,
@@ -93,7 +93,7 @@ impl NetworkAnalysisRequest {
     }
 }
 
-impl ResolvedNetworkAnalysisRequest {
+impl ResolvedTokenNetworkAnalysisRequest {
     pub fn token_address(&self) -> Result<Address> {
         Address::from_str(&self.token).map_err(Into::into)
     }
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn resolve_defaults_to_bounded_recent_range() {
-        let request = NetworkAnalysisRequest {
+        let request = TokenNetworkAnalysisRequest {
             token: "0x133a79c66bc8789cf4d081159654aa378004541c".to_string(),
             start_block: None,
             end_block: None,
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn resolve_rejects_zero_limits() {
-        let request = NetworkAnalysisRequest {
+        let request = TokenNetworkAnalysisRequest {
             token: "0x133a79c66bc8789cf4d081159654aa378004541c".to_string(),
             start_block: Some(1),
             end_block: Some(10),
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn resolve_accepts_timeline_flag() {
-        let request: NetworkAnalysisRequest = serde_json::from_str(
+        let request: TokenNetworkAnalysisRequest = serde_json::from_str(
             r#"{
                 "token": "0x133a79c66bc8789cf4d081159654aa378004541c",
                 "include_timeline": true

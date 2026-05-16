@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::read_models::network::TokenNetworkGraphView;
+use crate::read_models::token_analytics::TokenNetworkGraphView;
 use eth_token::network::{
     activity::AddressActivity,
     flow_context::{
@@ -13,24 +13,24 @@ use eth_token::network::{
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct NetworkAnalysisTimeline {
+pub struct TokenNetworkAnalysisTimeline {
     pub active_blocks: Vec<u64>,
     pub frame_count: usize,
-    pub frames: Vec<NetworkAnalysisTimelineFrame>,
+    pub frames: Vec<TokenNetworkAnalysisTimelineFrame>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NetworkAnalysisTimelineFrame {
+pub struct TokenNetworkAnalysisTimelineFrame {
     pub index: usize,
     pub block_number: u64,
     pub block_timestamp: Option<u64>,
     pub token_graph: TimelineTokenGraphFrame,
     pub flow_context: FlowContextSnapshot,
-    pub deltas: NetworkAnalysisTimelineDelta,
+    pub deltas: TokenNetworkAnalysisTimelineDelta,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct NetworkAnalysisTimelineDelta {
+pub struct TokenNetworkAnalysisTimelineDelta {
     pub token_node_delta: isize,
     pub token_edge_delta: isize,
     pub token_address_delta: isize,
@@ -53,7 +53,7 @@ pub fn build_timeline(
     flow_artifacts: &FlowContextBuildArtifacts,
     active_blocks: &[u64],
     block_timestamps: &BTreeMap<u64, u64>,
-) -> NetworkAnalysisTimeline {
+) -> TokenNetworkAnalysisTimeline {
     let active_blocks = sorted_unique_blocks(active_blocks);
     let mut frames = Vec::with_capacity(active_blocks.len());
     let mut previous_counts = TimelineCounts::default();
@@ -65,7 +65,7 @@ pub fn build_timeline(
         let deltas = counts.delta(previous_counts);
         previous_counts = counts;
 
-        frames.push(NetworkAnalysisTimelineFrame {
+        frames.push(TokenNetworkAnalysisTimelineFrame {
             index,
             block_number,
             block_timestamp: block_timestamps.get(&block_number).copied(),
@@ -75,7 +75,7 @@ pub fn build_timeline(
         });
     }
 
-    NetworkAnalysisTimeline {
+    TokenNetworkAnalysisTimeline {
         frame_count: frames.len(),
         active_blocks,
         frames,
@@ -220,8 +220,8 @@ impl TimelineCounts {
         }
     }
 
-    fn delta(self, previous: Self) -> NetworkAnalysisTimelineDelta {
-        NetworkAnalysisTimelineDelta {
+    fn delta(self, previous: Self) -> TokenNetworkAnalysisTimelineDelta {
+        TokenNetworkAnalysisTimelineDelta {
             token_node_delta: usize_delta(self.token_nodes, previous.token_nodes),
             token_edge_delta: usize_delta(self.token_edges, previous.token_edges),
             token_address_delta: usize_delta(self.token_addresses, previous.token_addresses),

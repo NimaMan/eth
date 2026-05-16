@@ -7,11 +7,11 @@ use eth_token::network::flow_context::{select_flow_context_seeds, FlowContextCon
 use eth_token::network::graph::RawTokenNetworkGraph;
 use eyre::Result;
 
-use crate::network_analysis::request::ResolvedNetworkAnalysisRequest;
+use crate::token_analytics::network::request::ResolvedTokenNetworkAnalysisRequest;
 
 pub fn token_participation_blocks(
     index_query: &impl AddressParticipationQuery,
-    request: &ResolvedNetworkAnalysisRequest,
+    request: &ResolvedTokenNetworkAnalysisRequest,
 ) -> Result<Vec<u64>> {
     let range = BlockRange::new(request.start_block, request.end_block);
     let mut blocks = index_query.blocks_for_address(&request.token, range)?;

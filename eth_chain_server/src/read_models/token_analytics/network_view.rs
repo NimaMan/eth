@@ -92,17 +92,17 @@ impl TokenNetworkView {
         let pnl_omitted_count = pnl_rows.len().saturating_sub(MAX_PNL_ROWS);
         pnl_rows.truncate(MAX_PNL_ROWS);
 
-        let pnl_totals = all_summaries.iter().fold(
-            TokenNetworkPnlTotals::default(),
-            |mut totals, summary| {
-                totals.num_tx += summary.num_tx;
-                totals.bribes += summary.bribe_amount;
-                totals.realized_profit += summary.pnl.realized_profit;
-                totals.unrealized_profit += summary.pnl.unrealized_profit;
-                totals.total_profit += summary.pnl.total_profit;
-                totals
-            },
-        );
+        let pnl_totals =
+            all_summaries
+                .iter()
+                .fold(TokenNetworkPnlTotals::default(), |mut totals, summary| {
+                    totals.num_tx += summary.num_tx;
+                    totals.bribes += summary.bribe_amount;
+                    totals.realized_profit += summary.pnl.realized_profit;
+                    totals.unrealized_profit += summary.pnl.unrealized_profit;
+                    totals.total_profit += summary.pnl.total_profit;
+                    totals
+                });
 
         let summary_by_node = all_summaries
             .into_iter()
