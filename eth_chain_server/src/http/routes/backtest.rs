@@ -5,6 +5,9 @@ use warp::http::StatusCode;
 
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
+use crate::stores::alpha_trading::{
+    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct RunListQuery {
@@ -39,6 +42,69 @@ pub(super) async fn run_detail(
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }
+}
+
+pub(super) async fn result_sets(
+    query: ResultSetListQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.alpha_trading.result_sets(query).await {
+        Ok(result_sets) => Ok(json_response(&result_sets, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to list result sets: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_detail(
+    result_set_id: String,
+    query: ResultSetDetailQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .result_set_detail(&result_set_id, query)
+        .await
+    {
+        Ok(Some(result_set)) => Ok(json_response(&result_set, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "result set not found",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to load result set: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_performance(
+    result_set_id: String,
+    query: ResultSetPerformanceQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .result_set_performance(&result_set_id, query)
+        .await
+    {
+        Ok(performance) => Ok(json_response(&performance, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load result set performance: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_strategy_performance(
+    result_set_id: String,
+    strategy_name: String,
+    mut query: ResultSetPerformanceQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    query.strategy_name = Some(strategy_name);
+    result_set_performance(result_set_id, query, state).await
 }
 
 pub(super) async fn run_positions(

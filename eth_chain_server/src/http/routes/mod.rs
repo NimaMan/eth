@@ -14,7 +14,9 @@ use warp::{Filter, Reply};
 
 use crate::http::ServerState;
 use crate::read_models::activity::TokenActivityBlocksQuery;
-use crate::stores::alpha_trading::StrategyPerformanceQuery;
+use crate::stores::alpha_trading::{
+    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery, StrategyPerformanceQuery,
+};
 use crate::stores::mempool_signals::MempoolSignalQuery;
 
 pub fn routes(
@@ -240,10 +242,46 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(backtest::list_runs);
 
+    let alpha_result_sets = warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets")
+        .and(warp::get())
+        .and(warp::query::<ResultSetListQuery>())
+        .and(with_state(state.clone()))
+        .and_then(backtest::result_sets);
+
     let alpha_run_detail = warp::path!("eth" / "tokens" / "api" / "alpha" / "runs" / String)
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(backtest::run_detail);
+
+    let alpha_result_set_detail =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets" / String)
+            .and(warp::get())
+            .and(warp::query::<ResultSetDetailQuery>())
+            .and(with_state(state.clone()))
+            .and_then(backtest::result_set_detail);
+
+    let alpha_result_set_performance =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets" / String / "performance")
+            .and(warp::get())
+            .and(warp::query::<ResultSetPerformanceQuery>())
+            .and(with_state(state.clone()))
+            .and_then(backtest::result_set_performance);
+
+    let alpha_result_set_strategy_performance = warp::path!(
+        "eth"
+            / "tokens"
+            / "api"
+            / "alpha"
+            / "result-sets"
+            / String
+            / "strategies"
+            / String
+            / "performance"
+    )
+    .and(warp::get())
+    .and(warp::query::<ResultSetPerformanceQuery>())
+    .and(with_state(state.clone()))
+    .and_then(backtest::result_set_strategy_performance);
 
     let alpha_run_positions =
         warp::path!("eth" / "tokens" / "api" / "alpha" / "runs" / String / "positions")
@@ -328,14 +366,21 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state))
         .and_then(range::stop_run);
 
-    health
-        .or(list_runs)
+    let alpha_result_set_routes = alpha_result_set_strategy_performance
+        .or(alpha_result_set_performance)
+        .or(alpha_result_set_detail)
+        .or(alpha_result_sets)
+        .boxed();
+
+    let token_run_routes = list_runs
         .or(start_run)
         .or(active_run)
         .or(stop_active_run)
         .or(active_run_launch_stats)
         .or(processed_block_disk_cache_coverage)
-        .or(live_status)
+        .boxed();
+
+    let live_routes = live_status
         .or(live_start)
         .or(live_stop)
         .or(live_token_detail)
@@ -349,7 +394,9 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
-        .or(ops_health)
+        .boxed();
+
+    let ops_routes = ops_health
         .or(ops_issues)
         .or(ops_bottlenecks)
         .or(mempool_signals_by_type)
@@ -359,7 +406,9 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(token_network_analysis_list)
         .or(token_network_analysis_get)
         .or(token_network_analysis_cancel)
-        .or(alpha_strategy_performance)
+        .boxed();
+
+    let alpha_routes = alpha_strategy_performance
         .or(alpha_strategy_reset)
         .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
@@ -372,7 +421,9 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(alpha_run_positions)
         .or(alpha_run_detail)
         .or(alpha_runs)
-        .or(token_detail)
+        .boxed();
+
+    let range_routes = token_detail
         .or(tokens)
         .or(progress)
         .or(surface)
@@ -381,6 +432,16 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(errors)
         .or(stream)
         .or(stop)
+        .boxed();
+
+    health
+        .or(alpha_result_set_routes)
+        .or(token_run_routes)
+        .or(live_routes)
+        .or(ops_routes)
+        .or(alpha_routes)
+        .or(range_routes)
+        .boxed()
 }
 
 fn with_state(

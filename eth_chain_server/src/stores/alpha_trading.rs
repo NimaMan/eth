@@ -1,14 +1,21 @@
 pub use eth_alpha_store::performance::StrategyPerformanceQuery;
+pub use eth_alpha_store::result_sets::{
+    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery,
+};
 
 use eth_alpha_store::performance::{load_strategy_performance, StrategyPerformanceReport};
+use eth_alpha_store::result_sets::{
+    load_result_set, load_result_set_performance, load_result_sets, ResultSetDetailResponse,
+    ResultSetListResponse, ResultSetPerformanceResponse,
+};
 use eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
-const STRATEGY_ID: &str = "snipe-all-v1";
-const STRATEGY_NAME: &str = "Snipe All v1";
+const STRATEGY_ID: &str = "snipe-all";
+const STRATEGY_NAME: &str = "Snipe All";
 const MAX_ROW_LIMIT: i64 = 250;
 
 #[derive(Clone)]
@@ -547,6 +554,32 @@ impl AlphaTradingStore {
         row.as_ref().map(row_to_run).transpose()
     }
 
+    pub async fn result_set_detail(
+        &self,
+        result_set_id: &str,
+        query: ResultSetDetailQuery,
+    ) -> Result<Option<ResultSetDetailResponse>> {
+        load_result_set(&self.pool, result_set_id, query)
+            .await
+            .map_err(|error| eyre!(error.to_string()))
+    }
+
+    pub async fn result_sets(&self, query: ResultSetListQuery) -> Result<ResultSetListResponse> {
+        load_result_sets(&self.pool, query)
+            .await
+            .map_err(|error| eyre!(error.to_string()))
+    }
+
+    pub async fn result_set_performance(
+        &self,
+        result_set_id: &str,
+        query: ResultSetPerformanceQuery,
+    ) -> Result<ResultSetPerformanceResponse> {
+        load_result_set_performance(&self.pool, result_set_id, query)
+            .await
+            .map_err(|error| eyre!(error.to_string()))
+    }
+
     async fn recent_runs(&self, limit: i64) -> Result<Vec<TraderRunView>> {
         self.list_runs(None, limit).await
     }
@@ -859,7 +892,7 @@ fn summary_from_run(run: Option<&TraderRunView>, counts: StrategyCounts) -> Alph
     AlphaStrategySummary {
         strategy_id: STRATEGY_ID.to_string(),
         name: STRATEGY_NAME.to_string(),
-        description: "Chain-sim strategy that buys every newly observed eligible live pool once and exits on matching liquidity-removal risk.".to_string(),
+        description: "Live chain-sim strategy that buys newly observed eligible pools and can exit open positions from matching mempool risk signals.".to_string(),
         mode: run.map(|run| run.mode.clone()),
         status: run
             .map(|run| run.status.clone())
@@ -899,21 +932,21 @@ fn strategy_rules() -> Vec<StrategyRuleView> {
             name: "Exit On Liquidity Removal",
             status: "active",
             description:
-                "Submit one chain-sim sell when a liquidity-removal risk event matches an open position.",
+                "Submit one chain-sim sell when a liquidity-removal mempool signal matches an open position.",
         },
         StrategyRuleView {
             rule_id: "lp_approval",
             name: "LP Approval Response",
-            status: "scaffolded",
+            status: "active",
             description:
-                "LP approval events are recorded for analysis. Private-creator immediate exits will be added here.",
+                "Submit one chain-sim sell when a matching LP approval risk event indicates removable liquidity exposure.",
         },
         StrategyRuleView {
             rule_id: "tax_honeypot",
             name: "Tax And Honeypot Response",
-            status: "scaffolded",
+            status: "active",
             description:
-                "Tax and honeypot risk events are recorded now; sell and blocklist actions will be enabled after validation.",
+                "Submit one chain-sim sell when matching tax, honeypot, or scam risk is emitted for an open position.",
         },
         StrategyRuleView {
             rule_id: "creator_label",
