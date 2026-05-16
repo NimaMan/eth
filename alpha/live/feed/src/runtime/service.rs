@@ -284,11 +284,15 @@ impl LiveTokenRuntime {
     }
 
     pub async fn fail_runtime(&self, message: impl Into<String>, phase: impl Into<String>) {
-        self.mark_failed(
+        self.fail_runtime_error(
             LiveTokenError::new(None, None, None, message.into())
                 .with_context("phase", phase.into()),
         )
         .await;
+    }
+
+    pub async fn fail_runtime_error(&self, error: LiveTokenError) {
+        self.mark_failed(error).await;
     }
 
     fn resolve_request(

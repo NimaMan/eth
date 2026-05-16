@@ -6,7 +6,7 @@ use std::{
 };
 
 use eth_live_feed::{
-    LiveBlockUpdate, LiveTokenEvent, LiveTokenReader, LiveTokenRuntime,
+    LiveBlockUpdate, LiveTokenError, LiveTokenEvent, LiveTokenReader, LiveTokenRuntime,
     ResolvedLiveTokenRuntimeRequest, StartLiveTokenRuntimeRequest,
 };
 use eyre::{bail, Result, WrapErr};
@@ -16,6 +16,9 @@ use tx_processor::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveProcessedBlock, ProcessedBlock,
     ProcessedBlockReplayStoreWriter,
 };
+
+const LIVE_CHAIN_RUNTIME_PHASE: &str = "live_chain_runtime";
+const LIVE_BLOCK_APPLY_ERROR_PREFIX: &str = "failed to apply live block update ";
 
 #[derive(Clone, Debug)]
 pub struct LiveChainRuntimeConfig {
@@ -82,27 +85,35 @@ impl LiveChainRuntime {
             let run_result = panic::catch_unwind(AssertUnwindSafe(|| {
                 local_runtime.block_on(runtime.run(live_id))
             }));
-            let error = match run_result {
+            let live_error = match run_result {
                 Ok(Ok(())) => return,
-                Ok(Err(error)) => error.to_string(),
-                Err(payload) => format!(
-                    "live chain runtime task panicked: {}",
-                    panic_payload_message(payload.as_ref())
-                ),
+                Ok(Err(error)) => {
+                    let error_detail = error_chain_detail(&error);
+                    tracing::error!(
+                        target: "live_chain_runtime",
+                        error = %error,
+                        error_detail = %error_detail,
+                        error_debug = ?error,
+                        "live chain runtime failed"
+                    );
+                    live_runtime_error_from_report(&error, LIVE_CHAIN_RUNTIME_PHASE)
+                }
+                Err(payload) => {
+                    let message = format!(
+                        "live chain runtime task panicked: {}",
+                        panic_payload_message(payload.as_ref())
+                    );
+                    tracing::error!(
+                        target: "live_chain_runtime",
+                        error = %message,
+                        "live chain runtime failed"
+                    );
+                    LiveTokenError::new(None, None, None, message)
+                        .with_context("phase", LIVE_CHAIN_RUNTIME_PHASE)
+                        .with_context("runtime_failure_kind", "panic")
+                }
             };
-            {
-                tracing::error!(
-                    target: "live_chain_runtime",
-                    error = %error,
-                    "live chain runtime failed"
-                );
-                local_runtime.block_on(
-                    runtime
-                        .inner
-                        .live_tracker
-                        .fail_runtime(error, "live_chain_runtime"),
-                );
-            }
+            local_runtime.block_on(runtime.inner.live_tracker.fail_runtime_error(live_error));
         });
 
         let mut task = self.inner.task.lock().await;
@@ -260,4 +271,84 @@ fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
         return message.clone();
     }
     "non-string panic payload".to_string()
+}
+
+fn live_runtime_error_from_report(error: &eyre::Report, phase: &str) -> LiveTokenError {
+    let mut live_error = LiveTokenError::new(
+        live_apply_error_block_number(error),
+        None,
+        None,
+        error.to_string(),
+    )
+    .with_detail(error_chain_detail(error))
+    .with_context("phase", phase)
+    .with_context("runtime_failure_kind", "error");
+
+    if let Some(root_error) = error.chain().last() {
+        live_error = live_error.with_context("root_error", root_error.to_string());
+    }
+
+    live_error
+}
+
+fn error_chain_detail(error: &eyre::Report) -> String {
+    error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+fn live_apply_error_block_number(error: &eyre::Report) -> Option<u64> {
+    error
+        .chain()
+        .find_map(|source| parse_live_apply_block_number(&source.to_string()))
+}
+
+fn parse_live_apply_block_number(message: &str) -> Option<u64> {
+    message
+        .strip_prefix(LIVE_BLOCK_APPLY_ERROR_PREFIX)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_live_apply_block_number() {
+        assert_eq!(
+            parse_live_apply_block_number("failed to apply live block update 25106480"),
+            Some(25106480)
+        );
+    }
+
+    #[test]
+    fn live_runtime_error_keeps_block_and_error_chain() {
+        let error = eyre::eyre!("inner apply failure")
+            .wrap_err("failed to apply live block update 25106480");
+
+        let live_error = live_runtime_error_from_report(&error, LIVE_CHAIN_RUNTIME_PHASE);
+
+        assert_eq!(live_error.block_number, Some(25106480));
+        assert_eq!(
+            live_error.message,
+            "failed to apply live block update 25106480"
+        );
+        assert_eq!(
+            live_error.context.get("phase").map(String::as_str),
+            Some(LIVE_CHAIN_RUNTIME_PHASE)
+        );
+        assert_eq!(
+            live_error.context.get("root_error").map(String::as_str),
+            Some("inner apply failure")
+        );
+        assert_eq!(
+            live_error.detail.as_deref(),
+            Some("failed to apply live block update 25106480: inner apply failure")
+        );
+    }
 }
