@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::atlas::RiskAtlasStorySection;
+use crate::atlas::{RiskAtlasPageStory, RiskAtlasStorySection};
 use crate::db::schema::{
     ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, ReviewExample,
     RiskAtlasRun,
@@ -9,6 +9,7 @@ use crate::db::schema::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RiskAtlasPageView {
     pub run: RiskAtlasRun,
+    pub page_story: RiskAtlasPageStory,
     pub sections: Vec<RiskAtlasStorySection>,
     pub distributions: Vec<DistributionBucket>,
     pub numeric_stats: Vec<NumericStat>,

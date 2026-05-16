@@ -4,7 +4,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
 use crate::api::RiskAtlasPageView;
-use crate::atlas::default_story_sections;
+use crate::atlas::{build_page_story, default_story_sections};
 
 use super::schema::{
     ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, ReviewExample,
@@ -59,12 +59,18 @@ impl RiskAtlasReader {
             return Ok(None);
         };
 
+        let distributions = self.distributions(run_id).await?;
+        let numeric_stats = self.numeric_stats(run_id).await?;
+        let active_targets = self.active_targets(run_id).await?;
+        let page_story = build_page_story(&run, &distributions, &numeric_stats, &active_targets);
+
         Ok(Some(RiskAtlasPageView {
             run,
+            page_story,
             sections: default_story_sections(),
-            distributions: self.distributions(run_id).await?,
-            numeric_stats: self.numeric_stats(run_id).await?,
-            active_targets: self.active_targets(run_id).await?,
+            distributions,
+            numeric_stats,
+            active_targets,
             review_examples: self.review_examples(run_id).await?,
             model_readiness: self.model_readiness(run_id).await?,
         }))

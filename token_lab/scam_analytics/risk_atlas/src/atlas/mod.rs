@@ -1,6 +1,7 @@
 pub mod active_targets;
 pub mod launch_surface;
 pub mod model_readiness;
+pub mod page_story;
 pub mod review_queues;
 pub mod scam_mechanisms;
 pub mod time_to_scam;
@@ -15,6 +16,8 @@ pub struct RiskAtlasStorySection {
     pub primary_distribution: Option<String>,
     pub primary_stat_section: Option<String>,
 }
+
+pub use page_story::{build_page_story, RiskAtlasPageStory, RiskAtlasPageStoryStep};
 
 pub fn default_story_sections() -> Vec<RiskAtlasStorySection> {
     vec![
