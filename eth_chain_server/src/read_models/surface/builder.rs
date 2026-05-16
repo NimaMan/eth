@@ -51,6 +51,7 @@ where
     let mut pooled_token_addresses = BTreeSet::new();
     let mut launch_timestamps_by_token = BTreeMap::<String, u64>::new();
     let mut ineligible_reason_counts = BTreeMap::<(String, String), usize>::new();
+    let mut total_tokens = 0usize;
     let mut pool_rows = 0usize;
     let mut eligible = 0usize;
     let mut ineligible = 0usize;
@@ -58,6 +59,7 @@ where
     let mut scammed = 0usize;
 
     for token in tokens {
+        total_tokens += 1;
         let token_view = TokenView::from_token(token, index_status(&token.contract_address));
         let pools = PoolView::from_token_pool_summaries(token);
 
@@ -124,8 +126,10 @@ where
         context,
         progress_summary,
         stats: TokenPoolSurfaceStats {
+            total_tokens,
             pool_rows,
             pooled_tokens: pooled_token_addresses.len(),
+            unpooled_tokens: unpooled_rows.len(),
             eligible,
             eligible_rate_percent: percent(eligible, pool_rows),
             ineligible,

@@ -29,8 +29,10 @@ pub struct TokenPoolSurfaceResponse {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenPoolSurfaceStats {
+    pub total_tokens: usize,
     pub pool_rows: usize,
     pub pooled_tokens: usize,
+    pub unpooled_tokens: usize,
     pub eligible: usize,
     pub eligible_rate_percent: Option<f64>,
     pub ineligible: usize,

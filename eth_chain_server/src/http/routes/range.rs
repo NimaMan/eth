@@ -29,7 +29,7 @@ pub(super) async fn start_run(
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.start_run(request).await {
         Ok(run) => {
-            let progress = views::run::progress(&run).await;
+            let progress = views::run::progress_response(&run).await;
             Ok(json_response(&progress, StatusCode::CREATED))
         }
         Err(StartRangeIndexError::ActiveRunConflict { active_run_id }) => Ok(error_response(
@@ -45,7 +45,7 @@ pub(super) async fn start_run(
 pub(super) async fn active_run(state: ServerState) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.active_run().await {
         Some(run) => Ok(json_response(
-            &views::run::progress(&run).await,
+            &views::run::progress_response(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response(
@@ -60,7 +60,7 @@ pub(super) async fn stop_active_run(
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.stop_active_run().await {
         Some(run) => Ok(json_response(
-            &views::run::progress(&run).await,
+            &views::run::progress_response(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response(
@@ -110,7 +110,7 @@ pub(super) async fn progress(
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
-            &views::run::progress(&run).await,
+            &views::run::progress_response(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),
@@ -216,7 +216,7 @@ pub(super) async fn stop_run(
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.stop_run(&run_id).await {
         Some(run) => Ok(json_response(
-            &views::run::progress(&run).await,
+            &views::run::progress_response(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),
