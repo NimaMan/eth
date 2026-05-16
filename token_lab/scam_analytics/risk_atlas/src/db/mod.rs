@@ -5,7 +5,7 @@ pub mod writer;
 
 pub use reader::RiskAtlasReader;
 pub use schema::{
-    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, ReviewExample,
-    RiskAtlasRun,
+    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, PoolEligibilityRow,
+    ReviewExample, RiskAtlasRun,
 };
 pub use writer::RiskAtlasWriter;

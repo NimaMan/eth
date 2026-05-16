@@ -186,6 +186,14 @@ impl PoolClassificationInput {
         self
     }
 
+    pub fn for_cohort_entry(&self) -> Self {
+        let mut input = self.clone();
+        input.max_denom_reserve = input.denom_reserve;
+        input.cohort_can_buy = None;
+        input.cohort_can_sell = None;
+        input
+    }
+
     pub fn from_json_value(value: &Value) -> serde_json::Result<Self> {
         let mut input: Self = serde_json::from_value(value.clone())?;
         if input.quote_symbol.is_none() {
@@ -270,6 +278,28 @@ impl PoolClassificationInput {
         }
         Ok(input)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PoolEligibilityObservation {
+    pub block_number: u64,
+    pub input: PoolClassificationInput,
+}
+
+impl PoolEligibilityObservation {
+    pub fn new(block_number: u64, input: PoolClassificationInput) -> Self {
+        Self {
+            block_number,
+            input,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PoolEligibilityEntry {
+    pub block_number: u64,
+    pub input: PoolClassificationInput,
+    pub classification: PoolClassification,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -444,6 +474,30 @@ enum QuoteFamily {
 
 pub fn classify_pool(input: &PoolClassificationInput) -> PoolClassification {
     classify_pool_with_config(input, &PoolClassificationConfig::default())
+}
+
+pub fn first_eligible_observation(
+    observations: impl IntoIterator<Item = PoolEligibilityObservation>,
+) -> Option<PoolEligibilityEntry> {
+    first_eligible_observation_with_config(observations, &PoolClassificationConfig::default())
+}
+
+pub fn first_eligible_observation_with_config(
+    observations: impl IntoIterator<Item = PoolEligibilityObservation>,
+    config: &PoolClassificationConfig,
+) -> Option<PoolEligibilityEntry> {
+    let mut observations: Vec<_> = observations.into_iter().collect();
+    observations.sort_by_key(|observation| observation.block_number);
+
+    observations.into_iter().find_map(|observation| {
+        let entry_input = observation.input.for_cohort_entry();
+        let classification = classify_pool_with_config(&entry_input, config);
+        classification.eligible.then_some(PoolEligibilityEntry {
+            block_number: observation.block_number,
+            input: entry_input,
+            classification,
+        })
+    })
 }
 
 pub fn classify_pool_with_config(
@@ -1033,5 +1087,56 @@ mod tests {
             Some(EligiblePoolOutcome::Honeypot)
         );
         assert!(!decision.tradable_now);
+    }
+
+    #[test]
+    fn first_eligible_observation_is_not_pool_creation() {
+        let observations = vec![
+            PoolEligibilityObservation::new(
+                100,
+                PoolClassificationInput::new(Some("WETH"), Some(0.1), false, false, false),
+            ),
+            PoolEligibilityObservation::new(
+                101,
+                PoolClassificationInput::new(Some("WETH"), Some(0.8), true, false, false),
+            ),
+            PoolEligibilityObservation::new(
+                102,
+                PoolClassificationInput::new(Some("WETH"), Some(0.8), true, true, false),
+            ),
+        ];
+
+        let entry = first_eligible_observation(observations).unwrap();
+
+        assert_eq!(entry.block_number, 102);
+        assert!(entry.classification.eligible);
+        assert_eq!(
+            entry.classification.eligible_outcome,
+            Some(EligiblePoolOutcome::Active)
+        );
+    }
+
+    #[test]
+    fn first_eligible_observation_uses_current_entry_state_not_lifetime_state() {
+        let mut low_current_after_prior_liquidity =
+            PoolClassificationInput::new(Some("WETH"), Some(0.03), true, true, false);
+        low_current_after_prior_liquidity.max_denom_reserve = Some(1.2);
+        low_current_after_prior_liquidity.cohort_can_buy = Some(true);
+        low_current_after_prior_liquidity.cohort_can_sell = Some(true);
+
+        let observations = vec![
+            PoolEligibilityObservation::new(100, low_current_after_prior_liquidity),
+            PoolEligibilityObservation::new(
+                101,
+                PoolClassificationInput::new(Some("WETH"), Some(0.6), true, true, false),
+            ),
+        ];
+
+        let entry = first_eligible_observation(observations).unwrap();
+
+        assert_eq!(entry.block_number, 101);
+        assert_eq!(entry.input.max_denom_reserve, Some(0.6));
+        assert_eq!(entry.input.cohort_can_buy, None);
+        assert_eq!(entry.input.cohort_can_sell, None);
     }
 }

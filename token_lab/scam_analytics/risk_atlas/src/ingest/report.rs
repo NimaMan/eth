@@ -8,8 +8,8 @@ use serde_json::json;
 
 use crate::atlas;
 use crate::db::schema::{
-    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, ReviewExample,
-    RiskAtlasRun,
+    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, PoolEligibilityRow,
+    ReviewExample, RiskAtlasRun,
 };
 
 pub const DEFAULT_100K_DISTRIBUTION_REPORT: &str =
@@ -19,6 +19,7 @@ pub const DEFAULT_100K_DISTRIBUTION_REPORT: &str =
 pub struct RiskAtlasReportImport {
     pub run: RiskAtlasRun,
     pub distributions: Vec<DistributionBucket>,
+    pub pool_eligibility: Vec<PoolEligibilityRow>,
     pub numeric_stats: Vec<NumericStat>,
     pub active_targets: Vec<ActiveTargetSummary>,
     pub review_examples: Vec<ReviewExample>,
@@ -76,6 +77,7 @@ pub fn import_distribution_report(
     Ok(RiskAtlasReportImport {
         run,
         distributions,
+        pool_eligibility: Vec::new(),
         numeric_stats,
         active_targets,
         review_examples: Vec::new(),

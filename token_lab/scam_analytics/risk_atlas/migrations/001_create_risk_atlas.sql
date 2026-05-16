@@ -29,6 +29,35 @@ CREATE TABLE IF NOT EXISTS risk_atlas_distributions (
 CREATE INDEX IF NOT EXISTS idx_risk_atlas_distributions_section
     ON risk_atlas_distributions (run_id, section, sort_order);
 
+CREATE TABLE IF NOT EXISTS risk_atlas_pool_eligibility (
+    run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
+    token_address TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    protocol TEXT,
+    quote_symbol TEXT,
+    eligible BOOLEAN NOT NULL,
+    eligibility_block BIGINT,
+    eligibility_liquidity DOUBLE PRECISION,
+    first_observed_block BIGINT,
+    last_observed_block BIGINT,
+    PRIMARY KEY (run_id, token_address, pool_address)
+);
+
+DROP INDEX IF EXISTS idx_risk_atlas_pool_eligibility_filter;
+
+ALTER TABLE risk_atlas_pool_eligibility
+    DROP COLUMN IF EXISTS eligibility_label,
+    DROP COLUMN IF EXISTS min_liquidity,
+    DROP COLUMN IF EXISTS current_category,
+    DROP COLUMN IF EXISTS current_outcome,
+    DROP COLUMN IF EXISTS metadata;
+
+CREATE INDEX IF NOT EXISTS idx_risk_atlas_pool_eligibility_filter
+    ON risk_atlas_pool_eligibility (run_id, eligible);
+
+CREATE INDEX IF NOT EXISTS idx_risk_atlas_pool_eligibility_block
+    ON risk_atlas_pool_eligibility (run_id, eligibility_block);
+
 CREATE TABLE IF NOT EXISTS risk_atlas_numeric_stats (
     run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
     section TEXT NOT NULL,

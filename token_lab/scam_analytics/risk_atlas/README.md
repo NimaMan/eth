@@ -39,6 +39,45 @@ Risk Atlas is the cleanup layer that turns those outputs into a compact DB read
 model for a high-level page: launch surface, scam type distribution, time to
 scam, active-horizon targets, review queues, and trading relevance.
 
+## Page Story
+
+Risk Atlas is meant to answer "what is going on?" from the highest level down.
+The first section should be the launch and eligibility surface, not scam labels.
+All later distributions should be framed over the eligible cohort unless the
+page explicitly says it is showing the full observed universe.
+
+The launch flow should make these questions visible:
+
+- observed pools in the range;
+- supported-denom/protocol pools;
+- pools that crossed the liquidity floor;
+- pools that became cohort-buyable and cohort-sellable;
+- pools that entered the eligible cohort;
+- eligible pools that are currently active versus eligible-risk;
+- ineligible pools by exclusion reason;
+- the same funnel over time.
+
+Eligibility itself is owned by `alpha/pool_classification`. The current contract
+is intentionally simple: supported quote, current denom liquidity above the
+configured floor, cohort buy availability, and cohort sell availability.
+Eligibility is first satisfied at some point in the pool lifetime, not
+necessarily at pool creation. Once a pool is eligible, it remains eligible;
+later failures are outcomes inside the eligible cohort. Risk Atlas should not
+reimplement these rules in the frontend.
+
+The DB contract stores this first filter in `risk_atlas_pool_eligibility`.
+Future pool-atlas generation should write one row per pool with:
+
+- `eligible`: the boolean filter used by all downstream analysis;
+- `eligibility_block`: the first block where the current as-of-block pool state
+  satisfied the criteria;
+- `eligibility_liquidity`: the liquidity observed at entry.
+
+All scam-rate, time-to-scam, active-target, and model-row outputs should be
+built from `risk_atlas_pool_eligibility.eligible = true` unless a page section
+explicitly says it is reporting the full observed universe or ineligible
+exclusion reasons.
+
 ## Layout
 
 ```text

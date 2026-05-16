@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use crate::api::RiskAtlasPageView;
 use crate::ingest::report::RiskAtlasReportImport;
 
-use super::schema::RiskAtlasRun;
+use super::schema::{PoolEligibilityRow, RiskAtlasRun};
 
 #[derive(Clone)]
 pub struct RiskAtlasWriter {
@@ -29,6 +29,7 @@ impl RiskAtlasWriter {
         let mut tx = self.pool.begin().await?;
         for table in [
             "risk_atlas_distributions",
+            "risk_atlas_pool_eligibility",
             "risk_atlas_numeric_stats",
             "risk_atlas_active_targets",
             "risk_atlas_review_examples",
@@ -59,6 +60,10 @@ impl RiskAtlasWriter {
             .bind(item.sort_order)
             .execute(&mut *tx)
             .await?;
+        }
+
+        for item in &import.pool_eligibility {
+            insert_pool_eligibility_row(&mut tx, &import.run.run_id, item).await?;
         }
 
         for item in &import.numeric_stats {
@@ -252,4 +257,35 @@ fn active_target_key(row_kind: &str, horizon: Option<i32>) -> String {
         Some(horizon) => format!("{row_kind}:{horizon}"),
         None => row_kind.to_string(),
     }
+}
+
+async fn insert_pool_eligibility_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_id: &str,
+    item: &PoolEligibilityRow,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO risk_atlas_pool_eligibility (
+            run_id, token_address, pool_address, protocol, quote_symbol,
+            eligible, eligibility_block, eligibility_liquidity,
+            first_observed_block, last_observed_block
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "#,
+    )
+    .bind(run_id)
+    .bind(&item.token_address)
+    .bind(&item.pool_address)
+    .bind(&item.protocol)
+    .bind(&item.quote_symbol)
+    .bind(item.eligible)
+    .bind(item.eligibility_block)
+    .bind(item.eligibility_liquidity)
+    .bind(item.first_observed_block)
+    .bind(item.last_observed_block)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }

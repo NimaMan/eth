@@ -31,6 +31,19 @@ pub struct DistributionBucket {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PoolEligibilityRow {
+    pub token_address: String,
+    pub pool_address: String,
+    pub protocol: Option<String>,
+    pub quote_symbol: Option<String>,
+    pub eligible: bool,
+    pub eligibility_block: Option<i64>,
+    pub eligibility_liquidity: Option<f64>,
+    pub first_observed_block: Option<i64>,
+    pub last_observed_block: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NumericStat {
     pub section: String,
     pub metric: String,

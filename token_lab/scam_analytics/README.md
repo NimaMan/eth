@@ -25,6 +25,64 @@ Build a pool-first dataset where each row has:
   enabled to the first bad block;
 - only features that would have been known before the label block.
 
+## Launch And Eligibility Surface
+
+The first Risk Atlas question is:
+
+```text
+What is going on in the token launch surface that we might actually trade?
+```
+
+Start from all observed token pools, then narrow to the eligible cohort before
+running scam-rate, time-to-scam, and model-target analysis. The page should make
+the denominator explicit at every step because "all pools", "trading-enabled
+pools", "eligible pools", and "model-eligible rows" answer different questions.
+
+The current eligibility source of truth is `alpha/pool_classification`. Keep the
+initial definition simple for now:
+
+- supported quote/denom: `ETH`, `WETH`, `USDC`, `USDT`, or `DAI`;
+- current denom liquidity is above the configured floor at the entry block:
+  - `0.5` for `ETH`/`WETH`;
+  - `1000` for stables;
+- buy path was available for the cohort;
+- sell path was available for the cohort;
+- optional strategy-stat views may require pool creation data and price history.
+
+Eligibility is not a pool-creation label. A pool becomes eligible at the first
+block in its lifetime where the current as-of-block state satisfies all
+eligibility criteria. Eligibility is sticky after that point: once a pool becomes
+eligible, it stays in the analysis cohort. Later liquidity removal, current low
+liquidity, cannot-buy/cannot-sell, honeypot, hidden mint, extreme tax, or
+LP-control risk are outcomes inside the eligible cohort, not reasons to remove
+the pool from historical analysis.
+
+Pool creation, liquidity addition, trading enablement, and buy/sell
+observability can be separated. The useful launch moment for this analysis is
+the first block where the pool becomes tradable with supported-denom liquidity
+above the floor. In code, use `alpha/pool_classification` entry helpers to find
+that first eligible observation, then use sticky lifetime fields for later
+eligible-risk classification.
+
+Risk Atlas should answer these launch/eligibility questions before mechanism
+deep dives:
+
+- how many pools were discovered in the range;
+- how many use supported denoms/protocols;
+- how many crossed the liquidity floor;
+- how many became buyable and sellable for the cohort;
+- how many entered the eligible cohort;
+- how many eligible pools later became `eligible_active` versus
+  `eligible_risk`;
+- which pools were excluded and why;
+- how those counts change through time.
+
+The Risk Atlas DB table `risk_atlas_pool_eligibility` is the durable first
+filter for this. Next data generation must populate `eligible` for every
+observed pool before producing scam labels, active-observation targets, or model
+rows. Non-eligible pools can be counted in launch/exclusion diagnostics, but
+they should not enter training.
+
 The primary scam-evolution modeling target is:
 
 ```text
