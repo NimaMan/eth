@@ -202,29 +202,6 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(token_analytics::cancel);
 
-    let legacy_network_analysis_start = warp::path!("eth" / "tokens" / "api" / "network-analysis")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and(with_state(state.clone()))
-        .and_then(token_analytics::start);
-
-    let legacy_network_analysis_list = warp::path!("eth" / "tokens" / "api" / "network-analysis")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(token_analytics::list);
-
-    let legacy_network_analysis_get =
-        warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
-            .and(warp::get())
-            .and(with_state(state.clone()))
-            .and_then(token_analytics::get);
-
-    let legacy_network_analysis_cancel =
-        warp::path!("eth" / "tokens" / "api" / "network-analysis" / String)
-            .and(warp::delete())
-            .and(with_state(state.clone()))
-            .and_then(token_analytics::cancel);
-
     let alpha_strategies = warp::path!("eth" / "tokens" / "api" / "alpha" / "strategies")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -382,10 +359,6 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(token_network_analysis_list)
         .or(token_network_analysis_get)
         .or(token_network_analysis_cancel)
-        .or(legacy_network_analysis_start)
-        .or(legacy_network_analysis_list)
-        .or(legacy_network_analysis_get)
-        .or(legacy_network_analysis_cancel)
         .or(alpha_strategy_performance)
         .or(alpha_strategy_reset)
         .or(alpha_gas_rank_estimate)
