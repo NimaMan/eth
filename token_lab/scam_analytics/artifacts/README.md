@@ -17,5 +17,9 @@ artifacts/
     cohort_summaries/
 ```
 
-Keep committed files human-auditable. Large JSON, CSV, parquet, notebook output,
-and graph exports should be ignored or regenerated from documented commands.
+Keep committed files human-auditable. Large JSON, parquet, notebook output, and
+graph exports should be ignored or regenerated from documented commands.
+
+Risk Atlas DB snapshots are not generic artifacts. They belong under
+`risk_atlas/data/` locally, or in the configured Postgres database once the page
+is wired through the Rust API.

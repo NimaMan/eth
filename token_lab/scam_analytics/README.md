@@ -1,11 +1,16 @@
 # Scam Analytics
 
 Workspace for turning confirmed scammed-pool cases into token/pool labels,
-durations, and pre-scam features that can train or calibrate a scam-probability
-model.
+durations, active-observation targets, lab review queues, and model-ready rows
+that can train or calibrate a scam-probability model.
 
 This track is token-centric. Scam labels and model rows are based on token and
 pool behavior, not on how any external workflow interacted with the token.
+
+Source feature construction now belongs in `eth_token::token_analytics`.
+`token_lab/scam_analytics` owns the historical joins around those features:
+labels, target construction, review artifacts, model experiments, and Risk Atlas
+read models.
 
 ## Goal
 
@@ -48,20 +53,37 @@ directly: given the state now, is the pool likely to become unsafe soon? Exact
 next-observation targets can be exported later as a timing diagnostic, but the
 primary risk curve should be `P(label within next N active observations)`.
 
-Start with a fine-grained near-future horizon set:
+Start with the near-future horizon set we can inspect and model first:
 
 ```text
-1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500
+1, 2, 3, 5, 10
 ```
 
 ## Folder Structure
 
 | Folder | Purpose |
 | --- | --- |
-| `labels/` | Human-auditable scammed-pool labels and duration schema. |
-| `features/` | Feature contract for model-ready rows and leakage rules. |
+| `labels/` | Human-auditable scammed-pool label schema and review rules. |
+| `features/` | Model-row contract and leakage rules. Source feature families live in `eth_token::token_analytics`. |
 | `clusters/` | Human-readable scam mechanism taxonomy and detector attributes. |
 | `artifacts/` | Generated extracts, raw API responses, and local notebooks. |
+| `risk_atlas/` | Rust-owned aggregate DB and page-ready story model for `/eth/tokens/analytics/risk-atlas`. |
+
+## Data Ownership
+
+```text
+eth_token::token_analytics
+  -> active token/pool observations and as-of feature families
+token_lab/scam_analytics
+  -> labels, active-horizon targets, review queues, model rows
+token_lab/scam_analytics/risk_atlas
+  -> compact DB/read model for high-level distribution and predictability pages
+```
+
+The old script-and-flat-file bootstrap path has been removed. Risk Atlas now
+owns the first DB-backed read model, and future training rows should be written
+from Rust source features rather than checked-in flat files. Asena should read
+only API responses.
 
 ## Label Semantics
 
@@ -125,19 +147,24 @@ For the direct-LP category, build rows that can answer:
 - whether LP approvals, holder concentration, or liquidity state were visible
   before the removal block;
 - which static token/pool attributes were known before the label;
-- which token-network and block-activity signals were present before a selected
-  prediction horizon;
-- whether the removal happens within the next `1`, `2`, `3`, `5`, `10`, `15`,
-  `20`, `30`, `50`, `100`, `250`, or `500` active token/pool observations.
+- which `eth_token::token_analytics` source feature signals were present before
+  a selected prediction horizon;
+- whether the removal happens within the next `1`, `2`, `3`, `5`, or `10`
+  active token/pool observations.
 
 Controls are preliminary while the source token range build is still running.
 Treat them as observed-negative-so-far examples until the range completes and
 the labels are regenerated.
 
-The `run-2` full-range export has completed. Use
-`tools/build_current_snapshot.py` to regenerate the labels and direct-LP feature
-files from one range-view snapshot, then run
-`tools/validate_direct_lp_features.py` before using the training rows.
+The current 100K distribution report has been imported into the Risk Atlas DB:
+
+```text
+cargo run -p token_lab_scam_risk_atlas -- import-report
+```
+
+Next model-row generation should join `eth_token::token_analytics` source
+features with `labels/` semantics and active targets, then write DB tables or
+Rust-owned artifacts. Do not reintroduce frontend-facing flat-file contracts.
 
 ## Current Modeling Questions
 
@@ -169,10 +196,9 @@ Rows should keep the chain-block coordinates as supporting metadata:
 - `chain_blocks_to_label`;
 - `chain_blocks_until_active_horizon_end`, when known.
 
-The current completed export already includes active block/activity features,
-but its `prediction_horizon_blocks` and `blocks_before_removal` columns are
-chain-block horizons. Treat it as a baseline and execution-risk dataset, not the
-final active-observation target.
+The historical flat-file baseline has been removed from the lab. Rebuild it from
+Rust source features only if we need an execution-risk baseline separate from
+the active-observation target.
 
 When building intuition for this target, inspect individual pools block by block:
 the useful row is the state after one active observation and before future
@@ -202,5 +228,7 @@ token-server and indexed chain-observation outputs:
 - token server pool summaries with `scam_mechanism`
 - source observation rows with first bad block and sell failures
 - network analytics timeline features for suspicious graph/fund-flow behavior
-
-The seed label ledger is `labels/scammed_pools.seed.csv`.
+- `eth_token::token_analytics` source features as they become the canonical
+  Rust feature contract
+- `risk_atlas/` DB snapshots for high-level distribution and predictability
+  pages

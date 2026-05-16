@@ -4,8 +4,8 @@
 
 Extend the token-centric scam analytics dataset from the first 100 reviewed
 token/pool cases to the rest of the currently indexed scam-mechanism labels.
-Then build category-specific training features, starting with
-`direct_lp_liquidity_removal`.
+Then build category-specific training rows from canonical source features,
+starting with `direct_lp_liquidity_removal`.
 
 The deep dive is about the token and pool evolution itself.
 
@@ -38,7 +38,7 @@ secondary timing target after we inspect the target distributions.
 Initial active-observation horizons:
 
 ```text
-1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500
+1, 2, 3, 5, 10
 ```
 
 ## Required Label Fields
@@ -57,7 +57,8 @@ Each label row should keep:
 
 ## Direct-LP Training Attributes
 
-Initial features should include:
+Initial rows should join labels and active targets onto source features from
+`eth_token::token_analytics`. They should include:
 
 - LP approval timing before removal;
 - first and last LP approval blocks visible at `as_of_block`;
@@ -68,8 +69,8 @@ Initial features should include:
 - liquidity drawdown from the pre-`as_of_block` peak;
 - token/pool static attributes such as creator, owner, tax bucket, protocol,
   and creation/trading age;
-- token-network graph counts and block-activity features with explicit scope
-  columns until fully time-sliced exports exist.
+- token-network graph counts and block-activity features from the Rust
+  token-analytics source contract.
 
 ## Leakage Rules
 
@@ -94,21 +95,10 @@ contains:
 - `2970` completed-range control rows;
 - `13706` total direct-LP training-window rows.
 
-Validate the export from the ETH repo root:
+Validate future exports through Rust tests or Risk Atlas DB checks from the ETH
+repo root.
 
-```text
-python3 token_lab/scam_analytics/tools/validate_direct_lp_features.py
-```
-
-The current direct-LP export includes pre-removal LP approval timing, completed
-range controls, static token/pool fields, actor-network proxy fields, detailed
-liquidity/price histories where token detail exposes them, and block-activity
-time-series features.
-
-The current `direct_lp_liquidity_removal_training_windows.csv` uses chain-block
-horizons in `prediction_horizon_blocks` and `blocks_before_removal`. It already
-contains active block/activity features, so it is useful for a baseline and for
-capital-at-risk timing, but it is not yet the final active-observation target.
-The next export should add active observation indexes and active-horizon target
-columns for `1`, `2`, `3`, `5`, `10`, `15`, `20`, `30`, `50`, `100`, `250`,
-and `500` active token/pool observations.
+The old direct-LP flat-file exports have been removed. Rebuild direct-LP rows
+from `eth_token::token_analytics` source features, then write the result into
+Rust-owned DB tables or Risk Atlas snapshots. The first target columns remain
+`1`, `2`, `3`, `5`, and `10` active token/pool observations.

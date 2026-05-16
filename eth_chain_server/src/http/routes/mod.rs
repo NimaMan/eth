@@ -179,6 +179,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(token_activity::activity_blocks);
 
+    let token_risk_atlas = warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(token_analytics::risk_atlas);
+
     let token_network_analysis_start =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "network")
             .and(warp::post())
@@ -402,6 +407,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(token_risk_atlas)
         .or(token_network_analysis_start)
         .or(token_network_analysis_list)
         .or(token_network_analysis_get)

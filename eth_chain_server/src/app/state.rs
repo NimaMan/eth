@@ -3,6 +3,7 @@ use std::sync::Arc;
 use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenRuntimeConfig};
 use eyre::{eyre, Result};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
+use token_lab_scam_risk_atlas::{RiskAtlasConfig, RiskAtlasReader};
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
@@ -27,6 +28,7 @@ pub struct ServerState {
     pub processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     pub mempool_signals: MempoolSignalStore,
     pub alpha_trading: AlphaTradingStore,
+    pub risk_atlas: RiskAtlasReader,
 }
 
 impl ServerState {
@@ -78,6 +80,7 @@ impl ServerState {
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
         let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
+        let risk_atlas = RiskAtlasReader::connect_lazy(&RiskAtlasConfig::default().database_url)?;
 
         Ok(Self {
             config,
@@ -91,6 +94,7 @@ impl ServerState {
             processed_block_replay_store,
             mempool_signals,
             alpha_trading,
+            risk_atlas,
         })
     }
 

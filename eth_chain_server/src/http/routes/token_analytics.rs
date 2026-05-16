@@ -35,6 +35,20 @@ pub(super) async fn list(state: ServerState) -> Result<warp::reply::Response, In
     ))
 }
 
+pub(super) async fn risk_atlas(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match state.risk_atlas.latest_page_view().await {
+        Ok(Some(view)) => Ok(json_response(&view, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "risk atlas has no imported snapshot",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to load risk atlas: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
 pub(super) async fn get(
     job_id: String,
     state: ServerState,

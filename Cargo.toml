@@ -20,6 +20,7 @@ members = [
     "eth_chain_server",
     "mempool_processor",
     "pyreth",
+    "token_lab/scam_analytics/risk_atlas",
 ]
 
 [workspace.package]

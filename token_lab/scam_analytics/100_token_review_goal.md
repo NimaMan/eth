@@ -35,7 +35,7 @@ the case.
 
 The 100-token checkpoint is complete when:
 
-- `labels/` contains 100 reviewed token/pool label rows;
+- the label ledger contains 100 reviewed token/pool label rows;
 - every row has `token`, `pool`, `label`, `mechanism`, `confidence`, and
   `label_block` or a clear `needs_chain_truth` status;
 - every verified row has `trading_enabled_block` or a documented reason why it
@@ -62,17 +62,6 @@ The 100-token checkpoint is complete when:
 
 ## First Cohort Output
 
-Expected committed files for the review batch:
-
-```text
-scam_analytics/
-  labels/
-    scammed_pools.seed.csv
-    scam_pools_100_review.csv
-  artifacts/
-    reports/
-      scam_pools_100_summary.md
-```
-
-Large raw extracts should stay under `artifacts/` and should only be committed
-when they are small enough to audit directly.
+The first cohort should produce durable label rows, a Risk Atlas distribution
+snapshot, and a small human-auditable summary report. Large raw extracts should
+stay local unless they are small enough to audit directly.

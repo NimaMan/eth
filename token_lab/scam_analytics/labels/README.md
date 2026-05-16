@@ -1,30 +1,13 @@
 # Scam Pool Labels
 
-This folder holds the token/pool label ledger for supervised scam-risk
-analysis.
+This folder documents the token/pool label ledger for supervised scam-risk
+analysis. Durable label rows should be written through Rust-owned storage rather
+than checked-in flat files.
 
 Labels are token-centric. Strategy performance, strategy entry, and strategy
 exit are not label criteria.
 
-## Primary Ledger
-
-`scammed_pools.seed.csv` is a small manually reviewed seed set from existing
-token-lab investigations. It is not yet the full training dataset.
-
-`scam_pools_100_review.csv` is the first fixed manual-review batch.
-`scam_pools_all_review.csv` is a refreshable export of all currently available
-token-server pools with `scam_mechanism`.
-
-Regenerate the full label export and direct-LP feature exports from one
-consistent range-view snapshot:
-
-```text
-python3 token_lab/scam_analytics/tools/build_current_snapshot.py --run-id run-2
-```
-
-The snapshot builder retries transient empty `/tokens` and `/pools` views from
-an active range run. Use the narrower `build_100_review_batch.py` only when you
-intentionally want to refresh labels without feature files.
+## Primary Ledger Contract
 
 Use one row per pool label event. Required columns:
 
@@ -53,7 +36,7 @@ Use one row per pool label event. Required columns:
 Unknown fields stay empty until chain truth is extracted. Do not fill them from
 guesswork.
 
-If a legacy row includes strategy entry or exit fields, keep them as optional
+If a historical row includes strategy entry or exit fields, keep them as optional
 provenance only. Do not use them to assign `label`, `mechanism`, or timing.
 
 ## Label Names
