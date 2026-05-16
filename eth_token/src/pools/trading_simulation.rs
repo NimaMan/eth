@@ -253,7 +253,14 @@ impl UniswapV3Pool {
             .test_amount
             .unwrap_or(scaled_decimal_amount(denom_amount, denom_decimals)?);
 
-        let pool_type = self.simulation_pool_type();
+        let pool_type = self.simulation_pool_type().ok_or_else(|| {
+            eyre!(
+                "unsupported V3 pool protocol/factory for pool {} protocol={} factory={:?}",
+                self.base.identity.pool_address,
+                self.base.identity.protocol,
+                self.factory_address
+            )
+        })?;
         let mut params = PoolBuySellParameters::new(token_address, pool_address, pool_type)
             .with_test_amount(test_amount)
             .with_denom_address(denom_address)
@@ -264,23 +271,20 @@ impl UniswapV3Pool {
         Ok(params)
     }
 
-    fn simulation_pool_type(&self) -> PoolType {
-        let protocol = self
-            .factory_address
-            .as_deref()
-            .and_then(|address| parse_address(address).ok())
-            .and_then(KnownV3Protocol::from_factory)
-            .or_else(|| KnownV3Protocol::from_label(&self.base.identity.protocol))
-            .unwrap_or(KnownV3Protocol::UniswapV3);
+    pub fn supports_trading_simulation(&self) -> bool {
+        self.simulation_pool_type().is_some()
+    }
 
-        match protocol {
-            KnownV3Protocol::UniswapV3 => PoolType::UniswapV3 {
-                fee_tier: self.fee_tier,
-            },
-            KnownV3Protocol::SushiSwapV3 => PoolType::SushiSwapV3 {
-                fee_tier: self.fee_tier,
-            },
-        }
+    fn simulation_pool_type(&self) -> Option<PoolType> {
+        let protocol = match self.factory_address.as_deref() {
+            Some(address) => {
+                let factory = parse_address(address).ok()?;
+                KnownV3Protocol::from_factory(factory)
+            }
+            None => KnownV3Protocol::from_label(&self.base.identity.protocol),
+        }?;
+
+        Some(PoolType::from_known_v3_protocol(protocol, self.fee_tier))
     }
 
     pub async fn evaluate_trading_status_v3_with_pool_simulator(

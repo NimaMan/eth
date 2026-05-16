@@ -4,6 +4,7 @@ use alloy_primitives::{Address, B256, U256};
 use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol};
 use reth_chain_query::provider::BlockHeader;
 use serde::{Deserialize, Serialize};
+use tx_simulator::tx_builders::amm_swap_route::AmmSwapRoute;
 
 pub const DEFAULT_GAS_LIMIT_NO_PRIOR: u64 = 5_000_000;
 pub const DEFAULT_BUY_GAS_LIMIT: u64 = 450_000;
@@ -172,6 +173,7 @@ pub enum PoolType {
     UniswapV2,
     UniswapV3 { fee_tier: u32 }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
     SushiSwapV3 { fee_tier: u32 },
+    PancakeSwapV3 { fee_tier: u32 },
     SushiSwap,
     PancakeSwapV2,
     ShibaSwapV2,
@@ -197,14 +199,41 @@ impl PoolType {
         match self {
             Self::UniswapV3 { .. } => Some(KnownV3Protocol::UniswapV3),
             Self::SushiSwapV3 { .. } => Some(KnownV3Protocol::SushiSwapV3),
+            Self::PancakeSwapV3 { .. } => Some(KnownV3Protocol::PancakeSwapV3),
             _ => None,
         }
     }
 
     pub fn v3_fee_tier(self) -> Option<u32> {
         match self {
-            Self::UniswapV3 { fee_tier } | Self::SushiSwapV3 { fee_tier } => Some(fee_tier),
+            Self::UniswapV3 { fee_tier }
+            | Self::SushiSwapV3 { fee_tier }
+            | Self::PancakeSwapV3 { fee_tier } => Some(fee_tier),
             _ => None,
+        }
+    }
+
+    pub fn from_known_v3_protocol(protocol: KnownV3Protocol, fee_tier: u32) -> Self {
+        match protocol {
+            KnownV3Protocol::UniswapV3 => Self::UniswapV3 { fee_tier },
+            KnownV3Protocol::SushiSwapV3 => Self::SushiSwapV3 { fee_tier },
+            KnownV3Protocol::PancakeSwapV3 => Self::PancakeSwapV3 { fee_tier },
+        }
+    }
+
+    pub fn amm_swap_route(self, pool: Address) -> Option<AmmSwapRoute> {
+        match self {
+            Self::UniswapV3 { fee_tier } => Some(AmmSwapRoute::UniswapV3 { pool, fee_tier }),
+            Self::SushiSwapV3 { fee_tier } => Some(AmmSwapRoute::SushiswapV3 { pool, fee_tier }),
+            Self::PancakeSwapV3 { fee_tier } => {
+                Some(AmmSwapRoute::PancakeSwapV3 { pool, fee_tier })
+            }
+            _ => self
+                .known_v2_protocol()
+                .map(|protocol| AmmSwapRoute::V2Router {
+                    pool,
+                    router: protocol.router(),
+                }),
         }
     }
 

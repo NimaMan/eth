@@ -251,6 +251,9 @@ async fn simulate_pool(
         "SUSHISWAP-V3" | "SUSHISWAP_V3" | "SUSHI-V3" | "SUSHI_V3" => {
             PoolType::SushiSwapV3 { fee_tier }
         }
+        "PANCAKESWAP-V3" | "PANCAKESWAP_V3" | "PANCAKE-V3" | "PANCAKE_V3" => {
+            PoolType::PancakeSwapV3 { fee_tier }
+        }
         _ => PoolType::UniswapV3 { fee_tier },
     };
 

@@ -18,6 +18,7 @@ use crate::network::{
 pub const UNISWAP_V2_PROTOCOL: &str = "uniswap_v2";
 pub const UNISWAP_V3_PROTOCOL: &str = "uniswap_v3";
 pub const SUSHI_V3_PROTOCOL: &str = "sushiswap_v3";
+pub const PANCAKE_V3_PROTOCOL: &str = "pancake_v3";
 pub const UNISWAP_V4_PROTOCOL: &str = "uniswap_v4";
 pub const PANCAKE_V2_PROTOCOL: &str = "pancake_v2";
 pub const SUSHI_V2_PROTOCOL: &str = "sushiswap";
@@ -39,6 +40,7 @@ fn v3_protocol_label(factory: Address) -> &'static str {
     match KnownV3Protocol::from_factory(factory) {
         Some(KnownV3Protocol::UniswapV3) => UNISWAP_V3_PROTOCOL,
         Some(KnownV3Protocol::SushiSwapV3) => SUSHI_V3_PROTOCOL,
+        Some(KnownV3Protocol::PancakeSwapV3) => PANCAKE_V3_PROTOCOL,
         None => UNISWAP_V3_PROTOCOL,
     }
 }

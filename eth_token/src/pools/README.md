@@ -14,7 +14,8 @@ This folder corresponds to Python modules under `erc20_token/pools`.
 ## Layout
 
 - `uniswap/`: Uniswap V2, V3, V4, and shared concentrated-liquidity helpers.
-- `sushiswap/`: SushiSwap V2.
+- `sushiswap/`: SushiSwap V2/V3 protocol wrappers.
+- `pancakeswap/`: PancakeSwap V2/V3 protocol wrappers.
 - `balancer/`: Balancer protocol implementations. Current tracked version: V2.
 - `curve/`: Curve protocol implementations. Current tracked version: V1-style pool state.
 - `base.rs`, `reserves.rs`, `tax.rs`, `trading_simulation.rs`: protocol-agnostic pool state and shared pool simulation helpers.

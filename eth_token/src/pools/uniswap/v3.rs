@@ -23,7 +23,6 @@ use super::concentrated::{
 use super::v2::{LPHolderSnapshot, UniswapV2TxContext};
 
 pub const UNISWAP_V3_PROTOCOL: &str = "UNISWAP-V3";
-pub const SUSHISWAP_V3_PROTOCOL: &str = "SUSHISWAP-V3";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UniswapV3Pool {
@@ -90,14 +89,33 @@ impl UniswapV3Pool {
         tick_spacing: i32,
         config: BasePoolConfig,
     ) -> Self {
-        let token_address = token_address.into();
-        let denom_address = denom_address.into();
-        let identity = PoolIdentity::new(
+        Self::new_with_protocol(
             pool_address,
             token_address,
             denom_address,
+            token0,
+            token1,
+            fee_tier,
+            tick_spacing,
             UNISWAP_V3_PROTOCOL,
-        );
+            config,
+        )
+    }
+
+    pub fn new_with_protocol(
+        pool_address: impl Into<String>,
+        token_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        token0: impl Into<String>,
+        token1: impl Into<String>,
+        fee_tier: u32,
+        tick_spacing: i32,
+        protocol: impl Into<String>,
+        config: BasePoolConfig,
+    ) -> Self {
+        let token_address = token_address.into();
+        let denom_address = denom_address.into();
+        let identity = PoolIdentity::new(pool_address, token_address, denom_address, protocol);
         Self {
             base: BasePool::new(identity, config),
             factory_address: None,

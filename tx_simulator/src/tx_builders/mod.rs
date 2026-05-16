@@ -22,6 +22,14 @@ pub mod uniswap_v3 {
     pub use super::protocols::uniswap::v3::*;
 }
 
+pub mod sushiswap_v3 {
+    pub use super::protocols::sushiswap::v3::*;
+}
+
+pub mod pancakeswap_v3 {
+    pub use super::protocols::pancakeswap::v3::*;
+}
+
 pub mod uniswap_v4 {
     pub use super::protocols::uniswap::v4::*;
 }

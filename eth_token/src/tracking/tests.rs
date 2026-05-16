@@ -20,7 +20,10 @@ use crate::chain_metadata::{
     TokenMetadataProvider, UniswapV2PoolIdentity, UniswapV2PoolIdentityProvider,
     UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
-use crate::pools::{PoolTradingSimulationConfig, SUSHISWAP_V2_PROTOCOL, SUSHISWAP_V3_PROTOCOL};
+use crate::pools::{
+    PoolTradingSimulationConfig, PANCAKESWAP_V3_PROTOCOL, SUSHISWAP_V2_PROTOCOL,
+    SUSHISWAP_V3_PROTOCOL,
+};
 
 pub(crate) fn metadata() -> ERC20TokenMetadata {
     ERC20TokenMetadata::new(
@@ -486,6 +489,50 @@ fn discovers_sushiswap_v3_pool_from_sushi_factory() {
         .build_buy_sell_parameters(&PoolTradingSimulationConfig::default())
         .unwrap();
     assert_eq!(params.pool_type, PoolType::SushiSwapV3 { fee_tier: 3000 });
+}
+
+#[test]
+fn discovers_pancakeswap_v3_pool_from_pancake_factory() {
+    let mut registry = TokenRegistry::new();
+    let update_router = ProcessedTokenUpdateRouter::new(100);
+    registry.add_token(metadata());
+    let mut tx = tx();
+    let protocol = KnownV3Protocol::PancakeSwapV3;
+    tx.uniswap_v3_pools.push(UniswapV3PoolCreatedEvent {
+        factory_address: protocol.factory(),
+        token0: address!("1111111111111111111111111111111111111111"),
+        token1: address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+        fee: 100,
+        tick_spacing: 1,
+        pool: address!("3333333333333333333333333333333333333333"),
+        log_index: 1,
+    });
+
+    let token_index = TrackedTokenIndex::from_registry(&registry, 100);
+    update_router
+        .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
+        .unwrap();
+
+    let token = registry
+        .token("0x1111111111111111111111111111111111111111")
+        .unwrap();
+    let pool = token
+        .uniswap_v3_pool("0x3333333333333333333333333333333333333333")
+        .unwrap();
+    assert_eq!(pool.base.identity.protocol, PANCAKESWAP_V3_PROTOCOL);
+    assert_eq!(
+        pool.factory_address.as_deref(),
+        Some("0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865")
+    );
+    assert_eq!(
+        pool.router_address.as_deref(),
+        Some("0x13f4ea83d0bd40e75c8222255bc855a974568dd4")
+    );
+
+    let params = pool
+        .build_buy_sell_parameters(&PoolTradingSimulationConfig::default())
+        .unwrap();
+    assert_eq!(params.pool_type, PoolType::PancakeSwapV3 { fee_tier: 100 });
 }
 
 #[test]

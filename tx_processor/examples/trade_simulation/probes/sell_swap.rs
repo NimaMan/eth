@@ -153,6 +153,9 @@ fn parse_pool_type(protocol: &str, fee_tier: Option<u32>) -> Result<PoolType> {
         "sushiswap-v3" | "sushi-v3" => Ok(PoolType::SushiSwapV3 {
             fee_tier: fee_tier.ok_or_else(|| eyre!("--fee-tier is required for SushiSwap V3"))?,
         }),
+        "pancakeswap-v3" | "pancake-v3" => Ok(PoolType::PancakeSwapV3 {
+            fee_tier: fee_tier.ok_or_else(|| eyre!("--fee-tier is required for PancakeSwap V3"))?,
+        }),
         other => Err(eyre!("unsupported protocol {other}")),
     }
 }

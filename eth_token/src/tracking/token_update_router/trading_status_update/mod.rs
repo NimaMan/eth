@@ -315,6 +315,7 @@ pub(super) async fn simulate_updated_v3_pools(
             .uniswap_v3_pool(pool_address)
             .map(|pool| {
                 !pool.base.has_liquidity_removal()
+                    && pool.supports_trading_simulation()
                     && (force_simulation || should_simulate_v3_trading(pool, tx))
             })
             .unwrap_or(false);

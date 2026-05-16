@@ -4,7 +4,6 @@ use alloy_primitives::{Address, Bytes, U256};
 #[derive(Debug, Clone, Copy)]
 pub enum Router {
     UniswapV2,
-    SushiswapV2,
     Custom(Address),
 }
 
@@ -13,10 +12,6 @@ fn router_address(router: Router) -> Address {
         Router::UniswapV2 => Address::from([
             0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
             0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
-        ]),
-        Router::SushiswapV2 => Address::from([
-            0xd9, 0xe1, 0xcE, 0x17, 0xf2, 0x64, 0x1f, 0x24, 0xaE, 0x83, 0x63, 0x7a, 0xb6, 0x6a,
-            0x2c, 0xca, 0x9C, 0x37, 0x8B, 0x9F,
         ]),
         Router::Custom(router) => router,
     }
@@ -76,7 +71,7 @@ fn encode_swap_exact_eth_for_tokens(
     Bytes::from(data)
 }
 
-/// Build a Uniswap/Sushiswap V2 buy swap (ETH -> token) via router.
+/// Build a V2-style buy swap (ETH -> token) via router.
 fn default_buy_path(token_out: Address) -> [Address; 2] {
     [weth_address(), token_out]
 }
@@ -125,7 +120,7 @@ pub fn build_buy_swap_v2(
     build_buy_swap_v2_with_path(router, buyer, amount_in_eth, &path, deadline)
 }
 
-/// Build a Uniswap/Sushiswap V2 buy swap with explicit amountOutMin.
+/// Build a V2-style buy swap with explicit amountOutMin.
 pub fn build_buy_swap_v2_with_min_out(
     router: Router,
     buyer: Address,
@@ -283,7 +278,7 @@ fn encode_approve(spender: Address, amount: U256) -> Bytes {
     Bytes::from(data)
 }
 
-/// Build approve(tx) for V2/Sushiswap router as spender.
+/// Build approve(tx) for a V2-style router as spender.
 pub fn build_approve_v2(
     router: Router,
     owner: Address,
@@ -305,7 +300,7 @@ pub fn build_approve_v2(
     }
 }
 
-/// Build a Uniswap/Sushiswap V2 sell swap (Token -> ETH) via router.
+/// Build a V2-style sell swap (Token -> ETH) via router.
 pub fn build_sell_swap_v2(
     router: Router,
     seller: Address,
@@ -318,7 +313,7 @@ pub fn build_sell_swap_v2(
     build_sell_swap_v2_with_path(router, seller, amount_in_tokens, &path, deadline)
 }
 
-/// Build a Uniswap/Sushiswap V2 sell swap with explicit amountOutMin.
+/// Build a V2-style sell swap with explicit amountOutMin.
 pub fn build_sell_swap_v2_with_min_out(
     router: Router,
     seller: Address,
@@ -397,7 +392,7 @@ pub fn build_sell_swap_v2_with_min_out_path(
     }
 }
 
-/// Build a Uniswap/Sushiswap V2 token -> token swap via router.
+/// Build a V2-style token -> token swap via router.
 pub fn build_token_to_token_swap_v2(
     router: Router,
     trader: Address,
@@ -429,7 +424,7 @@ pub fn build_token_to_token_swap_v2(
     }
 }
 
-/// Build a Uniswap/Sushiswap V2 token -> token swap that tolerates fee-on-transfer tokens.
+/// Build a V2-style token -> token swap that tolerates fee-on-transfer tokens.
 pub fn build_token_to_token_swap_supporting_fee_v2(
     router: Router,
     trader: Address,
@@ -460,7 +455,7 @@ pub fn build_token_to_token_swap_supporting_fee_v2(
     }
 }
 
-/// Build a Uniswap/Sushiswap V2 token -> token swap with explicit amountOutMin.
+/// Build a V2-style token -> token swap with explicit amountOutMin.
 pub fn build_token_to_token_swap_v2_with_min_out(
     router: Router,
     trader: Address,

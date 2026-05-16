@@ -12,7 +12,10 @@ Purpose
 Entrypoints
 - `protocols/uniswap/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
 - `protocols/sushiswap/v2.rs`: Sushi V2 router constants and V2-router wrapper exports
-- `protocols/uniswap/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, Universal Router v3 helpers, and `build_approve_v3`
+- `protocols/uniswap/v3.rs`: Uniswap V3 SwapRouter builders, Universal Router v3 helpers, and `build_approve_v3`
+- `protocols/sushiswap/v3.rs`: SushiSwap V3 SwapRouter builders and router constants
+- `protocols/pancakeswap/v3.rs`: PancakeSwap V3 SwapRouter builders and router constants
+- `protocols/v3_swap_router.rs`: shared exactInputSingle and approve encoding used by V3-style protocol modules
 - `protocols/uniswap/v4/`: pool-key orientation, ERC20/WETH helpers, and Universal Router v4 builders
 - `protocols/permit2.rs`: Permit2 allowance approval builder
 - `route_dispatch.rs`:

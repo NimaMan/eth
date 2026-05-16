@@ -35,23 +35,41 @@ impl ProcessedTokenUpdateRouter {
             } else {
                 event.token0
             };
-            let pool = token.create_uniswap_v3_pool(
-                pool_address.clone(),
-                address_string(&denom_address),
-                address_string(&event.token0),
-                address_string(&event.token1),
-                event.fee,
-                event.tick_spacing,
-                BasePoolConfig {
-                    token_decimals: token.decimals,
-                    denom_decimals: known_decimals_for_address(denom_address),
-                    token1_is_denom: Some(token_is_token0),
-                    history_limit: self.history_limit,
-                    denom_threshold: 0.0,
-                    threshold_unit: None,
-                    test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
-                },
-            );
+            let config = BasePoolConfig {
+                token_decimals: token.decimals,
+                denom_decimals: known_decimals_for_address(denom_address),
+                token1_is_denom: Some(token_is_token0),
+                history_limit: self.history_limit,
+                denom_threshold: 0.0,
+                threshold_unit: None,
+                test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
+            };
+            let token0 = address_string(&event.token0);
+            let token1 = address_string(&event.token1);
+            let denom_address = address_string(&denom_address);
+            let pool = if let Some(protocol) = KnownV3Protocol::from_factory(event.factory_address)
+            {
+                token.create_known_v3_pool(
+                    protocol,
+                    pool_address.clone(),
+                    denom_address,
+                    token0,
+                    token1,
+                    event.fee,
+                    event.tick_spacing,
+                    config,
+                )
+            } else {
+                token.create_uniswap_v3_pool(
+                    pool_address.clone(),
+                    denom_address,
+                    token0,
+                    token1,
+                    event.fee,
+                    event.tick_spacing,
+                    config,
+                )
+            };
             apply_v3_protocol_metadata(pool, event.factory_address);
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
@@ -71,7 +89,9 @@ fn apply_v3_protocol_metadata(pool: &mut UniswapV3Pool, factory_address: Address
             pool.router_address = Some(address_string(&protocol.router()));
         }
         None if !factory_address.is_zero() => {
+            pool.base.identity.protocol = "UNKNOWN-V3".to_string();
             pool.factory_address = Some(address_string(&factory_address));
+            pool.router_address = None;
         }
         None => {
             let protocol = KnownV3Protocol::UniswapV3;

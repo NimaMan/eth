@@ -1,8 +1,8 @@
 # uniswap
 
-Uniswap-family pool implementations.
+Uniswap pool implementations.
 
-This folder owns concrete Uniswap protocol versions while shared pool state remains in `pools::base`, `pools::data_models`, and `pools::reserves`.
+This folder owns concrete Uniswap protocol versions while shared pool state remains in `pools::base`, `pools::data_models`, and `pools::reserves`. Other V2/V3-style protocols wrap the shared state machine from their own protocol folders.
 
 ## Layout
 

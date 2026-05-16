@@ -4,6 +4,7 @@ pub mod balancer;
 pub mod base;
 pub mod curve;
 pub mod data_models;
+pub mod pancakeswap;
 pub mod reserves;
 pub mod sushiswap;
 pub mod tax;
@@ -16,12 +17,19 @@ pub use base::{BasePool, BasePoolConfig, PoolIdentity, TradingStatus};
 pub use curve::{CurvePool, CurvePoolToken, CURVE_V1_PROTOCOL};
 pub use data_models::{PoolLifecycle, PoolLiquiditySnapshot, PoolRuntimeState};
 pub use reserves::{PoolReserveTracker, ReserveSnapshot};
-pub use sushiswap::{SushiSwapV2Pool, SUSHISWAP_V2_FACTORY, SUSHISWAP_V2_PROTOCOL};
+pub use pancakeswap::{
+    PancakeSwapV2Pool, PancakeSwapV3Pool, PANCAKESWAP_V2_FACTORY, PANCAKESWAP_V2_PROTOCOL,
+    PANCAKESWAP_V3_PROTOCOL,
+};
+pub use sushiswap::{
+    SushiSwapV2Pool, SushiSwapV3Pool, SUSHISWAP_V2_FACTORY, SUSHISWAP_V2_PROTOCOL,
+    SUSHISWAP_V3_PROTOCOL,
+};
 pub use tax::TaxBucket;
 pub use trading_simulation::{PoolTradingSimulationConfig, PoolTradingSimulationOutcome};
 pub use uniswap::{
     ApprovalInfo, LPApprovalEvent, LPApprovalSnapshot, LPHolderInfo, LPHolderSnapshot,
     LPTokenTracker, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
-    UniswapV3Pool, UniswapV4Pool, UniswapV4PoolKey, SUSHISWAP_V3_PROTOCOL,
+    UniswapV3Pool, UniswapV4Pool, UniswapV4PoolKey,
 };

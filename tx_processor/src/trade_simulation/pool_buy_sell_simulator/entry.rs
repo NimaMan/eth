@@ -24,10 +24,7 @@ use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
 use tx_simulator::tx_builders::{
-    amm_swap_route::AmmSwapRoute,
     build_approve_for_route, build_denom_to_token_swap, build_token_to_denom_swap,
-    uniswap_v2::{build_approve_v2, Router as UniswapV2Router},
-    uniswap_v3::{build_approve_v3, build_approve_v3_for_router},
 };
 
 const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
@@ -149,20 +146,8 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
             .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE)),
     )?;
 
-    let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
-        AmmSwapRoute::V2Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-        }
-    } else if let (Some(protocol), Some(fee_tier)) = (
-        config.pool_type.known_v3_protocol(),
-        config.pool_type.v3_fee_tier(),
-    ) {
-        AmmSwapRoute::V3Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-            fee_tier,
-        }
+    let route = if let Some(route) = config.pool_type.amm_swap_route(config.pool_address) {
+        route
     } else {
         match config.pool_type {
             PoolType::UniswapV4 => {
@@ -236,30 +221,12 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     }
 
     let mut denom_approve_tx_for_delay: Option<UnsignedTransaction> = None;
-    let denom_approve_tx = if let Some(protocol) = config.pool_type.known_v2_protocol() {
-        Some(build_approve_v2(
-            UniswapV2Router::Custom(protocol.router()),
-            config.buyer_address,
-            config.denom_address,
-            config.test_amount,
-        ))
-    } else if let Some(protocol) = config.pool_type.known_v3_protocol() {
-        Some(build_approve_v3_for_router(
-            protocol.router(),
-            config.buyer_address,
-            config.denom_address,
-            config.test_amount,
-        ))
-    } else {
-        match config.pool_type {
-            PoolType::UniswapV3 { .. } => Some(build_approve_v3(
-                config.buyer_address,
-                config.denom_address,
-                config.test_amount,
-            )),
-            _ => None,
-        }
-    };
+    let denom_approve_tx = Some(build_approve_for_route(
+        &route,
+        config.buyer_address,
+        config.denom_address,
+        config.test_amount,
+    ));
     if let Some(mut denom_approve_tx) = denom_approve_tx {
         denom_approve_tx.gas = Some(config.approve_gas_limit);
         apply_fee_policy(&mut denom_approve_tx, &config, base_fee);

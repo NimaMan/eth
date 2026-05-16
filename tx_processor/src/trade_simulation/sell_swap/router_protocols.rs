@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use eyre::{eyre, Result};
 use std::sync::Arc;
-use tx_simulator::tx_builders::{self, amm_swap_route::AmmSwapRoute};
+use tx_simulator::tx_builders;
 use tx_simulator::TxSimulator;
 
 use crate::trade_simulation::types::PoolBuySellParameters;
@@ -23,26 +23,15 @@ pub(super) async fn simulate_router_protocol_sell(
     block: u64,
 ) -> Result<SellSwapResult> {
     let seller_address = config.buyer_address;
-    let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
-        AmmSwapRoute::V2Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-        }
-    } else if let (Some(protocol), Some(fee_tier)) = (
-        config.pool_type.known_v3_protocol(),
-        config.pool_type.v3_fee_tier(),
-    ) {
-        AmmSwapRoute::V3Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-            fee_tier,
-        }
-    } else {
-        return Err(eyre!(
-            "Pool type {:?} not yet supported for router sell simulation",
-            config.pool_type
-        ));
-    };
+    let route = config
+        .pool_type
+        .amm_swap_route(config.pool_address)
+        .ok_or_else(|| {
+            eyre!(
+                "Pool type {:?} not yet supported for router sell simulation",
+                config.pool_type
+            )
+        })?;
 
     let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     let base_fee = chain.block_base_fee();

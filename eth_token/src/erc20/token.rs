@@ -3,7 +3,7 @@ mod events;
 use std::collections::{HashMap, HashSet};
 
 use eyre::{eyre, Result};
-use reth_chain_query::common_addresses::{KnownV2Protocol, DENOM_ADDRESSES};
+use reth_chain_query::common_addresses::{KnownV2Protocol, KnownV3Protocol, DENOM_ADDRESSES};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
@@ -11,7 +11,8 @@ use tx_processor::ProcessedTransaction;
 use crate::pools::balancer::{BalancerPool, BalancerPoolToken};
 use crate::pools::base::{BasePool, BasePoolConfig};
 use crate::pools::curve::{CurvePool, CurvePoolToken};
-use crate::pools::sushiswap::new_sushiswap_v2_pool;
+use crate::pools::pancakeswap::new_pancakeswap_v3_pool;
+use crate::pools::sushiswap::{new_sushiswap_v2_pool, new_sushiswap_v3_pool};
 use crate::pools::uniswap::v2::{UniswapV2Pool, UniswapV2TransactionEvents, UniswapV2TxContext};
 use crate::pools::uniswap::{v4_event_display_key, UniswapV3Pool, UniswapV4Pool};
 use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
@@ -284,6 +285,57 @@ impl ERC20Token {
             tick_spacing,
             config,
         );
+        let pool_address = pool.base.identity.pool_address.clone();
+        self.add_uniswap_v3_pool(pool);
+        self.v3_pools
+            .get_mut(&pool_address)
+            .expect("pool was inserted")
+    }
+
+    pub fn create_known_v3_pool(
+        &mut self,
+        protocol: KnownV3Protocol,
+        pool_address: impl Into<String>,
+        denom_address: impl Into<String>,
+        token0: impl Into<String>,
+        token1: impl Into<String>,
+        fee_tier: u32,
+        tick_spacing: i32,
+        mut config: BasePoolConfig,
+    ) -> &mut UniswapV3Pool {
+        config.token_decimals = self.decimals;
+        let pool = match protocol {
+            KnownV3Protocol::UniswapV3 => UniswapV3Pool::new(
+                pool_address,
+                self.contract_address.clone(),
+                denom_address,
+                token0,
+                token1,
+                fee_tier,
+                tick_spacing,
+                config,
+            ),
+            KnownV3Protocol::SushiSwapV3 => new_sushiswap_v3_pool(
+                pool_address,
+                self.contract_address.clone(),
+                denom_address,
+                token0,
+                token1,
+                fee_tier,
+                tick_spacing,
+                config,
+            ),
+            KnownV3Protocol::PancakeSwapV3 => new_pancakeswap_v3_pool(
+                pool_address,
+                self.contract_address.clone(),
+                denom_address,
+                token0,
+                token1,
+                fee_tier,
+                tick_spacing,
+                config,
+            ),
+        };
         let pool_address = pool.base.identity.pool_address.clone();
         self.add_uniswap_v3_pool(pool);
         self.v3_pools

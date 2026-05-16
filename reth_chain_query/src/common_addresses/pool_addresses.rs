@@ -19,6 +19,7 @@ pub enum KnownV2Protocol {
 pub enum KnownV3Protocol {
     UniswapV3,
     SushiSwapV3,
+    PancakeSwapV3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,8 +131,11 @@ impl KnownV2Protocol {
 }
 
 impl KnownV3Protocol {
-    pub const ALL: [KnownV3Protocol; 2] =
-        [KnownV3Protocol::UniswapV3, KnownV3Protocol::SushiSwapV3];
+    pub const ALL: [KnownV3Protocol; 3] = [
+        KnownV3Protocol::UniswapV3,
+        KnownV3Protocol::SushiSwapV3,
+        KnownV3Protocol::PancakeSwapV3,
+    ];
 
     pub fn descriptor(self) -> KnownV3ProtocolDescriptor {
         match self {
@@ -146,6 +150,12 @@ impl KnownV3Protocol {
                 label: "SUSHISWAP-V3",
                 factory: address!("bACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F"),
                 router: address!("2E6cd2d30aa43f40aa81619ff4b6E0a41479B13F"),
+            },
+            Self::PancakeSwapV3 => KnownV3ProtocolDescriptor {
+                protocol: self,
+                label: "PANCAKESWAP-V3",
+                factory: address!("0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"),
+                router: address!("13f4EA83D0bd40E75C8222255bc855a974568Dd4"),
             },
         }
     }
@@ -179,6 +189,7 @@ impl KnownV3Protocol {
         match normalized.as_str() {
             "UNISWAPV3" | "UNIV3" => Some(Self::UniswapV3),
             "SUSHISWAPV3" | "SUSHIV3" => Some(Self::SushiSwapV3),
+            "PANCAKESWAPV3" | "PANCAKEV3" => Some(Self::PancakeSwapV3),
             _ => Self::ALL.iter().copied().find(|protocol| {
                 protocol
                     .label()
@@ -206,7 +217,7 @@ pub static POOL_FACTORIES: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
         ("pancake_factory", KnownV2Protocol::PancakeSwapV2.factory()),
         (
             "pancake_v3_factory",
-            address!("0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"),
+            KnownV3Protocol::PancakeSwapV3.factory(),
         ),
         (
             "curve_registry",
@@ -274,6 +285,25 @@ mod tests {
             Some(KnownV2Protocol::PancakeSwapV2)
         );
     }
+
+    #[test]
+    fn known_v3_protocol_classifies_pancakeswap_ethereum_factory() {
+        let factory = address!("0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865");
+
+        assert_eq!(
+            KnownV3Protocol::from_factory(factory),
+            Some(KnownV3Protocol::PancakeSwapV3)
+        );
+        assert_eq!(KnownV3Protocol::PancakeSwapV3.label(), "PANCAKESWAP-V3");
+        assert_eq!(
+            KnownV3Protocol::PancakeSwapV3.router(),
+            address!("13f4EA83D0bd40E75C8222255bc855a974568Dd4")
+        );
+        assert_eq!(
+            KnownV3Protocol::from_label("pancake_v3"),
+            Some(KnownV3Protocol::PancakeSwapV3)
+        );
+    }
 }
 
 /// Named map of router contracts.
@@ -288,10 +318,7 @@ pub static ROUTERS: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
         ("sushi_router", KnownV2Protocol::SushiSwapV2.router()),
         ("sushi_v3_router", KnownV3Protocol::SushiSwapV3.router()),
         ("pancake_router", KnownV2Protocol::PancakeSwapV2.router()),
-        (
-            "pancake_v3_router",
-            address!("13f4EA83D0bd40E75C8222255bc855a974568Dd4"),
-        ),
+        ("pancake_v3_router", KnownV3Protocol::PancakeSwapV3.router()),
         (
             "kyber_router",
             address!("1c87257F5e8609940Bc751a07BB085Bb7f8cDBE6"),

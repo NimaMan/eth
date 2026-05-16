@@ -8,7 +8,7 @@ use crate::tx_processor::TxProcessor;
 
 use super::pool_buy_sell_simulator::PoolBuySellSimulator;
 use super::types::{PoolBuySellParameters, PoolType};
-use tx_simulator::tx_builders::{self, amm_swap_route::AmmSwapRoute};
+use tx_simulator::tx_builders;
 
 /// Result of a single buy swap simulation
 #[derive(Debug, Clone)]
@@ -60,30 +60,15 @@ pub async fn simulate_buy_swap_with_params(
 
     let buyer_address = config.buyer_address;
     // Build route
-    let route = if let Some(protocol) = config.pool_type.known_v2_protocol() {
-        AmmSwapRoute::V2Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-        }
-    } else if let (Some(protocol), Some(fee_tier)) = (
-        config.pool_type.known_v3_protocol(),
-        config.pool_type.v3_fee_tier(),
-    ) {
-        AmmSwapRoute::V3Router {
-            pool: config.pool_address,
-            router: protocol.router(),
-            fee_tier,
-        }
-    } else {
-        match config.pool_type {
-            _ => {
-                return Err(eyre::eyre!(
-                    "Pool type {:?} not yet supported for buy-only simulation",
-                    config.pool_type
-                ));
-            }
-        }
-    };
+    let route = config
+        .pool_type
+        .amm_swap_route(config.pool_address)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "Pool type {:?} not yet supported for buy-only simulation",
+                config.pool_type
+            )
+        })?;
 
     // Build BUY transaction
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;

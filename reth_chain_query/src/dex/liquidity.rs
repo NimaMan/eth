@@ -47,10 +47,53 @@ impl RethQueryProvider {
             .await
     }
 
+    async fn get_v3_style_route_liquidity(
+        &self,
+        protocol: &'static str,
+        pool: Address,
+        block_number: u64,
+    ) -> Result<PoolLiquidityInfo> {
+        let (t0, t1) = self
+            .uni_v2_get_tokens(pool, Some(block_number))
+            .await
+            .unwrap_or((Address::ZERO, Address::ZERO));
+        let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
+        let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
+        let (sqrt, tick, liq, _ts) = self
+            .uni_v3_get_slot0_and_liquidity(pool, Some(block_number))
+            .await?;
+        let (d0, d1) = match tokio::try_join!(
+            self.get_token_decimals(t0, Some(block_number)),
+            self.get_token_decimals(t1, Some(block_number)),
+        ) {
+            Ok((a, b)) => (a, b),
+            Err(_) => (18u8, 18u8),
+        };
+        let price = compute_price_from_sqrt_price_1e18(sqrt, d0, d1);
+        Ok(PoolLiquidityInfo {
+            protocol,
+            pool,
+            pool_id: None,
+            token0: Some(t0),
+            token1: Some(t1),
+            token0_symbol: s0,
+            token1_symbol: s1,
+            token0_decimals: Some(d0),
+            token1_decimals: Some(d1),
+            reserve0: None,
+            reserve1: None,
+            v3_liquidity: Some(liq),
+            tick: Some(tick),
+            sqrt_price_x96: Some(sqrt),
+            price_1e18: Some(price),
+            block_number,
+        })
+    }
+
     /// Get liquidity info for a specific AMM route at a block.
     ///
     /// - UniswapV2/SushiswapV2: returns reserves (reserve0, reserve1)
-    /// - UniswapV3: returns (liquidity, tick)
+    /// - V3-style routes: returns (liquidity, tick)
     pub async fn get_route_liquidity(
         &self,
         route: &AmmSwapRoute,
@@ -70,43 +113,21 @@ impl RethQueryProvider {
                 self.get_v2_style_liquidity("V2-Router", pool, Some(block_number))
                     .await
             }
-            AmmSwapRoute::UniswapV3 { pool, .. } | AmmSwapRoute::V3Router { pool, .. } => {
-                // token addresses via token0()/token1() as well
-                let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number))
+            AmmSwapRoute::UniswapV3 { pool, .. } => {
+                self.get_v3_style_route_liquidity("Uniswap-V3", pool, block_number)
                     .await
-                    .unwrap_or((Address::ZERO, Address::ZERO));
-                let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
-                let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
-                let (sqrt, tick, liq, _ts) = self
-                    .uni_v3_get_slot0_and_liquidity(pool, Some(block_number))
-                    .await?;
-                let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number)),
-                    self.get_token_decimals(t1, Some(block_number)),
-                ) {
-                    Ok((a, b)) => (a, b),
-                    Err(_) => (18u8, 18u8),
-                };
-                let price = compute_price_from_sqrt_price_1e18(sqrt, d0, d1);
-                Ok(PoolLiquidityInfo {
-                    protocol: "Uniswap-V3",
-                    pool,
-                    pool_id: None,
-                    token0: Some(t0),
-                    token1: Some(t1),
-                    token0_symbol: s0,
-                    token1_symbol: s1,
-                    token0_decimals: Some(d0),
-                    token1_decimals: Some(d1),
-                    reserve0: None,
-                    reserve1: None,
-                    v3_liquidity: Some(liq),
-                    tick: Some(tick),
-                    sqrt_price_x96: Some(sqrt),
-                    price_1e18: Some(price),
-                    block_number,
-                })
+            }
+            AmmSwapRoute::SushiswapV3 { pool, .. } => {
+                self.get_v3_style_route_liquidity("SushiswapV3", pool, block_number)
+                    .await
+            }
+            AmmSwapRoute::PancakeSwapV3 { pool, .. } => {
+                self.get_v3_style_route_liquidity("PancakeSwapV3", pool, block_number)
+                    .await
+            }
+            AmmSwapRoute::V3Router { pool, .. } => {
+                self.get_v3_style_route_liquidity("V3-Router", pool, block_number)
+                    .await
             }
             AmmSwapRoute::UniswapV4 {
                 pool_manager,

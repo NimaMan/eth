@@ -1,4 +1,4 @@
-use super::protocols::{curve, sushiswap, uniswap};
+use super::protocols::{curve, pancakeswap, sushiswap, uniswap};
 use super::routes::AmmSwapRoute;
 use crate::UnsignedTransaction;
 use alloy_primitives::{Address, U256};
@@ -45,6 +45,12 @@ pub fn build_buy_swap(
             slippage_bps,
             deadline,
         ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => {
+            sushiswap::v3::build_buy_swap_v3(buyer, token_out, amount_in_eth, fee_tier, deadline)
+        }
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_buy_swap_v3(buyer, token_out, amount_in_eth, fee_tier, deadline)
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_buy_swap_v3_with_router(
@@ -122,6 +128,26 @@ pub fn build_buy_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => {
+            sushiswap::v3::build_buy_swap_v3_with_min_out(
+                buyer,
+                token_out,
+                amount_in_eth,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_buy_swap_v3_with_min_out(
+                buyer,
+                token_out,
+                amount_in_eth,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_buy_swap_v3_with_min_out_router(
@@ -162,6 +188,10 @@ pub fn build_approve_for_route(
             uniswap::v2::build_approve_v2(uniswap::v2::Router::Custom(router), owner, token, amount)
         }
         AmmSwapRoute::UniswapV3 { .. } => uniswap::v3::build_approve_v3(owner, token, amount),
+        AmmSwapRoute::SushiswapV3 { .. } => sushiswap::v3::build_approve_v3(owner, token, amount),
+        AmmSwapRoute::PancakeSwapV3 { .. } => {
+            pancakeswap::v3::build_approve_v3(owner, token, amount)
+        }
         AmmSwapRoute::V3Router { router, .. } => {
             uniswap::v3::build_approve_v3_for_router(router, owner, token, amount)
         }
@@ -209,6 +239,20 @@ pub fn build_sell_swap(
             amount_in_tokens,
             fee_tier,
             slippage_bps,
+            deadline,
+        ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => sushiswap::v3::build_sell_swap_v3(
+            seller,
+            token_in,
+            amount_in_tokens,
+            fee_tier,
+            deadline,
+        ),
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => pancakeswap::v3::build_sell_swap_v3(
+            seller,
+            token_in,
+            amount_in_tokens,
+            fee_tier,
             deadline,
         ),
         AmmSwapRoute::V3Router {
@@ -304,6 +348,14 @@ fn build_fee_tolerant_token_to_token_swap(
         AmmSwapRoute::UniswapV3 { fee_tier, .. } => uniswap::v3::build_token_to_token_swap_v3(
             trader, token_in, token_out, amount_in, fee_tier, 0, deadline,
         ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => sushiswap::v3::build_token_to_token_swap_v3(
+            trader, token_in, token_out, amount_in, fee_tier, deadline,
+        ),
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_token_to_token_swap_v3(
+                trader, token_in, token_out, amount_in, fee_tier, deadline,
+            )
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_token_to_token_swap_v3_with_router(
@@ -355,6 +407,26 @@ pub fn build_sell_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => {
+            sushiswap::v3::build_sell_swap_v3_with_min_out(
+                seller,
+                token_in,
+                amount_in_tokens,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_sell_swap_v3_with_min_out(
+                seller,
+                token_in,
+                amount_in_tokens,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_sell_swap_v3_with_min_out_router(
@@ -424,6 +496,14 @@ pub fn build_token_to_token_swap(
             slippage_bps,
             deadline,
         ),
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => sushiswap::v3::build_token_to_token_swap_v3(
+            trader, token_in, token_out, amount_in, fee_tier, deadline,
+        ),
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_token_to_token_swap_v3(
+                trader, token_in, token_out, amount_in, fee_tier, deadline,
+            )
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_token_to_token_swap_v3_with_router(
@@ -492,6 +572,28 @@ pub fn build_token_to_token_swap_with_min_out(
                 deadline,
             )
         }
+        AmmSwapRoute::SushiswapV3 { fee_tier, .. } => {
+            sushiswap::v3::build_token_to_token_swap_v3_with_min_out(
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
+        AmmSwapRoute::PancakeSwapV3 { fee_tier, .. } => {
+            pancakeswap::v3::build_token_to_token_swap_v3_with_min_out(
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         AmmSwapRoute::V3Router {
             router, fee_tier, ..
         } => uniswap::v3::build_token_to_token_swap_v3_with_min_out_router(
@@ -523,16 +625,12 @@ pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
             0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
             0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
         ]),
-        AmmSwapRoute::SushiswapV2 { .. } => Address::from([
-            0xd9, 0xe1, 0xcE, 0x17, 0xf2, 0x64, 0x1f, 0x24, 0xaE, 0x83, 0x63, 0x7a, 0xb6, 0x6a,
-            0x2c, 0xca, 0x9C, 0x37, 0x8B, 0x9F,
-        ]),
+        AmmSwapRoute::SushiswapV2 { .. } => sushiswap::v2::DEFAULT_ROUTER_ADDRESS,
         AmmSwapRoute::V2Router { router, .. } => router,
         AmmSwapRoute::V3Router { router, .. } => router,
-        AmmSwapRoute::UniswapV3 { .. } => Address::from([
-            0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0,
-            0x15, 0x7C, 0x05, 0x86, 0x15, 0x64,
-        ]),
+        AmmSwapRoute::UniswapV3 { .. } => uniswap::v3::DEFAULT_ROUTER,
+        AmmSwapRoute::SushiswapV3 { .. } => sushiswap::v3::DEFAULT_ROUTER,
+        AmmSwapRoute::PancakeSwapV3 { .. } => pancakeswap::v3::DEFAULT_ROUTER,
         _ => Address::from([
             0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
             0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
@@ -661,6 +759,49 @@ mod tests {
         let data = tx.data.expect("swap calldata");
 
         assert_eq!(&data[..4], &[0x41, 0x4b, 0xf3, 0x89]);
+        assert_eq!(tx.to, Some(uniswap::v3::DEFAULT_ROUTER));
+        assert_eq!(tx.value, Some(U256::ZERO));
+    }
+
+    #[test]
+    fn sushiswap_v3_route_uses_sushi_router_and_deadline_selector() {
+        let tx = build_denom_to_token_swap(
+            &AmmSwapRoute::SushiswapV3 {
+                pool: addr(1),
+                fee_tier: 3000,
+            },
+            addr(2),
+            addr(3),
+            addr(4),
+            U256::from(1000),
+            0,
+            u64::MAX,
+        );
+        let data = tx.data.expect("swap calldata");
+
+        assert_eq!(&data[..4], &[0x41, 0x4b, 0xf3, 0x89]);
+        assert_eq!(tx.to, Some(sushiswap::v3::DEFAULT_ROUTER));
+        assert_eq!(tx.value, Some(U256::ZERO));
+    }
+
+    #[test]
+    fn pancakeswap_v3_router_uses_no_deadline_exact_input_single_selector() {
+        let tx = build_denom_to_token_swap(
+            &AmmSwapRoute::PancakeSwapV3 {
+                pool: addr(1),
+                fee_tier: 10000,
+            },
+            addr(2),
+            addr(3),
+            addr(4),
+            U256::from(1000),
+            0,
+            u64::MAX,
+        );
+        let data = tx.data.expect("swap calldata");
+
+        assert_eq!(&data[..4], &[0x04, 0xe4, 0x5a, 0xaf]);
+        assert_eq!(tx.to, Some(pancakeswap::v3::DEFAULT_ROUTER));
         assert_eq!(tx.value, Some(U256::ZERO));
     }
 }

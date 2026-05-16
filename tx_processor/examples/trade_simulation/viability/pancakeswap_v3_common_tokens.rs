@@ -50,7 +50,7 @@ async fn test_token(
     let config = PoolBuySellParameters::new(
         token.token_address,
         pool_address,
-        PoolType::UniswapV3 {
+        PoolType::PancakeSwapV3 {
             fee_tier: token.fee_tier,
         },
     )
