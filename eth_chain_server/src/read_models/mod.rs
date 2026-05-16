@@ -9,4 +9,5 @@ pub mod ops;
 pub mod pool;
 pub mod run;
 pub mod strategy;
+pub mod surface;
 pub mod token;

@@ -30,6 +30,12 @@ pub(super) struct RecentProcessedBlocksQuery {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct LivePoolsQuery {
+    #[serde(default)]
+    status: views::surface::PoolSurfaceFilter,
+}
+
 #[derive(Debug, Serialize)]
 struct LiveUpdatesResponse {
     event: &'static str,
@@ -80,9 +86,63 @@ pub(super) async fn tokens(state: ServerState) -> Result<warp::reply::Response, 
     ))
 }
 
-pub(super) async fn pools(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+pub(super) async fn surface(state: ServerState) -> Result<warp::reply::Response, Infallible> {
     Ok(json_response(
-        &views::live::pool_list(&state.live_tracker).await,
+        &views::live::surface(&state.live_tracker).await,
+        StatusCode::OK,
+    ))
+}
+
+pub(super) async fn pools(
+    query: LivePoolsQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(&state.live_tracker, query.status).await,
+        StatusCode::OK,
+    ))
+}
+
+pub(super) async fn active_pools(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(
+            &state.live_tracker,
+            views::surface::PoolSurfaceFilter::Active,
+        )
+        .await,
+        StatusCode::OK,
+    ))
+}
+
+pub(super) async fn scam_pools(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(&state.live_tracker, views::surface::PoolSurfaceFilter::Scam).await,
+        StatusCode::OK,
+    ))
+}
+
+pub(super) async fn eligible_pools(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(
+            &state.live_tracker,
+            views::surface::PoolSurfaceFilter::Eligible,
+        )
+        .await,
+        StatusCode::OK,
+    ))
+}
+
+pub(super) async fn ineligible_pools(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(
+            &state.live_tracker,
+            views::surface::PoolSurfaceFilter::Ineligible,
+        )
+        .await,
         StatusCode::OK,
     ))
 }

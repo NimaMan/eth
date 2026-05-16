@@ -88,8 +88,35 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(live::tokens);
 
+    let live_surface = warp::path!("eth" / "tokens" / "api" / "live" / "surface")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live::surface);
+
+    let live_active_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "active")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live::active_pools);
+
+    let live_scam_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "scam")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live::scam_pools);
+
+    let live_eligible_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "eligible")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live::eligible_pools);
+
+    let live_ineligible_pools =
+        warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "ineligible")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::ineligible_pools);
+
     let live_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools")
         .and(warp::get())
+        .and(warp::query::<live::LivePoolsQuery>())
         .and(with_state(state.clone()))
         .and_then(live::pools);
 
@@ -266,8 +293,14 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(range::token_detail);
 
+    let surface = warp::path!("eth" / "tokens" / "api" / "runs" / String / "surface")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(range::surface);
+
     let pools = warp::path!("eth" / "tokens" / "api" / "runs" / String / "pools")
         .and(warp::get())
+        .and(warp::query::<range::RangePoolsQuery>())
         .and(with_state(state.clone()))
         .and_then(range::pools);
 
@@ -304,6 +337,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_stop)
         .or(live_token_detail)
         .or(live_tokens)
+        .or(live_surface)
+        .or(live_active_pools)
+        .or(live_scam_pools)
+        .or(live_eligible_pools)
+        .or(live_ineligible_pools)
         .or(live_pools)
         .or(live_updates)
         .or(live_retention)
@@ -334,6 +372,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(token_detail)
         .or(tokens)
         .or(progress)
+        .or(surface)
         .or(pools)
         .or(launch_stats)
         .or(errors)

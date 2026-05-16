@@ -9,6 +9,12 @@ use crate::http::ServerState;
 use crate::ranges::{StartRangeIndexError, StartRangeIndexRequest};
 use crate::read_models as views;
 
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct RangePoolsQuery {
+    #[serde(default)]
+    status: views::surface::PoolSurfaceFilter,
+}
+
 pub(super) async fn list_runs(state: ServerState) -> Result<warp::reply::Response, Infallible> {
     let runs = state.range_indexer.list_runs().await;
     Ok(json_response(
@@ -140,11 +146,25 @@ pub(super) async fn token_detail(
 
 pub(super) async fn pools(
     run_id: String,
+    query: RangePoolsQuery,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
-            &views::pool::pool_list(&run).await,
+            &views::pool::pool_list_filtered(&run, query.status).await,
+            StatusCode::OK,
+        )),
+        None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+pub(super) async fn surface(
+    run_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.range_indexer.get_run(&run_id).await {
+        Some(run) => Ok(json_response(
+            &views::surface::range_surface(&run).await,
             StatusCode::OK,
         )),
         None => Ok(error_response("run not found", StatusCode::NOT_FOUND)),

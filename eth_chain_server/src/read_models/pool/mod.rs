@@ -7,7 +7,7 @@ use eth_price::liquidity::{assess_denom_liquidity, LiquidityReference, PoolLiqui
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
     BalancerPool, BasePool, CurvePool, LPHolderSnapshot, PoolLifecycle, PoolRuntimeState,
-    TaxBucket, TradingStatus, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
+    TaxBucket, TradingStatus, TradingStatusSnapshot, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
 };
 use eth_token::token_activity::TokenBlockActivity;
 use reth_chain_query::common_addresses::get_token_symbol;
@@ -16,6 +16,7 @@ use serde_json::Value;
 use std::cmp::Ordering;
 
 use crate::ranges::RangeIndexJob;
+use crate::read_models::surface::PoolSurfaceFilter;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolListResponse {
@@ -113,6 +114,9 @@ pub struct PoolView {
     pub supply_ratio_label: Option<String>,
     pub can_buy: bool,
     pub can_sell: bool,
+    pub effective_can_buy: bool,
+    pub effective_can_sell: bool,
+    pub economic_sellable: Option<bool>,
     pub has_observed_buy: bool,
     pub has_observed_sell: bool,
     pub trading_enabled: bool,
@@ -126,6 +130,9 @@ pub struct PoolView {
     pub last_trading_failure_class: Option<String>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
+    pub scam_mechanism_evidence: Option<Value>,
     pub liquidity_removal: bool,
     pub liquidity_removal_label: Option<String>,
     pub liquidity_removal_block: Option<u64>,
@@ -139,6 +146,7 @@ pub struct PoolView {
     pub can_buy_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub trading_status: TradingStatus,
+    pub trading_status_history: Vec<TradingStatusSnapshot>,
     pub runtime_state: PoolRuntimeState,
     pub lp_total_supply: f64,
     pub lp_supply_known: bool,
@@ -526,6 +534,11 @@ impl PoolView {
         let price_ratio_to_initial =
             display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
         let price_ratio_history = display_price_ratio_history(&base.price_history, liquidity_level);
+        let (liquidity_history, price_ratio_history) = truncate_history_at_liquidity_removal(
+            &liquidity_history,
+            &price_ratio_history,
+            base.scam_block,
+        );
         let raw_pooled_token_supply_ratio =
             total_supply.and_then(|supply| base.pooled_token_supply_ratio(supply));
         let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
@@ -539,14 +552,14 @@ impl PoolView {
         let tax_bucket = TaxBucket::combined(buy_tax, sell_tax);
         let current_trading = current_trading_view(base, liquidity_level);
         let mut trading_status = base.trading_status();
-        trading_status.can_buy = current_trading.can_buy;
-        trading_status.can_sell = current_trading.can_sell;
-        trading_status.trading_enabled = current_trading.can_buy;
-        trading_status.can_buy_and_sell = current_trading.can_buy && current_trading.can_sell;
+        trading_status.effective_can_buy = current_trading.can_buy;
+        trading_status.effective_can_sell = current_trading.can_sell;
         let mut risk = pool_risk(base, current_trading);
         let mut stage = current_lifecycle_view(base, current_trading);
         let explicit_liquidity_removal = base.has_liquidity_removal();
         let max_denom_reserve = max_denom_reserve(&liquidity_history, base.denom_reserve());
+        let cohort_can_buy = base.state.can_buy || base.has_observed_buy();
+        let cohort_can_sell = base.state.can_sell || base.has_observed_sell();
         let lp_max_holder_share = lp_fields
             .lp_holders
             .iter()
@@ -559,8 +572,8 @@ impl PoolView {
             token_reserve: Some(base.token_reserve()),
             can_buy: current_trading.can_buy,
             can_sell: current_trading.can_sell,
-            cohort_can_buy: Some(base.state.can_buy),
-            cohort_can_sell: Some(base.state.can_sell),
+            cohort_can_buy: Some(cohort_can_buy),
+            cohort_can_sell: Some(cohort_can_sell),
             is_scam: explicit_liquidity_removal || matches!(risk.level, PoolRiskLevel::Honeypot),
             hidden_mint: token.hidden_mint_detected(),
             liquidity_removed: explicit_liquidity_removal,
@@ -586,10 +599,24 @@ impl PoolView {
             Some(EligiblePoolOutcome::LiquidityRemoval)
         );
         let liquidity_removal = explicit_liquidity_removal || derived_liquidity_removal;
+        let inferred_mechanism = base.inferred_scam_mechanism();
+        let scam_mechanism = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.mechanism.clone());
+        let scam_mechanism_label = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.label.clone());
+        let scam_mechanism_evidence = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.evidence.clone());
         let liquidity_removal_label = if explicit_liquidity_removal {
-            base.scam_label.clone()
+            base.scam_label
+                .clone()
+                .or_else(|| scam_mechanism_label.clone())
         } else if derived_liquidity_removal {
-            Some("liquidity_removal (derived from reserve drop)".to_string())
+            scam_mechanism_label
+                .clone()
+                .or_else(|| Some("liquidity_removal (derived from reserve drop)".to_string()))
         } else {
             None
         };
@@ -649,8 +676,11 @@ impl PoolView {
             liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
             supply_ratio_status: supply_ratio.status.to_string(),
             supply_ratio_label: supply_ratio.label,
-            can_buy: current_trading.can_buy,
-            can_sell: current_trading.can_sell,
+            can_buy: base.state.can_buy,
+            can_sell: base.state.can_sell,
+            effective_can_buy: current_trading.can_buy,
+            effective_can_sell: current_trading.can_sell,
+            economic_sellable: economic_sellable_from_tax(base.state.can_sell, sell_tax),
             has_observed_buy: base.has_observed_buy(),
             has_observed_sell: base.has_observed_sell(),
             trading_enabled: current_trading.can_buy,
@@ -664,10 +694,21 @@ impl PoolView {
             last_trading_failure_class: base.last_trading_failure_class.clone(),
             is_scam: liquidity_removal,
             scam_label: liquidity_removal_label.clone(),
+            scam_mechanism,
+            scam_mechanism_label,
+            scam_mechanism_evidence,
             liquidity_removal,
             liquidity_removal_label,
-            liquidity_removal_block: base.scam_block,
-            liquidity_removal_tx_hash: base.scam_tx_hash.clone(),
+            liquidity_removal_block: base.scam_block.or_else(|| {
+                inferred_mechanism
+                    .as_ref()
+                    .and_then(|mechanism| mechanism.block_number)
+            }),
+            liquidity_removal_tx_hash: base.scam_tx_hash.clone().or_else(|| {
+                inferred_mechanism
+                    .as_ref()
+                    .and_then(|mechanism| mechanism.tx_hash.clone())
+            }),
             risk_level: risk.level,
             risk_label: risk.label,
             pool_classification,
@@ -677,6 +718,7 @@ impl PoolView {
             can_buy_block: base.can_buy_block,
             latest_block_number: latest_pool_block_number(base),
             trading_status,
+            trading_status_history: base.trading_status_history.clone(),
             runtime_state: base.state.clone(),
             lp_total_supply: lp_fields.lp_total_supply,
             lp_supply_known: lp_fields.lp_supply_known,
@@ -907,20 +949,21 @@ fn display_tax(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite() && *value >= 0.0)
 }
 
-fn display_price_ratio(value: Option<f64>, liquidity_level: PoolLiquidityLevel) -> Option<f64> {
-    if liquidity_level != PoolLiquidityLevel::Liquid {
-        return None;
+fn economic_sellable_from_tax(can_sell: bool, sell_tax: Option<f64>) -> Option<bool> {
+    if !can_sell {
+        return Some(false);
     }
+    display_tax(sell_tax).map(|tax| tax <= 40.0)
+}
+
+fn display_price_ratio(value: Option<f64>, _liquidity_level: PoolLiquidityLevel) -> Option<f64> {
     value.filter(|value| value.is_finite() && *value > 0.0)
 }
 
 fn display_price_ratio_history(
     history: &[(u64, f64)],
-    liquidity_level: PoolLiquidityLevel,
+    _liquidity_level: PoolLiquidityLevel,
 ) -> Vec<PriceRatioPoint> {
-    if liquidity_level != PoolLiquidityLevel::Liquid {
-        return Vec::new();
-    }
     price_ratio_history(history)
 }
 
@@ -993,6 +1036,48 @@ fn price_ratio_history(history: &[(u64, f64)]) -> Vec<PriceRatioPoint> {
         .collect()
 }
 
+fn truncate_history_at_liquidity_removal(
+    liquidity_history: &[LiquidityPoint],
+    price_ratio_history: &[PriceRatioPoint],
+    liquidity_removal_block: Option<u64>,
+) -> (Vec<LiquidityPoint>, Vec<PriceRatioPoint>) {
+    let Some(removal_block) = liquidity_removal_block else {
+        return (liquidity_history.to_vec(), price_ratio_history.to_vec());
+    };
+
+    let max_before = liquidity_history
+        .iter()
+        .filter(|p| p.block_number <= removal_block)
+        .map(|p| p.liquidity)
+        .filter(|l| l.is_finite() && *l > 0.0)
+        .fold(0.0, f64::max);
+
+    let after = liquidity_history
+        .iter()
+        .find(|p| p.block_number > removal_block)
+        .map(|p| p.liquidity)
+        .unwrap_or(0.0);
+
+    let significant_removal = max_before > 0.0 && after / max_before < 0.1;
+    if !significant_removal {
+        return (liquidity_history.to_vec(), price_ratio_history.to_vec());
+    }
+
+    let truncated_liquidity: Vec<_> = liquidity_history
+        .iter()
+        .take_while(|p| p.block_number <= removal_block)
+        .cloned()
+        .collect();
+
+    let truncated_price_ratio: Vec<_> = price_ratio_history
+        .iter()
+        .take_while(|p| p.block_number <= removal_block)
+        .cloned()
+        .collect();
+
+    (truncated_liquidity, truncated_price_ratio)
+}
+
 fn ratio_percent(value: Option<f64>) -> Option<f64> {
     value
         .map(|value| value * 100.0)
@@ -1040,12 +1125,20 @@ fn pool_liquidity_cmp(left: &PoolView, right: &PoolView) -> Ordering {
 }
 
 pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
+    pool_list_filtered(run, PoolSurfaceFilter::All).await
+}
+
+pub async fn pool_list_filtered(
+    run: &RangeIndexJob,
+    filter: PoolSurfaceFilter,
+) -> PoolListResponse {
     let state = run.state.read().await;
     let mut pools = Vec::new();
 
     for token in state.processor.registry.tokens.values() {
         pools.extend(PoolView::from_token_pool_summaries(token));
     }
+    pools.retain(|pool| filter.matches(pool));
 
     sort_pools_by_liquidity(&mut pools);
 
@@ -1072,18 +1165,23 @@ mod tests {
     }
 
     #[test]
-    fn display_price_ratio_requires_liquid_pool() {
+    fn display_price_ratio_returns_finite_positive_value() {
         assert_eq!(
             display_price_ratio(Some(1000.0), PoolLiquidityLevel::Dust),
-            None
+            Some(1000.0)
         );
         assert_eq!(
             display_price_ratio(Some(1000.0), PoolLiquidityLevel::Unknown),
-            None
+            Some(1000.0)
         );
         assert_eq!(
             display_price_ratio(Some(10.0), PoolLiquidityLevel::Liquid),
             Some(10.0)
+        );
+        assert_eq!(display_price_ratio(None, PoolLiquidityLevel::Liquid), None);
+        assert_eq!(
+            display_price_ratio(Some(-5.0), PoolLiquidityLevel::Liquid),
+            None
         );
     }
 
