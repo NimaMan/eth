@@ -787,11 +787,13 @@ fn market_event_block(event: &MarketEvent) -> u64 {
 }
 
 fn should_snapshot_position_for_pool(position: &Position) -> bool {
-    position.drained
-        || matches!(
-            position.state,
-            PositionState::BuyConfirmed | PositionState::SellFailed | PositionState::SellCancelled
-        )
+    if position.drained {
+        return position.has_exposure();
+    }
+    matches!(
+        position.state,
+        PositionState::BuyConfirmed | PositionState::SellFailed | PositionState::SellCancelled
+    )
 }
 
 #[derive(Clone, Debug, Default)]
@@ -938,6 +940,19 @@ fn zero_value_snapshot(
     pool: Option<&PoolSnapshot>,
 ) -> PositionSnapshot {
     let cost = position.entry_cost_basis.unwrap_or_default();
+    let realized = position.realized_pnl();
+    let unrealized = if position.is_closed() {
+        DecimalAmount::ZERO
+    } else {
+        -cost
+    };
+    let roi = if cost.is_zero() {
+        DecimalAmount::ZERO
+    } else if position.is_closed() {
+        realized / cost
+    } else {
+        DecimalAmount::from(-1)
+    };
     let snapshot = PositionSnapshot {
         position_id: position.id.clone(),
         trade_id: position.trade_id.clone(),
@@ -946,13 +961,9 @@ fn zero_value_snapshot(
         observed_block_number: pool.map(|pool| pool.latest_block).or(Some(block_number)),
         valuation_block_number: Some(block_number),
         current_value_eth: DecimalAmount::ZERO,
-        realized_profit_eth: position.realized_pnl(),
-        unrealized_profit_eth: -cost,
-        roi: if cost.is_zero() {
-            DecimalAmount::ZERO
-        } else {
-            DecimalAmount::from(-1)
-        },
+        realized_profit_eth: realized,
+        unrealized_profit_eth: unrealized,
+        roi,
         pool_price_to_initial_price_ratio: None,
         pool_initial_price_denom_per_token: None,
         pool_price_denom_per_token: None,
@@ -1114,7 +1125,7 @@ impl TradingStore for MemoryTradingStore {
 mod tests {
     use alloy_primitives::{Address, U256};
     use eth_alpha_core::{
-        amount::Amount,
+        amount::{Amount, DecimalAmount},
         execution::ExecutionStatus,
         ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
         market::{PoolProtocol, PoolSnapshot},
@@ -1394,6 +1405,35 @@ mod tests {
         assert!(should_snapshot_position_for_pool(&test_position(
             PositionState::SellFailed
         )));
+    }
+
+    #[test]
+    fn drained_closed_positions_are_not_resnapshotted() {
+        let mut open_drained = test_position(PositionState::BuyConfirmed);
+        open_drained.drained = true;
+        assert!(should_snapshot_position_for_pool(&open_drained));
+
+        let mut pending_sell_drained = test_position(PositionState::SellSubmitted);
+        pending_sell_drained.drained = true;
+        assert!(should_snapshot_position_for_pool(&pending_sell_drained));
+
+        let mut closed_drained = test_position(PositionState::SellConfirmed);
+        closed_drained.drained = true;
+        assert!(!should_snapshot_position_for_pool(&closed_drained));
+    }
+
+    #[test]
+    fn zero_value_snapshot_for_closed_position_has_no_unrealized_pnl() {
+        let mut position = test_position(PositionState::SellConfirmed);
+        position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.01").unwrap());
+        position.exit_proceeds = Some(DecimalAmount::from_str_exact("0.02").unwrap());
+
+        let snapshot = zero_value_snapshot(&position, 10, None);
+
+        assert_eq!(snapshot.current_value_eth, DecimalAmount::ZERO);
+        assert_eq!(snapshot.unrealized_profit_eth, DecimalAmount::ZERO);
+        assert_eq!(snapshot.realized_profit_eth.to_string(), "0.01");
+        assert_eq!(snapshot.roi.to_string(), "1");
     }
 
     #[tokio::test]

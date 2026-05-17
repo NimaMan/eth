@@ -11,6 +11,21 @@ live trading path. It currently uses:
 - `position_snapshots`
 - `strategy_observations`
 
+## Layout
+
+The lab crate is the umbrella for offline diagnostics. Keep each lab as a
+top-level module under `src/` rather than nesting modules under a generic
+`labs/` directory.
+
+```text
+src/
+  bin/eth_alpha_lab.rs
+  backtest_validation/
+  position_lab.rs
+  strategy_lab.rs
+  render.rs
+```
+
 ## Strategy Lab
 
 Run-level checks for PnL, concentration, failures, protocol mix, missing
@@ -45,6 +60,99 @@ eth_alpha_lab position \
 If more than one position matches a token, use `--position-id`.
 
 Both commands support `--json` for automation.
+
+## Backtest Validation
+
+Trade-centric validation for a persisted backtest result set. This is the first
+gate before trusting a strategy comparison, a top winner, or a reported PnL.
+
+```bash
+eth_alpha_lab backtest-validation \
+  --result-set historical-25090165-25110164 \
+  --strategy snipe-all-risk-atlas-lp-gate-hold15-v2
+```
+
+The command supports profiles:
+
+```bash
+eth_alpha_lab backtest-validation \
+  --result-set historical-25090165-25110164 \
+  --profile standard
+```
+
+- `quick`: DB invariants plus top/worst 3 trade samples.
+- `standard`: same validation with wider top/worst samples.
+- `strict`: reserved for EVM replay expansion; DB checks still run first.
+
+Use `--json` for machine-readable reports.
+
+### Validation Procedure
+
+The validation procedure is intentionally ordered. Do not start by inspecting
+PnL; first prove the result set is internally coherent.
+
+1. Load the result set, run provenance, strategy config, scoped trades, events,
+   decisions, risk events, snapshots, and execution reports from
+   `alpha_trading`.
+2. Validate metadata and scope:
+   - historical result sets should be `completed`;
+   - live result sets should be `running`;
+   - the selected strategy must have trades;
+   - public trade IDs must use the `trd_` prefix;
+   - historical result sets must not include pending mempool risk rows.
+3. Validate lifecycle:
+   - every trade has buy submit and buy confirmation in order;
+   - `entry_block` equals the `buy_confirmed` event block;
+   - sell submit cannot precede buy confirmation;
+   - `exit_block` exists only for `sell_confirmed` trades;
+   - `exit_block` equals the `sell_confirmed` event block;
+   - duplicate terminal buy/sell confirmations are failures.
+4. Validate decision timing:
+   - every submitted buy/sell event has a same-block `strategy_decisions` row;
+   - risk-driven sell decisions must have local `risk_events` evidence at or
+     before the decision block.
+5. Validate accounting:
+   - `total_pnl_eth = realized_pnl_eth + unrealized_pnl_eth`;
+   - for closed trades,
+     `realized_pnl_eth = exit_value_eth - entry_cost_eth - gas_cost_eth`;
+   - closed trades must have zero `current_value_eth` and zero
+     `unrealized_pnl_eth`.
+6. Validate snapshots:
+   - `latest_snapshot_block` must equal the max persisted trade snapshot block;
+   - closed trades should have a final `sell_confirmed` snapshot at `exit_block`.
+7. Validate replay readiness:
+   - closed trades must retain buy-confirmed token amount, sell order amount,
+     and sell-confirmed filled amount. These are the required inputs for
+     independent chain-sim replay.
+8. Review samples:
+   - top winners and worst losers are printed as mandatory follow-up forensic
+     trades. A profitable strategy is not accepted until representative winners
+     and losers replay cleanly.
+
+### Verdicts
+
+- `pass`: the invariant holds.
+- `warn`: the result may still be usable, but strategy conclusions are
+  sensitive or evidence is incomplete.
+- `fail`: do not trust the scoped result until fixed.
+- `blocked`: the check could not run because required external state or replay
+  support is unavailable.
+
+### EVM Replay Policy
+
+The current `backtest-validation` command validates DB coherence and replay
+readiness. The next validation layer is EVM replay over sampled trades using
+the existing tx-processor sell/buy simulators. Until that is wired into the lab
+command, use the printed top/worst samples with `probe_sell_swap` and
+`probe_pool_buy_sell` for forensic replay.
+
+For each sampled closed trade, replay should prove:
+
+- the recorded buy amount is obtainable at the buy-confirmed block;
+- the recorded token amount is sellable at the sell-confirmed block;
+- the simulated denomination received matches `sell_confirmed.filled_amount`;
+- gas accounting uses the same approval-plus-swap policy as the backtest;
+- the exit signal was visible no later than the sell-submitted block.
 
 ## Current Strategy Issue Ledger
 

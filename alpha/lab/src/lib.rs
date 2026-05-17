@@ -1,3 +1,4 @@
+pub mod backtest_validation;
 pub mod position_lab;
 pub mod render;
 pub mod strategy_lab;

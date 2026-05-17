@@ -1,0 +1,146 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use eyre::{Context, Result};
+use sqlx::PgPool;
+
+use super::report::{BacktestValidationReport, Verdict};
+
+const VALIDATOR_VERSION: &str = concat!(
+    "eth_alpha_lab-backtest-validation-",
+    env!("CARGO_PKG_VERSION")
+);
+
+pub async fn persist_validation_report(
+    pool: &PgPool,
+    report: &BacktestValidationReport,
+) -> Result<String> {
+    ensure_validation_schema(pool).await?;
+    let validation_id = validation_id(report);
+    let report_json =
+        serde_json::to_value(report).wrap_err("failed to encode validation report as json")?;
+    let overall_verdict = overall_verdict(report).as_str();
+    let status = if matches!(overall_verdict, "fail" | "blocked") {
+        "needs_review"
+    } else {
+        "validated"
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO alpha_trading.backtest_validation_reports (
+            validation_id,
+            result_set_id,
+            strategy_name,
+            profile,
+            status,
+            passed,
+            warnings,
+            failures,
+            blocked,
+            overall_verdict,
+            report,
+            validator_version
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        "#,
+    )
+    .bind(&validation_id)
+    .bind(&report.result_set.result_set_id)
+    .bind(report.strategy_filter.as_deref())
+    .bind(&report.profile)
+    .bind(status)
+    .bind(report.summary.passed as i64)
+    .bind(report.summary.warnings as i64)
+    .bind(report.summary.failures as i64)
+    .bind(report.summary.blocked as i64)
+    .bind(overall_verdict)
+    .bind(report_json)
+    .bind(VALIDATOR_VERSION)
+    .execute(pool)
+    .await
+    .wrap_err("failed to persist validation report")?;
+
+    Ok(validation_id)
+}
+
+async fn ensure_validation_schema(pool: &PgPool) -> Result<()> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS alpha_trading.backtest_validation_reports (
+            validation_id TEXT PRIMARY KEY,
+            result_set_id TEXT NOT NULL REFERENCES alpha_trading.backtest_result_sets(result_set_id) ON DELETE CASCADE,
+            strategy_name TEXT,
+            profile TEXT NOT NULL,
+            status TEXT NOT NULL,
+            passed BIGINT NOT NULL,
+            warnings BIGINT NOT NULL,
+            failures BIGINT NOT NULL,
+            blocked BIGINT NOT NULL,
+            overall_verdict TEXT NOT NULL,
+            report JSONB NOT NULL,
+            validator_version TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .wrap_err("failed to create validation report table")?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS backtest_validation_reports_latest_idx
+        ON alpha_trading.backtest_validation_reports (
+            result_set_id,
+            strategy_name,
+            profile,
+            created_at DESC
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .wrap_err("failed to create validation report latest index")?;
+
+    Ok(())
+}
+
+fn overall_verdict(report: &BacktestValidationReport) -> Verdict {
+    if report.summary.failures > 0 {
+        Verdict::Fail
+    } else if report.summary.blocked > 0 {
+        Verdict::Blocked
+    } else if report.summary.warnings > 0 {
+        Verdict::Warn
+    } else {
+        Verdict::Pass
+    }
+}
+
+fn validation_id(report: &BacktestValidationReport) -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let strategy = report.strategy_filter.as_deref().unwrap_or("all");
+    format!(
+        "val_{}_{}_{}_{}",
+        sanitize_id(&report.result_set.result_set_id),
+        sanitize_id(strategy),
+        sanitize_id(&report.profile),
+        millis
+    )
+}
+
+fn sanitize_id(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}

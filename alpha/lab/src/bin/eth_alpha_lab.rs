@@ -4,6 +4,10 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use eth_alpha_lab::{
+    backtest_validation::{
+        self, persistence::persist_validation_report, report::print_backtest_validation_report,
+        ValidationOptions, ValidationProfile,
+    },
     connect,
     position_lab::{self, PositionSelector},
     strategy_lab,
@@ -30,6 +34,9 @@ enum Command {
 
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        persist: bool,
     },
 
     /// Single position/token diagnostics with entry, snapshots, and observation joins.
@@ -54,6 +61,27 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+
+    /// Trade-centric backtest result validation for lifecycle, timing, and accounting.
+    BacktestValidation {
+        #[arg(long = "result-set")]
+        result_set_id: String,
+
+        #[arg(long)]
+        strategy: Option<String>,
+
+        #[arg(long, value_enum, default_value_t = ValidationProfile::Quick)]
+        profile: ValidationProfile,
+
+        #[arg(long = "sample-limit")]
+        sample_limit: Option<i64>,
+
+        #[arg(long)]
+        json: bool,
+
+        #[arg(long)]
+        persist: bool,
+    },
 }
 
 #[tokio::main]
@@ -68,6 +96,7 @@ async fn main() -> Result<()> {
             run_ids,
             limit,
             json,
+            persist: _,
         } => {
             let mut reports = Vec::with_capacity(run_ids.len());
             for run_id in &run_ids {
@@ -115,6 +144,39 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 position_lab::print_position_report(&report);
+            }
+        }
+        Command::BacktestValidation {
+            result_set_id,
+            strategy,
+            profile,
+            sample_limit,
+            json,
+            persist,
+        } => {
+            let report = backtest_validation::validate_backtest(
+                &pool,
+                ValidationOptions {
+                    result_set_id,
+                    strategy,
+                    profile,
+                    sample_limit: sample_limit.unwrap_or_else(|| profile.default_sample_limit()),
+                },
+            )
+            .await?;
+            let validation_id = if persist {
+                Some(persist_validation_report(&pool, &report).await?)
+            } else {
+                None
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_backtest_validation_report(&report);
+                if let Some(validation_id) = validation_id {
+                    println!();
+                    println!("Persisted validation report: {validation_id}");
+                }
             }
         }
     }

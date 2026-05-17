@@ -941,6 +941,18 @@ impl PostgresTradingStore {
                     WHEN gas_cost_eth IS NULL OR gas_cost_eth = '' THEN $7
                     ELSE gas_cost_eth
                 END,
+                current_value_eth = CASE
+                    WHEN $2 = 'sell' AND $3 = 'confirmed' THEN '0'
+                    ELSE current_value_eth
+                END,
+                unrealized_pnl_eth = CASE
+                    WHEN $2 = 'sell' AND $3 = 'confirmed' THEN '0'
+                    ELSE unrealized_pnl_eth
+                END,
+                total_pnl_eth = CASE
+                    WHEN $2 = 'sell' AND $3 = 'confirmed' THEN realized_pnl_eth
+                    ELSE total_pnl_eth
+                END,
                 updated_at = NOW()
             WHERE trade_id = $1
             "#,
