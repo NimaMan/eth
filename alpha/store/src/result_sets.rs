@@ -9,6 +9,7 @@ use sqlx::{PgPool, Row};
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 500;
 const MAX_PERFORMANCE_LIMIT: i64 = 5_000;
+const ESTIMATED_ETH_BLOCK_SECONDS: i64 = 12;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ResultSetDetailQuery {
@@ -106,6 +107,8 @@ pub struct ResultSetPerformanceResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct ResultSetPerformancePoint {
     pub block_number: i64,
+    pub elapsed_seconds: Option<i64>,
+    pub time_axis_source: Option<String>,
     pub trade_count: i64,
     pub open_trades: i64,
     pub closed_trades: i64,
@@ -389,7 +392,15 @@ pub async fn load_result_set_performance(
         .iter()
         .map(|row| int(row, "block_number"))
         .collect::<Result<Vec<_>>>()?;
+    let timeline_start_block = baseline
+        .as_ref()
+        .map(|point| point.block_number)
+        .or_else(|| blocks.first().copied());
     if blocks.is_empty() {
+        let mut baseline = baseline;
+        if let Some(point) = baseline.as_mut() {
+            apply_elapsed_time(point, timeline_start_block);
+        }
         return Ok(ResultSetPerformanceResponse {
             points: baseline.into_iter().collect(),
         });
@@ -432,8 +443,10 @@ pub async fn load_result_set_performance(
         .iter()
         .map(row_to_carried_snapshot)
         .collect::<Result<Vec<_>>>()?;
-    let mut points = build_performance_points(&blocks, &snapshots);
+    let mut points = build_performance_points(&blocks, &snapshots, timeline_start_block);
     if let Some(baseline) = baseline {
+        let mut baseline = baseline;
+        apply_elapsed_time(&mut baseline, timeline_start_block);
         let should_insert = points.first().map_or(true, |point| {
             point.block_number > baseline.block_number
                 || (point.block_number == baseline.block_number
@@ -501,6 +514,8 @@ async fn load_result_set_performance_baseline(
     };
     Ok(Some(ResultSetPerformancePoint {
         block_number,
+        elapsed_seconds: None,
+        time_axis_source: None,
         trade_count: 0,
         open_trades: 0,
         closed_trades: 0,
@@ -513,6 +528,22 @@ async fn load_result_set_performance_baseline(
         roi_percent: Some(0.0),
         recorded_at: optional_text(&row, "baseline_at")?,
     }))
+}
+
+fn apply_elapsed_time(point: &mut ResultSetPerformancePoint, start_block: Option<i64>) {
+    if let Some((elapsed_seconds, source)) = elapsed_time_fields(start_block, point.block_number) {
+        point.elapsed_seconds = Some(elapsed_seconds);
+        point.time_axis_source = Some(source);
+    }
+}
+
+fn elapsed_time_fields(start_block: Option<i64>, block_number: i64) -> Option<(i64, String)> {
+    let start_block = start_block?;
+    let elapsed_blocks = block_number.saturating_sub(start_block);
+    Some((
+        elapsed_blocks * ESTIMATED_ETH_BLOCK_SECONDS,
+        "estimated_elapsed_from_blocks".to_string(),
+    ))
 }
 
 fn row_to_result_set(
@@ -606,6 +637,7 @@ fn row_to_carried_snapshot(row: &sqlx::postgres::PgRow) -> Result<CarriedSnapsho
 fn build_performance_points(
     blocks: &[i64],
     snapshots: &[CarriedSnapshot],
+    timeline_start_block: Option<i64>,
 ) -> Vec<ResultSetPerformancePoint> {
     let mut latest_by_trade: HashMap<String, CarriedSnapshot> = HashMap::new();
     let mut next_snapshot = 0_usize;
@@ -659,8 +691,14 @@ fn build_performance_points(
         } else {
             None
         };
+        let (elapsed_seconds, time_axis_source) =
+            elapsed_time_fields(timeline_start_block, *block_number)
+                .map(|(elapsed_seconds, source)| (Some(elapsed_seconds), Some(source)))
+                .unwrap_or((None, None));
         points.push(ResultSetPerformancePoint {
             block_number: *block_number,
+            elapsed_seconds,
+            time_axis_source,
             trade_count,
             open_trades,
             closed_trades,
