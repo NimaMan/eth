@@ -74,8 +74,14 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
                     (pool.liquidity_removal_block, pool.can_buy_block)
                 {
                     let age = label_block.saturating_sub(trading_block) as f64;
+                    let bucket = time_bucket(age);
                     scam_ages.push(age);
-                    distributions.add("time_to_scam_buckets", time_bucket(age), 1);
+                    distributions.add("time_to_scam_buckets", bucket, 1);
+                    distributions.add(
+                        "time_to_scam_by_protocol",
+                        format!("{}|{}", pool.protocol, bucket),
+                        1,
+                    );
                 }
             }
 
