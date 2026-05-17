@@ -143,6 +143,10 @@ fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "exit_lp_approval": spec.exit_lp_approval,
         "exit_lp_approval_critical_only": spec.exit_lp_approval_critical_only,
         "exit_scam": spec.exit_scam,
+        "allowed_protocols": spec.allowed_protocols,
+        "block_entry_on_lp_approval": spec.block_entry_on_lp_approval,
+        "lp_approval_gate_min_pct": spec.lp_approval_gate_min_pct,
+        "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
         "stop_loss_ratio": spec.stop_loss_ratio,
         "take_profit_ratio": spec.take_profit_ratio,
         "max_hold_blocks": spec.max_hold_blocks,
@@ -342,6 +346,10 @@ async fn main() -> Result<()> {
             .take_profit_ratio
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
+        let lp_approval_gate_min_pct = spec
+            .lp_approval_gate_min_pct
+            .as_deref()
+            .and_then(|s| Decimal::from_str(s).ok());
         let config = LiveSnipeAllConfig::new(SnipeAllConfig {
             strategy_name: StrategyName(spec.strategy_name.clone()),
             buy_amount: Amount {
@@ -361,6 +369,11 @@ async fn main() -> Result<()> {
             exit_on_lp_approval: spec.exit_lp_approval,
             exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
             exit_on_scam: spec.exit_scam,
+            allowed_protocols: spec.allowed_protocols.clone(),
+            block_entry_on_lp_approval: spec.block_entry_on_lp_approval,
+            lp_approval_gate_min_pct,
+            defer_buy_confirm_block_lp_approval_to_max_hold: spec
+                .defer_buy_confirm_block_lp_approval_to_max_hold,
             ..SnipeAllConfig::default()
         });
         let seen_pools = seen_pools_by_strategy

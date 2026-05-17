@@ -8,4 +8,5 @@
 pub mod entry;
 pub mod exit;
 pub mod live;
+pub mod lp_approval;
 pub mod lp_approval_warning_exit;

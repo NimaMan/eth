@@ -736,6 +736,7 @@ fn sell_intent_for_position(position: &Position) -> Option<OrderIntent> {
         side: OrderSide::Sell,
         token_address: position.key.token_address,
         pool_address: position.key.pool_address.clone(),
+        protocol: position.key.protocol.clone(),
         amount: position.entry_token_raw_amount.clone()?,
         route: None,
         max_slippage_bps: 0,

@@ -1,6 +1,7 @@
 use crate::{
     amount::Amount,
     ids::{PoolAddress, PortfolioId, StrategyName, TokenAddress, TradeId, WalletId},
+    market::PoolProtocol,
     order::RouteHint,
 };
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,8 @@ pub struct OrderIntent {
     pub side: OrderSide,
     pub token_address: TokenAddress,
     pub pool_address: PoolAddress,
+    #[serde(default)]
+    pub protocol: PoolProtocol,
     pub amount: Amount,
     pub route: Option<RouteHint>,
     pub max_slippage_bps: u32,

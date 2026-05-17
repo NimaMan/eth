@@ -1,6 +1,6 @@
 //! Trade-centric result-set read models for alpha backtests and live runs.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use eth_alpha_core::error::{AlphaCoreError, Result};
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,8 @@ pub struct ResultSetSummary {
 #[derive(Debug, Clone, Serialize)]
 pub struct ResultSetPerformanceResponse {
     pub points: Vec<ResultSetPerformancePoint>,
+    pub protocol_summary: ResultSetProtocolPerformanceSummary,
+    pub protocol_series: Vec<ResultSetProtocolPerformanceSeries>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +122,22 @@ pub struct ResultSetPerformancePoint {
     pub total_pnl_eth: Option<f64>,
     pub roi_percent: Option<f64>,
     pub recorded_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResultSetProtocolPerformanceSeries {
+    pub protocol: String,
+    pub points: Vec<ResultSetPerformancePoint>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ResultSetProtocolPerformanceSummary {
+    pub protocol_count: usize,
+    pub latest_total_pnl_eth: Option<f64>,
+    pub best_protocol: Option<String>,
+    pub best_total_pnl_eth: Option<f64>,
+    pub worst_protocol: Option<String>,
+    pub worst_total_pnl_eth: Option<f64>,
 }
 
 pub async fn load_result_sets(
@@ -403,6 +421,8 @@ pub async fn load_result_set_performance(
         }
         return Ok(ResultSetPerformanceResponse {
             points: baseline.into_iter().collect(),
+            protocol_summary: ResultSetProtocolPerformanceSummary::default(),
+            protocol_series: Vec::new(),
         });
     }
     let max_block = *blocks.last().unwrap_or(&0);
@@ -439,12 +459,18 @@ pub async fn load_result_set_performance(
     .await
     .map_err(store_error)?;
 
+    let protocols_by_trade =
+        load_result_set_trade_protocols(pool, result_set_id, query.strategy_name.as_deref())
+            .await?;
     let snapshots = snapshot_rows
         .iter()
-        .map(row_to_carried_snapshot)
+        .map(|row| row_to_carried_snapshot(row, &protocols_by_trade))
         .collect::<Result<Vec<_>>>()?;
     let mut points = build_performance_points(&blocks, &snapshots, timeline_start_block);
+    let mut protocol_series =
+        build_protocol_performance_series(&blocks, &snapshots, timeline_start_block);
     if let Some(baseline) = baseline {
+        let protocol_baseline = baseline.clone();
         let mut baseline = baseline;
         apply_elapsed_time(&mut baseline, timeline_start_block);
         let should_insert = points.first().map_or(true, |point| {
@@ -455,13 +481,24 @@ pub async fn load_result_set_performance(
         if should_insert {
             points.insert(0, baseline);
         }
+        insert_protocol_baseline_points(
+            &mut protocol_series,
+            &protocol_baseline,
+            timeline_start_block,
+        );
     }
-    Ok(ResultSetPerformanceResponse { points })
+    let protocol_summary = build_protocol_performance_summary(&protocol_series);
+    Ok(ResultSetPerformanceResponse {
+        points,
+        protocol_summary,
+        protocol_series,
+    })
 }
 
 #[derive(Debug, Clone)]
 struct CarriedSnapshot {
     trade_id: String,
+    protocol: String,
     entry_cost_eth: f64,
     snapshot_block: i64,
     state: String,
@@ -470,6 +507,93 @@ struct CarriedSnapshot {
     unrealized_pnl_eth: f64,
     total_pnl_eth: f64,
     created_at: Option<String>,
+}
+
+async fn load_result_set_trade_protocols(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy_name: Option<&str>,
+) -> Result<HashMap<String, String>> {
+    let has_risk_atlas: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.risk_atlas_pool_eligibility') IS NOT NULL")
+            .fetch_one(pool)
+            .await
+            .map_err(store_error)?;
+
+    let rows = if has_risk_atlas {
+        sqlx::query(
+            r#"
+            WITH protocol_lookup AS (
+                SELECT DISTINCT ON (lower(token_address), lower(pool_address))
+                       lower(token_address) AS token_key,
+                       lower(pool_address) AS pool_key,
+                       protocol
+                FROM public.risk_atlas_pool_eligibility
+                WHERE protocol IS NOT NULL
+                ORDER BY
+                    lower(token_address),
+                    lower(pool_address),
+                    last_observed_block DESC NULLS LAST,
+                    first_observed_block DESC NULLS LAST
+            )
+            SELECT t.trade_id,
+                   COALESCE(
+                       NULLIF(t.protocol, ''),
+                       NULLIF(t.payload->>'protocol', ''),
+                       NULLIF(t.payload #>> '{pool,protocol}', ''),
+                       NULLIF(t.payload #>> '{key,protocol}', ''),
+                       protocol_lookup.protocol,
+                       'unknown'
+                   ) AS protocol
+            FROM alpha_trading.trades t
+            LEFT JOIN protocol_lookup
+              ON protocol_lookup.token_key = lower(t.token_address)
+             AND protocol_lookup.pool_key = lower(
+                CASE
+                    WHEN strpos(t.pool_address, ':') > 0 THEN split_part(t.pool_address, ':', 2)
+                    ELSE t.pool_address
+                END
+             )
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            "#,
+        )
+        .bind(result_set_id)
+        .bind(strategy_name)
+        .fetch_all(pool)
+        .await
+        .map_err(store_error)?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT t.trade_id,
+                   COALESCE(
+                       NULLIF(t.protocol, ''),
+                       NULLIF(t.payload->>'protocol', ''),
+                       NULLIF(t.payload #>> '{pool,protocol}', ''),
+                       NULLIF(t.payload #>> '{key,protocol}', ''),
+                       'unknown'
+                   ) AS protocol
+            FROM alpha_trading.trades t
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            "#,
+        )
+        .bind(result_set_id)
+        .bind(strategy_name)
+        .fetch_all(pool)
+        .await
+        .map_err(store_error)?
+    };
+
+    rows.iter()
+        .map(|row| {
+            Ok((
+                text(row, "trade_id")?,
+                normalize_protocol_label(&text(row, "protocol")?),
+            ))
+        })
+        .collect()
 }
 
 async fn load_result_set_performance_baseline(
@@ -620,9 +744,18 @@ fn row_to_result_set_summary(row: &sqlx::postgres::PgRow) -> Result<ResultSetSum
     })
 }
 
-fn row_to_carried_snapshot(row: &sqlx::postgres::PgRow) -> Result<CarriedSnapshot> {
+fn row_to_carried_snapshot(
+    row: &sqlx::postgres::PgRow,
+    protocols_by_trade: &HashMap<String, String>,
+) -> Result<CarriedSnapshot> {
+    let trade_id = text(row, "trade_id")?;
+    let protocol = protocols_by_trade
+        .get(&trade_id)
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_string());
     Ok(CarriedSnapshot {
-        trade_id: text(row, "trade_id")?,
+        trade_id,
+        protocol,
         entry_cost_eth: float(row, "entry_cost_eth")?,
         snapshot_block: int(row, "snapshot_block")?,
         state: text(row, "state")?,
@@ -632,6 +765,15 @@ fn row_to_carried_snapshot(row: &sqlx::postgres::PgRow) -> Result<CarriedSnapsho
         total_pnl_eth: float(row, "total_pnl_eth")?,
         created_at: optional_text(row, "created_at")?,
     })
+}
+
+fn normalize_protocol_label(protocol: &str) -> String {
+    let protocol = protocol.trim();
+    if protocol.is_empty() {
+        "unknown".to_string()
+    } else {
+        protocol.to_string()
+    }
 }
 
 fn build_performance_points(
@@ -652,68 +794,238 @@ fn build_performance_points(
             next_snapshot += 1;
         }
 
-        let mut trade_count = 0_i64;
-        let mut open_trades = 0_i64;
-        let mut closed_trades = 0_i64;
-        let mut entry_cost_eth = 0.0_f64;
-        let mut current_value_eth = 0.0_f64;
-        let mut realized_pnl_eth = 0.0_f64;
-        let mut unrealized_pnl_eth = 0.0_f64;
-        let mut total_pnl_eth = 0.0_f64;
-        let mut recorded_at: Option<String> = None;
-
-        for snapshot in latest_by_trade.values() {
-            trade_count += 1;
-            if is_closed_trade_state(&snapshot.state) {
-                closed_trades += 1;
-            } else if is_open_trade_state(&snapshot.state) {
-                open_trades += 1;
-            }
-            entry_cost_eth += snapshot.entry_cost_eth;
-            current_value_eth += snapshot.current_value_eth;
-            realized_pnl_eth += snapshot.realized_pnl_eth;
-            unrealized_pnl_eth += snapshot.unrealized_pnl_eth;
-            total_pnl_eth += snapshot.total_pnl_eth;
-            if let Some(created_at) = snapshot.created_at.as_deref() {
-                if recorded_at
-                    .as_deref()
-                    .map(|current| created_at > current)
-                    .unwrap_or(true)
-                {
-                    recorded_at = Some(created_at.to_owned());
-                }
-            }
-        }
-
-        let portfolio_value_eth = entry_cost_eth + total_pnl_eth;
-        let roi_percent = if entry_cost_eth > 0.0 {
-            Some(total_pnl_eth / entry_cost_eth * 100.0)
-        } else {
-            None
-        };
-        let (elapsed_seconds, time_axis_source) =
-            elapsed_time_fields(timeline_start_block, *block_number)
-                .map(|(elapsed_seconds, source)| (Some(elapsed_seconds), Some(source)))
-                .unwrap_or((None, None));
-        points.push(ResultSetPerformancePoint {
-            block_number: *block_number,
-            elapsed_seconds,
-            time_axis_source,
-            trade_count,
-            open_trades,
-            closed_trades,
-            entry_cost_eth: some_if_any(trade_count, entry_cost_eth),
-            current_value_eth: some_if_any(trade_count, current_value_eth),
-            portfolio_value_eth: some_if_any(trade_count, portfolio_value_eth),
-            realized_pnl_eth: some_if_any(trade_count, realized_pnl_eth),
-            unrealized_pnl_eth: some_if_any(trade_count, unrealized_pnl_eth),
-            total_pnl_eth: some_if_any(trade_count, total_pnl_eth),
-            roi_percent,
-            recorded_at,
-        });
+        points.push(build_performance_point(
+            *block_number,
+            latest_by_trade.values(),
+            timeline_start_block,
+            false,
+        ));
     }
 
     points
+}
+
+fn build_protocol_performance_series(
+    blocks: &[i64],
+    snapshots: &[CarriedSnapshot],
+    timeline_start_block: Option<i64>,
+) -> Vec<ResultSetProtocolPerformanceSeries> {
+    let protocols = snapshots
+        .iter()
+        .map(|snapshot| normalize_protocol_label(&snapshot.protocol))
+        .collect::<BTreeSet<_>>();
+    if protocols.is_empty() {
+        return Vec::new();
+    }
+
+    let mut latest_by_trade: HashMap<String, CarriedSnapshot> = HashMap::new();
+    let mut next_snapshot = 0_usize;
+    let mut points_by_protocol = protocols
+        .iter()
+        .map(|protocol| (protocol.clone(), Vec::with_capacity(blocks.len())))
+        .collect::<BTreeMap<_, _>>();
+
+    for block_number in blocks {
+        while let Some(snapshot) = snapshots.get(next_snapshot) {
+            if snapshot.snapshot_block > *block_number {
+                break;
+            }
+            latest_by_trade.insert(snapshot.trade_id.clone(), snapshot.clone());
+            next_snapshot += 1;
+        }
+
+        for protocol in &protocols {
+            if let Some(points) = points_by_protocol.get_mut(protocol) {
+                points.push(build_performance_point(
+                    *block_number,
+                    latest_by_trade
+                        .values()
+                        .filter(|snapshot| snapshot.protocol.as_str() == protocol.as_str()),
+                    timeline_start_block,
+                    true,
+                ));
+            }
+        }
+    }
+
+    points_by_protocol
+        .into_iter()
+        .map(|(protocol, points)| ResultSetProtocolPerformanceSeries { protocol, points })
+        .collect()
+}
+
+fn insert_protocol_baseline_points(
+    protocol_series: &mut [ResultSetProtocolPerformanceSeries],
+    baseline: &ResultSetPerformancePoint,
+    timeline_start_block: Option<i64>,
+) {
+    for series in protocol_series {
+        let should_insert = series.points.first().map_or(true, |point| {
+            point.block_number > baseline.block_number
+                || (point.block_number == baseline.block_number
+                    && point.total_pnl_eth.unwrap_or(0.0).abs() > f64::EPSILON)
+        });
+        if should_insert {
+            let mut point = zero_performance_point(
+                baseline.block_number,
+                baseline.recorded_at.clone(),
+                timeline_start_block,
+            );
+            apply_elapsed_time(&mut point, timeline_start_block);
+            series.points.insert(0, point);
+        }
+    }
+}
+
+fn build_protocol_performance_summary(
+    protocol_series: &[ResultSetProtocolPerformanceSeries],
+) -> ResultSetProtocolPerformanceSummary {
+    let mut latest = protocol_series
+        .iter()
+        .filter_map(|series| {
+            let value = series.points.last()?.total_pnl_eth?;
+            value.is_finite().then(|| (series.protocol.clone(), value))
+        })
+        .collect::<Vec<_>>();
+
+    if latest.is_empty() {
+        return ResultSetProtocolPerformanceSummary {
+            protocol_count: protocol_series.len(),
+            ..Default::default()
+        };
+    }
+
+    let latest_total_pnl_eth = latest.iter().map(|(_, value)| *value).sum();
+    latest.sort_by(|left, right| right.1.total_cmp(&left.1));
+    let (best_protocol, best_total_pnl_eth) = latest
+        .first()
+        .map(|(protocol, value)| (Some(protocol.clone()), Some(*value)))
+        .unwrap_or((None, None));
+    let (worst_protocol, worst_total_pnl_eth) = latest
+        .last()
+        .map(|(protocol, value)| (Some(protocol.clone()), Some(*value)))
+        .unwrap_or((None, None));
+
+    ResultSetProtocolPerformanceSummary {
+        protocol_count: protocol_series.len(),
+        latest_total_pnl_eth: Some(latest_total_pnl_eth),
+        best_protocol,
+        best_total_pnl_eth,
+        worst_protocol,
+        worst_total_pnl_eth,
+    }
+}
+
+fn build_performance_point<'a>(
+    block_number: i64,
+    snapshots: impl IntoIterator<Item = &'a CarriedSnapshot>,
+    timeline_start_block: Option<i64>,
+    force_zero_values: bool,
+) -> ResultSetPerformancePoint {
+    let mut trade_count = 0_i64;
+    let mut open_trades = 0_i64;
+    let mut closed_trades = 0_i64;
+    let mut entry_cost_eth = 0.0_f64;
+    let mut current_value_eth = 0.0_f64;
+    let mut realized_pnl_eth = 0.0_f64;
+    let mut unrealized_pnl_eth = 0.0_f64;
+    let mut total_pnl_eth = 0.0_f64;
+    let mut recorded_at: Option<String> = None;
+
+    for snapshot in snapshots {
+        trade_count += 1;
+        if is_closed_trade_state(&snapshot.state) {
+            closed_trades += 1;
+        } else if is_open_trade_state(&snapshot.state) {
+            open_trades += 1;
+        }
+        entry_cost_eth += snapshot.entry_cost_eth;
+        current_value_eth += snapshot.current_value_eth;
+        realized_pnl_eth += snapshot.realized_pnl_eth;
+        unrealized_pnl_eth += snapshot.unrealized_pnl_eth;
+        total_pnl_eth += snapshot.total_pnl_eth;
+        if let Some(created_at) = snapshot.created_at.as_deref() {
+            if recorded_at
+                .as_deref()
+                .map(|current| created_at > current)
+                .unwrap_or(true)
+            {
+                recorded_at = Some(created_at.to_owned());
+            }
+        }
+    }
+
+    let portfolio_value_eth = entry_cost_eth + total_pnl_eth;
+    let roi_percent = if entry_cost_eth > 0.0 {
+        Some(total_pnl_eth / entry_cost_eth * 100.0)
+    } else if force_zero_values {
+        Some(0.0)
+    } else {
+        None
+    };
+    let (elapsed_seconds, time_axis_source) =
+        elapsed_time_fields(timeline_start_block, block_number)
+            .map(|(elapsed_seconds, source)| (Some(elapsed_seconds), Some(source)))
+            .unwrap_or((None, None));
+    ResultSetPerformancePoint {
+        block_number,
+        elapsed_seconds,
+        time_axis_source,
+        trade_count,
+        open_trades,
+        closed_trades,
+        entry_cost_eth: some_if_any_or_forced(trade_count, entry_cost_eth, force_zero_values),
+        current_value_eth: some_if_any_or_forced(trade_count, current_value_eth, force_zero_values),
+        portfolio_value_eth: some_if_any_or_forced(
+            trade_count,
+            portfolio_value_eth,
+            force_zero_values,
+        ),
+        realized_pnl_eth: some_if_any_or_forced(trade_count, realized_pnl_eth, force_zero_values),
+        unrealized_pnl_eth: some_if_any_or_forced(
+            trade_count,
+            unrealized_pnl_eth,
+            force_zero_values,
+        ),
+        total_pnl_eth: some_if_any_or_forced(trade_count, total_pnl_eth, force_zero_values),
+        roi_percent,
+        recorded_at,
+    }
+}
+
+fn zero_performance_point(
+    block_number: i64,
+    recorded_at: Option<String>,
+    timeline_start_block: Option<i64>,
+) -> ResultSetPerformancePoint {
+    let (elapsed_seconds, time_axis_source) =
+        elapsed_time_fields(timeline_start_block, block_number)
+            .map(|(elapsed_seconds, source)| (Some(elapsed_seconds), Some(source)))
+            .unwrap_or((None, None));
+    ResultSetPerformancePoint {
+        block_number,
+        elapsed_seconds,
+        time_axis_source,
+        trade_count: 0,
+        open_trades: 0,
+        closed_trades: 0,
+        entry_cost_eth: Some(0.0),
+        current_value_eth: Some(0.0),
+        portfolio_value_eth: Some(0.0),
+        realized_pnl_eth: Some(0.0),
+        unrealized_pnl_eth: Some(0.0),
+        total_pnl_eth: Some(0.0),
+        roi_percent: Some(0.0),
+        recorded_at,
+    }
+}
+
+fn some_if_any_or_forced(count: i64, value: f64, force: bool) -> Option<f64> {
+    if force {
+        Some(value)
+    } else {
+        some_if_any(count, value)
+    }
 }
 
 fn some_if_any(count: i64, value: f64) -> Option<f64> {

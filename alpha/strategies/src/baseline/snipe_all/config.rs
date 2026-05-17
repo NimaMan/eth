@@ -35,6 +35,14 @@ pub struct SnipeAllConfig {
     /// mined-chain LP approvals can be warnings for exits while still gating
     /// the launch-gate variants.
     pub block_entry_on_lp_approval: bool,
+    /// Optional strict LP approval percentage gate shared by entry and exit.
+    /// When set, LP approval only blocks entry or triggers exit if approved_pct > threshold.
+    /// None preserves the legacy "any LP approval" behavior.
+    pub lp_approval_gate_min_pct: Option<DecimalAmount>,
+    /// If true, an LP approval observed in the same block as buy confirmation
+    /// is not an immediate LP-approval exit. The position remains governed by
+    /// proactive exits such as max active-hold blocks.
+    pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
     /// Asymmetric price-ratio exits.
     /// Sell if price drops to this ratio of entry price (e.g., 0.7 = -30% stop-loss).
     /// None = disabled.
@@ -80,6 +88,8 @@ impl Default for SnipeAllConfig {
             exit_on_scam: true,
             allowed_protocols: Vec::new(),
             block_entry_on_lp_approval: false,
+            lp_approval_gate_min_pct: None,
+            defer_buy_confirm_block_lp_approval_to_max_hold: false,
             stop_loss_ratio: None,
             take_profit_ratio: None,
             max_hold_blocks: None,

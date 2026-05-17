@@ -146,9 +146,16 @@ where
                 Ok(reports)
             }
             EngineEvent::Risk(event) => {
+                let mut reports = if let Some(block_number) = event.observed_block {
+                    self.apply_due_pending_execution_reports(block_number)
+                        .await?
+                } else {
+                    Vec::new()
+                };
                 self.active_risks.push(event.clone());
                 self.store.record_risk_event(&event).await?;
-                self.run_risk_strategies(&event).await
+                reports.extend(self.run_risk_strategies(&event).await?);
+                Ok(reports)
             }
             EngineEvent::Execution(report) => {
                 self.store.record_execution_report(&report).await?;
@@ -692,6 +699,7 @@ where
             strategy_name: intent.strategy_name.clone(),
             token_address: intent.token_address,
             pool_address: intent.pool_address.clone(),
+            protocol: intent.protocol.clone(),
         };
         if let Some(position) = self
             .portfolio
@@ -1157,6 +1165,7 @@ mod tests {
                 side: OrderSide::Buy,
                 token_address: pool.token_address,
                 pool_address: pool.address.clone(),
+                protocol: pool.protocol.clone(),
                 amount: Amount {
                     raw: U256::from(1_000_000u64),
                     decimals: 18,
@@ -1200,6 +1209,7 @@ mod tests {
                             side: OrderSide::Sell,
                             token_address: pool.token_address,
                             pool_address: pool.address.clone(),
+                            protocol: pool.protocol.clone(),
                             amount,
                             route: None,
                             max_slippage_bps: 500,
@@ -1220,6 +1230,7 @@ mod tests {
                     side: OrderSide::Buy,
                     token_address: pool.token_address,
                     pool_address: pool.address.clone(),
+                    protocol: pool.protocol.clone(),
                     amount: Amount {
                         raw: U256::from(1_000_000u64),
                         decimals: 18,
@@ -1229,6 +1240,94 @@ mod tests {
                     deadline_secs: 30,
                 },
                 "entry.first_pool_update",
+            ))
+        }
+    }
+
+    struct BuyThenRiskSellWhenConfirmedStrategy;
+
+    impl Strategy for BuyThenRiskSellWhenConfirmedStrategy {
+        fn name(&self) -> StrategyName {
+            StrategyName("buy-then-risk-sell-when-confirmed".to_string())
+        }
+
+        fn on_market_event(
+            &mut self,
+            ctx: &StrategyContext<'_>,
+            _event: &MarketEvent,
+        ) -> Result<StrategyDecision> {
+            let Some(pool) = ctx.market.pool.as_ref() else {
+                return Ok(StrategyDecision::hold("market.no_pool"));
+            };
+            let has_position = ctx.portfolio.positions.values().any(|position| {
+                position.key.strategy_name == self.name()
+                    && position.key.pool_address == pool.address
+                    && position.has_exposure()
+            });
+            if has_position {
+                return Ok(StrategyDecision::hold("position_open"));
+            }
+
+            Ok(StrategyDecision::submit_order(
+                OrderIntent {
+                    trade_id: None,
+                    portfolio_id: PortfolioId("chain-sim".to_string()),
+                    wallet_id: WalletId("chain-sim-wallet".to_string()),
+                    strategy_name: self.name(),
+                    side: OrderSide::Buy,
+                    token_address: pool.token_address,
+                    pool_address: pool.address.clone(),
+                    protocol: pool.protocol.clone(),
+                    amount: Amount {
+                        raw: U256::from(1_000_000u64),
+                        decimals: 18,
+                    },
+                    route: None,
+                    max_slippage_bps: 500,
+                    deadline_secs: 30,
+                },
+                "entry.first_pool_update",
+            ))
+        }
+
+        fn on_risk_event(
+            &mut self,
+            ctx: &StrategyContext<'_>,
+            event: &RiskEvent,
+        ) -> Result<StrategyDecision> {
+            let position = ctx.portfolio.positions.values().find(|position| {
+                position.key.strategy_name == self.name()
+                    && position.key.token_address == event.token_address
+                    && event
+                        .pool_address
+                        .as_ref()
+                        .map(|pool| *pool == position.key.pool_address)
+                        .unwrap_or(true)
+                    && position.state == PositionState::BuyConfirmed
+            });
+            let Some(position) = position else {
+                return Ok(StrategyDecision::hold("risk.no_sellable_position"));
+            };
+
+            Ok(StrategyDecision::submit_order(
+                OrderIntent {
+                    trade_id: None,
+                    portfolio_id: position.key.portfolio_id.clone(),
+                    wallet_id: position.key.wallet_id.clone(),
+                    strategy_name: self.name(),
+                    side: OrderSide::Sell,
+                    token_address: position.key.token_address,
+                    pool_address: position.key.pool_address.clone(),
+                    protocol: position.key.protocol.clone(),
+                    amount: position.entry_token_raw_amount.clone().unwrap_or(Amount {
+                        raw: U256::from(1_000_000u64),
+                        decimals: 18,
+                    }),
+                    route: None,
+                    max_slippage_bps: 500,
+                    deadline_secs: 30,
+                },
+                "exit.risk",
             ))
         }
     }
@@ -1271,6 +1370,7 @@ mod tests {
                             side: OrderSide::Sell,
                             token_address: position.key.token_address,
                             pool_address: position.key.pool_address.clone(),
+                            protocol: position.key.protocol.clone(),
                             amount: position.entry_token_raw_amount.clone().unwrap_or(Amount {
                                 raw: U256::from(1_000_000u64),
                                 decimals: 18,
@@ -1388,6 +1488,7 @@ mod tests {
                 strategy_name: StrategyName("strategy".to_string()),
                 token_address: token,
                 pool_address: TokenPoolId::new(token, pool_address.to_string()),
+                protocol: PoolProtocol::UniswapV2,
             },
         );
         position.state = state;
@@ -1634,6 +1735,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_reports_apply_before_same_block_risk_updates() {
+        let store = MemoryTradingStore::default();
+        let mut engine = AlphaEngine::new(
+            AllowAllRiskPolicy,
+            store.clone(),
+            SequencedNextBlockExecutionAdapter::default(),
+        );
+        engine.add_strategy(Box::new(BuyThenRiskSellWhenConfirmedStrategy));
+
+        let token = Address::repeat_byte(0x11);
+        let pool_address = Address::repeat_byte(0x22);
+        let pool = TokenPoolId::new(token, pool_address.to_string());
+
+        let reports = engine
+            .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: pool_snapshot(token, pool_address, 1),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, ExecutionStatus::Submitted);
+        assert_eq!(store.positions()[0].state, PositionState::BuySubmitted);
+
+        let reports = engine
+            .handle_event(EngineEvent::Risk(RiskEvent {
+                kind: RiskKind::LpApproval,
+                severity: RiskSeverity::Warning,
+                token_address: token,
+                pool_address: Some(pool),
+                pending_tx_hash: None,
+                observed_block: Some(2),
+                message: "lp approval".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].status, ExecutionStatus::Confirmed);
+        assert_eq!(reports[0].block_number, Some(2));
+        assert_eq!(reports[1].status, ExecutionStatus::Submitted);
+        assert_eq!(reports[1].block_number, Some(2));
+        assert_eq!(store.positions()[0].state, PositionState::SellSubmitted);
+
+        let decisions = store.strategy_decisions();
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(decisions[0].action, "submit_buy");
+        assert_eq!(decisions[1].event_source, "risk");
+        assert_eq!(decisions[1].action, "submit_sell");
+    }
+
+    #[tokio::test]
     async fn position_monitor_runs_without_prior_market_after_restore() {
         let store = MemoryTradingStore::default();
         let token = Address::repeat_byte(0x11);
@@ -1644,6 +1797,7 @@ mod tests {
             strategy_name: StrategyName("monitor-exit".to_string()),
             token_address: token,
             pool_address: TokenPoolId::new(token, pool_address.to_string()),
+            protocol: PoolProtocol::UniswapV2,
         };
         let mut position = Position::new(position_id_for_key(&key), key);
         position.state = PositionState::BuyConfirmed;

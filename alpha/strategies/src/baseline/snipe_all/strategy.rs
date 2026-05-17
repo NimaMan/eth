@@ -1,7 +1,7 @@
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{PoolAddress, StrategyName, TokenAddress},
-    market::{MarketEvent, PoolProtocol, PoolSnapshot},
+    market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -56,6 +56,7 @@ impl SnipeAllStrategy {
                 side: OrderSide::Buy,
                 token_address: pool.token_address,
                 pool_address: pool.address.clone(),
+                protocol: pool.protocol.clone(),
                 amount: self.config.buy_amount.clone(),
                 route: None,
                 max_slippage_bps: self.config.max_slippage_bps,
@@ -80,8 +81,10 @@ impl SnipeAllStrategy {
                 && p.can_submit_exit()
         });
 
-        let Some(token_amount) = position
-            .and_then(|position| sell_amount_from_position(position, self.config.sell_fraction))
+        let Some(position) = position else {
+            return StrategyDecision::hold("exit.no_sellable_position");
+        };
+        let Some(token_amount) = sell_amount_from_position(position, self.config.sell_fraction)
         else {
             return StrategyDecision::hold("exit.no_sellable_position");
         };
@@ -95,6 +98,7 @@ impl SnipeAllStrategy {
                 side: OrderSide::Sell,
                 token_address,
                 pool_address,
+                protocol: position.key.protocol.clone(),
                 amount: token_amount,
                 route: None,
                 max_slippage_bps: self.config.max_slippage_bps,
@@ -119,6 +123,7 @@ impl SnipeAllStrategy {
                 side: OrderSide::Sell,
                 token_address: position.key.token_address,
                 pool_address: position.key.pool_address.clone(),
+                protocol: position.key.protocol.clone(),
                 amount: token_amount,
                 route: None,
                 max_slippage_bps: self.config.max_slippage_bps,
@@ -234,30 +239,29 @@ impl SnipeAllStrategy {
         })
     }
 
-    fn has_lp_approval_entry_risk(
+    fn has_matching_buy_confirm_block_position(
+        &self,
         ctx: &StrategyContext<'_>,
-        token_address: TokenAddress,
-        pool_address: &PoolAddress,
+        event: &RiskEvent,
     ) -> bool {
-        ctx.active_risks.iter().rev().any(|risk| {
-            risk.kind == RiskKind::LpApproval
-                && risk.token_address == token_address
-                && risk
-                    .pool_address
-                    .as_ref()
-                    .map(|pool| pool == pool_address)
-                    .unwrap_or(true)
+        let Some(observed_block) = event.observed_block else {
+            return false;
+        };
+        let Some(pool_address) = event
+            .pool_address
+            .as_ref()
+            .or(ctx.market.pool_address.as_ref())
+        else {
+            return false;
+        };
+        let strategy_name = self.name();
+        ctx.portfolio.positions.values().any(|position| {
+            position.key.strategy_name == strategy_name
+                && position.key.token_address == event.token_address
+                && &position.key.pool_address == pool_address
+                && position.entry_block == Some(observed_block)
+                && position.can_submit_exit()
         })
-    }
-}
-
-fn protocol_label(protocol: &PoolProtocol) -> &str {
-    match protocol {
-        PoolProtocol::UniswapV2 => "UNISWAP-V2",
-        PoolProtocol::UniswapV3 => "UNISWAP-V3",
-        PoolProtocol::UniswapV4 => "UNISWAP-V4",
-        PoolProtocol::PancakeSwapV2 => "PANCAKESWAP-V2",
-        PoolProtocol::Unknown(label) => label.as_str(),
     }
 }
 
@@ -330,18 +334,26 @@ impl Strategy for SnipeAllStrategy {
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
-        if self.config.block_entry_on_lp_approval
-            && Self::has_lp_approval_entry_risk(ctx, pool.token_address, &pool.address)
-        {
-            return Ok(StrategyDecision::hold("entry.blocked_by_lp_approval"));
+        if self.config.block_entry_on_lp_approval {
+            match shared_rules::lp_approval::entry_gate::evaluate(
+                ctx,
+                pool.token_address,
+                &pool.address,
+                self.config.lp_approval_gate_min_pct,
+            ) {
+                RuleDecision::Hold { rule, reason } => {
+                    return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+                }
+                _ => {}
+            }
         }
         if !self.config.allowed_protocols.is_empty() {
-            let protocol = protocol_label(&pool.protocol);
+            let protocol = pool.protocol.label();
             if !self
                 .config
                 .allowed_protocols
                 .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(protocol))
+                .any(|allowed| allowed.eq_ignore_ascii_case(protocol.as_ref()))
             {
                 return Ok(StrategyDecision::hold(format!(
                     "entry.protocol_not_allowed:{protocol}"
@@ -409,21 +421,38 @@ impl Strategy for SnipeAllStrategy {
             {
                 return Ok(StrategyDecision::hold("exit.lp_approval_not_critical"));
             }
-            if let RuleDecision::Exit { .. } =
-                shared_rules::exit::lp_approval::evaluate(ctx, &strategy_name, event)
+            if self.config.defer_buy_confirm_block_lp_approval_to_max_hold
+                && event.kind == RiskKind::LpApproval
+                && self.has_matching_buy_confirm_block_position(ctx, event)
             {
-                if let Some(pool_address) = event
-                    .pool_address
-                    .clone()
-                    .or_else(|| ctx.market.pool_address.clone())
-                {
-                    return Ok(self.sell_pool(
-                        ctx,
-                        event.token_address,
-                        pool_address,
-                        "exit.lp_approval",
-                    ));
+                return Ok(StrategyDecision::hold(
+                    "exit.lp_approval_buy_confirm_block_deferred_to_max_hold",
+                ));
+            }
+            match shared_rules::lp_approval::exit_gate::evaluate(
+                ctx,
+                &strategy_name,
+                event,
+                self.config.lp_approval_gate_min_pct,
+            ) {
+                RuleDecision::Exit { .. } => {
+                    if let Some(pool_address) = event
+                        .pool_address
+                        .clone()
+                        .or_else(|| ctx.market.pool_address.clone())
+                    {
+                        return Ok(self.sell_pool(
+                            ctx,
+                            event.token_address,
+                            pool_address,
+                            "exit.lp_approval",
+                        ));
+                    }
                 }
+                RuleDecision::Hold { rule, reason } if event.kind == RiskKind::LpApproval => {
+                    return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+                }
+                _ => {}
             }
         }
 
@@ -544,6 +573,7 @@ mod tests {
                 strategy_name: strategy.name(),
                 token_address: pool.token_address,
                 pool_address: pool.address.clone(),
+                protocol: pool.protocol.clone(),
             },
         );
         position.mark_intent_created(OrderSide::Buy).unwrap();
@@ -570,6 +600,18 @@ mod tests {
             })
             .unwrap();
         position
+    }
+
+    fn lp_approval_risk(pool: &PoolSnapshot, message: impl Into<String>) -> RiskEvent {
+        RiskEvent {
+            kind: RiskKind::LpApproval,
+            severity: RiskSeverity::Warning,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            pending_tx_hash: None,
+            observed_block: Some(2),
+            message: message.into(),
+        }
     }
 
     fn failed_exit_position(strategy: &SnipeAllStrategy, pool: &PoolSnapshot) -> Position {
@@ -654,6 +696,80 @@ mod tests {
             )
             .unwrap();
         assert!(repeat.is_hold());
+    }
+
+    #[test]
+    fn lp_approval_entry_gate_blocks_above_threshold() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = vec![lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=30.01%",
+        )];
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            block_entry_on_lp_approval: true,
+            lp_approval_gate_min_pct: Some(Decimal::from(30)),
+            ..SnipeAllConfig::default()
+        });
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 1,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("entry.lp_approval_gate:approved_pct_gt_min")
+        );
+    }
+
+    #[test]
+    fn lp_approval_entry_gate_allows_at_threshold() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = vec![lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=30.00%",
+        )];
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            block_entry_on_lp_approval: true,
+            lp_approval_gate_min_pct: Some(Decimal::from(30)),
+            ..SnipeAllConfig::default()
+        });
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 1,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(decision.order_intent().is_some());
     }
 
     #[test]
@@ -1213,6 +1329,158 @@ mod tests {
         };
 
         let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+        match decision {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
+                assert_eq!(intent.side, OrderSide::Sell);
+                assert_eq!(intent.pool_address, pool.address);
+            }
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
+                panic!("expected sell order")
+            }
+        }
+    }
+
+    #[test]
+    fn buy_confirm_block_lp_approval_can_defer_to_max_hold() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 2,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            defer_buy_confirm_block_lp_approval_to_max_hold: true,
+            max_hold_blocks: Some(15),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        assert_eq!(position.entry_block, Some(1));
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut risk = lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=100.00%",
+        );
+        risk.observed_block = Some(1);
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("exit.lp_approval_buy_confirm_block_deferred_to_max_hold")
+        );
+    }
+
+    #[test]
+    fn buy_confirm_block_defer_does_not_hide_later_lp_approval() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 3,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            defer_buy_confirm_block_lp_approval_to_max_hold: true,
+            max_hold_blocks: Some(15),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        assert_eq!(position.entry_block, Some(1));
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut risk = lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=100.00%",
+        );
+        risk.observed_block = Some(3);
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+        match decision {
+            StrategyDecision::SubmitOrder(intent)
+            | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
+                assert_eq!(intent.side, OrderSide::Sell);
+                assert_eq!(intent.pool_address, pool.address);
+            }
+            StrategyDecision::Hold
+            | StrategyDecision::HoldWithReason { .. }
+            | StrategyDecision::CancelOrders { .. } => {
+                panic!("expected sell order")
+            }
+        }
+    }
+
+    #[test]
+    fn lp_approval_exit_gate_holds_below_threshold() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            lp_approval_gate_min_pct: Some(Decimal::from(30)),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let risk = lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=30.00%",
+        );
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("exit.lp_approval:approved_pct_unknown_or_not_gt_min")
+        );
+    }
+
+    #[test]
+    fn lp_approval_exit_gate_sells_above_threshold() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            lp_approval_gate_min_pct: Some(Decimal::from(30)),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let risk = lp_approval_risk(
+            &pool,
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=30.01%",
+        );
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
         match decision {
             StrategyDecision::SubmitOrder(intent)
             | StrategyDecision::SubmitOrderWithReason { intent, .. } => {

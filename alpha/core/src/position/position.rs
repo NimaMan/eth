@@ -6,6 +6,7 @@ use crate::{
         BlockNumber, OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress,
         TradeId, WalletId,
     },
+    market::PoolProtocol,
     order::OrderSide,
     position::PositionState,
 };
@@ -18,6 +19,8 @@ pub struct PositionKey {
     pub strategy_name: StrategyName,
     pub token_address: TokenAddress,
     pub pool_address: PoolAddress,
+    #[serde(default)]
+    pub protocol: PoolProtocol,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

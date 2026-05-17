@@ -4,7 +4,7 @@ use alloy_primitives::U256;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{PoolAddress, PortfolioId, StrategyName, TokenAddress, WalletId},
-    market::{MarketEvent, PoolSnapshot},
+    market::{MarketEvent, PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     risk::{RiskEvent, RiskKind, RiskSeverity},
     AlphaCoreError, Result, Strategy, StrategyContext, StrategyDecision,
@@ -88,13 +88,18 @@ impl MarketTrackerStrategy {
             _ => {}
         }
 
-        self.submit_buy(pool.token_address, pool.address.clone())
+        self.submit_buy(
+            pool.token_address,
+            pool.address.clone(),
+            pool.protocol.clone(),
+        )
     }
 
     fn submit_buy(
         &mut self,
         token_address: TokenAddress,
         pool_address: PoolAddress,
+        protocol: PoolProtocol,
     ) -> Result<StrategyDecision> {
         self.submitted_pools.insert(pool_address.clone());
         Ok(StrategyDecision::SubmitOrder(OrderIntent {
@@ -105,6 +110,7 @@ impl MarketTrackerStrategy {
             side: OrderSide::Buy,
             token_address,
             pool_address,
+            protocol,
             amount: self.config.buy_amount.clone(),
             route: None,
             max_slippage_bps: self.config.max_slippage_bps,
@@ -171,7 +177,14 @@ impl Strategy for MarketTrackerStrategy {
                 "risk event market context token mismatch".to_string(),
             ));
         }
-        self.submit_buy(event.token_address, pool_address)
+        let protocol = ctx
+            .market
+            .pool
+            .as_ref()
+            .filter(|pool| pool.address == pool_address)
+            .map(|pool| pool.protocol.clone())
+            .unwrap_or_default();
+        self.submit_buy(event.token_address, pool_address, protocol)
     }
 }
 

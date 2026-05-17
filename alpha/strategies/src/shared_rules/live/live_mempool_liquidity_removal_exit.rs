@@ -3,6 +3,8 @@ pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All";
 pub const STRATEGY_RUNTIME: &str = "live";
 pub const SUITE_NAME: &str = "mempool-live-exits";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
+pub const RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
+    "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveStrategySpecOptions {
@@ -23,6 +25,10 @@ pub struct LiveStrategySpec {
     pub exit_lp_approval: bool,
     pub exit_lp_approval_critical_only: bool,
     pub exit_scam: bool,
+    pub allowed_protocols: Vec<String>,
+    pub block_entry_on_lp_approval: bool,
+    pub lp_approval_gate_min_pct: Option<String>,
+    pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
@@ -40,6 +46,10 @@ pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
         exit_lp_approval: true,
         exit_lp_approval_critical_only: false,
         exit_scam: true,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval: false,
+        lp_approval_gate_min_pct: None,
+        defer_buy_confirm_block_lp_approval_to_max_hold: false,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: options.max_hold_blocks,
@@ -57,6 +67,11 @@ pub fn suite_specs(
         crate::shared_rules::lp_approval_warning_exit::SUITE_NAME
         | crate::shared_rules::lp_approval_warning_exit::STRATEGY_NAME => {
             Ok(vec![lp_approval_warning_exit_spec(options)])
+        }
+        RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME => {
+            Ok(vec![risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
+                options,
+            )])
         }
         other => Err(format!("unsupported strategy suite: {other}")),
     }
@@ -88,6 +103,10 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     exit_lp_approval: false,
                     exit_lp_approval_critical_only: false,
                     exit_scam: false,
+                    allowed_protocols: Vec::new(),
+                    block_entry_on_lp_approval: false,
+                    lp_approval_gate_min_pct: None,
+                    defer_buy_confirm_block_lp_approval_to_max_hold: false,
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
@@ -107,6 +126,10 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     exit_lp_approval: true,
                     exit_lp_approval_critical_only: true,
                     exit_scam: false,
+                    allowed_protocols: Vec::new(),
+                    block_entry_on_lp_approval: false,
+                    lp_approval_gate_min_pct: None,
+                    defer_buy_confirm_block_lp_approval_to_max_hold: false,
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
@@ -130,9 +153,39 @@ fn lp_approval_warning_exit_spec(options: &LiveStrategySpecOptions) -> LiveStrat
         exit_lp_approval_critical_only:
             crate::shared_rules::lp_approval_warning_exit::EXIT_LP_APPROVAL_CRITICAL_ONLY,
         exit_scam: crate::shared_rules::lp_approval_warning_exit::EXIT_SCAM,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval: false,
+        lp_approval_gate_min_pct: None,
+        defer_buy_confirm_block_lp_approval_to_max_hold: false,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: None,
+        exit_retry_interval_blocks: options.exit_retry_interval_blocks,
+        max_exit_retries: options.max_exit_retries,
+    }
+}
+
+fn risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
+    options: &LiveStrategySpecOptions,
+) -> LiveStrategySpec {
+    LiveStrategySpec {
+        strategy_name: RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME.to_string(),
+        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+        strategy_label: "Snipe All risk atlas LP gate hold 15 buy-confirm LP maxhold".to_string(),
+        exit_liquidity_removal: true,
+        exit_tax: false,
+        exit_lp_approval: true,
+        exit_lp_approval_critical_only: false,
+        exit_scam: false,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval: true,
+        lp_approval_gate_min_pct: Some(
+            crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
+        ),
+        defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        stop_loss_ratio: options.stop_loss_ratio.clone(),
+        take_profit_ratio: options.take_profit_ratio.clone(),
+        max_hold_blocks: Some(15),
         exit_retry_interval_blocks: options.exit_retry_interval_blocks,
         max_exit_retries: options.max_exit_retries,
     }
@@ -183,6 +236,32 @@ mod tests {
             crate::shared_rules::lp_approval_warning_exit::STRATEGY_NAME
         );
         assert_eq!(spec.max_hold_blocks, None);
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_lp_approval);
+        assert!(!spec.exit_lp_approval_critical_only);
+        assert!(!spec.exit_tax);
+        assert!(!spec.exit_scam);
+    }
+
+    #[test]
+    fn risk_atlas_buy_confirm_maxhold_suite_has_no_protocol_filter() {
+        let specs = suite_specs(
+            RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME,
+            &LiveStrategySpecOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(
+            spec.strategy_name,
+            RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME
+        );
+        assert!(spec.allowed_protocols.is_empty());
+        assert!(spec.block_entry_on_lp_approval);
+        assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
+        assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert_eq!(spec.max_hold_blocks, Some(15));
         assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(!spec.exit_lp_approval_critical_only);

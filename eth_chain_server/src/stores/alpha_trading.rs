@@ -138,6 +138,7 @@ pub struct PositionView {
     pub strategy_name: String,
     pub token_address: String,
     pub pool_address: String,
+    pub protocol: Option<String>,
     pub state: String,
     pub entry_order_id: Option<String>,
     pub exit_order_id: Option<String>,
@@ -155,6 +156,7 @@ pub struct OrderIntentView {
     pub side: String,
     pub token_address: String,
     pub pool_address: String,
+    pub protocol: Option<String>,
     pub amount_raw: String,
     pub amount_decimals: i16,
     pub max_slippage_bps: i32,
@@ -639,7 +641,7 @@ impl AlphaTradingStore {
         let rows = sqlx::query(
             r#"
             SELECT position_id, portfolio_id, wallet_id, strategy_name, token_address,
-                   pool_address, state, entry_order_id, exit_order_id,
+                   pool_address, protocol, state, entry_order_id, exit_order_id,
                    created_at::text AS created_at, updated_at::text AS updated_at,
                    payload::text AS payload
             FROM alpha_trading.positions
@@ -666,7 +668,7 @@ impl AlphaTradingStore {
         let rows = sqlx::query(
             r#"
             SELECT id, portfolio_id, wallet_id, strategy_name, side, token_address,
-                   pool_address, amount_raw, amount_decimals, max_slippage_bps,
+                   pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
                    deadline_secs, created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.order_intents
             WHERE run_id = $1 AND strategy_name = $2
@@ -687,7 +689,7 @@ impl AlphaTradingStore {
         let rows = sqlx::query(
             r#"
             SELECT position_id, portfolio_id, wallet_id, strategy_name, token_address,
-                   pool_address, state, entry_order_id, exit_order_id,
+                   pool_address, protocol, state, entry_order_id, exit_order_id,
                    created_at::text AS created_at, updated_at::text AS updated_at,
                    payload::text AS payload
             FROM alpha_trading.positions
@@ -708,7 +710,7 @@ impl AlphaTradingStore {
         let rows = sqlx::query(
             r#"
             SELECT id, portfolio_id, wallet_id, strategy_name, side, token_address,
-                   pool_address, amount_raw, amount_decimals, max_slippage_bps,
+                   pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
                    deadline_secs, created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.order_intents
             WHERE run_id = $1
@@ -979,6 +981,7 @@ fn row_to_position(row: &sqlx::postgres::PgRow) -> Result<PositionView> {
         strategy_name: text(row, "strategy_name")?,
         token_address: text(row, "token_address")?,
         pool_address: text(row, "pool_address")?,
+        protocol: optional_text(row, "protocol")?,
         state: text(row, "state")?,
         entry_order_id: optional_text(row, "entry_order_id")?,
         exit_order_id: optional_text(row, "exit_order_id")?,
@@ -997,6 +1000,7 @@ fn row_to_order(row: &sqlx::postgres::PgRow) -> Result<OrderIntentView> {
         side: text(row, "side")?,
         token_address: text(row, "token_address")?,
         pool_address: text(row, "pool_address")?,
+        protocol: optional_text(row, "protocol")?,
         amount_raw: text(row, "amount_raw")?,
         amount_decimals: small_int(row, "amount_decimals")?,
         max_slippage_bps: int32(row, "max_slippage_bps")?,

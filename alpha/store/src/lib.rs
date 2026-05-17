@@ -1,6 +1,7 @@
 //! PostgreSQL persistence for the alpha trading runtime.
 
 pub mod performance;
+pub mod observations;
 pub mod result_sets;
 
 use async_trait::async_trait;
@@ -9,6 +10,7 @@ use eth_alpha_core::{
     error::{AlphaCoreError, Result},
     execution::{ExecutionReport, ExecutionStatus},
     ids::{PoolAddress, PositionId},
+    market::PoolProtocol,
     order::{OrderIntent, OrderSide},
     position::{Position, PositionSnapshot, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -337,7 +339,7 @@ impl PostgresTradingStore {
     pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
         let rows = sqlx::query(
             r#"
-            SELECT payload::text AS payload
+            SELECT protocol, payload::text AS payload
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
@@ -356,6 +358,13 @@ impl PostgresTradingStore {
                 let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
                 let mut position =
                     serde_json::from_str::<Position>(&payload).map_err(store_error)?;
+                let protocol = row
+                    .try_get::<Option<String>, _>("protocol")
+                    .map_err(store_error)?;
+                if let Some(protocol) = protocol.as_deref().filter(|value| !value.trim().is_empty())
+                {
+                    position.key.protocol = PoolProtocol::from_label(protocol);
+                }
                 normalize_position_pool_id(&mut position);
                 Ok(position)
             })
@@ -420,10 +429,10 @@ impl TradingStore for PostgresTradingStore {
             r#"
             INSERT INTO alpha_trading.positions (
                 run_id, position_id, trade_id, portfolio_id, wallet_id, strategy_name,
-                token_address, pool_address, state, entry_order_id, exit_order_id,
+                token_address, pool_address, protocol, state, entry_order_id, exit_order_id,
                 entry_block, exit_block, payload, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
             ON CONFLICT (run_id, position_id) DO UPDATE SET
                 trade_id = EXCLUDED.trade_id,
                 portfolio_id = EXCLUDED.portfolio_id,
@@ -431,6 +440,7 @@ impl TradingStore for PostgresTradingStore {
                 strategy_name = EXCLUDED.strategy_name,
                 token_address = EXCLUDED.token_address,
                 pool_address = EXCLUDED.pool_address,
+                protocol = EXCLUDED.protocol,
                 state = EXCLUDED.state,
                 entry_order_id = EXCLUDED.entry_order_id,
                 exit_order_id = EXCLUDED.exit_order_id,
@@ -448,6 +458,7 @@ impl TradingStore for PostgresTradingStore {
         .bind(&position.key.strategy_name.0)
         .bind(position.key.token_address.to_string())
         .bind(position.key.pool_address.to_string())
+        .bind(protocol_label(&position.key.protocol))
         .bind(position_state_label(&position.state))
         .bind(position.entry_order_id.as_ref().map(|id| id.0.as_str()))
         .bind(position.exit_order_id.as_ref().map(|id| id.0.as_str()))
@@ -498,10 +509,10 @@ impl TradingStore for PostgresTradingStore {
             r#"
             INSERT INTO alpha_trading.order_intents (
                 run_id, trade_id, portfolio_id, wallet_id, strategy_name, side, token_address,
-                pool_address, amount_raw, amount_decimals, max_slippage_bps,
+                pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
                 deadline_secs, payload, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
             "#,
         )
         .bind(&self.run_id)
@@ -512,6 +523,7 @@ impl TradingStore for PostgresTradingStore {
         .bind(order_side_label(intent.side))
         .bind(intent.token_address.to_string())
         .bind(intent.pool_address.to_string())
+        .bind(protocol_label(&intent.protocol))
         .bind(amount_raw(&intent.amount))
         .bind(i16::from(intent.amount.decimals))
         .bind(u32_to_i32(intent.max_slippage_bps))
@@ -614,11 +626,11 @@ impl PostgresTradingStore {
             r#"
             INSERT INTO alpha_trading.trades (
                 trade_id, result_set_id, run_id, position_id, strategy_name,
-                token_address, pool_address, state, entry_order_id, exit_order_id,
+                token_address, pool_address, protocol, state, entry_order_id, exit_order_id,
                 entry_block, exit_block, entry_cost_eth, exit_value_eth, gas_cost_eth,
                 realized_pnl_eth, payload, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
             ON CONFLICT (trade_id) DO UPDATE SET
                 result_set_id = EXCLUDED.result_set_id,
                 run_id = EXCLUDED.run_id,
@@ -626,6 +638,7 @@ impl PostgresTradingStore {
                 strategy_name = EXCLUDED.strategy_name,
                 token_address = EXCLUDED.token_address,
                 pool_address = EXCLUDED.pool_address,
+                protocol = EXCLUDED.protocol,
                 state = EXCLUDED.state,
                 entry_order_id = EXCLUDED.entry_order_id,
                 exit_order_id = EXCLUDED.exit_order_id,
@@ -646,6 +659,7 @@ impl PostgresTradingStore {
         .bind(&position.key.strategy_name.0)
         .bind(position.key.token_address.to_string())
         .bind(position.key.pool_address.to_string())
+        .bind(protocol_label(&position.key.protocol))
         .bind(position_state_label(&position.state))
         .bind(position.entry_order_id.as_ref().map(|id| id.0.as_str()))
         .bind(position.exit_order_id.as_ref().map(|id| id.0.as_str()))
@@ -1074,6 +1088,10 @@ fn order_side_label(side: OrderSide) -> &'static str {
     }
 }
 
+fn protocol_label(protocol: &PoolProtocol) -> String {
+    protocol.label().into_owned()
+}
+
 fn execution_status_label(status: &ExecutionStatus) -> &'static str {
     match status {
         ExecutionStatus::Submitted => "submitted",
@@ -1183,6 +1201,7 @@ const MIGRATIONS: &[&str] = &[
         side TEXT NOT NULL,
         token_address TEXT NOT NULL,
         pool_address TEXT NOT NULL,
+        protocol TEXT,
         amount_raw TEXT NOT NULL,
         amount_decimals SMALLINT NOT NULL,
         max_slippage_bps INTEGER NOT NULL,
@@ -1192,6 +1211,8 @@ const MIGRATIONS: &[&str] = &[
     )
     "#,
     "ALTER TABLE alpha_trading.order_intents ADD COLUMN IF NOT EXISTS trade_id TEXT",
+    "ALTER TABLE alpha_trading.order_intents ADD COLUMN IF NOT EXISTS protocol TEXT",
+    "ALTER TABLE alpha_trading.order_intents ALTER COLUMN protocol SET DEFAULT 'unknown'",
     r#"
     CREATE INDEX IF NOT EXISTS order_intents_run_created_idx
     ON alpha_trading.order_intents (run_id, created_at DESC)
@@ -1244,6 +1265,7 @@ const MIGRATIONS: &[&str] = &[
         strategy_name TEXT NOT NULL,
         token_address TEXT NOT NULL,
         pool_address TEXT NOT NULL,
+        protocol TEXT,
         state TEXT NOT NULL,
         entry_order_id TEXT,
         exit_order_id TEXT,
@@ -1256,6 +1278,8 @@ const MIGRATIONS: &[&str] = &[
     )
     "#,
     "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS trade_id TEXT",
+    "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS protocol TEXT",
+    "ALTER TABLE alpha_trading.positions ALTER COLUMN protocol SET DEFAULT 'unknown'",
     "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS entry_block BIGINT",
     "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS exit_block BIGINT",
     "UPDATE alpha_trading.positions SET trade_id = position_id WHERE trade_id IS NULL",
@@ -1330,6 +1354,7 @@ const MIGRATIONS: &[&str] = &[
         strategy_name TEXT NOT NULL,
         token_address TEXT NOT NULL,
         pool_address TEXT NOT NULL,
+        protocol TEXT,
         state TEXT NOT NULL,
         entry_order_id TEXT,
         exit_order_id TEXT,
@@ -1351,6 +1376,8 @@ const MIGRATIONS: &[&str] = &[
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     "#,
+    "ALTER TABLE alpha_trading.trades ADD COLUMN IF NOT EXISTS protocol TEXT",
+    "ALTER TABLE alpha_trading.trades ALTER COLUMN protocol SET DEFAULT 'unknown'",
     r#"
     CREATE INDEX IF NOT EXISTS trades_result_strategy_idx
     ON alpha_trading.trades (result_set_id, strategy_name, updated_at DESC)
@@ -1362,6 +1389,10 @@ const MIGRATIONS: &[&str] = &[
     r#"
     CREATE INDEX IF NOT EXISTS trades_token_pool_idx
     ON alpha_trading.trades (token_address, pool_address, updated_at DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS trades_result_protocol_idx
+    ON alpha_trading.trades (result_set_id, protocol, updated_at DESC)
     "#,
     r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.trade_events (

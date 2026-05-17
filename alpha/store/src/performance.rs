@@ -90,6 +90,7 @@ pub struct StrategyPerformancePoint {
 pub struct StrategyPoolPerformance {
     pub token_address: String,
     pub pool_address: String,
+    pub protocol: Option<String>,
     pub state: String,
     pub entry_order_id: Option<String>,
     pub exit_order_id: Option<String>,
@@ -229,6 +230,7 @@ struct PositionRecord {
     position_id: String,
     token_address: String,
     pool_address: String,
+    protocol: Option<String>,
     state: String,
     entry_order_id: Option<String>,
     exit_order_id: Option<String>,
@@ -243,6 +245,7 @@ struct OrderRecord {
     side: String,
     token_address: String,
     pool_address: String,
+    protocol: Option<String>,
     created_epoch: i64,
 }
 
@@ -277,6 +280,7 @@ struct SnapshotRecord {
 struct PoolRollup {
     token_address: String,
     pool_address: String,
+    protocol: Option<String>,
     state: String,
     entry_order_id: Option<String>,
     exit_order_id: Option<String>,
@@ -311,6 +315,7 @@ impl PoolRollup {
         Self {
             token_address: position.token_address.clone(),
             pool_address: position.pool_address.clone(),
+            protocol: position.protocol.clone(),
             state: position.state.clone(),
             entry_order_id: position.entry_order_id.clone(),
             exit_order_id: position.exit_order_id.clone(),
@@ -326,6 +331,7 @@ impl PoolRollup {
         Self {
             token_address: order.token_address.clone(),
             pool_address: order.pool_address.clone(),
+            protocol: order.protocol.clone(),
             state: "order_only".to_string(),
             created_epoch: Some(order.created_epoch),
             updated_epoch: Some(order.created_epoch),
@@ -466,6 +472,7 @@ impl PoolRollup {
         StrategyPoolPerformance {
             token_address: self.token_address,
             pool_address: self.pool_address,
+            protocol: self.protocol,
             state: self.state,
             entry_order_id: self.entry_order_id,
             exit_order_id: self.exit_order_id,
@@ -531,7 +538,7 @@ async fn load_positions(
 ) -> Result<Vec<PositionRecord>> {
     let rows = sqlx::query(
         r#"
-        SELECT position_id, token_address, pool_address, state, entry_order_id,
+        SELECT position_id, token_address, pool_address, protocol, state, entry_order_id,
                exit_order_id, created_at::text AS created_at, updated_at::text AS updated_at,
                EXTRACT(EPOCH FROM created_at)::BIGINT AS created_epoch,
                EXTRACT(EPOCH FROM updated_at)::BIGINT AS updated_epoch
@@ -554,6 +561,7 @@ async fn load_positions(
                 position_id: row.try_get("position_id").map_err(store_error)?,
                 token_address: row.try_get("token_address").map_err(store_error)?,
                 pool_address: row.try_get("pool_address").map_err(store_error)?,
+                protocol: row.try_get("protocol").map_err(store_error)?,
                 state: row.try_get("state").map_err(store_error)?,
                 entry_order_id: row.try_get("entry_order_id").map_err(store_error)?,
                 exit_order_id: row.try_get("exit_order_id").map_err(store_error)?,
@@ -569,7 +577,7 @@ async fn load_positions(
 async fn load_orders(pool: &PgPool, run_id: &str, strategy_id: &str) -> Result<Vec<OrderRecord>> {
     let rows = sqlx::query(
         r#"
-        SELECT side, token_address, pool_address,
+        SELECT side, token_address, pool_address, protocol,
                EXTRACT(EPOCH FROM created_at)::BIGINT AS created_epoch
         FROM alpha_trading.order_intents
         WHERE run_id = $1 AND strategy_name = $2
@@ -590,6 +598,7 @@ async fn load_orders(pool: &PgPool, run_id: &str, strategy_id: &str) -> Result<V
                 side: row.try_get("side").map_err(store_error)?,
                 token_address: row.try_get("token_address").map_err(store_error)?,
                 pool_address: row.try_get("pool_address").map_err(store_error)?,
+                protocol: row.try_get("protocol").map_err(store_error)?,
                 created_epoch: row.try_get("created_epoch").map_err(store_error)?,
             })
         })

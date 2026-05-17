@@ -716,7 +716,7 @@ async fn load_buy_failed_entries(
             p.token_address,
             p.pool_address,
             f.block_number AS failed_block,
-            coalesce(so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
+            coalesce(p.protocol, so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
             coalesce(so.payload->'pool'->>'denom_symbol', so.payload->'pool'->>'currency', '<missing>') AS denom_symbol,
             (so.payload->'pool'->>'can_buy')::boolean AS can_buy,
             (so.payload->'pool'->>'can_sell')::boolean AS can_sell,
@@ -858,7 +858,9 @@ async fn load_protocols(
     let rows = sqlx::query(
         r#"
         WITH pos AS (
-            SELECT lower(pool_address) AS pool_id, (payload->>'entry_block')::bigint AS entry_block
+            SELECT lower(pool_address) AS pool_id,
+                   protocol,
+                   (payload->>'entry_block')::bigint AS entry_block
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND payload ? 'entry_block'
@@ -866,7 +868,7 @@ async fn load_protocols(
               AND state <> 'buy_failed'
         )
         SELECT
-            coalesce(so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
+            coalesce(pos.protocol, so.payload->'pool'->>'protocol', '<no observation>') AS protocol,
             coalesce(so.payload->'pool'->>'denom_symbol', so.payload->'pool'->>'currency', '<missing>') AS denom_symbol,
             count(*) AS confirmed_buys
         FROM pos

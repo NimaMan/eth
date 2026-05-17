@@ -344,17 +344,7 @@ pub fn is_critical_tax_bucket(bucket: &str) -> bool {
 }
 
 pub fn parse_protocol(value: &str) -> PoolProtocol {
-    match value.to_ascii_lowercase().as_str() {
-        "uniswapv2" | "uniswap_v2" | "uniswap-v2" | "v2" => PoolProtocol::UniswapV2,
-        "uniswapv3" | "uniswap_v3" | "uniswap-v3" | "v3" => PoolProtocol::UniswapV3,
-        "uniswapv4" | "uniswap_v4" | "uniswap-v4" | "v4" => PoolProtocol::UniswapV4,
-        "sushi" | "sushiswap" | "sushi_v2" | "sushi-v2" => {
-            PoolProtocol::Unknown("sushi".to_string())
-        }
-        "pancake" | "pancakeswap" | "pancake_v2" | "pancake-v2" | "pancakeswap_v2"
-        | "pancakeswap-v2" => PoolProtocol::PancakeSwapV2,
-        other => PoolProtocol::Unknown(other.to_string()),
-    }
+    PoolProtocol::from_label(value)
 }
 
 pub fn parse_address(value: &str) -> Result<Address> {

@@ -24,7 +24,7 @@ pub use ids::{
     BlockHash, BlockNumber, ChainId, OrderId, PortfolioId, PositionId, StrategyName, TokenPoolId,
     TxHash, WalletId,
 };
-pub use market::{MarketEvent, PoolSnapshot, TokenSnapshot};
+pub use market::{MarketEvent, PoolProtocol, PoolSnapshot, TokenSnapshot};
 pub use order::{OrderIntent, OrderSide, OrderStatus};
 pub use portfolio::{PortfolioLimits, PortfolioState};
 pub use position::{Position, PositionKey, PositionSnapshot, PositionState};
