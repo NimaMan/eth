@@ -1356,6 +1356,10 @@ const MIGRATIONS: &[&str] = &[
     ON alpha_trading.trades (result_set_id, strategy_name, updated_at DESC)
     "#,
     r#"
+    CREATE INDEX IF NOT EXISTS trades_result_strategy_trade_idx
+    ON alpha_trading.trades (result_set_id, strategy_name, trade_id)
+    "#,
+    r#"
     CREATE INDEX IF NOT EXISTS trades_token_pool_idx
     ON alpha_trading.trades (token_address, pool_address, updated_at DESC)
     "#,
@@ -1411,6 +1415,14 @@ const MIGRATIONS: &[&str] = &[
     r#"
     CREATE INDEX IF NOT EXISTS trade_snapshots_trade_block_idx
     ON alpha_trading.trade_snapshots (trade_id, block_number DESC, id DESC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS trade_snapshots_trade_effective_block_idx
+    ON alpha_trading.trade_snapshots (
+        trade_id,
+        (COALESCE(valuation_block_number, observed_block_number, block_number)) DESC,
+        id DESC
+    )
     "#,
     r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.risk_events (
