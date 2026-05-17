@@ -86,7 +86,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     once: bool,
 
-    /// Max hold blocks: force sell after this many blocks regardless of price.
+    /// Max hold active pool-update blocks: force sell after this many distinct
+    /// pool-update blocks while the position is open.
     /// Disabled by default.
     #[arg(long)]
     max_hold_blocks: Option<u64>,

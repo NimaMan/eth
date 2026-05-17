@@ -8,9 +8,9 @@ pub mod features;
 pub mod observation;
 
 pub use features::{
-    FeatureEvidenceBlocks, LpControlFeatures, PoolActivityFeatures, PoolLiquidityFeatures,
-    PoolMarketFeatures, TokenAuthorityFeatures, TokenNetworkFeatures, TokenPoolAnalyticsFeatures,
-    TokenPoolObservationFeatures, TokenStaticFeatures,
+    FeatureEvidenceBlocks, LpControlFeatures, ObservedSellTransferFlow, PoolActivityFeatures,
+    PoolLiquidityFeatures, PoolMarketFeatures, TokenAuthorityFeatures, TokenNetworkFeatures,
+    TokenPoolAnalyticsFeatures, TokenPoolObservationFeatures, TokenStaticFeatures,
 };
 pub use observation::{
     ActiveObservationReason, ObservationBlockActivity, ObservationBlockActivitySource,

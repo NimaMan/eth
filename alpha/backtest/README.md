@@ -75,8 +75,8 @@ Backtests use the same EVM simulation path as live chain-sim trading:
 
 ```bash
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
-  --strategy-impl snipe-all-v1 \
-  --strategy-name snipe-all-v1 \
+  --strategy-impl snipe-all \
+  --strategy-name snipe-all \
   --replay-run-id "alpha-trader-1715350000-12345" \
   --buy-amount-wei 10000000000000000 \
   --min-liquidity-eth 0.5 \
@@ -96,15 +96,15 @@ The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--strategy-impl` | Strategy implementation to instantiate | `snipe-all-v1` |
-| `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all-v1` |
-| `--strategy-suite historical-maxhold` | Run maxhold 10/20/50 variants in one replay pass | disabled |
+| `--strategy-impl` | Strategy implementation to instantiate | `snipe-all` |
+| `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all` |
+| `--strategy-suite historical-pool-update-hold` | Run hold1/2/3/5/10 pool-update variants in one replay pass | disabled |
 | `--from-block` | Start block (inclusive) | first observation |
 | `--to-block` | End block (inclusive) | last observation |
 | `--skip-primed` | Skip warmup observations | false |
 | `--stop-loss-ratio` | Stop-loss trigger ratio | disabled |
 | `--take-profit-ratio` | Take-profit trigger ratio | disabled |
-| `--max-hold-blocks` | Force exit after N blocks | disabled |
+| `--max-hold-blocks` | Force exit after N distinct pool-update blocks while the position is open | disabled |
 
 Suite mode still records one `trader_runs` row, but orders, positions,
 strategy decisions, and derived PnL stay separated by `strategy_name`.

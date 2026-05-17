@@ -492,6 +492,16 @@ impl UniswapV2Pool {
         for burn in &events.burns {
             self.process_burn(burn, tx)?;
         }
+        if self.base.has_liquidity_removal() {
+            if let Some(mechanism) = self.base.inferred_scam_mechanism() {
+                self.base.mark_scam_mechanism(
+                    mechanism.mechanism,
+                    mechanism.block_number,
+                    mechanism.tx_hash,
+                    mechanism.evidence,
+                );
+            }
+        }
         Ok(())
     }
 

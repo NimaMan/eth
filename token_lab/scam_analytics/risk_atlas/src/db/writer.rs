@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use crate::api::RiskAtlasPageView;
 use crate::ingest::report::RiskAtlasReportImport;
 
-use super::schema::{PoolEligibilityRow, RiskAtlasRun};
+use super::schema::{ObservationRow, PoolEligibilityRow, RiskAtlasRun};
 
 #[derive(Clone)]
 pub struct RiskAtlasWriter {
@@ -23,6 +23,10 @@ impl RiskAtlasWriter {
         Self { pool }
     }
 
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn replace_report_import(&self, import: &RiskAtlasReportImport) -> Result<()> {
         self.upsert_run(&import.run).await?;
 
@@ -30,8 +34,10 @@ impl RiskAtlasWriter {
         for table in [
             "risk_atlas_distributions",
             "risk_atlas_pool_eligibility",
+            "risk_atlas_observations",
             "risk_atlas_numeric_stats",
             "risk_atlas_active_targets",
+            "risk_atlas_decision_questions",
             "risk_atlas_review_examples",
             "risk_atlas_model_readiness",
             "risk_atlas_page_snapshots",
@@ -64,6 +70,10 @@ impl RiskAtlasWriter {
 
         for item in &import.pool_eligibility {
             insert_pool_eligibility_row(&mut tx, &import.run.run_id, item).await?;
+        }
+
+        for item in &import.observations {
+            insert_observation_row(&mut tx, &import.run.run_id, item).await?;
         }
 
         for item in &import.numeric_stats {
@@ -110,6 +120,31 @@ impl RiskAtlasWriter {
             .bind(item.unique_pools)
             .bind(item.positives)
             .bind(item.negatives)
+            .bind(item.sort_order)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for item in &import.decision_questions {
+            sqlx::query(
+                r#"
+                INSERT INTO risk_atlas_decision_questions (
+                    run_id, question_id, category, question, headline, answer, status,
+                    denominator_label, denominator_count, payload, sort_order
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                "#,
+            )
+            .bind(&import.run.run_id)
+            .bind(&item.question_id)
+            .bind(&item.category)
+            .bind(&item.question)
+            .bind(&item.headline)
+            .bind(&item.answer)
+            .bind(&item.status)
+            .bind(&item.denominator_label)
+            .bind(item.denominator_count)
+            .bind(&item.payload)
             .bind(item.sort_order)
             .execute(&mut *tx)
             .await?;
@@ -257,6 +292,89 @@ fn active_target_key(row_kind: &str, horizon: Option<i32>) -> String {
         Some(horizon) => format!("{row_kind}:{horizon}"),
         None => row_kind.to_string(),
     }
+}
+
+async fn insert_observation_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_id: &str,
+    item: &ObservationRow,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO risk_atlas_observations (
+            run_id, token_address, pool_address, denom_address, protocol,
+            active_observation_index, block_number, timestamp, active_reasons,
+            tx_count, token_transfer_count, denom_transfer_count,
+            buy_volume_denom, sell_volume_denom, total_bribe_eth,
+            can_buy, can_sell, effective_can_buy, effective_can_sell,
+            buy_tax, sell_tax, liquidity_removed_as_of, liquidity_removal_in_block,
+            liquidity_removal_block_as_of, direct_lp_removal_as_of, direct_lp_removal_in_block,
+            direct_lp_target_1, direct_lp_target_2, direct_lp_target_3, direct_lp_target_5,
+            direct_lp_target_10, denom_reserve, token_reserve, total_liquidity_denom,
+            price_to_initial_ratio, lp_approved_pct_as_of,
+            token_transfer_to_total_supply_ratio, token_transfer_to_pool_token_reserve_ratio,
+            observation, features
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9,
+            $10, $11, $12,
+            $13, $14, $15,
+            $16, $17, $18, $19,
+            $20, $21, $22, $23,
+            $24, $25, $26,
+            $27, $28, $29, $30,
+            $31, $32, $33, $34,
+            $35, $36,
+            $37, $38,
+            $39, $40
+        )
+        "#,
+    )
+    .bind(run_id)
+    .bind(&item.token_address)
+    .bind(&item.pool_address)
+    .bind(&item.denom_address)
+    .bind(&item.protocol)
+    .bind(item.active_observation_index)
+    .bind(item.block_number)
+    .bind(item.timestamp)
+    .bind(&item.active_reasons)
+    .bind(item.tx_count)
+    .bind(item.token_transfer_count)
+    .bind(item.denom_transfer_count)
+    .bind(item.buy_volume_denom)
+    .bind(item.sell_volume_denom)
+    .bind(item.total_bribe_eth)
+    .bind(item.can_buy)
+    .bind(item.can_sell)
+    .bind(item.effective_can_buy)
+    .bind(item.effective_can_sell)
+    .bind(item.buy_tax)
+    .bind(item.sell_tax)
+    .bind(item.liquidity_removed_as_of)
+    .bind(item.liquidity_removal_in_block)
+    .bind(item.liquidity_removal_block_as_of)
+    .bind(item.direct_lp_removal_as_of)
+    .bind(item.direct_lp_removal_in_block)
+    .bind(item.direct_lp_target_1)
+    .bind(item.direct_lp_target_2)
+    .bind(item.direct_lp_target_3)
+    .bind(item.direct_lp_target_5)
+    .bind(item.direct_lp_target_10)
+    .bind(item.denom_reserve)
+    .bind(item.token_reserve)
+    .bind(item.total_liquidity_denom)
+    .bind(item.price_to_initial_ratio)
+    .bind(item.lp_approved_pct_as_of)
+    .bind(item.token_transfer_to_total_supply_ratio)
+    .bind(item.token_transfer_to_pool_token_reserve_ratio)
+    .bind(&item.observation)
+    .bind(&item.features)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 async fn insert_pool_eligibility_row(

@@ -2,6 +2,7 @@ use eth_token::tracking::{BlockTokenProcessor, TokenBlockUpdateReport};
 
 use crate::ranges::progress::{now_unix_secs, RangeIndexStatus};
 use crate::ranges::{RangeIndexError, RangeIndexJob, RangeIndexState};
+use crate::ranges::observations;
 
 use super::cache::ProcessedBlockDiskCacheMetrics;
 
@@ -95,6 +96,8 @@ pub(super) fn apply_report(
     state.progress.last_block_disk_cache_write_ms = Some(disk_cache_metrics.disk_cache_write_ms);
     state.progress.last_block_source = Some(disk_cache_metrics.source.to_string());
     state.progress.updated_at_unix_secs = now_unix_secs();
+
+    observations::collect_observations(state, &report);
 
     state.created_tokens.extend(report.created_token_addresses);
     state.updated_tokens.extend(report.updated_token_addresses);

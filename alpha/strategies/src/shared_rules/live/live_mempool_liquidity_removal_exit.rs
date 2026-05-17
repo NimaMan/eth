@@ -1,8 +1,7 @@
-pub const DEFAULT_STRATEGY_NAME: &str = "snipe-all-v1";
-pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All v1";
+pub const DEFAULT_STRATEGY_NAME: &str = "snipe-all";
+pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All";
 pub const STRATEGY_RUNTIME: &str = "live";
 pub const SUITE_NAME: &str = "mempool-live-exits";
-pub const LEGACY_SUITE_NAME: &str = "live-mempool-exits";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 
 #[derive(Clone, Debug, Default)]
@@ -54,7 +53,11 @@ pub fn suite_specs(
     options: &LiveStrategySpecOptions,
 ) -> Result<Vec<LiveStrategySpec>, String> {
     match suite_name {
-        SUITE_NAME | LEGACY_SUITE_NAME => Ok(liquidity_removal_exit_specs(options)),
+        SUITE_NAME => Ok(liquidity_removal_exit_specs(options)),
+        crate::shared_rules::lp_approval_warning_exit::SUITE_NAME
+        | crate::shared_rules::lp_approval_warning_exit::STRATEGY_NAME => {
+            Ok(vec![lp_approval_warning_exit_spec(options)])
+        }
         other => Err(format!("unsupported strategy suite: {other}")),
     }
 }
@@ -73,10 +76,12 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
         .flat_map(|max_hold_blocks| {
             [
                 LiveStrategySpec {
-                    strategy_name: format!("snipe-all-live-maxhold{max_hold_blocks}-liq-exit"),
+                    strategy_name: format!(
+                        "snipe-all-live-hold{max_hold_blocks}-pool-updates-liquidity-exit"
+                    ),
                     strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
                     strategy_label: format!(
-                        "Snipe All live maxhold {max_hold_blocks} liquidity exit"
+                        "Snipe All live hold {max_hold_blocks} pool updates + liquidity exit"
                     ),
                     exit_liquidity_removal: true,
                     exit_tax: false,
@@ -91,11 +96,11 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                 },
                 LiveStrategySpec {
                     strategy_name: format!(
-                        "snipe-all-live-maxhold{max_hold_blocks}-critical-lp-exit"
+                        "snipe-all-live-hold{max_hold_blocks}-pool-updates-liquidity-critical-lp-exit"
                     ),
                     strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
                     strategy_label: format!(
-                        "Snipe All live maxhold {max_hold_blocks} critical LP + liquidity exit"
+                        "Snipe All live hold {max_hold_blocks} pool updates + liquidity + critical LP exit"
                     ),
                     exit_liquidity_removal: true,
                     exit_tax: false,
@@ -111,6 +116,26 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
             ]
         })
         .collect()
+}
+
+fn lp_approval_warning_exit_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+    LiveStrategySpec {
+        strategy_name: crate::shared_rules::lp_approval_warning_exit::STRATEGY_NAME.to_string(),
+        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+        strategy_label: crate::shared_rules::lp_approval_warning_exit::STRATEGY_LABEL.to_string(),
+        exit_liquidity_removal:
+            crate::shared_rules::lp_approval_warning_exit::EXIT_LIQUIDITY_REMOVAL,
+        exit_tax: crate::shared_rules::lp_approval_warning_exit::EXIT_TAX,
+        exit_lp_approval: crate::shared_rules::lp_approval_warning_exit::EXIT_LP_APPROVAL,
+        exit_lp_approval_critical_only:
+            crate::shared_rules::lp_approval_warning_exit::EXIT_LP_APPROVAL_CRITICAL_ONLY,
+        exit_scam: crate::shared_rules::lp_approval_warning_exit::EXIT_SCAM,
+        stop_loss_ratio: options.stop_loss_ratio.clone(),
+        take_profit_ratio: options.take_profit_ratio.clone(),
+        max_hold_blocks: None,
+        exit_retry_interval_blocks: options.exit_retry_interval_blocks,
+        max_exit_retries: options.max_exit_retries,
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +163,30 @@ mod tests {
         assert!(critical_lp_specs
             .iter()
             .all(|spec| spec.exit_lp_approval_critical_only));
+    }
+
+    #[test]
+    fn lp_approval_warning_suite_is_single_non_hold_strategy() {
+        let specs = suite_specs(
+            crate::shared_rules::lp_approval_warning_exit::SUITE_NAME,
+            &LiveStrategySpecOptions {
+                max_hold_blocks: Some(20),
+                ..LiveStrategySpecOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(
+            spec.strategy_name,
+            crate::shared_rules::lp_approval_warning_exit::STRATEGY_NAME
+        );
+        assert_eq!(spec.max_hold_blocks, None);
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_lp_approval);
+        assert!(!spec.exit_lp_approval_critical_only);
+        assert!(!spec.exit_tax);
+        assert!(!spec.exit_scam);
     }
 }

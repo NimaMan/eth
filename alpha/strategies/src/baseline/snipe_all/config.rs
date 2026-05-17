@@ -28,6 +28,13 @@ pub struct SnipeAllConfig {
     pub exit_on_lp_approval: bool,
     pub exit_on_critical_lp_approval_only: bool,
     pub exit_on_scam: bool,
+    /// If non-empty, only enter pools whose protocol label is present here.
+    pub allowed_protocols: Vec<String>,
+    /// Treat any observed LP approval risk for this pool as an entry blocker.
+    /// This is separate from the global critical-risk policy so historical
+    /// mined-chain LP approvals can be warnings for exits while still gating
+    /// the launch-gate variants.
+    pub block_entry_on_lp_approval: bool,
     /// Asymmetric price-ratio exits.
     /// Sell if price drops to this ratio of entry price (e.g., 0.7 = -30% stop-loss).
     /// None = disabled.
@@ -35,7 +42,7 @@ pub struct SnipeAllConfig {
     /// Sell if price rises to this multiple of entry price (e.g., 3.0 = +200% take-profit).
     /// None = disabled (let winners run).
     pub take_profit_ratio: Option<DecimalAmount>,
-    /// Force sell after this many blocks regardless of price.
+    /// Force sell after this many distinct pool-update blocks while open.
     /// None = disabled (hold indefinitely).
     pub max_hold_blocks: Option<u64>,
     /// Retry a failed exit after this many blocks.
@@ -53,7 +60,7 @@ impl Default for SnipeAllConfig {
             decimals: 18,
         };
         Self {
-            strategy_name: StrategyName("snipe-all-v1".to_string()),
+            strategy_name: StrategyName("snipe-all".to_string()),
             portfolio_id: PortfolioId("chain-sim".to_string()),
             wallet_id: WalletId("chain-sim-wallet".to_string()),
             sell_fraction: DecimalAmount::from(1),
@@ -71,6 +78,8 @@ impl Default for SnipeAllConfig {
             exit_on_lp_approval: true,
             exit_on_critical_lp_approval_only: false,
             exit_on_scam: true,
+            allowed_protocols: Vec::new(),
+            block_entry_on_lp_approval: false,
             stop_loss_ratio: None,
             take_profit_ratio: None,
             max_hold_blocks: None,

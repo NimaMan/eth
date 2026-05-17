@@ -16,6 +16,7 @@ pub struct ObservationTransactionSummary {
     pub affects_token: bool,
     pub affects_pool: bool,
     pub token_transfer_count: u32,
+    pub token_transfer_volume: f64,
     pub denom_transfer_count: u32,
     pub token_approval_count: u32,
     pub lp_approval_count: u32,
@@ -82,6 +83,7 @@ impl From<&TokenTransactionActivity> for ObservationTransactionSummary {
             timestamp: activity.timestamp,
             maker: activity.maker.clone(),
             token_transfer_count: activity.token_transfer_count,
+            token_transfer_volume: activity.token_transfer_volume,
             denom_transfer_count: activity.denom_transfer_count,
             buy_volume_by_denom: activity.buy_volume_by_denom.clone(),
             sell_volume_by_denom: activity.sell_volume_by_denom.clone(),
@@ -101,6 +103,7 @@ mod tests {
     fn transaction_summary_infers_swap_transfer_and_bribe_types() {
         let mut tx = TokenTransactionActivity::new("0xA", 10, Some(100), Some("0xMaker".into()));
         tx.token_transfer_count = 1;
+        tx.token_transfer_volume = 10.0;
         tx.denom_transfer_count = 2;
         tx.buy_volume_by_denom.insert("0xC02A".to_string(), 1.0);
         tx.total_bribe_eth = 0.01;
@@ -111,6 +114,7 @@ mod tests {
         assert!(summary
             .tx_types
             .contains(&ObservationTransactionType::TokenTransfer));
+        assert_eq!(summary.token_transfer_volume, 10.0);
         assert!(summary
             .tx_types
             .contains(&ObservationTransactionType::DenomTransfer));

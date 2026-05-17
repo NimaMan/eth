@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use eth_token::token_analytics::TokenPoolCurrentObservation;
 use eth_token::tracking::BlockTokenProcessor;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -77,6 +78,8 @@ pub struct RangeIndexState {
     pub updated_v3_pools: BTreeSet<String>,
     pub discovered_v4_pools: BTreeSet<String>,
     pub updated_v4_pools: BTreeSet<String>,
+    pub observations: Vec<TokenPoolCurrentObservation>,
+    pub active_observation_counts_by_pool: BTreeMap<String, u64>,
 }
 
 #[derive(Debug)]
@@ -110,6 +113,8 @@ impl RangeIndexJob {
                 updated_v3_pools: BTreeSet::new(),
                 discovered_v4_pools: BTreeSet::new(),
                 updated_v4_pools: BTreeSet::new(),
+                observations: Vec::new(),
+                active_observation_counts_by_pool: BTreeMap::new(),
             }),
             stop_requested: AtomicBool::new(false),
         }

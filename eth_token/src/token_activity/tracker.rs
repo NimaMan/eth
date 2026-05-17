@@ -109,19 +109,21 @@ impl TokenActivityTracker {
         block_number: u64,
         timestamp: Option<u64>,
         count: u32,
+        amount: f64,
     ) {
-        if count == 0 {
+        let amount = finite_non_negative(amount);
+        if count == 0 && amount == 0.0 {
             return;
         }
         self.record_transaction(tx_hash.as_ref(), None, block_number, timestamp);
         let tx_hash = normalize_key(tx_hash);
         if let Some(tx) = self.transactions_by_hash.get_mut(&tx_hash) {
             tx.token_transfer_count = tx.token_transfer_count.saturating_add(count);
+            tx.token_transfer_volume += amount;
         }
-        self.block_mut(block_number, timestamp).token_transfer_count = self
-            .block_mut(block_number, timestamp)
-            .token_transfer_count
-            .saturating_add(count);
+        let block = self.block_mut(block_number, timestamp);
+        block.token_transfer_count = block.token_transfer_count.saturating_add(count);
+        block.token_transfer_volume += amount;
         self.record_latest(block_number, timestamp);
     }
 
@@ -306,5 +308,20 @@ mod tests {
         assert_eq!(tracker.blocks[&11].total_bribe_eth, 0.02);
         assert_eq!(tracker.transactions_by_hash["0xa"].total_bribe_eth, 0.02);
         assert_eq!(tracker.total_bribe_eth(), 0.02);
+    }
+
+    #[test]
+    fn records_token_transfer_volume_on_block_and_transaction() {
+        let mut tracker = TokenActivityTracker::default();
+
+        tracker.record_token_transfer("0xA", 12, Some(1002), 2, 42.5);
+
+        assert_eq!(tracker.blocks[&12].token_transfer_count, 2);
+        assert_eq!(tracker.blocks[&12].token_transfer_volume, 42.5);
+        assert_eq!(tracker.transactions_by_hash["0xa"].token_transfer_count, 2);
+        assert_eq!(
+            tracker.transactions_by_hash["0xa"].token_transfer_volume,
+            42.5
+        );
     }
 }

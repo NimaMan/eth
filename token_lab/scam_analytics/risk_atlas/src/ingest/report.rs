@@ -4,12 +4,12 @@ use std::path::Path;
 
 use chrono::Utc;
 use eyre::{eyre, Result};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::atlas;
 use crate::db::schema::{
-    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, PoolEligibilityRow,
-    ReviewExample, RiskAtlasRun,
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, ModelReadinessItem, NumericStat,
+    PoolEligibilityRow, ReviewExample, RiskAtlasRun,
 };
 
 pub const DEFAULT_100K_DISTRIBUTION_REPORT: &str =
@@ -20,8 +20,10 @@ pub struct RiskAtlasReportImport {
     pub run: RiskAtlasRun,
     pub distributions: Vec<DistributionBucket>,
     pub pool_eligibility: Vec<PoolEligibilityRow>,
+    pub observations: Vec<crate::db::schema::ObservationRow>,
     pub numeric_stats: Vec<NumericStat>,
     pub active_targets: Vec<ActiveTargetSummary>,
+    pub decision_questions: Vec<DecisionQuestion>,
     pub review_examples: Vec<ReviewExample>,
     pub model_readiness: Vec<ModelReadinessItem>,
 }
@@ -73,16 +75,327 @@ pub fn import_distribution_report(
     if let Some(table) = tables.get("Active Horizons") {
         append_active_horizon_rows(table, &mut active_targets)?;
     }
+    let feature_tables = feature_report_tables(path)?;
+    let decision_questions = build_decision_questions(
+        &run,
+        &distributions,
+        &numeric_stats,
+        &active_targets,
+        &tables,
+        feature_tables.as_ref(),
+    )?;
 
     Ok(RiskAtlasReportImport {
         run,
         distributions,
         pool_eligibility: Vec::new(),
+        observations: Vec::new(),
         numeric_stats,
         active_targets,
+        decision_questions,
         review_examples: Vec::new(),
         model_readiness: default_model_readiness(),
     })
+}
+
+fn feature_report_tables(path: &Path) -> Result<Option<BTreeMap<String, MarkdownTable>>> {
+    let Some(parent) = path.parent() else {
+        return Ok(None);
+    };
+    let feature_path =
+        parent.join("direct_lp_liquidity_removal_features_100k_25007276_25107275_summary.md");
+    if !feature_path.exists() {
+        return Ok(None);
+    }
+    let contents = fs::read_to_string(&feature_path).map_err(|error| {
+        eyre!(
+            "failed to read risk atlas feature report {}: {error}",
+            feature_path.display()
+        )
+    })?;
+    let lines: Vec<&str> = contents.lines().collect();
+    Ok(Some(markdown_tables(&lines)))
+}
+
+fn build_decision_questions(
+    run: &RiskAtlasRun,
+    distributions: &[DistributionBucket],
+    numeric_stats: &[NumericStat],
+    active_targets: &[ActiveTargetSummary],
+    distribution_tables: &BTreeMap<String, MarkdownTable>,
+    feature_tables: Option<&BTreeMap<String, MarkdownTable>>,
+) -> Result<Vec<DecisionQuestion>> {
+    let mut questions = Vec::new();
+    let scam_labels = run.scam_label_count.unwrap_or_else(|| {
+        distributions
+            .iter()
+            .filter(|row| row.section == "scam_mechanisms")
+            .map(|row| row.count)
+            .sum()
+    });
+
+    let mechanism_rows = distribution_payload(distributions, "scam_mechanisms");
+    let top_mechanism = distributions
+        .iter()
+        .filter(|row| row.section == "scam_mechanisms")
+        .max_by_key(|row| row.count);
+    questions.push(decision_question(
+        "scam_mechanism_mix",
+        "Label mix",
+        "Which scam mechanisms dominate eligible scam labels?",
+        top_mechanism.map(|row| {
+            format!(
+                "{} / {}",
+                labelize(&row.bucket),
+                percent(row.count, scam_labels)
+            )
+        }),
+        Some(format!(
+            "{} scam labels are dominated by {}. This tells us which failure modes deserve the first feature work.",
+            fmt_count(scam_labels),
+            top_mechanism
+                .map(|row| labelize(&row.bucket))
+                .unwrap_or_else(|| "unknown mechanisms".to_string())
+        )),
+        "answered",
+        Some("scam labels"),
+        Some(scam_labels),
+        json!({ "rows": mechanism_rows }),
+        0,
+    ));
+
+    if let Some(stat) = numeric_stat(numeric_stats, "scam_age", "Trading Enabled To Label Blocks") {
+        questions.push(decision_question(
+            "scam_time_from_trading_enabled",
+            "Timing",
+            "How fast do eligible scam pools get scammed after trading becomes enabled?",
+            stat.median.map(|value| format!("{} blocks median", fmt_number(value))),
+            Some(format!(
+                "Median scam label arrives after {} active-chain blocks; P90 is {} and P95 is {}. This is the base survival window for scam pools.",
+                fmt_optional_number(stat.median),
+                fmt_optional_number(stat.p90),
+                fmt_optional_number(stat.p95)
+            )),
+            "answered",
+            Some("scam labels"),
+            Some(stat.count),
+            json!({
+                "stats": stat,
+                "buckets": distribution_payload(distributions, "time_to_scam_buckets")
+            }),
+            1,
+        ));
+    }
+
+    let pre_approval = distribution_count(distributions, "direct_lp_approval_pre_removal", "true");
+    let no_pre_approval =
+        distribution_count(distributions, "direct_lp_approval_pre_removal", "false");
+    let approval_total = pre_approval + no_pre_approval;
+    questions.push(decision_question(
+        "lp_approval_visible_before_direct_removal",
+        "Direct LP warning",
+        "How often is LP approval visible before direct LP liquidity removal?",
+        Some(format!("{}", percent(pre_approval, approval_total))),
+        Some(format!(
+            "{} of {} direct LP removals had a pre-removal LP approval; {} had no pre-removal approval visible in the current feature export.",
+            fmt_count(pre_approval),
+            fmt_count(approval_total),
+            fmt_count(no_pre_approval)
+        )),
+        "answered",
+        Some("direct LP removals"),
+        Some(approval_total),
+        json!({ "rows": distribution_payload(distributions, "direct_lp_approval_pre_removal") }),
+        2,
+    ));
+
+    if let Some(stat) = numeric_stat(
+        numeric_stats,
+        "direct_lp_age_approval",
+        "First Pre-Removal LP Approval To Removal Blocks",
+    ) {
+        questions.push(decision_question(
+            "lp_approval_lead_time",
+            "Direct LP warning",
+            "How much warning does first relevant LP approval give before direct removal?",
+            stat.median.map(|value| format!("{} blocks median", fmt_number(value))),
+            Some(format!(
+                "First pre-removal LP approval appears a median {} blocks before removal; P25 is {}, P75 is {}, P90 is {}. The current report measures chain-block lead time, not active-observation lead time yet.",
+                fmt_optional_number(stat.median),
+                fmt_optional_number(stat.p25),
+                fmt_optional_number(stat.p75),
+                fmt_optional_number(stat.p90)
+            )),
+            "answered",
+            Some("direct LP removals with pre-approval"),
+            Some(stat.count),
+            json!({
+                "stats": stat,
+                "lead_buckets": feature_table_count_rows(feature_tables, "First Approval Lead To Removal")?
+            }),
+            3,
+        ));
+    }
+
+    if let Some(stat) = numeric_stat(
+        numeric_stats,
+        "direct_lp_age_approval",
+        "Last Pre-Removal LP Approval To Removal Blocks",
+    ) {
+        questions.push(decision_question(
+            "last_lp_approval_lead_time",
+            "Direct LP warning",
+            "How close to removal is the latest pre-removal LP approval?",
+            stat.median.map(|value| format!("{} blocks median", fmt_number(value))),
+            Some(format!(
+                "The latest pre-removal LP approval is still a median {} blocks before removal. P25 is {}, which helps separate same-block approvals from earlier warning.",
+                fmt_optional_number(stat.median),
+                fmt_optional_number(stat.p25)
+            )),
+            "answered",
+            Some("direct LP removals with pre-approval"),
+            Some(stat.count),
+            json!({
+                "stats": stat,
+                "lead_buckets": feature_table_count_rows(feature_tables, "Last Pre-Removal Approval Lead")?
+            }),
+            4,
+        ));
+    }
+
+    let can_sell_false = distribution_count(distributions, "scam_can_sell_at_label", "false");
+    let can_sell_true = distribution_count(distributions, "scam_can_sell_at_label", "true");
+    let can_sell_total = can_sell_false + can_sell_true;
+    questions.push(decision_question(
+        "sellability_at_scam_label",
+        "Sellability",
+        "What is sellability at the scam label?",
+        Some(format!("{} cannot sell", percent(can_sell_false, can_sell_total))),
+        Some(format!(
+            "At label time, {} of {} scam labels cannot sell and {} can still sell. This answers label-time state; pre-scam sellability degradation needs time-sliced observations.",
+            fmt_count(can_sell_false),
+            fmt_count(can_sell_total),
+            fmt_count(can_sell_true)
+        )),
+        "partial",
+        Some("scam labels"),
+        Some(can_sell_total),
+        json!({
+            "can_sell": distribution_payload(distributions, "scam_can_sell_at_label"),
+            "can_buy": distribution_payload(distributions, "scam_can_buy_at_label")
+        }),
+        5,
+    ));
+
+    if let Some(stat) = numeric_stat(numeric_stats, "scam_age", "Liquidity ETH At Label") {
+        questions.push(decision_question(
+            "liquidity_state_at_label",
+            "Liquidity",
+            "What liquidity state do scams leave at the label?",
+            Some(format!("{} median ETH", fmt_optional_number(stat.median))),
+            Some(format!(
+                "Scam labels usually occur after liquidity is already drained: median label liquidity is {} ETH and P90 is {} ETH.",
+                fmt_optional_number(stat.median),
+                fmt_optional_number(stat.p90)
+            )),
+            "answered",
+            Some("scam labels"),
+            Some(stat.count),
+            json!({
+                "stats": stat,
+                "levels": distribution_payload(distributions, "scam_liquidity_at_label")
+            }),
+            6,
+        ));
+    }
+
+    questions.push(decision_question(
+        "direct_lp_no_observable_lp_warning",
+        "Direct LP warning",
+        "What share of direct LP removals have no observable pre-removal LP approval?",
+        Some(format!("{}", percent(no_pre_approval, approval_total))),
+        Some(format!(
+            "{} direct LP removals have no pre-removal LP approval visible in the current feature export. These are the direct-removal cases where LP approval alone cannot warn us.",
+            fmt_count(no_pre_approval)
+        )),
+        "answered",
+        Some("direct LP removals"),
+        Some(approval_total),
+        json!({
+            "rows": distribution_payload(distributions, "direct_lp_feature_scope")
+        }),
+        7,
+    ));
+
+    let horizon_rows = feature_table_horizon_rows(feature_tables)?;
+    let first_positive = horizon_rows.iter().find(|row| {
+        row.get("row_kind").and_then(|value| value.as_str()) == Some("positive")
+            && row.get("horizon_blocks").and_then(|value| value.as_i64()) == Some(1)
+    });
+    let first_control = horizon_rows.iter().find(|row| {
+        row.get("row_kind").and_then(|value| value.as_str()) == Some("control")
+            && row.get("horizon_blocks").and_then(|value| value.as_i64()) == Some(1)
+    });
+    if let (Some(positive), Some(control)) = (first_positive, first_control) {
+        let positive_pct = positive
+            .get("approval_seen_percent")
+            .and_then(|value| value.as_f64())
+            .unwrap_or_default();
+        let control_pct = control
+            .get("approval_seen_percent")
+            .and_then(|value| value.as_f64())
+            .unwrap_or_default();
+        questions.push(decision_question(
+            "lp_approval_signal_in_controls",
+            "Signal quality",
+            "How noisy is LP approval when compared with non-scam controls?",
+            Some(format!("{} vs {}", fmt_percent(positive_pct), fmt_percent(control_pct))),
+            Some(format!(
+                "At the 1-block as-of window, LP approval is seen in {} of direct-removal positive rows versus {} of control rows. The signal is strong but not unique to scams.",
+                fmt_percent(positive_pct),
+                fmt_percent(control_pct)
+            )),
+            "answered",
+            Some("horizon rows"),
+            None,
+            json!({ "rows": horizon_rows }),
+            8,
+        ));
+    }
+
+    let active_target_rows: i64 = active_targets
+        .iter()
+        .filter(|row| row.horizon_active_observations.is_none())
+        .map(|row| row.rows)
+        .sum();
+    let positive_rows = active_targets
+        .iter()
+        .filter(|row| row.row_kind == "pre_label_positive")
+        .map(|row| row.rows)
+        .sum::<i64>();
+    questions.push(decision_question(
+        "active_observation_target_base_rate",
+        "Model target",
+        "What is the current active-observation target base rate?",
+        Some(format!("{}", percent(positive_rows, active_target_rows))),
+        Some(format!(
+            "{} of {} active-observation rows are positive across the near-future direct-removal horizons. This is the class balance for the first conditional model.",
+            fmt_count(positive_rows),
+            fmt_count(active_target_rows)
+        )),
+        "answered",
+        Some("active-observation rows"),
+        Some(active_target_rows),
+        json!({
+            "row_kinds": active_targets,
+            "active_target": distribution_payload(distributions, "active_target"),
+            "horizons": distribution_payload(distributions, "active_horizons"),
+            "source_note": distribution_tables.contains_key("Active Observation Target Rows")
+        }),
+        9,
+    ));
+
+    Ok(questions)
 }
 
 fn parse_run(lines: &[&str], path: &Path) -> Result<RiskAtlasRun> {
@@ -182,7 +495,15 @@ fn markdown_tables(lines: &[&str]) -> BTreeMap<String, MarkdownTable> {
                 rows.push(table_cells(lines[index].trim()));
                 index += 1;
             }
-            tables.insert(heading.clone(), MarkdownTable { headers, rows });
+            let table = MarkdownTable { headers, rows };
+            if let Some(header_key) = table
+                .headers
+                .first()
+                .filter(|value| should_key_table_by_header(value))
+            {
+                tables.insert(header_key.clone(), table.clone());
+            }
+            tables.insert(heading.clone(), table);
             continue;
         }
 
@@ -190,6 +511,10 @@ fn markdown_tables(lines: &[&str]) -> BTreeMap<String, MarkdownTable> {
     }
 
     tables
+}
+
+fn should_key_table_by_header(value: &str) -> bool {
+    !matches!(value, "Value" | "Metric" | "Bucket" | "Field" | "Row Kind")
 }
 
 fn markdown_heading(line: &str) -> Option<String> {
@@ -344,6 +669,181 @@ fn append_active_horizon_rows(
         });
     }
     Ok(())
+}
+
+fn decision_question(
+    question_id: &str,
+    category: &str,
+    question: &str,
+    headline: Option<String>,
+    answer: Option<String>,
+    status: &str,
+    denominator_label: Option<&str>,
+    denominator_count: Option<i64>,
+    payload: Value,
+    sort_order: i32,
+) -> DecisionQuestion {
+    DecisionQuestion {
+        question_id: question_id.to_string(),
+        category: category.to_string(),
+        question: question.to_string(),
+        headline,
+        answer,
+        status: status.to_string(),
+        denominator_label: denominator_label.map(str::to_string),
+        denominator_count,
+        payload,
+        sort_order,
+    }
+}
+
+fn distribution_count(distributions: &[DistributionBucket], section: &str, bucket: &str) -> i64 {
+    distributions
+        .iter()
+        .find(|row| row.section == section && row.bucket == bucket)
+        .map(|row| row.count)
+        .unwrap_or_default()
+}
+
+fn distribution_payload(distributions: &[DistributionBucket], section: &str) -> Vec<Value> {
+    distributions
+        .iter()
+        .filter(|row| row.section == section)
+        .map(|row| {
+            json!({
+                "bucket": row.bucket,
+                "label": labelize(&row.bucket),
+                "count": row.count,
+                "share": row.share,
+                "sort_order": row.sort_order,
+            })
+        })
+        .collect()
+}
+
+fn numeric_stat<'a>(
+    numeric_stats: &'a [NumericStat],
+    section: &str,
+    metric: &str,
+) -> Option<&'a NumericStat> {
+    numeric_stats
+        .iter()
+        .find(|row| row.section == section && row.metric == metric)
+}
+
+fn feature_table_count_rows(
+    feature_tables: Option<&BTreeMap<String, MarkdownTable>>,
+    heading: &str,
+) -> Result<Vec<Value>> {
+    let Some(table) = feature_tables.and_then(|tables| tables.get(heading)) else {
+        return Ok(Vec::new());
+    };
+    table
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            if row.len() < 2 {
+                return None;
+            }
+            Some((index, row))
+        })
+        .map(|(index, row)| {
+            let (count, share) = parse_count_and_share(&row[1])?;
+            Ok(json!({
+                "bucket": row[0],
+                "label": labelize(&row[0]),
+                "count": count,
+                "share": share,
+                "sort_order": index,
+            }))
+        })
+        .collect()
+}
+
+fn feature_table_horizon_rows(
+    feature_tables: Option<&BTreeMap<String, MarkdownTable>>,
+) -> Result<Vec<Value>> {
+    let Some(table) = feature_tables.and_then(|tables| tables.get("Horizon Signal Availability"))
+    else {
+        return Ok(Vec::new());
+    };
+    table
+        .rows
+        .iter()
+        .filter(|row| row.len() >= 9)
+        .map(|row| {
+            Ok(json!({
+                "row_kind": row[0],
+                "horizon_blocks": parse_i64(&row[1])?,
+                "rows": parse_i64(&row[2])?,
+                "lp_approval_seen": parse_i64(&row[3])?,
+                "approval_seen_percent": parse_f64(&row[4])?,
+                "median_activity_density": parse_optional_f64(&row[5])?,
+                "median_tx_last_10": parse_optional_f64(&row[6])?,
+                "median_tx_last_100": parse_optional_f64(&row[7])?,
+                "median_net_buy_eth": parse_optional_f64(&row[8])?,
+            }))
+        })
+        .collect()
+}
+
+fn labelize(value: &str) -> String {
+    let label = value
+        .replace("(empty)", "Empty")
+        .split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    label
+        .replace("Lp", "LP")
+        .replace("Eth", "ETH")
+        .replace("P90", "P90")
+}
+
+fn percent(count: i64, total: i64) -> String {
+    if total <= 0 {
+        "-".to_string()
+    } else {
+        fmt_percent((count as f64 / total as f64) * 100.0)
+    }
+}
+
+fn fmt_percent(value: f64) -> String {
+    format!("{value:.1}%")
+}
+
+fn fmt_count(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let digits = value.abs().to_string();
+    let mut out = String::new();
+    for (index, ch) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    format!("{sign}{}", out.chars().rev().collect::<String>())
+}
+
+fn fmt_optional_number(value: Option<f64>) -> String {
+    value.map(fmt_number).unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_number(value: f64) -> String {
+    if value.abs() >= 1000.0 {
+        fmt_count(value.round() as i64)
+    } else if value.fract().abs() < 0.000_001 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
 }
 
 fn default_model_readiness() -> Vec<ModelReadinessItem> {

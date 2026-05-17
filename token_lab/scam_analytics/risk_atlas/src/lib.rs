@@ -13,6 +13,7 @@ pub mod ingest;
 pub use api::RiskAtlasPageView;
 pub use config::RiskAtlasConfig;
 pub use db::{
-    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, PoolEligibilityRow,
-    ReviewExample, RiskAtlasReader, RiskAtlasRun, RiskAtlasWriter,
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, ModelReadinessItem, NumericStat,
+    ObservationRow, PoolEligibilityRow, ReviewExample, RiskAtlasReader, RiskAtlasRun,
+    RiskAtlasWriter,
 };

@@ -729,6 +729,7 @@ fn gas_cost_amount(raw: U256) -> Amount {
 
 fn sell_intent_for_position(position: &Position) -> Option<OrderIntent> {
     Some(OrderIntent {
+        trade_id: Some(position.trade_id.clone()),
         portfolio_id: position.key.portfolio_id.clone(),
         wallet_id: position.key.wallet_id.clone(),
         strategy_name: position.key.strategy_name.clone(),

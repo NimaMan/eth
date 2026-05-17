@@ -7,8 +7,8 @@ use crate::api::RiskAtlasPageView;
 use crate::atlas::{build_page_story, default_story_sections};
 
 use super::schema::{
-    ActiveTargetSummary, DistributionBucket, ModelReadinessItem, NumericStat, ReviewExample,
-    RiskAtlasRun,
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, ModelReadinessItem, NumericStat,
+    ReviewExample, RiskAtlasRun,
 };
 
 #[derive(Clone)]
@@ -71,6 +71,7 @@ impl RiskAtlasReader {
             distributions,
             numeric_stats,
             active_targets,
+            decision_questions: self.decision_questions(run_id).await?,
             review_examples: self.review_examples(run_id).await?,
             model_readiness: self.model_readiness(run_id).await?,
         }))
@@ -137,6 +138,23 @@ impl RiskAtlasReader {
         .await?;
 
         rows.into_iter().map(row_to_active_target).collect()
+    }
+
+    async fn decision_questions(&self, run_id: &str) -> Result<Vec<DecisionQuestion>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT question_id, category, question, headline, answer, status,
+                   denominator_label, denominator_count, payload, sort_order
+            FROM risk_atlas_decision_questions
+            WHERE run_id = $1
+            ORDER BY sort_order, question_id
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_decision_question).collect()
     }
 
     async fn review_examples(&self, run_id: &str) -> Result<Vec<ReviewExample>> {
@@ -228,6 +246,21 @@ fn row_to_active_target(row: sqlx::postgres::PgRow) -> Result<ActiveTargetSummar
         unique_pools: row.try_get("unique_pools")?,
         positives: row.try_get("positives")?,
         negatives: row.try_get("negatives")?,
+        sort_order: row.try_get("sort_order")?,
+    })
+}
+
+fn row_to_decision_question(row: sqlx::postgres::PgRow) -> Result<DecisionQuestion> {
+    Ok(DecisionQuestion {
+        question_id: row.try_get("question_id")?,
+        category: row.try_get("category")?,
+        question: row.try_get("question")?,
+        headline: row.try_get("headline")?,
+        answer: row.try_get("answer")?,
+        status: row.try_get("status")?,
+        denominator_label: row.try_get("denominator_label")?,
+        denominator_count: row.try_get("denominator_count")?,
+        payload: row.try_get::<Value, _>("payload")?,
         sort_order: row.try_get("sort_order")?,
     })
 }

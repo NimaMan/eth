@@ -356,6 +356,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(range::launch_stats);
 
+    let risk_atlas_export =
+        warp::path!("eth" / "tokens" / "api" / "runs" / String / "risk-atlas" / "export")
+            .and(warp::post())
+            .and(with_state(state.clone()))
+            .and_then(range::export_risk_atlas);
+
     let errors = warp::path!("eth" / "tokens" / "api" / "runs" / String / "errors")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -435,6 +441,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(surface)
         .or(pools)
         .or(launch_stats)
+        .or(risk_atlas_export)
         .or(errors)
         .or(stream)
         .or(stop)

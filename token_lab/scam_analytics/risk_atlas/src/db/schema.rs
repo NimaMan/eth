@@ -44,6 +44,49 @@ pub struct PoolEligibilityRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ObservationRow {
+    pub token_address: String,
+    pub pool_address: String,
+    pub denom_address: String,
+    pub protocol: String,
+    pub active_observation_index: i64,
+    pub block_number: i64,
+    pub timestamp: Option<i64>,
+    pub active_reasons: Value,
+    pub tx_count: i32,
+    pub token_transfer_count: i32,
+    pub denom_transfer_count: i32,
+    pub buy_volume_denom: Option<f64>,
+    pub sell_volume_denom: Option<f64>,
+    pub total_bribe_eth: Option<f64>,
+    pub can_buy: bool,
+    pub can_sell: bool,
+    pub effective_can_buy: bool,
+    pub effective_can_sell: bool,
+    pub buy_tax: Option<f64>,
+    pub sell_tax: Option<f64>,
+    pub liquidity_removed_as_of: bool,
+    pub liquidity_removal_in_block: bool,
+    pub liquidity_removal_block_as_of: Option<i64>,
+    pub direct_lp_removal_as_of: bool,
+    pub direct_lp_removal_in_block: bool,
+    pub direct_lp_target_1: Option<bool>,
+    pub direct_lp_target_2: Option<bool>,
+    pub direct_lp_target_3: Option<bool>,
+    pub direct_lp_target_5: Option<bool>,
+    pub direct_lp_target_10: Option<bool>,
+    pub denom_reserve: Option<f64>,
+    pub token_reserve: Option<f64>,
+    pub total_liquidity_denom: Option<f64>,
+    pub price_to_initial_ratio: Option<f64>,
+    pub lp_approved_pct_as_of: Option<f64>,
+    pub token_transfer_to_total_supply_ratio: Option<f64>,
+    pub token_transfer_to_pool_token_reserve_ratio: Option<f64>,
+    pub observation: Value,
+    pub features: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NumericStat {
     pub section: String,
     pub metric: String,
@@ -66,6 +109,20 @@ pub struct ActiveTargetSummary {
     pub unique_pools: Option<i64>,
     pub positives: Option<i64>,
     pub negatives: Option<i64>,
+    pub sort_order: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DecisionQuestion {
+    pub question_id: String,
+    pub category: String,
+    pub question: String,
+    pub headline: Option<String>,
+    pub answer: Option<String>,
+    pub status: String,
+    pub denominator_label: Option<String>,
+    pub denominator_count: Option<i64>,
+    pub payload: Value,
     pub sort_order: i32,
 }
 

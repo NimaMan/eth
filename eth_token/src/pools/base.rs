@@ -69,6 +69,9 @@ impl BasePoolConfig {
 pub struct TradingStatus {
     pub can_buy: bool,
     pub can_sell: bool,
+    pub effective_can_buy: bool,
+    pub effective_can_sell: bool,
+    pub economic_sellable: Option<bool>,
     pub trading_enabled: bool,
     pub can_buy_and_sell: bool,
     pub block: Option<u64>,
@@ -77,6 +80,17 @@ pub struct TradingStatus {
     pub sell_tax: Option<f64>,
     pub tax_check_block: Option<u64>,
     pub tax_check_tx: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TradingStatusSnapshot {
+    pub block_number: u64,
+    pub tx_hash: String,
+    pub can_buy: bool,
+    pub can_sell: bool,
+    pub buy_tax: Option<f64>,
+    pub sell_tax: Option<f64>,
+    pub economic_sellable: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -99,12 +113,19 @@ pub struct BasePool {
     pub sell_tax: Option<f64>,
     pub tax_check_block: Option<u64>,
     pub tax_check_tx: Option<String>,
+    #[serde(default)]
+    pub trading_status_history: Vec<TradingStatusSnapshot>,
     pub last_trading_failure_reason: Option<String>,
     pub last_trading_failure_class: Option<String>,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
+    pub scam_mechanism_evidence: Option<Value>,
     pub scam_block: Option<u64>,
     pub scam_tx_hash: Option<String>,
     pub reserve_tracker: PoolReserveTracker,
+    #[serde(default)]
+    pub suspicious_pair_token_out_transfers: Vec<Value>,
     pub token_control_addresses: HashSet<String>,
     pub latest_block_number: Option<u64>,
     pub latest_block_control_address_txs: HashMap<String, Value>,
@@ -143,12 +164,17 @@ impl BasePool {
             sell_tax: None,
             tax_check_block: None,
             tax_check_tx: None,
+            trading_status_history: Vec::new(),
             last_trading_failure_reason: None,
             last_trading_failure_class: None,
             scam_label: None,
+            scam_mechanism: None,
+            scam_mechanism_label: None,
+            scam_mechanism_evidence: None,
             scam_block: None,
             scam_tx_hash: None,
             reserve_tracker,
+            suspicious_pair_token_out_transfers: Vec::new(),
             token_control_addresses: HashSet::new(),
             latest_block_number: None,
             latest_block_control_address_txs: HashMap::new(),
@@ -282,6 +308,7 @@ impl BasePool {
         self.sell_tax = sell_tax;
         self.tax_check_block = Some(block_number);
         self.tax_check_tx = Some(tx_hash.into());
+        self.record_trading_status_snapshot(block_number);
         if can_sell {
             self.last_trading_failure_reason = None;
             self.last_trading_failure_class = None;
@@ -298,6 +325,9 @@ impl BasePool {
         TradingStatus {
             can_buy: self.state.can_buy,
             can_sell: self.state.can_sell,
+            effective_can_buy: self.effective_can_buy(),
+            effective_can_sell: self.effective_can_sell(),
+            economic_sellable: economic_sellable(self.state.can_sell, self.sell_tax),
             trading_enabled: self.trading_enabled(),
             can_buy_and_sell: self.can_buy_and_sell(),
             block: self.can_buy_block,
@@ -306,6 +336,31 @@ impl BasePool {
             sell_tax: self.sell_tax,
             tax_check_block: self.tax_check_block,
             tax_check_tx: self.tax_check_tx.clone(),
+        }
+    }
+
+    fn record_trading_status_snapshot(&mut self, block_number: u64) {
+        let tx_hash = self.tax_check_tx.clone().unwrap_or_default();
+        let snapshot = TradingStatusSnapshot {
+            block_number,
+            tx_hash,
+            can_buy: self.state.can_buy,
+            can_sell: self.state.can_sell,
+            buy_tax: self.buy_tax,
+            sell_tax: self.sell_tax,
+            economic_sellable: economic_sellable(self.state.can_sell, self.sell_tax),
+        };
+
+        if let Some(existing) = self.trading_status_history.iter_mut().find(|status| {
+            status.block_number == block_number && status.tx_hash == snapshot.tx_hash
+        }) {
+            *existing = snapshot;
+        } else {
+            append_with_history_limit(
+                &mut self.trading_status_history,
+                snapshot,
+                self.config.history_limit,
+            );
         }
     }
 
@@ -428,13 +483,23 @@ impl BasePool {
 
     fn sync_liquidity_removal_state_from_reserve_tracker(&mut self) {
         if self.reserve_tracker.is_scam {
-            self.scam_label = self.reserve_tracker.scam_label.clone();
+            let mechanism_label = self
+                .inferred_scam_mechanism()
+                .map(|mechanism| mechanism.label);
+            self.scam_label = self
+                .scam_mechanism_label
+                .clone()
+                .or(mechanism_label)
+                .or_else(|| self.reserve_tracker.scam_label.clone());
             self.scam_block = self.reserve_tracker.scam_block;
             self.scam_tx_hash = self.reserve_tracker.scam_tx_hash.clone();
             self.clear_current_trading_status();
             self.state.lifecycle = PoolLifecycle::LiquidityRemoved;
         } else {
             self.scam_label = None;
+            self.scam_mechanism = None;
+            self.scam_mechanism_label = None;
+            self.scam_mechanism_evidence = None;
             self.scam_block = None;
             self.scam_tx_hash = None;
             self.refresh_lifecycle();
@@ -494,7 +559,7 @@ impl BasePool {
     }
 }
 
-fn meaningful_liquidity_threshold(denom_address: &str) -> f64 {
+pub(crate) fn meaningful_liquidity_threshold(denom_address: &str) -> f64 {
     match normalize_address_string(denom_address) {
         address if address == WETH_ADDRESS => MIN_MEANINGFUL_WETH_LIQUIDITY,
         address if is_stable_denom(&address) => MIN_MEANINGFUL_STABLE_LIQUIDITY,
@@ -508,6 +573,15 @@ fn is_stable_denom(denom_address: &str) -> bool {
 
 fn positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
+}
+
+fn economic_sellable(can_sell: bool, sell_tax: Option<f64>) -> Option<bool> {
+    if !can_sell {
+        return Some(false);
+    }
+    sell_tax
+        .filter(|tax| tax.is_finite() && *tax >= 0.0)
+        .map(|tax| tax <= 40.0)
 }
 
 fn normalize_address(value: impl AsRef<str>) -> Option<String> {
@@ -687,6 +761,27 @@ mod tests {
         assert_eq!(status.tx.as_deref(), Some("0xBUY"));
         assert_eq!(status.sell_tax, Some(2.0));
         assert_eq!(pool.trading_age_blocks(25), Some(5));
+    }
+
+    #[test]
+    fn trading_status_history_keeps_high_tax_sell_execution() {
+        let mut pool = test_pool();
+
+        pool.set_simulated_buy_status(true, 20, "0xBUY", 2_000);
+        pool.set_simulated_sell_status(true, Some(0.0), Some(99.0), 21, "0xSELL");
+
+        assert_eq!(pool.trading_status_history.len(), 1);
+        let snapshot = &pool.trading_status_history[0];
+        assert_eq!(snapshot.block_number, 21);
+        assert_eq!(snapshot.tx_hash, "0xSELL");
+        assert!(snapshot.can_buy);
+        assert!(snapshot.can_sell);
+        assert_eq!(snapshot.sell_tax, Some(99.0));
+        assert_eq!(snapshot.economic_sellable, Some(false));
+
+        let status = pool.trading_status();
+        assert!(status.can_sell);
+        assert_eq!(status.economic_sellable, Some(false));
     }
 
     #[test]

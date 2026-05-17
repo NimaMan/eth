@@ -34,6 +34,9 @@ pub struct StrategyName(pub String);
 pub struct PositionId(pub String);
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct TradeId(pub String);
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct OrderId(pub String);
 
 impl TokenPoolId {
@@ -75,6 +78,12 @@ impl From<&str> for StrategyName {
 }
 
 impl From<&str> for PositionId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<&str> for TradeId {
     fn from(value: &str) -> Self {
         Self(value.to_string())
     }

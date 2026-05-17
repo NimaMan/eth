@@ -8,7 +8,7 @@ reference against which selective strategies are measured.
 
 | Strategy | Path | Description |
 |----------|------|-------------|
-| Snipe All v1 | `snipe_all/` | Buy every eligible pool once (0.01 ETH). Exit on liquidity-removal / tax / LP-approval / scam signals. |
+| Snipe All | `snipe_all/` | Buy every eligible pool once (0.01 ETH). Exit on liquidity-removal / tax / LP-approval / scam signals. |
 
 ## Live Runtime Convention
 

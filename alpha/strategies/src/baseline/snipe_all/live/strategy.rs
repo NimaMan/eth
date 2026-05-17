@@ -73,13 +73,10 @@ mod tests {
     #[test]
     fn live_wrapper_uses_regular_strategy_identity() {
         let strategy = LiveSnipeAllStrategy::new(LiveSnipeAllConfig::new(SnipeAllConfig {
-            strategy_name: StrategyName("snipe-all-live-v1".to_string()),
+            strategy_name: StrategyName("snipe-all-live".to_string()),
             ..SnipeAllConfig::default()
         }));
 
-        assert_eq!(
-            strategy.name(),
-            StrategyName("snipe-all-live-v1".to_string())
-        );
+        assert_eq!(strategy.name(), StrategyName("snipe-all-live".to_string()));
     }
 }

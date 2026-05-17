@@ -11,8 +11,7 @@ pub use current::{
 pub use transaction::ObservationTransactionSummary;
 pub use tx_classification::{ObservationTransactionClassification, ObservationTransactionType};
 
-pub const ACTIVE_OBSERVATION_TARGET_HORIZONS: [u16; 12] =
-    [1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500];
+pub const ACTIVE_OBSERVATION_TARGET_HORIZONS: [u16; 5] = [1, 2, 3, 5, 10];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenPoolObservationKey {
@@ -121,9 +120,6 @@ mod tests {
 
     #[test]
     fn active_horizons_keep_near_future_detail() {
-        assert_eq!(
-            ACTIVE_OBSERVATION_TARGET_HORIZONS,
-            [1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500]
-        );
+        assert_eq!(ACTIVE_OBSERVATION_TARGET_HORIZONS, [1, 2, 3, 5, 10]);
     }
 }

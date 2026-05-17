@@ -60,12 +60,25 @@ pub struct PoolStateSnapshot {
     pub trading_enabled: bool,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
     pub liquidity_removal: bool,
     pub liquidity_removal_label: Option<String>,
 }
 
 impl PoolStateSnapshot {
     pub fn from_base(base: &BasePool) -> Self {
+        let scam_mechanism = base.inferred_scam_mechanism();
+        let scam_mechanism_key = scam_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.mechanism.clone());
+        let scam_mechanism_label = scam_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.label.clone());
+        let scam_label = base
+            .scam_label
+            .clone()
+            .or_else(|| scam_mechanism_label.clone());
         Self {
             pool_address: base.identity.pool_address.clone(),
             protocol: base.identity.protocol.clone(),
@@ -77,10 +90,12 @@ impl PoolStateSnapshot {
             can_buy: base.state.can_buy,
             can_sell: base.state.can_sell,
             trading_enabled: base.trading_enabled(),
-            is_scam: base.has_liquidity_removal(),
-            scam_label: base.scam_label.clone(),
-            liquidity_removal: base.has_liquidity_removal(),
-            liquidity_removal_label: base.scam_label.clone(),
+            is_scam: base.has_liquidity_removal() || scam_mechanism.is_some(),
+            scam_label: scam_label.clone(),
+            scam_mechanism: scam_mechanism_key,
+            scam_mechanism_label: scam_mechanism_label.clone(),
+            liquidity_removal: base.has_liquidity_removal() || scam_mechanism.is_some(),
+            liquidity_removal_label: scam_label,
         }
     }
 }
@@ -113,6 +128,8 @@ pub struct TokenSummary {
     pub token_life_cycle_status: Option<TokenLifecycleState>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
     pub hidden_mint_detected: bool,
     pub hidden_mint_block: Option<u64>,
     pub hidden_mint_tx: Option<String>,

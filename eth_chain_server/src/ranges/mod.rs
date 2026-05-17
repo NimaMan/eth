@@ -1,4 +1,5 @@
 pub mod manager;
+pub mod observations;
 pub mod pipeline;
 pub mod progress;
 pub mod types;

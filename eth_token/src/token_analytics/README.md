@@ -19,6 +19,9 @@ This module should define observations and features known as of an observation:
 - reserve, liquidity, price, price-to-initial, and drawdown context;
 - LP holder and router-approval context;
 - token/pool block activity;
+- token transfer ratios to total token supply and current pool token reserve;
+- observed sell-flow ratios that describe whether seller token flow reaches the
+  pool or is diverted through the token contract;
 - token-network and fund-flow summaries;
 - latest evidence block per feature family for leakage checks.
 
@@ -57,6 +60,16 @@ index.
   transfer, LP transfer, LP approval, mint, burn, sync, trading simulation, tax
   simulation, bribe, control-address activity, network activity, or other.
 
+Activity features should avoid raw token-unit magnitudes when the same signal can be expressed as a ratio. For token transfers, keep the total-supply and pool-reserve ratios. For observed sell txs, track sell-flow quality as:
+
+- seller token outflow share that reaches the selected pool;
+- seller token outflow share routed to the token contract;
+- seller token outflow share routed elsewhere;
+- token-contract transfers into the pool relative to pool token reserve;
+- token-contract transfers into the pool relative to seller token outflow.
+
+This captures tax/honeypot mechanics where an on-chain sell swap exists but most seller token flow is diverted away from the pool or the token contract injects tokens into the pool during the sell.
+
 The existing `token_activity` tracker is still the raw per-token accumulator.
 `token_analytics::observation` is the pool-scoped contract we should build from
 when creating analytics rows. Until the pool-scoped builder is wired, current
@@ -72,7 +85,7 @@ not as known zero-transaction rows.
 The current target horizon constants are kept here as shared metadata:
 
 ```text
-1, 2, 3, 5, 10, 15, 20, 30, 50, 100, 250, 500
+1, 2, 3, 5, 10
 ```
 
 ## Data Ownership

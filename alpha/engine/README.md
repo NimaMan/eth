@@ -184,8 +184,8 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
 Use `--replay-current` for a local smoke test that replays the current
 token-server snapshot through chain simulation.
 
-The deployed no-capital runtime uses a stable
-`--run-id snipe-all-v1-chain-sim-live`. On startup it restores active positions
+The deployed no-capital runtime uses a stable Snipe All chain-sim live run id.
+On startup it restores active positions
 from `alpha_trading.positions` and restores pool/signal watermarks from
 `alpha_trading.strategy_observations`.
 The deployed Snipe All thresholds are `--min-liquidity-eth 0.5` for ETH/WETH pools and `--min-liquidity-usd 1000` for USDC/USDT/DAI pools.

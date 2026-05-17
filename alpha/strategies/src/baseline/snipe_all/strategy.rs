@@ -1,7 +1,7 @@
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{PoolAddress, StrategyName, TokenAddress},
-    market::{MarketEvent, PoolSnapshot},
+    market::{MarketEvent, PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
@@ -49,6 +49,7 @@ impl SnipeAllStrategy {
         self.state.mark_bought(pool.address.clone());
         StrategyDecision::submit_order(
             OrderIntent {
+                trade_id: None,
                 portfolio_id: self.config.portfolio_id.clone(),
                 wallet_id: self.config.wallet_id.clone(),
                 strategy_name: self.name(),
@@ -87,6 +88,7 @@ impl SnipeAllStrategy {
 
         StrategyDecision::submit_order(
             OrderIntent {
+                trade_id: None,
                 portfolio_id: self.config.portfolio_id.clone(),
                 wallet_id: self.config.wallet_id.clone(),
                 strategy_name: self.name(),
@@ -110,6 +112,7 @@ impl SnipeAllStrategy {
 
         StrategyDecision::submit_order(
             OrderIntent {
+                trade_id: None,
                 portfolio_id: self.config.portfolio_id.clone(),
                 wallet_id: self.config.wallet_id.clone(),
                 strategy_name: self.name(),
@@ -146,30 +149,29 @@ impl SnipeAllStrategy {
             .unwrap_or(true)
     }
 
-    /// Evaluate proactive price-ratio and time-based exits for an open position.
+    /// Evaluate proactive price-ratio and active-hold exits for an open position.
     /// Returns Some(decision) if an exit should be triggered, None otherwise.
     fn evaluate_proactive_exit(
         &mut self,
         ctx: &StrategyContext<'_>,
         position: &eth_alpha_core::position::Position,
         pool: &PoolSnapshot,
-        current_block: u64,
+        active_hold_blocks: u64,
     ) -> Option<StrategyDecision> {
         if !position.can_submit_exit() {
             return None;
         }
 
-        // Time-based exit: sell once the configured hold window has elapsed.
+        // Active-hold exit: sell once the position has seen the configured
+        // number of distinct pool-update blocks while open.
         if let Some(max_hold) = self.config.max_hold_blocks {
-            if let Some(entry_block) = position.entry_block {
-                if current_block >= entry_block.saturating_add(max_hold) {
-                    return Some(self.sell_pool(
-                        ctx,
-                        pool.token_address,
-                        pool.address.clone(),
-                        "exit.max_hold",
-                    ));
-                }
+            if active_hold_blocks >= max_hold {
+                return Some(self.sell_pool(
+                    ctx,
+                    pool.token_address,
+                    pool.address.clone(),
+                    "exit.max_hold_active_blocks",
+                ));
             }
         }
 
@@ -231,6 +233,32 @@ impl SnipeAllStrategy {
                     .unwrap_or(true)
         })
     }
+
+    fn has_lp_approval_entry_risk(
+        ctx: &StrategyContext<'_>,
+        token_address: TokenAddress,
+        pool_address: &PoolAddress,
+    ) -> bool {
+        ctx.active_risks.iter().rev().any(|risk| {
+            risk.kind == RiskKind::LpApproval
+                && risk.token_address == token_address
+                && risk
+                    .pool_address
+                    .as_ref()
+                    .map(|pool| pool == pool_address)
+                    .unwrap_or(true)
+        })
+    }
+}
+
+fn protocol_label(protocol: &PoolProtocol) -> &str {
+    match protocol {
+        PoolProtocol::UniswapV2 => "UNISWAP-V2",
+        PoolProtocol::UniswapV3 => "UNISWAP-V3",
+        PoolProtocol::UniswapV4 => "UNISWAP-V4",
+        PoolProtocol::PancakeSwapV2 => "PANCAKESWAP-V2",
+        PoolProtocol::Unknown(label) => label.as_str(),
+    }
 }
 
 fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) -> Option<Amount> {
@@ -271,9 +299,13 @@ impl Strategy for SnipeAllStrategy {
             self.state.mark_bought(pool.address.clone());
 
             if position.state == PositionState::BuyConfirmed {
-                // Evaluate proactive price-ratio / time-based exits.
+                let active_hold_blocks = self
+                    .state
+                    .observe_active_hold_block(&position.id, *block_number);
+
+                // Evaluate proactive price-ratio / active-hold exits.
                 if let Some(decision) =
-                    self.evaluate_proactive_exit(ctx, position, pool, *block_number)
+                    self.evaluate_proactive_exit(ctx, position, pool, active_hold_blocks)
                 {
                     return Ok(decision);
                 }
@@ -297,6 +329,24 @@ impl Strategy for SnipeAllStrategy {
 
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
+        }
+        if self.config.block_entry_on_lp_approval
+            && Self::has_lp_approval_entry_risk(ctx, pool.token_address, &pool.address)
+        {
+            return Ok(StrategyDecision::hold("entry.blocked_by_lp_approval"));
+        }
+        if !self.config.allowed_protocols.is_empty() {
+            let protocol = protocol_label(&pool.protocol);
+            if !self
+                .config
+                .allowed_protocols
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(protocol))
+            {
+                return Ok(StrategyDecision::hold(format!(
+                    "entry.protocol_not_allowed:{protocol}"
+                )));
+            }
         }
 
         Ok(match entry::evaluate(&self.state, pool) {
@@ -399,8 +449,7 @@ impl Strategy for SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         block_number: u64,
     ) -> Result<Vec<StrategyDecision>> {
-        if self.config.max_hold_blocks.is_none() && self.config.exit_retry_interval_blocks.is_none()
-        {
+        if self.config.exit_retry_interval_blocks.is_none() {
             return Ok(Vec::new());
         }
         let strategy_name = self.name();
@@ -414,18 +463,6 @@ impl Strategy for SnipeAllStrategy {
                 }
 
                 match position.state {
-                    PositionState::BuyConfirmed => {
-                        let Some(max_hold) = self.config.max_hold_blocks else {
-                            return false;
-                        };
-                        position.can_submit_exit()
-                            && position
-                                .entry_block
-                                .map(|entry_block| {
-                                    block_number >= entry_block.saturating_add(max_hold)
-                                })
-                                .unwrap_or(false)
-                    }
                     PositionState::SellFailed => {
                         self.should_retry_failed_exit(position, block_number)
                     }
@@ -438,14 +475,7 @@ impl Strategy for SnipeAllStrategy {
 
         Ok(positions
             .iter()
-            .map(|position| {
-                let reason = if position.state == PositionState::SellFailed {
-                    "exit.failed_retry"
-                } else {
-                    "exit.max_hold"
-                };
-                self.sell_position(position, reason)
-            })
+            .map(|position| self.sell_position(position, "exit.failed_retry"))
             .filter(|decision| !decision.is_hold())
             .collect())
     }
@@ -567,13 +597,13 @@ mod tests {
     #[test]
     fn uses_configured_strategy_name() {
         let strategy = SnipeAllStrategy::new(SnipeAllConfig {
-            strategy_name: StrategyName("snipe-all-maxhold20-liq-exit".to_string()),
+            strategy_name: StrategyName("snipe-all-hold20-pool-updates-liquidity-exit".to_string()),
             ..SnipeAllConfig::default()
         });
 
         assert_eq!(
             strategy.name(),
-            StrategyName("snipe-all-maxhold20-liq-exit".to_string())
+            StrategyName("snipe-all-hold20-pool-updates-liquidity-exit".to_string())
         );
     }
 
@@ -627,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn position_monitor_exits_at_max_hold_without_pool_update() {
+    fn position_monitor_does_not_exit_at_max_hold_without_pool_update() {
         let pool = pool();
         let market = MarketSnapshotRef {
             block_number: 201,
@@ -648,8 +678,52 @@ mod tests {
 
         let decisions = strategy.on_position_monitor(&ctx, 201).unwrap();
 
-        assert_eq!(decisions.len(), 1);
-        match &decisions[0] {
+        assert!(decisions.is_empty());
+    }
+
+    #[test]
+    fn max_hold_counts_active_pool_update_blocks_not_chain_blocks() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 100,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_hold_blocks: Some(2),
+            ..SnipeAllConfig::default()
+        });
+        let position = confirmed_position(&strategy, &pool);
+        portfolio.positions.insert(position.id.clone(), position);
+        let ctx = ctx(&market, &portfolio, &risks);
+
+        let first_active_block = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 100,
+                    pool: pool.clone(),
+                },
+            )
+            .unwrap();
+
+        assert!(first_active_block.is_hold());
+
+        let second_active_block = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 101,
+                    pool: pool.clone(),
+                },
+            )
+            .unwrap();
+
+        match second_active_block {
             StrategyDecision::SubmitOrder(intent)
             | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
                 assert_eq!(intent.side, OrderSide::Sell);
@@ -664,10 +738,10 @@ mod tests {
     }
 
     #[test]
-    fn position_monitor_holds_before_max_hold_boundary() {
+    fn max_hold_counts_each_active_block_once() {
         let pool = pool();
         let market = MarketSnapshotRef {
-            block_number: 200,
+            block_number: 100,
             token_address: pool.token_address,
             pool_address: Some(pool.address.clone()),
             token: None,
@@ -676,16 +750,46 @@ mod tests {
         let mut portfolio = PortfolioState::default();
         let risks = Vec::new();
         let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-            max_hold_blocks: Some(200),
+            max_hold_blocks: Some(2),
             ..SnipeAllConfig::default()
         });
         let position = confirmed_position(&strategy, &pool);
         portfolio.positions.insert(position.id.clone(), position);
         let ctx = ctx(&market, &portfolio, &risks);
 
-        let decisions = strategy.on_position_monitor(&ctx, 200).unwrap();
+        let first = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 100,
+                    pool: pool.clone(),
+                },
+            )
+            .unwrap();
+        let duplicate = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 100,
+                    pool: pool.clone(),
+                },
+            )
+            .unwrap();
 
-        assert!(decisions.is_empty());
+        assert!(first.is_hold());
+        assert!(duplicate.is_hold());
+
+        let next_block = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 101,
+                    pool: pool.clone(),
+                },
+            )
+            .unwrap();
+
+        assert!(!next_block.is_hold());
     }
 
     #[test]

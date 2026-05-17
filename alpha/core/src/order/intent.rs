@@ -1,6 +1,6 @@
 use crate::{
     amount::Amount,
-    ids::{PoolAddress, PortfolioId, StrategyName, TokenAddress, WalletId},
+    ids::{PoolAddress, PortfolioId, StrategyName, TokenAddress, TradeId, WalletId},
     order::RouteHint,
 };
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub enum OrderSide {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrderIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trade_id: Option<TradeId>,
     pub portfolio_id: PortfolioId,
     pub wallet_id: WalletId,
     pub strategy_name: StrategyName,

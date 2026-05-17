@@ -527,7 +527,7 @@ impl ERC20Token {
             transaction.block_timestamp,
         );
         self.record_bribe_activity_from_processed_transaction(transaction)?;
-        self.record_transfer_activity_from_processed_transaction(transaction);
+        self.record_transfer_activity_from_processed_transaction(transaction)?;
         self.transfer_tracker
             .update_from_processed_transaction(transaction)?;
         self.record_pair_token_transfers_from_processed_transaction(transaction)?;
@@ -613,14 +613,17 @@ impl ERC20Token {
     fn record_transfer_activity_from_processed_transaction(
         &mut self,
         transaction: &ProcessedTransaction,
-    ) {
+    ) -> Result<()> {
         let mut token_transfer_count = 0u32;
+        let mut token_transfer_volume = 0.0;
         let mut denom_transfer_count = 0u32;
         let token_address = normalize_address_string(&self.contract_address);
 
         for transfer in &transaction.erc20_transfers {
             if same_address(&transfer.token_address, &token_address) {
                 token_transfer_count = token_transfer_count.saturating_add(1);
+                token_transfer_volume +=
+                    scale_raw_units(transfer.amount.to_string(), self.decimals)?;
             } else if DENOM_ADDRESSES.contains_key(&transfer.token_address) {
                 denom_transfer_count = denom_transfer_count.saturating_add(1);
             }
@@ -632,6 +635,7 @@ impl ERC20Token {
                 transaction.block_number,
                 Some(transaction.block_timestamp),
                 token_transfer_count,
+                token_transfer_volume,
             );
         }
         if denom_transfer_count > 0 {
@@ -642,6 +646,7 @@ impl ERC20Token {
                 denom_transfer_count,
             );
         }
+        Ok(())
     }
 
     fn record_pair_token_transfers_from_processed_transaction(

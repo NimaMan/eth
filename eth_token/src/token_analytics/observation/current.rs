@@ -31,6 +31,7 @@ pub struct ObservationBlockActivity {
     pub metrics_complete: bool,
     pub tx_count: u32,
     pub token_transfer_count: u32,
+    pub token_transfer_volume: f64,
     pub denom_transfer_count: u32,
     pub buy_volume_by_denom: BTreeMap<String, f64>,
     pub sell_volume_by_denom: BTreeMap<String, f64>,
@@ -49,6 +50,7 @@ impl ObservationBlockActivity {
     pub fn has_signal(&self) -> bool {
         self.tx_count > 0
             || self.token_transfer_count > 0
+            || self.token_transfer_volume > 0.0
             || self.denom_transfer_count > 0
             || self
                 .buy_volume_by_denom
@@ -73,6 +75,7 @@ impl From<&TokenBlockActivity> for ObservationBlockActivity {
             metrics_complete: true,
             tx_count: activity.num_tx,
             token_transfer_count: activity.token_transfer_count,
+            token_transfer_volume: activity.token_transfer_volume,
             denom_transfer_count: activity.denom_transfer_count,
             buy_volume_by_denom: activity.buy_volume_by_denom.clone(),
             sell_volume_by_denom: activity.sell_volume_by_denom.clone(),
@@ -176,6 +179,7 @@ mod tests {
         let mut source = TokenBlockActivity::new(10, Some(100));
         source.num_tx = 2;
         source.token_transfer_count = 3;
+        source.token_transfer_volume = 42.0;
         source.denom_transfer_count = 4;
         source.buy_volume_by_denom.insert("0xC02A".to_string(), 1.5);
         source
@@ -187,6 +191,7 @@ mod tests {
 
         assert_eq!(activity.tx_count, 2);
         assert_eq!(activity.token_transfer_count, 3);
+        assert_eq!(activity.token_transfer_volume, 42.0);
         assert_eq!(activity.denom_transfer_count, 4);
         assert_eq!(activity.buy_volume_for_denom("0xc02a"), 1.5);
         assert_eq!(activity.sell_volume_for_denom("0xC02A"), 0.5);

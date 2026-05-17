@@ -21,10 +21,12 @@ Asena
   -> renders the page; no flat-file parsing or feature logic
 ```
 
-The current 100K distribution report can seed this DB while the Rust feature
-pipeline is being finalized. Once the source feature rows are fully produced by
-`eth_token::token_analytics`, the importer should read those typed rows instead
-of markdown reports.
+The current 100K distribution report can still seed this DB for comparison, but
+new range runs should write row-level observations from
+`eth_token::token_analytics::TokenPoolCurrentObservation`. The target join stays
+in this lab layer: source features are as-of the active observation, while scam
+labels and near-future target columns are added when the range is exported into
+Risk Atlas.
 
 ## Current State
 
@@ -78,6 +80,46 @@ built from `risk_atlas_pool_eligibility.eligible = true` unless a page section
 explicitly says it is reporting the full observed universe or ineligible
 exclusion reasons.
 
+## Row-Level Observations
+
+The range exporter writes `risk_atlas_observations` with one row per active
+`(token, pool)` observation. Each row stores:
+
+- identity: token, pool, quote/denom, protocol, active observation index, block,
+  timestamp, and active reasons;
+- as-of trading state: can buy, can sell, effective sellability, taxes, and
+  liquidity-removal state known at that observation;
+- as-of feature columns from `eth_token::token_analytics`, including reserves,
+  price-to-initial, LP approval percentage, token-transfer ratios, and full
+  observation/features JSON;
+- lab-owned target labels for direct LP removal within the next `1, 2, 3, 5,
+  10` active observations.
+
+Ineligible pools can be stored for audit, but their target columns should be
+`NULL` because they are outside the training cohort. Eligible pools without a
+future direct LP removal are negative target rows until the end of the observed
+range.
+
+## Decision Questions
+
+The Atlas should turn each generated dataset into strategy-neutral answers
+about pool behavior. These questions are not final; they are the first set for
+reading the 100K cohort and deciding which follow-up cuts matter.
+
+1. Which scam mechanisms dominate eligible scam labels?
+2. How fast do eligible scam pools get scammed after trading becomes enabled?
+3. How often is LP approval visible before direct LP liquidity removal?
+4. How much warning does first relevant LP approval give before direct removal?
+5. How close to removal is the latest pre-removal LP approval?
+6. What is sellability at the scam label?
+7. What liquidity state do scams leave at the label?
+8. What share of direct LP removals have no observable pre-removal LP approval?
+9. How noisy is LP approval when compared with non-scam controls?
+10. What is the current active-observation target base rate?
+
+These answers are stored in `risk_atlas_decision_questions` so Asena renders a
+read model instead of re-parsing reports or implementing feature logic.
+
 ## Layout
 
 ```text
@@ -119,3 +161,9 @@ cargo run -p token_lab_scam_risk_atlas -- import-report
 
 The API/server integration should use `RiskAtlasReader` from this crate rather
 than reading report artifacts directly.
+
+Export a completed in-memory range run into the Risk Atlas DB:
+
+```bash
+curl -X POST http://127.0.0.1:8765/eth/tokens/api/runs/<run-id>/risk-atlas/export
+```

@@ -1,10 +1,27 @@
 use serde::{Deserialize, Serialize};
 
-use crate::pools::PoolLifecycle;
+use super::observation::{TokenPoolObservationContext, TokenPoolObservationKey};
 
-use super::observation::{
-    ObservationBlockActivity, TokenPoolObservationContext, TokenPoolObservationKey,
-};
+pub mod activity;
+pub mod authority;
+pub mod evidence;
+pub mod liquidity;
+pub mod lp_control;
+pub mod market;
+pub mod network;
+pub mod sell_flow;
+pub mod token;
+pub mod utils;
+
+pub use activity::PoolActivityFeatures;
+pub use authority::TokenAuthorityFeatures;
+pub use evidence::FeatureEvidenceBlocks;
+pub use liquidity::PoolLiquidityFeatures;
+pub use lp_control::LpControlFeatures;
+pub use market::PoolMarketFeatures;
+pub use network::TokenNetworkFeatures;
+pub use sell_flow::ObservedSellTransferFlow;
+pub use token::TokenStaticFeatures;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenPoolAnalyticsFeatures {
@@ -51,378 +68,9 @@ impl TokenPoolObservationFeatures {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TokenStaticFeatures {
-    pub token_creation_block: Option<u64>,
-    pub token_age_blocks: Option<u64>,
-    pub pool_creation_after_token_blocks: Option<u64>,
-    pub decimals: Option<u8>,
-    pub total_supply_scaled: Option<f64>,
-    pub total_supply_from_transfers: Option<f64>,
-}
-
-impl TokenStaticFeatures {
-    pub fn from_blocks(
-        token_creation_block: Option<u64>,
-        pool_creation_block: Option<u64>,
-        as_of_block: u64,
-    ) -> Self {
-        Self {
-            token_creation_block,
-            token_age_blocks: token_creation_block.map(|block| as_of_block.saturating_sub(block)),
-            pool_creation_after_token_blocks: token_creation_block
-                .zip(pool_creation_block)
-                .map(|(token_block, pool_block)| pool_block.saturating_sub(token_block)),
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TokenAuthorityFeatures {
-    pub creator_address: Option<String>,
-    pub current_owner: Option<String>,
-    pub current_owner_is_zero_address: Option<bool>,
-    pub current_owner_is_creator: Option<bool>,
-    pub ownership_renounced: bool,
-    pub renouncement_block: Option<u64>,
-    pub control_address_count: Option<u32>,
-    pub control_address_tx_count_in_block: Option<u32>,
-}
-
-impl TokenAuthorityFeatures {
-    pub fn with_owner_context(
-        creator_address: Option<String>,
-        current_owner: Option<String>,
-        ownership_renounced: bool,
-    ) -> Self {
-        let current_owner_is_creator = creator_address
-            .as_deref()
-            .zip(current_owner.as_deref())
-            .map(|(creator, owner)| creator.eq_ignore_ascii_case(owner));
-        let current_owner_is_zero_address = current_owner
-            .as_deref()
-            .map(|owner| normalize_address(owner) == ZERO_ADDRESS);
-
-        Self {
-            creator_address,
-            current_owner,
-            current_owner_is_zero_address,
-            current_owner_is_creator,
-            ownership_renounced,
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PoolMarketFeatures {
-    pub pool_creation_block: Option<u64>,
-    pub trading_enabled_block: Option<u64>,
-    pub pool_age_blocks: Option<u64>,
-    pub trading_age_blocks: Option<u64>,
-    pub lifecycle: Option<PoolLifecycle>,
-    pub can_buy: bool,
-    pub can_sell: bool,
-    pub effective_can_buy: bool,
-    pub effective_can_sell: bool,
-    pub buy_tax: Option<f64>,
-    pub sell_tax: Option<f64>,
-    pub tax_bucket: Option<String>,
-    pub first_observed_buy_block: Option<u64>,
-    pub first_observed_sell_block: Option<u64>,
-    pub first_failed_sell_block: Option<u64>,
-    pub last_trading_failure_class: Option<String>,
-    pub liquidity_removed_as_of: bool,
-    pub liquidity_removal_block_as_of: Option<u64>,
-    pub scam_mechanism_as_of: Option<String>,
-    pub scam_label_as_of: Option<String>,
-}
-
-impl PoolMarketFeatures {
-    pub fn with_ages(
-        pool_creation_block: Option<u64>,
-        trading_enabled_block: Option<u64>,
-        as_of_block: u64,
-    ) -> Self {
-        Self {
-            pool_creation_block,
-            trading_enabled_block,
-            pool_age_blocks: pool_creation_block.map(|block| as_of_block.saturating_sub(block)),
-            trading_age_blocks: trading_enabled_block
-                .map(|block| as_of_block.saturating_sub(block)),
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PoolLiquidityFeatures {
-    pub denom_reserve: f64,
-    pub token_reserve: f64,
-    pub total_liquidity_denom: f64,
-    pub price_denom_per_token: f64,
-    pub initial_price_denom_per_token: Option<f64>,
-    pub price_to_initial_ratio: Option<f64>,
-    pub initial_denom_reserve: Option<f64>,
-    pub denom_reserve_to_initial_ratio: Option<f64>,
-    pub initial_token_reserve: Option<f64>,
-    pub token_reserve_to_initial_ratio: Option<f64>,
-    pub max_denom_reserve_so_far: Option<f64>,
-    pub denom_reserve_drawdown_from_max: Option<f64>,
-    pub reserve_observation_count: u32,
-}
-
-impl PoolLiquidityFeatures {
-    pub fn new(
-        denom_reserve: f64,
-        token_reserve: f64,
-        total_liquidity_denom: f64,
-        price_denom_per_token: f64,
-    ) -> Self {
-        Self {
-            denom_reserve: finite_non_negative(denom_reserve),
-            token_reserve: finite_non_negative(token_reserve),
-            total_liquidity_denom: finite_non_negative(total_liquidity_denom),
-            price_denom_per_token: finite_non_negative(price_denom_per_token),
-            ..Default::default()
-        }
-    }
-
-    pub fn with_initial_reserves(
-        mut self,
-        initial_denom_reserve: Option<f64>,
-        initial_token_reserve: Option<f64>,
-        initial_price_denom_per_token: Option<f64>,
-    ) -> Self {
-        self.initial_denom_reserve = valid_positive(initial_denom_reserve);
-        self.initial_token_reserve = valid_positive(initial_token_reserve);
-        self.initial_price_denom_per_token = valid_positive(initial_price_denom_per_token);
-        self.denom_reserve_to_initial_ratio =
-            ratio_to_initial(self.denom_reserve, self.initial_denom_reserve);
-        self.token_reserve_to_initial_ratio =
-            ratio_to_initial(self.token_reserve, self.initial_token_reserve);
-        self.price_to_initial_ratio = ratio_to_initial(
-            self.price_denom_per_token,
-            self.initial_price_denom_per_token,
-        );
-        self
-    }
-
-    pub fn with_max_denom_reserve(mut self, max_denom_reserve_so_far: Option<f64>) -> Self {
-        self.max_denom_reserve_so_far = valid_positive(max_denom_reserve_so_far);
-        self.denom_reserve_drawdown_from_max = self.max_denom_reserve_so_far.and_then(|max| {
-            if max > 0.0 {
-                Some((max - self.denom_reserve).max(0.0) / max)
-            } else {
-                None
-            }
-        });
-        self
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct LpControlFeatures {
-    pub lp_total_supply: Option<f64>,
-    pub lp_holder_count: Option<u32>,
-    pub lp_top_holder_share_pct: Option<f64>,
-    pub lp_top_holder_is_creator: Option<bool>,
-    pub lp_top_holder_is_owner: Option<bool>,
-    pub lp_approval_count_as_of: Option<u32>,
-    pub lp_first_approval_block_as_of: Option<u64>,
-    pub lp_holders_with_approvals_count: Option<u32>,
-    pub lp_approved_spender_count_as_of: Option<u32>,
-    pub lp_approved_pct_as_of: Option<f64>,
-    pub lp_approved_to_router: Option<f64>,
-    pub lp_approved_to_router_pct: Option<f64>,
-    pub lp_router_approved_pct_as_of: Option<f64>,
-    pub lp_router_approval_seen_as_of: Option<bool>,
-    pub lp_max_approval_amount_as_of: Option<f64>,
-    pub last_lp_approval_block: Option<u64>,
-    pub last_lp_approval_timestamp: Option<u64>,
-    pub last_lp_approval_owner: Option<String>,
-    pub last_lp_approval_spender: Option<String>,
-    pub last_lp_approval_is_router: Option<bool>,
-    pub last_lp_approval_owner_is_creator: Option<bool>,
-    pub last_lp_approval_owner_is_current_owner: Option<bool>,
-    pub blocks_from_first_lp_approval_to_as_of: Option<u64>,
-    pub blocks_from_last_lp_approval_to_as_of: Option<u64>,
-    pub blocks_from_pool_creation_to_last_lp_approval: Option<i64>,
-    pub blocks_from_trading_enabled_to_last_lp_approval: Option<i64>,
-    pub feature_scope: Option<String>,
-}
-
-impl LpControlFeatures {
-    pub fn with_as_of_offsets(mut self, as_of_block: u64) -> Self {
-        self.blocks_from_first_lp_approval_to_as_of = self
-            .lp_first_approval_block_as_of
-            .map(|block| as_of_block.saturating_sub(block));
-        self.blocks_from_last_lp_approval_to_as_of = self
-            .last_lp_approval_block
-            .map(|block| as_of_block.saturating_sub(block));
-        self
-    }
-
-    pub fn with_last_approval_offsets(
-        mut self,
-        pool_creation_block: Option<u64>,
-        trading_enabled_block: Option<u64>,
-    ) -> Self {
-        self.blocks_from_pool_creation_to_last_lp_approval =
-            signed_block_delta(pool_creation_block, self.last_lp_approval_block);
-        self.blocks_from_trading_enabled_to_last_lp_approval =
-            signed_block_delta(trading_enabled_block, self.last_lp_approval_block);
-        self
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PoolActivityFeatures {
-    pub block_tx_count: u32,
-    pub block_token_transfer_count: u32,
-    pub block_denom_transfer_count: u32,
-    pub block_buy_volume_denom: f64,
-    pub block_sell_volume_denom: f64,
-    pub block_buy_sell_volume_imbalance: Option<f64>,
-    pub block_total_bribe_eth: f64,
-    pub cumulative_active_observation_count: u64,
-    pub cumulative_tx_count: u64,
-    pub cumulative_token_transfer_count: u64,
-    pub cumulative_denom_transfer_count: u64,
-    pub cumulative_buy_volume_denom: f64,
-    pub cumulative_sell_volume_denom: f64,
-    pub cumulative_total_bribe_eth: f64,
-    pub first_activity_block: Option<u64>,
-    pub last_activity_block: Option<u64>,
-    pub blocks_since_last_activity: Option<u64>,
-    pub activity_density: Option<f64>,
-    pub tx_per_active_observation: Option<f64>,
-    pub net_buy_volume_denom: f64,
-    pub buy_sell_volume_ratio: Option<f64>,
-    pub denom_token_transfer_ratio: Option<f64>,
-    pub active_observations_last_10: Option<u32>,
-    pub tx_count_last_10: Option<u64>,
-    pub active_observations_last_50: Option<u32>,
-    pub tx_count_last_50: Option<u64>,
-    pub active_observations_last_100: Option<u32>,
-    pub tx_count_last_100: Option<u64>,
-    pub active_density_last_10: Option<f64>,
-    pub active_density_last_50: Option<f64>,
-    pub active_density_last_100: Option<f64>,
-    pub tx_share_last_10_to_total: Option<f64>,
-    pub tx_share_last_50_to_total: Option<f64>,
-    pub tx_share_last_100_to_total: Option<f64>,
-    pub feature_scope: Option<String>,
-}
-
-impl PoolActivityFeatures {
-    pub fn set_block_volume(&mut self, buy_volume_denom: f64, sell_volume_denom: f64) {
-        self.block_buy_volume_denom = finite_non_negative(buy_volume_denom);
-        self.block_sell_volume_denom = finite_non_negative(sell_volume_denom);
-        self.block_buy_sell_volume_imbalance =
-            signed_volume_imbalance(self.block_buy_volume_denom, self.block_sell_volume_denom);
-    }
-}
-
-impl From<&ObservationBlockActivity> for PoolActivityFeatures {
-    fn from(activity: &ObservationBlockActivity) -> Self {
-        Self {
-            block_tx_count: activity.tx_count,
-            block_token_transfer_count: activity.token_transfer_count,
-            block_denom_transfer_count: activity.denom_transfer_count,
-            block_total_bribe_eth: activity.total_bribe_eth,
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TokenNetworkFeatures {
-    pub unique_address_count: Option<u32>,
-    pub new_address_count_in_block: Option<u32>,
-    pub pool_recycling_transfer_count: Option<u32>,
-    pub one_to_many_transfer_count: Option<u32>,
-    pub many_to_one_transfer_count: Option<u32>,
-    pub creator_centrality: Option<f64>,
-    pub owner_centrality: Option<f64>,
-    pub node_count: Option<u32>,
-    pub edge_count: Option<u32>,
-    pub largest_non_protocol_cluster_size: Option<u32>,
-    pub shared_non_protocol_funder_count: Option<u32>,
-    pub feature_scope: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct FeatureEvidenceBlocks {
-    pub token_static_latest_block: Option<u64>,
-    pub authority_latest_block: Option<u64>,
-    pub market_latest_block: Option<u64>,
-    pub liquidity_latest_block: Option<u64>,
-    pub lp_control_latest_block: Option<u64>,
-    pub activity_latest_block: Option<u64>,
-    pub network_latest_block: Option<u64>,
-}
-
-impl FeatureEvidenceBlocks {
-    pub fn latest(&self) -> Option<u64> {
-        [
-            self.token_static_latest_block,
-            self.authority_latest_block,
-            self.market_latest_block,
-            self.liquidity_latest_block,
-            self.lp_control_latest_block,
-            self.activity_latest_block,
-            self.network_latest_block,
-        ]
-        .into_iter()
-        .flatten()
-        .max()
-    }
-}
-
-fn valid_positive(value: Option<f64>) -> Option<f64> {
-    value.filter(|value| value.is_finite() && *value > 0.0)
-}
-
-fn finite_non_negative(value: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
-        value
-    } else {
-        0.0
-    }
-}
-
-fn ratio_to_initial(current: f64, initial: Option<f64>) -> Option<f64> {
-    let initial = initial?;
-    if current.is_finite() && current >= 0.0 && initial > 0.0 {
-        Some(current / initial)
-    } else {
-        None
-    }
-}
-
-fn signed_block_delta(start: Option<u64>, end: Option<u64>) -> Option<i64> {
-    Some(end? as i64 - start? as i64)
-}
-
-fn signed_volume_imbalance(buy: f64, sell: f64) -> Option<f64> {
-    let total = buy + sell;
-    if total > 0.0 && total.is_finite() {
-        Some((buy - sell) / total)
-    } else {
-        None
-    }
-}
-
-const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
-
-fn normalize_address(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
 #[cfg(test)]
 mod tests {
+    use super::utils::ZERO_ADDRESS;
     use super::*;
 
     #[test]
@@ -480,6 +128,51 @@ mod tests {
         features.set_block_volume(3.0, 1.0);
 
         assert_eq!(features.block_buy_sell_volume_imbalance, Some(0.5));
+    }
+
+    #[test]
+    fn token_transfer_volume_ratios_use_supply_and_pool_reserve() {
+        let mut features = PoolActivityFeatures::default();
+        features.set_token_transfer_volume_context(10.0, Some(1_000.0), Some(200.0));
+
+        assert_eq!(features.block_token_transfer_volume, 10.0);
+        assert_eq!(
+            features.block_token_transfer_to_total_supply_ratio,
+            Some(0.01)
+        );
+        assert_eq!(
+            features.block_token_transfer_to_pool_token_reserve_ratio,
+            Some(0.05)
+        );
+    }
+
+    #[test]
+    fn observed_sell_transfer_flow_uses_ratios() {
+        let mut features = PoolActivityFeatures::default();
+        features.set_observed_sell_transfer_flow(ObservedSellTransferFlow {
+            observed_sell_tx_count: 4,
+            seller_token_out: 1_000.0,
+            seller_token_to_pool: 10.0,
+            seller_token_to_token_contract: 990.0,
+            seller_token_to_other: 0.0,
+            token_contract_to_pool: 2_000.0,
+            pool_token_reserve: Some(10_000.0),
+        });
+
+        assert_eq!(features.block_observed_sell_tx_count, 4);
+        assert_eq!(features.block_sell_seller_token_to_pool_ratio, Some(0.01));
+        assert_eq!(
+            features.block_sell_seller_token_to_token_contract_ratio,
+            Some(0.99)
+        );
+        assert_eq!(
+            features.block_sell_token_contract_to_pool_reserve_ratio,
+            Some(0.2)
+        );
+        assert_eq!(
+            features.block_sell_token_contract_to_pool_seller_out_ratio,
+            Some(2.0)
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use crate::{
     execution::{ExecutionReport, ExecutionStatus},
     ids::{
         BlockNumber, OrderId, PoolAddress, PortfolioId, PositionId, StrategyName, TokenAddress,
-        WalletId,
+        TradeId, WalletId,
     },
     order::OrderSide,
     position::PositionState,
@@ -23,6 +23,8 @@ pub struct PositionKey {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Position {
     pub id: PositionId,
+    #[serde(default = "legacy_trade_id")]
+    pub trade_id: TradeId,
     pub key: PositionKey,
     pub state: PositionState,
     pub entry_order_id: Option<OrderId>,
@@ -45,6 +47,9 @@ pub struct Position {
     /// Used for time-based exits (e.g., max hold duration).
     #[serde(default)]
     pub entry_block: Option<BlockNumber>,
+    /// Block number at which the sell was confirmed.
+    #[serde(default)]
+    pub exit_block: Option<BlockNumber>,
     /// Total ETH spent on execution gas for this position.
     #[serde(default)]
     pub gas_cost_eth: DecimalAmount,
@@ -69,8 +74,14 @@ pub struct Position {
 
 impl Position {
     pub fn new(id: PositionId, key: PositionKey) -> Self {
+        let trade_id = TradeId(id.0.clone());
+        Self::with_trade_id(id, trade_id, key)
+    }
+
+    pub fn with_trade_id(id: PositionId, trade_id: TradeId, key: PositionKey) -> Self {
         Self {
             id,
+            trade_id,
             key,
             state: PositionState::Init,
             entry_order_id: None,
@@ -81,6 +92,7 @@ impl Position {
             entry_token_amount: None,
             entry_token_raw_amount: None,
             entry_block: None,
+            exit_block: None,
             gas_cost_eth: DecimalAmount::ZERO,
             drained: false,
             exit_failure_reason: None,
@@ -239,6 +251,7 @@ impl Position {
             if let Some(amount) = &report.filled_amount {
                 self.exit_proceeds = Some(amount_to_decimal(amount));
             }
+            self.exit_block = report.block_number;
             self.exit_failure_reason = None;
             self.exit_retryable = true;
             return Ok(());
@@ -277,6 +290,10 @@ impl Position {
     pub fn mark_scammed(&mut self) {
         self.state = PositionState::Scammed;
     }
+}
+
+fn legacy_trade_id() -> TradeId {
+    TradeId("legacy-unset".to_string())
 }
 
 fn default_exit_retryable() -> bool {

@@ -98,6 +98,7 @@ impl MarketTrackerStrategy {
     ) -> Result<StrategyDecision> {
         self.submitted_pools.insert(pool_address.clone());
         Ok(StrategyDecision::SubmitOrder(OrderIntent {
+            trade_id: None,
             portfolio_id: self.config.portfolio_id.clone(),
             wallet_id: self.config.wallet_id.clone(),
             strategy_name: self.name(),

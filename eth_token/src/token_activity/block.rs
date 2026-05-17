@@ -8,6 +8,7 @@ pub struct TokenBlockActivity {
     pub timestamp: Option<u64>,
     pub num_tx: u32,
     pub token_transfer_count: u32,
+    pub token_transfer_volume: f64,
     pub denom_transfer_count: u32,
     pub buy_volume_by_denom: BTreeMap<String, f64>,
     pub sell_volume_by_denom: BTreeMap<String, f64>,

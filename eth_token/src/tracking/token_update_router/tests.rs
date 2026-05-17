@@ -93,8 +93,8 @@ fn token_decimals_failures_are_optional_pool_metadata_misses() {
         "Failed to get token decimals for 0x38c6a68304cdefb9bec48bbfaaba5c5b47818bb2"
     ));
     assert!(is_optional_uniswap_v2_pool_metadata_miss(
-            "Token decimals call for 0xe0b7927c4af23765cb51314a0e0521a9645f0e2a returned 0 bytes (expected >= 32)"
-        ));
+        "Token decimals call for 0xe0b7927c4af23765cb51314a0e0521a9645f0e2a returned 0 bytes (expected >= 32)"
+    ));
     assert!(is_optional_uniswap_v2_pool_metadata_miss(
         "factory() view call failed or empty output"
     ));

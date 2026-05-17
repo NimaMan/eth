@@ -58,6 +58,64 @@ CREATE INDEX IF NOT EXISTS idx_risk_atlas_pool_eligibility_filter
 CREATE INDEX IF NOT EXISTS idx_risk_atlas_pool_eligibility_block
     ON risk_atlas_pool_eligibility (run_id, eligibility_block);
 
+CREATE TABLE IF NOT EXISTS risk_atlas_observations (
+    run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
+    token_address TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    denom_address TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    active_observation_index BIGINT NOT NULL,
+    block_number BIGINT NOT NULL,
+    timestamp BIGINT,
+    active_reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+    tx_count INTEGER NOT NULL DEFAULT 0,
+    token_transfer_count INTEGER NOT NULL DEFAULT 0,
+    denom_transfer_count INTEGER NOT NULL DEFAULT 0,
+    buy_volume_denom DOUBLE PRECISION,
+    sell_volume_denom DOUBLE PRECISION,
+    total_bribe_eth DOUBLE PRECISION,
+    can_buy BOOLEAN NOT NULL DEFAULT false,
+    can_sell BOOLEAN NOT NULL DEFAULT false,
+    effective_can_buy BOOLEAN NOT NULL DEFAULT false,
+    effective_can_sell BOOLEAN NOT NULL DEFAULT false,
+    buy_tax DOUBLE PRECISION,
+    sell_tax DOUBLE PRECISION,
+    liquidity_removed_as_of BOOLEAN NOT NULL DEFAULT false,
+    liquidity_removal_in_block BOOLEAN NOT NULL DEFAULT false,
+    liquidity_removal_block_as_of BIGINT,
+    direct_lp_removal_as_of BOOLEAN NOT NULL DEFAULT false,
+    direct_lp_removal_in_block BOOLEAN NOT NULL DEFAULT false,
+    direct_lp_target_1 BOOLEAN,
+    direct_lp_target_2 BOOLEAN,
+    direct_lp_target_3 BOOLEAN,
+    direct_lp_target_5 BOOLEAN,
+    direct_lp_target_10 BOOLEAN,
+    denom_reserve DOUBLE PRECISION,
+    token_reserve DOUBLE PRECISION,
+    total_liquidity_denom DOUBLE PRECISION,
+    price_to_initial_ratio DOUBLE PRECISION,
+    lp_approved_pct_as_of DOUBLE PRECISION,
+    token_transfer_to_total_supply_ratio DOUBLE PRECISION,
+    token_transfer_to_pool_token_reserve_ratio DOUBLE PRECISION,
+    observation JSONB NOT NULL,
+    features JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, token_address, pool_address, active_observation_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_atlas_observations_pool_block
+    ON risk_atlas_observations (run_id, token_address, pool_address, block_number);
+
+CREATE INDEX IF NOT EXISTS idx_risk_atlas_observations_direct_lp_targets
+    ON risk_atlas_observations (
+        run_id,
+        direct_lp_target_1,
+        direct_lp_target_2,
+        direct_lp_target_3,
+        direct_lp_target_5,
+        direct_lp_target_10
+    );
+
 CREATE TABLE IF NOT EXISTS risk_atlas_numeric_stats (
     run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
     section TEXT NOT NULL,
@@ -86,6 +144,24 @@ CREATE TABLE IF NOT EXISTS risk_atlas_active_targets (
     sort_order INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, target_key)
 );
+
+CREATE TABLE IF NOT EXISTS risk_atlas_decision_questions (
+    run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
+    question_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    question TEXT NOT NULL,
+    headline TEXT,
+    answer TEXT,
+    status TEXT NOT NULL DEFAULT 'answered',
+    denominator_label TEXT,
+    denominator_count BIGINT,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (run_id, question_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_atlas_decision_questions_order
+    ON risk_atlas_decision_questions (run_id, sort_order);
 
 CREATE TABLE IF NOT EXISTS risk_atlas_review_examples (
     run_id TEXT NOT NULL REFERENCES risk_atlas_runs(run_id) ON DELETE CASCADE,
