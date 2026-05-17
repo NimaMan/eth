@@ -66,6 +66,69 @@ Both commands support `--json` for automation.
 Trade-centric validation for a persisted backtest result set. This is the first
 gate before trusting a strategy comparison, a top winner, or a reported PnL.
 
+### Objective And Model
+
+The objective is:
+
+> Would this exact strategy, seeing only evidence available at the time, have
+> produced these trades and this PnL if we had actually run it?
+
+The validator is not only checking whether rows exist. It is checking whether
+the persisted result is a faithful estimate of the strategy under the backtest
+execution model.
+
+The current execution model is:
+
+- the backtester loops over blocks in order and writes all position, trade,
+  snapshot, event, decision, and risk-evidence rows from that block loop;
+- when the strategy submits an order, the simulator assumes the order is
+  accepted in the next block;
+- execution is simulated against the post-state of that next block, which
+  effectively models our order as the last relevant trade in that block;
+- buy fills are not guessed: the recorded token amount must come from the
+  chain simulator for that buy path and block;
+- sell fills are not guessed: the recorded denomination received must come
+  from the chain simulator for the held token amount and sell block;
+- historical backtests must use mined/local evidence only, while live
+  backtests may also use mempool evidence that was observed before the
+  decision.
+
+Under this model, a closed trade is pure cash accounting:
+
+```text
+closed PnL = sell denomination received - buy denomination paid - gas
+```
+
+A closed trade must not have unrealized PnL unless we explicitly model a
+partial sell or residual token balance. If residual tokens exist, they must be
+stored and valued as a separate open exposure, not hidden inside a closed trade.
+
+### Validation Layers
+
+Validation should run in layers. A later layer is not meaningful if an earlier
+layer fails.
+
+1. **Persistence coherence**: while the block loop runs, are the result-set,
+   trade, event, decision, risk, and snapshot rows written consistently?
+2. **Decision reproducibility**: if the same event stream is replayed into the
+   strategy, do we get the same buy/sell decisions at the same blocks?
+3. **No information leakage**: did every decision use only evidence available
+   at or before that decision block, or observed mempool evidence for live
+   backtests?
+4. **Buy execution replay**: can the simulator reproduce the stored token amount
+   at the buy-confirmed block under the next-block/post-state execution model?
+5. **Sell execution replay**: can the simulator reproduce the stored
+   denomination received at the sell-confirmed block for the exact token amount
+   held?
+6. **Cash and residual accounting**: is closed PnL cash-based, and are any
+   residual tokens tracked explicitly as remaining exposure?
+7. **Fair comparison**: strategies compared together must share the same block
+   window, input stream, execution model, gas model, capital sizing, and token
+   universe.
+8. **Robustness**: profitable conclusions must survive top-winner
+   concentration checks, worst-loser review, liquidity-exit cases, failed-sell
+   cases, and random normal-trade samples.
+
 ```bash
 eth_alpha_lab backtest-validation \
   --result-set historical-25090165-25110164 \
@@ -116,7 +179,9 @@ PnL; first prove the result set is internally coherent.
    - for closed trades,
      `realized_pnl_eth = exit_value_eth - entry_cost_eth - gas_cost_eth`;
    - closed trades must have zero `current_value_eth` and zero
-     `unrealized_pnl_eth`.
+     `unrealized_pnl_eth`;
+   - sell-confirmed snapshots must also have zero unrealized PnL so a later
+     snapshot cannot corrupt the aggregate trade row.
 6. Validate snapshots:
    - `latest_snapshot_block` must equal the max persisted trade snapshot block;
    - closed trades should have a final `sell_confirmed` snapshot at `exit_block`.
@@ -141,18 +206,37 @@ PnL; first prove the result set is internally coherent.
 ### EVM Replay Policy
 
 The current `backtest-validation` command validates DB coherence and replay
-readiness. The next validation layer is EVM replay over sampled trades using
-the existing tx-processor sell/buy simulators. Until that is wired into the lab
+readiness. It does not yet prove full strategy reproducibility or independent
+EVM execution replay for every sampled trade.
+
+The next validation layer is EVM replay over sampled trades using the existing
+tx-processor buy/sell simulators. Replay must use the same next-block,
+post-state execution model as the backtest. Until that is wired into the lab
 command, use the printed top/worst samples with `probe_sell_swap` and
 `probe_pool_buy_sell` for forensic replay.
 
 For each sampled closed trade, replay should prove:
 
-- the recorded buy amount is obtainable at the buy-confirmed block;
-- the recorded token amount is sellable at the sell-confirmed block;
+- the recorded token amount is obtainable from the simulator at the
+  buy-confirmed block;
+- the recorded token amount is sellable in the simulator at the sell-confirmed
+  block;
 - the simulated denomination received matches `sell_confirmed.filled_amount`;
 - gas accounting uses the same approval-plus-swap policy as the backtest;
 - the exit signal was visible no later than the sell-submitted block.
+
+For profitable strategies, sample replay must include:
+
+- top winners;
+- worst losers;
+- liquidity-removal or LP-warning exits;
+- failed sells;
+- random normal trades.
+
+For strategy-level replay, the lab should eventually replay the complete input
+event stream into the strategy and compare generated decisions against
+`strategy_decisions`. That is the check that proves the result is not only
+internally coherent, but reproducible from the historical/live evidence stream.
 
 ## Current Strategy Issue Ledger
 
