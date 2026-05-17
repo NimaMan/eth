@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
 use eth_token::erc20::ERC20Token;
+use eth_token::pools::uniswap::v2::LPHolderSnapshot;
 use eth_token::pools::{BasePool, TaxBucket};
 use eth_token::token_activity::TokenBlockActivity;
 use eth_token::token_analytics::{
     ActiveObservationReason, FeatureEvidenceBlocks, LpControlFeatures, ObservationBlockActivity,
     ObservationBlockActivitySource, ObservationBlockEventFlags, ObservationPoolTradingState,
-    ObservationTransactionSummary, PoolActivityFeatures, PoolLiquidityFeatures,
-    PoolMarketFeatures, TokenAuthorityFeatures, TokenNetworkFeatures, TokenPoolCurrentObservation,
+    ObservationTransactionSummary, PoolActivityFeatures, PoolLiquidityFeatures, PoolMarketFeatures,
+    TokenAuthorityFeatures, TokenNetworkFeatures, TokenPoolCurrentObservation,
     TokenPoolObservationContext, TokenPoolObservationFeatures, TokenPoolObservationKey,
     TokenStaticFeatures,
 };
@@ -119,13 +120,13 @@ fn build_current_observation(
     seed_reasons: Vec<ActiveObservationReason>,
     block_activity: Option<&TokenBlockActivity>,
 ) -> TokenPoolCurrentObservation {
-    let activity = block_activity.map(ObservationBlockActivity::from).unwrap_or_else(|| {
-        ObservationBlockActivity {
+    let activity = block_activity
+        .map(ObservationBlockActivity::from)
+        .unwrap_or_else(|| ObservationBlockActivity {
             source: ObservationBlockActivitySource::TokenActivityTracker,
             metrics_complete: true,
             ..Default::default()
-        }
-    });
+        });
     let event_flags = event_flags(token, pool, block_number);
     let mut reasons = seed_reasons;
     append_activity_reasons(&activity, &pool.identity.denom_address, &mut reasons);
@@ -208,7 +209,11 @@ fn build_current_observation(
     market_features.scam_label_as_of = pool
         .scam_label
         .clone()
-        .or_else(|| scam_mechanism.as_ref().map(|mechanism| mechanism.label.clone()))
+        .or_else(|| {
+            scam_mechanism
+                .as_ref()
+                .map(|mechanism| mechanism.label.clone())
+        })
         .filter(|_| pool.has_liquidity_removal());
 
     let liquidity_features = liquidity_features(pool);
@@ -282,7 +287,11 @@ fn build_current_observation(
     }
 }
 
-fn event_flags(token: &ERC20Token, pool: &BasePool, block_number: u64) -> ObservationBlockEventFlags {
+fn event_flags(
+    token: &ERC20Token,
+    pool: &BasePool,
+    block_number: u64,
+) -> ObservationBlockEventFlags {
     let pool_swap_count_in_block = event_count_at_block(&pool.swap_events, block_number);
     let pool_mint_count_in_block = event_count_at_block(&pool.mint_events, block_number);
     let pool_burn_count_in_block = event_count_at_block(&pool.burn_events, block_number);
@@ -353,7 +362,11 @@ fn liquidity_features(pool: &BasePool) -> PoolLiquidityFeatures {
     features
 }
 
-fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64) -> LpControlFeatures {
+fn lp_control_features(
+    token: &ERC20Token,
+    pool_address: &str,
+    as_of_block: u64,
+) -> LpControlFeatures {
     let pool_address = normalize_address(pool_address);
     if let Some(pool) = token.v2_pools.get(&pool_address) {
         let holders = pool.lp_holders();
@@ -373,14 +386,17 @@ fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64)
             .filter_map(event_block_number)
             .filter(|block| *block <= as_of_block)
             .min();
+        let max_approval_amount = max_lp_approval_amount(&holders);
         return LpControlFeatures {
             lp_total_supply: Some(pool.lp_tracker.total_supply),
             lp_holder_count: Some(holders.len() as u32),
             lp_top_holder_share_pct: top_holder.map(|holder| holder.share),
-            lp_top_holder_is_creator: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.creator_address.as_deref())),
-            lp_top_holder_is_owner: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.current_owner().as_deref())),
+            lp_top_holder_is_creator: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.creator_address.as_deref())
+            }),
+            lp_top_holder_is_owner: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.current_owner().as_deref())
+            }),
             lp_approval_count_as_of: Some(
                 pool.lp_tracker
                     .approval_events
@@ -397,26 +413,32 @@ fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64)
                     .map(|holder| holder.approvals.len())
                     .sum::<usize>() as u32,
             ),
-            lp_approved_pct_as_of: Some(pool.lp_approved_percentage()),
+            lp_approved_pct_as_of: lp_approved_pct_from_max(
+                pool.lp_tracker.total_supply,
+                max_approval_amount,
+            ),
             lp_approved_to_router: Some(pool.total_approved_to_routers()),
             lp_approved_to_router_pct: Some(pool.lp_approved_percentage()),
             lp_router_approved_pct_as_of: Some(pool.lp_approved_percentage()),
             lp_router_approval_seen_as_of: Some(pool.total_approved_to_routers() > 0.0),
-            lp_max_approval_amount_as_of: holders
-                .iter()
-                .flat_map(|holder| holder.approvals.values().map(|approval| approval.amount))
-                .max_by(|left, right| left.total_cmp(right)),
+            lp_max_approval_amount_as_of: max_approval_amount,
             last_lp_approval_block: last_approval.and_then(event_block_number),
             last_lp_approval_timestamp: last_approval.and_then(event_timestamp),
             last_lp_approval_owner: last_approval.and_then(|event| event_string(event, "owner")),
-            last_lp_approval_spender: last_approval.and_then(|event| event_string(event, "spender")),
-            last_lp_approval_is_router: last_approval.and_then(|event| event_bool(event, "is_router")),
+            last_lp_approval_spender: last_approval
+                .and_then(|event| event_string(event, "spender")),
+            last_lp_approval_is_router: last_approval
+                .and_then(|event| event_bool(event, "is_router")),
             last_lp_approval_owner_is_creator: last_approval
                 .and_then(|event| event_string(event, "owner"))
-                .and_then(|owner| same_optional_address(Some(&owner), token.creator_address.as_deref())),
+                .and_then(|owner| {
+                    same_optional_address(Some(&owner), token.creator_address.as_deref())
+                }),
             last_lp_approval_owner_is_current_owner: last_approval
                 .and_then(|event| event_string(event, "owner"))
-                .and_then(|owner| same_optional_address(Some(&owner), token.current_owner().as_deref())),
+                .and_then(|owner| {
+                    same_optional_address(Some(&owner), token.current_owner().as_deref())
+                }),
             feature_scope: Some("uniswap_v2_lp_tracker".to_string()),
             ..Default::default()
         }
@@ -432,10 +454,12 @@ fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64)
             lp_total_supply: Some(pool.lp_total_supply()),
             lp_holder_count: Some(holders.len() as u32),
             lp_top_holder_share_pct: top_holder.map(|holder| holder.share),
-            lp_top_holder_is_creator: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.creator_address.as_deref())),
-            lp_top_holder_is_owner: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.current_owner().as_deref())),
+            lp_top_holder_is_creator: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.creator_address.as_deref())
+            }),
+            lp_top_holder_is_owner: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.current_owner().as_deref())
+            }),
             feature_scope: Some("uniswap_v3_positions".to_string()),
             ..Default::default()
         }
@@ -458,14 +482,18 @@ fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64)
             .filter_map(event_block_number)
             .filter(|block| *block <= as_of_block)
             .min();
+        let lp_total_supply = pool.lp_total_supply();
+        let max_approval_amount = max_lp_approval_amount(&holders);
         return LpControlFeatures {
-            lp_total_supply: Some(pool.lp_total_supply()),
+            lp_total_supply: Some(lp_total_supply),
             lp_holder_count: Some(holders.len() as u32),
             lp_top_holder_share_pct: top_holder.map(|holder| holder.share),
-            lp_top_holder_is_creator: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.creator_address.as_deref())),
-            lp_top_holder_is_owner: top_holder
-                .and_then(|holder| same_optional_address(Some(&holder.address), token.current_owner().as_deref())),
+            lp_top_holder_is_creator: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.creator_address.as_deref())
+            }),
+            lp_top_holder_is_owner: top_holder.and_then(|holder| {
+                same_optional_address(Some(&holder.address), token.current_owner().as_deref())
+            }),
             lp_approval_count_as_of: Some(
                 pool.lp_approval_events
                     .iter()
@@ -481,26 +509,29 @@ fn lp_control_features(token: &ERC20Token, pool_address: &str, as_of_block: u64)
                     .map(|holder| holder.approvals.len())
                     .sum::<usize>() as u32,
             ),
-            lp_approved_pct_as_of: Some(pool.lp_approved_percentage()),
+            lp_approved_pct_as_of: lp_approved_pct_from_max(lp_total_supply, max_approval_amount),
             lp_approved_to_router: Some(pool.total_approved_to_routers()),
             lp_approved_to_router_pct: Some(pool.lp_approved_percentage()),
             lp_router_approved_pct_as_of: Some(pool.lp_approved_percentage()),
             lp_router_approval_seen_as_of: Some(pool.total_approved_to_routers() > 0.0),
-            lp_max_approval_amount_as_of: holders
-                .iter()
-                .flat_map(|holder| holder.approvals.values().map(|approval| approval.amount))
-                .max_by(|left, right| left.total_cmp(right)),
+            lp_max_approval_amount_as_of: max_approval_amount,
             last_lp_approval_block: last_approval.and_then(event_block_number),
             last_lp_approval_timestamp: last_approval.and_then(event_timestamp),
             last_lp_approval_owner: last_approval.and_then(|event| event_string(event, "owner")),
-            last_lp_approval_spender: last_approval.and_then(|event| event_string(event, "spender")),
-            last_lp_approval_is_router: last_approval.and_then(|event| event_bool(event, "is_router")),
+            last_lp_approval_spender: last_approval
+                .and_then(|event| event_string(event, "spender")),
+            last_lp_approval_is_router: last_approval
+                .and_then(|event| event_bool(event, "is_router")),
             last_lp_approval_owner_is_creator: last_approval
                 .and_then(|event| event_string(event, "owner"))
-                .and_then(|owner| same_optional_address(Some(&owner), token.creator_address.as_deref())),
+                .and_then(|owner| {
+                    same_optional_address(Some(&owner), token.creator_address.as_deref())
+                }),
             last_lp_approval_owner_is_current_owner: last_approval
                 .and_then(|event| event_string(event, "owner"))
-                .and_then(|owner| same_optional_address(Some(&owner), token.current_owner().as_deref())),
+                .and_then(|owner| {
+                    same_optional_address(Some(&owner), token.current_owner().as_deref())
+                }),
             feature_scope: Some("uniswap_v4_positions".to_string()),
             ..Default::default()
         }
@@ -535,7 +566,8 @@ fn apply_cumulative_activity_features(
         features.cumulative_tx_count += u64::from(activity.num_tx);
         features.cumulative_token_transfer_count += u64::from(activity.token_transfer_count);
         features.cumulative_denom_transfer_count += u64::from(activity.denom_transfer_count);
-        features.cumulative_buy_volume_denom += volume_for_denom(&activity.buy_volume_by_denom, &denom);
+        features.cumulative_buy_volume_denom +=
+            volume_for_denom(&activity.buy_volume_by_denom, &denom);
         features.cumulative_sell_volume_denom +=
             volume_for_denom(&activity.sell_volume_by_denom, &denom);
         features.cumulative_total_bribe_eth += activity.total_bribe_eth;
@@ -691,7 +723,11 @@ fn append_reason(reasons: &mut Vec<ActiveObservationReason>, reason: ActiveObser
     }
 }
 
-fn lp_event_counts_at_block(token: &ERC20Token, pool_address: &str, block_number: u64) -> (u32, u32) {
+fn lp_event_counts_at_block(
+    token: &ERC20Token,
+    pool_address: &str,
+    block_number: u64,
+) -> (u32, u32) {
     let pool_address = normalize_address(pool_address);
     if let Some(pool) = token.v2_pools.get(&pool_address) {
         return (
@@ -722,19 +758,22 @@ fn event_count_at_block(events: &[Value], block_number: u64) -> u32 {
 }
 
 fn event_block_number(event: &Value) -> Option<u64> {
-    event.get("block")
+    event
+        .get("block")
         .or_else(|| event.get("block_number"))
         .and_then(Value::as_u64)
 }
 
 fn event_timestamp(event: &Value) -> Option<u64> {
-    event.get("timestamp")
+    event
+        .get("timestamp")
         .or_else(|| event.get("block_timestamp"))
         .and_then(Value::as_u64)
 }
 
 fn event_string(event: &Value, key: &str) -> Option<String> {
-    event.get(key)
+    event
+        .get(key)
         .and_then(Value::as_str)
         .map(|value| value.to_ascii_lowercase())
 }
@@ -779,6 +818,21 @@ fn display_tax(value: Option<f64>) -> Option<f64> {
 fn same_optional_address(left: Option<&str>, right: Option<&str>) -> Option<bool> {
     left.zip(right)
         .map(|(left, right)| left.eq_ignore_ascii_case(right))
+}
+
+fn max_lp_approval_amount(holders: &[LPHolderSnapshot]) -> Option<f64> {
+    holders
+        .iter()
+        .flat_map(|holder| holder.approvals.values().map(|approval| approval.amount))
+        .filter(|amount| amount.is_finite() && *amount > 0.0)
+        .max_by(|left, right| left.total_cmp(right))
+}
+
+fn lp_approved_pct_from_max(total_supply: f64, max_approval_amount: Option<f64>) -> Option<f64> {
+    if !total_supply.is_finite() || total_supply <= 0.0 {
+        return None;
+    }
+    max_approval_amount.map(|amount| (amount.min(total_supply) / total_supply) * 100.0)
 }
 
 fn observation_pool_key(token_address: &str, pool_address: &str) -> String {
