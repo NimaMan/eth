@@ -78,7 +78,50 @@ pub(super) async fn manifest(state: ServerState) -> Result<warp::reply::Response
                 "frontend": "May return read-model snapshots and page DTOs. These endpoints can be stale by a bounded interval during active builds.",
                 "trading": "Only committed block state is valid. Trading consumers should react after BlockApplied/chain-state-applied, not from frontend DTO refreshes.",
                 "agents": "Agents should start from manifest/status, then call versioned HTTP resources. Agents should not depend on legacy /eth/tokens/api paths."
-            }
+            },
+            "risk_atlas_execution_modes": [
+                {
+                    "mode": "headless_generation",
+                    "choose_when": [
+                        "large ranges such as 100K or 500K blocks",
+                        "model-data generation",
+                        "training or evaluation datasets",
+                        "scam-label and target distributions without frontend inspection"
+                    ],
+                    "server_required": false,
+                    "state_refresh": "no frontend state; write bounded batches to the Risk Atlas DB",
+                    "canonical_output": "risk_atlas_* DB rows and derived aggregates"
+                },
+                {
+                    "mode": "server_backed_range_builder",
+                    "choose_when": [
+                        "the user needs Asena/token-builder access to generated tokens or pools",
+                        "visual token/pool debugging",
+                        "small smoke ranges meant for page inspection"
+                    ],
+                    "server_required": true,
+                    "state_refresh": "cheap progress every block; heavy read models every configured interval and at completion",
+                    "initial_large_run_interval_blocks": 1000,
+                    "canonical_output": "range read-model snapshots plus optional Risk Atlas DB export"
+                },
+                {
+                    "mode": "db_backed_read_mode",
+                    "choose_when": [
+                        "Risk Atlas page display",
+                        "decision-question review",
+                        "comparing already imported runs"
+                    ],
+                    "server_required": true,
+                    "state_refresh": "no block processing",
+                    "canonical_output": "RiskAtlasReader page view"
+                }
+            ],
+            "agent_decision_rules": [
+                "Default to headless_generation for large modelling/data requests.",
+                "Use server_backed_range_builder only when frontend range-builder inspection is part of the request.",
+                "Use db_backed_read_mode when the requested data already exists in the Risk Atlas DB.",
+                "Use the trading committed-state path for live execution/risk decisions, not frontend read models."
+            ]
         }),
         StatusCode::OK,
     ))

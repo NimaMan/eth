@@ -72,6 +72,26 @@ DB write timing rules:
 - Decision-question aggregates are derived from DB rows and can be regenerated
   without rerunning token processing.
 
+## Execution Modes
+
+Risk Atlas has two generation modes and one read mode. The mode must be chosen
+from the user goal before starting a run:
+
+- **Headless generation:** use for 100K, 500K, and larger modelling datasets.
+  It should run without `eth_chain_server` HTTP/read-model state and write
+  observation batches directly to the Risk Atlas DB.
+- **Server-backed range builder:** use when the user needs Asena/token-builder
+  access to the generated tokens or pools. Cheap progress may update every block;
+  heavy token/pool/Risk Atlas snapshots should refresh on a configured interval
+  such as every 1000 blocks and at completion.
+- **DB-backed read mode:** use when the data already exists and the user wants
+  the Risk Atlas page, decision questions, or distribution views.
+
+Agents should follow the decision matrix in
+[`docs/execution-modes.md`](docs/execution-modes.md). Large modelling runs are
+headless by default. Server-backed runs are only the default when the user asks
+for frontend range-builder inspection.
+
 ## Current State
 
 The surrounding `scam_analytics/` folder currently contains:
@@ -172,6 +192,8 @@ signal is being used as a filter, a warning, a target, or an execution caveat.
 
 ```text
 risk_atlas/
+  docs/
+    execution-modes.md
   migrations/
     001_create_risk_atlas.sql
   src/
@@ -182,6 +204,17 @@ risk_atlas/
     config.rs
     lib.rs
     main.rs     # small migration/schema CLI
+```
+
+Target folder split for the next generation implementation:
+
+```text
+risk_atlas/src/generation/
+  headless.rs       # large range generation without HTTP server state
+  server_export.rs  # export/finalize from a completed server range
+  batch_writer.rs   # bounded observation batch writes
+  targets.rs        # active-observation target finalization
+  progress.rs       # cheap generation progress records
 ```
 
 Local database dumps or generated snapshots belong under `risk_atlas/data/`,

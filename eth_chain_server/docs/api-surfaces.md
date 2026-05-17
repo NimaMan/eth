@@ -75,6 +75,25 @@ Agents should start with `manifest`, then use `status` to discover whether a
 live run, range run, or Risk Atlas snapshot is available before calling heavier
 read endpoints.
 
+## Agent Run-Mode Rules
+
+Agents should choose the Risk Atlas execution mode before starting work:
+
+| Request shape | Agent should use | Reason |
+| --- | --- | --- |
+| "Generate 100K/500K data", "train/evaluate model", "build scam distributions" | Headless Risk Atlas generation | No frontend state is needed; DB rows are the canonical output. |
+| "Run this range and let me inspect tokens in the frontend/token builder" | Server-backed range builder | Asena needs range snapshots and token/pool read models. |
+| "Show/redesign/read the Risk Atlas page" | DB-backed read mode | The page should read Risk Atlas DB views, not active range memory. |
+| "Make a trading decision/live gate/exit on next block" | Trading committed-state path | Trading must consume state after full block apply, not frontend DTOs. |
+
+For server-backed range builds, the server should update cheap progress every
+block but refresh heavy read models on an interval. The first target interval for
+large builds is every `1000` blocks plus a final refresh at completion.
+
+For headless generation, `eth_chain_server` should not be required. The Risk
+Atlas generator should process blocks, write bounded batches into the DB, and
+derive page/model aggregates from those DB rows.
+
 ## Live Trading Event Order
 
 The live trading path must stay committed-state only:
