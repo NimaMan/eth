@@ -13,8 +13,8 @@ use crate::chain_metadata::{
 use crate::network::graph::RawTokenNetworkGraph;
 use crate::tracking::token_update_router::{PoolTradingSimulationMode, V2PoolCandidateCache};
 use crate::tracking::{
-    hash_string, LiveTokenRetentionPolicy, ProcessedTokenUpdateRouter, TokenBlockUpdateReport,
-    TokenRegistry, TokenTransactionUpdateError, TrackedTokenIndex,
+    LiveTokenRetentionPolicy, ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
+    TokenTransactionUpdateError, TrackedTokenIndex, hash_string,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
@@ -428,6 +428,7 @@ impl BlockTokenProcessor {
             transaction_count: block.transactions.len(),
             processed_transaction_count: 0,
             failed_transaction_count: self.last_block_failure_count,
+            pool_simulation_failure_count: 0,
             already_processed: false,
             created_token_addresses: Vec::new(),
             updated_token_addresses: Vec::new(),

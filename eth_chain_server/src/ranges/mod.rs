@@ -7,6 +7,6 @@ pub mod types;
 pub use manager::{RangeIndexManager, StartRangeIndexError};
 pub use progress::{RangeIndexProgress, RangeIndexStatus};
 pub use types::{
-    RangeIndexError, RangeIndexJob, RangeIndexRetentionMode, RangeIndexState,
+    RangeIndexError, RangeIndexErrorKind, RangeIndexJob, RangeIndexRetentionMode, RangeIndexState,
     ResolvedRangeIndexRequest, StartRangeIndexRequest,
 };

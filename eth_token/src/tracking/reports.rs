@@ -39,6 +39,8 @@ pub struct TokenBlockUpdateReport {
     pub transaction_count: usize,
     pub processed_transaction_count: usize,
     pub failed_transaction_count: usize,
+    #[serde(default)]
+    pub pool_simulation_failure_count: usize,
     pub already_processed: bool,
     pub created_token_addresses: Vec<String>,
     pub updated_token_addresses: Vec<String>,

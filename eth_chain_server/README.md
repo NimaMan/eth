@@ -82,6 +82,66 @@ Pool-list responses include `count` for the returned set plus `total_count`,
 `active_count`, and `scam_count`, so clients can show active/scam separation
 without issuing multiple requests.
 
+## Hot Path And Read-Model Contract
+
+Block application must stay a small, deterministic hot path. Anything needed for
+future trading may run on that path; anything needed only for pages, analysis, or
+large historical exports must be moved to a durable writer or throttled read
+model.
+
+The target event flow is:
+
+```text
+processed block / live block update
+  -> tx_processor facts
+  -> eth_token block apply
+  -> TokenBlockUpdateReport
+  -> critical state commit
+       - restore/update token processor ownership
+       - increment cheap progress counters
+       - publish BlockApplied/RangeBlockApplied event
+  -> async/durable sinks
+       - Risk Atlas observation writer
+       - token/pool page snapshot refresher
+       - ops/profile logs
+  -> read APIs and Asena pages
+```
+
+The critical state commit is allowed to do only O(block delta) work. It must not
+scan the full token registry, materialize large token/pool DTOs, or rebuild
+strategy/atlas surfaces every block. Those jobs are read-model work.
+
+The practical ownership split is:
+
+- `eth_token` owns canonical token/pool state and emits compact per-block
+  update reports.
+- Range runs own cheap progress and run lifecycle, not expensive page
+  materialization on every block.
+- Live runs own the confirmed-chain in-memory state needed by trading and page
+  snapshots, but UI snapshots should refresh after a full block commit and at a
+  bounded cadence.
+- Risk Atlas owns durable row-level analytics tables and page story tables.
+  Range runs should stream or batch observations into that DB instead of keeping
+  the whole atlas export as in-memory server state.
+- Asena renders read models. It should not compute features, targets, or
+  eligibility rules.
+
+For a live trading system, the event order must be explicit:
+
+```text
+new confirmed block
+  -> process complete block
+  -> update token/pool state for that block
+  -> publish chain-state-applied event
+  -> trading/risk gates read the committed state for that block
+  -> UI/read-model snapshots refresh after the trading state is committed
+```
+
+This means the trading path should never wait for `/live/tokens`,
+`/live/pools`, Risk Atlas page rendering, or any full-registry statistics. It
+should consume the committed state/event stream directly, while the frontend uses
+snapshot/read-model endpoints.
+
 Resolved live-tail bottleneck target: V2 pool identity/metadata lookups became
 expensive when they fell back through Redis live-state snapshots. See
 [`docs/live-v2-metadata-bottleneck.md`](docs/live-v2-metadata-bottleneck.md)
@@ -94,7 +154,7 @@ Historical range builds are split into three distinct costs:
 ```text
 processed-block disk cache read
   -> token block apply
-  -> in-memory view materialization for HTTP clients
+  -> state commit / read-model updates
 ```
 
 When the processed-block disk cache is hot, cache reads are usually only a few
@@ -136,11 +196,28 @@ Preferred fixes are:
 - Move the mutable `BlockTokenProcessor` out of the progress/view lock, for
   example into a dedicated processor owner or mutex, and expose lightweight
   progress snapshots separately.
+- Keep progress counters incremental. Do not recompute tracked pool/token totals
+  by scanning the full registry on every block.
+- Stream or batch Risk Atlas observations into the Risk Atlas DB during range
+  generation, or export once from compact row batches. Do not require the
+  range-run state lock to retain and transform all atlas rows for the frontend.
 - Cache token/pool/strategy view DTO snapshots or refresh them on a slower
-  cadence while the build is running.
+  cadence while the build is running. A terminal run can refresh the final view
+  once.
 - Keep `/runs/active` cheap and poll it frequently; fetch the heavy token/pool
   lists only periodically, on manual refresh, or when the run reaches a terminal
   status.
+
+Range-builder UI contract:
+
+- `/runs/active` is the high-frequency endpoint and should stay cheap.
+- `/runs/:id/tokens`, `/runs/:id/pools`, `/runs/:id/surface`, and launch stats
+  are read-model endpoints. During an active build they may be stale by a few
+  seconds or a configured block interval.
+- Risk Atlas pages should read from the Risk Atlas DB, not from the active
+  range-run lock.
+- A range run intended only for Risk Atlas/model generation should be able to
+  run headless with durable DB writes and no token-builder page materialization.
 
 Useful profiling checks:
 

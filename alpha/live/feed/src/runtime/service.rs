@@ -6,20 +6,20 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use eth_ops_events::{
-    emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
-    PipelineSeverity,
+    PipelineBottleneckSample, PipelineImpact, PipelineIssue, PipelineSeverity, emit_bottleneck,
+    emit_issue,
 };
 use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use reth_chain_query::RethQueryProvider;
 use serde_json::json;
-use tokio::sync::{broadcast, watch, Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard, broadcast, watch};
 use tx_processor::{
-    load_processed_block, sealed_header_from_processed_block_header, BlockProcessor,
-    BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock, LiveStateDiffFrame,
-    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
+    BlockProcessor, BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock,
+    LiveStateDiffFrame, LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter,
+    ProcessedBlockSource, load_processed_block, sealed_header_from_processed_block_header,
 };
 
 use super::apply_report::{apply_report, push_bottleneck, push_issue};
@@ -709,7 +709,8 @@ impl LiveTokenRuntime {
                 warmup_total_blocks = progress.warmup_total_blocks,
                 live_blocks_processed = progress.live_blocks_processed,
                 txs_processed = progress.txs_processed,
-                tx_failures = progress.tx_failures,
+                transaction_failures = progress.transaction_failures,
+                pool_simulation_failures = progress.pool_simulation_failures,
                 tracked_tokens = progress.tracked_tokens,
                 tracked_pools = progress.tracked_pools,
                 tracked_v2_pools = progress.tracked_v2_pools,
@@ -874,7 +875,8 @@ impl LiveTokenRuntime {
             warmup_total_blocks = state.progress.warmup_total_blocks,
             live_blocks_processed = state.progress.live_blocks_processed,
             txs_processed = state.progress.txs_processed,
-            tx_failures = state.progress.tx_failures,
+            transaction_failures = state.progress.transaction_failures,
+            pool_simulation_failures = state.progress.pool_simulation_failures,
             tracked_tokens = state.progress.tracked_tokens,
             tracked_pools = state.progress.tracked_pools,
             tracked_v2_pools = state.progress.tracked_v2_pools,

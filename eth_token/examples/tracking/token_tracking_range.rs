@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use eth_token::tracking::{BlockTokenProcessor, TrackedTokenStatus};
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
@@ -89,7 +89,8 @@ async fn main() -> Result<()> {
     let mut blocks_processed = 0usize;
     let mut txs_scanned = 0usize;
     let mut txs_processed = 0usize;
-    let mut tx_failures = 0usize;
+    let mut transaction_failures = 0usize;
+    let mut pool_simulation_failures = 0usize;
     let mut token_update_reports = 0usize;
     let mut unique_created_tokens = BTreeSet::new();
     let mut unique_updated_tokens = BTreeSet::new();
@@ -122,7 +123,8 @@ async fn main() -> Result<()> {
         blocks_processed += 1;
         txs_scanned += report.transaction_count;
         txs_processed += report.processed_transaction_count;
-        tx_failures += report.failed_transaction_count;
+        transaction_failures += report.failed_transaction_count;
+        pool_simulation_failures += report.pool_simulation_failure_count;
         token_update_reports += report.token_updates.len();
         unique_created_tokens.extend(report.created_token_addresses);
         unique_updated_tokens.extend(report.updated_token_addresses);
@@ -170,7 +172,8 @@ async fn main() -> Result<()> {
     println!("blocks_processed:       {}", blocks_processed);
     println!("txs_scanned:            {}", txs_scanned);
     println!("txs_processed:          {}", txs_processed);
-    println!("tx_failures:            {}", tx_failures);
+    println!("transaction_failures:   {}", transaction_failures);
+    println!("pool_sim_failures:      {}", pool_simulation_failures);
     println!("token_update_reports:   {}", token_update_reports);
     println!("created_tokens_unique:  {}", unique_created_tokens.len());
     println!("updated_tokens_unique:  {}", unique_updated_tokens.len());

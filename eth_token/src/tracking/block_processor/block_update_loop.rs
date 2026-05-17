@@ -7,10 +7,10 @@ use crate::chain_metadata::{
     TokenMetadataProvider, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadataProvider,
 };
 use crate::tracking::token_update_router::{PendingPoolSimulationMap, PoolTradingSimulationMode};
-use crate::tracking::{hash_string, TokenBlockUpdateReport, TokenTransactionUpdateError};
+use crate::tracking::{TokenBlockUpdateReport, TokenTransactionUpdateError, hash_string};
 
 use super::block_update_profile::{
-    elapsed_micros, log_block_token_processor_profile, BlockTokenProcessorProfile,
+    BlockTokenProcessorProfile, elapsed_micros, log_block_token_processor_profile,
 };
 use super::processor::BlockTokenProcessor;
 use super::token_creation_update::{
@@ -32,6 +32,7 @@ impl BlockTokenProcessor {
                 transaction_count: block.transactions.len(),
                 processed_transaction_count: 0,
                 failed_transaction_count: 0,
+                pool_simulation_failure_count: 0,
                 already_processed: true,
                 created_token_addresses: Vec::new(),
                 updated_token_addresses: Vec::new(),
@@ -48,6 +49,7 @@ impl BlockTokenProcessor {
 
         let mut token_updates = Vec::new();
         let mut transaction_errors = Vec::new();
+        let mut pool_simulation_failure_count = 0;
         let created_token_addresses = Vec::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
@@ -138,7 +140,7 @@ impl BlockTokenProcessor {
                     }
                 }
                 Err(error) => {
-                    self.last_block_failure_count += 1;
+                    pool_simulation_failure_count += 1;
                     transaction_errors.push(TokenTransactionUpdateError {
                         tx_hash: hash_string(&block.header.hash),
                         tx_index: 0,
@@ -163,6 +165,7 @@ impl BlockTokenProcessor {
             transaction_count: block.transactions.len(),
             processed_transaction_count,
             failed_transaction_count: self.last_block_failure_count,
+            pool_simulation_failure_count,
             already_processed: false,
             created_token_addresses,
             updated_token_addresses: self.updated_token_addresses.clone(),
@@ -190,6 +193,7 @@ impl BlockTokenProcessor {
                 transaction_count: block.transactions.len(),
                 processed_transaction_count: 0,
                 failed_transaction_count: 0,
+                pool_simulation_failure_count: 0,
                 already_processed: true,
                 created_token_addresses: Vec::new(),
                 updated_token_addresses: Vec::new(),
@@ -206,6 +210,7 @@ impl BlockTokenProcessor {
 
         let mut token_updates = Vec::new();
         let mut transaction_errors = Vec::new();
+        let mut pool_simulation_failure_count = 0;
         let mut created_token_addresses = BTreeSet::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
@@ -316,7 +321,7 @@ impl BlockTokenProcessor {
                     }
                 }
                 Err(error) => {
-                    self.last_block_failure_count += 1;
+                    pool_simulation_failure_count += 1;
                     transaction_errors.push(TokenTransactionUpdateError {
                         tx_hash: hash_string(&block.header.hash),
                         tx_index: 0,
@@ -341,6 +346,7 @@ impl BlockTokenProcessor {
             transaction_count: block.transactions.len(),
             processed_transaction_count,
             failed_transaction_count: self.last_block_failure_count,
+            pool_simulation_failure_count,
             already_processed: false,
             created_token_addresses: created_token_addresses.into_iter().collect(),
             updated_token_addresses: self.updated_token_addresses.clone(),
@@ -373,6 +379,7 @@ impl BlockTokenProcessor {
                 transaction_count: block.transactions.len(),
                 processed_transaction_count: 0,
                 failed_transaction_count: 0,
+                pool_simulation_failure_count: 0,
                 already_processed: true,
                 created_token_addresses: Vec::new(),
                 updated_token_addresses: Vec::new(),
@@ -401,6 +408,7 @@ impl BlockTokenProcessor {
 
         let mut token_updates = Vec::new();
         let mut transaction_errors = Vec::new();
+        let mut pool_simulation_failure_count = 0;
         let mut created_token_addresses = BTreeSet::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
@@ -517,7 +525,7 @@ impl BlockTokenProcessor {
                     }
                 }
                 Err(error) => {
-                    self.last_block_failure_count += 1;
+                    pool_simulation_failure_count += 1;
                     transaction_errors.push(TokenTransactionUpdateError {
                         tx_hash: hash_string(&block.header.hash),
                         tx_index: 0,
@@ -562,6 +570,7 @@ impl BlockTokenProcessor {
             transaction_count: block.transactions.len(),
             processed_transaction_count,
             failed_transaction_count: self.last_block_failure_count,
+            pool_simulation_failure_count,
             already_processed: false,
             created_token_addresses: created_token_addresses.into_iter().collect(),
             updated_token_addresses: self.updated_token_addresses.clone(),

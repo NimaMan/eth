@@ -1,4 +1,4 @@
-use eth_ops_events::{emit_issue, PipelineBottleneckSample, PipelineIssue};
+use eth_ops_events::{PipelineBottleneckSample, PipelineIssue, emit_issue};
 use eth_token::tracking::{LiveTokenRetentionReport, TokenBlockUpdateReport};
 use tx_processor::LoadedProcessedBlock as LiveBlockLoad;
 
@@ -31,7 +31,8 @@ pub(super) fn apply_report(
     }
     state.progress.txs_scanned += report.transaction_count;
     state.progress.txs_processed += report.processed_transaction_count;
-    state.progress.tx_failures += report.failed_transaction_count;
+    state.progress.transaction_failures += report.failed_transaction_count;
+    state.progress.pool_simulation_failures += report.pool_simulation_failure_count;
     state.progress.token_update_reports += report.token_updates.len();
     state.progress.last_block_upstream_ms = Some(loaded.upstream_ms);
     state.progress.last_block_token_apply_ms = Some(token_apply_ms);

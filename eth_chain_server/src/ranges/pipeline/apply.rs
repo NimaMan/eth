@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::Instrument;
 use tx_processor::PoolBuySellSimulator;
 
-use crate::ranges::{RangeIndexError, RangeIndexJob};
+use crate::ranges::{RangeIndexError, RangeIndexErrorKind, RangeIndexJob};
 
 use super::cache::ProcessedBlockWithMetrics;
 use super::state;
@@ -53,6 +53,7 @@ pub(super) async fn apply_processed_block(
             state::mark_failed(
                 run,
                 RangeIndexError {
+                    kind: RangeIndexErrorKind::Run,
                     block_number: Some(block_number),
                     tx_index: None,
                     tx_hash: None,
@@ -70,6 +71,7 @@ pub(super) async fn apply_processed_block(
             state::mark_failed(
                 run,
                 RangeIndexError {
+                    kind: RangeIndexErrorKind::Run,
                     block_number: Some(block_number),
                     tx_index: None,
                     tx_hash: None,

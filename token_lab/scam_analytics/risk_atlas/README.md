@@ -28,6 +28,50 @@ in this lab layer: source features are as-of the active observation, while scam
 labels and near-future target columns are added when the range is exported into
 Risk Atlas.
 
+## Generation And Read Flow
+
+Risk Atlas should be a durable analytics read model, not a live range-run memory
+view. The intended flow is:
+
+```text
+range block apply
+  -> eth_token::token_analytics active observations
+  -> Risk Atlas observation writer
+       - append/batch risk_atlas_observations
+       - upsert risk_atlas_pool_eligibility
+       - derive target rows after the observed horizon is known
+  -> Risk Atlas DB
+  -> eth_chain_server RiskAtlasReader
+  -> /eth/tokens/analytics/risk-atlas
+  -> Asena page
+```
+
+The range runner may keep a bounded debug buffer, but the canonical atlas rows
+belong in Postgres. This prevents large model-generation runs from making
+`RangeIndexState` and frontend view materialization part of the block-processing
+hot path.
+
+For 100K+ generation, prefer one of these modes:
+
+- **Streaming writer:** write observation rows in batches as each block finishes.
+  This is the target for long model-data runs because memory stays bounded.
+- **Finalize writer:** keep compact row batches during the run, then write the DB
+  at completion. This is acceptable for smaller runs and smoke tests.
+
+The frontend page must read from the DB-backed atlas view. It should not parse
+CSV/report files, inspect active range-run state, or implement feature/target
+logic.
+
+DB write timing rules:
+
+- Source features are written only after the full block has been applied.
+- Eligibility is the first active observation where the pool satisfies the
+  cohort criteria; after that it remains true for downstream analysis.
+- Near-future targets are attached only when the required future active
+  observations or the end of the range are known.
+- Decision-question aggregates are derived from DB rows and can be regenerated
+  without rerunning token processing.
+
 ## Current State
 
 The surrounding `scam_analytics/` folder currently contains:
@@ -106,19 +150,23 @@ The Atlas should turn each generated dataset into strategy-neutral answers
 about pool behavior. These questions are not final; they are the first set for
 reading the 100K cohort and deciding which follow-up cuts matter.
 
-1. Which scam mechanisms dominate eligible scam labels?
-2. How fast do eligible scam pools get scammed after trading becomes enabled?
-3. How often is LP approval visible before direct LP liquidity removal?
-4. How much warning does first relevant LP approval give before direct removal?
-5. How close to removal is the latest pre-removal LP approval?
-6. What is sellability at the scam label?
-7. What liquidity state do scams leave at the label?
-8. What share of direct LP removals have no observable pre-removal LP approval?
-9. How noisy is LP approval when compared with non-scam controls?
-10. What is the current active-observation target base rate?
+1. Which pools enter the eligible cohort?
+2. Why were pools excluded before modeling?
+3. Which protocols dominate the eligible cohort?
+4. Which scam mechanisms dominate eligible scam labels?
+5. How fast do eligible scam pools get scammed after trading becomes enabled?
+6. How often is LP approval visible before direct LP liquidity removal?
+7. How much confirmed-chain warning does LP approval give before removal?
+8. What is the direct LP removal base rate across active-observation horizons?
+9. How often are active observations economically buyable and sellable?
+10. How much row-level data is available for training?
+11. How are we using these answers right now?
 
 These answers are stored in `risk_atlas_decision_questions` so Asena renders a
-read model instead of re-parsing reports or implementing feature logic.
+read model instead of re-parsing reports or implementing feature logic. Each
+question payload also carries a short "how we use this" explanation. The page
+should keep behavior analysis strategy-neutral, then explicitly state whether a
+signal is being used as a filter, a warning, a target, or an execution caveat.
 
 ## Layout
 

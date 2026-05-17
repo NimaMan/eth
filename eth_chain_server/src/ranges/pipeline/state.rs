@@ -1,8 +1,8 @@
 use eth_token::tracking::{BlockTokenProcessor, TokenBlockUpdateReport};
 
-use crate::ranges::progress::{now_unix_secs, RangeIndexStatus};
-use crate::ranges::{RangeIndexError, RangeIndexJob, RangeIndexState};
 use crate::ranges::observations;
+use crate::ranges::progress::{now_unix_secs, RangeIndexStatus};
+use crate::ranges::{RangeIndexError, RangeIndexErrorKind, RangeIndexJob, RangeIndexState};
 
 use super::cache::ProcessedBlockDiskCacheMetrics;
 
@@ -83,7 +83,8 @@ pub(super) fn apply_report(
     state.progress.blocks_processed += 1;
     state.progress.txs_scanned += report.transaction_count;
     state.progress.txs_processed += report.processed_transaction_count;
-    state.progress.tx_failures += report.failed_transaction_count;
+    state.progress.transaction_failures += report.failed_transaction_count;
+    state.progress.pool_simulation_failures += report.pool_simulation_failure_count;
     state.progress.token_update_reports += report.token_updates.len();
     state.progress.last_block_upstream_ms = Some(upstream_ms);
     state.progress.last_block_token_apply_ms = Some(token_apply_ms);
@@ -122,7 +123,9 @@ pub(super) fn apply_report(
     }
 
     for error in report.transaction_errors {
+        let kind = range_error_kind(&error.message);
         state.errors.push(RangeIndexError {
+            kind,
             block_number: Some(report.block_number),
             tx_index: Some(error.tx_index),
             tx_hash: Some(error.tx_hash),
@@ -193,11 +196,7 @@ fn simulation_summary(
     report: &TokenBlockUpdateReport,
 ) -> SimulationSummary {
     let mut summary = SimulationSummary {
-        errors: report
-            .transaction_errors
-            .iter()
-            .filter(|error| looks_like_simulator_error(&error.message))
-            .count(),
+        errors: report.pool_simulation_failure_count,
         ..SimulationSummary::default()
     };
 
@@ -229,11 +228,15 @@ fn simulation_summary(
     summary
 }
 
-fn looks_like_simulator_error(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("simulat")
-        || message.contains("transfer_failed")
-        || message.contains("revert")
-        || message.contains("cannot sell")
-        || message.contains("cannot buy")
+fn range_error_kind(message: &str) -> RangeIndexErrorKind {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("post-block pool simulation failed")
+        || normalized.contains("pool simulation")
+        || normalized.contains("pool trading simulation")
+        || normalized.contains("simulating weth deposit")
+    {
+        RangeIndexErrorKind::PoolSimulation
+    } else {
+        RangeIndexErrorKind::Transaction
+    }
 }

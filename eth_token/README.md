@@ -40,6 +40,41 @@ ProcessedBlock / ProcessedTransaction
   -> mempool_processor context and alpha market events
 ```
 
+## Block Apply Contract
+
+`eth_token` is the source-state engine. It should finish a full block before any
+consumer treats the state as tradable or page-visible.
+
+The block apply contract is:
+
+```text
+processed block
+  -> apply every relevant transaction in block/index order
+  -> coalesce post-block pool simulations
+  -> update token/pool/analytics state as-of the end of the block
+  -> return TokenBlockUpdateReport
+```
+
+`TokenBlockUpdateReport` should stay compact and delta-oriented. It is the handoff
+from token source state to server/runtime consumers. It can include updated token
+addresses, discovered/simulated pools, transaction failures, pool-simulation
+failures, and active observation rows, but it should not require downstream code
+to rescan every tracked token to understand what changed in this block.
+
+Token analytics observations are source features only. Labels, active-horizon
+targets, training rows, and page story aggregates are owned by
+`token_lab/scam_analytics/risk_atlas` and should be written/read through its DB.
+
+For live trading, the important invariant is:
+
+```text
+trading/risk consumers read state only after eth_token has completed the block
+and eth_chain_server has committed that state for the block.
+```
+
+Frontend snapshots and Risk Atlas exports are downstream read models. They should
+not feed back into token state or block trading decisions.
+
 ## Where To Look First
 
 | Need | Start here |

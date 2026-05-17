@@ -57,8 +57,17 @@ pub enum RangeIndexRetentionMode {
     BoundedIndex,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RangeIndexErrorKind {
+    Transaction,
+    PoolSimulation,
+    Run,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RangeIndexError {
+    pub kind: RangeIndexErrorKind,
     pub block_number: Option<u64>,
     pub tx_index: Option<u64>,
     pub tx_hash: Option<String>,

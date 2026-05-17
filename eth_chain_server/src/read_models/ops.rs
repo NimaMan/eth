@@ -70,8 +70,14 @@ pub async fn health(tracker: &LiveTracker) -> OpsHealthResponse {
         "live_blocks_processed".to_string(),
         json!(progress.live_blocks_processed),
     );
-    live.metrics
-        .insert("tx_failures".to_string(), json!(progress.tx_failures));
+    live.metrics.insert(
+        "transaction_failures".to_string(),
+        json!(progress.transaction_failures),
+    );
+    live.metrics.insert(
+        "pool_simulation_failures".to_string(),
+        json!(progress.pool_simulation_failures),
+    );
     live.metrics
         .insert("tracked_tokens".to_string(), json!(progress.tracked_tokens));
     live.metrics

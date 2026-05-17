@@ -9,7 +9,7 @@ use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlockReplayStoreWriter};
 
 use crate::memory;
-use crate::ranges::{RangeIndexError, RangeIndexJob};
+use crate::ranges::{RangeIndexError, RangeIndexErrorKind, RangeIndexJob};
 
 const TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH: u64 = 25;
 const TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY: usize = 1;
@@ -66,6 +66,7 @@ pub async fn run_range_index(
             state::mark_failed(
                 &run,
                 RangeIndexError {
+                    kind: RangeIndexErrorKind::Run,
                     block_number: Some(next_block),
                     tx_index: None,
                     tx_hash: None,
@@ -92,6 +93,7 @@ pub async fn run_range_index(
                     state::mark_failed(
                         &run,
                         RangeIndexError {
+                            kind: RangeIndexErrorKind::Run,
                             block_number: Some(next_block),
                             tx_index: None,
                             tx_hash: None,
