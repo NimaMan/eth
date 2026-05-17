@@ -338,6 +338,9 @@ pub async fn load_result_set_performance(
         .limit
         .unwrap_or(DEFAULT_PERFORMANCE_LIMIT)
         .clamp(1, MAX_PERFORMANCE_LIMIT);
+    let baseline =
+        load_result_set_performance_baseline(pool, result_set_id, query.strategy_name.as_deref())
+            .await?;
     let block_rows = sqlx::query(
         r#"
         WITH filtered_trades AS (
@@ -352,14 +355,26 @@ pub async fn load_result_set_performance(
             FROM alpha_trading.trade_snapshots ts
             JOIN filtered_trades t ON t.trade_id = ts.trade_id
             WHERE COALESCE(ts.valuation_block_number, ts.observed_block_number, ts.block_number) IS NOT NULL
+        ),
+        ranked_blocks AS (
+            SELECT block_number,
+                   ROW_NUMBER() OVER (ORDER BY block_number ASC) AS rn,
+                   COUNT(*) OVER () AS total_blocks
+            FROM selected_blocks
+        ),
+        sampled_blocks AS (
+            SELECT block_number
+            FROM ranked_blocks
+            WHERE total_blocks <= $3
+               OR rn = 1
+               OR rn = total_blocks
+               OR (
+                   (rn - 1)
+                   % GREATEST(1::bigint, CEIL(total_blocks::numeric / $3::numeric)::bigint)
+               ) = 0
         )
         SELECT block_number
-        FROM (
-            SELECT block_number
-            FROM selected_blocks
-            ORDER BY block_number DESC
-            LIMIT $3
-        ) recent
+        FROM sampled_blocks
         ORDER BY block_number ASC
         "#,
     )
@@ -375,7 +390,9 @@ pub async fn load_result_set_performance(
         .map(|row| int(row, "block_number"))
         .collect::<Result<Vec<_>>>()?;
     if blocks.is_empty() {
-        return Ok(ResultSetPerformanceResponse { points: Vec::new() });
+        return Ok(ResultSetPerformanceResponse {
+            points: baseline.into_iter().collect(),
+        });
     }
     let max_block = *blocks.last().unwrap_or(&0);
 
@@ -415,7 +432,17 @@ pub async fn load_result_set_performance(
         .iter()
         .map(row_to_carried_snapshot)
         .collect::<Result<Vec<_>>>()?;
-    let points = build_performance_points(&blocks, &snapshots);
+    let mut points = build_performance_points(&blocks, &snapshots);
+    if let Some(baseline) = baseline {
+        let should_insert = points.first().map_or(true, |point| {
+            point.block_number > baseline.block_number
+                || (point.block_number == baseline.block_number
+                    && point.total_pnl_eth.unwrap_or(0.0).abs() > f64::EPSILON)
+        });
+        if should_insert {
+            points.insert(0, baseline);
+        }
+    }
     Ok(ResultSetPerformanceResponse { points })
 }
 
@@ -430,6 +457,62 @@ struct CarriedSnapshot {
     unrealized_pnl_eth: f64,
     total_pnl_eth: f64,
     created_at: Option<String>,
+}
+
+async fn load_result_set_performance_baseline(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy_name: Option<&str>,
+) -> Result<Option<ResultSetPerformancePoint>> {
+    let row = sqlx::query(
+        r#"
+        SELECT COALESCE(
+                   rs.start_block,
+                   MIN(t.entry_block),
+                   MIN(COALESCE(
+                       ts.valuation_block_number,
+                       ts.observed_block_number,
+                       ts.block_number
+                   ))
+               ) AS baseline_block,
+               CASE
+                   WHEN rs.start_block IS NOT NULL THEN rs.created_at
+                   ELSE COALESCE(MIN(t.created_at), MIN(ts.created_at), rs.created_at)
+               END::text AS baseline_at
+        FROM alpha_trading.backtest_result_sets rs
+        LEFT JOIN alpha_trading.trades t
+          ON t.result_set_id = rs.result_set_id
+         AND ($2::text IS NULL OR t.strategy_name = $2)
+        LEFT JOIN alpha_trading.trade_snapshots ts ON ts.trade_id = t.trade_id
+        WHERE rs.result_set_id = $1
+        GROUP BY rs.result_set_id, rs.start_block, rs.created_at
+        "#,
+    )
+    .bind(result_set_id)
+    .bind(strategy_name)
+    .fetch_optional(pool)
+    .await
+    .map_err(store_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let Some(block_number) = optional_int(&row, "baseline_block")? else {
+        return Ok(None);
+    };
+    Ok(Some(ResultSetPerformancePoint {
+        block_number,
+        trade_count: 0,
+        open_trades: 0,
+        closed_trades: 0,
+        entry_cost_eth: Some(0.0),
+        current_value_eth: Some(0.0),
+        portfolio_value_eth: Some(0.0),
+        realized_pnl_eth: Some(0.0),
+        unrealized_pnl_eth: Some(0.0),
+        total_pnl_eth: Some(0.0),
+        roi_percent: Some(0.0),
+        recorded_at: optional_text(&row, "baseline_at")?,
+    }))
 }
 
 fn row_to_result_set(
