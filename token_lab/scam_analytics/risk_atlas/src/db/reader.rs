@@ -54,6 +54,23 @@ impl RiskAtlasReader {
         self.page_view(&run_id).await
     }
 
+    pub async fn runs(&self, limit: i64) -> Result<Vec<RiskAtlasRun>> {
+        let limit = limit.clamp(1, 500);
+        let rows = sqlx::query(
+            r#"
+            SELECT *
+            FROM risk_atlas_runs
+            ORDER BY generated_at DESC, run_id DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_run).collect()
+    }
+
     pub async fn page_view(&self, run_id: &str) -> Result<Option<RiskAtlasPageView>> {
         let Some(run) = self.run(run_id).await? else {
             return Ok(None);

@@ -1,3 +1,4 @@
+mod agent;
 mod alpha;
 mod backtest;
 mod health;
@@ -7,6 +8,7 @@ mod ops;
 mod range;
 mod token_activity;
 mod token_analytics;
+mod v1;
 
 use std::convert::Infallible;
 
@@ -183,6 +185,18 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(token_analytics::risk_atlas);
+
+    let token_risk_atlas_runs =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "runs")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::risk_atlas_runs);
+
+    let token_risk_atlas_run =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "runs" / String)
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(token_analytics::risk_atlas_run);
 
     let token_network_analysis_start =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "network")
@@ -374,7 +388,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
 
     let stop = warp::path!("eth" / "tokens" / "api" / "runs" / String / "stop")
         .and(warp::post())
-        .and(with_state(state))
+        .and(with_state(state.clone()))
         .and_then(range::stop_run);
 
     let alpha_result_set_routes = alpha_result_set_strategy_performance
@@ -413,6 +427,8 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(token_risk_atlas_runs)
+        .or(token_risk_atlas_run)
         .or(token_risk_atlas)
         .or(token_network_analysis_start)
         .or(token_network_analysis_list)
@@ -447,14 +463,16 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(stop)
         .boxed();
 
-    health
+    let legacy_routes = health
         .or(alpha_result_set_routes)
         .or(token_run_routes)
         .or(live_routes)
         .or(ops_routes)
         .or(alpha_routes)
         .or(range_routes)
-        .boxed()
+        .boxed();
+
+    legacy_routes.or(v1::routes(state)).boxed()
 }
 
 fn with_state(

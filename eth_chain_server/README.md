@@ -10,6 +10,24 @@ Agent operating map for the runtime/API layer around `eth_token`.
 - Expose read-only HTTP/SSE views for tokens, pools, live status, mempool
   signals, and alpha-facing market inputs.
 
+## API Surfaces
+
+The server now has three explicit client surfaces:
+
+- Frontend/lab: versioned HTTP JSON/SSE under `/api/v1/eth/...`.
+- Trading: committed-state events inside the runtime, with a narrow HTTP facade
+  under `/api/v1/eth/trading/...` for supervision and future bridges.
+- Agents: stable automation/orientation routes under `/api/v1/eth/agents/...`.
+
+Agents should use the agent HTTP surface, not the internal trading boundary. The
+internal path is optimized for low-latency committed state and can change with
+the trading runtime; agents need stable, discoverable, tool-friendly JSON.
+
+The old `/eth/tokens/api/...` paths remain compatibility routes. New clients
+should prefer the versioned paths. See
+[`docs/api-surfaces.md`](docs/api-surfaces.md) for the route map and ownership
+rules.
+
 ## Owns
 
 - Process lifetime, config loading, logs, warmup/live-tail orchestration, and

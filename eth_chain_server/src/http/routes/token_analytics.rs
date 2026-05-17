@@ -1,9 +1,10 @@
 use std::convert::Infallible;
 
+use serde_json::json;
 use warp::http::StatusCode;
 
-use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
+use crate::http::reply::{error_response, json_response};
 use crate::read_models as views;
 use crate::token_analytics::network::{
     StartTokenNetworkAnalysisError, TokenNetworkAnalysisRequest,
@@ -44,6 +45,35 @@ pub(super) async fn risk_atlas(state: ServerState) -> Result<warp::reply::Respon
         )),
         Err(error) => Ok(error_response(
             format!("failed to load risk atlas: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn risk_atlas_runs(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.risk_atlas.runs(200).await {
+        Ok(runs) => Ok(json_response(&json!({ "runs": runs }), StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to list risk atlas runs: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn risk_atlas_run(
+    run_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.risk_atlas.page_view(&run_id).await {
+        Ok(Some(view)) => Ok(json_response(&view, StatusCode::OK)),
+        Ok(None) => Ok(error_response(
+            "risk atlas run not found",
+            StatusCode::NOT_FOUND,
+        )),
+        Err(error) => Ok(error_response(
+            format!("failed to load risk atlas run: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }
