@@ -1,15 +1,8 @@
-mod balance_deltas;
-mod buyer_setup;
+mod common;
 mod entry;
-mod failure;
-mod fees;
 mod live_simulator;
-mod prior_replay;
-mod replay_funding;
-mod results;
+mod protocols;
 mod simulator;
-mod uniswap_v4;
-mod validation;
 
 pub use entry::check_can_buy_sell_pool;
 pub use live_simulator::LivePoolBuySellSimulator;

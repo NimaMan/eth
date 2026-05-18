@@ -23,7 +23,10 @@ struct FailureContext {
     depth: usize,
 }
 
-pub(super) fn format_failure_with_revert(prefix: &str, revert: Option<&str>) -> String {
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn format_failure_with_revert(
+    prefix: &str,
+    revert: Option<&str>,
+) -> String {
     let reason = revert
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
@@ -34,7 +37,7 @@ pub(super) fn format_failure_with_revert(prefix: &str, revert: Option<&str>) -> 
     }
 }
 
-pub(super) fn format_failure_with_full_trace(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn format_failure_with_full_trace(
     base_message: &str,
     full: &FullSimulationResult,
 ) -> String {

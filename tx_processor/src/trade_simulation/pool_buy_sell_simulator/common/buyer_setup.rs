@@ -512,7 +512,7 @@ async fn prefund_denom_via_weth(
     Ok(None)
 }
 
-pub(super) async fn prepare_buyer_account(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn prepare_buyer_account(
     chain: &mut UnsignedTxChainSimulation,
     config: &PoolBuySellParameters,
     base_fee: Option<u128>,

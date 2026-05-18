@@ -5,7 +5,7 @@ use crate::tx_processor::{
 };
 use reth_chain_query::to_checksum_address;
 
-pub(super) fn extract_token_balance_delta(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn extract_token_balance_delta(
     processed_tx: &ProcessedTransaction,
     account: Address,
     token_address: Address,
@@ -34,7 +34,7 @@ pub(super) fn extract_token_balance_delta(
     I256::ZERO
 }
 
-pub(super) fn extract_tokens_received_from_processed_transaction(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn extract_tokens_received_from_processed_transaction(
     processed_tx: &ProcessedTransaction,
     recipient_address: Address,
     token_address: Address,
@@ -48,7 +48,7 @@ pub(super) fn extract_tokens_received_from_processed_transaction(
     }
 }
 
-pub(super) fn extract_denom_received_from_processed_transaction(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn extract_denom_received_from_processed_transaction(
     processed_tx: &ProcessedTransaction,
     recipient_address: Address,
     denom_address: Address,

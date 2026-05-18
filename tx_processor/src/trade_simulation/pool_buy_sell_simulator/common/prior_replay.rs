@@ -15,7 +15,7 @@ use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::replay_funding::ensure_replay_sender_can_pay;
 use super::results::create_failed_result;
 
-pub(super) struct PriorReplayOutcome {
+pub(in crate::trade_simulation::pool_buy_sell_simulator) struct PriorReplayOutcome {
     pub transactions: Vec<ProcessedTransaction>,
     pub failure: Option<PoolBuySellSimulationResult>,
 }
@@ -32,7 +32,7 @@ enum PriorReplayDecision {
     SkipNonceGap { expected_nonce: u64 },
 }
 
-pub(super) async fn replay_prior_transactions(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn replay_prior_transactions(
     tx_processor: Arc<TxProcessor>,
     config: &PoolBuySellParameters,
     block_number: u64,

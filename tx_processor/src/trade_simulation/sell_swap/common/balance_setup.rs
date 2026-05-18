@@ -3,7 +3,7 @@ use eyre::Result;
 use std::collections::HashSet;
 use tx_simulator::{UnsignedTransaction, UnsignedTxChainSimulation};
 
-use super::common::{apply_sell_fee_policy, SELLER_ETH_FUND};
+use super::core::{apply_sell_fee_policy, SELLER_ETH_FUND};
 
 const BALANCE_OF_SELECTOR: [u8; 4] = [0x70, 0xa0, 0x82, 0x31];
 const TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
@@ -11,7 +11,7 @@ const ERC20_BALANCE_SLOT_SEARCH_LIMIT: u64 = 64;
 const TRANSFER_DIFF_DUMMY_RECIPIENT: Address = address!("000000000000000000000000000000000000bEEF");
 
 #[derive(Debug, Clone)]
-pub(super) enum TokenBalanceSetup {
+pub(in crate::trade_simulation::sell_swap) enum TokenBalanceSetup {
     StandardSlot {
         slot: u64,
     },
@@ -21,7 +21,7 @@ pub(super) enum TokenBalanceSetup {
     },
 }
 
-pub(super) async fn prepare_seller_token_balance(
+pub(in crate::trade_simulation::sell_swap) async fn prepare_seller_token_balance(
     chain: &mut UnsignedTxChainSimulation,
     token_address: Address,
     funding_source: Address,
@@ -243,7 +243,7 @@ fn build_erc20_transfer_tx(
     tx
 }
 
-pub(super) fn log_token_balance_setup(
+pub(in crate::trade_simulation::sell_swap) fn log_token_balance_setup(
     setup: &TokenBalanceSetup,
     token: Address,
     seller: Address,

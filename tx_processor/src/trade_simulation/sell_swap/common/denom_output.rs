@@ -4,7 +4,7 @@ use reth_chain_query::to_checksum_address;
 use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
 use crate::tx_processor::data_models::ProcessedTransaction;
 
-pub(super) fn extract_denom_received(
+pub(in crate::trade_simulation::sell_swap) fn extract_denom_received(
     processed_tx: &ProcessedTransaction,
     recipient_address: Address,
     pool_address: Address,

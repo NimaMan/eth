@@ -3,7 +3,7 @@ use tx_simulator::UnsignedTransaction;
 use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::data_models::ProcessedTransaction;
 
-pub(super) fn apply_fee_policy(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn apply_fee_policy(
     tx: &mut UnsignedTransaction,
     config: &PoolBuySellParameters,
     base_fee: Option<u128>,
@@ -63,7 +63,7 @@ pub(super) fn apply_fee_policy(
     }
 }
 
-pub(super) fn normalize_prior_fees_with_header(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn normalize_prior_fees_with_header(
     base_fee: Option<u128>,
     prior_tx: &ProcessedTransaction,
     unsigned_tx: &mut UnsignedTransaction,

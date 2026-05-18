@@ -15,17 +15,21 @@ use tx_simulator::{
     FullSimulationResult, TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation,
 };
 
-use super::balance_deltas::{
+use crate::processed_tx_builder::UnsignedTxBuilder;
+use crate::trade_simulation::pool_buy_sell_simulator::common::balance_deltas::{
     extract_denom_received_from_processed_transaction, extract_token_balance_delta,
     extract_tokens_received_from_processed_transaction,
 };
-use super::buyer_setup::prepare_buyer_account;
-use super::entry::block_header_hint;
-use super::failure::{format_failure_with_full_trace, format_failure_with_revert};
-use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
-use super::replay_funding::ensure_replay_sender_can_pay;
-use super::results::create_failed_result;
-use crate::processed_tx_builder::UnsignedTxBuilder;
+use crate::trade_simulation::pool_buy_sell_simulator::common::block_header::block_header_hint;
+use crate::trade_simulation::pool_buy_sell_simulator::common::buyer_setup::prepare_buyer_account;
+use crate::trade_simulation::pool_buy_sell_simulator::common::failure::{
+    format_failure_with_full_trace, format_failure_with_revert,
+};
+use crate::trade_simulation::pool_buy_sell_simulator::common::fees::{
+    apply_fee_policy, normalize_prior_fees_with_header,
+};
+use crate::trade_simulation::pool_buy_sell_simulator::common::replay_funding::ensure_replay_sender_can_pay;
+use crate::trade_simulation::pool_buy_sell_simulator::common::results::create_failed_result;
 use crate::trade_simulation::types::{
     PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
@@ -40,7 +44,7 @@ const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
 const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 const PERMIT2_EXPIRATION: u64 = (1_u64 << 48) - 1;
 
-pub(super) async fn check_can_buy_sell_uniswap_v4(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn check_can_buy_sell_uniswap_v4(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,
@@ -87,7 +91,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
     .await
 }
 
-pub(super) async fn check_can_buy_sell_uniswap_v4_with_chain(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn check_can_buy_sell_uniswap_v4_with_chain(
     tx_processor: Arc<TxProcessor>,
     mut config: PoolBuySellParameters,
     chain: UnsignedTxChainSimulation,

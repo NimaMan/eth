@@ -1,9 +1,5 @@
-mod balance_setup;
 mod common;
-mod denom_output;
-mod router_protocols;
-mod uniswap_v3_universal_router;
-mod uniswap_v4_universal_router;
+mod protocols;
 
 use alloy_primitives::{Address, U256};
 use eyre::Result;
@@ -13,9 +9,9 @@ use tx_simulator::TxSimulator;
 use super::types::{PoolBuySellParameters, PoolType};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
-use router_protocols::simulate_router_protocol_sell;
-use uniswap_v3_universal_router::simulate_universal_router_v3_sell;
-use uniswap_v4_universal_router::simulate_universal_router_v4_sell;
+use protocols::router_amm::simulate_router_protocol_sell;
+use protocols::uniswap::v3::simulate_universal_router_v3_sell;
+use protocols::uniswap::v4::simulate_universal_router_v4_sell;
 
 #[derive(Debug, Clone)]
 pub struct SellSwapResult {

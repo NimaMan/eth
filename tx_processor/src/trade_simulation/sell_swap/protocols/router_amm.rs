@@ -7,15 +7,17 @@ use tx_simulator::TxSimulator;
 use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::TxProcessor;
 
-use super::balance_setup::{log_token_balance_setup, prepare_seller_token_balance};
-use super::common::{
+use crate::trade_simulation::sell_swap::common::balance_setup::{
+    log_token_balance_setup, prepare_seller_token_balance,
+};
+use crate::trade_simulation::sell_swap::common::core::{
     apply_sell_fee_policy, failed_sell_result, fee_totals, format_failure_with_revert,
     SELLER_ETH_FUND,
 };
-use super::denom_output::extract_denom_received;
-use super::SellSwapResult;
+use crate::trade_simulation::sell_swap::common::denom_output::extract_denom_received;
+use crate::trade_simulation::sell_swap::SellSwapResult;
 
-pub(super) async fn simulate_router_protocol_sell(
+pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sell(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,

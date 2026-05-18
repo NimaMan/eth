@@ -5,13 +5,14 @@ use tx_simulator::UnsignedTransaction;
 use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::data_models::ProcessedTransaction;
 
-use super::SellSwapResult;
+use crate::trade_simulation::sell_swap::SellSwapResult;
 
-pub(super) const SELLER_ETH_FUND: u128 = 1_000_000_000_000_000_000;
-pub(super) const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
-pub(super) const PERMIT2_EXPIRATION: u64 = (1_u64 << 48) - 1;
+pub(in crate::trade_simulation::sell_swap) const SELLER_ETH_FUND: u128 = 1_000_000_000_000_000_000;
+pub(in crate::trade_simulation::sell_swap) const PERMIT2: Address =
+    address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+pub(in crate::trade_simulation::sell_swap) const PERMIT2_EXPIRATION: u64 = (1_u64 << 48) - 1;
 
-pub(super) fn apply_sell_fee_policy(
+pub(in crate::trade_simulation::sell_swap) fn apply_sell_fee_policy(
     tx: &mut UnsignedTransaction,
     gas_limit: u64,
     base_fee: Option<u128>,
@@ -26,14 +27,19 @@ pub(super) fn apply_sell_fee_policy(
     }
 }
 
-pub(super) fn format_failure_with_revert(prefix: &str, revert_reason: Option<&str>) -> String {
+pub(in crate::trade_simulation::sell_swap) fn format_failure_with_revert(
+    prefix: &str,
+    revert_reason: Option<&str>,
+) -> String {
     match revert_reason.filter(|reason| !reason.trim().is_empty()) {
         Some(reason) => format!("{prefix}: {reason}"),
         None => prefix.to_string(),
     }
 }
 
-pub(super) fn fee_totals(transactions: &[&ProcessedTransaction]) -> (u64, U256) {
+pub(in crate::trade_simulation::sell_swap) fn fee_totals(
+    transactions: &[&ProcessedTransaction],
+) -> (u64, U256) {
     transactions
         .iter()
         .fold((0_u64, U256::ZERO), |(gas_used, gas_cost), transaction| {
@@ -44,7 +50,7 @@ pub(super) fn fee_totals(transactions: &[&ProcessedTransaction]) -> (u64, U256) 
         })
 }
 
-pub(super) fn failed_sell_result(
+pub(in crate::trade_simulation::sell_swap) fn failed_sell_result(
     config: &PoolBuySellParameters,
     tokens_to_sell: U256,
     processed: ProcessedTransaction,
@@ -65,7 +71,7 @@ pub(super) fn failed_sell_result(
     )
 }
 
-pub(super) fn failed_sell_result_with_fees(
+pub(in crate::trade_simulation::sell_swap) fn failed_sell_result_with_fees(
     config: &PoolBuySellParameters,
     tokens_to_sell: U256,
     processed: ProcessedTransaction,
@@ -91,11 +97,15 @@ pub(super) fn failed_sell_result_with_fees(
     }
 }
 
-pub(super) fn currency_matches_denom(currency: Address, denom: Address, weth: Address) -> bool {
+pub(in crate::trade_simulation::sell_swap) fn currency_matches_denom(
+    currency: Address,
+    denom: Address,
+    weth: Address,
+) -> bool {
     currency == denom || (currency.is_zero() && (denom.is_zero() || denom == weth))
 }
 
-pub(super) fn permit2_amount(amount: U256) -> Result<U256> {
+pub(in crate::trade_simulation::sell_swap) fn permit2_amount(amount: U256) -> Result<U256> {
     let max = (U256::from(1_u8) << 160) - U256::from(1_u8);
     if amount > max {
         return Err(eyre!("Permit2 allowance amount must fit uint160"));

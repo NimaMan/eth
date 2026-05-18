@@ -2,7 +2,7 @@ use alloy_primitives::{Address, U256};
 use eyre::Result;
 use tx_simulator::{UnsignedTransaction, UnsignedTxChainSimulation};
 
-pub(super) fn ensure_replay_sender_can_pay(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn ensure_replay_sender_can_pay(
     chain: &mut UnsignedTxChainSimulation,
     tx: &UnsignedTransaction,
 ) -> Result<Option<ReplayFundingAdjustment>> {
@@ -29,7 +29,7 @@ pub(super) fn ensure_replay_sender_can_pay(
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(super) struct ReplayFundingAdjustment {
+pub(in crate::trade_simulation::pool_buy_sell_simulator) struct ReplayFundingAdjustment {
     pub sender: Address,
     pub previous_balance: U256,
     pub replay_balance: U256,

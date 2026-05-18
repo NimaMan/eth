@@ -35,21 +35,21 @@ are handled incorrectly.
 
 ## Execution pipeline
 
-The simulator lives in `entry.rs`. The steps below outline the control flow and
-the corresponding helper modules:
+The simulator entrypoint lives in `entry.rs`. Shared mechanics are under
+`common/`, and protocol-specific paths are under `protocols/`:
 
 | Step | Module | Responsibility |
 | ---- | ------ | -------------- |
-| 1 | `validation.rs` | Confirm that the pool address matches the on-chain factory for the token/denom pair (Uniswap V2/V3). |
-| 2 | `buyer_setup.rs` | If the denom is WETH and we are not already dealing with Uniswap V4, deposit ETH into WETH inside the forked state. |
+| 1 | `common/validation.rs` | Confirm that the pool address matches the on-chain factory for the token/denom pair (Uniswap V2/V3). |
+| 2 | `common/buyer_setup.rs` | If the denom is WETH and we are not already dealing with Uniswap V4, deposit ETH into WETH inside the forked state. |
 | 3 | `entry.rs` | Apply optional prior transactions (e.g. enable trading) and persist their processed form. |
 | 4 | `entry.rs` | Approve the denomination token for the router (v2/v3) before attempting the buy. |
 | 5 | `entry.rs` | Execute the **buy leg** via the correct router builder. |
 | 6 | `entry.rs` | Execute the **approve leg** for the purchased token. |
 | 7 | `entry.rs` | Optionally delay the sell by re-creating a new fork at a later block and replaying the previous legs. |
 | 8 | `entry.rs` | Execute the **sell leg** using a builder that is compatible with fee-on-transfer tokens. |
-| 9 | `balance_deltas.rs` | Extract denomination spent/received and token inflows/outflows from address balance changes. |
-| 10 | `results.rs` | Assemble success booleans, tax computation, and diagnostic messages into the public result type. |
+| 9 | `common/balance_deltas.rs` | Extract denomination spent/received and token inflows/outflows from address balance changes. |
+| 10 | `common/results.rs` | Assemble success booleans, tax computation, and diagnostic messages into the public result type. |
 
 The simulator always uses `UnsignedTxChainSimulation::step_with_trace` so that
 each leg records full call traces. `TxProcessor` processes the trace into a

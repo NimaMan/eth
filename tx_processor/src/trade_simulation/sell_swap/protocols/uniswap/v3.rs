@@ -3,71 +3,43 @@ use eyre::{eyre, Result};
 use std::sync::Arc;
 use tx_simulator::tx_builders::{
     permit2::build_permit2_approve_tx,
-    uniswap_v4::{
-        build_token_approval_tx, build_universal_router_v4_exact_input_single_tx,
-        infer_orientation_from_input, UniswapV4PoolKey as BuilderV4PoolKey,
-        UniversalRouterV4ExactInputSingleRequest, UniversalRouterV4InputPayment,
-    },
+    uniswap_v3::{build_universal_router_v3_exact_input_tx, UniversalRouterV3ExactInputRequest},
+    uniswap_v4::build_token_approval_tx,
 };
 use tx_simulator::TxSimulator;
 
 use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::TxProcessor;
 
-use super::balance_setup::{log_token_balance_setup, prepare_seller_token_balance};
-use super::common::{
-    apply_sell_fee_policy, currency_matches_denom, failed_sell_result,
-    failed_sell_result_with_fees, fee_totals, format_failure_with_revert, permit2_amount, PERMIT2,
-    PERMIT2_EXPIRATION, SELLER_ETH_FUND,
+use crate::trade_simulation::sell_swap::common::balance_setup::{
+    log_token_balance_setup, prepare_seller_token_balance,
 };
-use super::denom_output::extract_denom_received;
-use super::SellSwapResult;
+use crate::trade_simulation::sell_swap::common::core::{
+    apply_sell_fee_policy, failed_sell_result, failed_sell_result_with_fees, fee_totals,
+    format_failure_with_revert, permit2_amount, PERMIT2, PERMIT2_EXPIRATION, SELLER_ETH_FUND,
+};
+use crate::trade_simulation::sell_swap::common::denom_output::extract_denom_received;
+use crate::trade_simulation::sell_swap::SellSwapResult;
 
-const UNIVERSAL_ROUTER_V4: Address = address!("66a9893cC07D91D95644AEDD05D03f95e1dBA8Af");
+const UNIVERSAL_ROUTER_V3: Address = address!("4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA");
 
-pub(super) async fn simulate_universal_router_v4_sell(
+pub(in crate::trade_simulation::sell_swap) async fn simulate_universal_router_v3_sell(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,
     tokens_to_sell: U256,
+    fee_tier: u32,
     block: u64,
 ) -> Result<SellSwapResult> {
-    let v4_cfg = config
-        .uniswap_v4_config
-        .clone()
-        .ok_or_else(|| eyre!("Uniswap V4 configuration must be provided"))?;
+    let seller_address = config.buyer_address;
+    let token_out = if config.denom_address.is_zero() {
+        config.weth_address
+    } else {
+        config.denom_address
+    };
+
     let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     let base_fee = chain.block_base_fee();
-    let seller_address = config.buyer_address;
-
-    if !chain.account_has_code(v4_cfg.pool_manager)? {
-        return Err(eyre!(
-            "Uniswap V4 PoolManager {:#x} has no bytecode at block {}",
-            v4_cfg.pool_manager,
-            block
-        ));
-    }
-
-    let pool_key = BuilderV4PoolKey {
-        currency0: v4_cfg.currency0,
-        currency1: v4_cfg.currency1,
-        fee: v4_cfg.fee,
-        tick_spacing: v4_cfg.tick_spacing,
-        hooks: v4_cfg.hooks,
-    };
-    let sell_orientation = infer_orientation_from_input(&pool_key, config.token_address)?;
-    if !currency_matches_denom(
-        sell_orientation.output_currency,
-        config.denom_address,
-        config.weth_address,
-    ) {
-        return Err(eyre!(
-            "Uniswap V4 sell output currency {:#x} does not match configured denom {:#x}",
-            sell_orientation.output_currency,
-            config.denom_address
-        ));
-    }
-
     chain.set_eth_balance(seller_address, U256::from(SELLER_ETH_FUND))?;
     let balance_setup = prepare_seller_token_balance(
         &mut chain,
@@ -90,7 +62,7 @@ pub(super) async fn simulate_universal_router_v4_sell(
         config.token_address,
         seller_address,
         tokens_to_sell,
-        "V4 chain-sim sell",
+        "V3 Universal Router chain-sim sell",
     );
 
     let mut token_approve =
@@ -115,7 +87,7 @@ pub(super) async fn simulate_universal_router_v4_sell(
         seller_address,
         PERMIT2,
         config.token_address,
-        UNIVERSAL_ROUTER_V4,
+        UNIVERSAL_ROUTER_V3,
         permit2_amount(tokens_to_sell)?,
         PERMIT2_EXPIRATION,
     )?;
@@ -144,21 +116,20 @@ pub(super) async fn simulate_universal_router_v4_sell(
         ));
     }
 
-    let mut sell_tx = build_universal_router_v4_exact_input_single_tx(
-        &UniversalRouterV4ExactInputSingleRequest {
-            universal_router: UNIVERSAL_ROUTER_V4,
+    let mut sell_tx =
+        build_universal_router_v3_exact_input_tx(&UniversalRouterV3ExactInputRequest {
+            universal_router: UNIVERSAL_ROUTER_V3,
             caller: seller_address,
-            pool_key,
+            recipient: seller_address,
             token_in: config.token_address,
-            token_out: sell_orientation.output_currency,
+            token_out,
+            fee: fee_tier,
             amount_in: tokens_to_sell,
             min_amount_out: U256::ZERO,
             deadline: U256::from(u64::MAX),
-            hook_data: v4_cfg.hook_data,
-            input_payment: UniversalRouterV4InputPayment::Permit2User,
-        },
-    )?;
-    sell_tx.gas = Some(config.sell_gas_limit);
+            payer_is_user: true,
+            unwrap_weth_to: Some(seller_address),
+        })?;
     apply_sell_fee_policy(&mut sell_tx, config.sell_gas_limit, base_fee);
     let sell_sim = chain.step_with_trace(sell_tx.clone()).await?;
     let processed = tx_processor
@@ -194,7 +165,7 @@ pub(super) async fn simulate_universal_router_v4_sell(
             None
         } else {
             Some(format_failure_with_revert(
-                "Universal Router V4 sell transaction failed",
+                "Universal Router V3 sell transaction failed",
                 sell_sim.revert_reason.as_deref(),
             ))
         },

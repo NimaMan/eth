@@ -4,7 +4,7 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 
 use crate::trade_simulation::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
 
-pub(super) fn create_failed_result(
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn create_failed_result(
     config: PoolBuySellParameters,
     block_number: u64,
     prior_txs: Vec<ProcessedTransaction>,
