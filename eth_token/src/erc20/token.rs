@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
 
+use crate::pnl::TokenPnlTracker;
 use crate::pools::balancer::{BalancerPool, BalancerPoolToken};
 use crate::pools::base::{BasePool, BasePoolConfig};
 use crate::pools::curve::{CurvePool, CurvePoolToken};
@@ -49,6 +50,8 @@ pub struct ERC20Token {
     pub token_life_cycle_status: Option<TokenLifecycleState>,
     #[serde(default)]
     pub activity: TokenActivityTracker,
+    #[serde(default)]
+    pub pnl: TokenPnlTracker,
     pub tx_hashes_to_makers: HashMap<String, String>,
     pub transaction_fees: Vec<Value>,
     pub latest_block_number: Option<u64>,
@@ -93,6 +96,7 @@ impl ERC20Token {
             creator_nonce: None,
             token_life_cycle_status: None,
             activity: TokenActivityTracker::default(),
+            pnl: TokenPnlTracker::default(),
             tx_hashes_to_makers: HashMap::new(),
             transaction_fees: Vec::new(),
             latest_block_number: None,
@@ -168,6 +172,19 @@ impl ERC20Token {
         pool.base
             .register_token_control_addresses(&self.token_control_addresses);
         let pool_address = pool.base.identity.pool_address.clone();
+        let token_address = pool.base.identity.token_address.clone();
+        let denom_address = pool.base.identity.denom_address.clone();
+        let token_decimals = pool.base.config.token_decimals;
+        let denom_decimals = pool.base.config.denom_decimals.unwrap_or(token_decimals);
+        let history_limit = pool.base.config.history_limit;
+        self.pnl.register_pool(
+            &pool_address,
+            &token_address,
+            &denom_address,
+            token_decimals,
+            denom_decimals,
+            history_limit,
+        );
         let previous = self.v2_pools.insert(pool_address, pool);
         self.refresh_lifecycle_status();
         previous
@@ -228,16 +245,45 @@ impl ERC20Token {
         );
         self.record_bribe_activity_from_processed_transaction(transaction)?;
         self.record_v2_swap_activity(&pool_address, &events, &tx_context)?;
-        let pool = self
-            .uniswap_v2_pool_mut(&pool_address)
-            .ok_or_else(|| eyre!("unknown Uniswap V2 pool {pool_address}"))?;
-        pool.update_from_events(&events, &tx_context)?;
-        for transfer in lp_transfers_from_processed_transaction(transaction, &pool_address) {
-            pool.process_lp_transfer(&transfer)?;
-        }
-        for approval in lp_approvals_from_processed_transaction(transaction, &pool_address) {
-            pool.process_lp_approval(&approval)?;
-        }
+        let (
+            pnl_pool_address,
+            pnl_token_address,
+            pnl_denom_address,
+            pnl_token_decimals,
+            pnl_denom_decimals,
+            pnl_history_limit,
+        ) = {
+            let pool = self
+                .uniswap_v2_pool_mut(&pool_address)
+                .ok_or_else(|| eyre!("unknown Uniswap V2 pool {pool_address}"))?;
+            pool.update_from_events(&events, &tx_context)?;
+            for transfer in lp_transfers_from_processed_transaction(transaction, &pool_address) {
+                pool.process_lp_transfer(&transfer)?;
+            }
+            for approval in lp_approvals_from_processed_transaction(transaction, &pool_address) {
+                pool.process_lp_approval(&approval)?;
+            }
+            (
+                pool.base.identity.pool_address.clone(),
+                pool.base.identity.token_address.clone(),
+                pool.base.identity.denom_address.clone(),
+                pool.base.config.token_decimals,
+                pool.base
+                    .config
+                    .denom_decimals
+                    .unwrap_or(pool.base.config.token_decimals),
+                pool.base.config.history_limit,
+            )
+        };
+        self.pnl.record_v2_pool_transaction(
+            pnl_pool_address,
+            pnl_token_address,
+            pnl_denom_address,
+            pnl_token_decimals,
+            pnl_denom_decimals,
+            pnl_history_limit,
+            transaction,
+        );
         self.refresh_lifecycle_status();
         Ok(())
     }

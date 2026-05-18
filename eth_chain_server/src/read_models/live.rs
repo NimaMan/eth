@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
 use crate::read_models::surface::{self, PoolSurfaceFilter, TokenPoolSurfaceResponse};
-use crate::read_models::token::TokenView;
+use crate::read_models::token::{TokenPnlView, TokenView};
 use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
 use crate::recent_blocks::{RecentLiveBlocks, RecentProcessedBlock};
 
@@ -39,6 +39,7 @@ pub struct LiveTokenDetailResponse {
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
     pub network: TokenNetworkView,
+    pub pnl: TokenPnlView,
     pub denom_symbols: BTreeMap<String, String>,
 }
 
@@ -169,6 +170,7 @@ pub async fn token_detail(
     let pools = PoolView::from_token_pools_with_activity(token, &recent_activity);
     let summary = crate::read_models::token::token_summary_with_pool_views(token, &pools);
     let denom_symbols = crate::read_models::token::build_denom_symbols(token);
+    let pnl = TokenPnlView::from_token(token);
 
     let progress = state.progress.clone();
     Some(LiveTokenDetailResponse {
@@ -179,6 +181,7 @@ pub async fn token_detail(
         index_status,
         pools,
         network,
+        pnl,
         denom_symbols,
     })
 }

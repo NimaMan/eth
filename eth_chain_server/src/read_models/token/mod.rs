@@ -5,11 +5,15 @@ use eth_token::contract_analysis::{
     ContractEvidenceSource, ContractSeverity,
 };
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
+use eth_token::pnl::{AddressPoolPnlSummary, PoolPnlConservationSummary};
 use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
 use crate::ranges::{RangeIndexJob, RangeIndexState};
 use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
+
+const TOKEN_PNL_TOP_POSITION_LIMIT: usize = 25;
+const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TokenListResponse {
@@ -63,8 +67,60 @@ pub struct TokenDetailResponse {
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
     pub network: TokenNetworkView,
+    pub pnl: TokenPnlView,
     pub contract_analysis: ContractAnalysisReport,
     pub denom_symbols: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TokenPnlView {
+    pub pool_count: usize,
+    pub total_position_count: usize,
+    pub total_display_position_count: usize,
+    pub total_tx_count: u64,
+    pub all_token_conserved: bool,
+    pub all_denom_conserved: bool,
+    pub pools: Vec<TokenPoolPnlView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TokenPoolPnlView {
+    pub pool_address: String,
+    pub protocol: Option<String>,
+    pub denom_address: String,
+    pub denom_symbol: Option<String>,
+    pub currency: String,
+    pub price: Option<f64>,
+    pub tx_count: u64,
+    pub position_count: usize,
+    pub display_position_count: usize,
+    pub omitted_position_count: usize,
+    pub latest_block_number: Option<u64>,
+    pub latest_block_timestamp: Option<u64>,
+    pub conservation: PoolPnlConservationSummary,
+    pub top_positions: Vec<TokenPoolPnlAddressView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TokenPoolPnlAddressView {
+    pub address: String,
+    pub token_balance_raw: String,
+    pub denom_cashflow_raw: String,
+    pub native_fee_raw: String,
+    pub native_bribe_raw: String,
+    pub token_balance: f64,
+    pub denom_cashflow: f64,
+    pub native_fee: f64,
+    pub native_bribe: f64,
+    pub marked_token_value_denom: Option<f64>,
+    pub pnl_proxy_denom: Option<f64>,
+    pub token_in_raw: String,
+    pub token_out_raw: String,
+    pub denom_in_raw: String,
+    pub denom_out_raw: String,
+    pub first_block: Option<u64>,
+    pub latest_block: Option<u64>,
+    pub movement_count: u64,
 }
 
 impl TokenView {
@@ -228,6 +284,118 @@ pub fn build_denom_symbols(token: &ERC20Token) -> BTreeMap<String, String> {
     symbols
 }
 
+impl TokenPnlView {
+    pub fn from_token(token: &ERC20Token) -> Self {
+        let mut pools = token
+            .pnl
+            .pools()
+            .map(|(pool_address, pool)| {
+                let base = token.pool_base(pool_address);
+                let mark_price = base
+                    .map(|base| base.price())
+                    .filter(|price| price.is_finite() && *price > 0.0);
+                let denom_symbol = base
+                    .and_then(|base| {
+                        crate::read_models::pool::denom_symbol(&base.identity.denom_address)
+                    })
+                    .or_else(|| crate::read_models::pool::denom_symbol(&pool.denom_address));
+                let currency = denom_symbol
+                    .clone()
+                    .unwrap_or_else(|| pool.denom_address.clone());
+                let display_position_count = pool
+                    .positions
+                    .values()
+                    .filter(|position| {
+                        position.address != pool.pool_address && position.address != ZERO_ADDRESS
+                    })
+                    .count();
+                let top_positions = pool
+                    .top_positions_by_denom_volume(TOKEN_PNL_TOP_POSITION_LIMIT, false, mark_price)
+                    .into_iter()
+                    .map(TokenPoolPnlAddressView::from_summary)
+                    .collect::<Vec<_>>();
+
+                TokenPoolPnlView {
+                    pool_address: pool.pool_address.clone(),
+                    protocol: base.map(|base| base.identity.protocol.clone()),
+                    denom_address: pool.denom_address.clone(),
+                    denom_symbol,
+                    currency,
+                    price: mark_price,
+                    tx_count: pool.tx_count,
+                    position_count: pool.positions.len(),
+                    display_position_count,
+                    omitted_position_count: display_position_count
+                        .saturating_sub(top_positions.len()),
+                    latest_block_number: pool.latest_block_number,
+                    latest_block_timestamp: pool.latest_block_timestamp,
+                    conservation: pool.conservation_summary(),
+                    top_positions,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        pools.sort_by(|left, right| {
+            right
+                .tx_count
+                .cmp(&left.tx_count)
+                .then_with(|| {
+                    right
+                        .display_position_count
+                        .cmp(&left.display_position_count)
+                })
+                .then_with(|| left.pool_address.cmp(&right.pool_address))
+        });
+
+        let pool_count = pools.len();
+        let total_position_count = pools.iter().map(|pool| pool.position_count).sum();
+        let total_display_position_count =
+            pools.iter().map(|pool| pool.display_position_count).sum();
+        let total_tx_count = pools.iter().map(|pool| pool.tx_count).sum();
+        let all_token_conserved = pools
+            .iter()
+            .all(|pool| pool.conservation.token_is_conserved);
+        let all_denom_conserved = pools
+            .iter()
+            .all(|pool| pool.conservation.denom_is_conserved);
+
+        Self {
+            pool_count,
+            total_position_count,
+            total_display_position_count,
+            total_tx_count,
+            all_token_conserved,
+            all_denom_conserved,
+            pools,
+        }
+    }
+}
+
+impl TokenPoolPnlAddressView {
+    fn from_summary(summary: AddressPoolPnlSummary) -> Self {
+        Self {
+            address: summary.address,
+            token_balance_raw: summary.token_balance_raw,
+            denom_cashflow_raw: summary.denom_cashflow_raw,
+            native_fee_raw: summary.native_fee_raw,
+            native_bribe_raw: summary.native_bribe_raw,
+            token_balance: summary.token_balance,
+            denom_cashflow: summary.denom_cashflow,
+            native_fee: summary.native_fee,
+            native_bribe: summary.native_bribe,
+            marked_token_value_denom: summary.marked_token_value_denom,
+            pnl_proxy_denom: summary.pnl_proxy_denom,
+            token_in_raw: summary.token_in_raw,
+            token_out_raw: summary.token_out_raw,
+            denom_in_raw: summary.denom_in_raw,
+            denom_out_raw: summary.denom_out_raw,
+            first_block: summary.first_block,
+            latest_block: summary.latest_block,
+            movement_count: summary.movement_count,
+        }
+    }
+}
+
 pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<TokenDetailResponse> {
     let state = run.state.read().await;
     let address = normalize_address(token_address);
@@ -239,6 +407,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let summary = token_summary_with_pool_views(token, &pools);
     let contract_analysis = contract_analysis_with_pool_views(token, &pools);
     let denom_symbols = build_denom_symbols(token);
+    let pnl = TokenPnlView::from_token(token);
 
     Some(TokenDetailResponse {
         run_id: run.id.clone(),
@@ -247,6 +416,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
         index_status,
         pools,
         network,
+        pnl,
         contract_analysis,
         denom_symbols,
     })

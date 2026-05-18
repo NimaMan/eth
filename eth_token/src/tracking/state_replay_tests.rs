@@ -1,5 +1,6 @@
 use super::tests::{metadata, tx};
 use super::*;
+use crate::erc20::ERC20TokenMetadata;
 use alloy_primitives::{address, U256};
 use tx_processor::tx_processor::data_models::{UniswapV2PairCreatedEvent, UniswapV2SyncEvent};
 
@@ -13,7 +14,7 @@ fn tracked_token_index_indexes_pool_to_token_mapping() {
         .push(UniswapV2PairCreatedEvent {
             pair_address: address!("3333333333333333333333333333333333333333"),
             token0: address!("1111111111111111111111111111111111111111"),
-            token1: address!("2222222222222222222222222222222222222222"),
+            token1: address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
             factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
             log_index: 1,
         });
@@ -36,7 +37,7 @@ fn tracked_token_index_indexes_pool_to_token_mapping() {
 
 #[test]
 fn token_state_builder_replays_processed_transactions_in_order() {
-    let builder = TokenStateBuilder::new(metadata(), 100);
+    let builder = TokenStateBuilder::new(nine_decimal_metadata(), 100);
     let mut creation_tx = tx();
     creation_tx.tx_index = 0;
     creation_tx.contract_address = Some(address!("1111111111111111111111111111111111111111"));
@@ -48,7 +49,7 @@ fn token_state_builder_replays_processed_transactions_in_order() {
         .push(UniswapV2PairCreatedEvent {
             pair_address: address!("3333333333333333333333333333333333333333"),
             token0: address!("1111111111111111111111111111111111111111"),
-            token1: address!("2222222222222222222222222222222222222222"),
+            token1: address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
             factory_address: address!("5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
             log_index: 1,
         });
@@ -57,7 +58,7 @@ fn token_state_builder_replays_processed_transactions_in_order() {
     sync_tx.tx_index = 2;
     sync_tx.uniswap_v2_syncs.push(UniswapV2SyncEvent {
         pair_address: address!("3333333333333333333333333333333333333333"),
-        reserve0: U256::from(100_000_000_000_000_000_000_u128),
+        reserve0: U256::from(100_000_000_000_u128),
         reserve1: U256::from(2_000_000_000_000_000_000_u128),
         log_index: 2,
     });
@@ -72,4 +73,14 @@ fn token_state_builder_replays_processed_transactions_in_order() {
         .unwrap();
     assert_eq!(pool.base.token_reserve(), 100.0);
     assert_eq!(pool.base.denom_reserve(), 2.0);
+}
+
+fn nine_decimal_metadata() -> ERC20TokenMetadata {
+    ERC20TokenMetadata::new(
+        "0x1111111111111111111111111111111111111111",
+        "Token",
+        "TKN",
+        9,
+        "100000000000000000000",
+    )
 }

@@ -33,3 +33,7 @@ path = "examples/tracking/token_tracking_range.rs"
 [[example]]
 name = "token_network_flow_context"
 path = "examples/network/token_network_flow_context.rs"
+
+[[example]]
+name = "uniswap_v2_pool_user_pnl_conservation"
+path = "examples/pnl/uniswap_v2_pool_user_pnl_conservation.rs"

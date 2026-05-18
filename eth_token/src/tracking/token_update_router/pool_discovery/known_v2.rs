@@ -53,7 +53,7 @@ impl ProcessedTokenUpdateRouter {
                 address_string(&denom_address),
                 BasePoolConfig {
                     token_decimals: token.decimals,
-                    denom_decimals: None,
+                    denom_decimals: known_decimals_for_address(denom_address),
                     token1_is_denom: Some(token_is_token0),
                     history_limit: self.history_limit,
                     denom_threshold: 0.0,

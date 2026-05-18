@@ -4,6 +4,7 @@ pub mod erc20;
 pub mod health;
 pub mod live;
 pub mod network;
+pub mod pnl;
 pub mod pools;
 pub mod state;
 pub mod token_activity;
