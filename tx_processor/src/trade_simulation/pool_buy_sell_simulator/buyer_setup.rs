@@ -28,6 +28,8 @@ const UNISWAP_V2_FACTORY_GET_PAIR: [u8; 4] = [0xe6, 0xa4, 0x39, 0x05];
 const FEE_NUMERATOR: u128 = 997;
 const FEE_DENOMINATOR: u128 = 1000;
 const PREFUND_BUFFER_BPS: u128 = 105; // 5% buffer
+const SYNTHETIC_WETH_DEPOSIT_GAS_RESERVE_WEI: u128 = 1_000_000_000_000_000_000; // 1 ETH
+const MAX_SYNTHETIC_WETH_DEPOSIT_WEI: u128 = 100_000_000_000_000_000_000; // 100 ETH
 
 fn decode_address_response(output: &[u8], context: &str) -> Result<Address> {
     if output.len() < 32 {
@@ -107,6 +109,61 @@ fn denom_prefund_unavailable_result(
     )
 }
 
+fn weth_deposit_required_eth_balance(amount: U256) -> U256 {
+    amount.saturating_add(U256::from(SYNTHETIC_WETH_DEPOSIT_GAS_RESERVE_WEI))
+}
+
+fn weth_deposit_cap() -> U256 {
+    U256::from(MAX_SYNTHETIC_WETH_DEPOSIT_WEI)
+}
+
+fn weth_deposit_cap_failure(
+    config: &PoolBuySellParameters,
+    block_number: u64,
+    prior_tx_results: &[ProcessedTransaction],
+    amount: U256,
+) -> PoolBuySellSimulationResult {
+    denom_prefund_unavailable_result(
+        config,
+        block_number,
+        prior_tx_results,
+        format!(
+            "required WETH deposit {} wei exceeds simulator cap {} wei",
+            amount,
+            weth_deposit_cap()
+        ),
+    )
+}
+
+fn ensure_buyer_eth_for_weth_deposit(
+    chain: &mut UnsignedTxChainSimulation,
+    config: &PoolBuySellParameters,
+    block_number: u64,
+    amount: U256,
+) -> Result<(U256, U256)> {
+    let required_balance = weth_deposit_required_eth_balance(amount);
+    let current_balance = chain.eth_balance(config.buyer_address)?;
+    if current_balance < required_balance {
+        let previous_balance = chain.set_eth_balance(config.buyer_address, required_balance)?;
+        tracing::info!(
+            target: "pool_buy_sell_sim",
+            step = "weth_deposit_synthetic_funding",
+            block = block_number,
+            token_address = %config.token_address,
+            pool_address = %config.pool_address,
+            denom_address = %config.denom_address,
+            buyer_address = %config.buyer_address,
+            required_weth = %amount,
+            previous_balance = %previous_balance,
+            current_balance = %current_balance,
+            synthetic_balance = %required_balance,
+            "increased synthetic buyer ETH balance for WETH deposit"
+        );
+    }
+
+    Ok((current_balance, required_balance))
+}
+
 fn fetch_uniswap_v2_pair_address_on_chain(
     chain: &mut UnsignedTxChainSimulation,
     token_a: Address,
@@ -179,6 +236,29 @@ async fn execute_weth_deposit(
     if amount.is_zero() {
         return Ok(None);
     }
+    if amount > weth_deposit_cap() {
+        tracing::warn!(
+            target: "pool_buy_sell_sim",
+            step = "weth_deposit_prefund_cap",
+            block = block_number,
+            token_address = %config.token_address,
+            pool_address = %config.pool_address,
+            denom_address = %config.denom_address,
+            buyer_address = %config.buyer_address,
+            required_weth = %amount,
+            cap = %weth_deposit_cap(),
+            "WETH deposit requirement exceeds simulator cap"
+        );
+        return Ok(Some(weth_deposit_cap_failure(
+            config,
+            block_number,
+            prior_tx_results,
+            amount,
+        )));
+    }
+
+    let (buyer_eth_balance, required_eth_balance) =
+        ensure_buyer_eth_for_weth_deposit(chain, config, block_number, amount)?;
     let mut deposit_tx =
         build_v4_weth_deposit_tx(config.buyer_address, config.weth_address, amount);
     deposit_tx.gas = Some(config.buy_gas_limit);
@@ -197,6 +277,13 @@ async fn execute_weth_deposit(
             step = "weth_deposit",
             %context,
             block = block_number,
+            token_address = %config.token_address,
+            pool_address = %config.pool_address,
+            denom_address = %config.denom_address,
+            buyer_address = %config.buyer_address,
+            required_weth = %amount,
+            buyer_eth_balance = %buyer_eth_balance,
+            required_eth_balance = %required_eth_balance,
             error = %err
         );
         err.wrap_err(context)
@@ -289,6 +376,21 @@ async fn prefund_denom_via_weth(
         }
     };
     let weth_buffered = apply_buffer(weth_needed, PREFUND_BUFFER_BPS)?;
+    tracing::debug!(
+        target: "pool_buy_sell_sim",
+        step = "denom_prefund_quote",
+        block = block_number,
+        token_address = %config.token_address,
+        pool_address = %config.pool_address,
+        denom_address = %config.denom_address,
+        pair_address = %pair_address,
+        reserve_weth = %reserve_weth,
+        reserve_denom = %reserve_denom,
+        desired_denom = %desired_out,
+        required_weth = %weth_needed,
+        buffered_weth = %weth_buffered,
+        "quoted WETH requirement for denomination top-up"
+    );
 
     if let Some(failure) = execute_weth_deposit(
         chain,
@@ -451,4 +553,43 @@ pub(super) async fn prepare_buyer_account(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::address;
+
+    #[test]
+    fn weth_deposit_required_eth_balance_adds_gas_reserve() {
+        let amount = U256::from(17_000_000_000_000_000_000u128);
+        assert_eq!(
+            weth_deposit_required_eth_balance(amount),
+            U256::from(18_000_000_000_000_000_000u128)
+        );
+    }
+
+    #[test]
+    fn weth_deposit_cap_failure_is_classified_as_pool_result() {
+        let config = PoolBuySellParameters::new(
+            address!("1111111111111111111111111111111111111111"),
+            address!("2222222222222222222222222222222222222222"),
+            PoolType::UniswapV4,
+        )
+        .with_test_amount(U256::from(10_000_000_000_000_000u128))
+        .with_denom_address(address!("3333333333333333333333333333333333333333"));
+        let required = weth_deposit_cap().saturating_add(U256::from(1u8));
+
+        let result = weth_deposit_cap_failure(&config, 123, &[], required);
+
+        assert!(!result.can_buy);
+        assert!(!result.can_approve);
+        assert!(!result.can_sell);
+        assert_eq!(result.block_number, 123);
+        assert!(result
+            .failure_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("exceeds simulator cap"));
+    }
 }
