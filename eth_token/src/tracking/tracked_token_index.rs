@@ -180,23 +180,9 @@ impl TrackedTokenIndex {
         registry: &mut TokenRegistry,
         token_address: impl AsRef<str>,
         token_status: TrackedTokenStatus,
-        current_block: u64,
+        _current_block: u64,
     ) -> TrackedTokenIndexUpdate {
         let token_address = normalize_address(token_address);
-        let retention_decision =
-            self.apply_live_retention_policy_to_token(registry, &token_address, current_block);
-
-        if matches!(retention_decision.as_ref(), Some(decision) if !decision.retain) {
-            registry.tokens.remove(&token_address);
-            self.remove_token(&token_address);
-            return TrackedTokenIndexUpdate {
-                token_address,
-                indexed: false,
-                removed_by_retention: true,
-                evicted_token_address: None,
-                retention_decision,
-            };
-        }
 
         let Some(token) = registry.tokens.get(&token_address) else {
             return TrackedTokenIndexUpdate {
@@ -204,7 +190,7 @@ impl TrackedTokenIndex {
                 indexed: false,
                 removed_by_retention: false,
                 evicted_token_address: None,
-                retention_decision,
+                retention_decision: None,
             };
         };
         let evicted_token_address = self.index_token(token, token_status);
@@ -221,7 +207,7 @@ impl TrackedTokenIndex {
             token_address,
             removed_by_retention: false,
             evicted_token_address,
-            retention_decision,
+            retention_decision: None,
         }
     }
 
@@ -361,16 +347,6 @@ impl TrackedTokenIndex {
         None
     }
 
-    fn apply_live_retention_policy_to_token(
-        &mut self,
-        registry: &mut TokenRegistry,
-        token_address: &str,
-        current_block: u64,
-    ) -> Option<LiveTokenRetentionDecision> {
-        let policy = self.live_retention_policy.clone()?;
-        self.apply_retention_policy_to_token(registry, &policy, token_address, current_block)
-    }
-
     fn apply_retention_policy_to_token(
         &mut self,
         registry: &mut TokenRegistry,
@@ -458,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn index_registry_token_removes_token_when_policy_drops_it() {
+    fn index_registry_token_defers_retention_to_reported_pass() {
         let mut policy = LiveTokenRetentionPolicy {
             drop_tokens_without_retained_pools_after_blocks: Some(10),
             ..LiveTokenRetentionPolicy::default()
@@ -478,7 +454,16 @@ mod tests {
             110,
         );
 
-        assert!(update.removed_by_retention);
+        assert!(update.indexed);
+        assert!(!update.removed_by_retention);
+        assert!(registry.token(TOKEN_ADDRESS).is_some());
+        assert!(index.contains_token(TOKEN_ADDRESS));
+
+        let report = index
+            .apply_live_retention_policy(&mut registry, 110)
+            .unwrap();
+
+        assert_eq!(report.dropped_tokens, 1);
         assert!(registry.token(TOKEN_ADDRESS).is_none());
         assert!(!index.contains_token(TOKEN_ADDRESS));
     }

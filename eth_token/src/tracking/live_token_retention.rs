@@ -69,7 +69,11 @@ impl LiveTokenRetentionPolicy {
         let reason = if let Some(reason) = self.liquidity_removal_expiry_reason(pool, current_block)
         {
             Some(reason)
-        } else if pool.has_liquidity_removal() || threshold <= 0.0 || denom_reserve >= threshold {
+        } else if pool.has_liquidity_removal()
+            || !pool_has_observed_liquidity_state(pool)
+            || threshold <= 0.0
+            || denom_reserve >= threshold
+        {
             None
         } else {
             Some(PoolDropReason::BelowDenomThreshold {
@@ -421,6 +425,10 @@ fn pool_reference_block(pool: &BasePool) -> Option<u64> {
     .max()
 }
 
+fn pool_has_observed_liquidity_state(pool: &BasePool) -> bool {
+    pool.latest_block_number.is_some() || pool.reserve_tracker.latest_snapshot.is_some()
+}
+
 fn address_set<const N: usize>(addresses: [&str; N]) -> BTreeSet<String> {
     addresses.into_iter().map(normalize_address).collect()
 }
@@ -485,6 +493,21 @@ mod tests {
         assert!(!decision.retain);
         assert_eq!(decision.denom_class, LivePoolDenomClass::Weth);
         assert_eq!(decision.threshold, 0.1);
+    }
+
+    #[test]
+    fn pool_without_observed_liquidity_state_is_retained() {
+        let policy = LiveTokenRetentionPolicy::default();
+        let mut pool = v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.099);
+        pool.base.reserve_tracker.latest_snapshot = None;
+        pool.base.reserve_tracker.reserve_history.clear();
+        pool.base.latest_block_number = None;
+        pool.base.state.denom_reserve = 0.0;
+
+        let decision = policy.evaluate_pool(&pool.base, 110);
+
+        assert!(decision.retain);
+        assert_eq!(decision.reason, None);
     }
 
     #[test]

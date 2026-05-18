@@ -68,8 +68,8 @@ impl LogDecoder {
             return self.decode_uniswap_v2_burn(log, log_index);
         }
 
-        // Uniswap V2 PairCreated
-        if event_signature == self.signatures.pair_created && log.topics().len() == 4 {
+        // Uniswap V2 PairCreated(address indexed token0, address indexed token1, address pair, uint)
+        if event_signature == self.signatures.pair_created && log.topics().len() == 3 {
             return self.decode_uniswap_v2_pair_created(log, log_index);
         }
 

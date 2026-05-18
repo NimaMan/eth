@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use eyre::Result;
@@ -50,6 +51,36 @@ fn report_block(block: &tx_processor::ProcessedBlock) {
         block.header.number,
         block.transactions.len(),
         failed,
+    );
+
+    let mut v2_pair_created = 0usize;
+    let mut v3_pool_created = 0usize;
+    let mut v4_initialized = 0usize;
+    let mut v2_pools = BTreeSet::new();
+    let mut v3_pools = BTreeSet::new();
+    let mut v4_pools = BTreeSet::new();
+    for tx in &block.transactions {
+        v2_pair_created += tx.processed.uniswap_v2_pair_created_events.len();
+        v3_pool_created += tx.processed.uniswap_v3_pools.len();
+        v4_initialized += tx.processed.uniswap_v4_initializes.len();
+        for event in &tx.processed.uniswap_v2_pair_created_events {
+            v2_pools.insert(event.pair_address);
+        }
+        for event in &tx.processed.uniswap_v3_pools {
+            v3_pools.insert(event.pool);
+        }
+        for event in &tx.processed.uniswap_v4_initializes {
+            v4_pools.insert((event.pool_manager_address, event.event_id));
+        }
+    }
+    println!(
+        "  Pool creations: v2={} ({} unique), v3={} ({} unique), v4={} ({} unique)",
+        v2_pair_created,
+        v2_pools.len(),
+        v3_pool_created,
+        v3_pools.len(),
+        v4_initialized,
+        v4_pools.len(),
     );
 
     if let Some(first) = block.transactions.first() {

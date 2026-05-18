@@ -185,7 +185,7 @@ impl LogDecoder {
         log: &AlloyLog,
         log_index: u64,
     ) -> Result<Option<DecodedEvent>> {
-        if log.topics().len() != 4 || log.data.data.len() != 64 {
+        if log.topics().len() != 3 || log.data.data.len() != 64 {
             return Ok(None);
         }
 

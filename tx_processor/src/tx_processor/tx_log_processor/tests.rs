@@ -11,6 +11,12 @@ fn topic_address(address: Address) -> B256 {
     B256::from(bytes)
 }
 
+fn word_address(address: Address) -> Vec<u8> {
+    let mut word = [0u8; 32];
+    word[12..32].copy_from_slice(address.as_slice());
+    word.to_vec()
+}
+
 fn word_u64(value: u64) -> Vec<u8> {
     let mut word = [0u8; 32];
     word[24..32].copy_from_slice(&value.to_be_bytes());
@@ -94,6 +100,45 @@ fn decodes_approval_for_all() {
             assert_eq!(event.operator, operator);
             assert!(event.approved);
             assert_eq!(event.log_index, 9);
+        }
+        other => panic!("unexpected decoded event: {:?}", other),
+    }
+}
+
+#[test]
+fn decodes_uniswap_v2_pair_created_with_three_topics() {
+    let decoder = LogDecoder::new();
+    let factory = address(0x5c);
+    let token0 = address(0x22);
+    let token1 = address(0xc0);
+    let pair = address(0x8a);
+
+    let mut data = Vec::new();
+    data.extend(word_address(pair));
+    data.extend(word_u64(506_983));
+
+    let log = AlloyLog::new_unchecked(
+        factory,
+        vec![
+            decoder.signatures.pair_created,
+            topic_address(token0),
+            topic_address(token1),
+        ],
+        Bytes::from(data),
+    );
+
+    let decoded = decoder
+        .decode_log(&log, 263)
+        .expect("decode should succeed")
+        .expect("event should decode");
+
+    match decoded {
+        DecodedEvent::UniswapV2PairCreatedEvent(event) => {
+            assert_eq!(event.factory_address, factory);
+            assert_eq!(event.token0, token0);
+            assert_eq!(event.token1, token1);
+            assert_eq!(event.pair_address, pair);
+            assert_eq!(event.log_index, 263);
         }
         other => panic!("unexpected decoded event: {:?}", other),
     }
