@@ -1,6 +1,8 @@
 pub mod backtest_validation;
 pub mod position_lab;
 pub mod render;
+#[path = "strategy_lab/event_trace/mod.rs"]
+pub mod strategy_event_trace;
 pub mod strategy_lab;
 
 use eyre::{Context, Result};

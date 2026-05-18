@@ -21,6 +21,7 @@ top-level module under `src/` rather than nesting modules under a generic
 src/
   bin/eth_alpha_lab.rs
   backtest_validation/
+  strategy_lab/event_trace/
   position_lab.rs
   strategy_lab.rs
   render.rs
@@ -45,6 +46,44 @@ eth_alpha_lab strategy \
   --run-id hist-poolonly-mtm-paper-20260512-1021 \
   --run-id hist-poolonly-mtm-v4-20260512-1021
 ```
+
+## Trade Event Trace
+
+Event-timing diagnostics for a single trade or for all losing trades in a
+strategy result. This is the repeatable workflow for asking:
+
+> What happened around the pool before entry, during the buy-confirmation
+> block, before sell submission, and before sell confirmation?
+
+Single trade:
+
+```bash
+eth_alpha_lab trade-events \
+  --result-set historical-25090165-25110164 \
+  --strategy snipe-all-risk-atlas-lp-gate-hold15-immediate-lp-exit \
+  --trade-id trd_mp8vc73a_23ggp_145
+```
+
+Losing-trade scan:
+
+```bash
+eth_alpha_lab losing-trades \
+  --result-set historical-25090165-25110164 \
+  --strategy snipe-all-risk-atlas-lp-gate-hold15-immediate-lp-exit \
+  --limit 20
+```
+
+The scan groups repeated timing signals across losing trades, including:
+
+- LP approval visible before buy submission;
+- LP approval in the buy-confirmation block;
+- LP approval after entry but before sell;
+- direct liquidity removal before or during sell confirmation;
+- max-hold exits that lost money;
+- mark-to-market crossing below entry before exit;
+- gas costs that materially explain the loss.
+
+Use `--json` when the scan output should feed another tool or a UI page.
 
 ## Token Lab
 
@@ -132,7 +171,7 @@ layer fails.
 ```bash
 eth_alpha_lab backtest-validation \
   --result-set historical-25090165-25110164 \
-  --strategy snipe-all-risk-atlas-lp-gate-hold15-v2
+  --strategy snipe-all-risk-atlas-lp-gate-hold15-v2-uniswap-v2-only
 ```
 
 The command supports profiles:

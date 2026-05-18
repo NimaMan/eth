@@ -1,0 +1,513 @@
+use eth_strategies::shared_rules::lp_approval_warning_exit;
+use eyre::Result;
+use serde_json::Value;
+
+#[derive(Clone, Debug)]
+pub struct StrategySuiteOptions {
+    pub strategy_name: String,
+    pub strategy_impl: String,
+    pub strategy_suite: Option<String>,
+    pub stop_loss_ratio: Option<String>,
+    pub take_profit_ratio: Option<String>,
+    pub max_hold_blocks: Option<u64>,
+    pub exit_retry_interval_blocks: Option<u64>,
+    pub max_exit_retries: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BacktestStrategySpec {
+    pub(crate) strategy_name: String,
+    pub(crate) strategy_impl: String,
+    pub(crate) exit_on_liquidity_removal: bool,
+    pub(crate) exit_on_tax: bool,
+    pub(crate) exit_on_lp_approval: bool,
+    pub(crate) exit_on_critical_lp_approval_only: bool,
+    pub(crate) exit_on_scam: bool,
+    pub(crate) allowed_protocols: Vec<String>,
+    pub(crate) block_entry_on_lp_approval: bool,
+    pub(crate) lp_approval_gate_min_pct: Option<String>,
+    pub(crate) defer_buy_confirm_block_lp_approval_to_max_hold: bool,
+    pub(crate) stop_loss_ratio: Option<String>,
+    pub(crate) take_profit_ratio: Option<String>,
+    pub(crate) max_hold_blocks: Option<u64>,
+    pub(crate) exit_retry_interval_blocks: Option<u64>,
+    pub(crate) max_exit_retries: Option<u32>,
+}
+
+impl BacktestStrategySpec {
+    pub fn config_json(&self) -> Value {
+        serde_json::json!({
+            "strategy_name": self.strategy_name,
+            "strategy_impl": self.strategy_impl,
+            "exit_liquidity_removal": self.exit_on_liquidity_removal,
+            "exit_tax": self.exit_on_tax,
+            "exit_lp_approval": self.exit_on_lp_approval,
+            "exit_lp_approval_critical_only": self.exit_on_critical_lp_approval_only,
+            "exit_scam": self.exit_on_scam,
+            "allowed_protocols": self.allowed_protocols,
+            "block_entry_on_lp_approval": self.block_entry_on_lp_approval,
+            "lp_approval_gate_min_pct": self.lp_approval_gate_min_pct,
+            "defer_buy_confirm_block_lp_approval_to_max_hold": self.defer_buy_confirm_block_lp_approval_to_max_hold,
+            "stop_loss_ratio": self.stop_loss_ratio,
+            "take_profit_ratio": self.take_profit_ratio,
+            "max_hold_blocks": self.max_hold_blocks,
+            "exit_retry_interval_blocks": self.exit_retry_interval_blocks,
+            "max_exit_retries": self.max_exit_retries,
+        })
+    }
+
+    pub fn uses_signal_risk_events(&self) -> bool {
+        self.exit_on_liquidity_removal
+            || self.exit_on_lp_approval
+            || self.exit_on_tax
+            || self.exit_on_scam
+    }
+}
+
+pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestStrategySpec>> {
+    if let Some(suite) = args.strategy_suite.as_deref() {
+        return match suite {
+            "historical-pool-update-hold" => Ok(historical_pool_update_hold_suite_specs(args)),
+            "risk-atlas-edge-v1" => Ok(risk_atlas_edge_suite_v1_specs(args)),
+            "risk-atlas-edge-v2" => Ok(risk_atlas_edge_suite_v2_specs(args)),
+            "risk-atlas-edge-v3" => Ok(risk_atlas_edge_suite_v3_specs(args)),
+            "risk-atlas-edge-v4" => Ok(risk_atlas_edge_suite_v4_specs(args)),
+            "risk-atlas-edge-v5" => Ok(risk_atlas_edge_suite_v5_specs(args)),
+            "alpha-10-risk-atlas" => Ok(alpha_10_risk_atlas_suite_specs(args)),
+            "risk-atlas-lp-buy-confirm-block-comparison" => {
+                Ok(risk_atlas_lp_buy_confirm_block_comparison_specs(args))
+            }
+            "risk-atlas-lp-buy-confirm-block-comparison-uniswap-v2-only" => {
+                Ok(risk_atlas_lp_buy_confirm_block_comparison_uniswap_v2_only_specs(args))
+            }
+            lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME
+            | lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_STRATEGY_NAME => {
+                Ok(vec![historical_mempool_aware_lp_approval_warning_exit_spec(args)])
+            }
+            lp_approval_warning_exit::SUITE_NAME | lp_approval_warning_exit::STRATEGY_NAME => {
+                Err(eyre::eyre!(
+                    "historical replay of stored mempool_signal rows must use a mempool-aware name. Use --strategy-suite {}",
+                    lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME
+                ))
+            }
+            "mempool-history-exits" => Err(eyre::eyre!(
+                "strategy suite mempool-history-exits was removed; historical backtests no longer replay mempool signals. Use --strategy-suite historical-pool-update-hold"
+            )),
+            other => Err(eyre::eyre!("unsupported strategy suite: {other}")),
+        };
+    }
+
+    Ok(vec![BacktestStrategySpec {
+        strategy_name: args.strategy_name.clone(),
+        strategy_impl: args.strategy_impl.clone(),
+        exit_on_liquidity_removal: false,
+        exit_on_tax: false,
+        exit_on_lp_approval: false,
+        exit_on_critical_lp_approval_only: false,
+        exit_on_scam: false,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval: false,
+        lp_approval_gate_min_pct: None,
+        defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        stop_loss_ratio: args.stop_loss_ratio.clone(),
+        take_profit_ratio: args.take_profit_ratio.clone(),
+        max_hold_blocks: args.max_hold_blocks,
+        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+        max_exit_retries: args.max_exit_retries,
+    }])
+}
+
+fn historical_pool_update_hold_suite_specs(
+    args: &StrategySuiteOptions,
+) -> Vec<BacktestStrategySpec> {
+    [1_u64, 2, 3, 5, 10]
+        .into_iter()
+        .map(|max_hold_blocks| BacktestStrategySpec {
+            strategy_name: format!("snipe-all-hold{max_hold_blocks}-pool-updates"),
+            strategy_impl: "snipe-all".to_string(),
+            exit_on_liquidity_removal: false,
+            exit_on_tax: false,
+            exit_on_lp_approval: false,
+            exit_on_critical_lp_approval_only: false,
+            exit_on_scam: false,
+            allowed_protocols: Vec::new(),
+            block_entry_on_lp_approval: false,
+            lp_approval_gate_min_pct: None,
+            defer_buy_confirm_block_lp_approval_to_max_hold: false,
+            stop_loss_ratio: args.stop_loss_ratio.clone(),
+            take_profit_ratio: args.take_profit_ratio.clone(),
+            max_hold_blocks: Some(max_hold_blocks),
+            exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+            max_exit_retries: args.max_exit_retries,
+        })
+        .collect()
+}
+
+fn risk_atlas_edge_suite_v1_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    vec![
+        risk_atlas_uniswap_v2_only_spec(
+            "snipe-all-risk-atlas-lp-immediate-exit-v1-uniswap-v2-only",
+            true,
+            false,
+            None,
+            args,
+        ),
+        risk_atlas_uniswap_v2_only_spec(
+            "snipe-all-risk-atlas-lp-launch-gate-v1-uniswap-v2-only",
+            true,
+            true,
+            None,
+            args,
+        ),
+        risk_atlas_uniswap_v2_only_spec(
+            "snipe-all-risk-atlas-active-horizon-hold10-v1-uniswap-v2-only",
+            true,
+            true,
+            Some(10),
+            args,
+        ),
+        risk_atlas_uniswap_v2_only_spec(
+            "snipe-all-risk-atlas-v2-backdoor-fast-hold5-v1-uniswap-v2-only",
+            false,
+            true,
+            Some(5),
+            args,
+        ),
+        risk_atlas_uniswap_v2_only_spec(
+            "snipe-all-risk-atlas-protocol-guard-hold50-v1-uniswap-v2-only",
+            true,
+            true,
+            Some(50),
+            args,
+        ),
+    ]
+}
+
+fn risk_atlas_edge_suite_v2_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    [5_u64, 8, 10, 12, 15]
+        .into_iter()
+        .map(|max_hold_blocks| {
+            risk_atlas_uniswap_v2_only_spec(
+                &format!("snipe-all-risk-atlas-lp-gate-hold{max_hold_blocks}-v2-uniswap-v2-only"),
+                true,
+                true,
+                Some(max_hold_blocks),
+                args,
+            )
+        })
+        .collect()
+}
+
+fn risk_atlas_edge_suite_v3_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    [15_u64, 20, 25, 30, 40]
+        .into_iter()
+        .map(|max_hold_blocks| {
+            risk_atlas_uniswap_v2_only_spec(
+                &format!("snipe-all-risk-atlas-lp-gate-hold{max_hold_blocks}-v3-uniswap-v2-only"),
+                true,
+                true,
+                Some(max_hold_blocks),
+                args,
+            )
+        })
+        .collect()
+}
+
+fn risk_atlas_edge_suite_v4_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    [20_u64, 30, 40]
+        .into_iter()
+        .flat_map(|max_hold_blocks| {
+            [2_u64, 3, 5, 8].into_iter().map(move |take_profit| {
+                risk_atlas_uniswap_v2_only_spec_with_price_exits(
+                    &format!(
+                        "snipe-all-risk-atlas-lp-gate-hold{max_hold_blocks}-tp{take_profit}x-v4-uniswap-v2-only"
+                    ),
+                    Some(max_hold_blocks),
+                    None,
+                    Some(&format!("{take_profit}.0")),
+                    args,
+                )
+            })
+        })
+        .collect()
+}
+
+fn risk_atlas_edge_suite_v5_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    [20_u64, 30, 40]
+        .into_iter()
+        .flat_map(|max_hold_blocks| {
+            [
+                ("sl70", "0.70", "tp3x", "3.0"),
+                ("sl70", "0.70", "tp5x", "5.0"),
+                ("sl85", "0.85", "tp3x", "3.0"),
+                ("sl85", "0.85", "tp5x", "5.0"),
+            ]
+            .into_iter()
+            .map(move |(sl_label, stop_loss, tp_label, take_profit)| {
+                risk_atlas_uniswap_v2_only_spec_with_price_exits(
+                    &format!(
+                        "snipe-all-risk-atlas-lp-gate-hold{max_hold_blocks}-{sl_label}-{tp_label}-v5-uniswap-v2-only"
+                    ),
+                    Some(max_hold_blocks),
+                    Some(stop_loss),
+                    Some(take_profit),
+                    args,
+                )
+            })
+        })
+        .collect()
+}
+
+fn risk_atlas_lp_buy_confirm_block_comparison_specs(
+    args: &StrategySuiteOptions,
+) -> Vec<BacktestStrategySpec> {
+    let immediate = risk_atlas_spec(
+        "snipe-all-risk-atlas-lp-gate-hold15-immediate-lp-exit",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    let mut buy_confirm_block_hold = risk_atlas_spec(
+        "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    buy_confirm_block_hold.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+
+    vec![immediate, buy_confirm_block_hold]
+}
+
+fn risk_atlas_lp_buy_confirm_block_comparison_uniswap_v2_only_specs(
+    args: &StrategySuiteOptions,
+) -> Vec<BacktestStrategySpec> {
+    let immediate = risk_atlas_uniswap_v2_only_spec(
+        "snipe-all-risk-atlas-lp-gate-hold15-immediate-lp-exit-uniswap-v2-only",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    let mut buy_confirm_block_hold = risk_atlas_uniswap_v2_only_spec(
+        "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold-uniswap-v2-only",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    buy_confirm_block_hold.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+
+    vec![immediate, buy_confirm_block_hold]
+}
+
+fn alpha_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    let mut baseline = risk_atlas_spec(
+        "alpha10-01-baseline-hold15-buy-confirm",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    baseline.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+
+    let mut v2_baseline = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-02-v2-hold15-buy-confirm",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    v2_baseline.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+
+    let hold20 = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-03-v2-hold20",
+        true,
+        true,
+        Some(20),
+        args,
+    );
+    let hold30 = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-04-v2-hold30",
+        true,
+        true,
+        Some(30),
+        args,
+    );
+    let hold40 = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-05-v2-hold40",
+        true,
+        true,
+        Some(40),
+        args,
+    );
+    let tp3 = risk_atlas_uniswap_v2_only_spec_with_price_exits(
+        "alpha10-06-v2-hold30-tp3x",
+        Some(30),
+        None,
+        Some("3.0"),
+        args,
+    );
+    let tp5 = risk_atlas_uniswap_v2_only_spec_with_price_exits(
+        "alpha10-07-v2-hold30-tp5x",
+        Some(30),
+        None,
+        Some("5.0"),
+        args,
+    );
+    let sl70_tp3 = risk_atlas_uniswap_v2_only_spec_with_price_exits(
+        "alpha10-08-v2-hold30-sl70-tp3x",
+        Some(30),
+        Some("0.70"),
+        Some("3.0"),
+        args,
+    );
+    let sl85_tp3 = risk_atlas_uniswap_v2_only_spec_with_price_exits(
+        "alpha10-09-v2-hold30-sl85-tp3x",
+        Some(30),
+        Some("0.85"),
+        Some("3.0"),
+        args,
+    );
+    let mut retry = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-10-v2-hold15-retry3",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    retry.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+    retry.exit_retry_interval_blocks = Some(1);
+    retry.max_exit_retries = Some(3);
+
+    vec![
+        baseline,
+        v2_baseline,
+        hold20,
+        hold30,
+        hold40,
+        tp3,
+        tp5,
+        sl70_tp3,
+        sl85_tp3,
+        retry,
+    ]
+}
+
+fn risk_atlas_spec(
+    strategy_name: &str,
+    exit_on_lp_approval: bool,
+    block_entry_on_lp_approval: bool,
+    max_hold_blocks: Option<u64>,
+    args: &StrategySuiteOptions,
+) -> BacktestStrategySpec {
+    BacktestStrategySpec {
+        strategy_name: strategy_name.to_string(),
+        strategy_impl: "snipe-all".to_string(),
+        exit_on_liquidity_removal: true,
+        exit_on_tax: false,
+        exit_on_lp_approval,
+        exit_on_critical_lp_approval_only: false,
+        exit_on_scam: false,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval,
+        lp_approval_gate_min_pct: Some(
+            eth_strategies::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
+        ),
+        defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        stop_loss_ratio: args.stop_loss_ratio.clone(),
+        take_profit_ratio: args.take_profit_ratio.clone(),
+        max_hold_blocks,
+        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+        max_exit_retries: args.max_exit_retries,
+    }
+}
+
+fn risk_atlas_uniswap_v2_only_spec(
+    strategy_name: &str,
+    exit_on_lp_approval: bool,
+    block_entry_on_lp_approval: bool,
+    max_hold_blocks: Option<u64>,
+    args: &StrategySuiteOptions,
+) -> BacktestStrategySpec {
+    let mut spec = risk_atlas_spec(
+        strategy_name,
+        exit_on_lp_approval,
+        block_entry_on_lp_approval,
+        max_hold_blocks,
+        args,
+    );
+    spec.allowed_protocols = vec!["UNISWAP-V2".to_string()];
+    spec
+}
+
+fn risk_atlas_spec_with_price_exits(
+    strategy_name: &str,
+    max_hold_blocks: Option<u64>,
+    stop_loss_ratio: Option<&str>,
+    take_profit_ratio: Option<&str>,
+    args: &StrategySuiteOptions,
+) -> BacktestStrategySpec {
+    let mut spec = risk_atlas_spec(strategy_name, true, true, max_hold_blocks, args);
+    if let Some(stop_loss_ratio) = stop_loss_ratio {
+        spec.stop_loss_ratio = Some(stop_loss_ratio.to_string());
+    }
+    if let Some(take_profit_ratio) = take_profit_ratio {
+        spec.take_profit_ratio = Some(take_profit_ratio.to_string());
+    }
+    spec
+}
+
+fn risk_atlas_uniswap_v2_only_spec_with_price_exits(
+    strategy_name: &str,
+    max_hold_blocks: Option<u64>,
+    stop_loss_ratio: Option<&str>,
+    take_profit_ratio: Option<&str>,
+    args: &StrategySuiteOptions,
+) -> BacktestStrategySpec {
+    let mut spec = risk_atlas_spec_with_price_exits(
+        strategy_name,
+        max_hold_blocks,
+        stop_loss_ratio,
+        take_profit_ratio,
+        args,
+    );
+    spec.allowed_protocols = vec!["UNISWAP-V2".to_string()];
+    spec
+}
+
+fn historical_mempool_aware_lp_approval_warning_exit_spec(
+    args: &StrategySuiteOptions,
+) -> BacktestStrategySpec {
+    BacktestStrategySpec {
+        strategy_name: lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_STRATEGY_NAME.to_string(),
+        strategy_impl: "snipe-all".to_string(),
+        exit_on_liquidity_removal: lp_approval_warning_exit::EXIT_LIQUIDITY_REMOVAL,
+        exit_on_tax: lp_approval_warning_exit::EXIT_TAX,
+        exit_on_lp_approval: lp_approval_warning_exit::EXIT_LP_APPROVAL,
+        exit_on_critical_lp_approval_only: lp_approval_warning_exit::EXIT_LP_APPROVAL_CRITICAL_ONLY,
+        exit_on_scam: lp_approval_warning_exit::EXIT_SCAM,
+        allowed_protocols: Vec::new(),
+        block_entry_on_lp_approval: false,
+        lp_approval_gate_min_pct: None,
+        defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        stop_loss_ratio: args.stop_loss_ratio.clone(),
+        take_profit_ratio: args.take_profit_ratio.clone(),
+        max_hold_blocks: None,
+        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
+        max_exit_retries: args.max_exit_retries,
+    }
+}
+
+pub fn validate_historical_signal_replay_names(specs: &[BacktestStrategySpec]) -> Result<()> {
+    for spec in specs {
+        if spec.uses_signal_risk_events() && !spec.strategy_name.contains("mempool-aware") {
+            return Err(eyre::eyre!(
+                "historical strategy {} replays stored mempool_signal risk events but is not named mempool-aware",
+                spec.strategy_name
+            ));
+        }
+    }
+    Ok(())
+}

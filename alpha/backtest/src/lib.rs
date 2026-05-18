@@ -7,4 +7,7 @@
 
 pub mod adapter;
 pub mod config;
+pub mod execution;
+pub mod replay;
 pub mod runner;
+pub mod strategy_suites;

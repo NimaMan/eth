@@ -10,6 +10,7 @@ use eth_alpha_lab::{
     },
     connect,
     position_lab::{self, PositionSelector},
+    strategy_event_trace::{self, LossScanOptions, TraceSelector},
     strategy_lab,
 };
 use eyre::{eyre, Result};
@@ -81,6 +82,42 @@ enum Command {
 
         #[arg(long)]
         persist: bool,
+    },
+
+    /// One trade's ordered event timeline: trade events, risks, decisions, snapshots.
+    TradeEvents {
+        #[arg(long = "result-set")]
+        result_set_id: String,
+
+        #[arg(long)]
+        strategy: String,
+
+        #[arg(long = "trade-id")]
+        trade_id: String,
+
+        #[arg(long = "run-id")]
+        run_id: Option<String>,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Scan losing trades for repeated event-timing signal candidates.
+    LosingTrades {
+        #[arg(long = "result-set")]
+        result_set_id: String,
+
+        #[arg(long)]
+        strategy: String,
+
+        #[arg(long = "run-id")]
+        run_id: Option<String>,
+
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -177,6 +214,52 @@ async fn main() -> Result<()> {
                     println!();
                     println!("Persisted validation report: {validation_id}");
                 }
+            }
+        }
+        Command::TradeEvents {
+            result_set_id,
+            strategy,
+            trade_id,
+            run_id,
+            json,
+        } => {
+            let trace = strategy_event_trace::trace_trade(
+                &pool,
+                TraceSelector {
+                    result_set_id,
+                    strategy_name: strategy,
+                    trade_id,
+                    run_id,
+                },
+            )
+            .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&trace)?);
+            } else {
+                strategy_event_trace::print_trade_trace(&trace);
+            }
+        }
+        Command::LosingTrades {
+            result_set_id,
+            strategy,
+            run_id,
+            limit,
+            json,
+        } => {
+            let report = strategy_event_trace::scan_losing_trades(
+                &pool,
+                LossScanOptions {
+                    result_set_id,
+                    strategy_name: strategy,
+                    run_id,
+                    detail_limit: limit,
+                },
+            )
+            .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                strategy_event_trace::print_loss_scan(&report);
             }
         }
     }
