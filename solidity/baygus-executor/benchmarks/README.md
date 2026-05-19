@@ -1,4 +1,4 @@
-# Baygus V2 Mode A Benchmarks
+# Uniswap V2 Trading Vault Mode A Benchmarks
 
 This folder records gas evidence for the V2 Mode A trading vault.
 
@@ -22,17 +22,17 @@ emergency sell:
 ```text
 contracts/test/bench/
   V2GasBenchBase.sol
-  BaygusTradingVaultGas.t.sol
-  BaygusTradingVaultForkGas.t.sol
+  UniswapV2TradingVaultGas.t.sol
+  UniswapV2TradingVaultForkGas.t.sol
 
 contracts/test/fixtures/
   V2MainnetFixtures.sol
 ```
 
-`BaygusTradingVaultGas.t.sol` uses local mocks. It is useful for regression
+`UniswapV2TradingVaultGas.t.sol` uses local mocks. It is useful for regression
 tracking, but it is not a production gas estimate.
 
-`BaygusTradingVaultForkGas.t.sol` uses mainnet Uniswap V2 router, WETH, and USDC
+`UniswapV2TradingVaultForkGas.t.sol` uses mainnet Uniswap V2 router, WETH, and USDC
 on a fork. It also includes an RFI fee-on-transfer smoke benchmark. It no-ops
 when run without fork code at the mainnet router address.
 
@@ -42,8 +42,8 @@ Run deterministic local benchmarks:
 
 ```bash
 cd /home/nima/code/crypto/blockchains/eth/solidity/baygus-executor/contracts
-forge test --match-contract BaygusTradingVaultGasTest --gas-report
-forge snapshot --match-contract BaygusTradingVaultGasTest \
+forge test --match-contract UniswapV2TradingVaultGasTest --gas-report
+forge snapshot --match-contract UniswapV2TradingVaultGasTest \
   --snap ../benchmarks/snapshots/v2-mode-a-local.gas-snapshot
 ```
 
@@ -52,7 +52,7 @@ Run mainnet fork benchmarks:
 ```bash
 cd /home/nima/code/crypto/blockchains/eth/solidity/baygus-executor/contracts
 MAINNET_RPC_URL="$MAINNET_RPC_URL" forge test \
-  --match-contract BaygusTradingVaultForkGasTest \
+  --match-contract UniswapV2TradingVaultForkGasTest \
   --fork-url "$MAINNET_RPC_URL" \
   --gas-report
 ```
@@ -61,7 +61,7 @@ For repeatable reports, add a fixed fork block:
 
 ```bash
 MAINNET_RPC_URL="$MAINNET_RPC_URL" forge test \
-  --match-contract BaygusTradingVaultForkGasTest \
+  --match-contract UniswapV2TradingVaultForkGasTest \
   --fork-url "$MAINNET_RPC_URL" \
   --fork-block-number <block> \
   --gas-report

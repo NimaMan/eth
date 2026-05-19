@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaygusTradingVault} from "../../src/BaygusTradingVault.sol";
+import {UniswapV2TradingVault} from "../../src/UniswapV2TradingVault.sol";
 import {IERC20} from "../../src/interfaces/IERC20.sol";
 import {IUniswapV2Router02} from "../../src/interfaces/IUniswapV2Router02.sol";
 import {TestBase} from "../utils/TestBase.sol";
@@ -42,8 +42,8 @@ abstract contract V2GasBenchBase is TestBase {
             );
     }
 
-    function _deployVault(address weth, address router) internal returns (BaygusTradingVault) {
-        return new BaygusTradingVault(OWNER, TREASURY, weth, router);
+    function _deployVault(address weth, address router) internal returns (UniswapV2TradingVault) {
+        return new UniswapV2TradingVault(OWNER, TREASURY, weth, router);
     }
 
     function _approve(address token, address spender, uint256 amount) internal {

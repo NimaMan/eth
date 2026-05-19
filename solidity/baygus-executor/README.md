@@ -1,6 +1,6 @@
-# Baygus Trading Vault
+# Uniswap V2 Trading Vault
 
-Baygus Trading Vault is the minimal Solidity execution layer for live scam-exit
+Uniswap V2 Trading Vault is the minimal Solidity execution layer for live scam-exit
 testing. It is no longer a broad command router. The v1 contract supports Mode A:
 
 - buy through the vault and hold the bought token in the vault;
@@ -13,7 +13,7 @@ testing. It is no longer a broad command router. The v1 contract supports Mode A
 
 ## Design goal
 
-Baygus should be cheap on-chain. The off-chain simulator and search pipeline
+The vault should be cheap on-chain. The off-chain simulator and search pipeline
 should do every piece of work that can be done before signing: route discovery,
 pool selection, calldata construction, price checks, slippage bounds, block
 bounds, gas estimates, profit checks, and bribe sizing. The deployed contract
@@ -46,12 +46,24 @@ then add the matching Rust builder.
 - `rescueToken(token, to, amount)` and `rescueEth(to, amount)`: owner-only
   recovery functions.
 
+## Miner Bribe Handling
+
+The vault does not pay `block.coinbase` and does not contain a miner-bribe
+method. Bribe selection is handled by the Rust live tx-prep layer through the
+outer transaction's EIP-1559 fields: `max_priority_fee_per_gas` and
+`max_fee_per_gas`.
+
+That means the same vault calldata can be submitted with different priority-fee
+plans. Direct coinbase payments, private bundles, and builder-relay bribes need
+a separate executor protocol/version; they should not be hidden inside this
+vault.
+
 ## Pre-deployment gate
 
 Do not deploy a new executor until all of these are true:
 
 - `forge fmt --check`, `forge build`, and `forge test` pass from `contracts/`.
-- The Rust tx builders compile and selector tests match `BaygusTradingVault`.
+- The Rust tx builders compile and selector tests match `UniswapV2TradingVault`.
 - Constructor arguments are fixed: owner, treasury, WETH, and Uniswap V2 router.
 - The bytecode hash and ABI diff are recorded next to the deployment note.
 - The exact buy and emergency-sell calldata are simulated against target block

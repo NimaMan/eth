@@ -5,7 +5,7 @@ import {IERC20} from "./interfaces/IERC20.sol";
 import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 
-contract BaygusTradingVault {
+contract UniswapV2TradingVault {
     using SafeTransferLib for address;
 
     error DeadlineExpired(uint256 deadline);

@@ -1,4 +1,4 @@
-# Baygus Trading Vault Deployment Gate
+# Uniswap V2 Trading Vault Deployment Gate
 
 This vault is part of the transaction execution path. Treat every deploy as
 immutable production infrastructure: owner, treasury, WETH, and router addresses
@@ -35,7 +35,7 @@ Run from `reth`:
 
 ```bash
 cargo test -p eth_live_trading
-cargo test -p tx_simulator tx_builders::protocols::baygus_v2_vault --lib
+cargo test -p tx_simulator tx_builders::protocols::uniswap_v2_trading_vault --lib
 cargo test -p eth_alpha_engine
 ```
 
@@ -65,7 +65,7 @@ Record these values for every deployment:
 - deployer
 - deployed vault address
 - constructor arguments
-- `BaygusTradingVault` bytecode hash
+- `UniswapV2TradingVault` bytecode hash
 - deployed runtime size
 - deploy gas, buy gas, and emergency-sell gas versus direct execution
 - Rust tx-builder commit and selector test output

@@ -1,6 +1,6 @@
 # Contracts
 
-This is the Foundry project for Baygus Trading Vault.
+This is the Foundry project for Uniswap V2 Trading Vault.
 
 - `src/` contains production Solidity.
 - `test/` contains deterministic tests and mocks.

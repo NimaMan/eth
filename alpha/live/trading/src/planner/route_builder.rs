@@ -6,8 +6,8 @@ use eth_alpha_core::{
 };
 use serde::{Deserialize, Serialize};
 use tx_simulator::tx_builders::{
-    build_baygus_vault_emergency_sell_v2_exact_tokens_for_eth, build_sell_swap_with_min_out,
-    AmmSwapRoute,
+    build_sell_swap_with_min_out,
+    build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth, AmmSwapRoute,
 };
 
 use crate::PreparedSellRoute;
@@ -16,8 +16,8 @@ use super::{LivePrioritySellPlannerError, LivePrioritySellPlannerInput};
 
 const DEFAULT_UNISWAP_V2_SELL_GAS_LIMIT: u64 = 500_000;
 const DEFAULT_UNISWAP_V2_ESTIMATED_SELL_GAS_USED: u64 = 180_000;
-const DEFAULT_BAYGUS_V2_VAULT_SELL_GAS_LIMIT: u64 = 300_000;
-const DEFAULT_BAYGUS_V2_VAULT_ESTIMATED_SELL_GAS_USED: u64 = 130_000;
+const DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT: u64 = 300_000;
+const DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED: u64 = 130_000;
 const WETH_ADDRESS: Address =
     alloy_primitives::address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 
@@ -96,12 +96,12 @@ impl SellRouteBuilder for UniswapV2SellRouteBuilder {
 }
 
 #[derive(Clone, Debug)]
-pub struct BaygusV2VaultSellRouteBuilder {
+pub struct UniswapV2TradingVaultSellRouteBuilder {
     vault_address: Address,
     request: RouteBuildRequest,
 }
 
-impl BaygusV2VaultSellRouteBuilder {
+impl UniswapV2TradingVaultSellRouteBuilder {
     pub fn new(vault_address: Address, request: RouteBuildRequest) -> Self {
         Self {
             vault_address,
@@ -113,15 +113,15 @@ impl BaygusV2VaultSellRouteBuilder {
         Self {
             vault_address,
             request: RouteBuildRequest {
-                gas_limit: DEFAULT_BAYGUS_V2_VAULT_SELL_GAS_LIMIT,
-                estimated_gas_used: DEFAULT_BAYGUS_V2_VAULT_ESTIMATED_SELL_GAS_USED,
+                gas_limit: DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
+                estimated_gas_used: DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED,
             },
         }
     }
 }
 
 #[async_trait]
-impl SellRouteBuilder for BaygusV2VaultSellRouteBuilder {
+impl SellRouteBuilder for UniswapV2TradingVaultSellRouteBuilder {
     async fn build_route(
         &self,
         input: &LivePrioritySellPlannerInput,
@@ -129,7 +129,7 @@ impl SellRouteBuilder for BaygusV2VaultSellRouteBuilder {
         validate_sell_intent(&input.intent, &input.pool)?;
         ensure_weth_denom(&input.pool)?;
         let min_output = parse_min_output(input.min_output_amount.as_deref())?;
-        let unsigned = build_baygus_vault_emergency_sell_v2_exact_tokens_for_eth(
+        let unsigned = build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth(
             self.vault_address,
             parse_owner_address(input)?,
             input.intent.token_address,
@@ -146,7 +146,7 @@ impl SellRouteBuilder for BaygusV2VaultSellRouteBuilder {
         let gas_limit = self.request.gas_limit.max(unsigned.gas.unwrap_or(0));
 
         Ok(PreparedSellRoute {
-            protocol: "baygus_v2_vault_uniswap_v2".to_string(),
+            protocol: "uniswap_v2_trading_vault".to_string(),
             router_address: to.to_string(),
             calldata: format!("0x{}", hex::encode(data.as_ref())),
             value_wei: unsigned.value.unwrap_or(U256::ZERO).to_string(),
@@ -369,23 +369,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn baygus_vault_route_targets_vault_and_internal_sell_selector() {
+    async fn uniswap_v2_trading_vault_route_targets_vault_and_internal_sell_selector() {
         let vault = Address::with_last_byte(0xaa);
-        let route = BaygusV2VaultSellRouteBuilder::with_default_gas(vault)
+        let route = UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault)
             .build_route(&input())
             .await
             .unwrap();
 
-        assert_eq!(route.protocol, "baygus_v2_vault_uniswap_v2");
+        assert_eq!(route.protocol, "uniswap_v2_trading_vault");
         assert!(route
             .router_address
             .eq_ignore_ascii_case(&vault.to_string()));
         assert!(route.calldata.starts_with("0x5f413d10"));
         assert_eq!(route.value_wei, "0");
-        assert_eq!(route.gas_limit, DEFAULT_BAYGUS_V2_VAULT_SELL_GAS_LIMIT);
+        assert_eq!(
+            route.gas_limit,
+            DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT
+        );
         assert_eq!(
             route.estimated_gas_used,
-            DEFAULT_BAYGUS_V2_VAULT_ESTIMATED_SELL_GAS_USED
+            DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED
         );
     }
 }

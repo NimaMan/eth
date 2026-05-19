@@ -1,6 +1,6 @@
 # Tests
 
-`BaygusTradingVault.t.sol` verifies Mode A behavior:
+`UniswapV2TradingVault.t.sol` verifies Mode A behavior:
 
 - buy stores bought tokens in the vault;
 - buy leaves no sell-router allowance;

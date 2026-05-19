@@ -162,9 +162,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        BaygusV2VaultSellRouteBuilder, FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan,
-        PlannerTxContext, RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
-        UniswapV2SellRouteBuilder, VaultInternalAllowanceChecker,
+        FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan, PlannerTxContext,
+        RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
+        UniswapV2SellRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
+        VaultInternalAllowanceChecker,
     };
 
     fn token() -> Address {
@@ -367,11 +368,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn planner_can_submit_baygus_vault_route_without_eoa_preapproval() {
+    async fn planner_can_submit_uniswap_v2_trading_vault_route_without_eoa_preapproval() {
         let vault = Address::with_last_byte(0xaa);
         let planner = LivePrioritySellPlanner::new(
             LivePrioritySellPlannerConfig::default(),
-            BaygusV2VaultSellRouteBuilder::with_default_gas(vault),
+            UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
             simulator(),
             gas_rank(),
             VaultInternalAllowanceChecker,

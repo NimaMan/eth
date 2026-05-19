@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaygusTradingVault} from "../../src/BaygusTradingVault.sol";
+import {UniswapV2TradingVault} from "../../src/UniswapV2TradingVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "../mocks/MockFeeOnTransferERC20.sol";
 import {MockV2Router} from "../mocks/MockV2Router.sol";
 import {V2GasBenchBase} from "./V2GasBenchBase.sol";
 
-contract BaygusTradingVaultGasTest is V2GasBenchBase {
+contract UniswapV2TradingVaultGasTest is V2GasBenchBase {
     MockERC20 private weth;
     MockERC20 private token;
     MockFeeOnTransferERC20 private feeToken;
     MockV2Router private router;
-    BaygusTradingVault private vault;
+    UniswapV2TradingVault private vault;
 
     function _setupLocal() internal {
         vm.pauseGasMetering();

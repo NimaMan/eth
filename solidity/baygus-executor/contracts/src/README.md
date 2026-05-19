@@ -1,6 +1,6 @@
 # Source
 
-`BaygusTradingVault.sol` is the only production entry point.
+`UniswapV2TradingVault.sol` is the only production entry point.
 
 The vault is intentionally narrow:
 

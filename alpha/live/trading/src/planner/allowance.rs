@@ -127,7 +127,7 @@ impl AllowanceChecker for VaultInternalAllowanceChecker {
             input.intent.amount.clone(),
         );
         decision.detail =
-            Some("Baygus vault emergency sell approves the router internally".to_string());
+            Some("trading vault emergency sell approves the router internally".to_string());
         Ok(AllowanceCheck { route, decision })
     }
 }

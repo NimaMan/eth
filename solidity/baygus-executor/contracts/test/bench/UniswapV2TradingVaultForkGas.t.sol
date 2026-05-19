@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaygusTradingVault} from "../../src/BaygusTradingVault.sol";
+import {UniswapV2TradingVault} from "../../src/UniswapV2TradingVault.sol";
 import {IERC20} from "../../src/interfaces/IERC20.sol";
 import {V2MainnetFixtures} from "../fixtures/V2MainnetFixtures.sol";
 import {V2GasBenchBase} from "./V2GasBenchBase.sol";
 
-contract BaygusTradingVaultForkGasTest is V2GasBenchBase {
-    BaygusTradingVault private vault;
+contract UniswapV2TradingVaultForkGasTest is V2GasBenchBase {
+    UniswapV2TradingVault private vault;
     uint256 private tokenAmount;
 
     modifier onlyFork() {

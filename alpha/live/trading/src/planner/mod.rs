@@ -26,6 +26,7 @@ pub use input::{LivePrioritySellPlannerInput, PlannerTxContext};
 pub use output::PrioritySellPlannerOutcome;
 pub use priority_sell::{LivePrioritySellPlanner, PrioritySellPlanner};
 pub use route_builder::{
-    BaygusV2VaultSellRouteBuilder, RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder,
+    RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder,
+    UniswapV2TradingVaultSellRouteBuilder,
 };
 pub use simulation::{FixedPreSubmitSimulator, PreSubmitSimulator};

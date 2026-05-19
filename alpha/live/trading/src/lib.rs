@@ -19,13 +19,12 @@ pub use lp_approval_exit::{
     LpSignalSource, PriorityRoute, PrioritySellPlan, SellUrgency, TradeAction,
 };
 pub use planner::{
-    AllowanceCheck, AllowanceChecker, AllowanceDecision, AllowanceMode,
-    BaygusV2VaultSellRouteBuilder, FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan,
-    GasRankProvider, LivePrioritySellPlanner, LivePrioritySellPlannerConfig,
-    LivePrioritySellPlannerError, LivePrioritySellPlannerInput, PlannerTxContext,
-    PreSubmitSimulator, PrioritySellPlanner, PrioritySellPlannerOutcome, RouteBuildRequest,
-    SellRouteBuilder, StaticAllowanceChecker, UniswapV2SellRouteBuilder,
-    VaultInternalAllowanceChecker,
+    AllowanceCheck, AllowanceChecker, AllowanceDecision, AllowanceMode, FixedGasRankProvider,
+    FixedPreSubmitSimulator, GasRankPlan, GasRankProvider, LivePrioritySellPlanner,
+    LivePrioritySellPlannerConfig, LivePrioritySellPlannerError, LivePrioritySellPlannerInput,
+    PlannerTxContext, PreSubmitSimulator, PrioritySellPlanner, PrioritySellPlannerOutcome,
+    RouteBuildRequest, SellRouteBuilder, StaticAllowanceChecker, UniswapV2SellRouteBuilder,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
 pub use tx_prep::{
     build_priority_sell_request, estimate_eth_cost_from_gwei, prepare_priority_sell,
