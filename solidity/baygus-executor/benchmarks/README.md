@@ -1,6 +1,8 @@
-# Uniswap V2 Trading Vault Mode A Benchmarks
+# Trading Vault Benchmarks
 
-This folder records gas evidence for the V2 Mode A trading vault.
+This folder records gas evidence for trading vault candidates.
+
+## Uniswap V2 Mode A
 
 Mode A means:
 
@@ -116,4 +118,57 @@ buyAndApprove:
 
 emergency sell:
   sell-only
+```
+
+## Uniswap V4 Candidate
+
+The V4 candidate has separate local and fork gas tests:
+
+```text
+contracts/test/bench/v4/
+  V4GasBenchBase.sol
+  UniswapV4TradingVaultGas.t.sol
+  UniswapV4TradingVaultForkGas.t.sol
+```
+
+Run local mock benchmarks:
+
+```bash
+cd /home/nima/code/crypto/blockchains/eth/solidity/baygus-executor/contracts
+forge test --match-contract UniswapV4TradingVaultGasTest --gas-report
+```
+
+Run the pinned mainnet fork comparison for the ETH/USDC 0.05% no-hook V4
+fixture:
+
+```bash
+forge test \
+  --match-contract UniswapV4TradingVaultForkGasTest \
+  --fork-url http://127.0.0.1:8545 \
+  --fork-block-number 25131251 \
+  --gas-report
+```
+
+Track these functions:
+
+```text
+testGas_*_DirectUniversalRouterBuyToEoa
+testGas_*_VaultBuyToVault
+testGas_*_Erc20ApprovePermit2
+testGas_*_Permit2ApproveUniversalRouter
+testGas_*_DirectUniversalRouterSellPreapproved
+testGas_*_VaultEmergencySellWithExactPermit2Lifecycle
+```
+
+Interpretation:
+
+```text
+v4_vault_buy_extra_gas =
+  VaultBuyToVault - DirectUniversalRouterBuyToEoa
+
+v4_vault_sell_vs_preapproved_direct =
+  VaultEmergencySellWithExactPermit2Lifecycle - DirectUniversalRouterSellPreapproved
+
+v4_two_tx_sell_reference =
+  Erc20ApprovePermit2 + Permit2ApproveUniversalRouter + DirectUniversalRouterSellPreapproved
 ```
