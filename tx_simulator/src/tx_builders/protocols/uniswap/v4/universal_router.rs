@@ -12,8 +12,8 @@ use super::{infer_orientation_from_input, UniswapV4PoolKey};
 const COMMAND_V4_SWAP: u8 = 0x10;
 
 const ACTION_SWAP_EXACT_IN_SINGLE: u8 = 0x06;
-const ACTION_SETTLE_ALL: u8 = 0x0c;
-const ACTION_TAKE_ALL: u8 = 0x0f;
+const ACTION_SETTLE: u8 = 0x0b;
+const ACTION_TAKE: u8 = 0x0e;
 
 sol! {
     struct PoolKey {
@@ -29,8 +29,8 @@ sol! {
         bool zeroForOne;
         uint128 amountIn;
         uint128 amountOutMinimum;
-        uint256 minHopPriceX36;
         bytes hookData;
+        uint256 minHopPriceX36;
     }
 
     function execute(bytes commands, bytes[] inputs, uint256 deadline);
@@ -159,8 +159,8 @@ fn encode_v4_swap_input(
         zeroForOne: zero_for_one,
         amountIn: amount_in,
         amountOutMinimum: min_amount_out,
-        minHopPriceX36: U256::ZERO,
         hookData: Bytes::copy_from_slice(&request.hook_data),
+        minHopPriceX36: U256::ZERO,
     };
 
     let input_currency = request.token_in;
@@ -168,14 +168,14 @@ fn encode_v4_swap_input(
     let mut actions = vec![ACTION_SWAP_EXACT_IN_SINGLE];
     let mut params = vec![Bytes::from(swap_params.abi_encode())];
 
-    actions.push(ACTION_SETTLE_ALL);
+    actions.push(ACTION_SETTLE);
     params.push(Bytes::from(
-        (input_currency, request.amount_in).abi_encode(),
+        (input_currency, request.amount_in, true).abi_encode(),
     ));
 
-    actions.push(ACTION_TAKE_ALL);
+    actions.push(ACTION_TAKE);
     params.push(Bytes::from(
-        (output_currency, request.min_amount_out).abi_encode(),
+        (output_currency, request.caller, U256::ZERO).abi_encode(),
     ));
 
     Ok(Bytes::from(
@@ -237,5 +237,35 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("requires an ERC20 input currency"));
+    }
+
+    #[test]
+    fn exact_input_single_uses_deployed_router_hook_data_field_order() {
+        let swap_params = ExactInputSingleParams {
+            poolKey: PoolKey {
+                currency0: Address::with_last_byte(1),
+                currency1: Address::with_last_byte(2),
+                fee: U24::from(100),
+                tickSpacing: I24::try_from(1).unwrap(),
+                hooks: Address::ZERO,
+            },
+            zeroForOne: false,
+            amountIn: 1_000,
+            amountOutMinimum: 900,
+            hookData: Bytes::new(),
+            minHopPriceX36: U256::from(20),
+        };
+
+        let encoded = swap_params.abi_encode();
+
+        assert_eq!(abi_word(&encoded, 0), U256::from(32));
+        assert_eq!(abi_word(&encoded, 9), U256::from(0x140));
+        assert_eq!(abi_word(&encoded, 10), U256::from(20));
+        assert_eq!(abi_word(&encoded, 11), U256::ZERO);
+    }
+
+    fn abi_word(data: &[u8], index: usize) -> U256 {
+        let start = index * 32;
+        U256::from_be_slice(&data[start..start + 32])
     }
 }

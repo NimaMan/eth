@@ -1,11 +1,20 @@
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
 
+pub mod trading_vault;
 mod universal_router;
 
 pub use self::universal_router::{
     build_universal_router_v4_exact_input_single_tx, UniversalRouterV4ExactInputSingleRequest,
     UniversalRouterV4InputPayment,
+};
+pub use trading_vault::{
+    build_uniswap_v4_trading_vault_buy_v4_exact_eth_for_tokens,
+    build_uniswap_v4_trading_vault_emergency_sell_v4_exact_tokens_for_eth,
+    encode_uniswap_v4_trading_vault_buy_v4_exact_eth_for_tokens,
+    encode_uniswap_v4_trading_vault_emergency_sell_v4_exact_tokens_for_eth,
+    DEFAULT_UNISWAP_V4_TRADING_VAULT_BUY_GAS_LIMIT,
+    DEFAULT_UNISWAP_V4_TRADING_VAULT_SELL_GAS_LIMIT,
 };
 
 use crate::UnsignedTransaction;

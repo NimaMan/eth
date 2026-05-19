@@ -30,10 +30,30 @@ The direct baseline executes:
 It reports total route gas, allowance setup gas, effective gas price, priority
 fee spend, balance deltas, and revert reasons when any step fails.
 
+## Candidate Vault Rehearsal
+
+After `forge build` has produced the local candidate artifact, run the simulator
+comparison:
+
+```bash
+cd /home/nima/code/crypto/blockchains/eth
+cargo run -q -p tx_simulator \
+  --example uniswap_v4_trading_vault_candidate_rehearsal \
+  | tee onchain-deployments/uniswap-v4-trading-vault/simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json \
+  | jq '.comparison'
+```
+
+The rehearsal starts two forked simulation chains at the same block:
+
+- direct Universal Router buy, ERC20 approval, Permit2 approval, sell;
+- synthetic deployment of the candidate vault, vault buy, vault emergency sell.
+
+Deployment gas is reported separately from route gas so direct route and vault
+route execution can be compared without mixing one-time deployment cost into
+trade cost.
+
 ## Required Before Deployment
 
-- candidate vault route simulation;
-- direct-vs-vault gas comparison;
 - Permit2 allowance lifecycle rehearsal;
 - hook policy rejection rehearsal;
 - public-priority-fee vs vault bribe path comparison if we add direct
