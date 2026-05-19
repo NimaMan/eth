@@ -1,7 +1,9 @@
+use super::TransactionSigner;
 use crate::{
     error::{EthTxExecutorError, Result},
     types::{PreparedDirectRawTransaction, SignedTransaction},
 };
+use async_trait::async_trait;
 use ethers_core::{
     types::{
         transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest,
@@ -10,6 +12,7 @@ use ethers_core::{
     utils::keccak256,
 };
 use ethers_signers::{LocalWallet, Signer};
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Clone)]
@@ -32,11 +35,25 @@ impl LocalTransactionSigner {
         Self::from_private_key(&private_key, chain_id)
     }
 
-    pub fn address(&self) -> Address {
+    pub fn from_keystore<P, S>(keypath: P, password: S, chain_id: u64) -> Result<Self>
+    where
+        P: AsRef<Path>,
+        S: AsRef<[u8]>,
+    {
+        let wallet = LocalWallet::decrypt_keystore(keypath, password)
+            .map_err(|err| EthTxExecutorError::Signer(format!("invalid keystore: {err}")))?
+            .with_chain_id(chain_id);
+        Ok(Self { wallet })
+    }
+}
+
+#[async_trait]
+impl TransactionSigner for LocalTransactionSigner {
+    fn address(&self) -> Address {
         self.wallet.address()
     }
 
-    pub async fn sign_direct_raw(
+    async fn sign_direct_raw(
         &self,
         request: &PreparedDirectRawTransaction,
     ) -> Result<SignedTransaction> {

@@ -23,7 +23,7 @@ What this crate can do now:
 - validate chain id, signer address, quantities, calldata, gas caps, and fee
   caps;
 - reserve a nonce when `nonce = null`;
-- sign locally;
+- sign through a configured signer backend;
 - journal received/signed/dry-run/broadcast events;
 - dry-run by default or broadcast to the public mempool when explicitly enabled.
 
@@ -88,10 +88,9 @@ each other.
 
 Runtime config lives in Kartal's `[eth_tx_executor]` config section and matching
 `ETH_TX_EXECUTOR_*` environment variables. The default broadcast mode is
-`dry_run`; public mempool submission requires both
-`ETH_TX_EXECUTOR_BROADCAST_MODE=public_mempool` and a signer key in the
-configured `ETH_TX_EXECUTOR_PRIVATE_KEY_ENV` target, default
-`ETH_EXECUTOR_PRIVATE_KEY`.
+`dry_run`. The default signer backend is `env` for local development; live mode
+should use `ETH_TX_EXECUTOR_SIGNER_BACKEND=unix_socket` with
+`ETH_TX_EXECUTOR_SIGNER_SOCKET_PATH` and `ETH_TX_EXECUTOR_SIGNER_ADDRESS`.
 
 When Kartal runs under Compose, it shares the VPN container network namespace.
 The Ethereum RPC endpoint must be reachable from that namespace. The default
@@ -254,6 +253,31 @@ tx_executor::types::SubmitDirectRawResult
 
 Kartal maps validation/config problems to HTTP validation errors, auth failures
 to auth errors, and nonce/broadcast/RPC problems to network errors.
+
+## Local Signer Wire Protocol
+
+When `unix_socket` signing is enabled, `tx_executor` talks to the local signer
+with newline-delimited JSON over a Unix socket. The schema name is
+`kartal_eth_signer_v1`, maintained in `tx_executor::signer::wire`.
+
+Request kinds:
+
+| Kind | Payload |
+| --- | --- |
+| `status` | Returns signer address, chain id, and readiness. |
+| `sign_direct_raw` | Carries `PreparedDirectRawTransaction` after validation and nonce reservation. |
+
+Response kinds:
+
+| Kind | Payload |
+| --- | --- |
+| `status` | `SignerStatus` |
+| `signed` | signer address plus `SignedTransaction` |
+| `error` | signer-side rejection or signing error text |
+
+The signer must enforce its own allowlist and caps before returning a raw
+signed transaction. That gives us a second policy boundary if Kartal is
+misconfigured or an authorized caller submits an unexpected transaction.
 
 ### Example Priority Sell
 

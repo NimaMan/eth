@@ -5,7 +5,7 @@ use crate::{
     nonce::NonceManager,
     repository::{ExecutionEvent, ExecutionRecorder},
     request::DirectRawTransactionRequest,
-    signer::LocalTransactionSigner,
+    signer::TransactionSigner,
     types::{ExecutionStatus, PreparedDirectRawTransaction, SubmitDirectRawResult},
     validation::prepare_direct_raw_request,
 };
@@ -15,7 +15,7 @@ use tracing::{info, warn};
 
 pub struct EthTxExecutionService {
     config: EthTxExecutorConfig,
-    signer: LocalTransactionSigner,
+    signer: Arc<dyn TransactionSigner>,
     nonce_manager: NonceManager,
     broadcaster: RpcBroadcaster,
     recorder: Arc<dyn ExecutionRecorder>,
@@ -24,7 +24,7 @@ pub struct EthTxExecutionService {
 impl EthTxExecutionService {
     pub fn new(
         config: EthTxExecutorConfig,
-        signer: LocalTransactionSigner,
+        signer: Arc<dyn TransactionSigner>,
         nonce_manager: NonceManager,
         broadcaster: RpcBroadcaster,
         recorder: Arc<dyn ExecutionRecorder>,

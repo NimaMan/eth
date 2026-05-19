@@ -5,9 +5,11 @@ use crate::{
     nonce::NonceManager,
     repository::{ExecutionRecorder, JsonlRecorder, NoopRecorder},
     service::EthTxExecutionService,
-    signer::LocalTransactionSigner,
+    signer::{LocalTransactionSigner, TransactionSigner, UnixSocketTransactionSigner},
 };
+use ethers_core::types::Address;
 use ethers_providers::{Http, Provider};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct EthTxExecutor {
@@ -25,9 +27,25 @@ impl EthTxExecutor {
         Self::from_signer(config, signer)
     }
 
-    pub fn from_signer(
+    pub fn from_unix_socket(
         config: EthTxExecutorConfig,
-        signer: LocalTransactionSigner,
+        socket_path: impl Into<PathBuf>,
+        signer_address: Address,
+    ) -> Result<Self> {
+        let signer = UnixSocketTransactionSigner::new(socket_path, signer_address);
+        Self::from_signer(config, signer)
+    }
+
+    pub fn from_signer<S>(config: EthTxExecutorConfig, signer: S) -> Result<Self>
+    where
+        S: TransactionSigner + 'static,
+    {
+        Self::from_signer_arc(config, Arc::new(signer))
+    }
+
+    pub fn from_signer_arc(
+        config: EthTxExecutorConfig,
+        signer: Arc<dyn TransactionSigner>,
     ) -> Result<Self> {
         let provider = Provider::<Http>::try_from(config.rpc_url.as_str())
             .map_err(|err| EthTxExecutorError::Config(format!("invalid rpc_url: {err}")))?;
