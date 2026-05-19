@@ -1,0 +1,22 @@
+//! Repeatable Kartal policy-calibration runner.
+//!
+//! Calibration submits already prepared `eth_direct_raw_v1` requests to Kartal
+//! while requiring dry-run mode by default. It records the executor status,
+//! submit result, policy journal entries, and a verdict for each case.
+
+mod config;
+mod input;
+mod report;
+mod run;
+mod verdict;
+
+pub use config::CalibrationRunConfig;
+pub use input::{CalibrationCaseInput, CalibrationInputFile, CalibrationSuiteInput};
+pub use report::{
+    CalibrationCaseReport, CalibrationReport, CalibrationSubmitReport, CalibrationSummary,
+};
+pub use run::run_calibration;
+pub use verdict::{
+    CalibrationCaseVerdict, CalibrationOverallVerdict, CalibrationVerdictKind,
+    ExpectedCalibrationOutcome,
+};

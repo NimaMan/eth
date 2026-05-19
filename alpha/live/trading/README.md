@@ -60,6 +60,30 @@ modules in this crate own the live-trading policy and request assembly; reusable
 route discovery, quoting, calldata builders, and simulation engines can stay in
 lower-level crates and be wrapped here.
 
+## Kartal Calibration
+
+`src/calibration/` is the repeatable end-to-end dry-run test harness for this
+boundary. It checks Kartal status, submits one or more prepared direct-raw
+requests, reads Kartal's policy journal, and writes a verdict report under
+`alpha/lab/reports/kartal_calibration/`.
+
+Safe reject-by-default check:
+
+```bash
+cd /home/nima/code/crypto/blockchains/eth
+ETH_TX_EXECUTOR_API_TOKEN=... cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
+  --request alpha/live/trading/fixtures/kartal_calibration/reject_policy_request.json
+```
+
+Full dry-run signing check, after Kartal has a signer and narrow policy:
+
+```bash
+cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
+  --request /path/to/planner-produced-request.json \
+  --expect dry-run-signed \
+  --refresh-simulation-block
+```
+
 Current bottleneck: the running `eth_alpha_trader` still uses chain-state
 simulation. It does not instantiate the engine's real `TxExecutorAdapter` or the
 `LiveTradingPlannerBridge`, and the planner's production context resolver,
@@ -239,3 +263,7 @@ the live strategy needs:
   are injected so production code can replace the fixed test implementations.
 - `src/kartal_executor.rs` exposes the Kartal client and JSON contract for
   submitting already-prepared direct raw transactions.
+- `src/kartal/` exposes status and policy-journal readers used by calibration
+  and operator checks.
+- `src/calibration/` runs repeatable policy-calibration suites against Kartal in
+  dry-run mode.

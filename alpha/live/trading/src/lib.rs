@@ -4,11 +4,24 @@
 //! It owns live transaction preparation and audit metadata, but it does not
 //! sign, reserve nonces, or broadcast transactions locally.
 
+pub mod calibration;
+pub mod kartal;
 pub mod kartal_executor;
 pub mod lp_approval_exit;
 pub mod planner;
 pub mod tx_prep;
 
+pub use calibration::{
+    run_calibration, CalibrationCaseInput, CalibrationCaseReport, CalibrationCaseVerdict,
+    CalibrationInputFile, CalibrationOverallVerdict, CalibrationReport, CalibrationRunConfig,
+    CalibrationSubmitReport, CalibrationSuiteInput, CalibrationSummary, CalibrationVerdictKind,
+    ExpectedCalibrationOutcome,
+};
+pub use kartal::{
+    KartalClient, KartalClientConfig, KartalClientError, KartalDailySpendStatus,
+    KartalEthTxExecutorStatus, KartalEthTxPolicyStatus, KartalPolicyDecision,
+    KartalPolicyDecisionList, KartalServerError, KartalStatusBroadcastMode,
+};
 pub use kartal_executor::{
     KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
     KartalExecutorClientError, KartalSimulationReference, KartalSubmitDirectRawResult,
