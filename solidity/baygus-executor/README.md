@@ -8,6 +8,8 @@ testing. It is no longer a broad command router. The v1 contract supports Mode A
 - on emergency exit, approve the exact sell amount and sell in the same
   top-level transaction;
 - send ETH proceeds to the configured treasury.
+- tolerate V2 fee-on-transfer token paths by using the router's supporting
+  fee-on-transfer methods and measuring net received balances.
 
 ## Design goal
 
@@ -21,7 +23,8 @@ For this Mode A vault, the atomic primitive we need is approve+sell during the
 emergency exit. We avoid paying approval gas on every buy, but the emergency
 sell gas estimate must include the exact approval and allowance-clear steps.
 
-The Rust builders load Foundry artifacts from `out/`. Rebuild artifacts after contract changes:
+The Rust tx builders encode the vault ABI directly and tests verify the
+selectors. Rebuild Foundry artifacts after contract changes:
 
 ```bash
 cd contracts
@@ -48,9 +51,11 @@ then add the matching Rust builder.
 Do not deploy a new executor until all of these are true:
 
 - `forge fmt --check`, `forge build`, and `forge test` pass from `contracts/`.
-- The Rust builders compile against `BaygusTradingVault` artifacts.
+- The Rust tx builders compile and selector tests match `BaygusTradingVault`.
 - Constructor arguments are fixed: owner, treasury, WETH, and Uniswap V2 router.
 - The bytecode hash and ABI diff are recorded next to the deployment note.
 - The exact buy and emergency-sell calldata are simulated against target block
   state before signing.
 - A gas benchmark proves Mode A is acceptable versus pre-approving on buy.
+- Fee-on-transfer token coverage passes locally and on a representative mainnet
+  fork fixture.

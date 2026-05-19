@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {BaygusTradingVault} from "../src/BaygusTradingVault.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
 import {MockV2Router} from "./mocks/MockV2Router.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
@@ -62,6 +63,40 @@ contract BaygusTradingVaultTest is TestBase {
         assertEq(token.allowance(address(vault), address(router)), 0, "allowance cleared after sell");
         assertEq(router.lastTokenIn(), 100 ether, "router saw token input");
         assertEq(router.lastRecipient(), address(vault), "router paid vault before treasury transfer");
+    }
+
+    function testBuyTracksNetFeeOnTransferTokensReceived() external {
+        _deploy();
+        MockFeeOnTransferERC20 feeToken = new MockFeeOnTransferERC20("Fee Token", "FEE", 18, 500, address(0xFEE));
+        feeToken.mint(address(router), 10_000 ether);
+        router.setNextTokenOut(250 ether);
+
+        vm.prank(OWNER);
+        uint256 tokensReceived =
+            vault.buyV2ExactEthForTokens{value: 1 ether}(address(feeToken), 237 ether, block.timestamp + 1);
+
+        assertEq(tokensReceived, 237.5 ether, "net fee token received");
+        assertEq(feeToken.balanceOf(address(vault)), 237.5 ether, "vault stores net token");
+        assertEq(feeToken.balanceOf(address(0xFEE)), 12.5 ether, "fee recipient paid");
+        assertEq(feeToken.allowance(address(vault), address(router)), 0, "no allowance after buy");
+    }
+
+    function testEmergencySellClearsAllowanceForFeeOnTransferToken() external {
+        _deploy();
+        MockFeeOnTransferERC20 feeToken = new MockFeeOnTransferERC20("Fee Token", "FEE", 18, 500, address(0xFEE));
+        feeToken.mint(address(vault), 250 ether);
+        router.setNextEthOut(8 ether);
+
+        vm.prank(OWNER);
+        uint256 ethReceived =
+            vault.emergencySellV2ExactTokensForEth(address(feeToken), 100 ether, 7 ether, block.timestamp + 1);
+
+        assertEq(ethReceived, 8 ether, "eth received");
+        assertEq(TREASURY.balance, 8 ether, "treasury paid");
+        assertEq(feeToken.balanceOf(address(vault)), 150 ether, "vault spent full amount");
+        assertEq(feeToken.balanceOf(address(router)), 95 ether, "router received net tokens");
+        assertEq(feeToken.balanceOf(address(0xFEE)), 5 ether, "fee recipient paid");
+        assertEq(feeToken.allowance(address(vault), address(router)), 0, "allowance cleared");
     }
 
     function testOnlyOwnerCanBuyOrSell() external {

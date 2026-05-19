@@ -46,6 +46,13 @@ contract BaygusTradingVaultForkGasTest is V2GasBenchBase {
         }(V2MainnetFixtures.USDC, V2MainnetFixtures.MIN_USDC_OUT, DEADLINE);
     }
 
+    function _buyRfiForVault() internal returns (uint256 received) {
+        vm.prank(OWNER);
+        received = vault.buyV2ExactEthForTokens{
+            value: V2MainnetFixtures.FEE_ON_TRANSFER_BUY_VALUE
+        }(V2MainnetFixtures.RFI, V2MainnetFixtures.MIN_RFI_OUT, DEADLINE);
+    }
+
     function testGas_Fork_DirectRouterBuyToEoa() external onlyFork {
         _setupFork();
 
@@ -107,6 +114,34 @@ contract BaygusTradingVaultForkGasTest is V2GasBenchBase {
         vm.prank(OWNER);
         vault.emergencySellV2ExactTokensForEth(
             V2MainnetFixtures.USDC, tokenAmount, V2MainnetFixtures.MIN_ETH_OUT, DEADLINE
+        );
+    }
+
+    function testGas_Fork_FeeOnTransferRfiVaultBuyAndEmergencySell() external onlyFork {
+        _setupFork();
+
+        vm.resumeGasMetering();
+        tokenAmount = _buyRfiForVault();
+        vm.pauseGasMetering();
+
+        assertTrue(tokenAmount > 0, "RFI buy output");
+        assertEq(
+            IERC20(V2MainnetFixtures.RFI).allowance(address(vault), V2MainnetFixtures.UNISWAP_V2_ROUTER),
+            0,
+            "no RFI allowance after buy"
+        );
+
+        vm.resumeGasMetering();
+        vm.prank(OWNER);
+        uint256 ethReceived = vault.emergencySellV2ExactTokensForEth(
+            V2MainnetFixtures.RFI, tokenAmount, V2MainnetFixtures.MIN_ETH_OUT, DEADLINE
+        );
+
+        assertTrue(ethReceived > 0, "RFI sell output");
+        assertEq(
+            IERC20(V2MainnetFixtures.RFI).allowance(address(vault), V2MainnetFixtures.UNISWAP_V2_ROUTER),
+            0,
+            "RFI allowance cleared after sell"
         );
     }
 }

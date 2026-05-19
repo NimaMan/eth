@@ -3,12 +3,14 @@ pragma solidity ^0.8.26;
 
 import {BaygusTradingVault} from "../../src/BaygusTradingVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockFeeOnTransferERC20} from "../mocks/MockFeeOnTransferERC20.sol";
 import {MockV2Router} from "../mocks/MockV2Router.sol";
 import {V2GasBenchBase} from "./V2GasBenchBase.sol";
 
 contract BaygusTradingVaultGasTest is V2GasBenchBase {
     MockERC20 private weth;
     MockERC20 private token;
+    MockFeeOnTransferERC20 private feeToken;
     MockV2Router private router;
     BaygusTradingVault private vault;
 
@@ -17,10 +19,12 @@ contract BaygusTradingVaultGasTest is V2GasBenchBase {
         vm.warp(1_800_000_000);
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         token = new MockERC20("Token", "TKN", 18);
+        feeToken = new MockFeeOnTransferERC20("Fee Token", "FEE", 18, 500, address(0xFEE));
         router = new MockV2Router(address(weth));
         vault = _deployVault(address(weth), address(router));
 
         token.mint(address(router), 1_000_000 ether);
+        feeToken.mint(address(router), 1_000_000 ether);
         vm.deal(address(router), 1_000_000 ether);
         vm.deal(OWNER, 1_000_000 ether);
         vm.deal(address(this), 1_000_000 ether);
@@ -34,6 +38,10 @@ contract BaygusTradingVaultGasTest is V2GasBenchBase {
 
     function _seedVaultTokens(uint256 amount) internal {
         token.mint(address(vault), amount);
+    }
+
+    function _seedVaultFeeTokens(uint256 amount) internal {
+        feeToken.mint(address(vault), amount);
     }
 
     function testGas_Local_DirectRouterBuyToEoa() external {
@@ -80,5 +88,22 @@ contract BaygusTradingVaultGasTest is V2GasBenchBase {
         vm.resumeGasMetering();
         vm.prank(OWNER);
         vault.emergencySellV2ExactTokensForEth(address(token), TOKEN_AMOUNT, 7 ether, DEADLINE);
+    }
+
+    function testGas_Local_FeeOnTransferVaultBuyToVault() external {
+        _setupLocal();
+
+        vm.resumeGasMetering();
+        vm.prank(OWNER);
+        vault.buyV2ExactEthForTokens{value: BUY_VALUE}(address(feeToken), 237 ether, DEADLINE);
+    }
+
+    function testGas_Local_FeeOnTransferVaultModeAEmergencySell() external {
+        _setupLocal();
+        _seedVaultFeeTokens(TOKEN_AMOUNT);
+
+        vm.resumeGasMetering();
+        vm.prank(OWNER);
+        vault.emergencySellV2ExactTokensForEth(address(feeToken), TOKEN_AMOUNT, 7 ether, DEADLINE);
     }
 }

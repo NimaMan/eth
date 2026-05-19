@@ -17,6 +17,7 @@ mod simulation;
 
 pub use allowance::{
     AllowanceCheck, AllowanceChecker, AllowanceDecision, AllowanceMode, StaticAllowanceChecker,
+    VaultInternalAllowanceChecker,
 };
 pub use config::LivePrioritySellPlannerConfig;
 pub use error::LivePrioritySellPlannerError;
@@ -24,5 +25,7 @@ pub use gas_rank::{FixedGasRankProvider, GasRankPlan, GasRankProvider};
 pub use input::{LivePrioritySellPlannerInput, PlannerTxContext};
 pub use output::PrioritySellPlannerOutcome;
 pub use priority_sell::{LivePrioritySellPlanner, PrioritySellPlanner};
-pub use route_builder::{RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder};
+pub use route_builder::{
+    BaygusV2VaultSellRouteBuilder, RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder,
+};
 pub use simulation::{FixedPreSubmitSimulator, PreSubmitSimulator};

@@ -10,6 +10,10 @@ pub mod curve {
     pub use super::protocols::curve::*;
 }
 
+pub mod baygus_v2_vault {
+    pub use super::protocols::baygus_v2_vault::*;
+}
+
 pub mod permit2 {
     pub use super::protocols::permit2::*;
 }
@@ -34,5 +38,6 @@ pub mod uniswap_v4 {
     pub use super::protocols::uniswap::v4::*;
 }
 
+pub use protocols::baygus_v2_vault::*;
 pub use route_dispatch::*;
 pub use routes::AmmSwapRoute;

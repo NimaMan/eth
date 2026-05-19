@@ -1,3 +1,4 @@
+pub mod baygus_v2_vault;
 pub mod curve;
 pub mod pancakeswap;
 pub mod permit2;

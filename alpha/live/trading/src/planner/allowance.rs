@@ -111,3 +111,23 @@ impl AllowanceChecker for StaticAllowanceChecker {
         Ok(AllowanceCheck { route, decision })
     }
 }
+
+#[derive(Clone, Debug, Default)]
+pub struct VaultInternalAllowanceChecker;
+
+#[async_trait]
+impl AllowanceChecker for VaultInternalAllowanceChecker {
+    async fn check_allowance(
+        &self,
+        input: &LivePrioritySellPlannerInput,
+        route: PreparedSellRoute,
+    ) -> Result<AllowanceCheck, LivePrioritySellPlannerError> {
+        let mut decision = AllowanceDecision::pre_approved(
+            route.router_address.clone(),
+            input.intent.amount.clone(),
+        );
+        decision.detail =
+            Some("Baygus vault emergency sell approves the router internally".to_string());
+        Ok(AllowanceCheck { route, decision })
+    }
+}

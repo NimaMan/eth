@@ -3,6 +3,7 @@ Tx Builders — AMM Calldata Constructors
 Purpose
 - Stateless builders that construct unsigned transactions for AMM interactions:
   - V2/Sushi: swapExactETHForTokens, swapExactTokensForETH, approve
+  - Baygus V2 vault: buyV2ExactEthForTokens and emergencySellV2ExactTokensForEth
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
   - V4: Universal Router exact-input single-hop swaps plus Permit2 allowance helpers
 - No chain reads here; callers must supply addresses and parameters.
@@ -11,6 +12,7 @@ Purpose
 
 Entrypoints
 - `protocols/uniswap/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
+- `protocols/baygus_v2_vault.rs`: Mode A vault builders for buy-through-vault and emergency approve+sell calldata
 - `protocols/sushiswap/v2.rs`: Sushi V2 router constants and V2-router wrapper exports
 - `protocols/uniswap/v3.rs`: Uniswap V3 SwapRouter builders, Universal Router v3 helpers, and `build_approve_v3`
 - `protocols/sushiswap/v3.rs`: SushiSwap V3 SwapRouter builders and router constants
@@ -37,6 +39,10 @@ Usage
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
 - V4 flows use Uniswap's deployed Universal Router and Permit2. The tx builder does not deploy
   local routers or custom executors.
+- `alpha/live/trading` wraps the direct V2 sell builder and the Baygus V2 vault
+  emergency-sell builder into `PreparedSellRoute`. It extracts `to`, `data`,
+  `value`, gas limit, estimated gas, and min-out evidence from the final unsigned
+  transaction before calling `tx_prep`.
 
 Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.

@@ -35,6 +35,7 @@ Run from `reth`:
 
 ```bash
 cargo test -p eth_live_trading
+cargo test -p tx_simulator tx_builders::protocols::baygus_v2_vault --lib
 cargo test -p eth_alpha_engine
 ```
 
@@ -49,6 +50,8 @@ Every proposed deploy must include a gas comparison against:
 - direct buy through router to the EOA;
 - direct sell with pre-existing allowance;
 - vault Mode A emergency sell with approve+sell.
+- a fee-on-transfer token path, locally and on a representative mainnet fork
+  fixture.
 
 Mode A is acceptable only if the saved buy-time approval gas is worth the extra
 emergency-sell gas under the current scam-exit rank model.
@@ -65,6 +68,5 @@ Record these values for every deployment:
 - `BaygusTradingVault` bytecode hash
 - deployed runtime size
 - deploy gas, buy gas, and emergency-sell gas versus direct execution
-- artifact path used by Rust:
-  `solidity/baygus-executor/out/BaygusTradingVault.sol/BaygusTradingVault.json`
+- Rust tx-builder commit and selector test output
 - Foundry and Rust check output

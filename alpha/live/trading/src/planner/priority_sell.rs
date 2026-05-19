@@ -162,9 +162,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan, PlannerTxContext,
-        RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
-        UniswapV2SellRouteBuilder,
+        BaygusV2VaultSellRouteBuilder, FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan,
+        PlannerTxContext, RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
+        UniswapV2SellRouteBuilder, VaultInternalAllowanceChecker,
     };
 
     fn token() -> Address {
@@ -303,6 +303,35 @@ mod tests {
         )
     }
 
+    fn simulator() -> FixedPreSubmitSimulator {
+        FixedPreSubmitSimulator::new(crate::PreSubmitSimulation {
+            block_number: 25_128_246,
+            block_hash: Some("0xabc".to_string()),
+            state_root: None,
+            expected_output_token: Some("WETH".to_string()),
+            expected_output_amount: Some("10000000000000000".to_string()),
+            min_output_amount: Some("9000000000000000".to_string()),
+            expected_recovery_eth: DecimalAmount::new(1, 2),
+            would_revert: false,
+            metadata: json!({ "sim": "ok" }),
+        })
+    }
+
+    fn gas_rank() -> FixedGasRankProvider {
+        FixedGasRankProvider::new(GasRankPlan {
+            predicted_base_fee_gwei: DecimalAmount::from(10),
+            candidates: vec![RankedFeeCandidate {
+                label: "aggressive".to_string(),
+                priority_fee_gwei: DecimalAmount::from(40),
+                max_fee_per_gas_gwei: DecimalAmount::from(50),
+                rank_position_p50: Some(10),
+                gas_before_p50: Some(450_000),
+                likely_fits_at_p50: Some(true),
+                source: Some("test".to_string()),
+            }],
+        })
+    }
+
     #[tokio::test]
     async fn planner_prepares_value_capped_kartal_signal() {
         let outcome = planner(StaticAllowanceChecker::pre_approved())
@@ -335,5 +364,26 @@ mod tests {
             .expect_err("missing allowance should reject");
 
         assert!(error.to_string().contains("pre-existing token allowance"));
+    }
+
+    #[tokio::test]
+    async fn planner_can_submit_baygus_vault_route_without_eoa_preapproval() {
+        let vault = Address::with_last_byte(0xaa);
+        let planner = LivePrioritySellPlanner::new(
+            LivePrioritySellPlannerConfig::default(),
+            BaygusV2VaultSellRouteBuilder::with_default_gas(vault),
+            simulator(),
+            gas_rank(),
+            VaultInternalAllowanceChecker,
+        );
+        let outcome = planner.plan_priority_sell(input()).await.unwrap();
+
+        match outcome {
+            PrioritySellPlannerOutcome::Submit { signal, .. } => {
+                assert!(signal.request.to.eq_ignore_ascii_case(&vault.to_string()));
+                assert!(signal.request.data.starts_with("0x5f413d10"));
+            }
+            other => panic!("expected submit, got {other:?}"),
+        }
     }
 }

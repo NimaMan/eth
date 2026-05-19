@@ -49,12 +49,13 @@ The practical consequence is:
   its CLI still only accepts `chain-sim`.
 - The `TxExecutorAdapter` and `LiveTradingPlannerBridge` exist in
   `alpha/engine`, but no runtime mode instantiates them.
-- `alpha/live/trading::LivePrioritySellPlanner` can build a Uniswap V2 ETH/WETH
-  sell route, require an allowance, consume simulation and gas-rank providers,
-  value-cap the bribe, and emit `LiveTraderTxSignal`.
+- `alpha/live/trading::LivePrioritySellPlanner` can build either a direct
+  Uniswap V2 ETH/WETH sell route or a Baygus V2 vault emergency-sell route,
+  consume simulation and gas-rank providers, value-cap the bribe, and emit
+  `LiveTraderTxSignal`.
 - The production `LiveTxPlanningInputResolver`, final simulation provider,
-  gas-rank provider, allowance reader, and receipt reconciler are still missing
-  from the live critical path.
+  gas-rank provider, route policy, and receipt reconciler are still missing from
+  the live critical path.
 
 ## Live Tx Submission Audit 2026-05-19
 
@@ -99,8 +100,8 @@ the live binary:
 | Strategy decision | `LiveSnipeAllStrategy` emits sell `OrderIntent`s for liquidity removal, LP approval, max-hold, retries, tax/scam when enabled. | Strategy does not encode execution urgency, route, gas-rank evidence, or private/public submission preference beyond reason/config fields. |
 | Engine | `AlphaEngine` records decisions and can route any approved `OrderIntent` to an `EngineExecutionAdapter`. | `eth_alpha_trader` constructs `LiveChainSimExecutionAdapter`; real mode is rejected by CLI parsing. |
 | Real adapter | `TxExecutorAdapter` maps a prepared live tx signal to Kartal and returns an `ExecutionReport`; `LiveTradingPlannerBridge` adapts the engine to `alpha/live/trading::PrioritySellPlanner`. | No runtime instantiates it, no production context resolver is wired, and receipt reconciliation is not implemented. |
-| Live tx prep | `alpha/live/trading::tx_prep` enforces route validation, pre-submit simulation, value-capped bribe policy, gas-rank candidate selection, and protocol metadata. `LivePrioritySellPlanner` now orchestrates those pieces for v1 priority sells. | Its production resolver/providers are missing: current-position lookup, latest pool snapshot, exact min-out/deadline, final simulation, gas-rank candidates, and allowance checks. |
-| Route/calldata | `UniswapV2SellRouteBuilder` wraps `tx_simulator::tx_builders` into `PreparedSellRoute` for ETH/WETH-denominated Uniswap V2 sells. | Production min-out evidence, slippage policy, allowance policy, and additional protocol surfaces still need to be wired. |
+| Live tx prep | `alpha/live/trading::tx_prep` enforces route validation, pre-submit simulation, value-capped bribe policy, gas-rank candidate selection, and protocol metadata. `LivePrioritySellPlanner` now orchestrates those pieces for v1 priority sells. | Its production resolver/providers are missing: current-position lookup, latest pool snapshot, exact min-out/deadline, final simulation, gas-rank candidates, and route policy. |
+| Route/calldata | `UniswapV2SellRouteBuilder` wraps direct V2 sells and `BaygusV2VaultSellRouteBuilder` wraps Mode A vault emergency sells into `PreparedSellRoute`. Rust builders exist in `tx_simulator::tx_builders`. | Production min-out evidence, slippage policy, vault deployment config, and route selection still need to be wired. |
 | Gas rank | `alpha/block_tx_rank` estimates mined-block rank and gas-before evidence. | No adapter pulls recent samples, produces `RankedFeeCandidate`s, and passes them into `tx_prep` on the live critical path. |
 | Kartal | `/eth/tx/direct-raw` is mounted on the order server and deserializes into `tx_executor::DirectRawTransactionRequest`. | Service config must be live-checked for token, signer, RPC reachability from the container, and broadcast mode before deployment. |
 | tx_executor | Direct raw validation, caps, nonce reservation, local signing, journal, dry-run, and public mempool broadcast exist. | No private relay/builder route, no receipt watcher, and no execution fill reconciliation back to alpha. |
@@ -161,8 +162,9 @@ Open tuning questions before live capital:
 2. Implement the production `LiveTxPlanningInputResolver`: load the matched open
    position, current pool snapshot, configured signer, current block/deadline,
    min-out evidence, and strategy observation metadata for each sell intent.
-3. Replace fixed planner providers with live providers: allowance reader,
-   final simulation, gas-rank/base-fee provider, and configured route policy.
+3. Replace fixed planner providers with live providers: route policy,
+   allowance/vault-spend policy, final simulation, and gas-rank/base-fee
+   provider.
 4. Run a final pre-submit simulation on the exact planned calldata and turn the
    result into `PreSubmitSimulation`; reject if it reverts or expected recovery is
    dust.
@@ -188,5 +190,5 @@ Open tuning questions before live capital:
 | 3 | **Receipt/fill reconciliation is missing** | `alpha/engine`, `tx_executor`, `kartal` | `TxExecutorAdapter` maps Kartal `broadcast` to submitted, but there is no watcher that turns tx hashes into confirmed/failed alpha execution reports. | Add a receipt tracker keyed by attempt id/tx hash and feed final reports into the existing store path. |
 | 4 | **Private relay/builder execution is not implemented** | `tx_executor`, `kartal` | `BroadcastMode` supports `dry_run` and `public_mempool`; direct coinbase/private bundle bribes are explicitly outside `eth_direct_raw_v1`. | Decide if public mempool is enough for first live test; otherwise add a new protocol/version for relay or bundle submission. |
 | 5 | **Gas rank is not on the live critical path** | `alpha/block_tx_rank`, `alpha/live/trading` | The rank crate exists and `tx_prep` accepts ranked fee candidates, but the planner currently only has a fixed test provider. | Build a gas-rank provider that emits conservative candidate bands from recent blocks plus next-block base-fee prediction. |
-| 6 | **Approval/allowance policy for real sells is unresolved** | `alpha/live/trading`, `tx_simulator::tx_builders` | The v1 planner can require a pre-existing allowance, but no live allowance reader or pre-approval deployment policy is wired. | Choose pre-approval, permit/multicall, or two-transaction approval flow; document nonce/race behavior before real exits. |
+| 6 | **Direct EOA allowance policy is unresolved** | `alpha/live/trading`, `tx_simulator::tx_builders`, `solidity/baygus-executor` | Baygus Mode A now has vault emergency-sell calldata and internal approve+sell semantics. Direct EOA sells still need a live allowance reader or explicit pre-approval deployment policy. | Prefer Baygus Mode A for scam exits; only enable direct EOA sells after documenting pre-approval, permit/multicall, or two-transaction approval behavior. |
 | 7 | **Live strategy evidence still needs real-planner shadowing** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | Chain-sim live-backtest evidence exists, but it does not include Kartal-shaped tx metadata, gas-rank rejects, or signer/RPC failures. | Run the real planner with Kartal `dry_run` and compare every planned priority exit against live chain-sim outcomes. |

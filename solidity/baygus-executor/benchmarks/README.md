@@ -33,7 +33,8 @@ contracts/test/fixtures/
 tracking, but it is not a production gas estimate.
 
 `BaygusTradingVaultForkGas.t.sol` uses mainnet Uniswap V2 router, WETH, and USDC
-on a fork. It no-ops when run without fork code at the mainnet router address.
+on a fork. It also includes an RFI fee-on-transfer smoke benchmark. It no-ops
+when run without fork code at the mainnet router address.
 
 ## Commands
 
@@ -76,6 +77,9 @@ testGas_*_VaultBuyToVault
 testGas_*_StandaloneApprove
 testGas_*_DirectRouterSellPreapproved
 testGas_*_VaultModeAEmergencySell
+testGas_Local_FeeOnTransferVaultBuyToVault
+testGas_Local_FeeOnTransferVaultModeAEmergencySell
+testGas_Fork_FeeOnTransferRfiVaultBuyAndEmergencySell
 ```
 
 Interpretation:

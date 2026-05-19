@@ -10,9 +10,9 @@ request, attaches audit metadata, and submits it to Kartal.
 
 This crate is now the transaction-prep boundary plus the first priority-sell
 planner scaffold. It can model LP approval priority exits, build a Uniswap V2
-ETH/WETH sell route, require a pre-existing allowance, consume final simulation
-and gas-rank inputs, value-cap the priority fee, build the Kartal JSON request,
-and submit that request to Kartal.
+ETH/WETH sell route, build a Baygus V2 vault emergency-sell route, consume final
+simulation and gas-rank inputs, value-cap the priority fee, build the Kartal JSON
+request, and submit that request to Kartal.
 
 Missing before a live strategy can use this crate for real capital:
 
@@ -22,8 +22,9 @@ Missing before a live strategy can use this crate for real capital:
   produce `PreSubmitSimulation` for the exact planned calldata.
 - Replace `FixedGasRankProvider` with live gas-rank/base-fee inputs that produce
   `RankedFeeCandidate`s.
-- Replace `StaticAllowanceChecker` with an allowance reader or enforce a
-  documented pre-approval requirement before positions can be opened.
+- Choose the live route policy per strategy: direct EOA sells need a real
+  allowance reader or documented pre-approval requirement, while Baygus Mode A
+  vault sells use the vault's internal approve+sell path.
 - Feed `prepare_priority_sell` rejects/submits back into the engine's
   `TxExecutorAdapter` from an explicit real execution mode.
 - Reconcile Kartal tx hashes into confirmed or failed alpha execution reports.
@@ -85,11 +86,12 @@ mempool/confirmed risk signal
        observation metadata such as signal_id and source tx
   -> LivePrioritySellPlanner validates intent/position/pool consistency
   -> SellRouteBuilder builds PreparedSellRoute:
-       router address
+       tx target address
        calldata
        ETH value
        gas limit and estimated gas used
-  -> AllowanceChecker proves the sell token can be spent
+  -> AllowanceChecker proves the sell token can be spent, or marks the Baygus
+     vault route as internally approved by the emergency-sell call
   -> PreSubmitSimulator simulates the exact calldata against current state
   -> GasRankProvider converts recent block-rank evidence into fee candidates
   -> tx_prep computes the value cap and chooses/rejects the gas plan
@@ -212,7 +214,8 @@ the live strategy needs:
 - a production `LiveTxPlanningInputResolver` for priority sell intents;
 - live pre-submit simulation against the current state;
 - live gas-rank and base-fee inputs wired into `tx_prep`;
-- real allowance/pre-approval policy for sell tokens;
+- route policy that selects the deployed Baygus vault for Mode A scam exits, or
+  a real allowance/pre-approval policy before direct EOA sells are allowed;
 - per-trade max fee, capital limit, and circuit breaker enforcement;
 - dry-run and shadow-mode evidence through Kartal's direct-raw path;
 - receipt tracking that proves whether the sell landed before removal.
@@ -230,9 +233,9 @@ the live strategy needs:
   includes structured decision-rationale fields such as `reason_code`,
   `reason_source`, and `decision_reason`.
 - `src/planner/` orchestrates the v1 live priority-sell path from
-  `LivePrioritySellPlannerInput` to `LiveTraderTxSignal`. The first route builder
-  supports Uniswap V2 ETH/WETH sells through `tx_simulator::tx_builders`; the
-  simulation, gas-rank, and allowance providers are injected so production code
-  can replace the fixed test implementations.
+  `LivePrioritySellPlannerInput` to `LiveTraderTxSignal`. Route builders support
+  direct Uniswap V2 ETH/WETH sells and Baygus V2 vault emergency sells through
+  `tx_simulator::tx_builders`; the simulation, gas-rank, and allowance providers
+  are injected so production code can replace the fixed test implementations.
 - `src/kartal_executor.rs` exposes the Kartal client and JSON contract for
   submitting already-prepared direct raw transactions.
