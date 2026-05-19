@@ -1,0 +1,371 @@
+use super::*;
+
+impl PostgresTradingStore {
+    pub async fn connect(database_url: &str, run_id: impl Into<String>) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(DEFAULT_MAX_CONNECTIONS)
+            .connect(database_url)
+            .await
+            .map_err(store_error)?;
+        let store = Self {
+            pool,
+            run_id: run_id.into(),
+        };
+        store.migrate().await?;
+        Ok(store)
+    }
+
+    pub fn from_pool(pool: PgPool, run_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            run_id: run_id.into(),
+        }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub async fn migrate(&self) -> Result<()> {
+        let mut connection = self.pool.acquire().await.map_err(store_error)?;
+        sqlx::query("SET client_min_messages TO WARNING")
+            .execute(&mut *connection)
+            .await
+            .map_err(store_error)?;
+        for statement in MIGRATIONS {
+            sqlx::query(statement)
+                .execute(&mut *connection)
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(())
+    }
+
+    pub async fn start_run(&self, mode: &str, config: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.trader_runs (
+                run_id, mode, status, config, started_at, last_heartbeat_at, metadata
+            )
+            VALUES ($1, $2, 'running', $3, NOW(), NOW(), '{}'::jsonb)
+            ON CONFLICT (run_id) DO UPDATE SET
+                mode = EXCLUDED.mode,
+                status = 'running',
+                config = EXCLUDED.config,
+                stopped_at = NULL,
+                last_heartbeat_at = NOW()
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(mode)
+        .bind(config.clone())
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        let result_set_id = result_set_id_for_run(&self.run_id, mode, &config);
+        let result_set_mode = result_set_mode(mode, &config);
+        let strategy_suite = config
+            .get("strategy_suite")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let start_block = config
+            .get("from_block")
+            .and_then(Value::as_u64)
+            .map(u64_to_i64);
+        let end_block = config
+            .get("to_block")
+            .and_then(Value::as_u64)
+            .map(u64_to_i64);
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.backtest_result_sets (
+                result_set_id, mode, status, strategy_suite, start_block, end_block,
+                config, metadata, created_at, updated_at
+            )
+            VALUES ($1, $2, 'running', $3, $4, $5, $6, '{}'::jsonb, NOW(), NOW())
+            ON CONFLICT (result_set_id) DO UPDATE SET
+                mode = EXCLUDED.mode,
+                status = CASE
+                    WHEN alpha_trading.backtest_result_sets.status = 'running' THEN 'running'
+                    ELSE EXCLUDED.status
+                END,
+                strategy_suite = COALESCE(EXCLUDED.strategy_suite, alpha_trading.backtest_result_sets.strategy_suite),
+                start_block = COALESCE(EXCLUDED.start_block, alpha_trading.backtest_result_sets.start_block),
+                end_block = COALESCE(EXCLUDED.end_block, alpha_trading.backtest_result_sets.end_block),
+                config = alpha_trading.backtest_result_sets.config || EXCLUDED.config,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&result_set_id)
+        .bind(result_set_mode)
+        .bind(strategy_suite)
+        .bind(start_block)
+        .bind(end_block)
+        .bind(config)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.backtest_result_set_runs (
+                result_set_id, run_id, created_at
+            )
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (result_set_id, run_id) DO NOTHING
+            "#,
+        )
+        .bind(result_set_id)
+        .bind(&self.run_id)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_stale_runs(&self, max_age_secs: u64) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET status = 'stale',
+                metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
+            WHERE run_id <> $1
+              AND status = 'running'
+              AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(u64_to_i64(max_age_secs))
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn heartbeat(&self, metadata: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET last_heartbeat_at = NOW(), status = 'running', metadata = $2
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(metadata.clone())
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.backtest_result_sets rs
+            SET status = 'running',
+                metadata = rs.metadata || $2,
+                updated_at = NOW()
+            FROM alpha_trading.backtest_result_set_runs runs
+            WHERE runs.result_set_id = rs.result_set_id
+              AND runs.run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_stopped(&self, status: &str, metadata: Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.trader_runs
+            SET status = $2, stopped_at = NOW(), last_heartbeat_at = NOW(), metadata = $3
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(status)
+        .bind(metadata.clone())
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.backtest_result_sets rs
+            SET status = $2,
+                stopped_at = NOW(),
+                metadata = rs.metadata || $3,
+                updated_at = NOW()
+            FROM alpha_trading.backtest_result_set_runs runs
+            WHERE runs.result_set_id = rs.result_set_id
+              AND runs.run_id = $1
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(status)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn load_strategy_observation_cursors(
+        &self,
+        strategy_name: &str,
+    ) -> Result<Vec<StrategyObservationCursor>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT event_source, event_key, token_address, pool_address, block_number
+            FROM alpha_trading.strategy_observations
+            WHERE run_id = $1 AND strategy_name = $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StrategyObservationCursor {
+                    event_source: row.try_get("event_source").map_err(store_error)?,
+                    event_key: row.try_get("event_key").map_err(store_error)?,
+                    token_address: row.try_get("token_address").map_err(store_error)?,
+                    pool_address: row.try_get("pool_address").map_err(store_error)?,
+                    block_number: row
+                        .try_get::<Option<i64>, _>("block_number")
+                        .map_err(store_error)?
+                        .and_then(i64_to_u64),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn record_strategy_observation(
+        &self,
+        record: StrategyObservationRecord,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.strategy_observations (
+                run_id, strategy_name, event_source, event_key, token_address,
+                pool_address, block_number, event_timestamp, decision, report_count,
+                payload, first_seen_at, last_seen_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            ON CONFLICT (run_id, strategy_name, event_source, event_key) DO UPDATE SET
+                token_address = EXCLUDED.token_address,
+                pool_address = EXCLUDED.pool_address,
+                block_number = EXCLUDED.block_number,
+                event_timestamp = EXCLUDED.event_timestamp,
+                decision = EXCLUDED.decision,
+                report_count = EXCLUDED.report_count,
+                payload = EXCLUDED.payload,
+                last_seen_at = NOW()
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(record.strategy_name)
+        .bind(record.event_source)
+        .bind(record.event_key)
+        .bind(record.token_address)
+        .bind(record.pool_address)
+        .bind(record.block_number.map(u64_to_i64))
+        .bind(record.event_timestamp)
+        .bind(record.decision)
+        .bind(usize_to_i32(record.report_count))
+        .bind(record.payload)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT protocol, payload::text AS payload
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+              AND strategy_name = $2
+              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
+                let mut position =
+                    serde_json::from_str::<Position>(&payload).map_err(store_error)?;
+                let protocol = row
+                    .try_get::<Option<String>, _>("protocol")
+                    .map_err(store_error)?;
+                if let Some(protocol) = protocol.as_deref().filter(|value| !value.trim().is_empty())
+                {
+                    position.key.protocol = PoolProtocol::from_label(protocol);
+                }
+                normalize_position_pool_id(&mut position);
+                Ok(position)
+            })
+            .collect()
+    }
+
+    pub async fn load_seen_pools(&self, strategy_name: &str) -> Result<Vec<PoolAddress>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT pool_address
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+              AND strategy_name = $2
+              AND pool_address IS NOT NULL
+            ORDER BY pool_address
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get::<String, _>("pool_address")
+                    .map(PoolAddress::from)
+                    .map_err(store_error)
+            })
+            .collect()
+    }
+
+    pub async fn max_order_sequence_for_prefix(&self, order_prefix: &str) -> Result<u64> {
+        let suffix_start = order_prefix.len() + 2;
+        let like_pattern = format!("{order_prefix}-%");
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(MAX((substring(order_id FROM $3::int))::bigint), 0) AS max_sequence
+            FROM alpha_trading.execution_reports
+            WHERE run_id = $1
+              AND order_id LIKE $2
+              AND substring(order_id FROM $3::int) ~ '^[0-9]+$'
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(like_pattern)
+        .bind(usize_to_i32(suffix_start))
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_error)?;
+        row.try_get::<i64, _>("max_sequence")
+            .map_err(store_error)
+            .map(|value| i64_to_u64(value).unwrap_or_default())
+    }
+}

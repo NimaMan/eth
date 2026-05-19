@@ -151,6 +151,113 @@ pub(super) async fn latest_snapshot_values_check(
     .await
 }
 
+pub(super) async fn zero_value_snapshot_pool_metrics_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "zero_value_snapshots_do_not_reuse_stale_pool_metrics",
+        Verdict::Fail,
+        "zero-value exposure snapshots do not carry stale positive pool metrics",
+        "zero-value exposure snapshots with stale positive pool metrics",
+        r#"
+        WITH scoped AS (
+            SELECT ts.id,
+                   ts.trade_id,
+                   ts.run_id,
+                   t.token_address,
+                   t.pool_address,
+                   ts.state,
+                   ts.block_number,
+                   ts.observed_block_number,
+                   ts.valuation_block_number,
+                   NULLIF(ts.current_value_eth, '')::numeric AS current_value_eth,
+                   NULLIF(ts.pool_liquidity_denom, '')::numeric AS pool_liquidity_denom,
+                   NULLIF(ts.pool_price_to_initial_price_ratio, '')::numeric AS pool_price_to_initial_price_ratio,
+                   NULLIF(ts.pool_price_denom_per_token, '')::numeric AS pool_price_denom_per_token
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+        ),
+        annotated AS (
+            SELECT scoped.*,
+                   max(
+                       CASE
+                           WHEN abs(coalesce(current_value_eth, 0)) <= 0.000000000000001
+                                AND (
+                                    (pool_liquidity_denom IS NOT NULL AND pool_liquidity_denom <= 0.001)
+                                    OR (
+                                        pool_price_to_initial_price_ratio IS NOT NULL
+                                        AND pool_price_to_initial_price_ratio <= 0.000000001
+                                    )
+                                    OR (
+                                        pool_price_denom_per_token IS NOT NULL
+                                        AND pool_price_denom_per_token <= 0.000000000000000001
+                                    )
+                                )
+                               THEN block_number
+                       END
+                   ) OVER (
+                       PARTITION BY trade_id
+                       ORDER BY block_number NULLS LAST, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                   ) AS prior_drained_snapshot_block,
+                   EXISTS (
+                       SELECT 1
+                       FROM alpha_trading.risk_events re
+                       WHERE re.run_id = scoped.run_id
+                         AND re.kind = 'liquidity_removal'
+                         AND lower(re.pool_address) = lower(scoped.pool_address)
+                         AND re.observed_block IS NOT NULL
+                         AND re.observed_block <= COALESCE(
+                             scoped.observed_block_number,
+                             scoped.valuation_block_number,
+                             scoped.block_number
+                         )
+                   ) AS has_seen_liquidity_removal
+            FROM scoped
+        )
+        SELECT count(*)
+        FROM annotated
+        WHERE abs(coalesce(current_value_eth, 0)) <= 0.000000000000001
+          AND state IN (
+              'buy_confirmed',
+              'sell_intent_created',
+              'sell_submitted',
+              'sell_failed',
+              'sell_cancelled'
+          )
+          AND (
+              (pool_liquidity_denom IS NOT NULL AND pool_liquidity_denom > 0.001)
+              OR (
+                  pool_price_to_initial_price_ratio IS NOT NULL
+                  AND pool_price_to_initial_price_ratio > 0.000000001
+              )
+              OR (
+                  pool_price_denom_per_token IS NOT NULL
+                  AND pool_price_denom_per_token > 0.000000000000000001
+              )
+          )
+          AND (
+              (
+                  observed_block_number IS NOT NULL
+                  AND COALESCE(valuation_block_number, block_number) IS NOT NULL
+                  AND observed_block_number < COALESCE(valuation_block_number, block_number)
+              )
+              OR prior_drained_snapshot_block IS NOT NULL
+              OR has_seen_liquidity_removal
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn closed_trade_final_snapshot_check(
     pool: &PgPool,
     result_set_id: &str,

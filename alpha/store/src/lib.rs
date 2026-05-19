@@ -1,8 +1,11 @@
 //! PostgreSQL persistence for the alpha trading runtime.
 
-pub mod performance;
 pub mod observations;
-pub mod result_sets;
+pub mod performance;
+pub mod strategy_run_results;
+
+mod runtime;
+mod schema;
 
 use async_trait::async_trait;
 use eth_alpha_core::{
@@ -19,6 +22,8 @@ use eth_alpha_core::{
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
+
+use schema::MIGRATIONS;
 
 const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 
@@ -49,376 +54,6 @@ pub struct StrategyObservationRecord {
     pub decision: String,
     pub report_count: usize,
     pub payload: Value,
-}
-
-impl PostgresTradingStore {
-    pub async fn connect(database_url: &str, run_id: impl Into<String>) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(DEFAULT_MAX_CONNECTIONS)
-            .connect(database_url)
-            .await
-            .map_err(store_error)?;
-        let store = Self {
-            pool,
-            run_id: run_id.into(),
-        };
-        store.migrate().await?;
-        Ok(store)
-    }
-
-    pub fn from_pool(pool: PgPool, run_id: impl Into<String>) -> Self {
-        Self {
-            pool,
-            run_id: run_id.into(),
-        }
-    }
-
-    pub fn pool(&self) -> &PgPool {
-        &self.pool
-    }
-
-    pub fn run_id(&self) -> &str {
-        &self.run_id
-    }
-
-    pub async fn migrate(&self) -> Result<()> {
-        let mut connection = self.pool.acquire().await.map_err(store_error)?;
-        sqlx::query("SET client_min_messages TO WARNING")
-            .execute(&mut *connection)
-            .await
-            .map_err(store_error)?;
-        for statement in MIGRATIONS {
-            sqlx::query(statement)
-                .execute(&mut *connection)
-                .await
-                .map_err(store_error)?;
-        }
-        Ok(())
-    }
-
-    pub async fn start_run(&self, mode: &str, config: Value) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO alpha_trading.trader_runs (
-                run_id, mode, status, config, started_at, last_heartbeat_at, metadata
-            )
-            VALUES ($1, $2, 'running', $3, NOW(), NOW(), '{}'::jsonb)
-            ON CONFLICT (run_id) DO UPDATE SET
-                mode = EXCLUDED.mode,
-                status = 'running',
-                config = EXCLUDED.config,
-                stopped_at = NULL,
-                last_heartbeat_at = NOW()
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(mode)
-        .bind(config.clone())
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        let result_set_id = result_set_id_for_run(&self.run_id, mode, &config);
-        let result_set_mode = result_set_mode(mode, &config);
-        let strategy_suite = config
-            .get("strategy_suite")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let start_block = config
-            .get("from_block")
-            .and_then(Value::as_u64)
-            .map(u64_to_i64);
-        let end_block = config
-            .get("to_block")
-            .and_then(Value::as_u64)
-            .map(u64_to_i64);
-        sqlx::query(
-            r#"
-            INSERT INTO alpha_trading.backtest_result_sets (
-                result_set_id, mode, status, strategy_suite, start_block, end_block,
-                config, metadata, created_at, updated_at
-            )
-            VALUES ($1, $2, 'running', $3, $4, $5, $6, '{}'::jsonb, NOW(), NOW())
-            ON CONFLICT (result_set_id) DO UPDATE SET
-                mode = EXCLUDED.mode,
-                status = CASE
-                    WHEN alpha_trading.backtest_result_sets.status = 'running' THEN 'running'
-                    ELSE EXCLUDED.status
-                END,
-                strategy_suite = COALESCE(EXCLUDED.strategy_suite, alpha_trading.backtest_result_sets.strategy_suite),
-                start_block = COALESCE(EXCLUDED.start_block, alpha_trading.backtest_result_sets.start_block),
-                end_block = COALESCE(EXCLUDED.end_block, alpha_trading.backtest_result_sets.end_block),
-                config = alpha_trading.backtest_result_sets.config || EXCLUDED.config,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(&result_set_id)
-        .bind(result_set_mode)
-        .bind(strategy_suite)
-        .bind(start_block)
-        .bind(end_block)
-        .bind(config)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        sqlx::query(
-            r#"
-            INSERT INTO alpha_trading.backtest_result_set_runs (
-                result_set_id, run_id, created_at
-            )
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (result_set_id, run_id) DO NOTHING
-            "#,
-        )
-        .bind(result_set_id)
-        .bind(&self.run_id)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(())
-    }
-
-    pub async fn mark_stale_runs(&self, max_age_secs: u64) -> Result<u64> {
-        let result = sqlx::query(
-            r#"
-            UPDATE alpha_trading.trader_runs
-            SET status = 'stale',
-                metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
-            WHERE run_id <> $1
-              AND status = 'running'
-              AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(u64_to_i64(max_age_secs))
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn heartbeat(&self, metadata: Value) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE alpha_trading.trader_runs
-            SET last_heartbeat_at = NOW(), status = 'running', metadata = $2
-            WHERE run_id = $1
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(metadata.clone())
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        sqlx::query(
-            r#"
-            UPDATE alpha_trading.backtest_result_sets rs
-            SET status = 'running',
-                metadata = rs.metadata || $2,
-                updated_at = NOW()
-            FROM alpha_trading.backtest_result_set_runs runs
-            WHERE runs.result_set_id = rs.result_set_id
-              AND runs.run_id = $1
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(metadata)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(())
-    }
-
-    pub async fn mark_stopped(&self, status: &str, metadata: Value) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE alpha_trading.trader_runs
-            SET status = $2, stopped_at = NOW(), last_heartbeat_at = NOW(), metadata = $3
-            WHERE run_id = $1
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(status)
-        .bind(metadata.clone())
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        sqlx::query(
-            r#"
-            UPDATE alpha_trading.backtest_result_sets rs
-            SET status = $2,
-                stopped_at = NOW(),
-                metadata = rs.metadata || $3,
-                updated_at = NOW()
-            FROM alpha_trading.backtest_result_set_runs runs
-            WHERE runs.result_set_id = rs.result_set_id
-              AND runs.run_id = $1
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(status)
-        .bind(metadata)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(())
-    }
-
-    pub async fn load_strategy_observation_cursors(
-        &self,
-        strategy_name: &str,
-    ) -> Result<Vec<StrategyObservationCursor>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT event_source, event_key, token_address, pool_address, block_number
-            FROM alpha_trading.strategy_observations
-            WHERE run_id = $1 AND strategy_name = $2
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(strategy_name)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(store_error)?;
-
-        rows.into_iter()
-            .map(|row| {
-                Ok(StrategyObservationCursor {
-                    event_source: row.try_get("event_source").map_err(store_error)?,
-                    event_key: row.try_get("event_key").map_err(store_error)?,
-                    token_address: row.try_get("token_address").map_err(store_error)?,
-                    pool_address: row.try_get("pool_address").map_err(store_error)?,
-                    block_number: row
-                        .try_get::<Option<i64>, _>("block_number")
-                        .map_err(store_error)?
-                        .and_then(i64_to_u64),
-                })
-            })
-            .collect()
-    }
-
-    pub async fn record_strategy_observation(
-        &self,
-        record: StrategyObservationRecord,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO alpha_trading.strategy_observations (
-                run_id, strategy_name, event_source, event_key, token_address,
-                pool_address, block_number, event_timestamp, decision, report_count,
-                payload, first_seen_at, last_seen_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
-            ON CONFLICT (run_id, strategy_name, event_source, event_key) DO UPDATE SET
-                token_address = EXCLUDED.token_address,
-                pool_address = EXCLUDED.pool_address,
-                block_number = EXCLUDED.block_number,
-                event_timestamp = EXCLUDED.event_timestamp,
-                decision = EXCLUDED.decision,
-                report_count = EXCLUDED.report_count,
-                payload = EXCLUDED.payload,
-                last_seen_at = NOW()
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(record.strategy_name)
-        .bind(record.event_source)
-        .bind(record.event_key)
-        .bind(record.token_address)
-        .bind(record.pool_address)
-        .bind(record.block_number.map(u64_to_i64))
-        .bind(record.event_timestamp)
-        .bind(record.decision)
-        .bind(usize_to_i32(record.report_count))
-        .bind(record.payload)
-        .execute(&self.pool)
-        .await
-        .map_err(store_error)?;
-        Ok(())
-    }
-
-    pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT protocol, payload::text AS payload
-            FROM alpha_trading.positions
-            WHERE run_id = $1
-              AND strategy_name = $2
-              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
-            ORDER BY updated_at DESC
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(strategy_name)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(store_error)?;
-
-        rows.into_iter()
-            .map(|row| {
-                let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
-                let mut position =
-                    serde_json::from_str::<Position>(&payload).map_err(store_error)?;
-                let protocol = row
-                    .try_get::<Option<String>, _>("protocol")
-                    .map_err(store_error)?;
-                if let Some(protocol) = protocol.as_deref().filter(|value| !value.trim().is_empty())
-                {
-                    position.key.protocol = PoolProtocol::from_label(protocol);
-                }
-                normalize_position_pool_id(&mut position);
-                Ok(position)
-            })
-            .collect()
-    }
-
-    pub async fn load_seen_pools(&self, strategy_name: &str) -> Result<Vec<PoolAddress>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT DISTINCT pool_address
-            FROM alpha_trading.positions
-            WHERE run_id = $1
-              AND strategy_name = $2
-              AND pool_address IS NOT NULL
-            ORDER BY pool_address
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(strategy_name)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(store_error)?;
-
-        rows.into_iter()
-            .map(|row| {
-                row.try_get::<String, _>("pool_address")
-                    .map(PoolAddress::from)
-                    .map_err(store_error)
-            })
-            .collect()
-    }
-
-    pub async fn max_order_sequence_for_prefix(&self, order_prefix: &str) -> Result<u64> {
-        let suffix_start = order_prefix.len() + 2;
-        let like_pattern = format!("{order_prefix}-%");
-        let row = sqlx::query(
-            r#"
-            SELECT COALESCE(MAX((substring(order_id FROM $3::int))::bigint), 0) AS max_sequence
-            FROM alpha_trading.execution_reports
-            WHERE run_id = $1
-              AND order_id LIKE $2
-              AND substring(order_id FROM $3::int) ~ '^[0-9]+$'
-            "#,
-        )
-        .bind(&self.run_id)
-        .bind(like_pattern)
-        .bind(usize_to_i32(suffix_start))
-        .fetch_one(&self.pool)
-        .await
-        .map_err(store_error)?;
-        row.try_get::<i64, _>("max_sequence")
-            .map_err(store_error)
-            .map(|value| i64_to_u64(value).unwrap_or_default())
-    }
 }
 
 #[async_trait]
@@ -505,14 +140,19 @@ impl TradingStore for PostgresTradingStore {
 
     async fn record_order_intent(&self, intent: &OrderIntent) -> Result<()> {
         let payload = to_json(intent)?;
+        let decision_reason = intent.decision_reason.as_ref();
         sqlx::query(
             r#"
             INSERT INTO alpha_trading.order_intents (
                 run_id, trade_id, portfolio_id, wallet_id, strategy_name, side, token_address,
                 pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
-                deadline_secs, payload, created_at
+                deadline_secs, reason_code, reason_category, reason_label, reason_source,
+                reason_details, payload, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, NOW()
+            )
             "#,
         )
         .bind(&self.run_id)
@@ -528,6 +168,11 @@ impl TradingStore for PostgresTradingStore {
         .bind(i16::from(intent.amount.decimals))
         .bind(u32_to_i32(intent.max_slippage_bps))
         .bind(u64_to_i64(intent.deadline_secs))
+        .bind(decision_reason.map(|reason| reason.code.as_str()))
+        .bind(decision_reason.map(|reason| reason.category_key()))
+        .bind(decision_reason.map(|reason| reason.label.as_str()))
+        .bind(decision_reason.and_then(|reason| reason.source.as_deref()))
+        .bind(decision_reason.map(|reason| &reason.details))
         .bind(payload)
         .execute(&self.pool)
         .await
@@ -595,9 +240,14 @@ impl TradingStore for PostgresTradingStore {
             r#"
             INSERT INTO alpha_trading.strategy_decisions (
                 run_id, strategy_name, event_source, event_key, block_number,
-                token_address, pool_address, action, reason, order_side, payload, created_at
+                token_address, pool_address, action, reason,
+                reason_code, reason_category, reason_label, reason_source, reason_details,
+                order_side, payload, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16, NOW()
+            )
             "#,
         )
         .bind(&self.run_id)
@@ -609,6 +259,11 @@ impl TradingStore for PostgresTradingStore {
         .bind(&record.pool_address)
         .bind(&record.action)
         .bind(&record.reason)
+        .bind(&record.reason_code)
+        .bind(&record.reason_category)
+        .bind(&record.reason_label)
+        .bind(&record.reason_source)
+        .bind(&record.reason_details)
         .bind(record.order_side.map(order_side_label))
         .bind(&record.payload)
         .execute(&self.pool)
@@ -1180,408 +835,5 @@ fn store_error(error: impl std::fmt::Display) -> AlphaCoreError {
     AlphaCoreError::Store(error.to_string())
 }
 
-const MIGRATIONS: &[&str] = &[
-    "CREATE SCHEMA IF NOT EXISTS alpha_trading",
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.trader_runs (
-        run_id TEXT PRIMARY KEY,
-        mode TEXT NOT NULL,
-        status TEXT NOT NULL,
-        config JSONB NOT NULL DEFAULT '{}'::jsonb,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        stopped_at TIMESTAMPTZ
-    )
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.order_intents (
-        id BIGSERIAL PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        trade_id TEXT,
-        portfolio_id TEXT NOT NULL,
-        wallet_id TEXT NOT NULL,
-        strategy_name TEXT NOT NULL,
-        side TEXT NOT NULL,
-        token_address TEXT NOT NULL,
-        pool_address TEXT NOT NULL,
-        protocol TEXT,
-        amount_raw TEXT NOT NULL,
-        amount_decimals SMALLINT NOT NULL,
-        max_slippage_bps INTEGER NOT NULL,
-        deadline_secs BIGINT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    "ALTER TABLE alpha_trading.order_intents ADD COLUMN IF NOT EXISTS trade_id TEXT",
-    "ALTER TABLE alpha_trading.order_intents ADD COLUMN IF NOT EXISTS protocol TEXT",
-    "ALTER TABLE alpha_trading.order_intents ALTER COLUMN protocol SET DEFAULT 'unknown'",
-    r#"
-    CREATE INDEX IF NOT EXISTS order_intents_run_created_idx
-    ON alpha_trading.order_intents (run_id, created_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS order_intents_token_created_idx
-    ON alpha_trading.order_intents (token_address, created_at DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.execution_reports (
-        id BIGSERIAL PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        position_id TEXT,
-        trade_id TEXT,
-        order_side TEXT,
-        order_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        tx_hash TEXT,
-        block_number BIGINT,
-        filled_amount_raw TEXT,
-        filled_amount_decimals SMALLINT,
-        gas_used BIGINT,
-        error TEXT,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    "ALTER TABLE alpha_trading.execution_reports ADD COLUMN IF NOT EXISTS position_id TEXT",
-    "ALTER TABLE alpha_trading.execution_reports ADD COLUMN IF NOT EXISTS trade_id TEXT",
-    "ALTER TABLE alpha_trading.execution_reports ADD COLUMN IF NOT EXISTS order_side TEXT",
-    r#"
-    CREATE INDEX IF NOT EXISTS execution_reports_run_created_idx
-    ON alpha_trading.execution_reports (run_id, created_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS execution_reports_position_created_idx
-    ON alpha_trading.execution_reports (run_id, position_id, created_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS execution_reports_order_created_idx
-    ON alpha_trading.execution_reports (order_id, created_at DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.positions (
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        position_id TEXT NOT NULL,
-        trade_id TEXT,
-        portfolio_id TEXT NOT NULL,
-        wallet_id TEXT NOT NULL,
-        strategy_name TEXT NOT NULL,
-        token_address TEXT NOT NULL,
-        pool_address TEXT NOT NULL,
-        protocol TEXT,
-        state TEXT NOT NULL,
-        entry_order_id TEXT,
-        exit_order_id TEXT,
-        entry_block BIGINT,
-        exit_block BIGINT,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (run_id, position_id)
-    )
-    "#,
-    "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS trade_id TEXT",
-    "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS protocol TEXT",
-    "ALTER TABLE alpha_trading.positions ALTER COLUMN protocol SET DEFAULT 'unknown'",
-    "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS entry_block BIGINT",
-    "ALTER TABLE alpha_trading.positions ADD COLUMN IF NOT EXISTS exit_block BIGINT",
-    "UPDATE alpha_trading.positions SET trade_id = position_id WHERE trade_id IS NULL",
-    r#"
-    CREATE INDEX IF NOT EXISTS positions_run_state_idx
-    ON alpha_trading.positions (run_id, state, updated_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS positions_token_idx
-    ON alpha_trading.positions (token_address, updated_at DESC)
-    "#,
-    r#"
-    CREATE UNIQUE INDEX IF NOT EXISTS positions_run_trade_idx
-    ON alpha_trading.positions (run_id, trade_id)
-    WHERE trade_id IS NOT NULL
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.position_snapshots (
-        id BIGSERIAL PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        position_id TEXT NOT NULL,
-        trade_id TEXT,
-        state TEXT NOT NULL,
-        block_number BIGINT NOT NULL,
-        observed_block_number BIGINT,
-        valuation_block_number BIGINT,
-        current_value_eth TEXT NOT NULL,
-        realized_profit_eth TEXT NOT NULL,
-        unrealized_profit_eth TEXT NOT NULL,
-        roi TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    "ALTER TABLE alpha_trading.position_snapshots ADD COLUMN IF NOT EXISTS trade_id TEXT",
-    "ALTER TABLE alpha_trading.position_snapshots ADD COLUMN IF NOT EXISTS observed_block_number BIGINT",
-    "ALTER TABLE alpha_trading.position_snapshots ADD COLUMN IF NOT EXISTS valuation_block_number BIGINT",
-    "UPDATE alpha_trading.position_snapshots SET trade_id = position_id WHERE trade_id IS NULL",
-    r#"
-    CREATE INDEX IF NOT EXISTS position_snapshots_position_block_idx
-    ON alpha_trading.position_snapshots (run_id, position_id, block_number DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.backtest_result_sets (
-        result_set_id TEXT PRIMARY KEY,
-        mode TEXT NOT NULL,
-        status TEXT NOT NULL,
-        strategy_suite TEXT,
-        start_block BIGINT,
-        end_block BIGINT,
-        config JSONB NOT NULL DEFAULT '{}'::jsonb,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        stopped_at TIMESTAMPTZ
-    )
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.backtest_result_set_runs (
-        result_set_id TEXT NOT NULL REFERENCES alpha_trading.backtest_result_sets(result_set_id) ON DELETE CASCADE,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (result_set_id, run_id)
-    )
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.trades (
-        trade_id TEXT PRIMARY KEY,
-        result_set_id TEXT NOT NULL REFERENCES alpha_trading.backtest_result_sets(result_set_id) ON DELETE CASCADE,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        position_id TEXT,
-        strategy_name TEXT NOT NULL,
-        token_address TEXT NOT NULL,
-        pool_address TEXT NOT NULL,
-        protocol TEXT,
-        state TEXT NOT NULL,
-        entry_order_id TEXT,
-        exit_order_id TEXT,
-        entry_block BIGINT,
-        exit_block BIGINT,
-        latest_snapshot_block BIGINT,
-        latest_observed_block BIGINT,
-        latest_valuation_block BIGINT,
-        entry_cost_eth TEXT,
-        exit_value_eth TEXT,
-        current_value_eth TEXT,
-        realized_pnl_eth TEXT,
-        unrealized_pnl_eth TEXT,
-        total_pnl_eth TEXT,
-        gas_cost_eth TEXT,
-        roi TEXT,
-        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    "ALTER TABLE alpha_trading.trades ADD COLUMN IF NOT EXISTS protocol TEXT",
-    "ALTER TABLE alpha_trading.trades ALTER COLUMN protocol SET DEFAULT 'unknown'",
-    r#"
-    CREATE INDEX IF NOT EXISTS trades_result_strategy_idx
-    ON alpha_trading.trades (result_set_id, strategy_name, updated_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trades_result_strategy_trade_idx
-    ON alpha_trading.trades (result_set_id, strategy_name, trade_id)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trades_token_pool_idx
-    ON alpha_trading.trades (token_address, pool_address, updated_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trades_result_protocol_idx
-    ON alpha_trading.trades (result_set_id, protocol, updated_at DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.trade_events (
-        id BIGSERIAL PRIMARY KEY,
-        trade_id TEXT NOT NULL REFERENCES alpha_trading.trades(trade_id) ON DELETE CASCADE,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        event_type TEXT NOT NULL,
-        order_side TEXT NOT NULL,
-        status TEXT NOT NULL,
-        order_id TEXT NOT NULL,
-        tx_hash TEXT,
-        block_number BIGINT,
-        filled_amount_raw TEXT,
-        filled_amount_decimals SMALLINT,
-        gas_used BIGINT,
-        gas_cost_eth TEXT,
-        error TEXT,
-        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trade_events_trade_created_idx
-    ON alpha_trading.trade_events (trade_id, created_at ASC, id ASC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.trade_snapshots (
-        id BIGSERIAL PRIMARY KEY,
-        trade_id TEXT NOT NULL REFERENCES alpha_trading.trades(trade_id) ON DELETE CASCADE,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        position_id TEXT,
-        state TEXT NOT NULL,
-        block_number BIGINT NOT NULL,
-        observed_block_number BIGINT,
-        valuation_block_number BIGINT,
-        current_value_eth TEXT NOT NULL,
-        realized_pnl_eth TEXT NOT NULL,
-        unrealized_pnl_eth TEXT NOT NULL,
-        total_pnl_eth TEXT NOT NULL,
-        roi TEXT NOT NULL,
-        pool_price_to_initial_price_ratio TEXT,
-        pool_initial_price_denom_per_token TEXT,
-        pool_price_denom_per_token TEXT,
-        pool_liquidity_denom TEXT,
-        pool_token_reserve TEXT,
-        pool_denom_symbol TEXT,
-        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trade_snapshots_trade_block_idx
-    ON alpha_trading.trade_snapshots (trade_id, block_number DESC, id DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS trade_snapshots_trade_effective_block_idx
-    ON alpha_trading.trade_snapshots (
-        trade_id,
-        (COALESCE(valuation_block_number, observed_block_number, block_number)) DESC,
-        id DESC
-    )
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.risk_events (
-        id BIGSERIAL PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        kind TEXT NOT NULL,
-        severity TEXT NOT NULL,
-        token_address TEXT NOT NULL,
-        pool_address TEXT,
-        pending_tx_hash TEXT,
-        observed_block BIGINT,
-        message TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS risk_events_run_created_idx
-    ON alpha_trading.risk_events (run_id, created_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS risk_events_token_created_idx
-    ON alpha_trading.risk_events (token_address, created_at DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.strategy_decisions (
-        id BIGSERIAL PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        strategy_name TEXT NOT NULL,
-        event_source TEXT NOT NULL,
-        event_key TEXT NOT NULL,
-        block_number BIGINT,
-        token_address TEXT,
-        pool_address TEXT,
-        action TEXT NOT NULL,
-        reason TEXT,
-        order_side TEXT,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS strategy_decisions_run_event_idx
-    ON alpha_trading.strategy_decisions (run_id, event_source, block_number, id)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS strategy_decisions_token_idx
-    ON alpha_trading.strategy_decisions (token_address, created_at DESC)
-    "#,
-    r#"
-    CREATE TABLE IF NOT EXISTS alpha_trading.strategy_observations (
-        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
-        strategy_name TEXT NOT NULL,
-        event_source TEXT NOT NULL,
-        event_key TEXT NOT NULL,
-        token_address TEXT,
-        pool_address TEXT,
-        block_number BIGINT,
-        event_timestamp TEXT,
-        decision TEXT NOT NULL,
-        report_count INTEGER NOT NULL DEFAULT 0,
-        payload JSONB NOT NULL,
-        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (run_id, strategy_name, event_source, event_key)
-    )
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS strategy_observations_run_seen_idx
-    ON alpha_trading.strategy_observations (run_id, strategy_name, last_seen_at DESC)
-    "#,
-    r#"
-    CREATE INDEX IF NOT EXISTS strategy_observations_token_idx
-    ON alpha_trading.strategy_observations (token_address, last_seen_at DESC)
-    "#,
-];
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn labels_are_dashboard_friendly() {
-        assert_eq!(order_side_label(OrderSide::Buy), "buy");
-        assert_eq!(
-            position_state_label(&PositionState::BuyConfirmed),
-            "buy_confirmed"
-        );
-        assert_eq!(
-            execution_status_label(&ExecutionStatus::Confirmed),
-            "confirmed"
-        );
-        assert_eq!(risk_kind_label(&RiskKind::LpApproval), "lp_approval");
-    }
-
-    #[test]
-    fn migrations_cover_runtime_tables() {
-        let combined = MIGRATIONS.join("\n");
-        for table in [
-            "backtest_result_sets",
-            "backtest_result_set_runs",
-            "trades",
-            "trade_events",
-            "trade_snapshots",
-            "trader_runs",
-            "order_intents",
-            "execution_reports",
-            "positions",
-            "position_snapshots",
-            "risk_events",
-            "strategy_decisions",
-            "strategy_observations",
-        ] {
-            assert!(combined.contains(table));
-        }
-    }
-
-    #[test]
-    fn heartbeat_metadata_is_json() {
-        let metadata = json!({
-            "live_status": "live",
-            "positions": 3,
-        });
-        assert_eq!(metadata["live_status"], "live");
-    }
-}
+mod tests;

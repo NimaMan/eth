@@ -171,6 +171,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do trade latest fields match the latest snapshot?",
             "Compares latest snapshot block coordinates, current value, realized/unrealized/total PnL, and ROI against the latest trade_snapshot row.",
         ),
+        "zero_value_snapshots_do_not_reuse_stale_pool_metrics" => (
+            "Do zero-value exposure snapshots avoid stale pool metrics?",
+            "Fails if a zero-value open or failed-exit snapshot still displays positive pool liquidity or price metrics from an older/pre-drain pool state.",
+        ),
         "no_snapshots_after_sell_confirmed" => (
             "Are closed trades no longer receiving snapshots?",
             "Fails if any trade snapshot row is appended after the first sell_confirmed snapshot for the same trade.",

@@ -113,6 +113,9 @@ pub async fn run_checks(
     );
     checks.push(snapshots::latest_snapshot_block_check(pool, result_set_id, strategy).await?);
     checks.push(snapshots::latest_snapshot_values_check(pool, result_set_id, strategy).await?);
+    checks.push(
+        snapshots::zero_value_snapshot_pool_metrics_check(pool, result_set_id, strategy).await?,
+    );
     checks.push(snapshots::closed_trade_final_snapshot_check(pool, result_set_id, strategy).await?);
     checks
         .push(snapshots::closed_trade_latest_snapshot_check(pool, result_set_id, strategy).await?);
