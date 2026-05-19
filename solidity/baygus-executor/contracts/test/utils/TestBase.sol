@@ -4,8 +4,13 @@ pragma solidity ^0.8.26;
 interface Vm {
     function coinbase(address newCoinbase) external;
     function deal(address account, uint256 newBalance) external;
+    function pauseGasMetering() external;
     function prank(address msgSender) external;
+    function resumeGasMetering() external;
     function roll(uint256 newBlockNumber) external;
+    function startPrank(address msgSender) external;
+    function stopPrank() external;
+    function warp(uint256 newTimestamp) external;
 }
 
 contract TestBase {

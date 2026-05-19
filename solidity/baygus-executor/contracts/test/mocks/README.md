@@ -1,6 +1,7 @@
 # Mocks
 
-Small test doubles for the PoolManager, ERC20 tokens, hook adapter, Permit2, and V2 router.
+Small test doubles for ERC20 tokens and the Uniswap V2 router surface used by
+Mode A.
 
-Mocks should model only behavior asserted by tests. Do not grow them into partial protocol
-implementations.
+Mocks should model only behavior asserted by tests. Do not grow them into
+partial protocol implementations.

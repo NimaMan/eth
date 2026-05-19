@@ -1,0 +1,5 @@
+BaygusTradingVaultGasTest:testGas_Local_DirectRouterBuyToEoa() (gas: 83249)
+BaygusTradingVaultGasTest:testGas_Local_DirectRouterSellPreapproved() (gas: 45673)
+BaygusTradingVaultGasTest:testGas_Local_StandaloneApprove() (gas: 28708)
+BaygusTradingVaultGasTest:testGas_Local_VaultBuyToVault() (gas: 97001)
+BaygusTradingVaultGasTest:testGas_Local_VaultModeAEmergencySell() (gas: 117752)

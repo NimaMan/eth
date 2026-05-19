@@ -1,10 +1,14 @@
 # Tests
 
-The test suite is split by router surface:
+`BaygusTradingVault.t.sol` verifies Mode A behavior:
 
-- `BaygusExecutorV4.t.sol` verifies v4 single-hop, multi-hop net settlement, hooks, and slippage.
-- `BaygusExecutorCommands.t.sol` verifies command execution for token pulls, sweeps, V2 router
-  swaps, direct V2 pair swaps, malformed commands, adapter-missing paths, coinbase tips, and
-  native-transfer reentrancy.
+- buy stores bought tokens in the vault;
+- buy leaves no sell-router allowance;
+- emergency sell approves exact amount and clears allowance;
+- ETH proceeds go to treasury;
+- non-owner calls fail;
+- min-output checks revert;
+- owner rescue functions work.
 
-The tests use local mocks instead of mainnet forks so CI and artifact rebuilds stay deterministic.
+The tests use local mocks instead of mainnet forks so CI and artifact rebuilds
+stay deterministic.

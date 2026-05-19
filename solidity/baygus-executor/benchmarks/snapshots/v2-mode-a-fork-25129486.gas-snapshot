@@ -1,0 +1,5 @@
+BaygusTradingVaultForkGasTest:testGas_Fork_DirectRouterBuyToEoa() (gas: 124159)
+BaygusTradingVaultForkGasTest:testGas_Fork_DirectRouterSellPreapproved() (gas: 58974)
+BaygusTradingVaultForkGasTest:testGas_Fork_StandaloneApprove() (gas: 32359)
+BaygusTradingVaultForkGasTest:testGas_Fork_VaultBuyToVault() (gas: 141720)
+BaygusTradingVaultForkGasTest:testGas_Fork_VaultModeAEmergencySell() (gas: 112023)

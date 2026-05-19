@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 contract MockERC20 {
     string public name;
     string public symbol;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint8 public immutable decimals;
 
     mapping(address => uint256) public balanceOf;
