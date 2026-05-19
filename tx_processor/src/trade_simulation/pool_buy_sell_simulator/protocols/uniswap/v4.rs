@@ -21,7 +21,9 @@ use crate::trade_simulation::pool_buy_sell_simulator::common::balance_deltas::{
     extract_tokens_received_from_processed_transaction,
 };
 use crate::trade_simulation::pool_buy_sell_simulator::common::block_header::block_header_hint;
-use crate::trade_simulation::pool_buy_sell_simulator::common::buyer_setup::prepare_buyer_account;
+use crate::trade_simulation::pool_buy_sell_simulator::common::buyer_setup::{
+    ensure_buyer_eth_for_probe, prepare_buyer_account,
+};
 use crate::trade_simulation::pool_buy_sell_simulator::common::failure::{
     format_failure_with_full_trace, format_failure_with_revert,
 };
@@ -40,9 +42,9 @@ use crate::tx_processor::tax_calculator::{
 use crate::tx_processor::TxProcessor;
 
 const UNIVERSAL_ROUTER_V4: Address = address!("66a9893cC07D91D95644AEDD05D03f95e1dBA8Af");
-const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
 const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 const PERMIT2_EXPIRATION: u64 = (1_u64 << 48) - 1;
+const ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 
 pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn check_can_buy_sell_uniswap_v4(
     simulator: Arc<TxSimulator>,
@@ -131,13 +133,6 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
     base_fee: Option<u128>,
     mut chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
-    chain.set_eth_balance(
-        config.buyer_address,
-        config
-            .test_amount
-            .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE)),
-    )?;
-
     let v4_cfg = config
         .uniswap_v4_config
         .clone()
@@ -219,7 +214,7 @@ async fn check_can_buy_sell_uniswap_v4_with_prepared_chain(
             min_amount_out: U256::ZERO,
             deadline: U256::from(u64::MAX),
             hook_data: v4_cfg.hook_data.clone(),
-            input_payment: payment_for_input(buy_orientation.input_currency),
+            input_payment: payment_for_input(buy_orientation.input_currency, config.weth_address),
         },
     )?;
     buy_tx.gas = Some(config.buy_gas_limit);
@@ -524,6 +519,8 @@ async fn prepare_v4_buy_input(
     input_currency: Address,
     prior_tx_results: &mut Vec<ProcessedTransaction>,
 ) -> Result<Option<PoolBuySellSimulationResult>> {
+    ensure_buyer_eth_for_probe(chain, config, block_number)?;
+
     if input_currency.is_zero() {
         return Ok(None);
     }
@@ -564,6 +561,45 @@ async fn prepare_v4_buy_input(
                 false,
             )));
         }
+
+        let mut transfer_tx = build_token_transfer_tx(
+            config.buyer_address,
+            input_currency,
+            UNIVERSAL_ROUTER_V4,
+            config.test_amount,
+        );
+        transfer_tx.gas = Some(config.approve_gas_limit);
+        apply_fee_policy(&mut transfer_tx, config, base_fee);
+        let (transfer_result, transfer_processed) = simulate_and_process(
+            chain,
+            tx_processor.clone(),
+            transfer_tx,
+            block_number,
+            prior_tx_results.len() as u64,
+            "v4_input_transfer_to_universal_router",
+        )
+        .await
+        .wrap_err("while pre-funding Universal Router with WETH for V4 input")?;
+        prior_tx_results.push(transfer_processed);
+        if !transfer_result.success {
+            return Ok(Some(create_failed_result(
+                config.clone(),
+                block_number,
+                prior_tx_results.clone(),
+                None,
+                None,
+                None,
+                format_failure_with_revert(
+                    "WETH transfer to Universal Router failed for Uniswap V4 input",
+                    transfer_result.revert_reason.as_deref(),
+                ),
+                false,
+                false,
+                false,
+            )));
+        }
+
+        return Ok(None);
     } else if let Some(failure) = prepare_buyer_account(
         chain,
         config,
@@ -648,7 +684,6 @@ async fn prepare_v4_buy_input(
             false,
         )));
     }
-
     Ok(None)
 }
 
@@ -685,9 +720,14 @@ async fn simulate_and_process(
     Ok((result, processed))
 }
 
-fn payment_for_input(input_currency: Address) -> UniversalRouterV4InputPayment {
+fn payment_for_input(
+    input_currency: Address,
+    weth_address: Address,
+) -> UniversalRouterV4InputPayment {
     if input_currency.is_zero() {
         UniversalRouterV4InputPayment::NativeEth
+    } else if input_currency == weth_address {
+        UniversalRouterV4InputPayment::RouterBalance
     } else {
         UniversalRouterV4InputPayment::Permit2User
     }
@@ -713,6 +753,9 @@ fn denom_spent_from_buy(
     if input_currency.is_zero() {
         return config.test_amount;
     }
+    if input_currency == config.weth_address {
+        return config.test_amount;
+    }
 
     let delta = extract_token_balance_delta(buy_processed, config.buyer_address, input_currency);
     if delta.is_negative() {
@@ -720,4 +763,30 @@ fn denom_spent_from_buy(
     } else {
         U256::ZERO
     }
+}
+
+fn build_token_transfer_tx(
+    owner: Address,
+    token: Address,
+    recipient: Address,
+    amount: U256,
+) -> UnsignedTransaction {
+    let mut data = Vec::with_capacity(4 + 64);
+    data.extend_from_slice(&ERC20_TRANSFER_SELECTOR);
+    data.extend_from_slice(&pad_address(recipient));
+    data.extend_from_slice(&amount.to_be_bytes::<32>());
+    UnsignedTransaction {
+        from: Some(owner),
+        to: Some(token),
+        gas: Some(120_000),
+        value: Some(U256::ZERO),
+        data: Some(data.into()),
+        ..Default::default()
+    }
+}
+
+fn pad_address(address: Address) -> [u8; 32] {
+    let mut word = [0_u8; 32];
+    word[12..].copy_from_slice(address.as_slice());
+    word
 }

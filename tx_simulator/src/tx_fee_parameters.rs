@@ -31,6 +31,7 @@ pub struct SimulationGasParameters {
     pub tx_type: GasTxType,
     pub gas_limit: u64,
     pub gas_price: u128,
+    pub effective_gas_price: u128,
     pub max_fee_per_gas: Option<u128>,
     pub max_priority_fee_per_gas: Option<u128>,
     pub max_fee_per_blob_gas: Option<u128>,
@@ -60,6 +61,23 @@ impl GasTxType {
             GasTxType::Eip1559 => 2,
         }
     }
+}
+
+pub(crate) fn effective_paid_gas_price_from_tx_env(
+    tx_type: u8,
+    gas_price: u128,
+    gas_priority_fee: Option<u128>,
+    base_fee: Option<u128>,
+) -> Option<u128> {
+    if gas_priority_fee.is_some() || matches!(tx_type, 2 | 3 | 4) {
+        let base_fee = base_fee?;
+        return Some(gas_price.min(base_fee.saturating_add(gas_priority_fee.unwrap_or(0))));
+    }
+
+    Some(match base_fee {
+        Some(base_fee) => gas_price.max(base_fee),
+        None => gas_price,
+    })
 }
 
 /// Input parameters provided by the caller / unsigned transaction.
@@ -135,16 +153,19 @@ pub fn prepare_tx_env_gas(
     };
 
     if matches!(tx_type, GasTxType::Eip1559) {
+        let base_fee = context.base_fee.ok_or_else(|| {
+            eyre!("missing block base fee for EIP-1559 transaction gas accounting")
+        })?;
         let resolved_priority = priority_fee.unwrap_or(0);
-        let base_fee_floor = context.base_fee.unwrap_or(0);
-        let requested_max_fee = explicit_max_fee.unwrap_or(base_fee_floor);
-        let effective_max_fee = requested_max_fee.max(base_fee_floor).max(resolved_priority);
-        let gas_price = effective_max_fee;
+        let requested_max_fee = explicit_max_fee.unwrap_or(base_fee);
+        let effective_max_fee = requested_max_fee.max(base_fee).max(resolved_priority);
+        let effective_gas_price = effective_max_fee.min(base_fee.saturating_add(resolved_priority));
 
         Ok(SimulationGasParameters {
             tx_type,
             gas_limit,
-            gas_price,
+            gas_price: effective_max_fee,
+            effective_gas_price,
             max_fee_per_gas: Some(effective_max_fee),
             max_priority_fee_per_gas: Some(resolved_priority),
             max_fee_per_blob_gas: blob_fee,
@@ -161,6 +182,7 @@ pub fn prepare_tx_env_gas(
             tx_type,
             gas_limit,
             gas_price: resolved_price,
+            effective_gas_price: resolved_price,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             max_fee_per_blob_gas: blob_fee,
@@ -211,6 +233,7 @@ mod tests {
         assert_eq!(resolved.gas_limit, 100_000);
         assert_eq!(resolved.max_fee_per_gas, Some(1_500_000_000));
         assert_eq!(resolved.max_priority_fee_per_gas, Some(0));
+        assert_eq!(resolved.effective_gas_price, 1_500_000_000);
     }
 
     #[test]
@@ -229,6 +252,7 @@ mod tests {
         assert!(matches!(resolved.tx_type, GasTxType::Eip1559));
         assert_eq!(resolved.max_fee_per_gas, Some(2_000_000_000));
         assert_eq!(resolved.max_priority_fee_per_gas, Some(0));
+        assert_eq!(resolved.effective_gas_price, 1_000_000_000);
     }
 
     #[test]
@@ -245,6 +269,7 @@ mod tests {
         .expect("gas should resolve");
 
         assert_eq!(resolved.max_fee_per_gas, Some(1_000_000_000));
+        assert_eq!(resolved.effective_gas_price, 1_000_000_000);
     }
 
     #[test]
@@ -262,5 +287,35 @@ mod tests {
 
         assert!(matches!(resolved.tx_type, GasTxType::Legacy));
         assert_eq!(resolved.legacy_gas_price(), Some(1_000_000_000));
+        assert_eq!(resolved.effective_gas_price, 1_000_000_000);
+    }
+
+    #[test]
+    fn eip1559_effective_gas_price_uses_base_plus_priority_not_fee_cap() {
+        let mut gas_inputs = inputs();
+        gas_inputs.max_fee_per_gas = Some(2_000_000_000);
+        gas_inputs.max_priority_fee_per_gas = Some(100_000_000);
+
+        let resolved = prepare_tx_env_gas(
+            None,
+            &TxGasParameters::default(),
+            gas_inputs,
+            context(Some(1_000_000_000)),
+        )
+        .expect("gas should resolve");
+
+        assert_eq!(resolved.max_fee_per_gas, Some(2_000_000_000));
+        assert_eq!(resolved.effective_gas_price, 1_100_000_000);
+    }
+
+    #[test]
+    fn eip1559_input_requires_block_base_fee() {
+        let mut gas_inputs = inputs();
+        gas_inputs.max_fee_per_gas = Some(2_000_000_000);
+
+        let err = prepare_tx_env_gas(None, &TxGasParameters::default(), gas_inputs, context(None))
+            .expect_err("EIP-1559 accounting needs a block base fee");
+
+        assert!(err.to_string().contains("missing block base fee"));
     }
 }

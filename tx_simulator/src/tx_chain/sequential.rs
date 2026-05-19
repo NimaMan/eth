@@ -330,7 +330,7 @@ impl TxSimulator {
         };
 
         // Create transaction environment
-        let tx_env = self.create_tx_env_from_unsigned_tx(
+        let (tx_env, effective_gas_price, tx_type) = self.create_tx_env_from_unsigned_tx(
             &transaction,
             evm_env.block_env.gas_limit as u128,
             base_fee,
@@ -380,6 +380,8 @@ impl TxSimulator {
         Ok(crate::types::FullSimulationResult {
             success,
             gas_used,
+            effective_gas_price: Some(effective_gas_price),
+            tx_type: Some(tx_type),
             revert_reason,
             revert_context,
             call_trace: call_frame,
@@ -412,7 +414,7 @@ impl TxSimulator {
         block_gas_limit: u128,
         base_fee: Option<u128>,
         db: &mut DB,
-    ) -> Result<reth_revm::revm::context::TxEnv> {
+    ) -> Result<(reth_revm::revm::context::TxEnv, u128, u8)> {
         use alloy_primitives::TxKind;
         use reth_revm::revm::context::TxEnv;
 
@@ -461,8 +463,9 @@ impl TxSimulator {
         let max_fee_per_blob_gas = simulation_gas.max_fee_per_blob_gas.unwrap_or(0);
 
         // Create TxEnv - no signature needed!
-        Ok(TxEnv {
-            tx_type: simulation_gas.tx_type.as_reth_tx_type(),
+        let tx_type = simulation_gas.tx_type.as_reth_tx_type();
+        let tx_env = TxEnv {
+            tx_type,
             caller: caller.into(),
             gas_limit: simulation_gas.gas_limit,
             gas_price,
@@ -480,7 +483,9 @@ impl TxSimulator {
             blob_hashes,
             max_fee_per_blob_gas,
             authorization_list,
-        })
+        };
+
+        Ok((tx_env, simulation_gas.effective_gas_price, tx_type))
     }
 }
 

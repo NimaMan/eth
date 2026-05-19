@@ -205,7 +205,6 @@ impl ProcessedTxProvider {
             )
             .await?;
 
-        // Convert simulation result to ProcessedTransaction (like Python does)
         let processed_tx = self
             .build_processed_transaction_from_simulation(
                 &unsigned_tx,
@@ -423,15 +422,15 @@ impl ProcessedTxProvider {
         self.simulator.get_base_fee_at_block(latest_block)
     }
 
-    /// Get the base fee for a specific block using NEW simulator
+    /// Get the base fee for a specific block.
     pub async fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
         self.simulator.get_base_fee_at_block(block_number)
     }
 
-    /// Build ProcessedTransaction from simulation result (like Python's process_transaction)
+    /// Build `ProcessedTransaction` from a simulation result.
     ///
     /// This is the core method that takes simulation results (logs, traces, etc.)
-    /// and builds a complete ProcessedTransaction, just like Python does.
+    /// and builds a complete `ProcessedTransaction`.
     async fn build_processed_transaction_from_simulation(
         &self,
         unsigned_tx: &UnsignedTransaction,

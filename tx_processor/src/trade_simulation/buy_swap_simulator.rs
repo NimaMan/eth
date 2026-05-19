@@ -89,7 +89,7 @@ pub async fn simulate_buy_swap_with_params(
             .test_amount
             .saturating_add(U256::from(1_000_000_000_000_000_000u128)),
     )?;
-    apply_buy_fee_policy(&mut buy_tx, config.buy_gas_limit, base_fee);
+    apply_buy_fee_policy(&mut buy_tx, &config, base_fee);
 
     let buy_sim = chain.step_with_trace(buy_tx.clone()).await?;
     let processed = tx_processor
@@ -189,12 +189,30 @@ fn extract_tokens_received(
     U256::ZERO
 }
 
-fn apply_buy_fee_policy(tx: &mut UnsignedTransaction, gas_limit: u64, base_fee: Option<u128>) {
-    tx.gas = Some(gas_limit);
-    if let Some(base_fee) = base_fee {
+fn apply_buy_fee_policy(
+    tx: &mut UnsignedTransaction,
+    config: &PoolBuySellParameters,
+    base_fee: Option<u128>,
+) {
+    tx.gas = Some(config.buy_gas_limit);
+    if let Some(gas_price) = config.gas_price {
+        tx.gas_price = Some(gas_price);
+        tx.max_fee_per_gas = None;
+        tx.max_priority_fee_per_gas = None;
+    } else if base_fee.is_some()
+        || config.max_fee_per_gas.is_some()
+        || config.max_priority_fee_per_gas.is_some()
+    {
+        let base_fee = base_fee.unwrap_or(0);
+        let priority_fee = config.max_priority_fee_per_gas.unwrap_or(0);
+        let min_required = base_fee.saturating_add(priority_fee);
+        let max_fee = config
+            .max_fee_per_gas
+            .unwrap_or(min_required)
+            .max(min_required);
         tx.gas_price = None;
-        tx.max_fee_per_gas = Some(base_fee);
-        tx.max_priority_fee_per_gas = Some(0);
+        tx.max_fee_per_gas = Some(max_fee);
+        tx.max_priority_fee_per_gas = Some(priority_fee);
     } else if tx.gas_price.is_none() && tx.max_fee_per_gas.is_none() {
         tx.gas_price = Some(1);
     }

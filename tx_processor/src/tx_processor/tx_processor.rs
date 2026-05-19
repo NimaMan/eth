@@ -1,17 +1,15 @@
-/// Transaction Processor - Rust equivalent of Python TransactionProcessor
+/// Core transaction processor.
 ///
-/// OBJECTIVE: Process simulation results into complete ProcessedTransaction objects
-/// with ALL decoded events (ERC20TransferEvent, UniswapV2MintEvent, UniswapV2SyncEvent, etc.)
+/// Converts raw transaction data and simulation results into complete
+/// `ProcessedTransaction` objects with decoded events, internal calls, balance
+/// changes, fee fields, and classification.
 ///
-/// This is the core transaction processing logic that:
+/// This processor:
 /// 1. Takes simulation results (logs, traces, balance changes)
-/// 2. Decodes ALL event logs using LogDecoder
+/// 2. Decodes event logs using LogDecoder
 /// 3. Processes internal transactions from traces
 /// 4. Converts balance changes to proper format
 /// 5. Creates complete ProcessedTransaction object
-///
-/// Key insight: Uses the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs
-/// instead of the broken manual filtering approach that was throwing away events.
 use super::data_models::{
     tx_models::ETHTransfer, ContractCreationEvent, InternalTransaction, ProcessedAccessListItem,
     ProcessedTransaction, TradingDisabledEvent, TradingEnabledEvent, TransactionFees,
@@ -25,11 +23,10 @@ use super::{
 };
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, U256};
-use eyre::Result;
+use eyre::{eyre, Result};
 use reth_chain_query::{function_signatures::FUNCTION_SIGNATURES, FEE_RECIPIENTS};
 use std::collections::{HashMap, HashSet};
 
-/// Core transaction processing logic equivalent to Python's TransactionProcessor
 pub struct TxProcessor {
     pub decoder: LogDecoder,
     pub classifier: TransactionClassifier,
@@ -46,11 +43,8 @@ impl TxProcessor {
 
     /// Process transaction from raw data into ProcessedTransaction
     ///
-    /// This is the Rust equivalent of Python's process_transaction() method.
-    /// It takes raw transaction data and converts it into a complete ProcessedTransaction
-    /// with ALL decoded events, just like the Python version does with log_processor.process_logs().
-    ///
-    /// Based on the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs:292-308
+    /// It takes raw transaction data and converts it into a complete
+    /// `ProcessedTransaction` with decoded events.
     pub async fn process_transaction_from_raw_data(
         &self,
         tx_hash: B256,
@@ -77,7 +71,7 @@ impl TxProcessor {
         signed_authorizations: Vec<SignedAuthorization>,
         address_balance_changes: Option<HashMap<Address, super::data_models::AddressBalanceChange>>,
     ) -> Result<ProcessedTransaction> {
-        // STEP 1: Decode ALL event logs using LogDecoder (just like Python's log_processor.process_logs)
+        // STEP 1: Decode event logs using LogDecoder.
         let mut erc20_transfers = Vec::new();
         let mut erc721_transfers = Vec::new();
         let mut erc1155_transfers = Vec::new();
@@ -240,7 +234,7 @@ impl TxProcessor {
             blob_gas_used,
         };
 
-        // Determine simple ETH transfer events before building the struct (mirrors Python `_extract_eth_transfers`)
+        // Determine simple ETH transfer events before building the struct.
         let empty_internals: &[InternalTransaction] = &[];
         let eth_transfers = self.extract_eth_transfers(from, to, value, &input, empty_internals);
 
@@ -309,7 +303,8 @@ impl TxProcessor {
         for approval in &processed_tx.approval_for_all_events {
             processed_tx.erc721_contracts.insert(approval.token_address);
         }
-        // Align with Python processor: exclude canonical WETH from the ERC20 contract set.
+        // Exclude canonical WETH from the ERC20 contract set because the
+        // balance calculator treats it as the ETH denomination.
         let weth = alloy_primitives::address!("0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2");
         erc20_contracts.remove(&weth);
 
@@ -370,22 +365,26 @@ impl TxProcessor {
         let max_priority_fee_per_gas = unsigned_tx
             .max_priority_fee_per_gas
             .map(|fee| U256::from(fee));
-        let gas_price = match (unsigned_tx.gas_price, unsigned_tx.max_fee_per_gas) {
-            (Some(price), _) => U256::from(price),
-            (None, Some(max_fee)) => U256::from(max_fee),
-            (None, None) => U256::from(20_000_000_000u128),
-        };
+        let gas_price = U256::from(simulation_result.effective_gas_price.ok_or_else(|| {
+            eyre!(
+                "simulated tx missing effective gas price block={} tx_index={}; tx_simulator must populate it from the block gas environment",
+                block_number,
+                tx_index
+            )
+        })?);
         let gas_used = simulation_result.gas_used;
         let status = simulation_result.success;
         let nonce = unsigned_tx.nonce.unwrap_or(0);
         let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
-        let raw_tx_type = if unsigned_tx.max_fee_per_gas.is_some()
-            || unsigned_tx.max_priority_fee_per_gas.is_some()
-        {
-            2
-        } else {
-            0
-        };
+        let raw_tx_type = simulation_result.tx_type.unwrap_or_else(|| {
+            if unsigned_tx.max_fee_per_gas.is_some()
+                || unsigned_tx.max_priority_fee_per_gas.is_some()
+            {
+                2
+            } else {
+                0
+            }
+        });
 
         // Use current timestamp for simulation
         let block_timestamp = std::time::SystemTime::now()

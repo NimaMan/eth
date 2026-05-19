@@ -314,6 +314,8 @@ impl UnsignedTxChainSimulation {
         let summary = SimulationResult {
             success: result.success,
             gas_used: result.gas_used,
+            effective_gas_price: result.effective_gas_price,
+            tx_type: result.tx_type,
             revert_reason: result.revert_reason.clone(),
             revert_context: result.revert_context.clone(),
         };

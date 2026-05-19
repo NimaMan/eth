@@ -28,6 +28,7 @@ const UNISWAP_V2_FACTORY_GET_PAIR: [u8; 4] = [0xe6, 0xa4, 0x39, 0x05];
 const FEE_NUMERATOR: u128 = 997;
 const FEE_DENOMINATOR: u128 = 1000;
 const PREFUND_BUFFER_BPS: u128 = 105; // 5% buffer
+const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000; // 1 ETH
 const SYNTHETIC_WETH_DEPOSIT_GAS_RESERVE_WEI: u128 = 1_000_000_000_000_000_000; // 1 ETH
 const MAX_SYNTHETIC_WETH_DEPOSIT_WEI: u128 = 100_000_000_000_000_000_000; // 100 ETH
 
@@ -133,6 +134,36 @@ fn weth_deposit_cap_failure(
             weth_deposit_cap()
         ),
     )
+}
+
+pub(in crate::trade_simulation::pool_buy_sell_simulator) fn ensure_buyer_eth_for_probe(
+    chain: &mut UnsignedTxChainSimulation,
+    config: &PoolBuySellParameters,
+    block_number: u64,
+) -> Result<(U256, U256)> {
+    let required_balance = config
+        .test_amount
+        .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE));
+    let current_balance = chain.eth_balance(config.buyer_address)?;
+    if current_balance < required_balance {
+        let previous_balance = chain.set_eth_balance(config.buyer_address, required_balance)?;
+        tracing::info!(
+            target: "pool_buy_sell_sim",
+            step = "buyer_probe_synthetic_funding",
+            block = block_number,
+            token_address = %config.token_address,
+            pool_address = %config.pool_address,
+            denom_address = %config.denom_address,
+            buyer_address = %config.buyer_address,
+            test_amount = %config.test_amount,
+            previous_balance = %previous_balance,
+            current_balance = %current_balance,
+            synthetic_balance = %required_balance,
+            "increased synthetic buyer ETH balance for pool buy/sell probe"
+        );
+    }
+
+    Ok((current_balance, required_balance))
 }
 
 fn ensure_buyer_eth_for_weth_deposit(
@@ -520,6 +551,8 @@ pub(in crate::trade_simulation::pool_buy_sell_simulator) async fn prepare_buyer_
     block_number: u64,
     prior_tx_results: &mut Vec<ProcessedTransaction>,
 ) -> Result<Option<PoolBuySellSimulationResult>> {
+    ensure_buyer_eth_for_probe(chain, config, block_number)?;
+
     if config.pool_type != PoolType::UniswapV4 && config.denom_address == config.weth_address {
         if let Some(failure) = execute_weth_deposit(
             chain,

@@ -285,15 +285,6 @@ impl SignalManager {
 
     /// Process one pool-specific simulation result into publishable signals.
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
-        if let Some(ref err) = result.error {
-            if !is_cache_wait_error(err)
-                && !is_replay_context_mismatch(err)
-                && !is_stale_pending_tx_error(err)
-            {
-                self.log_error("SIMULATION_ERROR", &format_simulation_error(result, err));
-            }
-        }
-
         let mut signals = Vec::new();
         let result_pool_address = result.pool_address.map(|addr| to_checksum_address(&addr));
         let pool_context =
@@ -905,21 +896,8 @@ fn known_denom_decimals(symbol: &str, address: &str) -> Option<u8> {
     }
 }
 
-fn is_cache_wait_error(error: &str) -> bool {
-    error.contains("unresolved_cache_context")
-        || error.contains("No pools found for token")
-        || error.contains("No token address found for creator")
-        || error.contains("Token cache reported no pools")
-}
-
 fn is_replay_context_mismatch(error: &str) -> bool {
     error.contains("Setup transaction replay failed") && error.contains("mined receipt succeeded")
-}
-
-fn is_stale_pending_tx_error(error: &str) -> bool {
-    error.contains("transaction validation error: nonce")
-        && error.contains("too low")
-        && error.contains("expected")
 }
 
 fn creator_address_from_simulation_result(result: &SimulationResult) -> String {
@@ -929,21 +907,6 @@ fn creator_address_from_simulation_result(result: &SimulationResult) -> String {
         }
         _ => "unknown".to_string(),
     }
-}
-
-fn format_simulation_error(result: &SimulationResult, error: &str) -> String {
-    format!(
-        "tx={} | category={:?} | token={} | pool={} | pool_type={} | error={}",
-        result.request.tx.hash,
-        result.request.category,
-        token_address_from_simulation_result(result).unwrap_or_else(|| "unknown".to_string()),
-        result
-            .pool_address
-            .map(|addr| to_checksum_address(&addr))
-            .unwrap_or_else(|| "unknown".to_string()),
-        result.pool_type.as_deref().unwrap_or("unknown"),
-        error
-    )
 }
 
 fn format_buy_sell_error(result: &SimulationResult, error: &str) -> String {

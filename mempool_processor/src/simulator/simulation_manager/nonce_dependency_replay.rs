@@ -473,7 +473,9 @@ fn merge_dependency_sources(
     let mut merged = Vec::new();
     for nonce in expected_nonce..target_nonce {
         let Some(tx) = by_nonce.remove(&nonce) else {
-            return Err(eyre!("missing dependency nonce {nonce}"));
+            return Err(eyre!(
+                "pending_nonce_dependency_gap: missing dependency nonce {nonce}"
+            ));
         };
         merged.push(tx);
     }
@@ -663,6 +665,7 @@ fn parse_hex_u64(value: &str) -> Option<u64> {
 pub fn is_pending_nonce_dependency_error(error: &str) -> bool {
     error.contains("pending_nonce_dependency_gap")
         || error.contains("pending_nonce_dependency_replay_failed")
+        || error.contains("missing dependency nonce")
         || (error.contains("transaction validation error: nonce")
             && error.contains("too high")
             && error.contains("expected"))
@@ -721,5 +724,15 @@ mod tests {
         };
 
         assert!(!should_replay_funding_dependencies(&error, &category));
+    }
+
+    #[test]
+    fn missing_dependency_nonce_is_pending_dependency_noise() {
+        assert!(is_pending_nonce_dependency_error(
+            "Failed to process creator transaction: missing dependency nonce 4"
+        ));
+        assert!(is_pending_nonce_dependency_error(
+            "Failed to process creator transaction: pending_nonce_dependency_gap: missing dependency nonce 4"
+        ));
     }
 }

@@ -63,6 +63,8 @@ impl UnsignedExecutionResult {
         FullSimulationResult {
             success: simulation.success,
             gas_used: simulation.gas_used,
+            effective_gas_price: simulation.effective_gas_price,
+            tx_type: simulation.tx_type,
             revert_reason: simulation.revert_reason,
             revert_context: simulation.revert_context,
             call_trace: call_trace.unwrap_or_default(),
@@ -369,7 +371,7 @@ impl TxSimulator {
             .evm_env(&header)
             .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let base_fee = header.base_fee_per_gas.map(|v| v as u128);
-        let tx_env = simulator.create_tx_env(
+        let (tx_env, effective_gas_price, tx_type) = simulator.create_tx_env(
             &unsigned_tx,
             evm_env.block_env.gas_limit as u128,
             base_fee,
@@ -401,6 +403,8 @@ impl TxSimulator {
         let simulation = SimulationResult {
             success,
             gas_used,
+            effective_gas_price: Some(effective_gas_price),
+            tx_type: Some(tx_type),
             revert_reason,
             revert_context,
         };
@@ -451,7 +455,7 @@ impl TxSimulator {
             .evm_env(&header)
             .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let base_fee = header.base_fee_per_gas.map(|v| v as u128);
-        let tx_env = simulator.create_tx_env(
+        let (tx_env, effective_gas_price, tx_type) = simulator.create_tx_env(
             &unsigned_tx,
             evm_env.block_env.gas_limit as u128,
             base_fee,
@@ -477,6 +481,8 @@ impl TxSimulator {
             simulation: SimulationResult {
                 success,
                 gas_used,
+                effective_gas_price: Some(effective_gas_price),
+                tx_type: Some(tx_type),
                 revert_reason,
                 revert_context,
             },
@@ -499,6 +505,8 @@ impl TxSimulator {
         let simulation = SimulationResult {
             success: full.success,
             gas_used: full.gas_used,
+            effective_gas_price: full.effective_gas_price,
+            tx_type: full.tx_type,
             revert_reason: full.revert_reason,
             revert_context: full.revert_context,
         };
@@ -534,7 +542,7 @@ impl TxSimulator {
         let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
 
         let mut overlay_db = CacheDB::new(&mut forked_state.db);
-        let tx_env = self.create_tx_env_from_unsigned_tx(
+        let (tx_env, _effective_gas_price, _tx_type) = self.create_tx_env_from_unsigned_tx(
             &unsigned_tx,
             evm_env.block_env.gas_limit as u128,
             base_fee,
@@ -570,7 +578,7 @@ impl TxSimulator {
         let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = Self::unsigned_fork_context(forked_state, &unsigned_tx)?;
-        let tx_env = self.create_tx_env_from_unsigned_tx(
+        let (tx_env, effective_gas_price, tx_type) = self.create_tx_env_from_unsigned_tx(
             &unsigned_tx,
             evm_env.block_env.gas_limit as u128,
             base_fee,
@@ -596,6 +604,8 @@ impl TxSimulator {
             simulation: SimulationResult {
                 success,
                 gas_used,
+                effective_gas_price: Some(effective_gas_price),
+                tx_type: Some(tx_type),
                 revert_reason,
                 revert_context,
             },
@@ -653,7 +663,7 @@ impl TxSimulator {
         block_gas_limit: u128,
         base_fee: Option<u128>,
         db: &mut DB,
-    ) -> Result<reth_revm::revm::context::TxEnv> {
+    ) -> Result<(reth_revm::revm::context::TxEnv, u128, u8)> {
         use alloy_primitives::TxKind;
         use reth_revm::revm::context::TxEnv;
 
@@ -703,8 +713,9 @@ impl TxSimulator {
             .collect();
         let max_fee_per_blob_gas = simulation_gas.max_fee_per_blob_gas.unwrap_or(0);
 
-        Ok(TxEnv {
-            tx_type: simulation_gas.tx_type.as_reth_tx_type(),
+        let tx_type = simulation_gas.tx_type.as_reth_tx_type();
+        let tx_env = TxEnv {
+            tx_type,
             caller: caller.into(),
             gas_limit: simulation_gas.gas_limit,
             gas_price,
@@ -722,6 +733,8 @@ impl TxSimulator {
             blob_hashes,
             max_fee_per_blob_gas,
             authorization_list,
-        })
+        };
+
+        Ok((tx_env, simulation_gas.effective_gas_price, tx_type))
     }
 }

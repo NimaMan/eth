@@ -6,6 +6,7 @@ use crate::{
     revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::{SharedStateProvider, SharedStateProviderDatabase},
+    tx_fee_parameters::effective_paid_gas_price_from_tx_env,
     types::{FullSimulationResult, SimulationResult},
 };
 use eyre::Result;
@@ -52,6 +53,8 @@ impl SignedExecutionResult {
         FullSimulationResult {
             success: simulation.success,
             gas_used: simulation.gas_used,
+            effective_gas_price: simulation.effective_gas_price,
+            tx_type: simulation.tx_type,
             revert_reason: simulation.revert_reason,
             revert_context: simulation.revert_context,
             call_trace: call_trace.unwrap_or_default(),
@@ -204,6 +207,13 @@ impl TxSimulator {
         let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
         let tx_env = simulator.evm_config.tx_env(&recovered_tx);
         let gas_limit = tx_env.gas_limit;
+        let tx_type = tx_env.tx_type;
+        let effective_gas_price = effective_paid_gas_price_from_tx_env(
+            tx_type,
+            tx_env.gas_price,
+            tx_env.gas_priority_fee,
+            block_header.base_fee_per_gas.map(u128::from),
+        );
 
         let mut evm =
             simulator
@@ -221,6 +231,8 @@ impl TxSimulator {
         let simulation = SimulationResult {
             success,
             gas_used,
+            effective_gas_price,
+            tx_type: Some(tx_type),
             revert_reason,
             revert_context: None,
         };

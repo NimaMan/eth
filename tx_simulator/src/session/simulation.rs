@@ -14,6 +14,7 @@ use crate::{
     simulator::TxSimulator,
     single_tx::{signed::SignedTransaction, unsigned::UnsignedTransaction},
     tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},
+    tx_fee_parameters::effective_paid_gas_price_from_tx_env,
     types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},
 };
 
@@ -127,6 +128,8 @@ impl SimulationSession {
         let summary = SimulationResult {
             success: result.success,
             gas_used: result.gas_used,
+            effective_gas_price: result.effective_gas_price,
+            tx_type: result.tx_type,
             revert_reason: result.revert_reason.clone(),
             revert_context: result.revert_context.clone(),
         };
@@ -148,6 +151,8 @@ impl SimulationSession {
             res.result.is_success(),
             res.result.tx_gas_used(),
             res.result.output(),
+            prepared.effective_gas_price,
+            prepared.tx_type,
         );
         self.record_signed_result(prepared.sender, prepared.nonce, &result);
         Ok(result)
@@ -181,6 +186,8 @@ impl SimulationSession {
         let summary = SimulationResult {
             success,
             gas_used,
+            effective_gas_price: prepared.effective_gas_price,
+            tx_type: Some(prepared.tx_type),
             revert_reason: revert_reason.clone(),
             revert_context: None,
         };
@@ -189,6 +196,8 @@ impl SimulationSession {
         Ok(FullSimulationResult {
             success,
             gas_used,
+            effective_gas_price: prepared.effective_gas_price,
+            tx_type: Some(prepared.tx_type),
             revert_reason,
             revert_context: None,
             call_trace,
@@ -348,6 +357,13 @@ impl SimulationSession {
         let tx_env = self.simulator.evm_config.tx_env(&recovered);
         let gas_limit = tx_env.gas_limit;
         let nonce = tx_env.nonce;
+        let tx_type = tx_env.tx_type;
+        let effective_gas_price = effective_paid_gas_price_from_tx_env(
+            tx_type,
+            tx_env.gas_price,
+            tx_env.gas_priority_fee,
+            block_header.header().base_fee_per_gas.map(u128::from),
+        );
 
         Ok(PreparedSignedExecution {
             evm_env,
@@ -355,13 +371,23 @@ impl SimulationSession {
             gas_limit,
             sender,
             nonce,
+            effective_gas_price,
+            tx_type,
         })
     }
 
-    fn signed_result(success: bool, gas_used: u64, output: Option<&Bytes>) -> SimulationResult {
+    fn signed_result(
+        success: bool,
+        gas_used: u64,
+        output: Option<&Bytes>,
+        effective_gas_price: Option<u128>,
+        tx_type: u8,
+    ) -> SimulationResult {
         SimulationResult {
             success,
             gas_used,
+            effective_gas_price,
+            tx_type: Some(tx_type),
             revert_reason: Self::signed_revert_reason(success, output),
             revert_context: None,
         }
@@ -382,6 +408,8 @@ struct PreparedSignedExecution {
     gas_limit: u64,
     sender: Address,
     nonce: u64,
+    effective_gas_price: Option<u128>,
+    tx_type: u8,
 }
 
 impl TxSimulator {

@@ -67,6 +67,7 @@ impl SimulationManager {
                 }
 
                 let mut last_success = None;
+                let mut first_error = None;
                 for (pool_idx, pool_specific_result) in removal_results.into_iter().enumerate() {
                     log_signal_dispatch_start(
                         pool_specific_result.request.tx.hash.as_str(),
@@ -80,13 +81,21 @@ impl SimulationManager {
 
                     if pool_specific_result.error.is_none() {
                         last_success = Some(pool_specific_result);
-                    } else if aggregate_result.error.is_none() {
-                        aggregate_result.error = pool_specific_result.error.clone();
+                    } else {
+                        if aggregate_result.error.is_none() {
+                            aggregate_result.error = pool_specific_result.error.clone();
+                        }
+                        if first_error.is_none() {
+                            first_error = Some(pool_specific_result);
+                        }
                     }
                 }
 
                 if let Some(success) = last_success {
                     return success;
+                }
+                if let Some(error_result) = first_error {
+                    return error_result;
                 }
 
                 return aggregate_result;
@@ -113,6 +122,7 @@ impl SimulationManager {
         }
 
         let mut last_success = None;
+        let mut first_error = None;
         for (pool_idx, pool_specific_result) in all_results.into_iter().enumerate() {
             log_signal_dispatch_start(
                 pool_specific_result.request.tx.hash.as_str(),
@@ -126,13 +136,20 @@ impl SimulationManager {
 
             if pool_specific_result.error.is_none() {
                 last_success = Some(pool_specific_result);
-            } else if aggregate_result.error.is_none() {
-                aggregate_result.error = pool_specific_result.error.clone();
+            } else {
+                if aggregate_result.error.is_none() {
+                    aggregate_result.error = pool_specific_result.error.clone();
+                }
+                if first_error.is_none() {
+                    first_error = Some(pool_specific_result);
+                }
             }
         }
 
         if let Some(success) = last_success {
             success
+        } else if let Some(error_result) = first_error {
+            error_result
         } else {
             aggregate_result
         }

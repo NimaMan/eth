@@ -11,7 +11,7 @@ use crate::trade_simulation::sell_swap::common::balance_setup::{
     log_token_balance_setup, prepare_seller_token_balance,
 };
 use crate::trade_simulation::sell_swap::common::core::{
-    apply_sell_fee_policy, failed_sell_result, fee_totals, format_failure_with_revert,
+    apply_configured_sell_fee_policy, failed_sell_result, fee_totals, format_failure_with_revert,
     SELLER_ETH_FUND,
 };
 use crate::trade_simulation::sell_swap::common::denom_output::extract_denom_received;
@@ -68,7 +68,7 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sel
         config.token_address,
         tokens_to_sell,
     );
-    apply_sell_fee_policy(&mut approve_tx, config.approve_gas_limit, base_fee);
+    apply_configured_sell_fee_policy(&mut approve_tx, &config, config.approve_gas_limit, base_fee);
     let approve_sim = chain.step_with_trace(approve_tx.clone()).await?;
     let approve_processed = tx_processor
         .process_transaction_from_simulation_result(&approve_tx, &approve_sim, block, 0)
@@ -93,7 +93,7 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sel
         slippage_bps,
         u64::MAX,
     );
-    apply_sell_fee_policy(&mut sell_tx, config.sell_gas_limit, base_fee);
+    apply_configured_sell_fee_policy(&mut sell_tx, &config, config.sell_gas_limit, base_fee);
     let sell_sim = chain.step_with_trace(sell_tx.clone()).await?;
     let processed = tx_processor
         .process_transaction_from_simulation_result(&sell_tx, &sell_sim, block, 1)

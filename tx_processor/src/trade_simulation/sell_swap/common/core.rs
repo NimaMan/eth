@@ -17,11 +17,47 @@ pub(in crate::trade_simulation::sell_swap) fn apply_sell_fee_policy(
     gas_limit: u64,
     base_fee: Option<u128>,
 ) {
+    apply_sell_fee_policy_with_overrides(tx, gas_limit, base_fee, None, None, None);
+}
+
+pub(in crate::trade_simulation::sell_swap) fn apply_configured_sell_fee_policy(
+    tx: &mut UnsignedTransaction,
+    config: &PoolBuySellParameters,
+    gas_limit: u64,
+    base_fee: Option<u128>,
+) {
+    apply_sell_fee_policy_with_overrides(
+        tx,
+        gas_limit,
+        base_fee,
+        config.gas_price,
+        config.max_fee_per_gas,
+        config.max_priority_fee_per_gas,
+    );
+}
+
+fn apply_sell_fee_policy_with_overrides(
+    tx: &mut UnsignedTransaction,
+    gas_limit: u64,
+    base_fee: Option<u128>,
+    gas_price: Option<u128>,
+    max_fee_per_gas: Option<u128>,
+    max_priority_fee_per_gas: Option<u128>,
+) {
     tx.gas = Some(gas_limit);
-    if let Some(base_fee) = base_fee {
+    if let Some(gas_price) = gas_price {
+        tx.gas_price = Some(gas_price);
+        tx.max_fee_per_gas = None;
+        tx.max_priority_fee_per_gas = None;
+    } else if base_fee.is_some() || max_fee_per_gas.is_some() || max_priority_fee_per_gas.is_some()
+    {
+        let base_fee = base_fee.unwrap_or(0);
+        let priority_fee = max_priority_fee_per_gas.unwrap_or(0);
+        let min_required = base_fee.saturating_add(priority_fee);
+        let max_fee = max_fee_per_gas.unwrap_or(min_required).max(min_required);
         tx.gas_price = None;
-        tx.max_fee_per_gas = Some(base_fee);
-        tx.max_priority_fee_per_gas = Some(0);
+        tx.max_fee_per_gas = Some(max_fee);
+        tx.max_priority_fee_per_gas = Some(priority_fee);
     } else if tx.gas_price.is_none() && tx.max_fee_per_gas.is_none() {
         tx.gas_price = Some(1);
     }

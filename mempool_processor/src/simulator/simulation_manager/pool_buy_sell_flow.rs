@@ -338,9 +338,7 @@ impl SimulationManager {
                 };
 
             let leg_gas_limit: u64 = 500_000;
-            let buyer_address = tx_call_request
-                .from
-                .unwrap_or_else(|| self.mempool_simulator.get_buyer_address());
+            let buyer_address = self.mempool_simulator.get_buyer_address();
 
             let config = PoolBuySellParameters {
                 token_address,
@@ -439,7 +437,7 @@ impl SimulationManager {
                     });
                 }
                 Err(e) => {
-                    let error_msg = format!("Pool {}: {}", pool_idx, e);
+                    let error_msg = format!("Pool {}: {:#}", pool_idx, e);
                     results.push(SimulationResult {
                         request: request.clone(),
                         pool_viability_result: None,

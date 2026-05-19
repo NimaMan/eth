@@ -2,7 +2,7 @@
 
 use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes as AlloyBytes, B256, U256 as AlloyU256};
-use eyre::Result;
+use eyre::{eyre, Result};
 use serde_json::Value;
 use tx_simulator::UnsignedTransaction;
 
@@ -26,30 +26,35 @@ pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<UnsignedTransaction> {
         .and_then(|s| u128::from_str_radix(s, 16).ok());
 
     // Determine transaction type and set appropriate gas parameters
-    let (final_gas_price, final_max_fee, final_max_priority) =
-        match (gas_price, max_fee_per_gas, max_priority_fee_per_gas) {
-            // EIP-1559 transaction with both fields
-            (_, Some(max_fee), Some(max_priority)) => {
-                // Ensure priority fee doesn't exceed max fee (safety check)
-                let safe_priority = max_priority.min(max_fee);
-                (None, Some(max_fee), Some(safe_priority))
-            }
-            // EIP-1559 with only max_fee (missing priority fee)
-            (_, Some(max_fee), None) => {
-                // Use a conservative default priority fee (0.1 Gwei)
-                let default_priority = 100_000_000u128; // 0.1 Gwei
-                let safe_priority = default_priority.min(max_fee);
-                (None, Some(max_fee), Some(safe_priority))
-            }
-            // Legacy transaction
-            (Some(price), None, None) => (Some(price), None, None),
-            // Invalid combinations - default to legacy with standard gas price
-            _ => {
-                // This handles edge cases like priority without max_fee
-                let default_gas_price = gas_price.unwrap_or(20_000_000_000); // 20 Gwei default
-                (Some(default_gas_price), None, None)
-            }
-        };
+    let (final_gas_price, final_max_fee, final_max_priority) = match (
+        gas_price,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+    ) {
+        // EIP-1559 transaction with both fields
+        (_, Some(max_fee), Some(max_priority)) => {
+            // Ensure priority fee doesn't exceed max fee (safety check)
+            let safe_priority = max_priority.min(max_fee);
+            (None, Some(max_fee), Some(safe_priority))
+        }
+        // Legacy transaction
+        (Some(price), None, None) => (Some(price), None, None),
+        (_, Some(_), None) => {
+            return Err(eyre!(
+                    "IPC transaction has maxFeePerGas without maxPriorityFeePerGas; refusing to infer a priority fee"
+                ));
+        }
+        (_, None, Some(_)) => {
+            return Err(eyre!(
+                    "IPC transaction has maxPriorityFeePerGas without maxFeePerGas; refusing to infer a fee cap"
+                ));
+        }
+        (None, None, None) => {
+            return Err(eyre!(
+                "IPC transaction is missing gas fee fields; refusing to infer a gas price"
+            ));
+        }
+    };
 
     let access_list = ipc_tx
         .get("accessList")

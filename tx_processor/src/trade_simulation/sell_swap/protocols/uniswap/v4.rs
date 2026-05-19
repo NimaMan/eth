@@ -18,7 +18,7 @@ use crate::trade_simulation::sell_swap::common::balance_setup::{
     log_token_balance_setup, prepare_seller_token_balance,
 };
 use crate::trade_simulation::sell_swap::common::core::{
-    apply_sell_fee_policy, currency_matches_denom, failed_sell_result,
+    apply_configured_sell_fee_policy, currency_matches_denom, failed_sell_result,
     failed_sell_result_with_fees, fee_totals, format_failure_with_revert, permit2_amount, PERMIT2,
     PERMIT2_EXPIRATION, SELLER_ETH_FUND,
 };
@@ -97,7 +97,12 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_universal_router_v4
 
     let mut token_approve =
         build_token_approval_tx(seller_address, config.token_address, PERMIT2, U256::MAX);
-    apply_sell_fee_policy(&mut token_approve, config.approve_gas_limit, base_fee);
+    apply_configured_sell_fee_policy(
+        &mut token_approve,
+        &config,
+        config.approve_gas_limit,
+        base_fee,
+    );
     let token_approve_sim = chain.step_with_trace(token_approve.clone()).await?;
     let token_approve_processed = tx_processor
         .process_transaction_from_simulation_result(&token_approve, &token_approve_sim, block, 0)
@@ -121,7 +126,12 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_universal_router_v4
         permit2_amount(tokens_to_sell)?,
         PERMIT2_EXPIRATION,
     )?;
-    apply_sell_fee_policy(&mut permit2_approve, config.approve_gas_limit, base_fee);
+    apply_configured_sell_fee_policy(
+        &mut permit2_approve,
+        &config,
+        config.approve_gas_limit,
+        base_fee,
+    );
     let permit2_approve_sim = chain.step_with_trace(permit2_approve.clone()).await?;
     let permit2_approve_processed = tx_processor
         .process_transaction_from_simulation_result(
@@ -161,7 +171,7 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_universal_router_v4
         },
     )?;
     sell_tx.gas = Some(config.sell_gas_limit);
-    apply_sell_fee_policy(&mut sell_tx, config.sell_gas_limit, base_fee);
+    apply_configured_sell_fee_policy(&mut sell_tx, &config, config.sell_gas_limit, base_fee);
     let sell_sim = chain.step_with_trace(sell_tx.clone()).await?;
     let processed = tx_processor
         .process_transaction_from_simulation_result(&sell_tx, &sell_sim, block, 2)

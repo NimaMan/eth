@@ -20,6 +20,8 @@ pub struct RevertContext {
 pub struct SimulationResult {
     pub success: bool,
     pub gas_used: u64,
+    pub effective_gas_price: Option<u128>,
+    pub tx_type: Option<u8>,
     pub revert_reason: Option<String>,
     pub revert_context: Option<RevertContext>,
 }
@@ -29,6 +31,8 @@ pub struct SimulationResult {
 pub struct FullSimulationResult {
     pub success: bool,
     pub gas_used: u64,
+    pub effective_gas_price: Option<u128>,
+    pub tx_type: Option<u8>,
     pub revert_reason: Option<String>,
     pub revert_context: Option<RevertContext>,
     /// Geth-style call frame produced by the call tracer (mirrors `/debug/trace_*`).

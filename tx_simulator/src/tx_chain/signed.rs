@@ -8,6 +8,7 @@ use crate::{
     revert::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
+    tx_fee_parameters::effective_paid_gas_price_from_tx_env,
     types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_consensus::transaction::SignerRecoverable;
@@ -25,6 +26,8 @@ struct PreparedSignedExecution {
     evm_env: EvmEnvFor<EthEvmConfig>,
     tx_env: TxEnvFor<EthEvmConfig>,
     gas_limit: u64,
+    effective_gas_price: Option<u128>,
+    tx_type: u8,
 }
 
 /// Stateful signed-tx chain simulator
@@ -156,7 +159,11 @@ impl TxSimulator {
         tx: &TransactionSigned,
     ) -> Result<SimulationResult> {
         let PreparedSignedExecution {
-            evm_env, tx_env, ..
+            evm_env,
+            tx_env,
+            effective_gas_price,
+            tx_type,
+            ..
         } = self.prepare_signed_execution_on_fork(forked_state, tx)?;
 
         let mut evm = self.evm_config.evm_with_env(&mut forked_state.db, evm_env);
@@ -171,6 +178,8 @@ impl TxSimulator {
         Ok(SimulationResult {
             success,
             gas_used,
+            effective_gas_price,
+            tx_type: Some(tx_type),
             revert_reason,
             revert_context: None,
         })
@@ -185,6 +194,8 @@ impl TxSimulator {
             evm_env,
             tx_env,
             gas_limit,
+            effective_gas_price,
+            tx_type,
         } = self.prepare_signed_execution_on_fork(forked_state, tx)?;
 
         let mut inspector =
@@ -213,6 +224,8 @@ impl TxSimulator {
         Ok(FullSimulationResult {
             success,
             gas_used,
+            effective_gas_price,
+            tx_type: Some(tx_type),
             revert_reason,
             revert_context: None,
             call_trace: call_frame,
@@ -236,11 +249,20 @@ impl TxSimulator {
         let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
         let tx_env = self.evm_config.tx_env(&recovered);
         let gas_limit = tx_env.gas_limit;
+        let tx_type = tx_env.tx_type;
+        let effective_gas_price = effective_paid_gas_price_from_tx_env(
+            tx_type,
+            tx_env.gas_price,
+            tx_env.gas_priority_fee,
+            block_header.header().base_fee_per_gas.map(u128::from),
+        );
 
         Ok(PreparedSignedExecution {
             evm_env,
             tx_env,
             gas_limit,
+            effective_gas_price,
+            tx_type,
         })
     }
 }

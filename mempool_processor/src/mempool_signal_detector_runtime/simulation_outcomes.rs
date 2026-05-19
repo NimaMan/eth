@@ -14,6 +14,7 @@ use mempool_processor::{
     tx_router::{RouteOrigin, TransactionCategory, TransactionRouter},
     unresolved_intents::{UnresolvedIntentKind, UnresolvedIntentStore},
 };
+use reth_chain_query::to_checksum_address;
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -33,7 +34,6 @@ pub(crate) async fn drain_completed_simulation_outcomes(
         metrics
             .simulations_completed
             .fetch_add(1, Ordering::Relaxed);
-        let tx_hash = format!("{:?}", result.request.tx_hash);
         let category = match &result.request.category {
             TransactionCategory::ContractCreation { .. } => "ContractCreation",
             TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
@@ -101,8 +101,8 @@ pub(crate) async fn drain_completed_simulation_outcomes(
                 write_actionable_simulation_error(
                     mempool_simulator,
                     actionable_simulation_error_log_path,
-                    &tx_hash,
                     category,
+                    &result,
                     error,
                 )
                 .await;
@@ -231,8 +231,8 @@ async fn handle_ready_unresolved_intent_without_simulation(
 async fn write_actionable_simulation_error(
     mempool_simulator: &MempoolSimulator,
     simulation_error_log_path: &Path,
-    tx_hash: &str,
     category: &str,
+    result: &SimulationResult,
     error: &str,
 ) {
     let block_str = match mempool_simulator.latest_simulation_block().await {
@@ -247,15 +247,43 @@ async fn write_actionable_simulation_error(
         let timestamp = chrono::Local::now();
         writeln!(
             file,
-            "[{}] SIMULATION_ERROR | block={} | tx={} | category={} | error={}",
+            "[{}] SIMULATION_ERROR | block={} | tx={} | category={} | category_detail={:?} | token={} | pool={} | pool_type={} | error={}",
             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
             block_str,
-            tx_hash,
+            result.request.tx.hash,
             category,
+            result.request.category,
+            token_address_from_simulation_result(result),
+            pool_address_from_simulation_result(result),
+            result.pool_type.as_deref().unwrap_or("unknown"),
             error
         )
         .ok();
     }
+}
+
+fn token_address_from_simulation_result(result: &SimulationResult) -> String {
+    if let Some(token_address) = result.token_address {
+        return to_checksum_address(&token_address);
+    }
+
+    match &result.request.category {
+        TransactionCategory::ContractCreation {
+            contract_address, ..
+        } => contract_address.clone(),
+        TransactionCategory::CreatorTransaction {
+            target_token: Some(token),
+            ..
+        } => token.clone(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn pool_address_from_simulation_result(result: &SimulationResult) -> String {
+    result
+        .pool_address
+        .map(|addr| to_checksum_address(&addr))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn is_cache_wait_error(error: &str) -> bool {

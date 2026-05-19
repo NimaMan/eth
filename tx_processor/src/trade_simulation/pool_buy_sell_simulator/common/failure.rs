@@ -446,6 +446,8 @@ mod tests {
         let full = FullSimulationResult {
             success: false,
             gas_used: 100_000,
+            effective_gas_price: Some(100),
+            tx_type: Some(2),
             revert_reason: Some(
                 "Contract 0xC36442b4a4522E871399CD717aBDD847Ab11FE88 reverted without returning data"
                     .to_string(),
@@ -480,6 +482,8 @@ mod tests {
         let full = FullSimulationResult {
             success: false,
             gas_used: 100_000,
+            effective_gas_price: Some(100),
+            tx_type: Some(2),
             revert_reason: Some("Unknown error (0x90bfb865)".to_string()),
             revert_context: Some(RevertContext {
                 target,

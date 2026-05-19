@@ -28,7 +28,6 @@ use tx_simulator::tx_builders::{
     build_approve_for_route, build_denom_to_token_swap, build_token_to_denom_swap,
 };
 
-const SYNTHETIC_BUYER_ETH_BALANCE: u128 = 1_000_000_000_000_000_000;
 pub async fn check_can_buy_sell_pool(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
@@ -140,13 +139,6 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     base_fee: Option<u128>,
     mut chain: UnsignedTxChainSimulation,
 ) -> Result<PoolBuySellSimulationResult> {
-    chain.set_eth_balance(
-        config.buyer_address,
-        config
-            .test_amount
-            .saturating_add(U256::from(SYNTHETIC_BUYER_ETH_BALANCE)),
-    )?;
-
     let route = if let Some(route) = config.pool_type.amm_swap_route(config.pool_address) {
         route
     } else {
@@ -453,18 +445,22 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
     }
 
     // SELL (optional delay)
+    let mut sell_block = block_number;
+    let mut sell_base_fee = base_fee;
     if config.block_delay > 0 {
         let requested_sell_block = block_number + config.block_delay;
         let latest = simulator
             .latest_historical_context_block_number()?
             .max(block_number);
-        let sell_block = if requested_sell_block > latest {
+        sell_block = if requested_sell_block > latest {
             latest
         } else {
             requested_sell_block
         };
         chain = simulator.start_simulation_chain(Some(sell_block)).await?;
-        if let Some(denom_tx) = denom_approve_tx_for_delay.clone() {
+        sell_base_fee = chain.block_base_fee();
+        if let Some(mut denom_tx) = denom_approve_tx_for_delay.clone() {
+            apply_fee_policy(&mut denom_tx, &config, sell_base_fee);
             chain.step_with_trace(denom_tx).await.map_err(|err| {
                 let context = "while reapplying denom approve before delayed sell".to_string();
                 tracing::warn!(
@@ -477,6 +473,7 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
                 err.wrap_err(context)
             })?;
         }
+        apply_fee_policy(&mut buy_tx, &config, sell_base_fee);
         chain.step_with_trace(buy_tx).await.map_err(|err| {
             let context = "while reapplying simulated buy before delayed sell".to_string();
             tracing::warn!(
@@ -488,6 +485,7 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
             );
             err.wrap_err(context)
         })?;
+        apply_fee_policy(&mut approve_tx, &config, sell_base_fee);
         chain.step_with_trace(approve_tx).await.map_err(|err| {
             let context = "while reapplying simulated approve before delayed sell".to_string();
             tracing::warn!(
@@ -510,12 +508,7 @@ async fn check_can_buy_sell_pool_with_prepared_chain(
         deadline,
     );
     sell_tx.gas = Some(config.sell_gas_limit);
-    apply_fee_policy(&mut sell_tx, &config, base_fee);
-    let sell_block = if config.block_delay > 0 {
-        block_number + config.block_delay
-    } else {
-        block_number
-    };
+    apply_fee_policy(&mut sell_tx, &config, sell_base_fee);
     let sell_sim_result = chain
         .step_with_trace(sell_tx.clone())
         .await

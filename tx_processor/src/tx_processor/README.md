@@ -125,7 +125,7 @@ It performs:
 - Log decoding via `LogDecoder` → populates event vectors (ERC20/721/1155 transfers, approvals, Uniswap events, etc.).
 - Trace processing via `TransactionTraceProcessor` → builds internal call list.
 - Address balance change calculation via `AddressBalanceChangeCalculator` → currency_net/token_net per address.
-- Fee and metadata population.
+- Fee and metadata population. Gas accounting uses `FullSimulationResult.effective_gas_price`, which is resolved by `tx_simulator` from the block being simulated against.
 - Lightweight classification (e.g., ETH_TRANSFER, CONTRACT_INTERACTION).
 
 ### 4) Address Balance Changes
@@ -212,8 +212,9 @@ See `tx_processor/examples` for end‑to‑end demos:
 - Process by hash: `process_transaction_by_hash`
 - Unsigned → processed: `processed_tx_from_unsigned_tx`
 - AMM viability + taxes: `can_buy_sell_common_tokens_uniswap_v2`, `can_buy_sell_common_tokens_uniswap_v3`, `erc20_pool_tax_demo`
-- Approval mechanics: `approval_mechanics_demo`
 
 ---
 
-This doc reflects version 0.3.0 after centralizing AMM builders in `reth_chain_query`, removing local pool adapters, and unifying tax calculation under `tx_processor::tx_processor::tax_calculator`.
+This doc reflects the current split where low-level AMM builders live in
+`tx_simulator::tx_builders`, while tx_processor owns decoded transaction facts,
+block processing, and tax/tradability interpretation.
