@@ -54,6 +54,7 @@ pub async fn run_checks(
     checks.push(
         no_exit_block_before_terminal_sell_check(pool, &result_set.result_set_id, strategy).await?,
     );
+    checks.push(trade_position_rollup_check(pool, &result_set.result_set_id, strategy).await?);
     checks
         .push(no_duplicate_terminal_events_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(lifecycle_order_check(pool, &result_set.result_set_id, strategy).await?);
@@ -61,6 +62,7 @@ pub async fn run_checks(
         .push(entry_cost_matches_buy_fill_check(pool, &result_set.result_set_id, strategy).await?);
     checks
         .push(exit_value_matches_sell_fill_check(pool, &result_set.result_set_id, strategy).await?);
+    checks.push(gas_cost_matches_events_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(pnl_sum_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(realized_sell_pnl_check(pool, &result_set.result_set_id, strategy).await?);
     checks
@@ -80,6 +82,8 @@ pub async fn run_checks(
     checks.push(latest_snapshot_values_check(pool, &result_set.result_set_id, strategy).await?);
     checks
         .push(closed_trade_final_snapshot_check(pool, &result_set.result_set_id, strategy).await?);
+    checks
+        .push(closed_trade_latest_snapshot_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(execution_replay_inputs_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(pnl_concentration_check(pool, &result_set.result_set_id, strategy).await?);
     Ok(checks)
@@ -610,6 +614,42 @@ async fn no_exit_block_before_terminal_sell_check(
     .await
 }
 
+async fn trade_position_rollup_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "rollups",
+        "trade_rollup_matches_position",
+        Verdict::Fail,
+        "trade rollup rows match their source position rows for lifecycle fields",
+        "trades whose state, order ids, blocks, or protocol differ from positions",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        LEFT JOIN alpha_trading.positions p
+          ON p.run_id = t.run_id
+         AND p.position_id = t.position_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND (
+              p.position_id IS NULL
+              OR t.state IS DISTINCT FROM p.state
+              OR t.entry_order_id IS DISTINCT FROM p.entry_order_id
+              OR t.exit_order_id IS DISTINCT FROM p.exit_order_id
+              OR t.entry_block IS DISTINCT FROM p.entry_block
+              OR t.exit_block IS DISTINCT FROM p.exit_block
+              OR t.protocol IS DISTINCT FROM p.protocol
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 async fn no_duplicate_terminal_events_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -760,6 +800,41 @@ async fn exit_value_matches_sell_fill_check(
                     )
               ) > 0.000000000000001
           )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn gas_cost_matches_events_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "gas_cost_matches_trade_events",
+        Verdict::Fail,
+        "trade gas_cost_eth equals summed persisted trade event gas costs",
+        "trades whose gas_cost_eth differs from trade event gas total",
+        r#"
+        WITH event_gas AS (
+            SELECT trade_id,
+                   sum(coalesce(nullif(gas_cost_eth, '')::numeric, 0)) AS gas_cost_eth
+            FROM alpha_trading.trade_events
+            GROUP BY trade_id
+        )
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        LEFT JOIN event_gas ON event_gas.trade_id = t.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND abs(
+              coalesce(nullif(t.gas_cost_eth, '')::numeric, 0)
+              - coalesce(event_gas.gas_cost_eth, 0)
+          ) > 0.000000000000001
         "#,
         result_set_id,
         strategy,
@@ -1006,16 +1081,20 @@ async fn latest_snapshot_values_check(
         "snapshots",
         "latest_snapshot_values_match_trade",
         Verdict::Fail,
-        "trade PnL fields match the latest persisted trade snapshot",
-        "trades whose current/latest PnL fields differ from latest snapshot values",
+        "trade latest snapshot fields match the latest persisted trade snapshot",
+        "trades whose latest snapshot fields differ from latest snapshot values",
         r#"
         WITH latest AS (
             SELECT DISTINCT ON (trade_id)
                    trade_id,
+                   block_number,
+                   observed_block_number,
+                   valuation_block_number,
                    current_value_eth,
                    realized_pnl_eth,
                    unrealized_pnl_eth,
-                   total_pnl_eth
+                   total_pnl_eth,
+                   roi
             FROM alpha_trading.trade_snapshots
             ORDER BY trade_id, block_number DESC NULLS LAST, id DESC
         )
@@ -1025,10 +1104,14 @@ async fn latest_snapshot_values_check(
         WHERE t.result_set_id = $1
           AND ($2::text IS NULL OR t.strategy_name = $2)
           AND (
-              abs(coalesce(nullif(t.current_value_eth, '')::numeric, 0) - coalesce(nullif(latest.current_value_eth, '')::numeric, 0)) > 0.000000000000001
+              t.latest_snapshot_block IS DISTINCT FROM latest.block_number
+              OR t.latest_observed_block IS DISTINCT FROM latest.observed_block_number
+              OR t.latest_valuation_block IS DISTINCT FROM latest.valuation_block_number
+              OR abs(coalesce(nullif(t.current_value_eth, '')::numeric, 0) - coalesce(nullif(latest.current_value_eth, '')::numeric, 0)) > 0.000000000000001
               OR abs(coalesce(nullif(t.realized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.realized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
               OR abs(coalesce(nullif(t.unrealized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.unrealized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
               OR abs(coalesce(nullif(t.total_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.total_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+              OR abs(coalesce(nullif(t.roi, '')::numeric, 0) - coalesce(nullif(latest.roi, '')::numeric, 0)) > 0.000000000000001
           )
         "#,
         result_set_id,
@@ -1061,6 +1144,47 @@ async fn closed_trade_final_snapshot_check(
               WHERE ts.trade_id = t.trade_id
                 AND ts.block_number = t.exit_block
                 AND ts.state = 'sell_confirmed'
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn closed_trade_latest_snapshot_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "closed_trade_latest_snapshot_is_terminal",
+        Verdict::Fail,
+        "closed trades have a terminal sell_confirmed latest snapshot",
+        "closed trades whose latest snapshot is not the sell_confirmed exit snapshot",
+        r#"
+        WITH latest AS (
+            SELECT DISTINCT ON (trade_id)
+                   trade_id,
+                   state,
+                   block_number,
+                   valuation_block_number
+            FROM alpha_trading.trade_snapshots
+            ORDER BY trade_id, block_number DESC NULLS LAST, id DESC
+        )
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        LEFT JOIN latest ON latest.trade_id = t.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND t.state = 'sell_confirmed'
+          AND (
+              latest.trade_id IS NULL
+              OR latest.state <> 'sell_confirmed'
+              OR latest.block_number IS DISTINCT FROM t.exit_block
+              OR coalesce(latest.valuation_block_number, latest.block_number) IS DISTINCT FROM t.exit_block
           )
         "#,
         result_set_id,
@@ -1286,6 +1410,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do open or failed trades avoid fake exit blocks?",
             "Fails if any non-sell_confirmed trade has exit_block populated from a snapshot or pending sell.",
         ),
+        "trade_rollup_matches_position" => (
+            "Does each trade row still match its source position?",
+            "Compares trade rollups against position state, order identifiers, entry/exit blocks, and protocol so UI read models do not drift from the execution state.",
+        ),
         "single_terminal_event_per_trade" => (
             "Does each trade have only one terminal buy and sell confirmation?",
             "Counts buy_confirmed and sell_confirmed events per trade and rejects duplicated terminal lifecycle events.",
@@ -1301,6 +1429,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "exit_value_matches_sell_fill" => (
             "Does exit value come from the sell simulation fill?",
             "Compares trade exit_value_eth with the sell_confirmed report's filled ETH amount.",
+        ),
+        "gas_cost_matches_trade_events" => (
+            "Does gas cost come from the execution event stream?",
+            "Sums persisted trade event gas_cost_eth values and compares them with the trade gas_cost_eth rollup used in realized PnL.",
         ),
         "total_pnl_equals_realized_plus_unrealized" => (
             "Does total PnL reconcile with realized and unrealized PnL?",
@@ -1323,8 +1455,8 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Compares trades.latest_snapshot_block with the max block_number in trade_snapshots for each trade.",
         ),
         "latest_snapshot_values_match_trade" => (
-            "Do trade PnL fields match the latest snapshot?",
-            "Compares current, realized, unrealized, and total PnL values against the latest trade_snapshot row.",
+            "Do trade latest fields match the latest snapshot?",
+            "Compares latest snapshot block coordinates, current value, realized/unrealized/total PnL, and ROI against the latest trade_snapshot row.",
         ),
         "no_snapshots_after_sell_confirmed" => (
             "Are closed trades no longer receiving snapshots?",
@@ -1337,6 +1469,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "closed_trade_final_snapshot" => (
             "Does each closed trade have a final closed snapshot?",
             "Requires a sell_confirmed trade snapshot at the exit_block so the UI can show terminal valuation cleanly.",
+        ),
+        "closed_trade_latest_snapshot_is_terminal" => (
+            "Is the latest closed-trade snapshot terminal?",
+            "Requires the latest snapshot by block/id for a sell-confirmed trade to be the sell_confirmed snapshot at the exit block.",
         ),
         "closed_trade_replay_inputs_present" => (
             "Can this closed trade be independently replayed?",
