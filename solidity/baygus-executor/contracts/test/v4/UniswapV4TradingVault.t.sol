@@ -83,7 +83,7 @@ contract UniswapV4TradingVaultTest is TestBase {
         assertEq(uint256(permitExpiration), 0, "permit2 expiration cleared");
         assertEq(router.lastInputCurrency(), address(token), "token input");
         assertEq(router.lastOutputCurrency(), address(0), "native output");
-        assertEq(router.lastRecipient(), address(vault), "vault receives eth before treasury");
+        assertEq(router.lastRecipient(), TREASURY, "router pays treasury directly");
         assertFalse(router.lastZeroForOne(), "token to ETH orientation");
     }
 

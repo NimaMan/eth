@@ -3,40 +3,49 @@ status: blocked
 items:
   - id: route-fixtures-reviewed
     area: routing
-    status: todo
+    status: evidence-ready
     requirement: Record representative V4 pool keys, hooks, command bytes, and expected outputs.
+    evidence: simulations/route-fixtures/eth-usdc-500-no-hook.json
   - id: interfaces-pinned
     area: source
-    status: todo
+    status: partial
     requirement: Pin Universal Router, Permit2, PoolManager, and hook interfaces with upstream versions and ABI hashes.
+    evidence: mainnet addresses are captured in config/mainnet.candidate.toml; upstream ABI hash signoff remains required.
   - id: source-reviewed
     area: source
-    status: todo
+    status: evidence-ready
     requirement: Replace the undeployable scaffold with reviewed V4 vault source.
+    evidence: solidity/baygus-executor/contracts/src/v4/UniswapV4TradingVault.sol
   - id: access-control-reviewed
     area: access-control
-    status: todo
+    status: evidence-ready
     requirement: Confirm owner-only calls and rescue behavior.
+    evidence: forge test --match-path 'test/v4/*.sol' -vv
   - id: permit2-reviewed
     area: allowance
-    status: todo
+    status: evidence-ready
     requirement: Confirm Permit2 setup, spending, revocation, and failure behavior.
+    evidence: unit tests and fork gas tests cover exact Permit2 lifecycle and post-sell allowance clearing.
   - id: hook-policy-reviewed
     area: hooks
-    status: todo
+    status: evidence-ready
     requirement: Confirm hook allowlist or denylist policy and tests.
+    evidence: default candidate sets hooks_allowed=false and tests reject hooks unless explicitly allowed.
   - id: simulator-reviewed
     area: simulation
-    status: todo
+    status: evidence-ready
     requirement: Compare direct Universal Router and candidate vault paths in tx_simulator.
+    evidence: simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json
   - id: gas-reviewed
     area: gas
-    status: todo
+    status: evidence-ready
     requirement: Store fork gas benchmarks for direct and vault paths.
+    evidence: pinned block 25131251; vault route 354887 gas; direct full route 382953 gas.
   - id: kartal-policy-reviewed
     area: execution
-    status: todo
+    status: partial
     requirement: Confirm target, selector, value, gas, fee, simulation, and daily cap policy.
+    evidence: config/kartal-policy.candidate.json has from address and buy/sell selectors; deployed target remains unset.
   - id: deploy-script-enabled
     area: deployment
     status: blocked

@@ -11,22 +11,21 @@ rust_tx_builder = "tx_simulator/src/tx_builders/protocols/uniswap/v4/trading_vau
 deployment_folder = "onchain-deployments/uniswap-v4-trading-vault"
 
 [chain]
-weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 universal_router = "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-pool_manager = "SET_AFTER_INTERFACE_REVIEW"
+pool_manager = "0x000000000004444C5DC75cB358380d2E3de08a90"
+weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 
 [constructor_args]
 owner = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
-weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 universal_router = "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-pool_manager = "SET_AFTER_INTERFACE_REVIEW"
+hooks_allowed = false
 
 [deployment]
 enabled = false
-blocked_reason = "assessment scaffold only"
+blocked_reason = "candidate evidence exists; blocked until deploy calldata, Kartal dry-run, and operator signoff are recorded"
 signer = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 rpc_url_env = "MAINNET_RPC_URL"
 etherscan_api_key_env = "ETHERSCAN_API_KEY"

@@ -172,3 +172,18 @@ v4_vault_sell_vs_preapproved_direct =
 v4_two_tx_sell_reference =
   Erc20ApprovePermit2 + Permit2ApproveUniversalRouter + DirectUniversalRouterSellPreapproved
 ```
+
+Latest pinned fork snapshot at block `25131251`:
+
+```text
+DirectUniversalRouterBuyToEoa: 169,155 gas
+DirectUniversalRouterSellPreapproved: 149,422 gas
+Erc20ApprovePermit2: 67,904 gas
+Permit2ApproveUniversalRouter: 62,616 gas
+VaultBuyToVault: 167,319 gas
+VaultEmergencySellWithExactPermit2Lifecycle: 157,734 gas
+```
+
+The tx_simulator direct-vs-vault rehearsal for the same block reports a full
+direct route including allowance setup at `382,953` gas and the candidate vault
+buy+sell route at `354,887` gas.

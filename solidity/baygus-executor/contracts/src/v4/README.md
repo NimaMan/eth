@@ -1,12 +1,13 @@
 # Uniswap V4 Trading Vault Source
 
-This folder is reserved for a future Uniswap V4 trading vault. It is separate
-from `src/UniswapV2TradingVault.sol` because V4 uses a different execution
+This folder holds the candidate Uniswap V4 trading vault. It is separate from
+`src/UniswapV2TradingVault.sol` because V4 uses a different execution
 surface: Universal Router, Permit2, PoolManager, hooks, and pool-key policy.
 
-Current state: assessment scaffold only. The checked-in Solidity file is
-deliberately undeployable until the route model, simulator coverage, gas
-benchmarks, and Kartal policy are reviewed.
+Current state: candidate source with unit tests, fork gas tests, and
+tx_simulator direct-vs-vault rehearsal evidence. Mainnet broadcast remains
+blocked by the deployment folder until calldata generation, Kartal dry-run, and
+operator signoff are recorded.
 
 Expected implementation files:
 

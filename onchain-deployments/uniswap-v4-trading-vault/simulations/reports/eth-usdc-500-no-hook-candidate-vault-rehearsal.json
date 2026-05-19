@@ -3,10 +3,10 @@
   "block": 25131251,
   "candidate_vault": {
     "balances_after": {
-      "owner_eth_wei": "99995579720918193795",
+      "owner_eth_wei": "99995595293229214915",
       "owner_token_raw": "1529818147",
       "token_symbol": "USDC",
-      "treasury_eth_wei": "99995579720918193795",
+      "treasury_eth_wei": "99995595293229214915",
       "vault_eth_wei": "0",
       "vault_token_raw": "0"
     },
@@ -22,8 +22,8 @@
       "token_out_delta_raw": "2114621766",
       "transaction": {
         "effective_gas_price_wei": "2150871688",
-        "estimated_total_fee_spend_wei": "360972191910288",
-        "gas_used": 167826,
+        "estimated_total_fee_spend_wei": "361013058472360",
+        "gas_used": 167845,
         "logs": 3,
         "revert_reason": null,
         "success": true,
@@ -34,8 +34,8 @@
       "code_available_after_deploy": true,
       "transaction": {
         "effective_gas_price_wei": "2150871688",
-        "estimated_total_fee_spend_wei": "2634903852667520",
-        "gas_used": 1225040,
+        "estimated_total_fee_spend_wei": "2641773736838992",
+        "gas_used": 1228234,
         "logs": 0,
         "revert_reason": null,
         "success": true,
@@ -46,19 +46,19 @@
       "eth_received_wei_before_gas": "999000383366793163",
       "transaction": {
         "effective_gas_price_wei": "2150871688",
-        "estimated_total_fee_spend_wei": "424786404021560",
-        "gas_used": 197495,
-        "logs": 8,
+        "estimated_total_fee_spend_wei": "402303342266896",
+        "gas_used": 187042,
+        "logs": 7,
         "revert_reason": null,
         "success": true,
         "tx_type": 2
       }
     },
     "totals": {
-      "deploy_gas_used": 1225040,
-      "total_gas_used": 1590361,
+      "deploy_gas_used": 1228234,
+      "total_gas_used": 1583121,
       "transactions_executed": 3,
-      "vault_route_gas_used": 365321
+      "vault_route_gas_used": 354887
     },
     "vault_address": "0x3e935C6057FBb8D5A7B9A6C13084D28A4f06DcF4"
   },
@@ -72,10 +72,10 @@
       "direct_full_with_allowances includes direct buy, ERC20 approve, Permit2 approve, and direct sell",
       "vault_buy_plus_sell excludes candidate deployment; sell includes exact ERC20 and Permit2 allowance lifecycle inside the vault"
     ],
-    "vault_buy_plus_sell_gas": 365321,
-    "vault_deploy_gas": 1225040,
-    "vault_route_minus_direct_full_gas": -17632,
-    "vault_route_minus_direct_router_gas": 85840
+    "vault_buy_plus_sell_gas": 354887,
+    "vault_deploy_gas": 1228234,
+    "vault_route_minus_direct_full_gas": -28066,
+    "vault_route_minus_direct_router_gas": 75406
   },
   "direct_universal_router": {
     "approvals": {
@@ -151,7 +151,7 @@
     "max_fee_per_gas_wei": "50000000000",
     "priority_fee_per_gas_wei": "2000000000"
   },
-  "latest_context_block": 25131449,
+  "latest_context_block": 25131554,
   "owner": "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5",
   "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
   "reth_datadir": "/home/nima/storage/samsung8tb/ethereum/reth",

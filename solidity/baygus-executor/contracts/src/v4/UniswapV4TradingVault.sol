@@ -116,7 +116,18 @@ contract UniswapV4TradingVault {
         bool zeroForOne = _inferZeroForOne(poolKey, address(0), tokenOut);
         uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
 
-        _executeV4Swap(poolKey, zeroForOne, address(0), tokenOut, amountIn, minTokensOut, deadline, hookData, msg.value);
+        _executeV4Swap(
+            poolKey,
+            zeroForOne,
+            address(0),
+            tokenOut,
+            address(this),
+            amountIn,
+            minTokensOut,
+            deadline,
+            hookData,
+            msg.value
+        );
 
         tokensReceived = IERC20(tokenOut).balanceOf(address(this)) - balanceBefore;
         if (tokensReceived < minTokensOut) revert InsufficientOutput(tokensReceived, minTokensOut);
@@ -138,21 +149,20 @@ contract UniswapV4TradingVault {
         _ensureHookPolicy(poolKey, hookData);
 
         bool zeroForOne = _inferZeroForOne(poolKey, tokenIn, address(0));
-        uint256 balanceBefore = address(this).balance;
+        uint256 balanceBefore = treasury.balance;
 
-        tokenIn.safeApprove(permit2, 0);
+        // Successful sells clear this allowance; failed sells revert the whole sequence.
         tokenIn.safeApprove(permit2, amountIn);
         IPermit2(permit2).approve(tokenIn, universalRouter, amountIn, PERMIT2_EXPIRATION);
 
-        _executeV4Swap(poolKey, zeroForOne, tokenIn, address(0), amountIn, minEthOut, deadline, hookData, 0);
+        _executeV4Swap(poolKey, zeroForOne, tokenIn, address(0), treasury, amountIn, minEthOut, deadline, hookData, 0);
 
         IPermit2(permit2).approve(tokenIn, universalRouter, 0, 0);
         tokenIn.safeApprove(permit2, 0);
 
-        ethReceived = address(this).balance - balanceBefore;
+        ethReceived = treasury.balance - balanceBefore;
         if (ethReceived < minEthOut) revert InsufficientOutput(ethReceived, minEthOut);
 
-        treasury.safeTransferEth(ethReceived);
         emit EmergencySoldV4(tokenIn, amountIn, ethReceived, minEthOut, poolKey.hooks);
     }
 
@@ -175,6 +185,7 @@ contract UniswapV4TradingVault {
         bool zeroForOne,
         address tokenIn,
         address tokenOut,
+        address recipient,
         uint128 amountIn,
         uint128 minAmountOut,
         uint256 deadline,
@@ -182,7 +193,8 @@ contract UniswapV4TradingVault {
         uint256 value
     ) private {
         bytes[] memory inputs = new bytes[](1);
-        inputs[0] = _encodeV4SwapInput(poolKey, zeroForOne, tokenIn, tokenOut, amountIn, minAmountOut, hookData);
+        inputs[0] =
+            _encodeV4SwapInput(poolKey, zeroForOne, tokenIn, tokenOut, recipient, amountIn, minAmountOut, hookData);
         IUniversalRouter(universalRouter).execute{value: value}(abi.encodePacked(COMMAND_V4_SWAP), inputs, deadline);
     }
 
@@ -191,10 +203,11 @@ contract UniswapV4TradingVault {
         bool zeroForOne,
         address tokenIn,
         address tokenOut,
+        address recipient,
         uint128 amountIn,
         uint128 minAmountOut,
         bytes calldata hookData
-    ) private view returns (bytes memory) {
+    ) private pure returns (bytes memory) {
         bytes memory actions = abi.encodePacked(
             bytes1(ACTION_SWAP_EXACT_IN_SINGLE), bytes1(ACTION_SETTLE), bytes1(ACTION_TAKE)
         );
@@ -210,7 +223,7 @@ contract UniswapV4TradingVault {
             })
         );
         params[1] = abi.encode(tokenIn, amountIn, true);
-        params[2] = abi.encode(tokenOut, address(this), uint256(0));
+        params[2] = abi.encode(tokenOut, recipient, uint256(0));
         return abi.encode(actions, params);
     }
 
