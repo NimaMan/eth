@@ -1,12 +1,13 @@
 use eth_alpha_core::{
     ids::{PoolAddress, StrategyName},
-    risk::{RiskEvent, RiskKind},
+    risk::{RiskEvent, RiskKind, RISK_SOURCE_MEMPOOL_SIGNAL},
     StrategyContext,
 };
 
 use crate::baseline::snipe_all::rule::RuleDecision;
 
 pub const RULE_NAME: &str = "exit.liquidity_removal";
+pub const MEMPOOL_SIGNAL_RULE_NAME: &str = "exit.mempool_liquidity_removal_signal";
 
 /// Exit when a `LiquidityRemoval` risk event targets a pool with an open
 /// position.
@@ -31,7 +32,17 @@ pub fn evaluate(
         return RuleDecision::hold(RULE_NAME, "no open matching position");
     }
 
-    RuleDecision::Exit { rule: RULE_NAME }
+    RuleDecision::Exit {
+        rule: exit_rule_name(event),
+    }
+}
+
+fn exit_rule_name(event: &RiskEvent) -> &'static str {
+    if event.source.as_deref() == Some(RISK_SOURCE_MEMPOOL_SIGNAL) {
+        MEMPOOL_SIGNAL_RULE_NAME
+    } else {
+        RULE_NAME
+    }
 }
 
 fn has_open_matching_position(

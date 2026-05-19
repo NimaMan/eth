@@ -31,6 +31,19 @@ pub async fn run_checks(
             .await?,
     );
     checks.push(
+        risk_sell_decisions_submit_on_signal_block_check(pool, &result_set.result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        historical_market_buy_decisions_have_observations_check(pool, result_set, strategy).await?,
+    );
+    checks.push(submit_decisions_in_range_check(pool, result_set, strategy).await?);
+    checks.push(execution_delay_check(pool, result_set, strategy).await?);
+    checks.push(
+        confirmed_reports_have_simulated_outputs_check(pool, &result_set.result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
         entry_block_matches_buy_confirmation_check(pool, &result_set.result_set_id, strategy)
             .await?,
     );
@@ -44,6 +57,10 @@ pub async fn run_checks(
     checks
         .push(no_duplicate_terminal_events_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(lifecycle_order_check(pool, &result_set.result_set_id, strategy).await?);
+    checks
+        .push(entry_cost_matches_buy_fill_check(pool, &result_set.result_set_id, strategy).await?);
+    checks
+        .push(exit_value_matches_sell_fill_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(pnl_sum_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(realized_sell_pnl_check(pool, &result_set.result_set_id, strategy).await?);
     checks
@@ -52,7 +69,15 @@ pub async fn run_checks(
         closed_trade_snapshot_zero_unrealized_check(pool, &result_set.result_set_id, strategy)
             .await?,
     );
+    checks.push(
+        no_snapshots_after_sell_confirmed_check(pool, &result_set.result_set_id, strategy).await?,
+    );
+    checks.push(
+        no_future_valued_open_snapshots_after_sell_check(pool, &result_set.result_set_id, strategy)
+            .await?,
+    );
     checks.push(latest_snapshot_block_check(pool, &result_set.result_set_id, strategy).await?);
+    checks.push(latest_snapshot_values_check(pool, &result_set.result_set_id, strategy).await?);
     checks
         .push(closed_trade_final_snapshot_check(pool, &result_set.result_set_id, strategy).await?);
     checks.push(execution_replay_inputs_check(pool, &result_set.result_set_id, strategy).await?);
@@ -61,25 +86,36 @@ pub async fn run_checks(
 }
 
 fn result_set_status_check(result_set: &ResultSetRecord) -> CheckResult {
-    let expected_status = match result_set.mode.as_str() {
-        "historical" => "completed",
-        "live" => "running",
-        _ => "",
+    let expected_statuses = match result_set.mode.as_str() {
+        "historical" => vec!["completed"],
+        "live" => vec!["running", "stopped"],
+        _ => Vec::new(),
     };
-    let verdict = if expected_status.is_empty() || result_set.status == expected_status {
+    let verdict = if expected_statuses.is_empty()
+        || expected_statuses
+            .iter()
+            .any(|status| *status == result_set.status)
+    {
         Verdict::Pass
     } else {
         Verdict::Warn
     };
-    let message = if expected_status.is_empty() {
+    let message = if expected_statuses.is_empty() {
         format!(
             "result set mode `{}` has no strict lab status expectation",
             result_set.mode
         )
+    } else if verdict == Verdict::Pass {
+        format!(
+            "result set status `{}` is valid for mode `{}`",
+            result_set.status, result_set.mode
+        )
     } else {
         format!(
-            "result set status is `{}`, expected `{}` for mode `{}`",
-            result_set.status, expected_status, result_set.mode
+            "result set status is `{}`, expected one of `{}` for mode `{}`",
+            result_set.status,
+            expected_statuses.join("`, `"),
+            result_set.mode
         )
     };
     check(
@@ -90,7 +126,7 @@ fn result_set_status_check(result_set: &ResultSetRecord) -> CheckResult {
         json!({
             "mode": result_set.mode,
             "status": result_set.status,
-            "expected_status": expected_status,
+            "expected_statuses": expected_statuses,
         }),
     )
 }
@@ -259,7 +295,7 @@ async fn risk_sell_decisions_have_prior_risk_events_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_sell'
-          AND sd.event_source = 'risk'
+          AND sd.event_source IN ('risk', 'mempool_signal', 'historical_mempool_signal', 'risk_atlas_mined_chain')
           AND NOT EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re
@@ -267,6 +303,214 @@ async fn risk_sell_decisions_have_prior_risk_events_check(
                 AND lower(re.token_address) = lower(sd.token_address)
                 AND (re.pool_address IS NULL OR sd.pool_address IS NULL OR lower(re.pool_address) = lower(sd.pool_address))
                 AND re.observed_block <= sd.block_number
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn risk_sell_decisions_submit_on_signal_block_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "decision_timing",
+        "risk_sell_signal_block_immediate",
+        Verdict::Fail,
+        "risk-triggered sell decisions are submitted on the same block as the matching risk signal",
+        "risk sell decisions whose matching risk evidence is not same-block",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_decisions sd
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = sd.run_id
+        WHERE rsr.result_set_id = $1
+          AND ($2::text IS NULL OR sd.strategy_name = $2)
+          AND sd.action = 'submit_sell'
+          AND sd.event_source IN ('risk', 'mempool_signal', 'historical_mempool_signal', 'risk_atlas_mined_chain')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM alpha_trading.risk_events re
+              WHERE re.run_id = sd.run_id
+                AND lower(re.token_address) = lower(sd.token_address)
+                AND (re.pool_address IS NULL OR sd.pool_address IS NULL OR lower(re.pool_address) = lower(sd.pool_address))
+                AND re.observed_block = sd.block_number
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn historical_market_buy_decisions_have_observations_check(
+    pool: &PgPool,
+    result_set: &ResultSetRecord,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    if result_set.mode != "historical" {
+        return Ok(check(
+            "signal_scope",
+            "market_buy_has_historical_observation",
+            Verdict::Pass,
+            "non-historical result set is not checked against Risk Atlas replay observations",
+            json!({ "mode": result_set.mode }),
+        ));
+    }
+    count_check(
+        pool,
+        "signal_scope",
+        "market_buy_has_historical_observation",
+        Verdict::Fail,
+        "historical market buy decisions join to the replay observation for that token, pool, and block",
+        "historical market buy decisions without matching replay observation rows",
+        r#"
+        WITH rs AS (
+            SELECT config->>'replay_run_id' AS replay_run_id
+            FROM alpha_trading.backtest_result_sets
+            WHERE result_set_id = $1
+        )
+        SELECT count(*)
+        FROM alpha_trading.strategy_decisions sd
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = sd.run_id
+        CROSS JOIN rs
+        WHERE rsr.result_set_id = $1
+          AND ($2::text IS NULL OR sd.strategy_name = $2)
+          AND sd.action = 'submit_buy'
+          AND sd.event_source = 'market'
+          AND rs.replay_run_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM risk_atlas_observations o
+              WHERE o.run_id = rs.replay_run_id
+                AND lower(o.token_address) = lower(sd.token_address)
+                AND lower(o.pool_address) = lower(COALESCE(NULLIF(split_part(sd.pool_address, ':', 2), ''), sd.pool_address))
+                AND o.block_number = sd.block_number
+          )
+        "#,
+        &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn submit_decisions_in_range_check(
+    pool: &PgPool,
+    result_set: &ResultSetRecord,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    if result_set.start_block.is_none() || result_set.end_block.is_none() {
+        return Ok(check(
+            "signal_scope",
+            "submit_decisions_within_result_range",
+            Verdict::Pass,
+            "result set has no fixed block range to enforce",
+            json!({
+                "start_block": result_set.start_block,
+                "end_block": result_set.end_block,
+            }),
+        ));
+    }
+    count_check(
+        pool,
+        "signal_scope",
+        "submit_decisions_within_result_range",
+        Verdict::Fail,
+        "submitted decisions are made inside the result-set input block range",
+        "submitted decisions outside the result-set block range",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_decisions sd
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = sd.run_id
+        JOIN alpha_trading.backtest_result_sets rs ON rs.result_set_id = rsr.result_set_id
+        WHERE rsr.result_set_id = $1
+          AND ($2::text IS NULL OR sd.strategy_name = $2)
+          AND sd.action IN ('submit_buy', 'submit_sell')
+          AND (
+              sd.block_number IS NULL
+              OR sd.block_number < rs.start_block
+              OR sd.block_number > rs.end_block
+          )
+        "#,
+        &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn execution_delay_check(
+    pool: &PgPool,
+    result_set: &ResultSetRecord,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "terminal_report_matches_execution_delay",
+        Verdict::Fail,
+        "terminal execution reports land exactly submitted_block + configured execution_delay_blocks",
+        "orders whose terminal report block does not match configured execution delay",
+        r#"
+        WITH cfg AS (
+            SELECT COALESCE(NULLIF(config->>'execution_delay_blocks', '')::bigint, 1) AS delay_blocks
+            FROM alpha_trading.backtest_result_sets
+            WHERE result_set_id = $1
+        ),
+        order_events AS (
+            SELECT t.trade_id,
+                   te.order_id,
+                   te.order_side,
+                   MIN(te.block_number) FILTER (WHERE te.status = 'submitted') AS submitted_block,
+                   MIN(te.block_number) FILTER (WHERE te.status IN ('confirmed', 'failed', 'cancelled')) AS terminal_block
+            FROM alpha_trading.trades t
+            JOIN alpha_trading.trade_events te ON te.trade_id = t.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            GROUP BY t.trade_id, te.order_id, te.order_side
+        )
+        SELECT count(*)
+        FROM order_events, cfg
+        WHERE submitted_block IS NOT NULL
+          AND terminal_block IS NOT NULL
+          AND terminal_block <> submitted_block + cfg.delay_blocks
+        "#,
+        &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn confirmed_reports_have_simulated_outputs_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "confirmed_reports_have_simulation_outputs",
+        Verdict::Fail,
+        "confirmed execution reports retain EVM simulation outputs, gas, and buy token amount",
+        "confirmed reports missing filled amount, gas, or buy token amount",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_events te
+        JOIN alpha_trading.trades t ON t.trade_id = te.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND te.status = 'confirmed'
+          AND (
+              nullif(te.filled_amount_raw, '') IS NULL
+              OR te.filled_amount_decimals IS NULL
+              OR te.gas_used IS NULL
+              OR nullif(te.gas_cost_eth, '') IS NULL
+              OR (
+                  te.order_side = 'buy'
+                  AND nullif(te.payload->'token_amount'->>'raw', '') IS NULL
+              )
           )
         "#,
         result_set_id,
@@ -409,13 +653,14 @@ async fn lifecycle_order_check(
         "lifecycle",
         "event_block_order",
         Verdict::Fail,
-        "trade events preserve buy submit <= buy fill <= sell submit <= sell fill ordering",
+        "trade events preserve buy submit <= buy terminal and confirmed-buy sell ordering",
         "trades with impossible event block ordering",
         r#"
         WITH ev AS (
             SELECT trade_id,
                    min(block_number) FILTER (WHERE event_type = 'buy_submitted') AS buy_submitted_block,
                    min(block_number) FILTER (WHERE event_type = 'buy_confirmed') AS buy_confirmed_block,
+                   min(block_number) FILTER (WHERE event_type IN ('buy_failed', 'buy_cancelled')) AS buy_failed_block,
                    min(block_number) FILTER (WHERE event_type = 'sell_submitted') AS sell_submitted_block,
                    min(block_number) FILTER (WHERE event_type = 'sell_confirmed') AS sell_confirmed_block
             FROM alpha_trading.trade_events
@@ -428,11 +673,92 @@ async fn lifecycle_order_check(
           AND ($2::text IS NULL OR t.strategy_name = $2)
           AND (
               ev.buy_submitted_block IS NULL
-              OR ev.buy_confirmed_block IS NULL
+              OR (ev.buy_confirmed_block IS NULL AND ev.buy_failed_block IS NULL)
               OR ev.buy_confirmed_block < ev.buy_submitted_block
+              OR ev.buy_failed_block < ev.buy_submitted_block
+              OR (
+                  ev.buy_confirmed_block IS NULL
+                  AND (ev.sell_submitted_block IS NOT NULL OR ev.sell_confirmed_block IS NOT NULL)
+              )
               OR (ev.sell_submitted_block IS NOT NULL AND ev.sell_submitted_block < ev.buy_confirmed_block)
               OR (ev.sell_confirmed_block IS NOT NULL AND ev.sell_submitted_block IS NULL)
               OR (ev.sell_confirmed_block IS NOT NULL AND ev.sell_confirmed_block < ev.sell_submitted_block)
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn entry_cost_matches_buy_fill_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "entry_cost_matches_buy_fill",
+        Verdict::Fail,
+        "entry_cost_eth equals the buy_confirmed filled ETH amount from the EVM simulation report",
+        "trades whose entry cost differs from buy_confirmed fill",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        JOIN alpha_trading.trade_events te
+          ON te.trade_id = t.trade_id
+         AND te.event_type = 'buy_confirmed'
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND (
+              nullif(t.entry_cost_eth, '') IS NULL
+              OR nullif(te.filled_amount_raw, '') IS NULL
+              OR abs(
+                  nullif(t.entry_cost_eth, '')::numeric
+                  - (
+                      nullif(te.filled_amount_raw, '')::numeric
+                      / power(10::numeric, COALESCE(te.filled_amount_decimals, 18))
+                    )
+              ) > 0.000000000000001
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn exit_value_matches_sell_fill_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "exit_value_matches_sell_fill",
+        Verdict::Fail,
+        "exit_value_eth equals the sell_confirmed filled ETH amount from the EVM simulation report",
+        "closed trades whose exit value differs from sell_confirmed fill",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        JOIN alpha_trading.trade_events te
+          ON te.trade_id = t.trade_id
+         AND te.event_type = 'sell_confirmed'
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND (
+              nullif(t.exit_value_eth, '') IS NULL
+              OR nullif(te.filled_amount_raw, '') IS NULL
+              OR abs(
+                  nullif(t.exit_value_eth, '')::numeric
+                  - (
+                      nullif(te.filled_amount_raw, '')::numeric
+                      / power(10::numeric, COALESCE(te.filled_amount_decimals, 18))
+                    )
+              ) > 0.000000000000001
           )
         "#,
         result_set_id,
@@ -596,6 +922,114 @@ async fn latest_snapshot_block_check(
         WHERE t.result_set_id = $1
           AND ($2::text IS NULL OR t.strategy_name = $2)
           AND t.latest_snapshot_block IS DISTINCT FROM latest.max_snapshot_block
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn no_snapshots_after_sell_confirmed_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_snapshots_after_sell_confirmed",
+        Verdict::Fail,
+        "no trade snapshots are appended after a sell_confirmed snapshot",
+        "closed trades with snapshots appended after sell_confirmed",
+        r#"
+        WITH terminal AS (
+            SELECT ts.trade_id, min(ts.id) AS sell_snapshot_id
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND ts.state = 'sell_confirmed'
+            GROUP BY ts.trade_id
+        )
+        SELECT count(DISTINCT ts.trade_id)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN terminal ON terminal.trade_id = ts.trade_id
+        WHERE ts.id > terminal.sell_snapshot_id
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn no_future_valued_open_snapshots_after_sell_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_open_snapshot_valued_after_sell_confirmed",
+        Verdict::Fail,
+        "open-state snapshots for closed trades are not valued after the sell_confirmed block",
+        "closed trades with open-state snapshots valued after sell_confirmed",
+        r#"
+        WITH terminal AS (
+            SELECT ts.trade_id, min(ts.block_number) AS sell_confirmed_block
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND ts.state = 'sell_confirmed'
+            GROUP BY ts.trade_id
+        )
+        SELECT count(DISTINCT ts.trade_id)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN terminal ON terminal.trade_id = ts.trade_id
+        WHERE ts.state <> 'sell_confirmed'
+          AND coalesce(ts.valuation_block_number, ts.block_number) > terminal.sell_confirmed_block
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+async fn latest_snapshot_values_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "latest_snapshot_values_match_trade",
+        Verdict::Fail,
+        "trade PnL fields match the latest persisted trade snapshot",
+        "trades whose current/latest PnL fields differ from latest snapshot values",
+        r#"
+        WITH latest AS (
+            SELECT DISTINCT ON (trade_id)
+                   trade_id,
+                   current_value_eth,
+                   realized_pnl_eth,
+                   unrealized_pnl_eth,
+                   total_pnl_eth
+            FROM alpha_trading.trade_snapshots
+            ORDER BY trade_id, block_number DESC NULLS LAST, id DESC
+        )
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        JOIN latest ON latest.trade_id = t.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND (
+              abs(coalesce(nullif(t.current_value_eth, '')::numeric, 0) - coalesce(nullif(latest.current_value_eth, '')::numeric, 0)) > 0.000000000000001
+              OR abs(coalesce(nullif(t.realized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.realized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+              OR abs(coalesce(nullif(t.unrealized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.unrealized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+              OR abs(coalesce(nullif(t.total_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.total_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+          )
         "#,
         result_set_id,
         strategy,
@@ -820,6 +1254,26 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Was each risk-triggered sell based on already-available evidence?",
             "Requires risk sell decisions to have a local risk event for the token/pool at or before the decision block.",
         ),
+        "risk_sell_signal_block_immediate" => (
+            "Did risk-triggered exits submit immediately on the signal block?",
+            "Requires risk-sourced submit_sell decisions to match a same-block local risk event for the token/pool.",
+        ),
+        "market_buy_has_historical_observation" => (
+            "Can every historical market buy be traced to an input observation?",
+            "Joins market-sourced submit_buy decisions to the replay Risk Atlas observation at the same token, pool, and block.",
+        ),
+        "submit_decisions_within_result_range" => (
+            "Were submitted decisions made inside the replayed input range?",
+            "Rejects submitted buy/sell decisions whose decision block is outside the result set start/end blocks.",
+        ),
+        "terminal_report_matches_execution_delay" => (
+            "Do fills land at the configured execution delay?",
+            "Checks each order's terminal confirmed/failed/cancelled report block equals submitted_block + execution_delay_blocks.",
+        ),
+        "confirmed_reports_have_simulation_outputs" => (
+            "Are confirmed fills backed by persisted EVM simulation output?",
+            "Requires filled amount, gas, gas cost, and buy token output on confirmed trade events.",
+        ),
         "entry_block_matches_buy_confirmed" => (
             "Does entry_block mean the buy-confirmed block?",
             "Compares each trade entry_block with its buy_confirmed lifecycle event block.",
@@ -838,7 +1292,15 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         ),
         "event_block_order" => (
             "Are lifecycle event blocks ordered correctly?",
-            "Validates buy submit <= buy confirmation <= sell submit <= sell confirmation where those events exist.",
+            "Validates buy submit <= buy terminal outcome, and for confirmed buys validates buy confirmation <= sell submit <= sell confirmation where those events exist.",
+        ),
+        "entry_cost_matches_buy_fill" => (
+            "Does entry cost come from the buy simulation fill?",
+            "Compares trade entry_cost_eth with the buy_confirmed report's filled ETH amount.",
+        ),
+        "exit_value_matches_sell_fill" => (
+            "Does exit value come from the sell simulation fill?",
+            "Compares trade exit_value_eth with the sell_confirmed report's filled ETH amount.",
         ),
         "total_pnl_equals_realized_plus_unrealized" => (
             "Does total PnL reconcile with realized and unrealized PnL?",
@@ -859,6 +1321,18 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "latest_snapshot_block_matches_snapshots" => (
             "Does the trade latest snapshot pointer match persisted snapshots?",
             "Compares trades.latest_snapshot_block with the max block_number in trade_snapshots for each trade.",
+        ),
+        "latest_snapshot_values_match_trade" => (
+            "Do trade PnL fields match the latest snapshot?",
+            "Compares current, realized, unrealized, and total PnL values against the latest trade_snapshot row.",
+        ),
+        "no_snapshots_after_sell_confirmed" => (
+            "Are closed trades no longer receiving snapshots?",
+            "Fails if any trade snapshot row is appended after the first sell_confirmed snapshot for the same trade.",
+        ),
+        "no_open_snapshot_valued_after_sell_confirmed" => (
+            "Were open-state snapshots valued only before the sell block?",
+            "Fails if a closed trade has any non-sell_confirmed snapshot whose valuation block is later than the sell_confirmed block.",
         ),
         "closed_trade_final_snapshot" => (
             "Does each closed trade have a final closed snapshot?",

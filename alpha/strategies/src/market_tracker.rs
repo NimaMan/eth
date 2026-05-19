@@ -274,6 +274,7 @@ mod tests {
         let risk = RiskEvent {
             kind: RiskKind::LiquidityRemoval,
             severity: RiskSeverity::Critical,
+            source: None,
             token_address: pool.token_address,
             pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,

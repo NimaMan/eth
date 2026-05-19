@@ -1,7 +1,7 @@
 use alloy_primitives::Address;
 use eth_alpha_core::ids::{PoolAddress, TokenPoolId};
 use eth_alpha_core::market::PoolSnapshot;
-use eth_alpha_core::risk::{RiskEvent, RiskKind, RiskSeverity};
+use eth_alpha_core::risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_RISK_ATLAS_MINED_CHAIN};
 use eth_alpha_engine::wire::{decimal_from_f64, parse_address, parse_protocol};
 use eth_alpha_store::observations::{query_risk_atlas_observations, RiskAtlasObservation};
 use eyre::{Result, WrapErr};
@@ -47,10 +47,25 @@ pub async fn load_events_from_risk_atlas(
         };
         let pool_address = TokenPoolId::new(token_address, &row.pool_address);
 
+        let pool_snapshot = match risk_atlas_pool_snapshot(
+            &row,
+            token_address,
+            pool_address.clone(),
+            block,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(error = %error, "skipping malformed Risk Atlas pool observation");
+                skipped += 1;
+                continue;
+            }
+        };
+
         if row.lp_approval_count_in_block > 0 {
             events.push(eth_alpha_engine::EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LpApproval,
                 severity: RiskSeverity::Warning,
+                source: Some(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN.to_string()),
                 token_address,
                 pool_address: Some(pool_address.clone()),
                 pending_tx_hash: None,
@@ -60,10 +75,18 @@ pub async fn load_events_from_risk_atlas(
             lp_approval_risks += 1;
         }
 
+        events.push(eth_alpha_engine::EngineEvent::Market(
+            eth_alpha_core::market::MarketEvent::PoolUpdated {
+                block_number: block,
+                pool: pool_snapshot,
+            },
+        ));
+
         if row.direct_lp_removal_in_block {
             events.push(eth_alpha_engine::EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LiquidityRemoval,
                 severity: RiskSeverity::Critical,
+                source: Some(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN.to_string()),
                 token_address,
                 pool_address: Some(pool_address.clone()),
                 pending_tx_hash: None,
@@ -72,22 +95,6 @@ pub async fn load_events_from_risk_atlas(
             }));
             direct_lp_removal_risks += 1;
         }
-
-        let pool_snapshot = match risk_atlas_pool_snapshot(&row, token_address, pool_address, block)
-        {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                tracing::warn!(error = %error, "skipping malformed Risk Atlas pool observation");
-                skipped += 1;
-                continue;
-            }
-        };
-        events.push(eth_alpha_engine::EngineEvent::Market(
-            eth_alpha_core::market::MarketEvent::PoolUpdated {
-                block_number: block,
-                pool: pool_snapshot,
-            },
-        ));
     }
 
     tracing::info!(

@@ -10,7 +10,7 @@ use alloy_primitives::{Address, B256};
 use eth_alpha_core::{
     ids::TokenPoolId,
     market::{PoolProtocol, PoolSnapshot, UniswapV4PoolKeySnapshot},
-    risk::{RiskEvent, RiskKind, RiskSeverity},
+    risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_MEMPOOL_SIGNAL},
 };
 use eyre::{eyre, Result};
 use rust_decimal::{prelude::FromPrimitive, Decimal};
@@ -273,6 +273,7 @@ impl MempoolSignalWire {
         Ok(Some(RiskEvent {
             kind,
             severity,
+            source: Some(RISK_SOURCE_MEMPOOL_SIGNAL.to_string()),
             token_address,
             pool_address,
             pending_tx_hash,
@@ -511,5 +512,6 @@ mod tests {
 
         assert_eq!(event.kind, RiskKind::LpApproval);
         assert_eq!(event.severity, RiskSeverity::Critical);
+        assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
     }
 }

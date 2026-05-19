@@ -147,6 +147,7 @@ fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "block_entry_on_lp_approval": spec.block_entry_on_lp_approval,
         "lp_approval_gate_min_pct": spec.lp_approval_gate_min_pct,
         "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
+        "min_sell_pool_denom_reserve": spec.min_sell_pool_denom_reserve,
         "stop_loss_ratio": spec.stop_loss_ratio,
         "take_profit_ratio": spec.take_profit_ratio,
         "max_hold_blocks": spec.max_hold_blocks,
@@ -239,6 +240,9 @@ async fn main() -> Result<()> {
     let observation_strategy_name = observation_strategy_name(&strategy_specs);
     let database_url = resolve_database_url(&shared_config)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
+    let process_started_at = Utc::now();
+    let process_started_at_text = process_started_at.to_rfc3339();
+    let process_started_at_unix_secs = process_started_at.timestamp();
     if let Err(error) = init_alpha_trader_ops_events(&run_id, &shared_config) {
         warn!(error = %error, "failed to initialize alpha trader ops events");
     }
@@ -259,6 +263,8 @@ async fn main() -> Result<()> {
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "observation_strategy_name": &observation_strategy_name,
                 "execution_model": "chain_state_evm_simulation",
+                "process_started_at": &process_started_at_text,
+                "process_started_at_unix_secs": process_started_at_unix_secs,
                 "token_server_url": &token_server_url,
                 "reth_datadir": &reth_datadir,
                 "poll_interval_ms": args.poll_interval_ms,
@@ -350,6 +356,11 @@ async fn main() -> Result<()> {
             .lp_approval_gate_min_pct
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
+        let min_sell_pool_denom_reserve = spec
+            .min_sell_pool_denom_reserve
+            .as_deref()
+            .and_then(|s| Decimal::from_str(s).ok())
+            .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
         let config = LiveSnipeAllConfig::new(SnipeAllConfig {
             strategy_name: StrategyName(spec.strategy_name.clone()),
             buy_amount: Amount {
@@ -359,6 +370,7 @@ async fn main() -> Result<()> {
             sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
             min_denom_reserve: min_liquidity_eth,
             min_stable_denom_reserve: min_liquidity_usd,
+            min_sell_pool_denom_reserve,
             stop_loss_ratio,
             take_profit_ratio,
             max_hold_blocks: spec.max_hold_blocks,
@@ -468,6 +480,8 @@ async fn main() -> Result<()> {
                 let metadata = json!({
                     "token_server_url": &token_server_url,
                     "poll_error": error.to_string(),
+                    "process_started_at": &process_started_at_text,
+                    "process_started_at_unix_secs": process_started_at_unix_secs,
                     "trading_enabled": false,
                     "positions": engine.portfolio().active_position_count(),
                 });
@@ -785,6 +799,8 @@ async fn main() -> Result<()> {
         let heartbeat_metadata = json!({
             "execution_model": "chain_state_evm_simulation",
             "chain_sim_state": chain_state_payload,
+            "process_started_at": &process_started_at_text,
+            "process_started_at_unix_secs": process_started_at_unix_secs,
             "live_status": status.progress.status,
             "live_current_block": status.progress.current_block,
             "live_blocks_processed": status.progress.blocks_processed,

@@ -1,3 +1,4 @@
+use eth_alpha_core::risk::RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL;
 use eth_alpha_engine::wire::{MempoolSignalWire, PoolWire};
 use eth_alpha_store::observations::{query_strategy_observations, StrategyObservation};
 use eyre::{Result, WrapErr};
@@ -136,6 +137,7 @@ fn historical_signal_risk_event(
         return Ok(None);
     };
     event.observed_block = Some(observed_block);
+    event.source = Some(RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL.to_string());
     event.message = format!("historical confirmed signal: {}", event.message);
     Ok(Some(event))
 }

@@ -946,7 +946,14 @@ fn economic_sellable_from_tax(can_sell: bool, sell_tax: Option<f64>) -> Option<b
     display_tax(sell_tax).map(|tax| tax <= 40.0)
 }
 
-fn display_price_ratio(value: Option<f64>, _liquidity_level: PoolLiquidityLevel) -> Option<f64> {
+fn display_price_ratio(value: Option<f64>, liquidity_level: PoolLiquidityLevel) -> Option<f64> {
+    if matches!(
+        liquidity_level,
+        PoolLiquidityLevel::Dust | PoolLiquidityLevel::Drained
+    ) {
+        return Some(0.0);
+    }
+
     value.filter(|value| value.is_finite() && *value > 0.0)
 }
 
@@ -1130,10 +1137,14 @@ mod tests {
     }
 
     #[test]
-    fn display_price_ratio_returns_finite_positive_value() {
+    fn display_price_ratio_zeroes_dust_or_drained_liquidity() {
         assert_eq!(
             display_price_ratio(Some(1000.0), PoolLiquidityLevel::Dust),
-            Some(1000.0)
+            Some(0.0)
+        );
+        assert_eq!(
+            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Drained),
+            Some(0.0)
         );
         assert_eq!(
             display_price_ratio(Some(1000.0), PoolLiquidityLevel::Unknown),

@@ -73,6 +73,8 @@ impl SnipeAllStrategy {
         pool_address: PoolAddress,
         reason: impl Into<String>,
     ) -> StrategyDecision {
+        let reason = reason.into();
+
         // Look up the open position to determine how many tokens to sell.
         let position = ctx.portfolio.positions.values().find(|p| {
             p.key.strategy_name == self.name()
@@ -88,6 +90,15 @@ impl SnipeAllStrategy {
         else {
             return StrategyDecision::hold("exit.no_sellable_position");
         };
+        if let Some(pool) = current_pool_snapshot(ctx, &pool_address) {
+            if let Some(skip_reason) = shared_rules::exit::sell_safety::dust_pool_exit_reason(
+                pool,
+                self.config.min_sell_pool_denom_reserve,
+                &reason,
+            ) {
+                return StrategyDecision::hold(skip_reason);
+            }
+        }
 
         StrategyDecision::submit_order(
             OrderIntent {
@@ -108,7 +119,23 @@ impl SnipeAllStrategy {
         )
     }
 
-    fn sell_position(&self, position: &Position, reason: impl Into<String>) -> StrategyDecision {
+    fn sell_position(
+        &self,
+        ctx: &StrategyContext<'_>,
+        position: &Position,
+        reason: impl Into<String>,
+    ) -> StrategyDecision {
+        let reason = reason.into();
+        if let Some(pool) = current_pool_snapshot(ctx, &position.key.pool_address) {
+            if let Some(skip_reason) = shared_rules::exit::sell_safety::dust_pool_exit_reason(
+                pool,
+                self.config.min_sell_pool_denom_reserve,
+                &reason,
+            ) {
+                return StrategyDecision::hold(skip_reason);
+            }
+        }
+
         let Some(token_amount) = sell_amount_from_position(position, self.config.sell_fraction)
         else {
             return StrategyDecision::hold("exit.no_token_amount");
@@ -382,7 +409,7 @@ impl Strategy for SnipeAllStrategy {
         // these signals. The strategy config controls which ones are enabled.
         // Each rule is evaluated independently so we can quantify per-rule effect.
         if self.config.exit_on_liquidity_removal {
-            if let RuleDecision::Exit { .. } =
+            if let RuleDecision::Exit { rule } =
                 shared_rules::exit::liquidity_removal::evaluate(ctx, &strategy_name, event)
             {
                 if let Some(pool_address) = event
@@ -390,12 +417,7 @@ impl Strategy for SnipeAllStrategy {
                     .clone()
                     .or_else(|| ctx.market.pool_address.clone())
                 {
-                    return Ok(self.sell_pool(
-                        ctx,
-                        event.token_address,
-                        pool_address,
-                        "exit.liquidity_removal",
-                    ));
+                    return Ok(self.sell_pool(ctx, event.token_address, pool_address, rule));
                 }
             }
         }
@@ -504,15 +526,25 @@ impl Strategy for SnipeAllStrategy {
 
         Ok(positions
             .iter()
-            .map(|position| self.sell_position(position, "exit.failed_retry"))
+            .map(|position| self.sell_position(ctx, position, "exit.failed_retry"))
             .filter(|decision| !decision.is_hold())
             .collect())
     }
 }
 
+fn current_pool_snapshot<'a>(
+    ctx: &'a StrategyContext<'_>,
+    pool_address: &PoolAddress,
+) -> Option<&'a PoolSnapshot> {
+    ctx.market
+        .pool
+        .as_ref()
+        .filter(|pool| &pool.address == pool_address)
+}
+
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{Address, B256, U256};
     use eth_alpha_core::{
         amount::Amount,
         execution::{ExecutionReport, ExecutionStatus},
@@ -521,6 +553,7 @@ mod tests {
         order::OrderSide,
         portfolio::PortfolioState,
         position::{Position, PositionKey},
+        risk::RISK_SOURCE_MEMPOOL_SIGNAL,
     };
     use rust_decimal::Decimal;
 
@@ -606,6 +639,7 @@ mod tests {
         RiskEvent {
             kind: RiskKind::LpApproval,
             severity: RiskSeverity::Warning,
+            source: None,
             token_address: pool.token_address,
             pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,
@@ -1280,6 +1314,7 @@ mod tests {
         let risk = RiskEvent {
             kind: RiskKind::LiquidityRemoval,
             severity: RiskSeverity::Critical,
+            source: None,
             token_address: pool.token_address,
             pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,
@@ -1288,6 +1323,7 @@ mod tests {
         };
 
         let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+        assert_eq!(decision.reason(), Some("exit.liquidity_removal"));
         match decision {
             StrategyDecision::SubmitOrder(intent)
             | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
@@ -1300,6 +1336,82 @@ mod tests {
                 panic!("expected sell order")
             }
         }
+    }
+
+    #[test]
+    fn mempool_liquidity_removal_signal_uses_explicit_exit_reason() {
+        let pool = pool();
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let risk = RiskEvent {
+            kind: RiskKind::LiquidityRemoval,
+            severity: RiskSeverity::Critical,
+            source: Some(RISK_SOURCE_MEMPOOL_SIGNAL.to_string()),
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            pending_tx_hash: Some(B256::repeat_byte(0x33)),
+            observed_block: Some(2),
+            message: "liquidity removal signal".to_string(),
+        };
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+        assert_eq!(
+            decision.reason(),
+            Some("exit.mempool_liquidity_removal_signal")
+        );
+        assert_eq!(
+            decision.order_intent().map(|intent| intent.side),
+            Some(OrderSide::Sell)
+        );
+    }
+
+    #[test]
+    fn skips_liquidity_removal_exit_when_pool_is_already_dust() {
+        let mut pool = pool();
+        pool.denom_reserve = Decimal::new(1, 3);
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+        let position = confirmed_position(&strategy, &pool);
+        let mut portfolio = PortfolioState::default();
+        portfolio.positions.insert(position.id.clone(), position);
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let risk = RiskEvent {
+            kind: RiskKind::LiquidityRemoval,
+            severity: RiskSeverity::Critical,
+            source: None,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            pending_tx_hash: None,
+            observed_block: Some(2),
+            message: "liquidity removal".to_string(),
+        };
+
+        let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+        assert!(decision.is_hold());
+        assert_eq!(
+            decision.reason(),
+            Some("exit.liquidity_removal:pool_denom_reserve_below_min_sell_threshold:0.001<0.01")
+        );
     }
 
     #[test]
@@ -1321,6 +1433,7 @@ mod tests {
         let risk = RiskEvent {
             kind: RiskKind::LpApproval,
             severity: RiskSeverity::Warning,
+            source: None,
             token_address: pool.token_address,
             pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,

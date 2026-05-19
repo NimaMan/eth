@@ -182,7 +182,7 @@ impl BasePool {
     }
 
     pub fn price(&self) -> f64 {
-        if self.has_liquidity_removal() {
+        if self.has_no_economic_price() {
             0.0
         } else {
             self.state.price_denom_per_token.max(0.0)
@@ -204,9 +204,17 @@ impl BasePool {
     }
 
     pub fn price_ratio_to_initial(&self) -> Option<f64> {
-        self.reserve_tracker
-            .price_ratio_to_initial()
-            .filter(|value| value.is_finite())
+        if self.has_no_economic_price() {
+            return Some(0.0);
+        }
+
+        let initial_price = self.initial_price()?;
+        let current_price = self.price();
+        if current_price.is_finite() && current_price >= 0.0 && initial_price > 0.0 {
+            Some(current_price / initial_price)
+        } else {
+            None
+        }
     }
 
     pub fn fully_diluted_value_denom(&self, total_supply: f64) -> Option<f64> {
@@ -389,14 +397,7 @@ impl BasePool {
     }
 
     pub fn current_liquidity_allows_trading(&self) -> bool {
-        if matches!(
-            self.state.lifecycle,
-            PoolLifecycle::Dust
-                | PoolLifecycle::Drained
-                | PoolLifecycle::LiquidityRemoved
-                | PoolLifecycle::Evicted
-        ) || self.has_liquidity_removal()
-        {
+        if self.has_no_economic_price() {
             return false;
         }
 
@@ -410,6 +411,16 @@ impl BasePool {
 
     pub fn has_liquidity_removal(&self) -> bool {
         self.reserve_tracker.is_scam
+    }
+
+    fn has_no_economic_price(&self) -> bool {
+        matches!(
+            self.state.lifecycle,
+            PoolLifecycle::Dust
+                | PoolLifecycle::Drained
+                | PoolLifecycle::LiquidityRemoved
+                | PoolLifecycle::Evicted
+        ) || self.has_liquidity_removal()
     }
 
     pub fn mark_liquidity_removal(
@@ -662,6 +673,7 @@ mod tests {
 
         assert!(pool.has_liquidity_removal());
         assert_eq!(pool.price(), 0.0);
+        assert_eq!(pool.price_ratio_to_initial(), Some(0.0));
         assert_eq!(pool.state.lifecycle, PoolLifecycle::LiquidityRemoved);
         assert_eq!(pool.scam_block, Some(10));
     }
@@ -675,6 +687,8 @@ mod tests {
         assert!(!pool.has_liquidity_removal());
         assert_eq!(pool.state.total_liquidity, 0.001);
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
+        assert_eq!(pool.price(), 0.0);
+        assert_eq!(pool.price_ratio_to_initial(), Some(0.0));
     }
 
     #[test]

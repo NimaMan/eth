@@ -128,6 +128,11 @@ where
                     .lp_approval_gate_min_pct
                     .as_deref()
                     .and_then(|s| Decimal::from_str(s).ok());
+                let min_sell_pool_denom_reserve = spec
+                    .min_sell_pool_denom_reserve
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str(s).ok())
+                    .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
 
                 engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
                     strategy_name: StrategyName(spec.strategy_name.clone()),
@@ -135,6 +140,7 @@ where
                     sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
                     min_denom_reserve: min_liquidity_eth,
                     min_stable_denom_reserve: min_liquidity_usd,
+                    min_sell_pool_denom_reserve,
                     exit_on_liquidity_removal: spec.exit_on_liquidity_removal,
                     exit_on_tax: spec.exit_on_tax,
                     exit_on_lp_approval: spec.exit_on_lp_approval,

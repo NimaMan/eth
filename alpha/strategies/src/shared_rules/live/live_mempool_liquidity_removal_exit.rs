@@ -5,6 +5,8 @@ pub const SUITE_NAME: &str = "mempool-live-exits";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 pub const RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
+pub const ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME: &str = "alpha11-live-gasguard-hold-sweep";
+const ALPHA11_MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveStrategySpecOptions {
@@ -29,6 +31,7 @@ pub struct LiveStrategySpec {
     pub block_entry_on_lp_approval: bool,
     pub lp_approval_gate_min_pct: Option<String>,
     pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
+    pub min_sell_pool_denom_reserve: Option<String>,
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
@@ -50,6 +53,7 @@ pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        min_sell_pool_denom_reserve: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: options.max_hold_blocks,
@@ -72,6 +76,9 @@ pub fn suite_specs(
             Ok(vec![risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
                 options,
             )])
+        }
+        ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME => {
+            Ok(alpha11_live_gasguard_hold_sweep_specs(options))
         }
         other => Err(format!("unsupported strategy suite: {other}")),
     }
@@ -107,6 +114,7 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     block_entry_on_lp_approval: false,
                     lp_approval_gate_min_pct: None,
                     defer_buy_confirm_block_lp_approval_to_max_hold: false,
+                    min_sell_pool_denom_reserve: None,
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
@@ -130,6 +138,7 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     block_entry_on_lp_approval: false,
                     lp_approval_gate_min_pct: None,
                     defer_buy_confirm_block_lp_approval_to_max_hold: false,
+                    min_sell_pool_denom_reserve: None,
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
@@ -157,6 +166,7 @@ fn lp_approval_warning_exit_spec(options: &LiveStrategySpecOptions) -> LiveStrat
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        min_sell_pool_denom_reserve: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: None,
@@ -183,11 +193,55 @@ fn risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
             crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        min_sell_pool_denom_reserve: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: Some(15),
         exit_retry_interval_blocks: options.exit_retry_interval_blocks,
         max_exit_retries: options.max_exit_retries,
+    }
+}
+
+fn alpha11_live_gasguard_hold_sweep_specs(
+    options: &LiveStrategySpecOptions,
+) -> Vec<LiveStrategySpec> {
+    [12_u64, 15, 20]
+        .into_iter()
+        .enumerate()
+        .map(|(index, max_hold_blocks)| {
+            alpha11_live_gasguard_hold_spec(index + 1, max_hold_blocks, options)
+        })
+        .collect()
+}
+
+fn alpha11_live_gasguard_hold_spec(
+    ordinal: usize,
+    max_hold_blocks: u64,
+    options: &LiveStrategySpecOptions,
+) -> LiveStrategySpec {
+    LiveStrategySpec {
+        strategy_name: format!(
+            "alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}-retry3-gasguard"
+        ),
+        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks} retry3 gasguard"),
+        exit_liquidity_removal: true,
+        exit_tax: false,
+        exit_lp_approval: true,
+        exit_lp_approval_critical_only: false,
+        exit_scam: false,
+        allowed_protocols: vec!["UNISWAP-V2".to_string()],
+        block_entry_on_lp_approval: true,
+        lp_approval_gate_min_pct: Some(
+            crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
+        ),
+        defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        min_sell_pool_denom_reserve: Some(ALPHA11_MIN_SELL_POOL_DENOM_RESERVE.to_string()),
+        stop_loss_ratio: options.stop_loss_ratio.clone(),
+        take_profit_ratio: options.take_profit_ratio.clone(),
+        max_hold_blocks: Some(max_hold_blocks),
+        exit_retry_interval_blocks: Some(1),
+        max_exit_retries: Some(3),
     }
 }
 
@@ -267,5 +321,47 @@ mod tests {
         assert!(!spec.exit_lp_approval_critical_only);
         assert!(!spec.exit_tax);
         assert!(!spec.exit_scam);
+    }
+
+    #[test]
+    fn alpha11_live_gasguard_suite_matches_hold_sweep() {
+        let specs = suite_specs(
+            ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME,
+            &LiveStrategySpecOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(specs.len(), 3);
+        assert_eq!(
+            specs
+                .iter()
+                .map(|spec| spec.max_hold_blocks)
+                .collect::<Vec<_>>(),
+            vec![Some(12), Some(15), Some(20)]
+        );
+        assert!(specs.iter().all(|spec| spec.exit_liquidity_removal));
+        assert!(specs.iter().all(|spec| spec.exit_lp_approval));
+        assert!(specs
+            .iter()
+            .all(|spec| !spec.exit_lp_approval_critical_only));
+        assert!(specs.iter().all(|spec| !spec.exit_tax));
+        assert!(specs.iter().all(|spec| !spec.exit_scam));
+        assert!(specs.iter().all(|spec| spec.block_entry_on_lp_approval));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.lp_approval_gate_min_pct.as_deref() == Some("30")));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.min_sell_pool_denom_reserve.as_deref() == Some("0")));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.exit_retry_interval_blocks == Some(1)));
+        assert!(specs.iter().all(|spec| spec.max_exit_retries == Some(3)));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
     }
 }

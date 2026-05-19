@@ -294,6 +294,12 @@ where
     }
 
     async fn run_risk_strategies(&mut self, event: &RiskEvent) -> Result<Vec<ExecutionReport>> {
+        let cached_pool = event
+            .pool_address
+            .as_ref()
+            .and_then(|pool_address| self.pool_snapshots.get(pool_address))
+            .filter(|pool| pool.token_address == event.token_address)
+            .cloned();
         let market = self
             .market
             .clone()
@@ -304,6 +310,15 @@ where
                         .as_ref()
                         .map(|pool| Some(pool) == market.pool_address.as_ref())
                         .unwrap_or(true)
+            })
+            .or_else(|| {
+                cached_pool.as_ref().map(|pool| MarketSnapshotRef {
+                    block_number: event.observed_block.unwrap_or(pool.latest_block),
+                    token_address: event.token_address,
+                    pool_address: Some(pool.address.clone()),
+                    token: None,
+                    pool: Some(pool.clone()),
+                })
             })
             .unwrap_or_else(|| MarketSnapshotRef {
                 block_number: event.observed_block.unwrap_or_default(),
@@ -474,10 +489,11 @@ where
         event: &RiskEvent,
         decision: &StrategyDecision,
     ) -> Result<()> {
+        let event_source = event.source.as_deref().unwrap_or("risk");
         self.store
             .record_strategy_decision(&strategy_decision_record(
                 strategy_name,
-                "risk",
+                event_source,
                 format!(
                     "risk:{}:{}:{}",
                     risk_kind_key(&event.kind),
@@ -1763,6 +1779,7 @@ mod tests {
             .handle_event(EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LpApproval,
                 severity: RiskSeverity::Warning,
+                source: None,
                 token_address: token,
                 pool_address: Some(pool),
                 pending_tx_hash: None,
@@ -1845,6 +1862,7 @@ mod tests {
             .handle_event(EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LpApproval,
                 severity: RiskSeverity::Warning,
+                source: None,
                 token_address: Address::repeat_byte(0x33),
                 pool_address: Some(TokenPoolId::new(
                     Address::repeat_byte(0x33),
@@ -1883,6 +1901,7 @@ mod tests {
             .handle_event(EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LiquidityRemoval,
                 severity: RiskSeverity::Critical,
+                source: None,
                 token_address: token,
                 pool_address: Some(pool.clone()),
                 pending_tx_hash: None,

@@ -10,4 +10,5 @@
 pub mod liquidity_removal;
 pub mod lp_approval;
 pub mod scam;
+pub mod sell_safety;
 pub mod tax;

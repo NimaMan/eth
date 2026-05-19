@@ -20,6 +20,9 @@ pub struct SnipeAllConfig {
     pub sell_fraction: DecimalAmount,
     pub min_denom_reserve: DecimalAmount,
     pub min_stable_denom_reserve: DecimalAmount,
+    /// Do not submit sell orders when the current pool denomination reserve is
+    /// below this floor. This avoids spending gas on already-drained pools.
+    pub min_sell_pool_denom_reserve: DecimalAmount,
     pub supported_denom_symbols: Vec<String>,
     pub max_slippage_bps: u32,
     pub deadline_secs: u64,
@@ -75,6 +78,7 @@ impl Default for SnipeAllConfig {
             buy_amount,
             min_denom_reserve: Decimal::new(5, 1),
             min_stable_denom_reserve: Decimal::from(1_000u64),
+            min_sell_pool_denom_reserve: Decimal::new(1, 2),
             supported_denom_symbols: ["ETH", "WETH", "USDC", "USDT", "DAI"]
                 .into_iter()
                 .map(str::to_string)
