@@ -1,0 +1,7 @@
+{
+  "schema": "deploy_output_v1",
+  "deployer": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "contract_address": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+  "transaction_hash": "0x8cfdddfba66d0c5651ee60042acd27978b35d6088b65d568f76de9d53208c886",
+  "raw_output": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/deploy-output.txt"
+}

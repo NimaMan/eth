@@ -2,7 +2,7 @@
   "schema": "uniswap_v2_trading_vault_run_inputs_v1",
   "network": "ethereum-mainnet",
   "chain_id": 1,
-  "source_git_revision": "00605e8ef472efe37223dc30382c481f09c653c7",
+  "source_git_revision": "cfc06f667ed70163691d1825c5d8698868cd7fe5",
   "constructor_args": {
     "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
     "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
@@ -11,14 +11,17 @@
   },
   "deployment": {
     "signer": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
-    "private_key_env": "ETH_VAULT_DEPLOYER_PRIVATE_KEY"
+    "signer_backend": "keystore",
+    "transaction_hash": "0x8cfdddfba66d0c5651ee60042acd27978b35d6088b65d568f76de9d53208c886",
+    "contract_address": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+    "block_number": 25130558
   },
   "alpha": {
     "route_name": "uniswap_v2_trading_vault_mode_a",
     "protocol": "uniswap_v2_trading_vault",
     "owner_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
     "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
-    "vault": "SET_AFTER_DEPLOY"
+    "vault": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
   },
   "kartal": {
     "base_url": "http://127.0.0.1:5004",
@@ -27,6 +30,8 @@
     "required_broadcast_mode_before_go_live": "dry_run"
   },
   "links": {
-    "operator_address_etherscan": "https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+    "operator_address_etherscan": "https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "vault_etherscan": "https://etherscan.io/address/0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+    "deployment_tx_etherscan": "https://etherscan.io/tx/0x8cfdddfba66d0c5651ee60042acd27978b35d6088b65d568f76de9d53208c886"
   }
 }

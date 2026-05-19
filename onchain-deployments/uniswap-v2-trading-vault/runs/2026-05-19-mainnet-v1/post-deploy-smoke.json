@@ -1,0 +1,21 @@
+{
+  "schema": "post_deploy_smoke_v1",
+  "vault_address": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+  "owner": {
+    "expected": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "actual": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  },
+  "treasury": {
+    "expected": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "actual": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  },
+  "weth": {
+    "expected": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "actual": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  },
+  "uniswap_v2_router": {
+    "expected": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+    "actual": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  },
+  "passed": true
+}

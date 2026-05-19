@@ -7,7 +7,7 @@ Ran 6 tests for test/bench/UniswapV2TradingVaultForkGas.t.sol:UniswapV2TradingVa
 [PASS] testGas_Fork_StandaloneApprove() (gas: 62585)
 [PASS] testGas_Fork_VaultBuyToVault() (gas: 130272)
 [PASS] testGas_Fork_VaultModeAEmergencySell() (gas: 134506)
-Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 2.29ms (5.21ms CPU time)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 1.33ms (4.61ms CPU time)
 
 ╭--------------------------------------------------------------+-----------------+--------+--------+--------+---------╮
 | src/UniswapV2TradingVault.sol:UniswapV2TradingVault Contract |                 |        |        |        |         |
@@ -26,4 +26,4 @@ Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 2.29ms (5.21ms CPU 
 ╰--------------------------------------------------------------+-----------------+--------+--------+--------+---------╯
 
 
-Ran 1 test suite in 6.54ms (2.29ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)
+Ran 1 test suite in 3.64ms (1.33ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)

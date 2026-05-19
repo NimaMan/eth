@@ -1,5 +1,5 @@
 No files changed, compilation skipped
-2026-05-19T15:39:46.880801Z  WARN traces::etherscan: etherscan config not found
+2026-05-19T16:46:14.374743Z  WARN traces::etherscan: etherscan config not found
 
 Ran 6 tests for test/bench/UniswapV2TradingVaultForkGas.t.sol:UniswapV2TradingVaultForkGasTest
 [PASS] testGas_Fork_DirectRouterBuyToEoa() (gas: 2818)
@@ -8,7 +8,7 @@ Ran 6 tests for test/bench/UniswapV2TradingVaultForkGas.t.sol:UniswapV2TradingVa
 [PASS] testGas_Fork_StandaloneApprove() (gas: 2884)
 [PASS] testGas_Fork_VaultBuyToVault() (gas: 2840)
 [PASS] testGas_Fork_VaultModeAEmergencySell() (gas: 2862)
-Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 173.15µs (170.82µs CPU time)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 246.73µs (223.71µs CPU time)
 
 Ran 7 tests for test/bench/UniswapV2TradingVaultGas.t.sol:UniswapV2TradingVaultGasTest
 [PASS] testGas_Local_DirectRouterBuyToEoa() (gas: 83249)
@@ -18,17 +18,22 @@ Ran 7 tests for test/bench/UniswapV2TradingVaultGas.t.sol:UniswapV2TradingVaultG
 [PASS] testGas_Local_StandaloneApprove() (gas: 28731)
 [PASS] testGas_Local_VaultBuyToVault() (gas: 97034)
 [PASS] testGas_Local_VaultModeAEmergencySell() (gas: 117778)
-Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 532.54µs (1.66ms CPU time)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 682.97µs (2.84ms CPU time)
 
-Ran 8 tests for test/UniswapV2TradingVault.t.sol:UniswapV2TradingVaultTest
+Ran 13 tests for test/UniswapV2TradingVault.t.sol:UniswapV2TradingVaultTest
+[PASS] testBuyRejectsZeroAddressZeroValueAndExpiredDeadline() (gas: 2289990)
 [PASS] testBuyRevertsWhenOutputBelowMinimum() (gas: 2272072)
-[PASS] testBuyStoresTokenInVaultWithoutApproval() (gas: 2325872)
+[PASS] testBuyStoresTokenInVaultWithoutApproval() (gas: 2325828)
 [PASS] testBuyTracksNetFeeOnTransferTokensReceived() (gas: 2883377)
+[PASS] testConstructorStoresImmutableConfigAndRejectsZeroAddresses() (gas: 2344025)
 [PASS] testEmergencySellApprovesExactAmountAndClearsAllowance() (gas: 2436565)
 [PASS] testEmergencySellClearsAllowanceForFeeOnTransferToken() (gas: 2920345)
+[PASS] testEmergencySellRejectsZeroAddressZeroAmountAndExpiredDeadline() (gas: 2276903)
 [PASS] testEmergencySellRevertsWhenOutputBelowMinimum() (gas: 2402753)
-[PASS] testOnlyOwnerCanBuyOrSell() (gas: 2329565)
-[PASS] testRescueTokenAndEthAreOwnerOnly() (gas: 2301923)
-Suite result: ok. 8 passed; 0 failed; 0 skipped; finished in 641.55µs (2.39ms CPU time)
+[PASS] testOnlyOwnerCanBuyOrSell() (gas: 2329632)
+[PASS] testReceiveAndRescueEth() (gas: 2250919)
+[PASS] testRescueRejectsZeroAddressAndZeroAmount() (gas: 2350400)
+[PASS] testRescueTokenAndEthAreOwnerOnly() (gas: 2302082)
+Suite result: ok. 13 passed; 0 failed; 0 skipped; finished in 903.41µs (4.36ms CPU time)
 
-Ran 3 test suites in 2.54ms (1.35ms CPU time): 21 tests passed, 0 failed, 0 skipped (21 total tests)
+Ran 3 test suites in 2.76ms (1.83ms CPU time): 26 tests passed, 0 failed, 0 skipped (26 total tests)

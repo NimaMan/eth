@@ -42,6 +42,38 @@ contract UniswapV2TradingVaultTest is TestBase {
         assertEq(router.lastEthIn(), 1 ether, "router saw buy eth");
     }
 
+    function testConstructorStoresImmutableConfigAndRejectsZeroAddresses() external {
+        _deploy();
+
+        assertEq(vault.owner(), OWNER, "owner immutable");
+        assertEq(vault.treasury(), TREASURY, "treasury immutable");
+        assertEq(vault.weth(), address(weth), "weth immutable");
+        assertEq(vault.uniswapV2Router(), address(router), "router immutable");
+
+        _expectConstructorZeroAddress(address(0), TREASURY, address(weth), address(router));
+        _expectConstructorZeroAddress(OWNER, address(0), address(weth), address(router));
+        _expectConstructorZeroAddress(OWNER, TREASURY, address(0), address(router));
+        _expectConstructorZeroAddress(OWNER, TREASURY, address(weth), address(0));
+    }
+
+    function testBuyRejectsZeroAddressZeroValueAndExpiredDeadline() external {
+        _deploy();
+        vm.warp(100);
+
+        (, bytes memory zeroTokenReason) = _callBuy(address(0), 1, block.timestamp + 1, 1 ether);
+        assertEq(zeroTokenReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector), "zero token");
+
+        (, bytes memory zeroValueReason) = _callBuy(address(token), 1, block.timestamp + 1, 0);
+        assertEq(zeroValueReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAmount.selector), "zero eth");
+
+        (, bytes memory expiredReason) = _callBuy(address(token), 1, block.timestamp - 1, 1 ether);
+        assertEq(
+            expiredReason,
+            abi.encodeWithSelector(UniswapV2TradingVault.DeadlineExpired.selector, block.timestamp - 1),
+            "expired buy"
+        );
+    }
+
     function testEmergencySellApprovesExactAmountAndClearsAllowance() external {
         _deploy();
         router.setNextTokenOut(250 ether);
@@ -63,6 +95,24 @@ contract UniswapV2TradingVaultTest is TestBase {
         assertEq(token.allowance(address(vault), address(router)), 0, "allowance cleared after sell");
         assertEq(router.lastTokenIn(), 100 ether, "router saw token input");
         assertEq(router.lastRecipient(), address(vault), "router paid vault before treasury transfer");
+    }
+
+    function testEmergencySellRejectsZeroAddressZeroAmountAndExpiredDeadline() external {
+        _deploy();
+        vm.warp(100);
+
+        (, bytes memory zeroTokenReason) = _callSell(address(0), 1, 1, block.timestamp + 1);
+        assertEq(zeroTokenReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector), "zero token");
+
+        (, bytes memory zeroAmountReason) = _callSell(address(token), 0, 1, block.timestamp + 1);
+        assertEq(zeroAmountReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAmount.selector), "zero amount");
+
+        (, bytes memory expiredReason) = _callSell(address(token), 1, 1, block.timestamp - 1);
+        assertEq(
+            expiredReason,
+            abi.encodeWithSelector(UniswapV2TradingVault.DeadlineExpired.selector, block.timestamp - 1),
+            "expired sell"
+        );
     }
 
     function testBuyTracksNetFeeOnTransferTokensReceived() external {
@@ -184,5 +234,104 @@ contract UniswapV2TradingVaultTest is TestBase {
         vm.prank(OWNER);
         vault.rescueEth(recipient, 2 ether);
         assertEq(recipient.balance, 2 ether, "rescued eth");
+    }
+
+    function testReceiveAndRescueEth() external {
+        _deploy();
+
+        (bool sent,) = address(vault).call{value: 3 ether}("");
+        assertTrue(sent, "receive eth");
+        assertEq(address(vault).balance, 3 ether, "received balance");
+
+        address recipient = address(0xCAFE);
+        vm.prank(OWNER);
+        vault.rescueEth(recipient, 1 ether);
+
+        assertEq(recipient.balance, 1 ether, "recipient eth");
+        assertEq(address(vault).balance, 2 ether, "remaining eth");
+    }
+
+    function testRescueRejectsZeroAddressAndZeroAmount() external {
+        _deploy();
+        token.mint(address(vault), 42 ether);
+        vm.deal(address(vault), 5 ether);
+
+        address recipient = address(0xCAFE);
+
+        vm.prank(OWNER);
+        (bool zeroTokenSuccess, bytes memory zeroTokenReason) =
+            address(vault).call(abi.encodeCall(UniswapV2TradingVault.rescueToken, (address(0), recipient, 1 ether)));
+        assertFalse(zeroTokenSuccess, "zero token rescue should fail");
+        assertEq(zeroTokenReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector), "zero token");
+
+        vm.prank(OWNER);
+        (bool zeroRecipientSuccess, bytes memory zeroRecipientReason) = address(vault)
+            .call(abi.encodeCall(UniswapV2TradingVault.rescueToken, (address(token), address(0), 1 ether)));
+        assertFalse(zeroRecipientSuccess, "zero token recipient rescue should fail");
+        assertEq(
+            zeroRecipientReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector), "zero recipient"
+        );
+
+        vm.prank(OWNER);
+        (bool zeroTokenAmountSuccess, bytes memory zeroTokenAmountReason) =
+            address(vault).call(abi.encodeCall(UniswapV2TradingVault.rescueToken, (address(token), recipient, 0)));
+        assertFalse(zeroTokenAmountSuccess, "zero token amount rescue should fail");
+        assertEq(
+            zeroTokenAmountReason,
+            abi.encodeWithSelector(UniswapV2TradingVault.ZeroAmount.selector),
+            "zero token amount"
+        );
+
+        vm.prank(OWNER);
+        (bool zeroEthRecipientSuccess, bytes memory zeroEthRecipientReason) =
+            address(vault).call(abi.encodeCall(UniswapV2TradingVault.rescueEth, (address(0), 1 ether)));
+        assertFalse(zeroEthRecipientSuccess, "zero eth recipient rescue should fail");
+        assertEq(
+            zeroEthRecipientReason,
+            abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector),
+            "zero eth recipient"
+        );
+
+        vm.prank(OWNER);
+        (bool zeroEthAmountSuccess, bytes memory zeroEthAmountReason) =
+            address(vault).call(abi.encodeCall(UniswapV2TradingVault.rescueEth, (recipient, 0)));
+        assertFalse(zeroEthAmountSuccess, "zero eth amount rescue should fail");
+        assertEq(
+            zeroEthAmountReason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAmount.selector), "zero eth amount"
+        );
+    }
+
+    function _expectConstructorZeroAddress(address owner_, address treasury_, address weth_, address router_) internal {
+        try new UniswapV2TradingVault(owner_, treasury_, weth_, router_) {
+            revert AssertionFailed("constructor should reject zero address");
+        } catch (bytes memory reason) {
+            assertEq(
+                reason, abi.encodeWithSelector(UniswapV2TradingVault.ZeroAddress.selector), "constructor zero address"
+            );
+        }
+    }
+
+    function _callBuy(address token_, uint256 minTokensOut, uint256 deadline, uint256 value)
+        internal
+        returns (bool success, bytes memory reason)
+    {
+        vm.prank(OWNER);
+        return address(vault)
+        .call{
+            value: value
+        }(abi.encodeCall(UniswapV2TradingVault.buyV2ExactEthForTokens, (token_, minTokensOut, deadline)));
+    }
+
+    function _callSell(address token_, uint256 amountIn, uint256 minEthOut, uint256 deadline)
+        internal
+        returns (bool success, bytes memory reason)
+    {
+        vm.prank(OWNER);
+        return address(vault)
+            .call(
+                abi.encodeCall(
+                    UniswapV2TradingVault.emergencySellV2ExactTokensForEth, (token_, amountIn, minEthOut, deadline)
+                )
+            );
     }
 }

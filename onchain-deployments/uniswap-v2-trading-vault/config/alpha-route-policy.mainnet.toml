@@ -4,7 +4,7 @@ route_name = "uniswap_v2_trading_vault_mode_a"
 protocol = "uniswap_v2_trading_vault"
 
 [addresses]
-vault = "SET_AFTER_DEPLOY"
+vault = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
 owner_from = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

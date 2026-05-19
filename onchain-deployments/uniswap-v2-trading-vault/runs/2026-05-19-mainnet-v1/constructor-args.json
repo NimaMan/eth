@@ -4,6 +4,9 @@
   "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
   "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
   "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-  "abi_encoded": "0x0000000000000000000000002348e8a3a21dbe64ace84853d7b4b696e8a1fc270000000000000000000000002348e8a3a21dbe64ace84853d7b4b696e8a1fc27000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488d",
-  "signer_env": "ETH_VAULT_DEPLOYER_PRIVATE_KEY"
+  "signer": {
+    "backend": "keystore",
+    "keystore": "/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-keystore.json",
+    "password_file": "/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-password"
+  }
 }

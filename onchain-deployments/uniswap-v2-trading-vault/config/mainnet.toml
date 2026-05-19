@@ -26,7 +26,7 @@ rpc_url_env = "MAINNET_RPC_URL"
 etherscan_api_key_env = "ETHERSCAN_API_KEY"
 
 [post_deploy]
-vault_address = "SET_AFTER_DEPLOY"
+vault_address = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
 expected_owner = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 expected_treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 expected_weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

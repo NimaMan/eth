@@ -3,12 +3,12 @@
   "chain_id": 1,
   "route": "/eth/tx/direct-raw",
   "contract": "UniswapV2TradingVault",
-  "deployed_address": "SET_AFTER_DEPLOY",
+  "deployed_address": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
   "required_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
   "broadcast_mode_before_go_live": "dry_run",
   "broadcast_mode_for_go_live": "public_mempool",
   "allowed_targets": [
-    "SET_AFTER_DEPLOY"
+    "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
   ],
   "allowed_selectors": {
     "buyV2ExactEthForTokens(address,uint256,uint256)": "0x8a62666c",

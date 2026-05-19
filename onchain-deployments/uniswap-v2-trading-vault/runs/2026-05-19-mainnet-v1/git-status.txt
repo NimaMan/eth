@@ -73,10 +73,16 @@
  M mempool_processor/src/token_tracking/README.md
  M node/systemd/user/eth-alpha-trader.service
  M onchain-deployments/uniswap-v2-trading-vault/README.md
- M onchain-deployments/uniswap-v2-trading-vault/config/alpha-route-policy.mainnet.toml
- M onchain-deployments/uniswap-v2-trading-vault/config/kartal-policy.mainnet.json
- M onchain-deployments/uniswap-v2-trading-vault/config/mainnet.toml
- M onchain-deployments/uniswap-v2-trading-vault/scripts/01_build_and_hash.sh
+ M onchain-deployments/uniswap-v2-trading-vault/audit/README.md
+ M onchain-deployments/uniswap-v2-trading-vault/audit/checklist.yaml
+ M onchain-deployments/uniswap-v2-trading-vault/audit/findings.jsonl
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/cargo-test-eth-live-trading.txt
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/cargo-test-tx-simulator.txt
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/forge-test.txt
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/fork-rehearsal.txt
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/git-revision.txt
+ M onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/git-status.txt
+ M onchain-deployments/uniswap-v2-trading-vault/scripts/05_deploy.sh
  M pyreth/examples/reth_indexer/README.md
  M pyreth/src/pyreth_instance.rs
  M pyreth/src/simulator/live_simulator.rs
@@ -90,6 +96,8 @@
  M reth_chain_query/src/reth_index/README.md
  M reth_chain_query/src/reth_index/tables/README.md
  M reth_chain_query/src/reth_index/writers/README.md
+ M solidity/baygus-executor/contracts/test/README.md
+ M solidity/baygus-executor/contracts/test/UniswapV2TradingVault.t.sol
  M token_lab/README.md
  M token_lab/investigations/README.md
  M token_lab/scam_analytics/README.md
@@ -98,6 +106,12 @@
  M token_lab/scam_analytics/risk_atlas/src/atlas/page_story.rs
  M token_lab/scam_analytics/risk_atlas/src/db/schema.rs
  M token_lab/scam_analytics/risk_atlas/src/db/writer.rs
+ M tx_executor/Cargo.toml
+ M tx_executor/README.md
+ M tx_executor/src/executor.rs
+ M tx_executor/src/service.rs
+ M tx_executor/src/signer/local.rs
+ M tx_executor/src/signer/mod.rs
  M tx_fund_flow/README.md
  M tx_fund_flow/src/core_types/src/error.rs
  M tx_fund_flow/src/core_types/src/lib.rs
@@ -167,7 +181,7 @@
 ?? eth_token/src/pnl/export.rs
 ?? eth_token/src/pnl/model.rs
 ?? eth_token_pnl_store/
-?? onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/
+?? onchain-deployments/uniswap-v2-trading-vault/audit/contract-test-gas-review-2026-05-19.md
 ?? reth_chain_query/src/common_addresses/burn_addresses.rs
 ?? token_lab/investigations/vyp_burned_lp_reserve_drain_25077324/
 ?? token_lab/network_analytics/
@@ -178,5 +192,7 @@
 ?? token_lab/scam_analytics/artifacts/reports/direct_lp_liquidity_removal_features_100k_25007276_25107275_summary.md
 ?? token_lab/scam_analytics/artifacts/reports/scam_pools_100k_25007276_25107275_summary.md
 ?? token_lab/scam_analytics/mempool_management/
+?? tx_executor/src/signer/remote.rs
+?? tx_executor/src/signer/wire.rs
 ?? tx_processor/examples/blocks/dump_pblock.rs
 ?? tx_processor/src/bin/dump_pblock.rs

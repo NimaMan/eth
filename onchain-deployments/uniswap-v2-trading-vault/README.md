@@ -65,6 +65,19 @@ Current temporary test address:
 | --- | --- |
 | owner, treasury, deployer, Kartal `from` | [`0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27`](https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27) |
 
+## Secure Deploy Signer
+
+Prefer the encrypted keystore path over `ETH_VAULT_DEPLOYER_PRIVATE_KEY`:
+
+```bash
+SIGNER_BACKEND=keystore
+ETH_VAULT_DEPLOYER_KEYSTORE=/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-keystore.json
+ETH_VAULT_DEPLOYER_PASSWORD_FILE=/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-password
+```
+
+The deploy script records only the keystore/password-file paths in the run
+folder. It must never log the decrypted private key.
+
 ## Go-live Bottleneck
 
 The contract can be deployed only after the full strategy-to-Kartal live path is

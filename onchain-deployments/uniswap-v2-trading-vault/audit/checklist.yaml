@@ -3,32 +3,41 @@ status: draft
 items:
   - id: source-pinned
     area: source
-    status: todo
+    status: reviewed
     requirement: Record git revision, artifact hash, ABI hash, and dirty-state summary.
+    evidence: runs/2026-05-19-mainnet-v1/artifact-hashes.json
+    note: Current run folder records hashes and dirty-state evidence; recheck if source changes before deploy.
   - id: constructor-args-reviewed
     area: deployment
-    status: todo
+    status: reviewed
     requirement: Review owner, treasury, WETH, Uniswap V2 router, signer, and chain id.
+    evidence: runs/2026-05-19-mainnet-v1/post-deploy-smoke.json
+    note: Constructor behavior is tested and deployed immutable values match expected values.
   - id: owner-model-reviewed
     area: access-control
-    status: todo
+    status: reviewed
     requirement: Confirm owner address is the intended Kartal signer or explicitly delegated operational account.
+    note: Owner-only behavior is tested; deployed owner is 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27.
   - id: treasury-reviewed
     area: funds
-    status: todo
+    status: reviewed
     requirement: Confirm emergency-sell ETH proceeds go to the intended treasury.
+    note: Treasury payout behavior is tested; deployed treasury is 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27.
   - id: approval-lifecycle-reviewed
     area: token-allowance
-    status: todo
+    status: reviewed
     requirement: Confirm buy creates no sell-router allowance and emergency sell clears allowance after swap.
+    evidence: audit/contract-test-gas-review-2026-05-19.md
   - id: fee-on-transfer-reviewed
     area: token-behavior
-    status: todo
+    status: reviewed
     requirement: Confirm FOT local and fork tests cover buy and emergency sell.
+    evidence: audit/contract-test-gas-review-2026-05-19.md
   - id: gas-benchmark-reviewed
     area: gas
-    status: todo
+    status: reviewed
     requirement: Confirm fork gas snapshot is acceptable versus direct buy and approve plus sell.
+    evidence: runs/2026-05-19-mainnet-v1/fork-rehearsal.txt
   - id: bribe-policy-reviewed
     area: gas-rank
     status: todo
@@ -39,8 +48,10 @@ items:
     requirement: Confirm exact buy and emergency-sell calldata are simulated against current state before submission.
   - id: kartal-policy-reviewed
     area: execution
-    status: todo
+    status: reviewed
     requirement: Confirm Kartal allowlist only permits the deployed vault target and strategy selectors.
+    evidence: onchain-deployments/uniswap-v2-trading-vault/config/kartal-policy.mainnet.json
+    note: Policy allows only 0x28474cbCd780AeEb3ED1501B68254bEd87cF5597 and selectors 0x8a62666c, 0x5f413d10.
   - id: dry-run-reviewed
     area: execution
     status: todo
@@ -51,8 +62,9 @@ items:
     requirement: Confirm alpha records submitted, confirmed, reverted, or replaced outcomes.
   - id: post-deploy-smoke-reviewed
     area: deployment
-    status: todo
+    status: reviewed
     requirement: Confirm deployed immutable reads match expected owner, treasury, WETH, and router.
+    evidence: runs/2026-05-19-mainnet-v1/post-deploy-smoke.json
   - id: signoff-complete
     area: release
     status: todo
