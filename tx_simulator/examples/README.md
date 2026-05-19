@@ -24,6 +24,18 @@ Token workflows (unsigned chains):
 Signed chain:
 - tx_builders/signed_bundle_simulation.rs
 
+Tx builders and deployed routers:
+- tx_builders/uniswap_v2_trading_vault_deployed.rs: Simulate the deployed
+  Mode A Uniswap V2 trading vault at
+  `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` using local Reth state.
+  Defaults to wallet-token transfer into the vault followed by
+  `emergencySellV2ExactTokensForEth`; `--scenario buy-then-sell` also exercises
+  `buyV2ExactEthForTokens`.
+- For the current direct-raw path, "bribe" means EIP-1559 priority fee. Use
+  `--priority-fee-per-gas-wei` and `--max-fee-per-gas-wei` to model it. The
+  deployed V2 vault does not have a direct `block.coinbase` payment path, and
+  private bundle bribes require a separate execution protocol.
+
 ## Performance
 - performance/rpc_vs_direct_simulation_benchmark.rs: RPC vs direct DB comparison
 - performance/inspector_fusing_test.rs: No-trace sequence and warm-cache benchmark

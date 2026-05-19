@@ -153,3 +153,7 @@ path = "examples/tx_builders/signed_bundle_simulation.rs"
 [[example]]
 name = "uniswap_v4_universal_router_eth_stable"
 path = "examples/tx_builders/uniswap_v4_universal_router_eth_stable.rs"
+
+[[example]]
+name = "uniswap_v2_trading_vault_deployed"
+path = "examples/tx_builders/uniswap_v2_trading_vault_deployed.rs"
