@@ -14,17 +14,21 @@ strategy result and returns a backend-owned `CheckResult`.
 - `lifecycle.rs`: trade event ordering and trade/position rollup consistency.
 - `accounting.rs`: fill, gas, realized/unrealized/total PnL consistency.
 - `snapshots.rs`: mark-to-market timeline and latest snapshot rollup checks.
-- `distribution.rs`: PnL concentration warning.
 - `common.rs`: shared result builders, tolerance, and user-facing check copy.
 
 ## Shared Semantics
 
 - `Fail` means the result should not be trusted until fixed or explained.
-- `Warn` means the result can be inspected, but conclusions are fragile.
+- `Warn` is retained for older persisted reports; current validation checks
+  should produce only `Pass`, `Fail`, or `Blocked`.
 - `Pass` means the scoped invariant had zero violations.
+- `Blocked` means validation could not answer because the result-set shape is
+  unsupported or prerequisite data is missing.
 - Numeric accounting uses `0.000000000000001` ETH tolerance.
 - The frontend renders these results and must not recalculate membership,
   accounting, or trust verdicts.
+- Distribution, concentration, and profitability robustness questions belong in
+  `strategy_assessment`.
 
 ## Checks
 
@@ -33,6 +37,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | Code | Question | Why We Ask | File |
 | --- | --- | --- | --- |
 | `result_set_status` | Is this result set in the expected state? | Historical results should be completed; live results can be running or stopped. A wrong status means the data may be partial or from the wrong mode. | `metadata.rs` |
+| `running_result_set_has_no_stop_marker` | Is a running live result free of stopped-run markers? | A running result set should not carry stopped timestamps or stale shutdown metadata from a prior process lifetime. | `metadata.rs` |
 | `strategy_rows` | Did this strategy produce trades in this result set? | A validation report without scoped trades is not meaningful for PnL or strategy behavior. | `metadata.rs` |
 | `public_trade_id_format` | Are public trade identifiers opaque and stable? | UI and reports should expose stable `trd_` ids instead of leaking legacy position identifiers. | `metadata.rs` |
 
@@ -71,6 +76,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `trade_rollup_matches_position` | Does each trade row still match its source position? | `trades` is a read model over `positions`; state, order ids, blocks, and protocol must not drift. | `lifecycle.rs` |
 | `single_terminal_event_per_trade` | Does each trade have only one terminal buy and sell confirmation? | Duplicate terminal events corrupt lifecycle state and accounting. | `lifecycle.rs` |
 | `event_block_order` | Are lifecycle event blocks ordered correctly? | Buy submit, buy terminal, sell submit, and sell terminal blocks must form a possible timeline. | `lifecycle.rs` |
+| `active_hold_limit_submits_exit` | Did max-hold positions actually submit exits? | A position that reached the active hold limit should have a sell submission, otherwise the strategy lifecycle is stuck. | `lifecycle.rs` |
 
 ### Accounting
 
@@ -92,14 +98,9 @@ strategy result and returns a backend-owned `CheckResult`.
 | `no_open_snapshot_valued_after_sell_confirmed` | Were open-state snapshots valued only before the sell block? | An open-state valuation after sell confirmation creates impossible post-exit exposure. | `snapshots.rs` |
 | `latest_snapshot_block_matches_snapshots` | Does the trade latest snapshot pointer match persisted snapshots? | `trades.latest_snapshot_block` must point at the max persisted snapshot block for the trade. | `snapshots.rs` |
 | `latest_snapshot_values_match_trade` | Do trade latest fields match the latest snapshot? | Latest block coordinates, current value, PnL, and ROI in `trades` must match the latest `trade_snapshots` row. | `snapshots.rs` |
+| `zero_value_snapshots_do_not_reuse_stale_pool_metrics` | Do zero-value exposure snapshots avoid stale pool metrics? | A zero-value exposure after a drain should not continue to display old pool liquidity or price data. | `snapshots.rs` |
 | `closed_trade_final_snapshot` | Does each closed trade have a final closed snapshot? | UI and validators need a clean sell-confirmed snapshot at `exit_block` for terminal valuation. | `snapshots.rs` |
 | `closed_trade_latest_snapshot_is_terminal` | Is the latest closed-trade snapshot terminal? | For a closed trade, the latest snapshot by block/id must be the sell-confirmed exit snapshot, not a stale open valuation. | `snapshots.rs` |
-
-### Distribution
-
-| Code | Question | Why We Ask | File |
-| --- | --- | --- | --- |
-| `top5_pnl_concentration` | Is strategy PnL too concentrated in the top winners? | If the top five winners exceed aggregate PnL, strategy conclusions are sensitive to a few trades and should be reviewed manually. | `distribution.rs` |
 
 ## Adding A Check
 
@@ -117,4 +118,5 @@ cargo check -p eth_alpha_lab
 ```
 
 For behavior changes, run one known-good and one known-bad result set so the
-validator proves both paths.
+validator proves both paths. Do not add PnL concentration, return distribution,
+or strategy attractiveness questions here; those are assessment questions.

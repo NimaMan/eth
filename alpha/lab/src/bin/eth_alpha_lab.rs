@@ -10,6 +10,9 @@ use eth_alpha_lab::{
     },
     connect,
     position_lab::{self, PositionSelector},
+    strategy_assessment::{
+        self, report::print_strategy_assessment_report, StrategyAssessmentOptions,
+    },
     strategy_event_trace::{self, LossScanOptions, TraceSelector},
     strategy_lab,
 };
@@ -84,6 +87,18 @@ enum Command {
 
         #[arg(long)]
         persist: bool,
+    },
+
+    /// Strategy-quality assessment questions such as PnL concentration and exposure.
+    StrategyAssessment {
+        #[arg(long = "result-set")]
+        result_set_id: String,
+
+        #[arg(long)]
+        strategy: Option<String>,
+
+        #[arg(long)]
+        json: bool,
     },
 
     /// One trade's ordered event timeline: trade events, risks, decisions, snapshots.
@@ -214,6 +229,25 @@ async fn main() -> Result<()> {
                     println!();
                     println!("Persisted validation report: {validation_id}");
                 }
+            }
+        }
+        Command::StrategyAssessment {
+            result_set_id,
+            strategy,
+            json,
+        } => {
+            let report = strategy_assessment::assess_strategy(
+                &pool,
+                StrategyAssessmentOptions {
+                    result_set_id,
+                    strategy,
+                },
+            )
+            .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_strategy_assessment_report(&report);
             }
         }
         Command::TradeEvents {

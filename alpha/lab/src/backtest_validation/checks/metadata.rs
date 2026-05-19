@@ -12,14 +12,15 @@ pub(super) fn result_set_status_check(result_set: &ResultSetRecord) -> CheckResu
         "live" => vec!["running", "stopped"],
         _ => Vec::new(),
     };
-    let verdict = if expected_statuses.is_empty()
-        || expected_statuses
-            .iter()
-            .any(|status| *status == result_set.status)
+    let verdict = if expected_statuses.is_empty() {
+        Verdict::Blocked
+    } else if expected_statuses
+        .iter()
+        .any(|status| *status == result_set.status)
     {
         Verdict::Pass
     } else {
-        Verdict::Warn
+        Verdict::Fail
     };
     let message = if expected_statuses.is_empty() {
         format!(
@@ -50,6 +51,45 @@ pub(super) fn result_set_status_check(result_set: &ResultSetRecord) -> CheckResu
             "expected_statuses": expected_statuses,
         }),
     )
+}
+
+pub(super) async fn result_set_running_state_consistency_check(
+    pool: &PgPool,
+    result_set_id: &str,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "metadata",
+        "running_result_set_has_no_stop_marker",
+        Verdict::Fail,
+        "running result sets and runs do not carry stopped markers",
+        "running result sets or runs with stopped_at/shutdown metadata",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.backtest_result_sets rs
+        LEFT JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.result_set_id = rs.result_set_id
+        LEFT JOIN alpha_trading.trader_runs tr
+          ON tr.run_id = rsr.run_id
+        WHERE rs.result_set_id = $1
+          AND ($2::text IS NULL OR $2::text IS NOT NULL)
+          AND (
+              (rs.status = 'running' AND rs.stopped_at IS NOT NULL)
+              OR (tr.status = 'running' AND tr.stopped_at IS NOT NULL)
+              OR (
+                  rs.status = 'running'
+                  AND rs.metadata->>'reason' IN ('shutdown_signal', 'stale_heartbeat')
+              )
+              OR (
+                  tr.status = 'running'
+                  AND tr.metadata->>'reason' IN ('shutdown_signal', 'stale_heartbeat')
+              )
+          )
+        "#,
+        result_set_id,
+        None,
+    )
+    .await
 }
 
 pub(super) fn strategy_rows_check(

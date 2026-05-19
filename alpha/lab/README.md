@@ -32,6 +32,7 @@ top-level module under `src/` rather than nesting modules under a generic
 src/
   bin/eth_alpha_lab.rs
   backtest_validation/
+  strategy_assessment/
   strategy_lab/event_trace/
   position_lab.rs
   strategy_lab.rs
@@ -175,9 +176,8 @@ layer fails.
 7. **Fair comparison**: strategies compared together must share the same block
    window, input stream, execution model, gas model, capital sizing, and token
    universe.
-8. **Robustness**: profitable conclusions must survive top-winner
-   concentration checks, worst-loser review, liquidity-exit cases, failed-sell
-   cases, and random normal-trade samples.
+8. **Assessment handoff**: robustness, concentration, exposure materiality, and
+   tail-loss questions are assessed after validation by `strategy_assessment`.
 
 ```bash
 eth_alpha_lab backtest-validation \
@@ -201,7 +201,7 @@ PnL; first prove the result set is internally coherent.
    `alpha_trading`.
 2. Validate metadata and scope:
    - historical result sets should be `completed`;
-   - live result sets should be `running`;
+   - live result sets should be `running` or `stopped`;
    - the selected strategy must have trades;
    - public trade IDs must use the `trd_` prefix;
    - historical result sets must not include pending mempool risk rows.
@@ -232,18 +232,39 @@ PnL; first prove the result set is internally coherent.
      and sell-confirmed filled amount. These are the required inputs for
      independent chain-sim replay.
 8. Review samples:
-   - top winners and worst losers are printed as mandatory follow-up forensic
-     trades. A profitable strategy is not accepted until representative winners
-     and losers replay cleanly.
+   - top winners and worst losers are printed as supporting forensic rows for
+     debugging validation failures. Profit concentration and tail-risk
+     questions are answered by `strategy_assessment`, not by validation.
 
 ### Verdicts
 
 - `pass`: the invariant holds.
-- `warn`: the result may still be usable, but strategy conclusions are
-  sensitive or evidence is incomplete.
 - `fail`: do not trust the scoped result until fixed.
 - `blocked`: the check could not run because required external state or replay
   support is unavailable.
+
+`warn` can still appear in older persisted reports, but current validation
+checks should produce only `pass`, `fail`, or `blocked`.
+
+## Strategy Assessment
+
+Strategy assessment runs after validation and asks quality questions that do not
+belong in correctness validation. The implemented questions are documented in
+`src/strategy_assessment/README.md` with their formulas and thresholds.
+
+Current questions:
+
+- Does positive PnL survive removing top winners?
+- Is gross profit large enough to absorb gross loss?
+- Are losses concentrated in a small tail we can explain or avoid?
+- Does unresolved exposure materially affect the strategy conclusion?
+- Are failed exits leaving unresolved exposure?
+
+```bash
+eth_alpha_lab strategy-assessment \
+  --result-set historical-25090165-25110164 \
+  --strategy snipe-all-risk-atlas-lp-gate-hold15-v2-uniswap-v2-only
+```
 
 ### EVM Replay Policy
 

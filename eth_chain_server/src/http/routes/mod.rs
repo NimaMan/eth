@@ -18,7 +18,8 @@ use warp::{Filter, Reply};
 use crate::http::ServerState;
 use crate::read_models::activity::TokenActivityBlocksQuery;
 use crate::stores::alpha_trading::{
-    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery, StrategyPerformanceQuery,
+    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery, ResultSetReportQuery,
+    StrategyPerformanceQuery,
 };
 use crate::stores::mempool_signals::MempoolSignalQuery;
 
@@ -294,6 +295,26 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(backtest::result_set_performance);
 
+    let alpha_result_set_strategies =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets" / String / "strategies")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(backtest::result_set_strategies);
+
+    let alpha_result_set_validation =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets" / String / "validation")
+            .and(warp::get())
+            .and(warp::query::<ResultSetReportQuery>())
+            .and(with_state(state.clone()))
+            .and_then(backtest::result_set_validation);
+
+    let alpha_result_set_assessment =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "result-sets" / String / "assessment")
+            .and(warp::get())
+            .and(warp::query::<ResultSetReportQuery>())
+            .and(with_state(state.clone()))
+            .and_then(backtest::result_set_assessment);
+
     let alpha_result_set_strategy_performance = warp::path!(
         "eth"
             / "tokens"
@@ -309,6 +330,38 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     .and(warp::query::<ResultSetPerformanceQuery>())
     .and(with_state(state.clone()))
     .and_then(backtest::result_set_strategy_performance);
+
+    let alpha_result_set_strategy_validation = warp::path!(
+        "eth"
+            / "tokens"
+            / "api"
+            / "alpha"
+            / "result-sets"
+            / String
+            / "strategies"
+            / String
+            / "validation"
+    )
+    .and(warp::get())
+    .and(warp::query::<ResultSetReportQuery>())
+    .and(with_state(state.clone()))
+    .and_then(backtest::result_set_strategy_validation);
+
+    let alpha_result_set_strategy_assessment = warp::path!(
+        "eth"
+            / "tokens"
+            / "api"
+            / "alpha"
+            / "result-sets"
+            / String
+            / "strategies"
+            / String
+            / "assessment"
+    )
+    .and(warp::get())
+    .and(warp::query::<ResultSetReportQuery>())
+    .and(with_state(state.clone()))
+    .and_then(backtest::result_set_strategy_assessment);
 
     let alpha_run_positions =
         warp::path!("eth" / "tokens" / "api" / "alpha" / "runs" / String / "positions")
@@ -399,7 +452,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(range::stop_run);
 
-    let alpha_result_set_routes = alpha_result_set_strategy_performance
+    let alpha_result_set_routes = alpha_result_set_strategy_assessment
+        .or(alpha_result_set_strategy_validation)
+        .or(alpha_result_set_strategy_performance)
+        .or(alpha_result_set_assessment)
+        .or(alpha_result_set_validation)
+        .or(alpha_result_set_strategies)
         .or(alpha_result_set_performance)
         .or(alpha_result_set_detail)
         .or(alpha_result_sets)

@@ -211,3 +211,85 @@ pub(super) async fn lifecycle_order_check(
     )
     .await
 }
+
+pub(super) async fn active_hold_limit_exit_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "lifecycle",
+        "active_hold_limit_submits_exit",
+        Verdict::Fail,
+        "buy-confirmed trades submit an exit once persisted active-hold observations reach max_hold_blocks",
+        "buy-confirmed trades over active-hold limit without a sell submission",
+        r#"
+        WITH strategy_cfg AS (
+            SELECT spec->>'strategy_name' AS strategy_name,
+                   NULLIF(spec->>'max_hold_blocks', '')::bigint AS max_hold_blocks
+            FROM alpha_trading.backtest_result_sets rs
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE
+                    WHEN jsonb_typeof(rs.config->'strategies') = 'array'
+                    THEN rs.config->'strategies'
+                    ELSE '[]'::jsonb
+                END
+            ) AS spec
+            WHERE rs.result_set_id = $1
+            UNION ALL
+            SELECT rs.config->>'strategy_name' AS strategy_name,
+                   NULLIF(rs.config->>'max_hold_blocks', '')::bigint AS max_hold_blocks
+            FROM alpha_trading.backtest_result_sets rs
+            WHERE rs.result_set_id = $1
+              AND rs.config ? 'strategy_name'
+        ),
+        scoped AS (
+            SELECT t.trade_id,
+                   t.run_id,
+                   t.strategy_name,
+                   t.token_address,
+                   t.pool_address,
+                   t.entry_block,
+                   cfg.max_hold_blocks
+            FROM alpha_trading.trades t
+            JOIN strategy_cfg cfg
+              ON cfg.strategy_name = t.strategy_name
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND t.state = 'buy_confirmed'
+              AND t.entry_block IS NOT NULL
+              AND cfg.max_hold_blocks IS NOT NULL
+        ),
+        active AS (
+            SELECT s.trade_id,
+                   count(DISTINCT sd.block_number) FILTER (
+                       WHERE sd.reason = 'position_open_no_exit'
+                         AND sd.action = 'hold'
+                         AND sd.block_number IS NOT NULL
+                   ) AS active_hold_blocks
+            FROM scoped s
+            LEFT JOIN alpha_trading.strategy_decisions sd
+              ON sd.run_id = s.run_id
+             AND sd.strategy_name = s.strategy_name
+             AND lower(sd.token_address) = lower(s.token_address)
+             AND lower(sd.pool_address) = lower(s.pool_address)
+             AND sd.block_number >= s.entry_block
+            GROUP BY s.trade_id
+        )
+        SELECT count(*)
+        FROM scoped s
+        JOIN active ON active.trade_id = s.trade_id
+        WHERE active.active_hold_blocks >= s.max_hold_blocks
+          AND NOT EXISTS (
+              SELECT 1
+              FROM alpha_trading.trade_events te
+              WHERE te.trade_id = s.trade_id
+                AND te.event_type = 'sell_submitted'
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}

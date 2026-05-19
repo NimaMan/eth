@@ -267,7 +267,7 @@ pub(super) async fn closed_trade_final_snapshot_check(
         pool,
         "snapshots",
         "closed_trade_final_snapshot",
-        Verdict::Warn,
+        Verdict::Fail,
         "closed trades have a sell_confirmed snapshot at the exit block",
         "closed trades missing sell_confirmed exit snapshot",
         r#"

@@ -1,10 +1,16 @@
 pub use eth_alpha_store::performance::StrategyPerformanceQuery;
-pub use eth_alpha_store::result_sets::{
+pub use eth_alpha_store::strategy_run_results::{
     ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery,
 };
 
+use eth_alpha_lab::backtest_validation::{
+    self, db::StrategySummary, BacktestValidationReport, ValidationOptions,
+};
+use eth_alpha_lab::strategy_assessment::{
+    self, StrategyAssessmentOptions, StrategyAssessmentReport,
+};
 use eth_alpha_store::performance::{load_strategy_performance, StrategyPerformanceReport};
-use eth_alpha_store::result_sets::{
+use eth_alpha_store::strategy_run_results::{
     load_result_set, load_result_set_performance, load_result_sets, ResultSetDetailResponse,
     ResultSetListResponse, ResultSetPerformanceResponse,
 };
@@ -66,6 +72,11 @@ impl AlphaStrategyResetScope {
 pub struct AlphaStrategyResetRequest {
     #[serde(default)]
     pub scope: AlphaStrategyResetScope,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ResultSetReportQuery {
+    pub strategy_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -161,6 +172,11 @@ pub struct OrderIntentView {
     pub amount_decimals: i16,
     pub max_slippage_bps: i32,
     pub deadline_secs: i64,
+    pub reason_code: Option<String>,
+    pub reason_category: Option<String>,
+    pub reason_label: Option<String>,
+    pub reason_source: Option<String>,
+    pub reason_details: Value,
     pub created_at: String,
     pub payload: Value,
 }
@@ -207,6 +223,11 @@ pub struct StrategyDecisionView {
     pub pool_address: Option<String>,
     pub action: String,
     pub reason: Option<String>,
+    pub reason_code: Option<String>,
+    pub reason_category: Option<String>,
+    pub reason_label: Option<String>,
+    pub reason_source: Option<String>,
+    pub reason_details: Value,
     pub order_side: Option<String>,
     pub created_at: String,
     pub payload: Value,
@@ -582,6 +603,47 @@ impl AlphaTradingStore {
             .map_err(|error| eyre!(error.to_string()))
     }
 
+    pub async fn result_set_strategy_summaries(
+        &self,
+        result_set_id: &str,
+    ) -> Result<Vec<StrategySummary>> {
+        backtest_validation::db::load_strategy_summaries(&self.pool, result_set_id, None)
+            .await
+            .map_err(|error| eyre!(error.to_string()))
+    }
+
+    pub async fn result_set_validation(
+        &self,
+        result_set_id: &str,
+        strategy_name: Option<String>,
+    ) -> Result<BacktestValidationReport> {
+        backtest_validation::validate_backtest(
+            &self.pool,
+            ValidationOptions {
+                result_set_id: result_set_id.to_string(),
+                strategy: strategy_name,
+            },
+        )
+        .await
+        .map_err(|error| eyre!(error.to_string()))
+    }
+
+    pub async fn result_set_assessment(
+        &self,
+        result_set_id: &str,
+        strategy_name: Option<String>,
+    ) -> Result<StrategyAssessmentReport> {
+        strategy_assessment::assess_strategy(
+            &self.pool,
+            StrategyAssessmentOptions {
+                result_set_id: result_set_id.to_string(),
+                strategy: strategy_name,
+            },
+        )
+        .await
+        .map_err(|error| eyre!(error.to_string()))
+    }
+
     async fn recent_runs(&self, limit: i64) -> Result<Vec<TraderRunView>> {
         self.list_runs(None, limit).await
     }
@@ -669,7 +731,9 @@ impl AlphaTradingStore {
             r#"
             SELECT id, portfolio_id, wallet_id, strategy_name, side, token_address,
                    pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
-                   deadline_secs, created_at::text AS created_at, payload::text AS payload
+                   deadline_secs, reason_code, reason_category, reason_label, reason_source,
+                   COALESCE(reason_details, '{}'::jsonb)::text AS reason_details,
+                   created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.order_intents
             WHERE run_id = $1 AND strategy_name = $2
             ORDER BY created_at DESC
@@ -711,7 +775,9 @@ impl AlphaTradingStore {
             r#"
             SELECT id, portfolio_id, wallet_id, strategy_name, side, token_address,
                    pool_address, protocol, amount_raw, amount_decimals, max_slippage_bps,
-                   deadline_secs, created_at::text AS created_at, payload::text AS payload
+                   deadline_secs, reason_code, reason_category, reason_label, reason_source,
+                   COALESCE(reason_details, '{}'::jsonb)::text AS reason_details,
+                   created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.order_intents
             WHERE run_id = $1
             ORDER BY created_at DESC
@@ -778,7 +844,10 @@ impl AlphaTradingStore {
         let rows = sqlx::query(
             r#"
             SELECT id, strategy_name, event_source, event_key, block_number,
-                   token_address, pool_address, action, reason, order_side,
+                   token_address, pool_address, action, reason,
+                   reason_code, reason_category, reason_label, reason_source,
+                   COALESCE(reason_details, '{}'::jsonb)::text AS reason_details,
+                   order_side,
                    created_at::text AS created_at, payload::text AS payload
             FROM alpha_trading.strategy_decisions
             WHERE run_id = $1
@@ -1005,6 +1074,11 @@ fn row_to_order(row: &sqlx::postgres::PgRow) -> Result<OrderIntentView> {
         amount_decimals: small_int(row, "amount_decimals")?,
         max_slippage_bps: int32(row, "max_slippage_bps")?,
         deadline_secs: int(row, "deadline_secs")?,
+        reason_code: optional_text(row, "reason_code")?,
+        reason_category: optional_text(row, "reason_category")?,
+        reason_label: optional_text(row, "reason_label")?,
+        reason_source: optional_text(row, "reason_source")?,
+        reason_details: json_text(row, "reason_details")?,
         created_at: text(row, "created_at")?,
         payload: json_text(row, "payload")?,
     })
@@ -1054,6 +1128,11 @@ fn row_to_strategy_decision(row: &sqlx::postgres::PgRow) -> Result<StrategyDecis
         pool_address: optional_text(row, "pool_address")?,
         action: text(row, "action")?,
         reason: optional_text(row, "reason")?,
+        reason_code: optional_text(row, "reason_code")?,
+        reason_category: optional_text(row, "reason_category")?,
+        reason_label: optional_text(row, "reason_label")?,
+        reason_source: optional_text(row, "reason_source")?,
+        reason_details: json_text(row, "reason_details")?,
         order_side: optional_text(row, "order_side")?,
         created_at: text(row, "created_at")?,
         payload: json_text(row, "payload")?,

@@ -7,7 +7,6 @@ use super::report::CheckResult;
 mod accounting;
 mod common;
 mod decision_timing;
-mod distribution;
 mod execution_replay;
 mod lifecycle;
 mod metadata;
@@ -23,6 +22,7 @@ pub async fn run_checks(
     let result_set_id = result_set.result_set_id.as_str();
     let mut checks = Vec::new();
     checks.push(metadata::result_set_status_check(result_set));
+    checks.push(metadata::result_set_running_state_consistency_check(pool, result_set_id).await?);
     checks.push(metadata::strategy_rows_check(strategy_summaries, strategy));
     checks.push(metadata::trade_id_format_check(pool, result_set_id, strategy).await?);
     checks.push(signal_scope::historical_mempool_scope_check(pool, result_set, strategy).await?);
@@ -91,6 +91,7 @@ pub async fn run_checks(
     checks
         .push(lifecycle::no_duplicate_terminal_events_check(pool, result_set_id, strategy).await?);
     checks.push(lifecycle::lifecycle_order_check(pool, result_set_id, strategy).await?);
+    checks.push(lifecycle::active_hold_limit_exit_check(pool, result_set_id, strategy).await?);
     checks
         .push(accounting::entry_cost_matches_buy_fill_check(pool, result_set_id, strategy).await?);
     checks
@@ -122,6 +123,5 @@ pub async fn run_checks(
     checks.push(
         execution_replay::execution_replay_inputs_check(pool, result_set_id, strategy).await?,
     );
-    checks.push(distribution::pnl_concentration_check(pool, result_set_id, strategy).await?);
     Ok(checks)
 }

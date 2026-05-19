@@ -67,6 +67,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Is this result set in the expected state?",
             "Compares result-set mode with status so completed historical results and running live results are not mixed with partial runs.",
         ),
+        "running_result_set_has_no_stop_marker" => (
+            "Is a running live result free of stopped-run markers?",
+            "Rejects running result sets or trader runs that still carry stopped_at or shutdown/stale metadata from a prior process lifetime.",
+        ),
         "strategy_rows" => (
             "Did this strategy produce trades in this result set?",
             "Counts scoped trade rows before any PnL or validation verdict is treated as meaningful.",
@@ -135,6 +139,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Are lifecycle event blocks ordered correctly?",
             "Validates buy submit <= buy terminal outcome, and for confirmed buys validates buy confirmation <= sell submit <= sell confirmation where those events exist.",
         ),
+        "active_hold_limit_submits_exit" => (
+            "Did max-hold positions actually submit exits?",
+            "Uses persisted position_open_no_exit decisions to catch buy-confirmed positions whose active pool-update count reached max_hold_blocks without any sell submission.",
+        ),
         "entry_cost_matches_buy_fill" => (
             "Does entry cost come from the buy simulation fill?",
             "Compares trade entry_cost_eth with the buy_confirmed report's filled ETH amount.",
@@ -194,10 +202,6 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "closed_trade_replay_inputs_present" => (
             "Can this closed trade be independently replayed?",
             "Requires buy token amount, sell order amount, and sell-confirmed filled amount to be persisted.",
-        ),
-        "top5_pnl_concentration" => (
-            "Is strategy PnL too concentrated in the top winners?",
-            "Warns when the top five winners exceed 100% of aggregate PnL, making strategy conclusions fragile.",
         ),
         _ => (
             "What invariant is this check validating?",

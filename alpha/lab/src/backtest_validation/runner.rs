@@ -59,6 +59,6 @@ fn validation_procedure() -> Vec<String> {
         "Validate rollups and accounting from persisted events: trade rows must match position lifecycle fields, gas must equal the trade event gas sum, entry cost equals buy fill, exit value equals sell fill, total PnL equals realized plus unrealized, and closed realized PnL equals exit value minus entry cost minus gas.".to_string(),
         "Validate snapshot consistency: closed trades must not receive later snapshots, open-state valuations must not pass the sell block, latest snapshot block coordinates, PnL, and ROI must match trade_snapshots, and closed trades must have a terminal sell_confirmed latest snapshot.".to_string(),
         "Validate replay readiness by ensuring closed trades retain buy token amount, sell order amount, and sell filled amount for independent chain-sim replay.".to_string(),
-        "Sample top winners and worst losers with the comprehensive sample size so concentration and tail failures are reviewed before accepting strategy-level conclusions.".to_string(),
+        "Sample top winners and worst losers only as supporting evidence for debugging failed invariants; distribution quality is assessed by strategy_assessment, not validation.".to_string(),
     ]
 }

@@ -58,7 +58,8 @@ It reads these backend tables:
 
 - result-set metadata and optional strategy filter.
 - the `comprehensive` profile label.
-- a summary of pass/warn/fail/blocked counts.
+- a summary of pass/fail/blocked counts. `warn` is retained only for backward
+  compatibility with older persisted reports.
 - per-strategy trade/PnL summaries.
 - ordered check results.
 - top-winner and worst-loser samples.
@@ -71,9 +72,12 @@ Each `CheckResult` answers one explicit question:
 - `code`: stable machine-readable check identifier.
 - `question`: user-facing trust question.
 - `description`: why that question matters.
-- `verdict`: `pass`, `warn`, `fail`, or `blocked`.
+- `verdict`: `pass`, `fail`, or `blocked` for current validation checks.
 - `message`: concise result and violation count.
 - `evidence`: structured evidence such as violation counts and tolerances.
+
+Validation checks ask correctness questions only. Questions about whether PnL is
+fragile, concentrated, or attractive belong in `strategy_assessment`.
 
 ## Procedure
 
@@ -87,7 +91,6 @@ The validator runs in this order:
 6. Validate accounting from backend persisted fills and gas.
 7. Validate snapshots and latest trade rollups.
 8. Validate replay readiness for closed trades.
-9. Warn on fragile PnL concentration.
 
 The order is intentional: basic provenance and lifecycle errors make downstream
 PnL harder to interpret.
@@ -143,3 +146,5 @@ cargo check -p eth_alpha_lab
 - Snapshot checks should detect stale aggregate rollups and impossible timeline
   ordering.
 - A known-bad historical result should fail in a specific, explainable way.
+- Do not add strategy-quality, distribution, or profitability attractiveness
+  checks here. Add those to `strategy_assessment` instead.

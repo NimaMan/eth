@@ -6,7 +6,7 @@ use warp::http::StatusCode;
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
 use crate::stores::alpha_trading::{
-    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery,
+    ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery, ResultSetReportQuery,
 };
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +105,79 @@ pub(super) async fn result_set_strategy_performance(
 ) -> Result<warp::reply::Response, Infallible> {
     query.strategy_name = Some(strategy_name);
     result_set_performance(result_set_id, query, state).await
+}
+
+pub(super) async fn result_set_strategies(
+    result_set_id: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .result_set_strategy_summaries(&result_set_id)
+        .await
+    {
+        Ok(strategies) => Ok(json_response(&strategies, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load result set strategies: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_validation(
+    result_set_id: String,
+    query: ResultSetReportQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .result_set_validation(&result_set_id, query.strategy_name)
+        .await
+    {
+        Ok(report) => Ok(json_response(&report, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to validate result set: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_strategy_validation(
+    result_set_id: String,
+    strategy_name: String,
+    mut query: ResultSetReportQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    query.strategy_name = Some(strategy_name);
+    result_set_validation(result_set_id, query, state).await
+}
+
+pub(super) async fn result_set_assessment(
+    result_set_id: String,
+    query: ResultSetReportQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .alpha_trading
+        .result_set_assessment(&result_set_id, query.strategy_name)
+        .await
+    {
+        Ok(report) => Ok(json_response(&report, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to assess result set: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub(super) async fn result_set_strategy_assessment(
+    result_set_id: String,
+    strategy_name: String,
+    mut query: ResultSetReportQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    query.strategy_name = Some(strategy_name);
+    result_set_assessment(result_set_id, query, state).await
 }
 
 pub(super) async fn run_positions(
