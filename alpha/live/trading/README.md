@@ -90,6 +90,10 @@ Use `--write-request-path /tmp/kartal-planner-produced-request.json` with
 and selector allowlists to the exact planner-produced transaction before
 submitting the signed dry-run.
 
+Planner-fixture calibration appends a UTC timestamp to the generated
+`attempt_id` by default. That keeps repeated dry-run signing attempts separate
+in Kartal's policy journal and spend ledger.
+
 Current bottleneck: the running `eth_alpha_trader` still uses chain-state
 simulation. It does not instantiate the engine's real `TxExecutorAdapter` or the
 `LiveTradingPlannerBridge`, and the planner's production context resolver,

@@ -42,6 +42,11 @@ cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
 That check proves decode, auth, policy acceptance, spend reservation, signing,
 tx_executor journaling, and no broadcast.
 
+Planner-fixture requests append a UTC timestamp to the generated `attempt_id`
+by default so repeated dry-run signing checks remain distinct in Kartal's
+policy journal and spend ledger. Use `--stable-planner-fixture-attempt-id` only
+when a deterministic request id is required.
+
 To inspect or policy-allow the exact planner-produced target and calldata
 selector first, write the request without contacting Kartal:
 

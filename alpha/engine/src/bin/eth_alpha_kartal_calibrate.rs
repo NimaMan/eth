@@ -10,6 +10,7 @@ use eth_live_trading::{
     PlannerCalibrationFixtureConfig, PlannerCalibrationRoute,
 };
 use eyre::{eyre, Result, WrapErr};
+use serde_json::json;
 
 const DEFAULT_REPORT_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/alpha/lab/reports/kartal_calibration";
@@ -46,6 +47,16 @@ struct Args {
 
     #[arg(long, default_value = DEFAULT_PLANNER_FIXTURE_RUN_ID)]
     planner_fixture_run_id: String,
+
+    /// Optional suffix for the generated planner-fixture attempt id.
+    /// Defaults to a UTC timestamp so repeated dry-runs remain auditable.
+    #[arg(long)]
+    planner_fixture_attempt_suffix: Option<String>,
+
+    /// Keep the planner-produced attempt id deterministic. Prefer leaving this
+    /// off for repeated dry-run signing checks.
+    #[arg(long, default_value_t = false)]
+    stable_planner_fixture_attempt_id: bool,
 
     /// Write the planner-produced request JSON before submission.
     #[arg(long)]
@@ -193,9 +204,12 @@ async fn build_planner_fixture_input(args: &Args) -> Result<CalibrationInputFile
     config.strategy_name = args.planner_fixture_strategy_name.clone();
     config.strategy_run_id = Some(args.planner_fixture_run_id.clone());
 
-    let request = build_planner_calibration_request(config)
+    let mut request = build_planner_calibration_request(config)
         .await
         .wrap_err("failed to build planner-produced calibration request")?;
+    if let Some(suffix) = planner_fixture_attempt_suffix(args) {
+        apply_attempt_suffix(&mut request, &suffix);
+    }
     if let Some(path) = &args.write_request_path {
         write_request(path, &request)?;
         println!("request: {}", path.display());
@@ -223,6 +237,31 @@ fn planner_fixture_from(args: &Args) -> Result<Address> {
         _ => Err(eyre!(
             "ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES has multiple values; pass --planner-fixture-from"
         )),
+    }
+}
+
+fn planner_fixture_attempt_suffix(args: &Args) -> Option<String> {
+    if let Some(suffix) = &args.planner_fixture_attempt_suffix {
+        let suffix = suffix.trim();
+        return (!suffix.is_empty()).then(|| suffix.to_string());
+    }
+    if args.stable_planner_fixture_attempt_id {
+        return None;
+    }
+    Some(Utc::now().format("%Y%m%d%H%M%S").to_string())
+}
+
+fn apply_attempt_suffix(
+    request: &mut eth_live_trading::LiveDirectRawTransactionRequest,
+    suffix: &str,
+) {
+    let base = request
+        .attempt_id
+        .clone()
+        .unwrap_or_else(|| "planner-fixture".to_string());
+    request.attempt_id = Some(format!("{base}-{suffix}"));
+    if let serde_json::Value::Object(metadata) = &mut request.metadata {
+        metadata.insert("calibration_attempt_suffix".to_string(), json!(suffix));
     }
 }
 
