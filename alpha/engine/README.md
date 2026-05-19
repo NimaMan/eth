@@ -22,7 +22,7 @@ This is the high-level live trading runtime. It consumes typed events, runs stra
 - It does not decode transaction logs.
 - It does not simulate pending mempool txs directly.
 - It does not sign transactions.
-- It does not own Redis live-state schemas.
+- It does not own live-state schemas.
 - It does not use snapshot-price or perfect-fill execution for strategy
   evaluation. No-capital execution goes through chain-state EVM simulation.
 
@@ -122,11 +122,31 @@ prepared transaction.
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
 - `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` return
   `ExecutionReport`s from EVM simulation against selected chain state.
-- The future real adapter is responsible for route/calldata construction,
-  pre-simulation, `eth_block_tx_rank` checks, and then final submission through
-  `tx_executor`.
+- `TxExecutorAdapter` is the real submission boundary. It delegates route,
+  calldata, pre-simulation, and gas-rank decisions to a `LiveTxPlanner`, then
+  submits the prepared signal through Kartal to `tx_executor`.
+- `LiveTradingPlannerBridge` adapts the engine's `LiveTxPlanner` trait to
+  `alpha/live/trading::PrioritySellPlanner`; `LiveTxPlanningInputResolver` is
+  the runtime hook for loading position, pool, wallet, and observation context.
 - `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
 - `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
+
+## Real Submission Status
+
+The engine has the real adapter and planner bridge shape, but the live binary is
+not deployable for real capital yet. `eth_alpha_trader` accepts only `chain-sim`
+mode today and always constructs `LiveChainSimExecutionAdapter`. A real
+deployment needs:
+
+- a new guarded runtime mode that instantiates `TxExecutorAdapter`;
+- a production `LiveTxPlanningInputResolver` and live
+  simulation/gas-rank/allowance providers for `alpha/live/trading`;
+- explicit Kartal URL/token/signer/broadcast config in the run record;
+- receipt tracking that turns Kartal tx hashes into final confirmed or failed
+  `ExecutionReport`s.
+
+Until those exist, live strategies can produce chain-sim orders and observations,
+but they cannot automatically submit real Kartal transactions.
 
 ## Trader Binary
 

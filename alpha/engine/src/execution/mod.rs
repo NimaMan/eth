@@ -13,4 +13,8 @@
 mod real;
 mod simulated;
 
+pub use real::{
+    LiveTradingPlannerBridge, LiveTxPlanner, LiveTxPlanningInputResolver, LiveTxSubmitter,
+    TxExecutorAdapter,
+};
 pub use simulated::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};

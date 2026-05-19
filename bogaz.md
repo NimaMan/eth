@@ -4,59 +4,6 @@
 what is limiting the pipeline, the evidence, the owning subsystem, and the next
 action. Completed work belongs in focused docs or commit history.
 
-## Current Runtime Snapshot
-
-Snapshot time: `2026-05-14 20:52 Europe/Amsterdam`.
-
-- Chain server user service: `eth-chain-server.service`, active PID `2480566`.
-- Chain server log run:
-  `logs/eth_chain_server/run-20260514-164337Z-pid-2480566`.
-- Chain server live status: `live`, current block `25,095,289`, `735`
-  tracked tokens, `471` tracked pools, `426` V2, `5` V3, `40` V4,
-  `115` token tx failures, `last_error=null`.
-- Live pool API split is deployed and working:
-  `/eth/tokens/api/live/pools` returns `471` retained pools,
-  `/eth/tokens/api/live/pools/active` returns `37` non-scam pools, and
-  `/eth/tokens/api/live/pools/scam` returns `434` scam pools. The default
-  response also includes `total_count`, `active_count`, and `scam_count`.
-- The dominant chain-server issue has changed from one V3 pool identity miss to
-  repeated live token-apply failures with detail
-  `missing local Reth block header for <current block - 1>`. Recent examples
-  include block `25,095,236`, tx indexes `158` and `166`. Those example txs are
-  contract creations; they are separate from the mined Uniswap V3 WBTC/USDT
-  remove/collect tx investigated below.
-- Mempool user service: `eth-mempool-signal-detector.service`, active PID
-  `1947012`.
-- Mempool log run:
-  `logs/mempool_processor/signal_detector_2026-05-14_16-12-52`.
-- Mempool token context is live at chain-server block `25,095,289`, but its
-  local additive cache reports `985` tokens and `57` pools while chain-server
-  reports `735` tokens and `37` active pools. This suggests the mempool cache is
-  retaining stale token/pool entries across chain-server live retention.
-- Mempool has processed `213,673` tx in the current run with `3,207/3,207`
-  simulations completed, `0` queue drops, and `1` actionable simulation error.
-- Current-run public mempool signals: `6` published and DB-written:
-  `2` `trading_enabled` and `4` `liquidity_removal`. Latest signal is
-  `liquidity_removal` tx
-  `0xece23beaf9264cee5960901c21bbc94d4c77789a1bbb4f7fc8e60e0ab7b16b3d`
-  on pool `0x1edf76d14d59f5b120d71f4541f85d00e3dee58b`, removing
-  `1.193374091004322457` WETH and leaving `0.000120721183061612`.
-- The single actionable mempool simulation error is tx
-  `0x0ad45126157ceba0ffc7e0864f0235394edbb2cdbea9f4aa40fac8012dd0a73e`,
-  a mined Uniswap V3 NonfungiblePositionManager multicall that removed and
-  collected WBTC/USDT liquidity. The pre-mine simulation ran at block
-  `25,094,878` and failed sender balance validation because the sender did not
-  yet have enough ETH for max gas. The transaction later mined successfully in
-  block `25,094,880` only after an inbound ETH funding tx in block
-  `25,094,879`. The target tx was recorded by the mempool arrival index at
-  `2026-05-14T17:30:18.250Z`; the funding tx was not recorded, so this is an
-  unseen funding-dependency gap, not a V3 pool/protocol failure.
-- LP approval publication is still blocked: latest counters show `5,596`
-  ERC20 approval ingress txs, `0` ownership hits, `9` position approvals,
-  `3` manager hits, and `0` public LP approval signals.
-- These are user systemd services. In non-login shells, use
-  `XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user ...` to inspect them;
-  plain system-level `systemctl` will not show these unit names.
 
 ## Bogaz Destination Goal
 
@@ -84,315 +31,162 @@ Finished means:
   sizing, retry cadence, exit restrictions, stale-data thresholds, simulation
   freshness, and kill switch behavior.
 
-## Codex Current Goal
 
-Build the live non-capital backtest version of the real strategy evidence
-layer.
+## Current Limiting Factor
 
-This workstream should produce a current-regime estimate for the candidate
-policy, not a final real-execution approval. It must make coverage explicit:
-the latest replay source currently reaches live blocks, but its historical
-observation coverage starts at block `25,066,498`, so a true two-week replay
-requires either a longer durable observation source or a historical observation
-builder.
+As of 2026-05-19, the live-capital bottleneck is production runtime wiring, not
+the direct-raw wire protocol. Kartal and `tx_executor` can already accept,
+validate, sign, journal, dry-run, and publicly broadcast a prepared direct
+transaction. `alpha/live/trading` now has a v1 priority-sell planner scaffold and
+the engine has a `LiveTradingPlannerBridge`, but the running trader still does
+not instantiate that path with production providers.
 
-Finished means:
+The practical consequence is:
 
-- The candidate policy is run against the latest available live observation
-  source with a fixed block window and run id.
-- The report states the requested window, actual observation coverage, and
-  whether the run is a full two-week replay or a partial current-regime replay.
-- Strategy Lab output is available for summary, concentration, top 10, worst
-  10, buy failures, and open failed exits.
-- The no-capital run persists strategy decision rows for buy, skip, hold, risk
-  check, retry, and exit decisions, and those rows are exposed through the
-  chain-server alpha run API for frontend review.
-- Any missing data needed for a true two-week replay is recorded as the next
-  limiting factor.
+- A manual direct-raw transaction can be sent to Kartal when the signer/token/RPC
+  config is present.
+- `eth_alpha_trader` cannot be promoted to real capital by flipping an env var;
+  its CLI still only accepts `chain-sim`.
+- The `TxExecutorAdapter` and `LiveTradingPlannerBridge` exist in
+  `alpha/engine`, but no runtime mode instantiates them.
+- `alpha/live/trading::LivePrioritySellPlanner` can build a Uniswap V2 ETH/WETH
+  sell route, require an allowance, consume simulation and gas-rank providers,
+  value-cap the bribe, and emit `LiveTraderTxSignal`.
+- The production `LiveTxPlanningInputResolver`, final simulation provider,
+  gas-rank provider, allowance reader, and receipt reconciler are still missing
+  from the live critical path.
 
-Latest evidence:
+## Live Tx Submission Audit 2026-05-19
 
-- `live-noncapital-maxhold50-twoweek-requested-20260514-1020` ran the current
-  best candidate, `snipe-all-v1` with `--max-hold-blocks 50`, against requested
-  window `24,991,345..25,092,144`.
-- The run completed with `127,878` events, `1,089` execution reports, `983`
-  confirmed reports, `106` failed reports, `533` positions, and `59` open
-  positions.
-- Strategy Lab reports total PnL `+12.876052023155642365 ETH`, PnL excluding
-  top 10 `+5.913359147437672841 ETH`, `12` buy-failed positions, and `59`
-  sell-failed positions.
-- The report is
-  `alpha/lab/reports/live-noncapital-maxhold50-twoweek-requested-20260514-1020.md`.
-- Coverage is still partial: the requested two-week window starts at
-  `24,991,345`, but usable pool observations start at `25,066,498`.
-- A bounded retry comparison,
-  `live-noncapital-maxhold50-retry20x3-twoweek-requested-20260514-1030`,
-  was run after adding opt-in retry cadence. It left PnL and open exposure
-  unchanged while increasing failed reports from `106` to `214`, so retry-only
-  is not the next useful policy.
-- A risk-exit comparison,
-  `live-noncapital-maxhold50-riskbundle-twoweek-requested-20260514-1040`,
-  included stored mempool signals and enabled liquidity-removal, LP-approval,
-  tax, and scam exits. It improved total PnL to
-  `+12.928123726556627169 ETH` and PnL excluding top 10 to
-  `+5.965430850838657645 ETH`, with the same `59` sell-failed positions.
-  Risk exits moved five confirmed sells earlier by up to `51` blocks.
-- Decision-ledger persistence has been added to the alpha engine/store and
-  exposed through chain-server at
-  `/eth/tokens/api/alpha/runs/{run_id}/decisions`. The smoke run
-  `decision-ledger-smoke-20260514-1045` wrote `832` decision rows, all with a
-  reason, including `27` buy submissions and `25` max-hold monitor sells.
-- The full candidate decision-ledger run,
-  `live-noncapital-maxhold50-riskbundle-decisions-twoweek-requested-20260514-1053`,
-  covered requested window `24,991,500..25,092,298` and completed with
-  `128,242` events, `1,091` execution reports, `985` confirmed reports, `106`
-  failed reports, `534` positions, and `59` open positions. Strategy Lab reports
-  total PnL `+12.927265783819489334 ETH` and PnL excluding top 10
-  `+5.964572908101519810 ETH`.
-- Sell-failure investigation showed that `53` of the `59` sell-failed positions
-  had a later pool observation where reserve fell below `0.1 ETH`, `can_sell`
-  became false, and `is_scam` became true before the max-hold-50 exit. The
-  transition age distribution was `{6,22,29,41,50}` blocks, so the current
-  max-hold-50 policy often waits through the rug transition.
-- Two shorter live no-capital variants were run on the same requested window
-  after centralizing failed-exit retries in the position-monitor path:
-  `live-noncapital-maxhold10-riskbundle-retryfix-twoweek-requested-20260514-092804Z`
-  and
-  `live-noncapital-maxhold20-riskbundle-retryfix-twoweek-requested-20260514-092804Z`.
-  `maxhold10` cut sell-failed positions to `9` with total PnL
-  `+7.710342857256795193 ETH` and ex-top-10 PnL
-  `+5.661370663780626751 ETH`. `maxhold20` cut sell-failed positions to `23`
-  with total PnL `+10.906166875635052281 ETH` and ex-top-10 PnL
-  `+7.505512163468218752 ETH`. Current no-capital evidence favors `maxhold20`
-  over `maxhold50`: less exit risk and better ex-top-10 PnL, while giving up
-  some top-winner upside.
-- The full candidate run wrote `27,889` strategy-decision rows, all with a
-  reason, including `534` buy submissions and `552` sell submissions. The top
-  10 winners and worst 10 losers are explainable from the ledger: all have
-  `entry.buy_eligible_pool_once` entries and `exit.max_hold` exits; five of the
-  worst 10 still have `TransferHelper: TRANSFER_FROM_FAILED` sell failures.
-- Chain-server also exposes the joined top/worst audit endpoint at
-  `/eth/tokens/api/alpha/runs/{run_id}/decision-audit`. For the full candidate
-  run it returns `20` rows: `10` top and `10` worst positions with entry reason,
-  exit reason, sell report status, PnL, and ROI.
-- Order lifecycle persistence now records a `submitted` execution report before
-  the simulated final report when the adapter returns `confirmed` or `failed`
-  directly. The smoke run
-  `lifecycle-smoke-20260514-095812Z` wrote `12` `buy/submitted`, `12`
-  `buy/confirmed`, `10` `sell/submitted`, `9` `sell/confirmed`, and `1`
-  `sell/failed` report. This makes the position lifecycle visible without
-  changing existing chain-sim PnL semantics.
-- Chain-server report APIs now expose `position_id` and `order_side`, and the
-  Asena historical backtest detail route has `Lifecycle` and `Decision Audit`
-  tabs. The lifecycle tab groups execution reports into steps such as
-  `buy_submitted`, `buy_confirmed`, `sell_submitted`, and `sell_failed`.
-  Existing candidate runs need to be rerun to show submitted rows because older
-  runs only persisted final execution reports.
-- The current `maxhold20+risk exits` candidate was rerun as
-  `live-noncapital-maxhold20-riskbundle-lifecycle-twoweek-requested-20260514-100515Z`
-  over requested window `24,991,500..25,092,658`. It completed with `129,121`
-  events, `546` positions, `1,080` final execution reports, `1,080`
-  submitted lifecycle rows, `1,044` confirmed final reports, `36` failed final
-  reports, and `24` open sell-failed positions. Strategy Lab reports total PnL
-  `+10.937672043030798303 ETH` and PnL excluding top 10
-  `+7.537017330863964774 ETH`.
-- Failed-buy investigation for that run found `12` failed buy positions:
-  `7` Uniswap V4 Universal Router reverts, `3` Uniswap V2
-  `TRANSFER_FAILED`, and `2` Uniswap V3 `TF` reverts. All `12` were approved
-  by the strategy as `submit_buy / entry.buy_eligible_pool_once`.
-- The V4 failures are an eligibility-source bug: the source observations have
-  top-level `can_buy=true` / `can_sell=true`, but their `runtime_state` lacks
-  direct `can_buy/can_sell` flags. The faulty semantics were that
-  `eth_chain_server` pool summaries computed top-level trading flags from direct
-  simulation state OR observed third-party flow. The code now removes that
-  equivalence: observed flow is exposed as explicit
-  `has_observed_buy/has_observed_sell` evidence fields, while strategy-facing
-  `can_buy/can_sell` means our own direct simulation path.
-- Representative V4 probes failed at the entry block and `block-1` for
-  `0.01`, `0.001`, and `0.0001 ETH`, so these should become skipped entries,
-  not failed buys. Representative V2/V3 failures are size-sensitive: they fail
-  at the fixed `0.01 ETH` buy amount but pass buy/approve/sell probes at
-  `0.001 ETH`.
-- All `12` failed-buy pools later degraded into bad pool state in the source
-  observations: `is_scam=true` or `can_buy/can_sell=false`, often with zero
-  denom reserve. These are not attractive missed entries; the issue is that
-  pre-buy eligibility accepted them too early.
-- After separating observed-flow evidence from direct trading flags, the
-  candidate was regenerated over the full available replay source range as
-  `live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z`
-  (`25,066,498..25,092,922`). The old replay source has no stored
-  `runtime_state.can_buy/can_sell` flags for any protocol: `25,548` V2 pool
-  observations, `6,079` V4 observations, `125` V3 observations, `16`
-  PancakeSwap V2 observations, and `6` SushiSwap V2 observations all lack those
-  runtime fields. The run completed with `54,705` replay events after skipping
-  primed rows, `427` positions, `849` final reports, `1,698` lifecycle reports,
-  `822` confirmed final reports, `27` failed final reports, and `22` open
-  sell-failed positions. Strategy Lab reports total PnL
-  `+10.937447237497281828 ETH` and PnL excluding top 10
-  `+7.536792525330448299 ETH`. Confirmed buys are `421` Uniswap V2, `5`
-  Uniswap V3, and `1` PancakeSwap V2. Failed buys are `3` Uniswap V2
-  `TRANSFER_FAILED` and `2` Uniswap V3 `TF`; failed sells are `21` Uniswap V2
-  and `1` PancakeSwap V2. V4 entries are now skipped by eligibility
-  (`2,834` `cannot_buy`, `2,137` unsupported hooks, `330` low liquidity, `59`
-  unsupported execution denom), so the prior V4 Universal Router failed buys are
-  gone.
-- On `2026-05-14`, all previous `mode='backtest'` alpha trading runs were
-  deleted so stale immediate-fill evidence would not be confused with the new
-  delayed-execution pipeline.
-- Historical backtests now model order lifecycle as: observe/submit at block
-  `N`, keep the position in submitted state, simulate the final fill against
-  post-block `N+1` state, then apply the confirmation/failure at block `N+1`.
-  The default backtest setting is `execution_delay_blocks=1`.
-- The requested 70K window was rerun with delayed execution as:
-  `live-noncapital-maxhold10-riskbundle-delay1-gas-70k-20260514-codex`,
-  `live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex`, and
-  `live-noncapital-maxhold50-riskbundle-delay1-gas-70k-20260514-codex`
-  (`25,023,119..25,093,118`, replay source coverage still effectively starts
-  at `25,066,498`). All three runs have `848` submitted orders and `848` final
-  reports, with every final report exactly one block after its submitted report.
-  `maxhold20+risk exits` is the current delayed-execution baseline: `427`
-  positions, `818` confirmed final reports, `30` failed final reports, `6`
-  buy-failed positions, `24` sell-failed positions, total PnL
-  `+9.931652664322816296 ETH`, PnL excluding top 10
-  `+6.095495393711597006 ETH`, and gas cost
-  `0.067717287466098780 ETH`. For comparison, `maxhold10` has total PnL
-  `+7.717126603610147479 ETH`, ex-top-10
-  `+5.521981359283359240 ETH`, gas cost
-  `0.068500126422544811 ETH`, `6` buy failures, and `11` sell failures;
-  `maxhold50` has total PnL `+10.121840425237639146 ETH`, ex-top-10
-  `+5.106975460246661598 ETH`, gas cost `0.068732659614350100 ETH`,
-  `6` buy failures, and `56` sell failures.
-  PnL reconciles as confirmed sell proceeds minus closed-position entry costs
-  minus open failed-exit cost marked to zero, minus simulated gas cost from
-  execution reports. The current fee policy prices gas at the replay block base
-  fee with zero priority fee, so live deployment still needs an explicit
-  priority-fee assumption.
-  Sample lifecycle check for token `0x929fA6d5e0870B4c16641C4C3F774A08C390e597`
-  in the `maxhold20` run: buy submitted `25,080,051`, buy confirmed
-  `25,080,052`; sell submitted `25,080,073`, sell confirmed `25,080,074`.
+Current intended path:
 
-## Active Bottlenecks
+```text
+eth_chain_server live pools + mempool signal rows
+  -> eth_alpha_trader
+  -> LiveSnipeAllStrategy / strategy suite
+  -> StrategyDecision::SubmitOrder
+  -> OrderIntent
+  -> AlphaEngine risk policy + order recording
+  -> real TxExecutorAdapter
+  -> LiveTradingPlannerBridge
+  -> alpha/live/trading LivePrioritySellPlanner + tx_prep
+  -> LiveTraderTxSignal / LiveDirectRawTransactionRequest
+  -> Kartal POST /eth/tx/direct-raw
+  -> tx_executor validate -> reserve nonce -> sign -> dry-run/public broadcast
+  -> ExecutionReport back into alpha store
+  -> receipt tracker later confirms/rejects the on-chain fill
+```
 
-| Order | Bottleneck | Owner | Evidence | Next Action |
-| --- | --- | --- | --- | --- |
-| 1 | **Real strategy deployment readiness** | `alpha/strategies`, `alpha/engine`, `tx_executor`, frontend | The main target is real live deployment, not a no-capital endpoint. The current best live-aligned no-capital evidence is now the delayed-execution, gas-inclusive 70K `maxhold20+risk exits` run: `+9.931652664322816296 ETH` total PnL, `+6.095495393711597006 ETH` excluding top 10, `0.067717287466098780 ETH` gas cost, `6` buy-failed positions, and `24` sell-failed positions. Evidence is still incomplete for real orders because the source observation coverage starts at `25,066,498`, older observations lack runtime trading flags across all protocols, priority-fee assumptions are not finalized, and execution gates are not finalized. | Treat this delayed gas-inclusive run as the current no-capital candidate. Review it in Asena, then resolve remaining fixed-size entry failures, failed-exit policy, priority-fee accounting, and real execution gates before handoff. |
-| 2 | **Strategy policy quality and concentration** | `alpha/strategies`, `alpha/engine` | Delayed `maxhold20+risk exits` remains the best balance: it has higher ex-top-10 PnL than delayed `maxhold10` and delayed `maxhold50`, while avoiding the much larger `56` sell-failed tail in `maxhold50`. `maxhold10` reduces sell failures to `11` but gives up total and ex-top-10 PnL. | Keep delayed `maxhold20+risk exits` as the baseline candidate. Compare any new policy against this run's PnL, concentration, failed buys, failed exits, and decision-ledger audit quality. |
-| 3 | **Buy-entry eligibility correctness** | `eth_chain_server`, `alpha/engine`, `alpha/backtest`, `alpha/strategies` | Observed-flow-only entries are fixed for new chain-server snapshots, and old replays now surface missing runtime flags as replay-data quality debt instead of silently treating them as direct-route eligibility. The delayed 70K runs have `6` failed buys: `4` V2 `TRANSFER_FAILED` and `2` V3 `TF`, still consistent with fixed-size failures where representative probes fail at `0.01 ETH` but pass at `0.001 ETH`. | Decide adaptive sizing or a strict fixed-size route gate at the configured buy amount. Rebuild durable observations with runtime direct-route flags for all protocols, then this replay guard can become a general data-quality assertion instead of a compatibility rule. |
-| 4 | **Sell restriction and exit policy** | `alpha/engine`, `tx_processor`, `tx_simulator` | The latest delayed baseline still has `24` open sell-failed positions. Prior sell-failure analysis showed mostly rug timing: failed exits later had reserve below `0.1 ETH`, `can_sell=false`, and `is_scam=true`, with median transition age `29` blocks. Retry-only did not recover exits. | Do not promote retry-only. Next policies should test stronger early warning from LP approvals/liquidity-removal mapping, stop-loss/reserve-drop exits, and entry filters for pools without robust observed sell support. |
-| 5 | **Strategy-review lifecycle completeness** | `alpha/engine`, `alpha/store`, `eth_chain_server`, frontend | Submitted order lifecycle rows are persisted and exposed through chain-server reports with `position_id` and `order_side`. The frontend historical backtest detail view renders `Lifecycle` and `Decision Audit` tabs. The delayed 70K reruns verify submitted/final rows for all `848` orders per run, with every final row exactly one block after its submitted row. | Review the delayed `maxhold20` candidate in Asena, especially the 24 sell-failed positions, top winners, worst losers, and decision audit rows. Any next policy must improve against this delayed-execution baseline. |
-| 6 | **Execution handoff readiness** | `alpha/engine`, `tx_executor` | Real deployment needs a final handoff contract: order sizing, exposure caps, stale-data checks, simulation freshness threshold, retry cadence, kill switch behavior, and failure logging. | Keep execution wiring explicit and gated. The selected strategy can move to real orders only after the policy evidence and runtime gates are both visible in logs/frontend. |
-| 7 | **Live previous-block header miss** | `eth_token`, `eth_chain_server`, `tx_processor` | The current chain-server run has `115` token tx failures. The dominant issue is `missing local Reth block header for <current block - 1>` during live token apply, not a pool identity miss. Recent failures include block `25,095,236`, tx indexes `158` and `166`; those txs are contract creations, so the header miss is broader than V3 liquidity actions. This indicates a live previous-block context/header lookup path is still reading only local Reth historical context when the needed latest header should be available from the live block update path. | Reproduce one header miss and trace the exact header lookup. The correct live options are only: use the local Reth DB when the parent header is already committed, or use the live block/processed-block context when the parent is ahead of local historical context. No Redis or silent fallback. |
-| 8 | **Mempool token cache is not an authoritative replacement snapshot** | `mempool_processor`, `eth_chain_server` | Chain-server reports `735` live tokens and `37` active pools, while the mempool cache reports `985` tokens and `57` pools at the same live context block. The mempool cache applies snapshots additively, so tokens/pools removed by chain-server retention can remain routable in the mempool context. | Make live-token-server snapshot application authoritative for the mempool cache: remove token/pool/creator/index entries absent from the accepted live snapshot while preserving monotonic block/status checks. Then recheck signal routing counts against `/live/pools/active` and `/live/pools/scam`. |
-| 9 | **LP position approval mapping coverage** | `eth_token`, `eth_chain_server`, `mempool_processor` | The current mempool run saw `5,596` ERC20 approval ingress txs, `9` position approval txs, `3` position-manager hits, and `0` public LP approval signals. Public LP approval signals are blocked because ownership/position share mapping is missing or not computable for many candidate approvals. | Decide whether missing position mappings should stay as unresolved intents only, or whether chain-server should backfill position context on approval by querying the position manager for token id -> pool key/owner/liquidity. Keep public signals blocked unless a token/pool/share mapping is known. |
-| 10 | **Mempool scam-protection signal coverage** | `mempool_processor`, `eth_chain_server`, `alpha` | The current run has `6` published signals: `2` trading-enabled and `4` liquidity-removal, all DB-written. That confirms the end-to-end signal path works, but no LP approvals, tax changes, sell-blocked, or token-supply-risk signals have published yet. | Keep monitoring signal distribution. Prioritize LP approval mapping and V3/V4 liquidity-modify mapping because those are the fastest pre-rug exits for open positions. |
-| 11 | **Mempool funding dependency visibility gaps** | `mempool_processor`, `tx_simulator`, `reth_chain_query` | The one current actionable simulation error is mined tx `0x0ad45126157ceba0ffc7e0864f0235394edbb2cdbea9f4aa40fac8012dd0a73e`, a Uniswap V3 WBTC/USDT remove/collect multicall. We simulated it at block `25,094,878` and failed max-gas balance validation. The sender was funded in block `25,094,879` by tx `0x30936be70a4f81d2be5d966d5bb3a9bfc1e54c325d126a24b4013a29b775a6ad`, then the target mined in block `25,094,880`. The arrival index recorded the target but not the funding tx, so the dependency replay lane had no visible funding to include. Code now routes lack-of-funds creator transactions through the funding dependency lane, matching contract creations. | Rebuild/restart the mempool processor and verify future V3/V4 creator-control lack-of-funds cases appear as `funding_dependency` unresolved diagnostics, not actionable `SIMULATION_ERROR` rows. Keep visible funding replay for mempool-seen inbound ETH transfers. |
-| 12 | **Residual Redis code outside the production chain-server path** | `alpha/live/state`, docs | Production chain-server live token tracking no longer uses Redis. `tx_simulator` no longer owns Redis live-cache state, and tx_processor no longer includes the Redis live publisher/provider path. The remaining Redis-shaped contract is the old `alpha/live/state` key layout plus any docs that describe it as normal runtime infrastructure. | Keep production paths Redis-free. Decide whether `alpha/live/state` is still needed for diagnostics, then remove or feature-gate it and finish stale-doc cleanup. |
-| 13 | **Mempool startup ordering** | `mempool_processor`, systemd units | On restart, mempool starts after the chain-server process, but before the HTTP listener is ready. It logs one `Connection refused` hydrate failure, then waits for token cache population and recovers. This is noisy and can delay startup diagnostics. | Add a readiness wait or health-check loop before first hydrate, or use a chain-server health endpoint in service startup. Keep the current retry path, but make the first connection-refused warning less alarming if startup is still inside the grace window. |
-| 14 | **Token candidate-selection scaling** | `eth_token` | The current live run is mostly healthy outside the header miss class, but the known algorithmic risk remains: V3/V4 ERC721 transfer/approval candidates can scan tracked registry state instead of using a position-manager/token-id index. This can reappear as tracked pool count grows. | Implement indexed V3/V4 LP-position and approval lookup keyed by position manager, token id, owner, and operator. Candidate selection should scale with events in the transaction, not total tracked tokens/pools. |
+Current actual running path:
 
-## Redis Cleanup Status
+```text
+eth_alpha_trader
+  -> LiveSnipeAllStrategy / strategy suite
+  -> StrategyDecision::SubmitOrder
+  -> OrderIntent
+  -> AlphaEngine risk policy + order recording
+  -> LiveChainSimExecutionAdapter
+  -> tx_simulator chain-state buy/sell simulation
+  -> ExecutionReport with no real tx hash
+  -> alpha store
+```
 
-Done:
+The codebase now has the middle and lower pieces, but they are not connected in
+the live binary:
 
-- `eth_chain_server` owns the live block loop, direct `LiveBlockUpdate` handoff,
-  live token runtime, recent processed-block ring, and live APIs.
-- Chain-server live tail uses `last_block_source=live_block_update`; it does
-  not tail `eth/live/blocks` or load live blocks through
-  `LiveProcessedBlockProvider`.
-- `TxSimulator::new()` and `TxSimulator::with_provider_factory()` no longer
-  auto-attach Redis live state; tx_simulator no longer exposes the Redis live
-  cache modules.
-- `tx_processor` no longer includes the old Redis live publisher/provider or
-  `live_block_processor` binary. Confirmed processed blocks now come through
-  `eth_chain_server`'s direct live runtime and processed-block replay store.
-- `mempool_signal_detector` no longer constructs a Redis `LiveChainCache` at
-  startup and no longer has `simulation.live_data_redis_url` in its config.
-- Long-lived `TxSimulator::new()` instances enable Reth read-only sync, so
-  local historical simulation context can advance with the live Reth node
-  instead of staying pinned to process-start static files.
-- Redis-free optional metadata misses such as `live chain cache not configured`
-  are classified as optional discovery misses, not live token transaction
-  failures.
-- Direct live pool trading simulation no longer falls back to the legacy live
-  cache when a previous-block direct state session is unavailable; it skips that
-  optional pool simulation and keeps the token block apply successful.
-- Direct live pool trading simulation also treats internal
-  `live chain cache not configured` / missing live header misses as optional
-  context misses in Redis-free live mode. Verified on block `25,092,345`: the
-  fresh run has `transaction_error_count=0` and no pipeline issue for that
-  block.
+| Layer | Current state | Deployment gap |
+| --- | --- | --- |
+| Strategy decision | `LiveSnipeAllStrategy` emits sell `OrderIntent`s for liquidity removal, LP approval, max-hold, retries, tax/scam when enabled. | Strategy does not encode execution urgency, route, gas-rank evidence, or private/public submission preference beyond reason/config fields. |
+| Engine | `AlphaEngine` records decisions and can route any approved `OrderIntent` to an `EngineExecutionAdapter`. | `eth_alpha_trader` constructs `LiveChainSimExecutionAdapter`; real mode is rejected by CLI parsing. |
+| Real adapter | `TxExecutorAdapter` maps a prepared live tx signal to Kartal and returns an `ExecutionReport`; `LiveTradingPlannerBridge` adapts the engine to `alpha/live/trading::PrioritySellPlanner`. | No runtime instantiates it, no production context resolver is wired, and receipt reconciliation is not implemented. |
+| Live tx prep | `alpha/live/trading::tx_prep` enforces route validation, pre-submit simulation, value-capped bribe policy, gas-rank candidate selection, and protocol metadata. `LivePrioritySellPlanner` now orchestrates those pieces for v1 priority sells. | Its production resolver/providers are missing: current-position lookup, latest pool snapshot, exact min-out/deadline, final simulation, gas-rank candidates, and allowance checks. |
+| Route/calldata | `UniswapV2SellRouteBuilder` wraps `tx_simulator::tx_builders` into `PreparedSellRoute` for ETH/WETH-denominated Uniswap V2 sells. | Production min-out evidence, slippage policy, allowance policy, and additional protocol surfaces still need to be wired. |
+| Gas rank | `alpha/block_tx_rank` estimates mined-block rank and gas-before evidence. | No adapter pulls recent samples, produces `RankedFeeCandidate`s, and passes them into `tx_prep` on the live critical path. |
+| Kartal | `/eth/tx/direct-raw` is mounted on the order server and deserializes into `tx_executor::DirectRawTransactionRequest`. | Service config must be live-checked for token, signer, RPC reachability from the container, and broadcast mode before deployment. |
+| tx_executor | Direct raw validation, caps, nonce reservation, local signing, journal, dry-run, and public mempool broadcast exist. | No private relay/builder route, no receipt watcher, and no execution fill reconciliation back to alpha. |
 
-Still present by design or migration debt:
+## Bribe Selection Discussion
 
-- `alpha/live/state` still owns the old `eth/live/...` Redis key contract.
-- Several READMEs and docs still describe Redis as a normal live-state path.
+For `eth_direct_raw_v1`, the bribe is the EIP-1559 priority fee selected before
+Kartal submission. We should not ask Kartal or `tx_executor` to discover the
+bribe. Alpha must choose it from current strategy context, recent block-rank
+evidence, and protected trade value.
 
-Do not delete the remaining Redis modules until all remaining consumers are
-confirmed dead or explicitly migrated; otherwise we risk breaking diagnostics,
-examples, or back-compat tooling.
+The live planner should use `eth_block_tx_rank` to generate a small set of
+ranked candidates from recent mined blocks:
 
-## Verification Commands
+```text
+candidate label
+priority_fee_gwei
+max_fee_per_gas_gwei
+expected rank position
+expected gas before us
+sample/source window
+```
 
-Recent checks that passed during this cleanup:
+Then `alpha/live/trading::tx_prep` applies the economic cap:
 
-- `cargo test -p eth_token token_update_router --lib`
-- `cargo check -p eth_chain_server`
-- `cargo check -p mempool_processor`
-- `cargo build -p eth_chain_server -p mempool_processor --release --bin eth_chain_server --bin mempool_signal_detector`
-- `cargo run -p tx_simulator --release --example verify_database_setup`
-- `cargo fmt --check`
-- `cargo test -p eth_alpha_engine --lib`
-- `cargo check -p eth_alpha_engine -p eth_alpha_store -p eth_chain_server -p eth_alpha_backtest`
-- `npm run build` from `interface/new_Asena`
-- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id lifecycle-smoke-20260514-095812Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25073540 --to-block 25073620 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
-- `cargo run -q -p eth_alpha_backtest --bin eth_alpha_backtest -- --run-id live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25066498 --to-block 25092922 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
-- `cargo run -q -p eth_alpha_lab --bin eth_alpha_lab -- strategy --run-id live-noncapital-maxhold20-riskbundle-fullrange-20260514-105815Z --limit 10`
-- `cargo test -p eth_alpha_engine -p eth_alpha_backtest`
-- `cargo build --release -p eth_alpha_backtest -p eth_alpha_lab`
-- `target/release/eth_alpha_backtest --run-id live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex --replay-run-id snipe-all-v1-chain-sim-live-v4 --from-block 25023119 --to-block 25093118 --skip-primed --include-mempool-signals --buy-amount-wei 10000000000000000 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 20 --exit-liquidity-removal --exit-lp-approval --exit-tax --exit-scam`
-- `target/release/eth_alpha_lab strategy --run-id live-noncapital-maxhold20-riskbundle-delay1-gas-70k-20260514-codex --limit 10`
-- `cargo check -p eth_chain_server -p eth_token`
-- `cargo build --release -p eth_chain_server --bin eth_chain_server`
+```text
+avoidable_loss = simulated_recovery_if_fast
+               - expected_late_recovery_if_slow
+               - safety_buffer
+
+max_priority_spend = avoidable_loss - estimated_base_fee_cost
+max_priority_fee_gwei = max_priority_spend / estimated_gas_used
+```
+
+Only candidates inside both the priority-spend cap and total-fee cap are
+eligible. Public mempool routing should reject if no ranked candidate fits. That
+is safer than broadcasting a weak transaction that advertises our exit without a
+credible chance of landing early. A value-cap fallback can be considered later
+for private/protected relay routes where leaking the transaction is less costly.
+
+Open tuning questions before live capital:
+
+- Which recent-block window should rank against: last block only, rolling N
+  blocks, or signal-specific windows around prior scam transactions?
+- Which rank band is required by signal type: mempool LP approval likely needs a
+  top-of-block band, while mined LP approval may accept a lower band unless
+  removal probability is high.
+- How stale can gas-rank evidence be during a fast exit path before the planner
+  rejects and avoids sending a bad request?
+- Should candidate labels and rejected alternatives be persisted with the order
+  even when `tx_prep` rejects, so later analysis can tune the cap?
 
 ## Immediate Next Actions
 
-1. Decide whether the next blocker is policy quality or missing historical
-   observation coverage for a true two-week replay.
-2. Fix the remaining fixed-size entry failures: either adaptive sizing based on
-   direct-route probes or a strict route gate at the configured `0.01 ETH` buy
-   amount.
-3. Implement the next failed-exit policy improvement against the current
-   delayed `maxhold20+risk exits` baseline: chunked exits, no-observed-sell
-   exposure limits, or earlier risk-driven exits. Retry cadence exists now, but
-   retry-only was not useful in the latest comparison.
-4. Review the lifecycle-enabled candidate in the frontend, including top
-   winners, worst losers, skipped entries, lifecycle rows, and failed exits.
-   Use that review to decide whether the next policy change is an exit rule,
-   entry filter, or missing historical coverage task.
-5. Define the real production strategy candidate and its execution gates:
-   sizing, max exposure, retry cadence, stale-data threshold, simulation
-   freshness threshold, exit restrictions, and kill switch behavior.
-6. Backtest the selected candidate over the exact last two-week block window and
-   keep the run reproducible from the frontend once observation coverage exists.
-7. Run the same policy in live shadow/live-backtest mode against the current
-   chain-server and mempool pipeline. Treat this as a rough current-regime
-   estimate and drift detector, not as the deployment target.
-8. Reproduce the live previous-block header miss, starting with block
-   `25,095,236` tx indexes `158` and `166`, and restore chain-server soak
-   expectations to `tx_failures=0` and `pipeline_issues=0`.
-9. Make mempool live token-cache snapshot application authoritative so stale
-   retained tokens/pools do not remain routable after chain-server retention.
-10. Decide the policy for unmapped V3/V4 position approvals: unresolved-only, or
-   on-demand position-manager backfill before public signal publication.
-11. Add a mempool readiness wait against chain-server HTTP health.
-12. Rebuild/restart the mempool processor after the funding-dependency fix, then
-   verify mined-success creator-control lack-of-funds cases no longer appear in
-   `simulation_errors.log`.
-13. Run a longer chain-server and mempool soak:
-   chain-server must keep `tx_failures=0` and `pipeline_issues=0`, while
-   mempool simulation target lag should stay within the accepted threshold.
-14. Remove or feature-gate legacy Redis modules only after the production
-   mempool path no longer needs any Redis-compatible fallback.
-15. Continue the broader strategy comparison as supporting evidence, but let the
-   exact two-week backtest and live shadow/live-backtest drive the real
-   deployment decision.
+1. Add an explicit real execution mode to `eth_alpha_trader`, guarded by config:
+   Kartal URL/token, signer address, max exposure, broadcast mode, kill switch,
+   and dry-run/live-capital mode must be visible in the run record.
+2. Implement the production `LiveTxPlanningInputResolver`: load the matched open
+   position, current pool snapshot, configured signer, current block/deadline,
+   min-out evidence, and strategy observation metadata for each sell intent.
+3. Replace fixed planner providers with live providers: allowance reader,
+   final simulation, gas-rank/base-fee provider, and configured route policy.
+4. Run a final pre-submit simulation on the exact planned calldata and turn the
+   result into `PreSubmitSimulation`; reject if it reverts or expected recovery is
+   dust.
+5. Wire `eth_block_tx_rank` into the planner so it produces
+   `RankedFeeCandidate`s and lets `tx_prep` reject bribes that exceed protected
+   value.
+6. Add receipt tracking for Kartal tx hashes. A Kartal `broadcast` response is
+   only submitted, not settled; alpha must later record confirmed, failed, or
+   replaced execution reports.
+7. Decide public mempool versus private relay. The current executor only supports
+   public mempool. That is acceptable for a first dry-run/public smoke test, but
+   racing scam liquidity removals may need private/builder submission.
+8. Run shadow mode through the exact real planner path while Kartal remains
+   `dry_run`, then compare planned tx metadata, gas caps, and simulated recovery
+   against chain-sim live-backtest outcomes.
+
+## Limiting Factors Of Each Module
+
+| Order | Issue | Owner | Latest Evidence | Next Action |
+| --- | --- | --- | --- | --- |
+| 1 | **Real planner not wired in the trader** | `alpha/engine`, `alpha/live/trading` | `LivePrioritySellPlanner` and `LiveTradingPlannerBridge` exist and are unit-tested, but `eth_alpha_trader` still constructs `LiveChainSimExecutionAdapter`. | Add an explicit guarded real mode that instantiates `TxExecutorAdapter` with the bridge and production providers. |
+| 2 | **Trader binary is chain-sim only** | `alpha/engine/src/bin/eth_alpha_trader.rs` | `--mode` normalization accepts only `chain-sim`; the binary always constructs `LiveChainSimExecutionAdapter`. | Add a guarded `kartal-direct-raw` or equivalent mode that records all real-capital config and refuses unsafe defaults. |
+| 3 | **Receipt/fill reconciliation is missing** | `alpha/engine`, `tx_executor`, `kartal` | `TxExecutorAdapter` maps Kartal `broadcast` to submitted, but there is no watcher that turns tx hashes into confirmed/failed alpha execution reports. | Add a receipt tracker keyed by attempt id/tx hash and feed final reports into the existing store path. |
+| 4 | **Private relay/builder execution is not implemented** | `tx_executor`, `kartal` | `BroadcastMode` supports `dry_run` and `public_mempool`; direct coinbase/private bundle bribes are explicitly outside `eth_direct_raw_v1`. | Decide if public mempool is enough for first live test; otherwise add a new protocol/version for relay or bundle submission. |
+| 5 | **Gas rank is not on the live critical path** | `alpha/block_tx_rank`, `alpha/live/trading` | The rank crate exists and `tx_prep` accepts ranked fee candidates, but the planner currently only has a fixed test provider. | Build a gas-rank provider that emits conservative candidate bands from recent blocks plus next-block base-fee prediction. |
+| 6 | **Approval/allowance policy for real sells is unresolved** | `alpha/live/trading`, `tx_simulator::tx_builders` | The v1 planner can require a pre-existing allowance, but no live allowance reader or pre-approval deployment policy is wired. | Choose pre-approval, permit/multicall, or two-transaction approval flow; document nonce/race behavior before real exits. |
+| 7 | **Live strategy evidence still needs real-planner shadowing** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | Chain-sim live-backtest evidence exists, but it does not include Kartal-shaped tx metadata, gas-rank rejects, or signer/RPC failures. | Run the real planner with Kartal `dry_run` and compare every planned priority exit against live chain-sim outcomes. |

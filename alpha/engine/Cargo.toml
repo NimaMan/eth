@@ -12,6 +12,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4.5", features = ["derive"] }
 eth_alpha_core = { path = "../core" }
 eth_alpha_store = { path = "../store" }
+eth_live_trading = { path = "../live/trading" }
 eth_ops_events = { path = "../../eth_ops_events" }
 eth_strategies = { path = "../strategies" }
 eyre = "0.6"

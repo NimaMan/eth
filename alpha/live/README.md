@@ -8,8 +8,9 @@ responsibility while keeping the existing crate names stable:
 
 | Folder | Crate name | Role |
 | --- | --- | --- |
-| `state/` | `eth_live_state` | Shared live-state keys, snapshot schemas, and store traits. |
+| `state/` | `eth_live_state` | Shared live-state snapshot schemas and store traits. |
 | `feed/` | `eth_live_feed` | Confirmed-chain feed contracts and runtime boundary over processed blocks and token updates. |
+| `trading/` | `eth_live_trading` | Live strategy policy that turns token/pool/risk signals into explicit trade actions. |
 
 `state/` is the shared protocol/read model. `feed/` is the writer/runtime side that can own confirmed live token updates. Token server and mempool runtimes can be hosted in one process now while still depending on these narrower crate boundaries.
 
@@ -40,8 +41,7 @@ Mempool processor
 ```
 
 `LiveChainRuntime` is responsible for processing the confirmed block and handing
-it to token tracking in order. Redis live block/state transport is not part of
-the normal runtime path.
+it to token tracking in order.
 
 ## Core Invariant
 
@@ -76,15 +76,22 @@ intended tradeoff until we add a separate snapshot publisher for heavy views.
 
 For the current implementation, `eth_chain_server` can host the live token
 runtime, token-server API, and mempool runtime in one Rust process. That keeps
-state sharing simple and avoids Redis/ZMQ as an internal dependency for the
+state sharing simple and avoids external process-boundary transports for the
 token/mempool handoff.
 
 The boundary should still stay modular:
 
 - `feed/` defines the live token runtime and event contract.
 - `state/` defines shared snapshots/readers/writers.
+- `trading/` defines live trade policy before execution/broadcast wiring.
 - `eth_chain_server` hosts the runtime and exposes HTTP views.
 - `mempool_processor` consumes live token state and live token events.
+
+Current deployment note: `trading/` now also contains the direct-raw tx-prep
+boundary for Kartal, but the running alpha trader still uses no-capital
+chain-state simulation. A real live strategy now needs runtime wiring around the
+planner: a `LiveTxPlanningInputResolver`, live final simulation, gas-rank
+provider, allowance reader, guarded real mode, and receipt reconciliation.
 
 This lets us split the runtimes into separate services later without changing
 the conceptual data flow.
@@ -92,6 +99,7 @@ the conceptual data flow.
 ## Related Docs
 
 - `feed/README.md`: crate-level confirmed live-feed and token-runtime contract.
-- `state/README.md`: shared live-state protocol, snapshots, keys, and store traits.
+- `state/README.md`: shared live-state snapshots and store traits.
+- `trading/README.md`: live LP approval priority-exit policy and deployment gates.
 - `../../eth_chain_server/README.md`: chain-server API and inspector-facing live state exposure.
 - `../../mempool_processor/README.md`: mempool risk processing, token context consumption, and `LiveTxSimulator` use.

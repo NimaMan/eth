@@ -1,0 +1,20 @@
+[package]
+name = "eth_live_trading"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+workspace = "../../.."
+
+[dependencies]
+alloy-primitives = { workspace = true }
+async-trait = { workspace = true }
+eth_alpha_core = { path = "../../core" }
+hex = { workspace = true }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tx_simulator = { path = "../../../tx_simulator" }
+
+[dev-dependencies]
+tokio = { workspace = true }
