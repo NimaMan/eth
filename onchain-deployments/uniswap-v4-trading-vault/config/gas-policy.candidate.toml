@@ -1,0 +1,12 @@
+schema = "uniswap_v4_trading_vault_gas_policy_candidate_v1"
+status = "blocked"
+
+[caps]
+max_gas_limit = 700000
+max_transaction_cost_wei = "20000000000000000"
+max_priority_fee_per_gas_wei = "500000000000"
+
+[evidence]
+require_fork_gas_report = true
+require_direct_vs_vault_comparison = true
+require_gas_rank_candidate = true

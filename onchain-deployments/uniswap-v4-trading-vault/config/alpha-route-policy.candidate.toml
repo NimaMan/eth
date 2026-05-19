@@ -1,0 +1,18 @@
+schema = "uniswap_v4_trading_vault_alpha_route_policy_candidate_v1"
+status = "blocked"
+
+[route]
+require_exact_pool_key = true
+require_exact_universal_router_commands = true
+allow_dynamic_route_discovery = false
+allow_unknown_hooks = false
+
+[simulation]
+require_direct_universal_router_comparison = true
+require_vault_path_comparison = true
+max_simulation_age_blocks = 2
+
+[bribe]
+mode = "eip1559_priority_fee_only"
+allow_coinbase_transfer = false
+allow_private_bundle_payment = false

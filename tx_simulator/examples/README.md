@@ -35,6 +35,9 @@ Tx builders and deployed routers:
   `--priority-fee-per-gas-wei` and `--max-fee-per-gas-wei` to model it. The
   deployed V2 vault does not have a direct `block.coinbase` payment path, and
   private bundle bribes require a separate execution protocol.
+- tx_builders/uniswap_v4_trading_vault/: Scaffold for future V4 vault route
+  rehearsals. Keep these examples separate from the deployed V2 vault and from
+  direct Universal Router examples until the V4 vault ABI is final.
 
 ## Performance
 - performance/rpc_vs_direct_simulation_benchmark.rs: RPC vs direct DB comparison

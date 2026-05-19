@@ -1,0 +1,47 @@
+schema: uniswap_v4_trading_vault_audit_checklist_v1
+status: blocked
+items:
+  - id: route-fixtures-reviewed
+    area: routing
+    status: todo
+    requirement: Record representative V4 pool keys, hooks, command bytes, and expected outputs.
+  - id: interfaces-pinned
+    area: source
+    status: todo
+    requirement: Pin Universal Router, Permit2, PoolManager, and hook interfaces with upstream versions and ABI hashes.
+  - id: source-reviewed
+    area: source
+    status: todo
+    requirement: Replace the undeployable scaffold with reviewed V4 vault source.
+  - id: access-control-reviewed
+    area: access-control
+    status: todo
+    requirement: Confirm owner-only calls and rescue behavior.
+  - id: permit2-reviewed
+    area: allowance
+    status: todo
+    requirement: Confirm Permit2 setup, spending, revocation, and failure behavior.
+  - id: hook-policy-reviewed
+    area: hooks
+    status: todo
+    requirement: Confirm hook allowlist or denylist policy and tests.
+  - id: simulator-reviewed
+    area: simulation
+    status: todo
+    requirement: Compare direct Universal Router and candidate vault paths in tx_simulator.
+  - id: gas-reviewed
+    area: gas
+    status: todo
+    requirement: Store fork gas benchmarks for direct and vault paths.
+  - id: kartal-policy-reviewed
+    area: execution
+    status: todo
+    requirement: Confirm target, selector, value, gas, fee, simulation, and daily cap policy.
+  - id: deploy-script-enabled
+    area: deployment
+    status: blocked
+    requirement: Enable deploy script only after every prior item is reviewed.
+  - id: signoff-complete
+    area: release
+    status: todo
+    requirement: Record operator and reviewer signoff before public broadcast.

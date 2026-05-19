@@ -1,0 +1,17 @@
+{
+  "schema": "uniswap_v4_trading_vault_kartal_policy_candidate_v1",
+  "status": "blocked",
+  "allowed_from": [
+    "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  ],
+  "allowed_targets": [],
+  "allowed_selectors": [],
+  "max_value_wei": "0",
+  "max_gas_limit": "700000",
+  "require_simulation": true,
+  "notes": [
+    "Fill allowed_targets only after deployment address exists.",
+    "Fill allowed_selectors only after V4 vault ABI is final.",
+    "Direct coinbase or private bundle bribes are not part of direct-raw v1."
+  ]
+}

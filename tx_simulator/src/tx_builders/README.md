@@ -6,6 +6,7 @@ Purpose
   - Uniswap V2 trading vault: buyV2ExactEthForTokens and emergencySellV2ExactTokensForEth
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
   - V4: Universal Router exact-input single-hop swaps plus Permit2 allowance helpers
+  - V4 trading vault: assessment scaffold only until the vault ABI is final
 - No chain reads here; callers must supply addresses and parameters.
 - Builders are where route and execution decisions should be finalized. Prefer adding off-chain
   builder logic over adding on-chain branching, discovery, or generic adapter behavior.
@@ -19,6 +20,7 @@ Entrypoints
 - `protocols/pancakeswap/v3.rs`: PancakeSwap V3 SwapRouter builders and router constants
 - `protocols/v3_swap_router.rs`: shared exactInputSingle and approve encoding used by V3-style protocol modules
 - `protocols/uniswap/v4/`: pool-key orientation, ERC20/WETH helpers, and Universal Router v4 builders
+- `protocols/uniswap/v4/trading_vault/`: reserved for future V4 vault calldata builders
 - `protocols/permit2.rs`: Permit2 allowance approval builder
 - `route_dispatch.rs`:
   - Route-aware dispatchers: `build_buy_swap`, `build_sell_swap`, `build_approve_for_route`

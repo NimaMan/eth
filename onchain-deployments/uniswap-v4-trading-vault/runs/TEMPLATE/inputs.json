@@ -1,0 +1,8 @@
+{
+  "schema": "uniswap_v4_trading_vault_run_inputs_v1",
+  "status": "template",
+  "route_fixture": "SET_IN_RUN",
+  "fork_block": null,
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+}

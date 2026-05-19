@@ -1,0 +1,7 @@
+{
+  "schema": "uniswap_v4_trading_vault_signoff_v1",
+  "status": "blocked",
+  "operator": null,
+  "reviewer": null,
+  "notes": "Template only. Do not broadcast from this folder."
+}
