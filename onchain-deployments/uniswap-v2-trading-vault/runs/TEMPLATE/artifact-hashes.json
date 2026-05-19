@@ -1,0 +1,7 @@
+{
+  "schema": "artifact_hashes_v1",
+  "artifact": "SET_AT_RUN_TIME",
+  "bytecode_hash": "SET_AT_RUN_TIME",
+  "deployed_bytecode_hash": "SET_AT_RUN_TIME",
+  "abi_hash": "SET_AT_RUN_TIME"
+}

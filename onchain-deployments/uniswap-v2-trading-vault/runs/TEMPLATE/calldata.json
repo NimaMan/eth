@@ -1,0 +1,14 @@
+{
+  "schema": "uniswap_v2_trading_vault_calldata_v1",
+  "token": "SET_TOKEN_ADDRESS",
+  "buy": {
+    "method": "buyV2ExactEthForTokens(address,uint256,uint256)",
+    "selector": "0x8a62666c",
+    "data": "SET_AT_RUN_TIME"
+  },
+  "emergency_sell": {
+    "method": "emergencySellV2ExactTokensForEth(address,uint256,uint256,uint256)",
+    "selector": "0x5f413d10",
+    "data": "SET_AT_RUN_TIME"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "uniswap_v2_trading_vault_run_inputs_v1",
+  "network": "ethereum-mainnet",
+  "chain_id": 1,
+  "source_git_revision": "SET_AT_RUN_TIME",
+  "constructor_args": {
+    "owner": "SET_OWNER_ADDRESS",
+    "treasury": "SET_TREASURY_ADDRESS",
+    "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  },
+  "deployment": {
+    "signer": "SET_DEPLOYMENT_SIGNER_ADDRESS",
+    "private_key_env": "ETH_VAULT_DEPLOYER_PRIVATE_KEY"
+  },
+  "alpha": {
+    "route_name": "uniswap_v2_trading_vault_mode_a",
+    "protocol": "uniswap_v2_trading_vault"
+  },
+  "kartal": {
+    "base_url": "http://127.0.0.1:5004",
+    "token_env": "ETH_TX_EXECUTOR_API_TOKEN",
+    "required_broadcast_mode_before_go_live": "dry_run"
+  }
+}

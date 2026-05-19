@@ -1,0 +1,59 @@
+schema: uniswap_v2_trading_vault_audit_checklist_v1
+status: draft
+items:
+  - id: source-pinned
+    area: source
+    status: todo
+    requirement: Record git revision, artifact hash, ABI hash, and dirty-state summary.
+  - id: constructor-args-reviewed
+    area: deployment
+    status: todo
+    requirement: Review owner, treasury, WETH, Uniswap V2 router, signer, and chain id.
+  - id: owner-model-reviewed
+    area: access-control
+    status: todo
+    requirement: Confirm owner address is the intended Kartal signer or explicitly delegated operational account.
+  - id: treasury-reviewed
+    area: funds
+    status: todo
+    requirement: Confirm emergency-sell ETH proceeds go to the intended treasury.
+  - id: approval-lifecycle-reviewed
+    area: token-allowance
+    status: todo
+    requirement: Confirm buy creates no sell-router allowance and emergency sell clears allowance after swap.
+  - id: fee-on-transfer-reviewed
+    area: token-behavior
+    status: todo
+    requirement: Confirm FOT local and fork tests cover buy and emergency sell.
+  - id: gas-benchmark-reviewed
+    area: gas
+    status: todo
+    requirement: Confirm fork gas snapshot is acceptable versus direct buy and approve plus sell.
+  - id: bribe-policy-reviewed
+    area: gas-rank
+    status: todo
+    requirement: Confirm ranked gas candidates are required and unranked value-cap fallback is rejected.
+  - id: final-simulation-reviewed
+    area: simulation
+    status: todo
+    requirement: Confirm exact buy and emergency-sell calldata are simulated against current state before submission.
+  - id: kartal-policy-reviewed
+    area: execution
+    status: todo
+    requirement: Confirm Kartal allowlist only permits the deployed vault target and strategy selectors.
+  - id: dry-run-reviewed
+    area: execution
+    status: todo
+    requirement: Confirm Kartal dry-run or safe policy-reject evidence is stored in the run folder.
+  - id: receipt-reconciliation-reviewed
+    area: alpha-state
+    status: todo
+    requirement: Confirm alpha records submitted, confirmed, reverted, or replaced outcomes.
+  - id: post-deploy-smoke-reviewed
+    area: deployment
+    status: todo
+    requirement: Confirm deployed immutable reads match expected owner, treasury, WETH, and router.
+  - id: signoff-complete
+    area: release
+    status: todo
+    requirement: Record operator and reviewer signoff before enabling public broadcast.

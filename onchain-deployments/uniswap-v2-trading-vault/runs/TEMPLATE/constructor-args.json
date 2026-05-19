@@ -1,0 +1,8 @@
+{
+  "schema": "constructor_args_v1",
+  "owner": "SET_OWNER_ADDRESS",
+  "treasury": "SET_TREASURY_ADDRESS",
+  "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+  "signer_env": "ETH_VAULT_DEPLOYER_PRIVATE_KEY"
+}

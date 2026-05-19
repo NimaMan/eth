@@ -1,0 +1,10 @@
+{
+  "schema": "deployment_signoff_v1",
+  "run_id": "SET_RUN_FOLDER_NAME",
+  "network": "ethereum-mainnet",
+  "vault_address": "SET_AFTER_DEPLOY",
+  "operator": "SET_OPERATOR",
+  "reviewer": "SET_REVIEWER",
+  "approved_for_public_broadcast": false,
+  "notes": []
+}

@@ -1,0 +1,52 @@
+schema = "uniswap_v2_trading_vault_gas_policy_v1"
+chain_id = 1
+
+[route_gas_limits]
+buy_v2_exact_eth_for_tokens = 180000
+emergency_sell_v2_exact_tokens_for_eth = 190000
+fee_on_transfer_buy_v2_exact_eth_for_tokens = 230000
+fee_on_transfer_emergency_sell_v2_exact_tokens_for_eth = 240000
+
+[benchmark_reference]
+source = "solidity/baygus-executor/benchmarks/reports/v2-mode-a-20260519.md"
+fork_block = 25129486
+direct_buy_gas = 124277
+vault_buy_gas = 141789
+standalone_approve_gas = 32477
+direct_sell_preapproved_gas = 59068
+vault_emergency_sell_gas = 112092
+
+[priority_fee_policy]
+source = "alpha/block_tx_rank"
+require_ranked_candidate = true
+reject_unranked_value_cap_fallback = true
+candidate_order = [
+  "next_block_aggressive",
+  "p50_top_10",
+  "p50_top_25"
+]
+
+[value_cap]
+protected_value_source = "final_simulation"
+late_recovery_source = "final_simulation"
+safety_buffer_bps = 1000
+include_base_fee_cost = true
+include_priority_fee_cost = true
+reject_if_priority_spend_exceeds_cap = true
+reject_if_total_max_fee_exceeds_cap = true
+
+[metadata_required]
+fields = [
+  "gas_rank_label",
+  "max_priority_fee_per_gas",
+  "max_fee_per_gas",
+  "estimated_priority_spend_wei",
+  "estimated_total_fee_wei",
+  "predicted_base_fee_wei",
+  "protected_value_wei",
+  "late_recovery_wei",
+  "safety_buffer_wei",
+  "expected_rank",
+  "gas_before",
+  "source_window"
+]

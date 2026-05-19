@@ -1,0 +1,33 @@
+schema = "alpha_uniswap_v2_trading_vault_route_policy_v1"
+chain_id = 1
+route_name = "uniswap_v2_trading_vault_mode_a"
+protocol = "uniswap_v2_trading_vault"
+
+[addresses]
+vault = "SET_AFTER_DEPLOY"
+owner_from = "SET_KARTAL_SIGNER_OR_OWNER_ADDRESS"
+treasury = "SET_TREASURY_ADDRESS"
+weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+uniswap_v2_router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+
+[entry]
+method = "buyV2ExactEthForTokens"
+selector = "0x8a62666c"
+holds_token_in_vault = true
+creates_sell_router_allowance = false
+
+[priority_exit]
+method = "emergencySellV2ExactTokensForEth"
+selector = "0x5f413d10"
+uses_internal_approve_and_sell = true
+requires_prior_eoa_allowance = false
+proceeds_recipient = "treasury"
+reject_if_position_not_held_by_vault = true
+
+[planner_requirements]
+require_current_position = true
+require_current_pool_snapshot = true
+require_exact_calldata_simulation = true
+require_ranked_gas_candidate = true
+reject_unranked_value_cap_fallback = true
+require_receipt_reconciliation = true

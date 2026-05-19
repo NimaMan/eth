@@ -1,0 +1,5 @@
+{
+  "schema": "verification_output_v1",
+  "vault_address": "SET_AFTER_DEPLOY",
+  "status": "SET_AT_RUN_TIME"
+}

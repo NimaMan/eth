@@ -1,0 +1,1 @@
+{"schema":"audit_findings_jsonl_v1","type":"placeholder","status":"replace_before_deploy","note":"Append one JSON object per finding. Remove this placeholder before signoff."}

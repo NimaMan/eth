@@ -1,0 +1,6 @@
+{
+  "schema": "fork_rehearsal_v1",
+  "fork_block": 25129486,
+  "gas_snapshot": "gas-snapshot.txt",
+  "status": "SET_AT_RUN_TIME"
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "post_deploy_smoke_v1",
+  "vault_address": "SET_AFTER_DEPLOY",
+  "passed": false
+}
