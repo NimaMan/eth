@@ -12,10 +12,11 @@ pub mod planner;
 pub mod tx_prep;
 
 pub use calibration::{
-    run_calibration, CalibrationCaseInput, CalibrationCaseReport, CalibrationCaseVerdict,
-    CalibrationInputFile, CalibrationOverallVerdict, CalibrationReport, CalibrationRunConfig,
-    CalibrationSubmitReport, CalibrationSuiteInput, CalibrationSummary, CalibrationVerdictKind,
-    ExpectedCalibrationOutcome,
+    build_planner_calibration_request, run_calibration, CalibrationCaseInput,
+    CalibrationCaseReport, CalibrationCaseVerdict, CalibrationInputFile, CalibrationOverallVerdict,
+    CalibrationReport, CalibrationRunConfig, CalibrationSubmitReport, CalibrationSuiteInput,
+    CalibrationSummary, CalibrationVerdictKind, ExpectedCalibrationOutcome,
+    PlannerCalibrationFixtureConfig, PlannerCalibrationFixtureError, PlannerCalibrationRoute,
 };
 pub use kartal::{
     KartalClient, KartalClientConfig, KartalClientError, KartalDailySpendStatus,

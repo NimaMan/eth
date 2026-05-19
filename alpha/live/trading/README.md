@@ -79,10 +79,16 @@ Full dry-run signing check, after Kartal has a signer and narrow policy:
 
 ```bash
 cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
-  --request /path/to/planner-produced-request.json \
+  --planner-fixture \
+  --planner-fixture-from 0x... \
   --expect dry-run-signed \
   --refresh-simulation-block
 ```
+
+Use `--write-request-path /tmp/kartal-planner-produced-request.json` with
+`--write-request-only` first when the operator needs to update Kartal's target
+and selector allowlists to the exact planner-produced transaction before
+submitting the signed dry-run.
 
 Current bottleneck: the running `eth_alpha_trader` still uses chain-state
 simulation. It does not instantiate the engine's real `TxExecutorAdapter` or the

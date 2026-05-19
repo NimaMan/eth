@@ -6,12 +6,17 @@
 
 mod config;
 mod input;
+mod planner_fixture;
 mod report;
 mod run;
 mod verdict;
 
 pub use config::CalibrationRunConfig;
 pub use input::{CalibrationCaseInput, CalibrationInputFile, CalibrationSuiteInput};
+pub use planner_fixture::{
+    build_planner_calibration_request, PlannerCalibrationFixtureConfig,
+    PlannerCalibrationFixtureError, PlannerCalibrationRoute,
+};
 pub use report::{
     CalibrationCaseReport, CalibrationReport, CalibrationSubmitReport, CalibrationSummary,
 };

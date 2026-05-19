@@ -1,23 +1,60 @@
 use std::fs;
 use std::path::PathBuf;
 
+use alloy_primitives::Address;
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
 use eth_live_trading::{
-    run_calibration, CalibrationInputFile, CalibrationOverallVerdict, CalibrationRunConfig,
-    ExpectedCalibrationOutcome,
+    build_planner_calibration_request, run_calibration, CalibrationInputFile,
+    CalibrationOverallVerdict, CalibrationRunConfig, ExpectedCalibrationOutcome,
+    PlannerCalibrationFixtureConfig, PlannerCalibrationRoute,
 };
 use eyre::{eyre, Result, WrapErr};
 
 const DEFAULT_REPORT_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/alpha/lab/reports/kartal_calibration";
+const DEFAULT_PLANNER_FIXTURE_STRATEGY: &str =
+    "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
+const DEFAULT_PLANNER_FIXTURE_RUN_ID: &str = "kartal-calibration-planner-fixture";
+const DEFAULT_PLANNER_FIXTURE_VAULT: &str = "0x0000000000000000000000000000000000000002";
 
 #[derive(Debug, Parser)]
 struct Args {
     /// JSON file containing either a single eth_direct_raw_v1 request or a
     /// calibration suite with `cases`.
     #[arg(long)]
-    request: PathBuf,
+    request: Option<PathBuf>,
+
+    /// Build the calibration request through the live priority-sell planner
+    /// instead of reading a JSON request from disk.
+    #[arg(long, default_value_t = false)]
+    planner_fixture: bool,
+
+    /// Signer/from address for --planner-fixture. Defaults to the single
+    /// ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES address when available.
+    #[arg(long)]
+    planner_fixture_from: Option<String>,
+
+    #[arg(long, value_enum, default_value_t = PlannerFixtureRouteArg::TradingVaultUniswapV2)]
+    planner_fixture_route: PlannerFixtureRouteArg,
+
+    #[arg(long, default_value = DEFAULT_PLANNER_FIXTURE_VAULT)]
+    planner_fixture_vault_address: String,
+
+    #[arg(long, default_value = DEFAULT_PLANNER_FIXTURE_STRATEGY)]
+    planner_fixture_strategy_name: String,
+
+    #[arg(long, default_value = DEFAULT_PLANNER_FIXTURE_RUN_ID)]
+    planner_fixture_run_id: String,
+
+    /// Write the planner-produced request JSON before submission.
+    #[arg(long)]
+    write_request_path: Option<PathBuf>,
+
+    /// Generate and write the planner-produced request, then exit without
+    /// contacting Kartal. Requires --planner-fixture.
+    #[arg(long, default_value_t = false)]
+    write_request_only: bool,
 
     #[arg(long, default_value = "http://127.0.0.1:5004")]
     kartal_url: String,
@@ -70,10 +107,28 @@ impl From<ExpectArg> for ExpectedCalibrationOutcome {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum PlannerFixtureRouteArg {
+    DirectUniswapV2,
+    TradingVaultUniswapV2,
+}
+
+impl From<PlannerFixtureRouteArg> for PlannerCalibrationRoute {
+    fn from(value: PlannerFixtureRouteArg) -> Self {
+        match value {
+            PlannerFixtureRouteArg::DirectUniswapV2 => Self::DirectUniswapV2,
+            PlannerFixtureRouteArg::TradingVaultUniswapV2 => Self::TradingVaultUniswapV2,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let input = load_input(&args.request)?;
+    let input = load_or_build_input(&args).await?;
+    if args.write_request_only {
+        return Ok(());
+    }
     let token = load_token(&args.token_env)?;
     let config = CalibrationRunConfig {
         kartal_base_url: args.kartal_url.clone(),
@@ -115,6 +170,68 @@ async fn main() -> Result<()> {
     }
 }
 
+async fn load_or_build_input(args: &Args) -> Result<CalibrationInputFile> {
+    match (&args.request, args.planner_fixture) {
+        (Some(_), true) => Err(eyre!(
+            "--request and --planner-fixture are mutually exclusive input sources"
+        )),
+        (Some(path), false) => load_input(path),
+        (None, true) => build_planner_fixture_input(args).await,
+        (None, false) => Err(eyre!("provide --request or --planner-fixture")),
+    }
+}
+
+async fn build_planner_fixture_input(args: &Args) -> Result<CalibrationInputFile> {
+    let from = planner_fixture_from(args)?;
+    let vault_address = parse_address(
+        &args.planner_fixture_vault_address,
+        "--planner-fixture-vault-address",
+    )?;
+    let mut config = PlannerCalibrationFixtureConfig::new(from);
+    config.route = args.planner_fixture_route.into();
+    config.vault_address = vault_address;
+    config.strategy_name = args.planner_fixture_strategy_name.clone();
+    config.strategy_run_id = Some(args.planner_fixture_run_id.clone());
+
+    let request = build_planner_calibration_request(config)
+        .await
+        .wrap_err("failed to build planner-produced calibration request")?;
+    if let Some(path) = &args.write_request_path {
+        write_request(path, &request)?;
+        println!("request: {}", path.display());
+    }
+    Ok(CalibrationInputFile::Single(request))
+}
+
+fn planner_fixture_from(args: &Args) -> Result<Address> {
+    if let Some(value) = &args.planner_fixture_from {
+        return parse_address(value, "--planner-fixture-from");
+    }
+
+    let value = std::env::var("ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES")
+        .wrap_err("missing --planner-fixture-from and ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES")?;
+    let values = value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    match values.as_slice() {
+        [single] => parse_address(single, "ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES"),
+        [] => Err(eyre!(
+            "ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES is empty; pass --planner-fixture-from"
+        )),
+        _ => Err(eyre!(
+            "ETH_TX_POLICY_ALLOWED_FROM_ADDRESSES has multiple values; pass --planner-fixture-from"
+        )),
+    }
+}
+
+fn parse_address(value: &str, label: &str) -> Result<Address> {
+    value
+        .parse::<Address>()
+        .wrap_err_with(|| format!("invalid {label} address {value:?}"))
+}
+
 fn load_input(path: &PathBuf) -> Result<CalibrationInputFile> {
     let bytes = fs::read(path).wrap_err_with(|| format!("failed to read {}", path.display()))?;
     serde_json::from_slice(&bytes)
@@ -134,6 +251,19 @@ fn load_token(primary_env: &str) -> Result<String> {
         "missing Kartal bearer token; set {} or KARTAL_API_TOKEN",
         primary_env
     ))
+}
+
+fn write_request(
+    path: &PathBuf,
+    request: &eth_live_trading::LiveDirectRawTransactionRequest,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .wrap_err_with(|| format!("failed to create request dir {}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec_pretty(request)?;
+    fs::write(path, bytes).wrap_err_with(|| format!("failed to write {}", path.display()))?;
+    Ok(())
 }
 
 fn write_report(args: &Args, report: &eth_live_trading::CalibrationReport) -> Result<PathBuf> {

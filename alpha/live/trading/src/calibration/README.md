@@ -33,10 +33,22 @@ planner-produced request and expect a signed dry-run:
 
 ```bash
 cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
-  --request /path/to/planner-produced-request.json \
+  --planner-fixture \
+  --planner-fixture-from 0x... \
   --expect dry-run-signed \
   --refresh-simulation-block
 ```
 
 That check proves decode, auth, policy acceptance, spend reservation, signing,
 tx_executor journaling, and no broadcast.
+
+To inspect or policy-allow the exact planner-produced target and calldata
+selector first, write the request without contacting Kartal:
+
+```bash
+cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
+  --planner-fixture \
+  --planner-fixture-from 0x... \
+  --write-request-path /tmp/kartal-planner-produced-request.json \
+  --write-request-only
+```
