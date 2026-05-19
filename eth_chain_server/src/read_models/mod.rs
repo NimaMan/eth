@@ -7,6 +7,7 @@ pub mod ops;
 pub mod pool;
 pub mod risk_atlas;
 pub mod run;
+pub mod simulation;
 pub mod strategy;
 pub mod surface;
 pub mod token;

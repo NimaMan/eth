@@ -6,6 +6,7 @@ mod live;
 mod mempool;
 mod ops;
 mod range;
+mod simulation;
 mod token_activity;
 mod token_analytics;
 mod v1;
@@ -255,6 +256,13 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(alpha::gas_rank_estimate);
 
+    let alpha_vault_simulation =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "simulations" / "vault")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(with_state(state.clone()))
+            .and_then(simulation::vault_uniswap_v2);
+
     let alpha_runs = warp::path!("eth" / "tokens" / "api" / "alpha" / "runs")
         .and(warp::get())
         .and(warp::query::<backtest::RunListQuery>())
@@ -438,6 +446,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
 
     let alpha_routes = alpha_strategy_performance
         .or(alpha_strategy_reset)
+        .or(alpha_vault_simulation)
         .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)

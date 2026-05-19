@@ -1,7 +1,8 @@
 use warp::{Filter, Reply};
 
 use super::{
-    agent, alpha, backtest, health, live, mempool, ops, range, token_activity, token_analytics,
+    agent, alpha, backtest, health, live, mempool, ops, range, simulation, token_activity,
+    token_analytics,
 };
 use crate::http::ServerState;
 use crate::read_models::activity::TokenActivityBlocksQuery;
@@ -308,6 +309,13 @@ pub(super) fn routes(
             .and(super::with_state(state.clone()))
             .and_then(alpha::gas_rank_estimate);
 
+    let alpha_vault_simulation =
+        warp::path!("api" / "v1" / "eth" / "alpha" / "simulations" / "vault")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(super::with_state(state.clone()))
+            .and_then(simulation::vault_uniswap_v2);
+
     let alpha_runs = warp::path!("api" / "v1" / "eth" / "alpha" / "runs")
         .and(warp::get())
         .and(warp::query::<backtest::RunListQuery>())
@@ -455,6 +463,7 @@ pub(super) fn routes(
 
     let alpha_routes = alpha_strategy_performance
         .or(alpha_strategy_reset)
+        .or(alpha_vault_simulation)
         .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)
