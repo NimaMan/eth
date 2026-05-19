@@ -1,0 +1,9 @@
+{
+  "schema": "uniswap_v4_trading_vault_run_inputs_v1",
+  "status": "candidate",
+  "route_fixture": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json",
+  "fork_block": 25131251,
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "predicted_address": "0x352879E8BA5B02e0A9839ec86AB4A94238e8dbc9"
+}

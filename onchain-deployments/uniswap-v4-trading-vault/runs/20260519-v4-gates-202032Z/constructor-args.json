@@ -1,0 +1,9 @@
+{
+  "schema": "constructor_args_v1",
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "universal_router": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+  "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+  "hooks_allowed": false,
+  "deployer": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+}

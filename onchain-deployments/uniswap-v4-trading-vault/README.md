@@ -11,13 +11,14 @@ signoff.
 
 ## Current Status
 
-Status: candidate implementation and pinned benchmark evidence exist;
-deployment remains blocked.
+Status: candidate implementation, pinned benchmark evidence, deploy calldata,
+and a Kartal policy-rejection dry-run exist; mainnet broadcast remains blocked.
 
 The Solidity source under `solidity/baygus-executor/contracts/src/v4/` now has a
 first `UniswapV4TradingVault` candidate. `scripts/05_deploy.sh` still fails
-closed until deploy calldata generation, Kartal dry-run evidence, and operator
-signoff are recorded.
+closed until explicit operator signoff. After deployment, Kartal must be
+switched from the currently deployed V2 vault allowlist to the new V4 vault
+target and rerun with `EXPECT=accepted`.
 
 Latest pinned rehearsal evidence:
 
@@ -33,6 +34,13 @@ Latest pinned rehearsal evidence:
 Report:
 `simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json`.
 
+Latest gate run:
+`runs/20260519-v4-gates-202032Z/`.
+
+That run records constructor args, init code hash, deploy gas estimate,
+nonce-bound predicted address, representative buy/sell calldata, and Kartal
+dry-run rejection evidence against the current live V2 allowlist.
+
 ## Required Flow
 
 1. Build route fixtures in `simulations/route-fixtures/`.
@@ -44,7 +52,7 @@ Report:
    pinned mainnet fork gas test with report capture.
 5. Fill candidate configs under `config/`.
 6. Run preflight, build/hash, fork rehearsal, calldata generation, and Kartal
-   dry-run scripts.
+   dry-run scripts. Current pre-deploy run is complete.
 7. Complete `audit/checklist.yaml` and resolve every finding.
 8. Only then enable a real deploy script for a dated run folder.
 

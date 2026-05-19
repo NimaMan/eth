@@ -1,0 +1,29 @@
+No files changed, compilation skipped
+
+Ran 6 tests for test/bench/v4/UniswapV4TradingVaultForkGas.t.sol:UniswapV4TradingVaultForkGasTest
+[PASS] testGas_Fork_DirectUniversalRouterBuyToEoa() (gas: 169155)
+[PASS] testGas_Fork_DirectUniversalRouterSellPreapproved() (gas: 149422)
+[PASS] testGas_Fork_Erc20ApprovePermit2() (gas: 67904)
+[PASS] testGas_Fork_Permit2ApproveUniversalRouter() (gas: 62616)
+[PASS] testGas_Fork_VaultBuyToVault() (gas: 167319)
+[PASS] testGas_Fork_VaultEmergencySellWithExactPermit2Lifecycle() (gas: 157734)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 2.23ms (6.95ms CPU time)
+
+╭-----------------------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| src/v4/UniswapV4TradingVault.sol:UniswapV4TradingVault Contract |                 |        |        |        |         |
++========================================================================================================================+
+| Deployment Cost                                                 | Deployment Size |        |        |        |         |
+|-----------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| 1225586                                                         | 6041            |        |        |        |         |
+|-----------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                                 |                 |        |        |        |         |
+|-----------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                                   | Min             | Avg    | Median | Max    | # Calls |
+|-----------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| buyV4ExactEthForTokens                                          | 22932           | 95214  | 95214  | 167497 | 2       |
+|-----------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| emergencySellV4ExactTokensForEth                                | 189194          | 189194 | 189194 | 189194 | 1       |
+╰-----------------------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+
+Ran 1 test suite in 5.83ms (2.23ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)

@@ -1,0 +1,6 @@
+UniswapV4TradingVaultForkGasTest:testGas_Fork_DirectUniversalRouterBuyToEoa() (gas: 139775)
+UniswapV4TradingVaultForkGasTest:testGas_Fork_DirectUniversalRouterSellPreapproved() (gas: 57309)
+UniswapV4TradingVaultForkGasTest:testGas_Fork_Erc20ApprovePermit2() (gas: 37856)
+UniswapV4TradingVaultForkGasTest:testGas_Fork_Permit2ApproveUniversalRouter() (gas: 37940)
+UniswapV4TradingVaultForkGasTest:testGas_Fork_VaultBuyToVault() (gas: 159287)
+UniswapV4TradingVaultForkGasTest:testGas_Fork_VaultEmergencySellWithExactPermit2Lifecycle() (gas: 129008)

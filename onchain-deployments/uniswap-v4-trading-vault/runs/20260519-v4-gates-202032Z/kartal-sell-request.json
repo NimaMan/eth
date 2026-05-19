@@ -1,0 +1,35 @@
+{
+  "attempt_id": "v4-vault-v4_vault_emergency_sell-20260519-202122Z",
+  "chain_id": 1,
+  "from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "to": "0x352879E8BA5B02e0A9839ec86AB4A94238e8dbc9",
+  "value": "0",
+  "data": "0x3a832d080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000001f4000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000f42400000000000000000000000000000000000000000000000000000000000000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000",
+  "gas_limit": "450000",
+  "max_fee_per_gas": "10000000000",
+  "max_priority_fee_per_gas": "1000000000",
+  "nonce": null,
+  "bribe": null,
+  "simulation": {
+    "block_number": 25131625,
+    "block_hash": null,
+    "state_root": null,
+    "expected_output_token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "expected_output_amount": null,
+    "min_output_amount": "1",
+    "metadata": {
+      "source": "uniswap_v4_trading_vault_gate"
+    }
+  },
+  "metadata": {
+    "wire_protocol": "eth_direct_raw_v1",
+    "intent_kind": "v4_vault_emergency_sell",
+    "strategy_name": "uniswap-v4-trading-vault-deploy-gate",
+    "strategy_run_id": "manual-v4-vault-gate",
+    "trade_id": "v4-vault-v4_vault_emergency_sell-20260519-202122Z",
+    "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "pool_address": "v4:(0x0000000000000000000000000000000000000000,0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,500,10,0x0000000000000000000000000000000000000000)",
+    "executor_boundary": "kartal_eth_tx_executor",
+    "tx_prep_version": 1
+  }
+}

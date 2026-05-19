@@ -1,0 +1,225 @@
+ M Cargo.toml
+ M README.md
+ M alpha/README.md
+ M alpha/backtest/README.md
+ M alpha/backtest/src/strategy_suites.rs
+ M alpha/core/README.md
+ M alpha/core/src/README.md
+ M alpha/core/src/lib.rs
+ M alpha/core/src/market/README.md
+ M alpha/core/src/order/intent.rs
+ M alpha/core/src/position/position.rs
+ M alpha/core/src/store/README.md
+ M alpha/core/src/store/trait.rs
+ M alpha/core/src/strategy/README.md
+ M alpha/core/src/strategy/decision.rs
+ M alpha/core/src/strategy/trait.rs
+ M alpha/core/tests/position_state_machine.rs
+ M alpha/engine/src/execution/simulated/README.md
+ M alpha/engine/src/execution/simulated/mod.rs
+ M alpha/engine/src/lib.rs
+ M alpha/engine/src/snapshots.rs
+ M alpha/engine/src/wire.rs
+ M alpha/lab/README.md
+ M alpha/lab/reports/alpha_10/README.md
+ M alpha/lab/reports/alpha_10/backtest_50k_checklist.md
+ D alpha/lab/src/backtest_validation/README.md
+ D alpha/lab/src/backtest_validation/checks.rs
+ D alpha/lab/src/backtest_validation/checks/README.md
+ D alpha/lab/src/backtest_validation/checks/accounting.rs
+ D alpha/lab/src/backtest_validation/checks/common.rs
+ D alpha/lab/src/backtest_validation/checks/decision_timing.rs
+ D alpha/lab/src/backtest_validation/checks/execution_replay.rs
+ D alpha/lab/src/backtest_validation/checks/lifecycle.rs
+ D alpha/lab/src/backtest_validation/checks/metadata.rs
+ D alpha/lab/src/backtest_validation/checks/signal_scope.rs
+ D alpha/lab/src/backtest_validation/checks/snapshots.rs
+ D alpha/lab/src/backtest_validation/db.rs
+ D alpha/lab/src/backtest_validation/mod.rs
+ D alpha/lab/src/backtest_validation/persistence.rs
+ D alpha/lab/src/backtest_validation/report.rs
+ D alpha/lab/src/backtest_validation/runner.rs
+ M alpha/lab/src/bin/eth_alpha_lab.rs
+ M alpha/lab/src/lib.rs
+ M alpha/lab/src/strategy_assessment/README.md
+ M alpha/lab/src/strategy_assessment/report.rs
+ M alpha/lab/src/strategy_assessment/runner.rs
+ M alpha/live/feed/Cargo.toml
+ M alpha/live/feed/README.md
+ M alpha/live/feed/src/README.md
+ M alpha/live/feed/src/runtime/apply_report.rs
+ M alpha/live/feed/src/runtime/service.rs
+ M alpha/live/feed/src/runtime/snapshot.rs
+ M alpha/live/feed/src/runtime/state.rs
+ M alpha/live/feed/src/source/README.md
+ M alpha/live/state/README.md
+ M alpha/live/state/src/README.md
+ M alpha/live/state/src/chain_state/README.md
+ M alpha/live/state/src/chain_state/snapshot.rs
+ D alpha/live/state/src/keys.rs
+ M alpha/live/state/src/lib.rs
+ M alpha/live/state/src/store/README.md
+ M alpha/live/state/src/store/memory.rs
+ M alpha/live/state/tests/README.md
+ D alpha/live/state/tests/keys.rs
+ M alpha/mempool_risk/README.md
+ M alpha/store/README.md
+ M alpha/store/src/lib.rs
+ M alpha/store/src/runtime.rs
+ M alpha/strategies/README.md
+ M alpha/strategies/src/baseline/README.md
+ M alpha/strategies/src/baseline/snipe_all/live/strategy.rs
+ M alpha/strategies/src/baseline/snipe_all/state.rs
+ M alpha/strategies/src/baseline/snipe_all/tests.rs
+ M alpha/strategies/src/market_tracker.rs
+ M alpha/strategies/src/shared_rules/live/live_mempool_liquidity_removal_exit.rs
+ M config.env
+ M config.toml
+ M eth_chain_server/README.md
+ M eth_chain_server/docs/live-v2-metadata-bottleneck.md
+ M eth_chain_server/src/app/state.rs
+ M eth_chain_server/src/http/routes/agent.rs
+ M eth_chain_server/src/http/routes/range.rs
+ M eth_chain_server/src/http/routes/token_analytics.rs
+ M eth_chain_server/src/ranges/observations.rs
+ M eth_chain_server/src/ranges/pipeline/cache.rs
+ M eth_chain_server/src/ranges/pipeline/mod.rs
+ M eth_chain_server/src/read_models/live.rs
+ M eth_chain_server/src/read_models/risk_atlas.rs
+ M eth_chain_server/src/read_models/token/mod.rs
+ M eth_token/examples/pnl/README.md
+ M eth_token/examples/tracking/token_tracking_range.rs
+ M eth_token/src/chain_metadata/reth.rs
+ M eth_token/src/network/README.md
+ M eth_token/src/pnl/mod.rs
+ M eth_token/src/pools/uniswap/v3.rs
+ M eth_token/src/pools/uniswap/v4.rs
+ M eth_token/src/tracking/README.md
+ M eth_token/src/tracking/block_processor/block_update_loop.rs
+ M eth_token/src/tracking/block_processor/processor.rs
+ M mempool_processor/README.md
+ M mempool_processor/src/bin/mempool_signal_detector.rs
+ M mempool_processor/src/db_writers/README.md
+ M mempool_processor/src/mempool_fetcher/mempool_fetcher_ipc_client.rs
+ M mempool_processor/src/mempool_signal_detector_runtime/README.md
+ M mempool_processor/src/token_tracking/README.md
+ M onchain-deployments/uniswap-v4-trading-vault/README.md
+ M onchain-deployments/uniswap-v4-trading-vault/audit/checklist.yaml
+ M onchain-deployments/uniswap-v4-trading-vault/bogaz.md
+ M onchain-deployments/uniswap-v4-trading-vault/config/gas-policy.candidate.toml
+ M onchain-deployments/uniswap-v4-trading-vault/config/mainnet.candidate.toml
+ M onchain-deployments/uniswap-v4-trading-vault/runs/README.md
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/00_preflight.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/01_build_and_hash.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/02_fork_rehearsal.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/03_generate_calldata.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/04_kartal_dry_run.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/05_deploy.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/06_verify_contract.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/07_post_deploy_smoke.sh
+ M onchain-deployments/uniswap-v4-trading-vault/scripts/README.md
+ M pyreth/examples/reth_indexer/README.md
+ M pyreth/src/pyreth_instance.rs
+ M pyreth/src/simulator/live_simulator.rs
+ M reth_chain_query/README.md
+ M reth_chain_query/src/common_addresses/address_book.rs
+ M reth_chain_query/src/common_addresses/identification.rs
+ M reth_chain_query/src/common_addresses/mod.rs
+ M reth_chain_query/src/contracts/erc20/pending_replay.rs
+ M reth_chain_query/src/postgres_db/README.md
+ M reth_chain_query/src/provider/block/rpc_fetcher.rs
+ M reth_chain_query/src/reth_index/README.md
+ M reth_chain_query/src/reth_index/tables/README.md
+ M reth_chain_query/src/reth_index/writers/README.md
+ M token_lab/README.md
+ M token_lab/investigations/README.md
+ M token_lab/scam_analytics/README.md
+ M token_lab/scam_analytics/risk_atlas/README.md
+ M token_lab/scam_analytics/risk_atlas/migrations/001_create_risk_atlas.sql
+ M token_lab/scam_analytics/risk_atlas/src/atlas/page_story.rs
+ M token_lab/scam_analytics/risk_atlas/src/db/schema.rs
+ M token_lab/scam_analytics/risk_atlas/src/db/writer.rs
+ M tx_fund_flow/README.md
+ M tx_fund_flow/src/core_types/src/error.rs
+ M tx_fund_flow/src/core_types/src/lib.rs
+ M tx_fund_flow/src/core_types/src/types.rs
+ M tx_fund_flow/src/core_types/src/utils.rs
+ M tx_fund_flow/src/eth_db_fetcher/src/address_fetcher.rs
+ M tx_fund_flow/src/eth_db_fetcher/src/connection.rs
+ M tx_fund_flow/src/eth_db_fetcher/src/lib.rs
+ M tx_fund_flow/src/eth_db_fetcher/src/models.rs
+ M tx_fund_flow/src/eth_db_fetcher/src/transaction_fetcher.rs
+ M tx_fund_flow/src/fundflownetwork/examples/basic_usage.rs
+ M tx_fund_flow/src/fundflownetwork/examples/build_fund_flow_network.rs
+ M tx_fund_flow/src/fundflownetwork/examples/test_graph_discovery.rs
+ M tx_fund_flow/src/fundflownetwork/src/fund_flow_analyzer.rs
+ M tx_fund_flow/src/fundflownetwork/src/graph_discovery/db_queries.rs
+ M tx_fund_flow/src/fundflownetwork/src/graph_discovery/mod.rs
+ M tx_fund_flow/src/fundflownetwork/src/graph_discovery/routing_rules.rs
+ M tx_fund_flow/src/fundflownetwork/src/graph_discovery/tx_selector.rs
+ M tx_fund_flow/src/fundflownetwork/src/graph_discovery/types.rs
+ M tx_fund_flow/src/fundflownetwork/src/lib.rs
+ M tx_fund_flow/src/fundflownetwork/src/network_builder.rs
+ M tx_fund_flow/src/fundflownetwork/src/network_types.rs
+ M tx_fund_flow/src/fundflownetwork/src/state_changes.rs
+ M tx_fund_flow/src/fundflownetwork/src/visualization.rs
+ M tx_processor/Cargo.toml
+ M tx_processor/README.md
+ M tx_processor/examples/trade_simulation/probes/uniswap_v4_pool.rs
+ D tx_processor/src/bin/live_block_processor/README.md
+ D tx_processor/src/bin/live_block_processor/main.rs
+ M tx_processor/src/block_processor/types.rs
+ M tx_processor/src/lib.rs
+ D tx_processor/src/live/block_logger.rs
+ D tx_processor/src/live/block_notifier.rs
+ D tx_processor/src/live/block_snapshot.rs
+ M tx_processor/src/live/live_block_processor.rs
+ D tx_processor/src/live/live_block_service.rs
+ M tx_processor/src/live/mod.rs
+ D tx_processor/src/live/processed_block_replay_store_sink.rs
+ D tx_processor/src/live/redis_block_publisher.rs
+ D tx_processor/src/live/redis_keys.rs
+ M tx_processor/src/processed_tx_provider/block/README.md
+ M tx_processor/src/processed_tx_provider/block/disk_cache/mod.rs
+ M tx_processor/src/processed_tx_provider/block/disk_cache/store.rs
+ D tx_processor/src/processed_tx_provider/block/live.rs
+ M tx_processor/src/processed_tx_provider/block/load.rs
+ M tx_processor/src/processed_tx_provider/block/mod.rs
+ M tx_processor/src/processed_tx_provider/mod.rs
+ M tx_processor/src/trade_simulation/README.md
+ M tx_processor/src/trade_simulation/pool_buy_sell_simulator/protocols/uniswap/v4.rs
+ M tx_processor/src/tx_processor/address_balance_change_calculator.rs
+ M tx_processor/src/tx_processor/data_models/README.md
+ M tx_processor/src/tx_processor/tx_log_processor/uniswap_v3.rs
+ M tx_processor/src/tx_processor/tx_trace_processor.rs
+ M tx_simulator/README.md
+ m vendor/reth
+?? alpha/core/src/decision_rationale/
+?? alpha/lab/reports/alpha_10/pnl_validation_50_pool_sample.md
+?? alpha/lab/reports/alpha_10/results_50k_alpha11_gasguard_hold_sweep.md
+?? alpha/lab/reports/alpha_10/results_50k_dust_sell_fix_v2.md
+?? alpha/lab/reports/gamma_10/
+?? alpha/lab/src/strategy_validation/
+?? alpha/store/reset_alpha_trading.sql
+?? alpha/strategies/tests/
+?? eth_chain_server/src/bin/
+?? eth_token/src/pnl/README.md
+?? eth_token/src/pnl/conservation.rs
+?? eth_token/src/pnl/export.rs
+?? eth_token/src/pnl/model.rs
+?? eth_token_pnl_store/
+?? onchain-deployments/uniswap-v2-trading-vault/runs/20260519-171434Z-kartal-dry-run/
+?? onchain-deployments/uniswap-v2-trading-vault/runs/20260519-otto-tx-simulator/
+?? onchain-deployments/uniswap-v4-trading-vault/runs/20260519-v4-gates-202032Z/
+?? reth_chain_query/src/common_addresses/burn_addresses.rs
+?? token_lab/investigations/vyp_burned_lp_reserve_drain_25077324/
+?? token_lab/network_analytics/
+?? token_lab/scam_analytics/artifacts/mempool_management/
+?? token_lab/scam_analytics/artifacts/reports/direct_lp_active_observation_segment1_24603113_24853112.md
+?? token_lab/scam_analytics/artifacts/reports/direct_lp_liquidity_removal_active_observation_100k_25007276_25107275_summary.md
+?? token_lab/scam_analytics/artifacts/reports/direct_lp_liquidity_removal_active_observation_segment1_summary.md
+?? token_lab/scam_analytics/artifacts/reports/direct_lp_liquidity_removal_features_100k_25007276_25107275_summary.md
+?? token_lab/scam_analytics/artifacts/reports/scam_pools_100k_25007276_25107275_summary.md
+?? token_lab/scam_analytics/mempool_management/
+?? tx_processor/examples/blocks/dump_pblock.rs
+?? tx_processor/src/bin/dump_pblock.rs

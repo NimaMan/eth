@@ -1,0 +1,17 @@
+No files changed, compilation skipped
+2026-05-19T20:24:44.897441Z  WARN traces::etherscan: etherscan config not found
+
+Ran 10 tests for test/v4/UniswapV4TradingVault.t.sol:UniswapV4TradingVaultTest
+[PASS] testBuyAndSellRejectInvalidInputs() (gas: 3204020)
+[PASS] testBuyV4ExactEthForTokensStoresTokenInVault() (gas: 3316219)
+[PASS] testConstructorStoresImmutableConfigAndRejectsZeroAddresses() (gas: 3180888)
+[PASS] testEmergencySellV4ExactTokensForEthApprovesExactlyAndClearsAllowances() (gas: 3339713)
+[PASS] testHookDataWithoutHookIsRejected() (gas: 3070148)
+[PASS] testHookPolicyRejectsHooksUnlessExplicitlyAllowed() (gas: 4480823)
+[PASS] testInvalidPoolKeyIsRejected() (gas: 3070665)
+[PASS] testOnlyOwnerCanBuySellOrRescue() (gas: 3121443)
+[PASS] testRescueTokenAndEth() (gas: 3133349)
+[PASS] testSlippageFailuresRevertStateAndAllowance() (gas: 3605811)
+Suite result: ok. 10 passed; 0 failed; 0 skipped; finished in 738.13µs (2.51ms CPU time)
+
+Ran 1 test suite in 2.44ms (738.13µs CPU time): 10 tests passed, 0 failed, 0 skipped (10 total tests)

@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running unittests src/lib.rs (target/debug/deps/tx_simulator-83b223bb9f89ecf5)
+
+running 6 tests
+test tx_builders::protocols::uniswap::v4::trading_vault::tests::builds_buy_transaction_to_vault ... ok
+test tx_builders::protocols::uniswap::v4::trading_vault::tests::encodes_sell_selector ... ok
+test tx_builders::protocols::uniswap::v4::universal_router::tests::builds_native_eth_universal_router_call ... ok
+test tx_builders::protocols::uniswap::v4::universal_router::tests::rejects_permit2_when_pool_input_is_native_eth ... ok
+test tx_builders::protocols::uniswap::v4::universal_router::tests::exact_input_single_uses_deployed_router_hook_data_field_order ... ok
+test tx_builders::protocols::uniswap::v4::trading_vault::tests::encodes_buy_selector ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s

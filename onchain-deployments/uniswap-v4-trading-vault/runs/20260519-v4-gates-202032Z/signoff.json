@@ -1,0 +1,7 @@
+{
+  "schema": "uniswap_v4_trading_vault_signoff_v1",
+  "status": "blocked",
+  "operator": null,
+  "reviewer": null,
+  "notes": "Local pre-deploy gates completed. Mainnet broadcast, post-deploy smoke, verification, and accepted Kartal allowlist dry-run remain blocked until explicit operator approval."
+}

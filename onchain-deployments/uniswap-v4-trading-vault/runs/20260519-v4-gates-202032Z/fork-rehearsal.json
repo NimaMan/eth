@@ -1,0 +1,188 @@
+{
+  "schema": "fork_rehearsal_v1",
+  "fork_block": 25131251,
+  "gas_snapshot": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v4-trading-vault/runs/20260519-v4-gates-202032Z/gas-snapshot.txt",
+  "tx_simulator": {
+    "artifact_path": "/home/nima/code/crypto/blockchains/eth/solidity/baygus-executor/out/UniswapV4TradingVault.sol/UniswapV4TradingVault.json",
+    "block": 25131251,
+    "candidate_vault": {
+      "balances_after": {
+        "owner_eth_wei": "99995595293229214915",
+        "owner_token_raw": "1529818147",
+        "token_symbol": "USDC",
+        "treasury_eth_wei": "99995595293229214915",
+        "vault_eth_wei": "0",
+        "vault_token_raw": "0"
+      },
+      "balances_before": {
+        "owner_eth_wei": "100000000000000000000",
+        "owner_token_raw": "1529818147",
+        "token_symbol": "USDC",
+        "treasury_eth_wei": "100000000000000000000",
+        "vault_eth_wei": "0",
+        "vault_token_raw": "0"
+      },
+      "buy": {
+        "token_out_delta_raw": "2114621766",
+        "transaction": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "361013058472360",
+          "gas_used": 167845,
+          "logs": 3,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "deploy": {
+        "code_available_after_deploy": true,
+        "transaction": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "2641773736838992",
+          "gas_used": 1228234,
+          "logs": 0,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "sell": {
+        "eth_received_wei_before_gas": "999000383366793163",
+        "transaction": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "402303342266896",
+          "gas_used": 187042,
+          "logs": 7,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "totals": {
+        "deploy_gas_used": 1228234,
+        "total_gas_used": 1583121,
+        "transactions_executed": 3,
+        "vault_route_gas_used": 354887
+      },
+      "vault_address": "0x3e935C6057FBb8D5A7B9A6C13084D28A4f06DcF4"
+    },
+    "chain_id": 1,
+    "comparison": {
+      "direct_allowance_setup_gas": 103472,
+      "direct_full_with_allowances_gas": 382953,
+      "direct_router_buy_plus_sell_gas": 279481,
+      "notes": [
+        "direct_router_buy_plus_sell excludes ERC20 and Permit2 approval transactions",
+        "direct_full_with_allowances includes direct buy, ERC20 approve, Permit2 approve, and direct sell",
+        "vault_buy_plus_sell excludes candidate deployment; sell includes exact ERC20 and Permit2 allowance lifecycle inside the vault"
+      ],
+      "vault_buy_plus_sell_gas": 354887,
+      "vault_deploy_gas": 1228234,
+      "vault_route_minus_direct_full_gas": -28066,
+      "vault_route_minus_direct_router_gas": 75406
+    },
+    "direct_universal_router": {
+      "approvals": {
+        "erc20_to_permit2": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "120117580288048",
+          "gas_used": 55846,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        },
+        "permit2_to_universal_router": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "102437415012688",
+          "gas_used": 47626,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "balances_after": {
+        "owner_eth_wei": "99998176700601258499",
+        "owner_token_raw": "1529818147",
+        "token_symbol": "USDC",
+        "treasury_eth_wei": "99998176700601258499",
+        "vault_eth_wei": null,
+        "vault_token_raw": null
+      },
+      "balances_before": {
+        "owner_eth_wei": "100000000000000000000",
+        "owner_token_raw": "1529818147",
+        "token_symbol": "USDC",
+        "treasury_eth_wei": "100000000000000000000",
+        "vault_eth_wei": null,
+        "vault_token_raw": null
+      },
+      "buy": {
+        "token_out_delta_raw": "2114621766",
+        "transaction": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "278456150471856",
+          "gas_used": 129462,
+          "logs": 2,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "sell": {
+        "eth_received_wei_before_gas": "999000383366793163",
+        "transaction": {
+          "effective_gas_price_wei": "2150871688",
+          "estimated_total_fee_spend_wei": "322671619762072",
+          "gas_used": 150019,
+          "logs": 2,
+          "revert_reason": null,
+          "success": true,
+          "tx_type": 2
+        }
+      },
+      "totals": {
+        "allowance_setup_gas_used": 103472,
+        "direct_router_gas_used": 279481,
+        "total_gas_used": 382953,
+        "transactions_executed": 4
+      }
+    },
+    "fixture_description": "Mainnet ETH/USDC 0.05% Uniswap V4 no-hook route used as the direct Universal Router baseline before building the V4 trading vault.",
+    "fixture_id": "eth-usdc-500-no-hook",
+    "fixture_path": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json",
+    "gas_policy": {
+      "kind": "eip1559_public_priority_fee",
+      "max_fee_per_gas_wei": "50000000000",
+      "priority_fee_per_gas_wei": "2000000000"
+    },
+    "latest_context_block": 25131623,
+    "owner": "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "reth_datadir": "/home/nima/storage/samsung8tb/ethereum/reth",
+    "route": {
+      "amount_in_wei": "1000000000000000000",
+      "deadline_raw": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "hook_data_hex": "0x",
+      "hook_policy": "no-hook fixture; V4 hooks must use separate fixtures and explicit policy",
+      "min_amount_out_raw": "1",
+      "pool_key": {
+        "currency0": "0x0000000000000000000000000000000000000000",
+        "currency1": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "fee": 500,
+        "hooks": "0x0000000000000000000000000000000000000000",
+        "tick_spacing": 10
+      },
+      "sell_min_eth_out_wei": "1",
+      "token_in": "0x0000000000000000000000000000000000000000",
+      "token_in_decimals": 18,
+      "token_in_symbol": "ETH",
+      "token_out": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "token_out_decimals": 6,
+      "token_out_symbol": "USDC"
+    },
+    "schema": "uniswap_v4_candidate_vault_rehearsal_v1",
+    "treasury": "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5",
+    "universal_router": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"
+  },
+  "status": "completed"
+}

@@ -35,22 +35,27 @@ items:
     area: simulation
     status: evidence-ready
     requirement: Compare direct Universal Router and candidate vault paths in tx_simulator.
-    evidence: simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json
+    evidence: runs/20260519-v4-gates-202032Z/fork-rehearsal.json
   - id: gas-reviewed
     area: gas
     status: evidence-ready
     requirement: Store fork gas benchmarks for direct and vault paths.
-    evidence: pinned block 25131251; vault route 354887 gas; direct full route 382953 gas.
+    evidence: runs/20260519-v4-gates-202032Z/fork-rehearsal.txt and runs/20260519-v4-gates-202032Z/fork-rehearsal.json
+    note: pinned block 25131251; vault route 354887 gas; direct full route 382953 gas.
   - id: kartal-policy-reviewed
     area: execution
     status: partial
     requirement: Confirm target, selector, value, gas, fee, simulation, and daily cap policy.
-    evidence: config/kartal-policy.candidate.json has from address and buy/sell selectors; deployed target remains unset.
+    evidence: runs/20260519-v4-gates-202032Z/kartal-dry-run.json
+    note: Candidate policy has from address and buy/sell selectors; current live Kartal policy correctly rejects V4 until the deployed target is known and allowlisted.
   - id: deploy-script-enabled
     area: deployment
-    status: blocked
+    status: fail-closed
     requirement: Enable deploy script only after every prior item is reviewed.
+    evidence: runs/20260519-v4-gates-202032Z/deploy-fail-closed.txt
+    note: scripts/05_deploy.sh requires CONFIRM_DEPLOY=1 and explicit signer inputs.
   - id: signoff-complete
     area: release
     status: todo
     requirement: Record operator and reviewer signoff before public broadcast.
+    evidence: runs/20260519-v4-gates-202032Z/signoff.json
