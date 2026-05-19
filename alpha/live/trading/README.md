@@ -124,8 +124,8 @@ The selection rule is:
 4. `tx_prep` filters out candidates whose priority spend or total max fee
    exceeds the protected-value cap.
 5. Among eligible candidates, `tx_prep` chooses the best ranked candidate. If no
-   candidate fits, public routing should reject; value-cap fallback should be
-   reserved for explicitly configured protected/private routes.
+   candidate fits, the planner rejects. It must not synthesize an unranked
+   value-cap candidate.
 
 This deliberately prevents us from paying more to escape than the position can
 recover. The practical tuning question is not "highest bribe wins"; it is "what

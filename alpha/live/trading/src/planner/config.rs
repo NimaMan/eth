@@ -20,7 +20,6 @@ impl Default for LivePrioritySellPlannerConfig {
                 max_total_fee_eth: DecimalAmount::new(2, 2),
                 max_priority_fee_gwei: DecimalAmount::from(100),
                 safety_buffer_eth: DecimalAmount::new(1, 3),
-                allow_value_cap_fallback: false,
             },
             priority_route: PriorityRoute::PublicMempool,
             max_priority_fee_per_gas_gwei: DecimalAmount::from(100),

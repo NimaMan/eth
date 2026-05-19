@@ -41,7 +41,6 @@ pub struct GasPlan {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum GasPlanDecision {
     UseRanked(GasPlan),
-    UseValueCap(GasPlan),
     Reject {
         reason: String,
         required_priority_fee_gwei: Option<DecimalAmount>,
@@ -53,7 +52,6 @@ pub enum GasPlanDecision {
 pub fn choose_ranked_fee(
     budget: &PriorityFeeBudget,
     candidates: &[RankedFeeCandidate],
-    allow_value_cap_fallback: bool,
 ) -> GasPlanDecision {
     let gas_used = budget.estimated_gas_used;
     let mut eligible = candidates
@@ -68,19 +66,6 @@ pub fn choose_ranked_fee(
 
     if let Some(candidate) = eligible.first() {
         return GasPlanDecision::UseRanked(plan_from_candidate(candidate, gas_used));
-    }
-
-    if allow_value_cap_fallback && budget.max_priority_fee_gwei > DecimalAmount::ZERO {
-        let candidate = RankedFeeCandidate {
-            label: "value_cap".to_string(),
-            priority_fee_gwei: budget.max_priority_fee_gwei,
-            max_fee_per_gas_gwei: budget.max_fee_per_gas_gwei,
-            rank_position_p50: None,
-            gas_before_p50: None,
-            likely_fits_at_p50: None,
-            source: Some("value_cap_budget".to_string()),
-        };
-        return GasPlanDecision::UseValueCap(plan_from_candidate(&candidate, gas_used));
     }
 
     let required_priority_fee_gwei = candidates
@@ -153,7 +138,6 @@ mod tests {
         let decision = choose_ranked_fee(
             &budget(60),
             &[candidate("urgent", 100, 5), candidate("aggressive", 50, 10)],
-            false,
         );
 
         match decision {
@@ -164,21 +148,8 @@ mod tests {
 
     #[test]
     fn rejects_when_all_ranked_candidates_exceed_cap() {
-        let decision = choose_ranked_fee(&budget(40), &[candidate("aggressive", 50, 10)], false);
+        let decision = choose_ranked_fee(&budget(40), &[candidate("aggressive", 50, 10)]);
 
         assert!(matches!(decision, GasPlanDecision::Reject { .. }));
-    }
-
-    #[test]
-    fn can_fallback_to_value_cap_when_rank_quotes_are_too_expensive() {
-        let decision = choose_ranked_fee(&budget(40), &[candidate("aggressive", 50, 10)], true);
-
-        match decision {
-            GasPlanDecision::UseValueCap(plan) => {
-                assert_eq!(plan.label, "value_cap");
-                assert_eq!(plan.priority_fee_gwei, DecimalAmount::from(40));
-            }
-            other => panic!("expected value-cap fallback, got {other:?}"),
-        }
     }
 }

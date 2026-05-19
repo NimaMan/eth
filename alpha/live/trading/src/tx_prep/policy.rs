@@ -15,10 +15,6 @@ pub struct TxPrepConfig {
     pub max_total_fee_eth: DecimalAmount,
     pub max_priority_fee_gwei: DecimalAmount,
     pub safety_buffer_eth: DecimalAmount,
-    /// When rank quotes are too expensive, submit at the value cap anyway.
-    /// Private/protected routes can use this; public routing should usually
-    /// leave it false so we do not leak a weak transaction into the mempool.
-    pub allow_value_cap_fallback: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,12 +63,8 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
             .min(input.plan.max_priority_fee_per_gas_gwei),
     });
 
-    match choose_ranked_fee(
-        &budget,
-        &input.ranked_fee_candidates,
-        config.allow_value_cap_fallback,
-    ) {
-        GasPlanDecision::UseRanked(gas_plan) | GasPlanDecision::UseValueCap(gas_plan) => {
+    match choose_ranked_fee(&budget, &input.ranked_fee_candidates) {
+        GasPlanDecision::UseRanked(gas_plan) => {
             let signal = build_priority_sell_request(
                 &input.context,
                 &input.plan,
@@ -189,7 +181,6 @@ mod tests {
             max_total_fee_eth: DecimalAmount::new(2, 2),
             max_priority_fee_gwei: DecimalAmount::from(max_priority_gwei),
             safety_buffer_eth: DecimalAmount::new(1, 3),
-            allow_value_cap_fallback: false,
         }
     }
 

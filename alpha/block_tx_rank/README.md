@@ -68,8 +68,6 @@ number. Useful candidate labels are operational bands such as:
   the recent sample.
 - `p50_top_25`: less aggressive but still early.
 - `p75_top_10`: aggressive band for pre-mine liquidity-removal races.
-- `value_cap`: only when an explicitly protected/private route allows spending
-  up to the protected-value cap despite missing a ranked quote.
 
 `alpha/live/trading::tx_prep` remains the final decider. It filters candidates
 against protected value:
@@ -86,8 +84,8 @@ Candidates whose priority spend or total max-fee spend exceed that cap are
 rejected. Among the remaining candidates, the planner prefers the best expected
 rank, then the higher priority fee when ranks tie. If every ranked candidate is
 too expensive, public mempool submission should reject rather than leak a weak
-transaction. Private/builder routing can later opt into value-cap fallback with a
-separate protocol version.
+transaction. The planner should not create a synthetic value-cap candidate when
+rank evidence is missing or too expensive.
 
 The metadata handed to Kartal should include the candidate label, source sample
 window, predicted base fee, priority fee, max fee, rank estimate, gas-before

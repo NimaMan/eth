@@ -138,8 +138,8 @@ max_priority_fee_gwei = max_priority_spend / estimated_gas_used
 Only candidates inside both the priority-spend cap and total-fee cap are
 eligible. Public mempool routing should reject if no ranked candidate fits. That
 is safer than broadcasting a weak transaction that advertises our exit without a
-credible chance of landing early. A value-cap fallback can be considered later
-for private/protected relay routes where leaking the transaction is less costly.
+credible chance of landing early. The planner must not synthesize an unranked
+value-cap candidate when rank evidence is missing or too expensive.
 
 Open tuning questions before live capital:
 

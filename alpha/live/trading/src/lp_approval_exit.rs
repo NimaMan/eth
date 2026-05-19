@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The strategy treats meaningful LP approval as an entry blocker and, when we
 /// already hold the pool, as a priority sell trigger. "Priority" means the real
-/// execution adapter should use protected/private routing when available and a
-/// fee-capped public fallback only when explicitly enabled.
+/// execution adapter should use the configured route with value-capped fees.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BribeExitConfig {
     /// Strict lower bound: approval must be greater than this percent of LP
@@ -22,8 +21,6 @@ pub struct BribeExitConfig {
     pub max_total_fee_eth: DecimalAmount,
     /// Prefer protected/private builder relay submission for race exits.
     pub prefer_private_relay: bool,
-    /// Allow public mempool fallback when private submission is unavailable.
-    pub allow_public_mempool_fallback: bool,
 }
 
 impl Default for BribeExitConfig {
@@ -33,7 +30,6 @@ impl Default for BribeExitConfig {
             max_priority_fee_per_gas_gwei: DecimalAmount::from(100),
             max_total_fee_eth: DecimalAmount::new(2, 2),
             prefer_private_relay: true,
-            allow_public_mempool_fallback: false,
         }
     }
 }
@@ -79,7 +75,6 @@ pub struct HeldPositionContext {
 pub enum PriorityRoute {
     PrivateRelay,
     PublicMempool,
-    PrivateRelayWithPublicFallback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -216,13 +211,9 @@ fn approval_exceeds_threshold(signal: &LpApprovalSignal, min_pct: DecimalAmount)
 }
 
 fn priority_route(config: &BribeExitConfig) -> PriorityRoute {
-    match (
-        config.prefer_private_relay,
-        config.allow_public_mempool_fallback,
-    ) {
-        (true, true) => PriorityRoute::PrivateRelayWithPublicFallback,
-        (true, false) => PriorityRoute::PrivateRelay,
-        (false, _) => PriorityRoute::PublicMempool,
+    match config.prefer_private_relay {
+        true => PriorityRoute::PrivateRelay,
+        false => PriorityRoute::PublicMempool,
     }
 }
 
