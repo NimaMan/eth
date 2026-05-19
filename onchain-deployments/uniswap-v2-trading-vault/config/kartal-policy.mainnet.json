@@ -4,7 +4,7 @@
   "route": "/eth/tx/direct-raw",
   "contract": "UniswapV2TradingVault",
   "deployed_address": "SET_AFTER_DEPLOY",
-  "required_from": "SET_KARTAL_SIGNER_OR_OWNER_ADDRESS",
+  "required_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
   "broadcast_mode_before_go_live": "dry_run",
   "broadcast_mode_for_go_live": "public_mempool",
   "allowed_targets": [

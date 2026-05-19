@@ -1,0 +1,6 @@
+{
+  "schema": "fork_rehearsal_v1",
+  "fork_block": 25129486,
+  "gas_snapshot": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v2-trading-vault/runs/2026-05-19-mainnet-v1/gas-snapshot.txt",
+  "status": "completed"
+}

@@ -6,7 +6,7 @@ DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ETH_ROOT="$(cd "$DEPLOY_DIR/../.." && pwd)"
 RUN_DIR="${RUN_DIR:-$DEPLOY_DIR/runs/$(date -u +%Y%m%d-%H%M%SZ)}"
 CONTRACT_ROOT="$ETH_ROOT/solidity/baygus-executor/contracts"
-ARTIFACT="$CONTRACT_ROOT/out/UniswapV2TradingVault.sol/UniswapV2TradingVault.json"
+ARTIFACT="$CONTRACT_ROOT/../out/UniswapV2TradingVault.sol/UniswapV2TradingVault.json"
 
 mkdir -p "$RUN_DIR"
 cd "$ETH_ROOT"

@@ -1,0 +1,12 @@
+{
+  "schema": "deployment_signoff_v1",
+  "run_id": "2026-05-19-mainnet-v1",
+  "network": "ethereum-mainnet",
+  "vault_address": "SET_AFTER_DEPLOY",
+  "operator": "SET_OPERATOR",
+  "reviewer": "SET_REVIEWER",
+  "approved_for_public_broadcast": false,
+  "notes": [
+    "Temporary test address for owner, treasury, deployer, and Kartal from: 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  ]
+}

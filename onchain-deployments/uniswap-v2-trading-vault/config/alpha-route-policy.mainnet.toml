@@ -5,8 +5,8 @@ protocol = "uniswap_v2_trading_vault"
 
 [addresses]
 vault = "SET_AFTER_DEPLOY"
-owner_from = "SET_KARTAL_SIGNER_OR_OWNER_ADDRESS"
-treasury = "SET_TREASURY_ADDRESS"
+owner_from = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 uniswap_v2_router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
 

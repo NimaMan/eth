@@ -1,0 +1,34 @@
+No files changed, compilation skipped
+2026-05-19T15:39:46.880801Z  WARN traces::etherscan: etherscan config not found
+
+Ran 6 tests for test/bench/UniswapV2TradingVaultForkGas.t.sol:UniswapV2TradingVaultForkGasTest
+[PASS] testGas_Fork_DirectRouterBuyToEoa() (gas: 2818)
+[PASS] testGas_Fork_DirectRouterSellPreapproved() (gas: 2796)
+[PASS] testGas_Fork_FeeOnTransferRfiVaultBuyAndEmergencySell() (gas: 2774)
+[PASS] testGas_Fork_StandaloneApprove() (gas: 2884)
+[PASS] testGas_Fork_VaultBuyToVault() (gas: 2840)
+[PASS] testGas_Fork_VaultModeAEmergencySell() (gas: 2862)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 173.15µs (170.82µs CPU time)
+
+Ran 7 tests for test/bench/UniswapV2TradingVaultGas.t.sol:UniswapV2TradingVaultGasTest
+[PASS] testGas_Local_DirectRouterBuyToEoa() (gas: 83249)
+[PASS] testGas_Local_DirectRouterSellPreapproved() (gas: 45656)
+[PASS] testGas_Local_FeeOnTransferVaultBuyToVault() (gas: 121537)
+[PASS] testGas_Local_FeeOnTransferVaultModeAEmergencySell() (gas: 137328)
+[PASS] testGas_Local_StandaloneApprove() (gas: 28731)
+[PASS] testGas_Local_VaultBuyToVault() (gas: 97034)
+[PASS] testGas_Local_VaultModeAEmergencySell() (gas: 117778)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 532.54µs (1.66ms CPU time)
+
+Ran 8 tests for test/UniswapV2TradingVault.t.sol:UniswapV2TradingVaultTest
+[PASS] testBuyRevertsWhenOutputBelowMinimum() (gas: 2272072)
+[PASS] testBuyStoresTokenInVaultWithoutApproval() (gas: 2325872)
+[PASS] testBuyTracksNetFeeOnTransferTokensReceived() (gas: 2883377)
+[PASS] testEmergencySellApprovesExactAmountAndClearsAllowance() (gas: 2436565)
+[PASS] testEmergencySellClearsAllowanceForFeeOnTransferToken() (gas: 2920345)
+[PASS] testEmergencySellRevertsWhenOutputBelowMinimum() (gas: 2402753)
+[PASS] testOnlyOwnerCanBuyOrSell() (gas: 2329565)
+[PASS] testRescueTokenAndEthAreOwnerOnly() (gas: 2301923)
+Suite result: ok. 8 passed; 0 failed; 0 skipped; finished in 641.55µs (2.39ms CPU time)
+
+Ran 3 test suites in 2.54ms (1.35ms CPU time): 21 tests passed, 0 failed, 0 skipped (21 total tests)

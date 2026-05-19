@@ -1,0 +1,29 @@
+No files changed, compilation skipped
+
+Ran 6 tests for test/bench/UniswapV2TradingVaultForkGas.t.sol:UniswapV2TradingVaultForkGasTest
+[PASS] testGas_Fork_DirectRouterBuyToEoa() (gas: 124125)
+[PASS] testGas_Fork_DirectRouterSellPreapproved() (gas: 95465)
+[PASS] testGas_Fork_FeeOnTransferRfiVaultBuyAndEmergencySell() (gas: 389938)
+[PASS] testGas_Fork_StandaloneApprove() (gas: 62585)
+[PASS] testGas_Fork_VaultBuyToVault() (gas: 130272)
+[PASS] testGas_Fork_VaultModeAEmergencySell() (gas: 134506)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 2.29ms (5.21ms CPU time)
+
+╭--------------------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| src/UniswapV2TradingVault.sol:UniswapV2TradingVault Contract |                 |        |        |        |         |
++=====================================================================================================================+
+| Deployment Cost                                              | Deployment Size |        |        |        |         |
+|--------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| 769564                                                       | 3831            |        |        |        |         |
+|--------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                              |                 |        |        |        |         |
+|--------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                                | Min             | Avg    | Median | Max    | # Calls |
+|--------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| buyV2ExactEthForTokens                                       | 21736           | 137748 | 154532 | 236977 | 3       |
+|--------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| emergencySellV2ExactTokensForEth                             | 166378          | 182241 | 182241 | 198104 | 2       |
+╰--------------------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+
+Ran 1 test suite in 6.54ms (2.29ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)

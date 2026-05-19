@@ -1,0 +1,7 @@
+{
+  "schema": "artifact_hashes_v1",
+  "artifact": "/home/nima/code/crypto/blockchains/eth/solidity/baygus-executor/contracts/../out/UniswapV2TradingVault.sol/UniswapV2TradingVault.json",
+  "bytecode_hash": "0xa9f198304a3a6b788a55c414d6d74987ed11e3ec91d6085b831c6e9ebd3750c1",
+  "deployed_bytecode_hash": "0x8bf8284b3d5ec39216ec9b1e1cf5951fecc8dea53020e0867c4f7dd754b6b6df",
+  "abi_hash": "0x6b634d6b594d643fb71102ac7a805f93abf2328c13f2dfe59ca378be05ddc1a2"
+}

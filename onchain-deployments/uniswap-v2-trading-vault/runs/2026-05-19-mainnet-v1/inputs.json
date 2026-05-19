@@ -1,0 +1,32 @@
+{
+  "schema": "uniswap_v2_trading_vault_run_inputs_v1",
+  "network": "ethereum-mainnet",
+  "chain_id": 1,
+  "source_git_revision": "00605e8ef472efe37223dc30382c481f09c653c7",
+  "constructor_args": {
+    "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  },
+  "deployment": {
+    "signer": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "private_key_env": "ETH_VAULT_DEPLOYER_PRIVATE_KEY"
+  },
+  "alpha": {
+    "route_name": "uniswap_v2_trading_vault_mode_a",
+    "protocol": "uniswap_v2_trading_vault",
+    "owner_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "vault": "SET_AFTER_DEPLOY"
+  },
+  "kartal": {
+    "base_url": "http://127.0.0.1:5004",
+    "token_env": "ETH_TX_EXECUTOR_API_TOKEN",
+    "required_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+    "required_broadcast_mode_before_go_live": "dry_run"
+  },
+  "links": {
+    "operator_address_etherscan": "https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  }
+}

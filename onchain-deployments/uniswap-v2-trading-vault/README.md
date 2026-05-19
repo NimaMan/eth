@@ -59,6 +59,12 @@ transaction's EIP-1559 fee fields.
 | `kartal signer/from` | Kartal ops | Must match the account used in `eth_direct_raw_v1` requests. |
 | `gas-rank policy` | Alpha ops | Must choose a ranked candidate; no synthetic value-cap fallback. |
 
+Current temporary test address:
+
+| Role | Address |
+| --- | --- |
+| owner, treasury, deployer, Kartal `from` | [`0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27`](https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27) |
+
 ## Go-live Bottleneck
 
 The contract can be deployed only after the full strategy-to-Kartal live path is
