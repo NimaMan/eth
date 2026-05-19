@@ -1,0 +1,29 @@
+{
+  "schema": "uniswap_v4_route_fixture_v1",
+  "id": "eth-usdc-500-no-hook",
+  "description": "Mainnet ETH/USDC 0.05% Uniswap V4 no-hook route used as the direct Universal Router baseline before building the V4 trading vault.",
+  "chain_id": 1,
+  "preferred_block": null,
+  "caller": "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5",
+  "universal_router": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+  "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+  "token_in": "0x0000000000000000000000000000000000000000",
+  "token_in_symbol": "ETH",
+  "token_in_decimals": 18,
+  "token_out": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "token_out_symbol": "USDC",
+  "token_out_decimals": 6,
+  "amount_in_wei": "1000000000000000000",
+  "min_amount_out_raw": "1",
+  "sell_min_eth_out_wei": "1",
+  "deadline_raw": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+  "hook_data_hex": "0x",
+  "hook_policy": "no-hook fixture; V4 hooks must use separate fixtures and explicit policy",
+  "pool_key": {
+    "currency0": "0x0000000000000000000000000000000000000000",
+    "currency1": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "fee": 500,
+    "tick_spacing": 10,
+    "hooks": "0x0000000000000000000000000000000000000000"
+  }
+}

@@ -155,5 +155,9 @@ name = "uniswap_v4_universal_router_eth_stable"
 path = "examples/tx_builders/uniswap_v4_universal_router_eth_stable.rs"
 
 [[example]]
+name = "uniswap_v4_trading_vault_direct_baseline"
+path = "examples/tx_builders/uniswap_v4_trading_vault/direct_universal_router_baseline.rs"
+
+[[example]]
 name = "uniswap_v2_trading_vault_deployed"
 path = "examples/tx_builders/uniswap_v2_trading_vault_deployed.rs"
