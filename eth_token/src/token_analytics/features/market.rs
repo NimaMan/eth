@@ -13,6 +13,7 @@ pub struct PoolMarketFeatures {
     pub can_sell: bool,
     pub effective_can_buy: bool,
     pub effective_can_sell: bool,
+    pub economic_sellable: Option<bool>,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
     pub tax_bucket: Option<String>,

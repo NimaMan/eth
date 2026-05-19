@@ -17,6 +17,14 @@ pub struct TokenPoolCurrentObservation {
     pub trading: ObservationPoolTradingState,
     pub features: TokenPoolObservationFeatures,
     pub transactions: Vec<ObservationTransactionSummary>,
+    #[serde(default)]
+    pub transfer_summary: Option<ObservationTransferSummary>,
+    #[serde(default)]
+    pub token_pool_movement: Option<ObservationTokenPoolMovement>,
+    #[serde(default)]
+    pub sell_flow: Option<ObservationSellFlow>,
+    #[serde(default)]
+    pub block_actions: Vec<ObservationBlockAction>,
 }
 
 impl TokenPoolCurrentObservation {
@@ -109,7 +117,9 @@ pub struct ObservationBlockEventFlags {
     pub pool_burn_count_in_block: u32,
     pub pool_sync_count_in_block: u32,
     pub lp_transfer_count_in_block: u32,
+    pub lp_burn_transfer_count_in_block: u32,
     pub lp_approval_count_in_block: u32,
+    pub token_approval_count_in_block: u32,
     pub liquidity_updated_in_block: bool,
     pub price_updated_in_block: bool,
     pub tax_checked_in_block: bool,
@@ -129,7 +139,9 @@ impl ObservationBlockEventFlags {
             || self.pool_burn_count_in_block > 0
             || self.pool_sync_count_in_block > 0
             || self.lp_transfer_count_in_block > 0
+            || self.lp_burn_transfer_count_in_block > 0
             || self.lp_approval_count_in_block > 0
+            || self.token_approval_count_in_block > 0
             || self.liquidity_updated_in_block
             || self.price_updated_in_block
             || self.tax_checked_in_block
@@ -146,6 +158,7 @@ pub struct ObservationPoolTradingState {
     pub can_sell: bool,
     pub effective_can_buy: bool,
     pub effective_can_sell: bool,
+    pub economic_sellable: Option<bool>,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
     pub tax_check_block: Option<u64>,
@@ -161,13 +174,79 @@ impl ObservationPoolTradingState {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObservationTransferSummary {
+    pub weth_count: u32,
+    pub weth_volume: f64,
+    pub usd_count: u32,
+    pub usd_volume: f64,
+    pub other_denom_count: u32,
+    pub other_denom_volume: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObservationTokenPoolMovement {
+    pub pool_in: f64,
+    pub pool_out: f64,
+    pub pool_to_control: f64,
+    pub pool_to_pool: f64,
+    pub contract_intake: f64,
+    pub contract_to_pool: f64,
+    pub pool_in_to_total_supply_ratio: Option<f64>,
+    pub pool_out_to_total_supply_ratio: Option<f64>,
+    pub pool_to_control_to_total_supply_ratio: Option<f64>,
+    pub pool_in_to_pool_reserve_ratio: Option<f64>,
+    pub pool_out_to_pool_reserve_ratio: Option<f64>,
+    pub pool_to_control_to_pool_reserve_ratio: Option<f64>,
+    pub contract_intake_to_total_supply_ratio: Option<f64>,
+    pub contract_to_pool_to_pool_reserve_ratio: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObservationSellFlow {
+    pub sell_tx_count: u32,
+    pub seller_token_out: f64,
+    pub seller_token_to_pool: f64,
+    pub seller_token_to_token_contract: f64,
+    pub seller_token_to_other: f64,
+    pub token_contract_to_pool: f64,
+    pub seller_to_pool_ratio: Option<f64>,
+    pub seller_to_token_contract_ratio: Option<f64>,
+    pub seller_to_other_ratio: Option<f64>,
+    pub token_contract_to_pool_reserve_ratio: Option<f64>,
+    pub token_contract_to_pool_seller_out_ratio: Option<f64>,
+    pub has_taxed_sell_pattern: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObservationBlockAction {
+    pub key: String,
+    pub label: String,
+    pub title: String,
+    pub count: u32,
+    pub amount: f64,
+    pub tx_hashes: Vec<String>,
+}
+
 fn volume_for_denom(volume: &BTreeMap<String, f64>, denom_address: &str) -> f64 {
     let denom = denom_address.trim().to_ascii_lowercase();
     volume
         .iter()
-        .find(|(key, _)| key.trim().eq_ignore_ascii_case(&denom))
+        .find(|(key, _)| denom_key_matches(key, &denom))
         .map(|(_, amount)| *amount)
         .unwrap_or(0.0)
+}
+
+fn denom_key_matches(key: &str, denom: &str) -> bool {
+    if key.trim().eq_ignore_ascii_case(denom) {
+        return true;
+    }
+    is_weth_denom(denom) && is_weth_denom(key)
+}
+
+fn is_weth_denom(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    value == "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" || value == "weth" || value == "eth"
 }
 
 #[cfg(test)]

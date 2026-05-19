@@ -1,12 +1,18 @@
+pub mod builder;
 pub mod current;
 pub mod transaction;
 pub mod tx_classification;
 
 use serde::{Deserialize, Serialize};
 
+pub use builder::{
+    build_current_observation, build_historical_observations_for_pool,
+    build_historical_observations_for_token, collect_current_observations, observation_pool_key,
+};
 pub use current::{
-    ObservationBlockActivity, ObservationBlockActivitySource, ObservationBlockEventFlags,
-    ObservationPoolTradingState, TokenPoolCurrentObservation,
+    ObservationBlockAction, ObservationBlockActivity, ObservationBlockActivitySource,
+    ObservationBlockEventFlags, ObservationPoolTradingState, ObservationSellFlow,
+    ObservationTokenPoolMovement, ObservationTransferSummary, TokenPoolCurrentObservation,
 };
 pub use transaction::ObservationTransactionSummary;
 pub use tx_classification::{ObservationTransactionClassification, ObservationTransactionType};
@@ -89,6 +95,7 @@ pub enum ActiveObservationReason {
     ScamStatusChange,
     LpApproval,
     LpTransfer,
+    LpBurn,
     TokenApproval,
     TokenTransfer,
     DenomTransfer,
