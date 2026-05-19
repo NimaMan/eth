@@ -215,11 +215,40 @@ pub(super) fn reports_payload(reports: &[ExecutionReport]) -> Vec<Value> {
         .collect()
 }
 
-pub(super) fn normalize_execution_mode(mode: &str) -> Result<&'static str> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TraderExecutionMode {
+    ChainSim,
+    KartalReal,
+}
+
+impl TraderExecutionMode {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::ChainSim => "chain-sim",
+            Self::KartalReal => "kartal-real",
+        }
+    }
+
+    pub(super) fn execution_model(self) -> &'static str {
+        match self {
+            Self::ChainSim => "chain_state_evm_simulation",
+            Self::KartalReal => "kartal_tx_executor",
+        }
+    }
+
+    pub(super) fn uses_kartal(self) -> bool {
+        matches!(self, Self::KartalReal)
+    }
+}
+
+pub(super) fn normalize_execution_mode(mode: &str) -> Result<TraderExecutionMode> {
     match mode.trim().to_ascii_lowercase().as_str() {
-        "chain-sim" | "chain_sim" | "chainsim" => Ok("chain-sim"),
+        "chain-sim" | "chain_sim" | "chainsim" => Ok(TraderExecutionMode::ChainSim),
+        "kartal-real" | "kartal_real" | "real" | "live-real" | "live_real" => {
+            Ok(TraderExecutionMode::KartalReal)
+        }
         other => Err(eyre!(
-            "unsupported execution mode {other:?}; only chain-sim is allowed"
+            "unsupported execution mode {other:?}; expected chain-sim or kartal-real"
         )),
     }
 }

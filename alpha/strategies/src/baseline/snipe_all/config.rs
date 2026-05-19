@@ -26,6 +26,9 @@ pub struct SnipeAllConfig {
     pub supported_denom_symbols: Vec<String>,
     pub max_slippage_bps: u32,
     pub deadline_secs: u64,
+    /// If false, the strategy will not open new positions. Existing positions
+    /// can still be managed and exited.
+    pub entry_enabled: bool,
     pub exit_on_liquidity_removal: bool,
     pub exit_on_tax: bool,
     pub exit_on_lp_approval: bool,
@@ -85,6 +88,7 @@ impl Default for SnipeAllConfig {
                 .collect(),
             max_slippage_bps: 500,
             deadline_secs: 30,
+            entry_enabled: true,
             exit_on_liquidity_removal: true,
             exit_on_tax: true,
             exit_on_lp_approval: true,

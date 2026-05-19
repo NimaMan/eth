@@ -1,5 +1,5 @@
 [Unit]
-Description=Ethereum alpha trader
+Description=Ethereum alpha trader (no-capital chain simulation)
 Wants=network-online.target eth-chain-server.service eth-mempool-signal-detector.service
 After=network-online.target eth-chain-server.service eth-mempool-signal-detector.service
 StartLimitIntervalSec=0
@@ -11,7 +11,7 @@ EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
 Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUST_LOG=info
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_trader --run-id snipe-all-v1-chain-sim-live-v4 --mode chain-sim --token-server-url http://127.0.0.1:8765 --poll-interval-ms 2000 --mempool-since-days 14 --signal-limit 200 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --max-hold-blocks 200
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_trader --run-id alpha11-live-gasguard-hold-sweep-chain-sim-20260519-194813 --mode chain-sim --poll-interval-ms 2000 --mempool-since-days 14 --signal-limit 200 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --strategy-suite alpha11-live-gasguard-hold-sweep
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

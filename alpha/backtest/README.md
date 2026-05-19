@@ -16,7 +16,9 @@ This crate replays historical market data through the same trading core used by 
 - No separate strategy API.
 - No separate position state machine.
 - No live signing or broadcasting.
-- No mutation of canonical live Redis state.
+- No Kartal client, signer, hot-wallet, deployed-vault, or live nonce
+  dependency.
+- No mutation of canonical live state.
 - No external file formats (JSONL, Parquet, etc.).  Events are read directly from Postgres.
 - No model-based fill estimation (slippage math, random failure rolls, etc.).  Fills come from actual EVM simulation.
 
@@ -86,6 +88,12 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
 The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
 `blockchains/eth/config.env` by default.
 
+Backtest persistence goes through `alpha/store/` and writes the
+`alpha_trading` schema: `trader_runs`, `order_intents`, `execution_reports`,
+`positions`, `position_snapshots`, `trades`, `trade_events`,
+`trade_snapshots`, and result-set tables. Backtest validation reports are saved
+by `alpha/lab` in `alpha_trading.backtest_validation_reports`.
+
 ### Required arguments
 
 | Flag | Description |
@@ -125,3 +133,12 @@ Backtest runs write to the same Postgres `alpha_trading` schema as live trading:
 - `positions`, `order_intents`, `execution_reports`, `risk_events`
 
 Asena's existing performance endpoints (`/alpha/strategies/<id>/performance`) can query these rows by `run_id` and display backtest results alongside live chain-sim results.
+
+## Broadcast Guard
+
+Backtests must never be able to broadcast. The only execution adapter in this
+crate is `ChainSimExecutionAdapter`; do not add Kartal, `TxExecutorAdapter`,
+signer env vars, hot-wallet config, or deployed-vault config to the backtest
+binary. If a historical experiment needs to exercise live tx-prep code, run it
+as a lab/calibration artifact that writes requests or uses Kartal dry-run, not
+as `eth_alpha_backtest`.

@@ -9,7 +9,7 @@ events, and persists decisions before execution.
 - Run trading strategy state machines over `MarketEvent`, `RiskEvent`, and
   `ExecutionReport`.
 - Keep strategy decisions auditable in Postgres before trusting PnL.
-- Keep live chain-sim, backtest, and future real execution behind the same core
+- Keep live chain-sim, backtest, and guarded real execution behind the same core
   domain contracts.
 
 ## Owns
@@ -23,6 +23,7 @@ events, and persists decisions before execution.
 | `store/` | `eth_alpha_store` | Durable run, observation, order, execution, position, and risk records. |
 | `live/state/` | `eth_live_state` | Legacy live-state schemas and protocol types. |
 | `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
+| `live/trading/` | `eth_live_trading` | Live priority-exit policy, tx-prep, value-capped gas planning, and Kartal request/client shape. |
 | `backtest/` | planned | Historical replay over the same core strategy contracts. |
 | `mempool_risk/` | planned | Future crate boundary for pending-risk events; current service is `mempool_processor`. |
 
@@ -38,20 +39,47 @@ events, and persists decisions before execution.
 ## Data Flow
 
 ```text
- eth_chain_server LiveChainRuntime
+eth_chain_server LiveChainRuntime
   -> direct processed-block feed + live token/pool views
   -> eth_alpha_trader polls /live/status, /live/pools, /mempool/signals
-  -> future real adapter checks eth_block_tx_rank before tx_executor
+  -> strategies emit StrategyDecision / OrderIntent
+  -> chain-sim service or guarded kartal-real service
+  -> real adapter prepares a Kartal direct-raw request through live/trading
   -> strategy_observations + orders + reports + positions + risk events
 ```
 
-`eth_alpha_trader` is no-capital chain-sim right now. It must not become
-decision-active until `/live/status` is `live`; while warming, it records
+`eth_alpha_trader --mode chain-sim` is the no-capital live runner. It must not
+become decision-active until `/live/status` is `live`; while warming, it records
 heartbeats and primes watermarks only.
+
+`eth_alpha_trader --mode kartal-real` is the separate real-executor runner. It
+instantiates `TxExecutorAdapter`, uses the deployed Uniswap V2 trading vault
+route, disables entries, and refuses to start unless Kartal reports
+`broadcast_mode = dry_run`. This is the dry-run/shadow service boundary for the
+real strategy; public broadcast remains blocked until final simulation,
+production gas-rank inputs, buy routing, and receipt reconciliation are wired.
+
+Backtests are not a service and must never be able to broadcast. The backtest
+binary stays in `alpha/backtest`, reads historical inputs, and only constructs
+`ChainSimExecutionAdapter`.
 
 Snipe All currently supports ETH/WETH and USD-stable quote pools. Use separate
 floors for each family: WETH-denominated pools are not comparable to
 USDC/USDT/DAI pools by raw reserve amount.
+
+## Persistent Stores
+
+Alpha durable state lives in PostgreSQL under the `alpha_trading` schema,
+configured by `ALPHA_DATABASE_URL`.
+
+| Owner | Tables |
+| --- | --- |
+| `alpha/store/` | `trader_runs`, `order_intents`, `execution_reports`, `positions`, `position_snapshots`, `backtest_result_sets`, `backtest_result_set_runs`, `trades`, `trade_events`, `trade_snapshots`, `risk_events`, `strategy_decisions`, `strategy_observations` |
+| `alpha/lab/` | `backtest_validation_reports` in the same `alpha_trading` schema |
+
+Alpha may read `live_trading.signal_events` through chain-server APIs or replay
+tools, but mempool signal persistence is owned by `mempool_processor`, not
+alpha. Historical/backtest execution also reads Reth through `RETH_DATADIR`.
 
 Live strategies should be documented as one policy with two sides. The
 regular/historical side replays stored confirmed-chain observations and only
@@ -70,6 +98,7 @@ liquidity-removal exit and critical LP-approval exit.
 | Durable decision ledger | `store/README.md`, Postgres `alpha_trading.*` tables |
 | Mined-block transaction rank estimates | `block_tx_rank/README.md`, `block_tx_rank/src/lib.rs` |
 | Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/baseline/snipe_all/` |
+| Live tx prep and Kartal request shape | `live/trading/README.md`, `live/trading/src/tx_prep/` |
 | Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
 | Legacy live-state contract | `live/state/README.md`, `live/state/src/` |
 | Service wiring | `engine/src/bin/eth_alpha_trader.rs` |
@@ -93,9 +122,12 @@ cargo run -p eth_alpha_engine --bin eth_alpha_trader
 
 ## Current Hazards
 
-- `eth_alpha_trader` uses chain-state simulation only; do not route it to
-  `tx_executor` without an explicit adapter, operator gate, and persistence plan.
-- Real execution must include a rank-evidence step through `eth_block_tx_rank`
+- Backtests must never load Kartal config, signer state, hot-wallet balance, or
+  deployed vault addresses.
+- `kartal-real` is dry-run only today. Do not remove that broadcast-mode guard
+  until production final simulation, live gas-rank provider, buy route, and
+  receipt reconciliation are all in place.
+- Real public execution must include rank evidence through `eth_block_tx_rank`
   before the adapter submits the final prepared transaction.
 - `strategy_observations` is the durable input log. In-memory watermarks are
   polling mechanics and must be recoverable from Postgres.

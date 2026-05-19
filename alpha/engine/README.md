@@ -98,10 +98,12 @@ Critical in-memory decisions happen before lower-priority analytics writes:
 7. Analytics writers can derive PnL, strategy metrics, and dashboard summaries from store records after the critical path.
 
 Backtest and live no-capital execution use the same sequence and the same
-chain-sim fill source. Real trading later swaps in a `tx_executor` adapter.
-That real adapter must consult `eth_block_tx_rank` before submission and persist
-the rank evidence with the order decision; `tx_executor` only receives the final
-prepared transaction.
+chain-sim fill source. The guarded live-real runner swaps in
+`TxExecutorAdapter`, but the systemd service keeps that path in Kartal dry-run
+until production simulation, gas-rank, buy-route, and receipt reconciliation
+gates are complete. Public real execution must consult `eth_block_tx_rank`
+before submission and persist the rank evidence with the order decision;
+`tx_executor` only receives the final prepared transaction.
 
 ### Python Concept Mapping
 
@@ -133,25 +135,31 @@ prepared transaction.
 
 ## Real Submission Status
 
-The engine has the real adapter and planner bridge shape, but the live binary is
-not deployable for real capital yet. `eth_alpha_trader` accepts only `chain-sim`
-mode today and always constructs `LiveChainSimExecutionAdapter`. A real
-deployment needs:
+`eth_alpha_trader` now has two explicit execution modes:
 
-- a new guarded runtime mode that instantiates `TxExecutorAdapter`;
-- a production `LiveTxPlanningInputResolver` and live
-  simulation/gas-rank/allowance providers for `alpha/live/trading`;
-- explicit Kartal URL/token/signer/broadcast config in the run record;
+| Mode | Adapter | Broadcast capability |
+| --- | --- | --- |
+| `chain-sim` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
+| `kartal-real` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run only. The binary refuses to start if Kartal is not in `dry_run`. |
+
+The `kartal-real` mode is intentionally sell-only for now: it requires
+`--disable-entry`, targets the deployed `UniswapV2TradingVault`, and uses shadow
+dry-run simulation/gas-rank providers only to prove the live executor boundary.
+A public-broadcast deployment still needs:
+
+- production `PreSubmitSimulator` for the exact calldata;
+- production `GasRankProvider` backed by recent block-rank evidence;
+- real vault buy route planning and position reconciliation;
 - receipt tracking that turns Kartal tx hashes into final confirmed or failed
   `ExecutionReport`s.
 
-Until those exist, live strategies can produce chain-sim orders and observations,
-but they cannot automatically submit real Kartal transactions.
+Backtest binaries must never use `TxExecutorAdapter`; they should remain on
+`ChainSimExecutionAdapter` only.
 
 ## Trader Binary
 
-`eth_alpha_trader` is the first runnable alpha runtime inside this crate. It
-runs in `chain-sim` mode, polls the Rust token server, and consumes:
+`eth_alpha_trader` is the first runnable alpha runtime inside this crate. Its
+default `chain-sim` mode polls the Rust token server and consumes:
 
 - `/live/pools` as confirmed market updates.
 - `/mempool/signals?since_days=14` as speculative risk events.
@@ -159,6 +167,10 @@ runs in `chain-sim` mode, polls the Rust token server, and consumes:
 The trader registers strategy wrappers from each strategy's `live/` module. For
 Snipe All that is `LiveSnipeAllStrategy`, which composes the regular
 `SnipeAllStrategy` policy while marking the runtime side in code and run config.
+
+The real-executor service uses the same binary with `--mode kartal-real
+--disable-entry`. That process is separate from backtests and the no-capital
+chain-sim service.
 
 ## Live Strategy Model
 

@@ -2,15 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
+use async_trait::async_trait;
 use chrono::Utc;
 use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
+    error::AlphaCoreError,
     execution::ExecutionReport,
     ids::{StrategyName, TokenPoolId},
     market::{MarketEvent, PoolSnapshot},
@@ -23,9 +25,19 @@ use eth_alpha_engine::wire::{
     MempoolSignalsResponse, PoolWire,
 };
 use eth_alpha_engine::{
-    AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, LiveChainSimExecutionAdapter,
+    AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, EngineExecutionAdapter,
+    LiveChainSimExecutionAdapter, LiveTradingPlannerBridge, LiveTxPlanningInputResolver,
+    PositionValueSimulation, TxExecutorAdapter,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
+use eth_live_trading::{
+    FixedGasRankProvider, GasRankPlan, KartalClient, KartalClientConfig, KartalEthTxExecutorStatus,
+    KartalExecutorClient, KartalExecutorClientConfig, KartalStatusBroadcastMode,
+    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
+    LivePrioritySellPlannerInput, PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator,
+    PreparedSellRoute, RankedFeeCandidate, TxPrepConfig, TxPrepRequestContext,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
+};
 use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
@@ -56,6 +68,10 @@ const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/logs/alpha_trader";
+const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
+const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
+const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
+const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -80,9 +96,51 @@ struct Args {
     #[arg(long)]
     run_id: Option<String>,
 
-    /// Execution mode. Only `chain-sim` is supported; theoretical fill modes are rejected.
+    /// Execution mode. `chain-sim` never contacts Kartal. `kartal-real` uses
+    /// TxExecutorAdapter and currently requires Kartal dry-run.
     #[arg(long, default_value = "chain-sim")]
     mode: String,
+
+    /// Disable new entries while still allowing existing live positions to exit.
+    #[arg(long, default_value_t = false)]
+    disable_entry: bool,
+
+    /// Kartal base URL used only by --mode kartal-real.
+    #[arg(long, default_value = DEFAULT_KARTAL_URL)]
+    kartal_url: String,
+
+    /// Env var containing the Kartal bearer token. KARTAL_API_TOKEN is also
+    /// tried as a fallback.
+    #[arg(long, default_value = DEFAULT_KARTAL_TOKEN_ENV)]
+    kartal_token_env: String,
+
+    /// EOA/from address that Kartal policy and the vault owner must allow.
+    #[arg(long, default_value = DEFAULT_LIVE_REAL_FROM)]
+    live_real_from: String,
+
+    /// Deployed Uniswap V2 trading vault used by the real priority-sell route.
+    #[arg(long, default_value = DEFAULT_UNISWAP_V2_TRADING_VAULT)]
+    live_real_vault_address: String,
+
+    /// Temporary dry-run simulation recovery value until the production final
+    /// simulator is wired.
+    #[arg(long, default_value = "0.01")]
+    live_real_shadow_expected_recovery_eth: String,
+
+    /// Temporary dry-run gas rank candidate until the production gas-rank
+    /// provider is wired.
+    #[arg(long, default_value = "40")]
+    live_real_shadow_priority_fee_gwei: String,
+
+    /// Temporary dry-run max fee candidate until the production gas-rank
+    /// provider is wired.
+    #[arg(long, default_value = "50")]
+    live_real_shadow_max_fee_gwei: String,
+
+    /// Temporary dry-run predicted base fee until the production gas-rank
+    /// provider is wired.
+    #[arg(long, default_value = "10")]
+    live_real_shadow_predicted_base_fee_gwei: String,
 
     /// Process the current token-server snapshot immediately instead of only priming watermarks.
     #[arg(long, default_value_t = false)]
@@ -223,6 +281,302 @@ impl TokenServerClient {
     }
 }
 
+struct RealExecutionWithValuation<E, V> {
+    execution: E,
+    valuation: V,
+}
+
+impl<E, V> RealExecutionWithValuation<E, V> {
+    fn new(execution: E, valuation: V) -> Self {
+        Self {
+            execution,
+            valuation,
+        }
+    }
+}
+
+#[async_trait]
+impl<E, V> EngineExecutionAdapter for RealExecutionWithValuation<E, V>
+where
+    E: EngineExecutionAdapter,
+    V: EngineExecutionAdapter,
+{
+    async fn execute(
+        &self,
+        intent: eth_alpha_core::order::OrderIntent,
+    ) -> eth_alpha_core::error::Result<ExecutionReport> {
+        self.execution.execute(intent).await
+    }
+
+    async fn simulate_position_value(
+        &self,
+        position: &Position,
+        pool: &PoolSnapshot,
+    ) -> eth_alpha_core::error::Result<Option<PositionValueSimulation>> {
+        self.valuation.simulate_position_value(position, pool).await
+    }
+}
+
+#[derive(Clone)]
+struct LiveRealInputResolver {
+    store: PostgresTradingStore,
+    pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+    current_block: Arc<AtomicU64>,
+    from: String,
+    run_id: String,
+    chain_id: u64,
+}
+
+#[async_trait]
+impl LiveTxPlanningInputResolver for LiveRealInputResolver {
+    async fn resolve_priority_sell_input(
+        &self,
+        intent: &eth_alpha_core::order::OrderIntent,
+    ) -> eth_alpha_core::error::Result<LivePrioritySellPlannerInput> {
+        let position = self.resolve_position(intent).await?;
+        let pool = {
+            let pools = self
+                .pools
+                .lock()
+                .map_err(|_| AlphaCoreError::Execution("pool cache lock poisoned".to_string()))?;
+            pools.get(&intent.pool_address).cloned()
+        }
+        .ok_or_else(|| {
+            AlphaCoreError::Execution(format!(
+                "live real planner has no pool snapshot for {}",
+                intent.pool_address
+            ))
+        })?;
+
+        let current_block = match self.current_block.load(Ordering::Relaxed) {
+            0 => pool.latest_block,
+            block => block,
+        };
+        let now = Utc::now().timestamp().max(0) as u64;
+
+        Ok(LivePrioritySellPlannerInput {
+            context: PlannerTxContext {
+                tx: TxPrepRequestContext {
+                    chain_id: self.chain_id,
+                    from: self.from.clone(),
+                    strategy_name: intent.strategy_name.0.clone(),
+                    strategy_run_id: Some(self.run_id.clone()),
+                    observed_block: Some(current_block),
+                    source_metadata: json!({
+                        "resolver": "eth_alpha_trader_live_real",
+                        "execution_mode": "kartal-real",
+                        "route": "uniswap_v2_trading_vault",
+                        "simulation_provider": "shadow_dry_run_only",
+                        "gas_rank_provider": "shadow_dry_run_only",
+                        "min_output_policy": "temporary_1_wei_dry_run_only"
+                    }),
+                },
+                current_block,
+                deadline_unix_secs: now.saturating_add(intent.deadline_secs),
+            },
+            intent: intent.clone(),
+            position,
+            pool,
+            min_output_amount: Some("1".to_string()),
+            source_metadata: json!({
+                "decision_reason": intent.decision_reason.clone(),
+                "trade_id": intent.trade_id.clone(),
+            }),
+        })
+    }
+}
+
+impl LiveRealInputResolver {
+    async fn resolve_position(
+        &self,
+        intent: &eth_alpha_core::order::OrderIntent,
+    ) -> eth_alpha_core::error::Result<Position> {
+        let positions = self
+            .store
+            .load_active_positions(&intent.strategy_name.0)
+            .await
+            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+
+        positions
+            .into_iter()
+            .find(|position| {
+                intent
+                    .trade_id
+                    .as_ref()
+                    .map(|trade_id| &position.trade_id == trade_id)
+                    .unwrap_or(true)
+                    && position.key.strategy_name == intent.strategy_name
+                    && position.key.token_address == intent.token_address
+                    && position.key.pool_address == intent.pool_address
+                    && position.can_submit_exit()
+            })
+            .ok_or_else(|| {
+                AlphaCoreError::Execution(format!(
+                    "no active sellable position found for strategy={} token={} pool={}",
+                    intent.strategy_name.0, intent.token_address, intent.pool_address
+                ))
+            })
+    }
+}
+
+#[derive(Clone)]
+struct ShadowDryRunPreSubmitSimulator {
+    expected_recovery_eth: Decimal,
+}
+
+#[async_trait]
+impl PreSubmitSimulator for ShadowDryRunPreSubmitSimulator {
+    async fn simulate(
+        &self,
+        input: &LivePrioritySellPlannerInput,
+        _route: &PreparedSellRoute,
+    ) -> std::result::Result<PreSubmitSimulation, LivePrioritySellPlannerError> {
+        Ok(PreSubmitSimulation {
+            block_number: input.context.current_block,
+            block_hash: None,
+            state_root: None,
+            expected_output_token: Some("WETH".to_string()),
+            expected_output_amount: Some("1".to_string()),
+            min_output_amount: input.min_output_amount.clone(),
+            expected_recovery_eth: self.expected_recovery_eth,
+            would_revert: false,
+            metadata: json!({
+                "provider": "shadow_dry_run_only",
+                "warning": "not a production final simulation"
+            }),
+        })
+    }
+}
+
+struct KartalRealPreflight {
+    token: String,
+    status: KartalEthTxExecutorStatus,
+}
+
+async fn preflight_kartal_real(args: &Args) -> Result<KartalRealPreflight> {
+    let token = load_kartal_bearer_token(&args.kartal_token_env)?;
+    let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
+        .eth_tx_status()
+        .await
+        .wrap_err("failed to read Kartal ETH tx executor status")?;
+    validate_kartal_real_status(&status)?;
+    Ok(KartalRealPreflight { token, status })
+}
+
+async fn build_kartal_real_adapter(
+    args: &Args,
+    preflight: KartalRealPreflight,
+    store: PostgresTradingStore,
+    run_id: String,
+    valuation_adapter: LiveChainSimExecutionAdapter,
+    pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+    current_block: Arc<AtomicU64>,
+) -> Result<Box<dyn EngineExecutionAdapter>> {
+    let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
+    let vault =
+        parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
+    let expected_recovery_eth = Decimal::from_str(&args.live_real_shadow_expected_recovery_eth)
+        .wrap_err("invalid --live-real-shadow-expected-recovery-eth")?;
+    let priority_fee_gwei = Decimal::from_str(&args.live_real_shadow_priority_fee_gwei)
+        .wrap_err("invalid --live-real-shadow-priority-fee-gwei")?;
+    let max_fee_gwei = Decimal::from_str(&args.live_real_shadow_max_fee_gwei)
+        .wrap_err("invalid --live-real-shadow-max-fee-gwei")?;
+    let predicted_base_fee_gwei = Decimal::from_str(&args.live_real_shadow_predicted_base_fee_gwei)
+        .wrap_err("invalid --live-real-shadow-predicted-base-fee-gwei")?;
+
+    let mut planner_config = LivePrioritySellPlannerConfig::default();
+    planner_config.require_existing_allowance = false;
+    planner_config.tx_prep = TxPrepConfig {
+        max_total_fee_eth: Decimal::new(2, 2),
+        max_priority_fee_gwei: Decimal::from(100),
+        safety_buffer_eth: Decimal::new(1, 3),
+    };
+    planner_config.max_priority_fee_per_gas_gwei = Decimal::from(100);
+    planner_config.max_total_fee_eth = Decimal::new(2, 2);
+
+    let planner = LivePrioritySellPlanner::new(
+        planner_config,
+        UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
+        ShadowDryRunPreSubmitSimulator {
+            expected_recovery_eth,
+        },
+        FixedGasRankProvider::new(GasRankPlan {
+            predicted_base_fee_gwei,
+            candidates: vec![RankedFeeCandidate {
+                label: "shadow_dry_run_fixed".to_string(),
+                priority_fee_gwei,
+                max_fee_per_gas_gwei: max_fee_gwei,
+                rank_position_p50: None,
+                gas_before_p50: None,
+                likely_fits_at_p50: None,
+                source: Some("shadow_dry_run_only".to_string()),
+            }],
+        }),
+        VaultInternalAllowanceChecker,
+    );
+    let resolver = LiveRealInputResolver {
+        store,
+        pools,
+        current_block,
+        from: from.to_string(),
+        run_id: run_id.clone(),
+        chain_id: preflight.status.chain_id,
+    };
+    let bridge = LiveTradingPlannerBridge::new(planner, resolver);
+    let submitter = KartalExecutorClient::new(KartalExecutorClientConfig::new(
+        &args.kartal_url,
+        preflight.token,
+    ));
+    let executor = TxExecutorAdapter::with_order_prefix(bridge, submitter, run_id);
+    Ok(Box::new(RealExecutionWithValuation::new(
+        executor,
+        valuation_adapter,
+    )))
+}
+
+fn validate_kartal_real_status(status: &KartalEthTxExecutorStatus) -> Result<()> {
+    if status.execution_disabled {
+        return Err(eyre!("Kartal ETH tx executor kill switch is active"));
+    }
+    if !status.enabled {
+        return Err(eyre!("Kartal ETH tx executor is disabled"));
+    }
+    if !status.signer_available {
+        return Err(eyre!("Kartal ETH signer is not available"));
+    }
+    if status.broadcast_mode != KartalStatusBroadcastMode::DryRun {
+        return Err(eyre!(
+            "kartal-real trader currently requires Kartal broadcast_mode=dry_run; got {:?}",
+            status.broadcast_mode
+        ));
+    }
+    if status.policy.allowed_target_count == 0 || status.policy.allowed_selector_count == 0 {
+        return Err(eyre!(
+            "Kartal ETH tx policy must have non-empty target and selector allowlists"
+        ));
+    }
+    Ok(())
+}
+
+fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
+    let token = std::env::var(token_env)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("KARTAL_API_TOKEN")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env} or KARTAL_API_TOKEN"))?;
+    Ok(token)
+}
+
+fn parse_live_real_address(value: &str, label: &str) -> Result<Address> {
+    value
+        .parse::<Address>()
+        .wrap_err_with(|| format!("invalid {label} address {value:?}"))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -234,6 +588,15 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let shared_config = load_shared_config()?;
     let execution_mode = normalize_execution_mode(&args.mode)?;
+    if execution_mode.uses_kartal() && !args.disable_entry {
+        return Err(eyre!(
+            "kartal-real mode requires --disable-entry until the vault buy path is wired into the real planner"
+        ));
+    }
+    let mut kartal_real_preflight = match execution_mode {
+        TraderExecutionMode::ChainSim => None,
+        TraderExecutionMode::KartalReal => Some(preflight_kartal_real(&args).await?),
+    };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
     let buy_wei = parse_u256_decimal(&args.buy_wei)?;
@@ -257,7 +620,7 @@ async fn main() -> Result<()> {
         .wrap_err("failed to initialize Postgres trading store")?;
     store
         .start_run(
-            execution_mode,
+            execution_mode.label(),
             json!({
                 "strategy_name": &observation_strategy_name,
                 "strategy_impl": if strategy_specs.len() == 1 { strategy_specs[0].strategy_impl.clone() } else { "multi-strategy-live-suite".to_string() },
@@ -267,7 +630,19 @@ async fn main() -> Result<()> {
                 "strategies": strategy_specs.iter().map(live_strategy_spec_config_json).collect::<Vec<_>>(),
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "observation_strategy_name": &observation_strategy_name,
-                "execution_model": "chain_state_evm_simulation",
+                "execution_model": execution_mode.execution_model(),
+                "entry_enabled": !args.disable_entry,
+                "kartal": if execution_mode.uses_kartal() {
+                    json!({
+                        "url": &args.kartal_url,
+                        "token_env": &args.kartal_token_env,
+                        "from": &args.live_real_from,
+                        "vault_address": &args.live_real_vault_address,
+                        "broadcast_requirement": "dry_run"
+                    })
+                } else {
+                    Value::Null
+                },
                 "process_started_at": &process_started_at_text,
                 "process_started_at_unix_secs": process_started_at_unix_secs,
                 "token_server_url": &token_server_url,
@@ -291,6 +666,7 @@ async fn main() -> Result<()> {
         .wrap_err("failed to mark stale alpha trader runs")?;
     let mut portfolio = PortfolioState::default();
     let mut seen_pools_by_strategy = HashMap::new();
+    let mut active_hold_counters_by_strategy = HashMap::new();
     let mut restored_stale_submitted_positions = 0usize;
     for spec in &strategy_specs {
         let seen_pools = store
@@ -303,6 +679,17 @@ async fn main() -> Result<()> {
                 )
             })?;
         seen_pools_by_strategy.insert(spec.strategy_name.clone(), seen_pools);
+
+        let active_hold_counters = store
+            .load_active_hold_counters(&spec.strategy_name)
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "failed to restore active hold counters for {}",
+                    spec.strategy_name
+                )
+            })?;
+        active_hold_counters_by_strategy.insert(spec.strategy_name.clone(), active_hold_counters);
 
         let restored_positions = store
             .load_active_positions(&spec.strategy_name)
@@ -335,16 +722,33 @@ async fn main() -> Result<()> {
         .max_order_sequence_for_prefix(&run_id)
         .await
         .wrap_err("failed to restore alpha trader order sequence")?;
-    let adapter = LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
+    let chain_sim_adapter = LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
         live_simulator,
         tx_processor,
         run_id.clone(),
         next_order_sequence,
     )
     .wrap_err("failed to initialize chain-sim execution adapter")?;
-    let adapter_current_block = adapter.current_block();
-    let pool_updates = adapter.pools();
-    let state_status_adapter = adapter.clone();
+    let adapter_current_block = chain_sim_adapter.current_block();
+    let pool_updates = chain_sim_adapter.pools();
+    let state_status_adapter = chain_sim_adapter.clone();
+    let adapter: Box<dyn EngineExecutionAdapter> = match execution_mode {
+        TraderExecutionMode::ChainSim => Box::new(chain_sim_adapter),
+        TraderExecutionMode::KartalReal => {
+            build_kartal_real_adapter(
+                &args,
+                kartal_real_preflight
+                    .take()
+                    .expect("kartal-real preflight must exist"),
+                store.clone(),
+                run_id.clone(),
+                chain_sim_adapter,
+                pool_updates.clone(),
+                adapter_current_block.clone(),
+            )
+            .await?
+        }
+    };
 
     let mut engine =
         AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter).with_portfolio(portfolio);
@@ -376,6 +780,7 @@ async fn main() -> Result<()> {
             min_denom_reserve: min_liquidity_eth,
             min_stable_denom_reserve: min_liquidity_usd,
             min_sell_pool_denom_reserve,
+            entry_enabled: !args.disable_entry,
             stop_loss_ratio,
             take_profit_ratio,
             max_hold_blocks: spec.max_hold_blocks,
@@ -397,8 +802,22 @@ async fn main() -> Result<()> {
             .get(&spec.strategy_name)
             .cloned()
             .unwrap_or_default();
-        engine.add_strategy(Box::new(LiveSnipeAllStrategy::with_bought_pools(
-            config, seen_pools,
+        let active_hold_counters = active_hold_counters_by_strategy
+            .get(&spec.strategy_name)
+            .into_iter()
+            .flat_map(|counters| counters.iter())
+            .map(|counter| {
+                (
+                    counter.position_id.clone(),
+                    counter.count,
+                    counter.last_block,
+                )
+            })
+            .collect::<Vec<_>>();
+        engine.add_strategy(Box::new(LiveSnipeAllStrategy::with_restored_state(
+            config,
+            seen_pools,
+            active_hold_counters,
         )));
     }
 
@@ -413,7 +832,7 @@ async fn main() -> Result<()> {
         token_server_url = %token_server_url,
         reth_datadir = %reth_datadir,
         run_id = %run_id,
-        mode = %execution_mode,
+        mode = %execution_mode.label(),
         strategy_suite = ?args.strategy_suite,
         strategy_count = strategy_specs.len(),
         observation_strategy_name = %observation_strategy_name,
@@ -422,6 +841,10 @@ async fn main() -> Result<()> {
         restored_pool_watermarks = seen_pool_blocks.len(),
         restored_signal_watermarks = seen_signal_ids.len(),
         restored_seen_pools = seen_pools_by_strategy
+            .values()
+            .map(Vec::len)
+            .sum::<usize>(),
+        restored_active_hold_counters = active_hold_counters_by_strategy
             .values()
             .map(Vec::len)
             .sum::<usize>(),
@@ -802,7 +1225,7 @@ async fn main() -> Result<()> {
             "alpha trader tick"
         );
         let heartbeat_metadata = json!({
-            "execution_model": "chain_state_evm_simulation",
+            "execution_model": execution_mode.execution_model(),
             "chain_sim_state": chain_state_payload,
             "process_started_at": &process_started_at_text,
             "process_started_at_unix_secs": process_started_at_unix_secs,
@@ -827,6 +1250,8 @@ async fn main() -> Result<()> {
             "strategy_count": strategy_specs.len(),
             "observation_strategy_name": &observation_strategy_name,
             "positions": engine.portfolio().active_position_count(),
+            "entry_enabled": !args.disable_entry,
+            "kartal_enabled": execution_mode.uses_kartal(),
         });
         let mut health = PipelineHealth::new(
             "eth_alpha_trader",

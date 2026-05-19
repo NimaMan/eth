@@ -1,0 +1,7 @@
+[Unit]
+Description=Ethereum live real-executor trading pipeline
+Wants=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-real-trader.service
+After=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-real-trader.service
+
+[Install]
+WantedBy=default.target

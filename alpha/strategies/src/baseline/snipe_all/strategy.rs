@@ -1,6 +1,6 @@
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
-    ids::{PoolAddress, StrategyName, TokenAddress},
+    ids::{BlockNumber, PoolAddress, PositionId, StrategyName, TokenAddress},
     market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionState},
@@ -38,6 +38,20 @@ impl SnipeAllStrategy {
         Self {
             config,
             state: SnipeAllState::with_bought_pools(bought_pools),
+        }
+    }
+
+    pub fn with_restored_state(
+        config: SnipeAllConfig,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+    ) -> Self {
+        Self {
+            config,
+            state: SnipeAllState::with_bought_pools_and_active_hold_blocks(
+                bought_pools,
+                active_hold_blocks,
+            ),
         }
     }
 
@@ -364,6 +378,9 @@ impl Strategy for SnipeAllStrategy {
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
+        if !self.config.entry_enabled {
+            return Ok(StrategyDecision::hold("entry.disabled"));
+        }
         if self.config.block_entry_on_lp_approval {
             match shared_rules::lp_approval::entry_gate::evaluate(
                 ctx,
@@ -503,7 +520,8 @@ impl Strategy for SnipeAllStrategy {
         ctx: &StrategyContext<'_>,
         block_number: u64,
     ) -> Result<Vec<StrategyDecision>> {
-        if self.config.exit_retry_interval_blocks.is_none() {
+        if self.config.exit_retry_interval_blocks.is_none() && self.config.max_hold_blocks.is_none()
+        {
             return Ok(Vec::new());
         }
         let strategy_name = self.name();
@@ -517,6 +535,13 @@ impl Strategy for SnipeAllStrategy {
                 }
 
                 match position.state {
+                    PositionState::BuyConfirmed => self
+                        .config
+                        .max_hold_blocks
+                        .map(|max_hold| {
+                            self.state.active_hold_block_count(&position.id) >= max_hold
+                        })
+                        .unwrap_or(false),
                     PositionState::SellFailed => {
                         self.should_retry_failed_exit(position, block_number)
                     }
@@ -529,7 +554,14 @@ impl Strategy for SnipeAllStrategy {
 
         Ok(positions
             .iter()
-            .map(|position| self.sell_position(ctx, position, "exit.failed_retry"))
+            .map(|position| {
+                let reason = match position.state {
+                    PositionState::BuyConfirmed => "exit.max_hold_active_blocks_restored",
+                    PositionState::SellFailed => "exit.failed_retry",
+                    _ => "exit.position_monitor",
+                };
+                self.sell_position(ctx, position, reason)
+            })
             .filter(|decision| !decision.is_hold())
             .collect())
     }

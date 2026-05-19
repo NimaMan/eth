@@ -14,19 +14,24 @@ ETH/WETH sell route, build a Uniswap V2 trading vault emergency-sell route, cons
 simulation and gas-rank inputs, value-cap the priority fee, build the Kartal JSON
 request, and submit that request to Kartal.
 
-Missing before a live strategy can use this crate for real capital:
+Current live-runner integration:
 
-- Wire a production `LiveTxPlanningInputResolver` that maps `OrderIntent` plus
-  current pool/position/store state into `LivePrioritySellPlannerInput`.
+`eth_alpha_trader --mode kartal-real --disable-entry` now instantiates
+`TxExecutorAdapter` and the `LiveTradingPlannerBridge` for a sell-only
+Uniswap V2 trading-vault route. That runner refuses to start unless Kartal is in
+`dry_run`, so it proves the real executor boundary without broadcasting.
+
+Missing before a live strategy can use this crate for public real capital:
+
+- Replace the temporary trader resolver with a production
+  `LiveTxPlanningInputResolver` that maps `OrderIntent` plus current
+  pool/position/store state into fully audited `LivePrioritySellPlannerInput`.
 - Replace `FixedPreSubmitSimulator` with a live final simulation provider and
   produce `PreSubmitSimulation` for the exact planned calldata.
 - Replace `FixedGasRankProvider` with live gas-rank/base-fee inputs that produce
   `RankedFeeCandidate`s.
-- Choose the live route policy per strategy: direct EOA sells need a real
-  allowance reader or documented pre-approval requirement, while Mode A
-  vault sells use the vault's internal approve+sell path.
-- Feed `prepare_priority_sell` rejects/submits back into the engine's
-  `TxExecutorAdapter` from an explicit real execution mode.
+- Wire the vault buy route so the real runner can open positions through the
+  same contract it later uses for emergency sells.
 - Reconcile Kartal tx hashes into confirmed or failed alpha execution reports.
 
 ## Kartal Execution Handoff
@@ -94,11 +99,10 @@ Planner-fixture calibration appends a UTC timestamp to the generated
 `attempt_id` by default. That keeps repeated dry-run signing attempts separate
 in Kartal's policy journal and spend ledger.
 
-Current bottleneck: the running `eth_alpha_trader` still uses chain-state
-simulation. It does not instantiate the engine's real `TxExecutorAdapter` or the
-`LiveTradingPlannerBridge`, and the planner's production context resolver,
-simulation provider, gas-rank provider, allowance reader, and receipt
-reconciliation are not wired.
+Current bottleneck: the real-runner boundary exists, but it is deliberately
+Kartal dry-run only. The planner still uses shadow dry-run simulation and gas
+rank values from the trader CLI, and receipt reconciliation is not wired. Public
+broadcast must remain disabled until those providers are production inputs.
 
 ## Tx Submission Data Flow
 

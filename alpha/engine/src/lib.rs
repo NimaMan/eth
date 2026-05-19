@@ -34,7 +34,10 @@ use eth_alpha_core::{
 };
 
 // Re-export chain-simulation adapters at crate root for convenience.
-pub use execution::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
+pub use execution::{
+    ChainSimExecutionAdapter, LiveChainSimExecutionAdapter, LiveTradingPlannerBridge,
+    LiveTxPlanningInputResolver, TxExecutorAdapter,
+};
 pub use memory_store::MemoryTradingStore;
 pub use policy::{AllowAllRiskPolicy, BlockCriticalRiskPolicy};
 
@@ -81,6 +84,24 @@ pub trait EngineExecutionAdapter: Send + Sync {
         _pool: &PoolSnapshot,
     ) -> Result<Option<PositionValueSimulation>> {
         Ok(None)
+    }
+}
+
+#[async_trait]
+impl<T> EngineExecutionAdapter for Box<T>
+where
+    T: EngineExecutionAdapter + ?Sized,
+{
+    async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
+        (**self).execute(intent).await
+    }
+
+    async fn simulate_position_value(
+        &self,
+        position: &Position,
+        pool: &PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        (**self).simulate_position_value(position, pool).await
     }
 }
 
