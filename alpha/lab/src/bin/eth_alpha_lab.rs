@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use eth_alpha_lab::{
     backtest_validation::{
         self, persistence::persist_validation_report, report::print_backtest_validation_report,
-        ValidationOptions, ValidationProfile,
+        ValidationOptions,
     },
     connect,
     position_lab::{self, PositionSelector},
@@ -71,10 +71,12 @@ enum Command {
         #[arg(long)]
         strategy: Option<String>,
 
-        #[arg(long, value_enum, default_value_t = ValidationProfile::Quick)]
-        profile: ValidationProfile,
+        /// Deprecated; validation is always comprehensive.
+        #[arg(long, hide = true)]
+        profile: Option<String>,
 
-        #[arg(long = "sample-limit")]
+        /// Deprecated; comprehensive validation owns its sample policy.
+        #[arg(long = "sample-limit", hide = true)]
         sample_limit: Option<i64>,
 
         #[arg(long)]
@@ -186,8 +188,8 @@ async fn main() -> Result<()> {
         Command::BacktestValidation {
             result_set_id,
             strategy,
-            profile,
-            sample_limit,
+            profile: _deprecated_profile,
+            sample_limit: _deprecated_sample_limit,
             json,
             persist,
         } => {
@@ -196,8 +198,6 @@ async fn main() -> Result<()> {
                 ValidationOptions {
                     result_set_id,
                     strategy,
-                    profile,
-                    sample_limit: sample_limit.unwrap_or_else(|| profile.default_sample_limit()),
                 },
             )
             .await?;

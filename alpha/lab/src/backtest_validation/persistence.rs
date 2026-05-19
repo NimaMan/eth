@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use eyre::{Context, Result};
 use sqlx::PgPool;
 
@@ -42,6 +40,19 @@ pub async fn persist_validation_report(
             validator_version
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ON CONFLICT (validation_id) DO UPDATE SET
+            result_set_id = EXCLUDED.result_set_id,
+            strategy_name = EXCLUDED.strategy_name,
+            profile = EXCLUDED.profile,
+            status = EXCLUDED.status,
+            passed = EXCLUDED.passed,
+            warnings = EXCLUDED.warnings,
+            failures = EXCLUDED.failures,
+            blocked = EXCLUDED.blocked,
+            overall_verdict = EXCLUDED.overall_verdict,
+            report = EXCLUDED.report,
+            validator_version = EXCLUDED.validator_version,
+            created_at = now()
         "#,
     )
     .bind(&validation_id)
@@ -59,6 +70,21 @@ pub async fn persist_validation_report(
     .execute(pool)
     .await
     .wrap_err("failed to persist validation report")?;
+
+    sqlx::query(
+        r#"
+        DELETE FROM alpha_trading.backtest_validation_reports
+        WHERE result_set_id = $1
+          AND strategy_name IS NOT DISTINCT FROM $2
+          AND validation_id <> $3
+        "#,
+    )
+    .bind(&report.result_set.result_set_id)
+    .bind(report.strategy_filter.as_deref())
+    .bind(&validation_id)
+    .execute(pool)
+    .await
+    .wrap_err("failed to remove superseded validation reports")?;
 
     Ok(validation_id)
 }
@@ -118,17 +144,12 @@ fn overall_verdict(report: &BacktestValidationReport) -> Verdict {
 }
 
 fn validation_id(report: &BacktestValidationReport) -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
     let strategy = report.strategy_filter.as_deref().unwrap_or("all");
     format!(
-        "val_{}_{}_{}_{}",
+        "val_{}_{}_{}",
         sanitize_id(&report.result_set.result_set_id),
         sanitize_id(strategy),
-        sanitize_id(&report.profile),
-        millis
+        sanitize_id(&report.profile)
     )
 }
 

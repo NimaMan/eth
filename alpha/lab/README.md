@@ -10,6 +10,17 @@ live trading path. It currently uses:
 - `execution_reports`
 - `position_snapshots`
 - `strategy_observations`
+- `backtest_result_sets`
+- `trades`
+- `trade_events`
+- `trade_snapshots`
+- `risk_events`
+- `strategy_decisions`
+
+The backtest validator writes `alpha_trading.backtest_validation_reports` when a
+validation report is persisted. That table belongs to lab diagnostics, but it is
+documented in `alpha/store/README.md` because it lives in the shared
+`alpha_trading` schema.
 
 ## Layout
 
@@ -174,17 +185,9 @@ eth_alpha_lab backtest-validation \
   --strategy snipe-all-risk-atlas-lp-gate-hold15-v2-uniswap-v2-only
 ```
 
-The command supports profiles:
-
-```bash
-eth_alpha_lab backtest-validation \
-  --result-set historical-25090165-25110164 \
-  --profile standard
-```
-
-- `quick`: DB invariants plus top/worst 3 trade samples.
-- `standard`: same validation with wider top/worst samples.
-- `strict`: reserved for EVM replay expansion; DB checks still run first.
+The command has one validation mode: comprehensive. Persisted reports use
+`profile = "comprehensive"` for compatibility with the existing report table,
+but callers should not choose a validation profile.
 
 Use `--json` for machine-readable reports.
 

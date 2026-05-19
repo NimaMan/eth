@@ -216,8 +216,7 @@ cargo run -p eth_alpha_lab --bin eth_alpha_lab -- \
 cargo run -p eth_alpha_lab --bin eth_alpha_lab -- \
   backtest-validation \
   --result-set "${RESULT_SET_ID}" \
-  --strategy "<strategy-name>" \
-  --profile standard
+  --strategy "<strategy-name>"
 ```
 
 If `eth_alpha_lab strategy` is used, confirm it runs successfully first. In the

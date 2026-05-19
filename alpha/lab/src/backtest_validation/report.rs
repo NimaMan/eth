@@ -125,7 +125,7 @@ pub fn print_backtest_validation_report(report: &BacktestValidationReport) {
         "- strategy filter: `{}`",
         report.strategy_filter.as_deref().unwrap_or("<all>")
     );
-    println!("- profile: `{}`", report.profile);
+    println!("- validation: `{}`", report.profile);
     println!();
 
     println!("## Verdict Summary");

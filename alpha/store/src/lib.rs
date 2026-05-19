@@ -742,6 +742,10 @@ impl PostgresTradingStore {
                 roi = $9,
                 updated_at = NOW()
             WHERE trade_id = $1
+              AND (
+                  latest_snapshot_block IS NULL
+                  OR latest_snapshot_block <= $3
+              )
             "#,
         )
         .bind(&snapshot.trade_id.0)
