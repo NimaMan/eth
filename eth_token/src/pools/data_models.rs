@@ -63,13 +63,13 @@ impl Default for PoolRuntimeState {
 
 impl PoolRuntimeState {
     pub fn update_reserves(&mut self, denom_reserve: f64, token_reserve: f64, block_number: u64) {
-        self.denom_reserve = denom_reserve;
-        self.token_reserve = token_reserve;
+        self.denom_reserve = finite_non_negative(denom_reserve);
+        self.token_reserve = finite_non_negative(token_reserve);
         self.last_update_block = block_number;
         self.last_sync_block = block_number;
         self.update_prices();
 
-        if denom_reserve > 0.0 || token_reserve > 0.0 {
+        if self.denom_reserve > 0.0 || self.token_reserve > 0.0 {
             self.lifecycle = PoolLifecycle::LiquidityDeposited;
         }
     }
@@ -106,15 +106,23 @@ impl PoolRuntimeState {
 
     fn update_prices(&mut self) {
         self.price_token_per_denom = if self.denom_reserve > 0.0 {
-            self.token_reserve / self.denom_reserve
+            finite_non_negative(self.token_reserve / self.denom_reserve)
         } else {
             0.0
         };
         self.price_denom_per_token = if self.token_reserve > 0.0 {
-            self.denom_reserve / self.token_reserve
+            finite_non_negative(self.denom_reserve / self.token_reserve)
         } else {
             0.0
         };
+    }
+}
+
+fn finite_non_negative(value: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -186,6 +194,18 @@ mod tests {
         assert_eq!(state.price_token_per_denom, 5.0);
         assert_eq!(state.price_denom_per_token, 0.2);
         assert_eq!(state.lifecycle, PoolLifecycle::LiquidityDeposited);
+    }
+
+    #[test]
+    fn update_reserves_sanitizes_non_finite_values() {
+        let mut state = PoolRuntimeState::default();
+
+        state.update_reserves(f64::INFINITY, f64::NAN, 123);
+
+        assert_eq!(state.denom_reserve, 0.0);
+        assert_eq!(state.token_reserve, 0.0);
+        assert_eq!(state.price_token_per_denom, 0.0);
+        assert_eq!(state.price_denom_per_token, 0.0);
     }
 
     #[test]

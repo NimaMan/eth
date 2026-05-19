@@ -2,7 +2,7 @@ use crate::pools::BasePool;
 use crate::token_analytics::PoolLiquidityFeatures;
 
 pub(super) fn liquidity_features(pool: &BasePool) -> PoolLiquidityFeatures {
-    let initial = pool.reserve_tracker.reserve_history.first();
+    let initial = pool.initial_meaningful_reserve_snapshot();
     let max_denom_reserve = pool
         .reserve_tracker
         .reserve_history

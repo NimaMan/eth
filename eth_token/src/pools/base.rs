@@ -6,11 +6,12 @@ use serde_json::Value;
 use crate::utils::append_with_history_limit;
 
 use super::data_models::{PoolLifecycle, PoolLiquiditySnapshot, PoolRuntimeState};
-use super::reserves::PoolReserveTracker;
+use super::reserves::{PoolReserveTracker, ReserveSnapshot};
 
 pub const DEFAULT_TEST_BUY_ETH: f64 = 0.01;
 const MIN_MEANINGFUL_WETH_LIQUIDITY: f64 = 0.01;
 const MIN_MEANINGFUL_STABLE_LIQUIDITY: f64 = 10.0;
+const MIN_MEANINGFUL_TOKEN_RESERVE: f64 = 1e-12;
 const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const USDC_ADDRESS: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDT_ADDRESS: &str = "0xdac17f958d2ee523a2206206994597c13d831ec7";
@@ -182,7 +183,7 @@ impl BasePool {
     }
 
     pub fn price(&self) -> f64 {
-        if self.has_no_economic_price() {
+        if self.has_no_economic_price() || !self.has_meaningful_liquidity() {
             0.0
         } else {
             self.state.price_denom_per_token.max(0.0)
@@ -198,9 +199,19 @@ impl BasePool {
     }
 
     pub fn initial_price(&self) -> Option<f64> {
-        self.reserve_tracker
-            .initial_price()
+        self.initial_meaningful_reserve_snapshot()
+            .map(|snapshot| snapshot.price)
             .filter(|value| value.is_finite())
+    }
+
+    pub fn initial_meaningful_reserve_snapshot(&self) -> Option<&ReserveSnapshot> {
+        self.reserve_tracker
+            .reserve_history
+            .iter()
+            .find(|snapshot| {
+                self.has_meaningful_liquidity_values(snapshot.denom_reserve, snapshot.token_reserve)
+                    && positive_finite(snapshot.price)
+            })
     }
 
     pub fn price_ratio_to_initial(&self) -> Option<f64> {
@@ -256,8 +267,13 @@ impl BasePool {
         let tx_hash = tx_hash.into();
         self.state
             .update_reserves(denom_reserve, token_reserve, block_number);
+        self.state.total_liquidity = self.state.denom_reserve.max(0.0);
 
-        let price = self.price();
+        let price = if self.has_meaningful_liquidity() {
+            self.state.price_denom_per_token.max(0.0)
+        } else {
+            0.0
+        };
         if price > 0.0 {
             append_with_history_limit(
                 &mut self.price_history,
@@ -266,11 +282,9 @@ impl BasePool {
             );
         }
 
-        self.state.total_liquidity = denom_reserve.max(0.0);
-
         self.reserve_tracker.update_reserves(
-            denom_reserve,
-            token_reserve,
+            self.state.denom_reserve,
+            self.state.token_reserve,
             price,
             block_number,
             timestamp,
@@ -484,12 +498,16 @@ impl BasePool {
     }
 
     pub fn liquidity_snapshot(&self) -> PoolLiquiditySnapshot {
-        PoolLiquiditySnapshot::new(
-            self.identity.pool_address.clone(),
-            self.identity.denom_address.clone(),
-            self.identity.protocol.clone(),
-            &self.state,
-        )
+        PoolLiquiditySnapshot {
+            pool_address: self.identity.pool_address.clone(),
+            denom_address: self.identity.denom_address.clone(),
+            protocol: self.identity.protocol.clone(),
+            price: self.price(),
+            denom_reserve: self.state.denom_reserve,
+            token_reserve: self.state.token_reserve,
+            can_buy: self.state.can_buy,
+            can_sell: self.state.can_sell,
+        }
     }
 
     fn sync_liquidity_removal_state_from_reserve_tracker(&mut self) {
@@ -558,10 +576,16 @@ impl BasePool {
     }
 
     fn has_meaningful_liquidity(&self) -> bool {
+        self.has_meaningful_liquidity_values(self.state.denom_reserve, self.state.token_reserve)
+    }
+
+    fn has_meaningful_liquidity_values(&self, denom_reserve: f64, token_reserve: f64) -> bool {
         let configured_threshold = self.config.denom_threshold.max(0.0);
         let display_threshold = meaningful_liquidity_threshold(&self.identity.denom_address);
-        self.state.denom_reserve >= configured_threshold.max(display_threshold)
-            && self.state.token_reserve > 0.0
+        denom_reserve.is_finite()
+            && token_reserve.is_finite()
+            && denom_reserve >= configured_threshold.max(display_threshold)
+            && meaningful_token_reserve_for_ratio(token_reserve).is_some()
     }
 
     fn clear_current_trading_status(&mut self) {
@@ -575,6 +599,14 @@ pub(crate) fn meaningful_liquidity_threshold(denom_address: &str) -> f64 {
         address if address == WETH_ADDRESS => MIN_MEANINGFUL_WETH_LIQUIDITY,
         address if is_stable_denom(&address) => MIN_MEANINGFUL_STABLE_LIQUIDITY,
         _ => 0.0,
+    }
+}
+
+pub(crate) fn meaningful_token_reserve_for_ratio(token_reserve: f64) -> Option<f64> {
+    if token_reserve.is_finite() && token_reserve >= MIN_MEANINGFUL_TOKEN_RESERVE {
+        Some(token_reserve)
+    } else {
+        None
     }
 }
 
@@ -676,6 +708,7 @@ mod tests {
         assert_eq!(pool.price_ratio_to_initial(), Some(0.0));
         assert_eq!(pool.state.lifecycle, PoolLifecycle::LiquidityRemoved);
         assert_eq!(pool.scam_block, Some(10));
+        assert!(pool.price_history.is_empty());
     }
 
     #[test]
@@ -689,6 +722,49 @@ mod tests {
         assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
         assert_eq!(pool.price(), 0.0);
         assert_eq!(pool.price_ratio_to_initial(), Some(0.0));
+        assert!(pool.price_history.is_empty());
+        assert_eq!(
+            pool.reserve_tracker
+                .latest_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.price),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn dust_bootstrap_is_not_used_as_initial_price() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(100.0, 0.001, 10, 1_700, "0xDUST");
+        pool.update_reserves(100.0, 1.0, 11, 1_712, "0xSYNC");
+
+        assert_eq!(pool.initial_price(), Some(0.01));
+        assert_eq!(pool.price_history, vec![(11, 0.01)]);
+        assert_eq!(pool.price_ratio_to_initial(), Some(1.0));
+        assert_eq!(
+            pool.initial_meaningful_reserve_snapshot()
+                .map(|snapshot| snapshot.block_number),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn token_dust_reserve_has_no_economic_price_even_with_denom_liquidity() {
+        let mut pool = weth_pool();
+
+        pool.update_reserves(5.6e-17, 1.0, 10, 1_700, "0xDUST");
+
+        assert_eq!(pool.state.lifecycle, PoolLifecycle::Dust);
+        assert_eq!(pool.price(), 0.0);
+        assert!(pool.price_history.is_empty());
+        assert_eq!(
+            pool.reserve_tracker
+                .latest_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.price),
+            Some(0.0)
+        );
     }
 
     #[test]

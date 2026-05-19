@@ -88,7 +88,10 @@ impl PoolReserveTracker {
     }
 
     pub fn latest_price(&self) -> Option<f64> {
-        self.latest_snapshot.as_ref().map(|snapshot| snapshot.price)
+        self.latest_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.price)
+            .filter(|price| price.is_finite() && *price >= 0.0)
     }
 
     pub fn latest_reserves(&self) -> (f64, f64) {
@@ -112,7 +115,10 @@ impl PoolReserveTracker {
     }
 
     pub fn initial_price(&self) -> Option<f64> {
-        self.reserve_history.first().map(|snapshot| snapshot.price)
+        self.reserve_history
+            .iter()
+            .map(|snapshot| snapshot.price)
+            .find(|price| price.is_finite() && *price > 0.0)
     }
 
     pub fn price_ratio_to_initial(&self) -> Option<f64> {
@@ -161,6 +167,18 @@ mod tests {
         assert_eq!(tracker.reserve_history[0].tx_hash, "tx2");
         assert_eq!(tracker.latest_price(), Some(0.12));
         assert_eq!(tracker.latest_reserves(), (12.0, 100.0));
+    }
+
+    #[test]
+    fn initial_price_skips_zero_or_non_finite_snapshots() {
+        let mut tracker = PoolReserveTracker::new("pool", "denom", Some("token"), Some("V2"), 10);
+
+        tracker.update_reserves(0.001, 100.0, 0.0, 1, 11, "dust");
+        tracker.update_reserves(1.0, 100.0, f64::NAN, 2, 12, "bad");
+        tracker.update_reserves(2.0, 100.0, 0.02, 3, 13, "live");
+
+        assert_eq!(tracker.initial_price(), Some(0.02));
+        assert_eq!(tracker.price_ratio_to_initial(), Some(1.0));
     }
 
     #[test]

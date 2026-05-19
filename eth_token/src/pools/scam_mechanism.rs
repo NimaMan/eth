@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::utils::append_with_history_limit;
 
-use super::base::{meaningful_liquidity_threshold, BasePool};
+use super::base::{meaningful_liquidity_threshold, meaningful_token_reserve_for_ratio, BasePool};
 
 pub const SCAM_DIRECT_LP_LIQUIDITY_REMOVAL: &str = "direct_lp_liquidity_removal";
 pub const SCAM_PAIR_BALANCE_BACKDOOR_DRAIN: &str = "pair_balance_backdoor_drain";
@@ -76,11 +76,8 @@ impl BasePool {
         }
 
         let token_reserve_before = self.token_reserve();
-        let pooled_token_share = if token_reserve_before > 0.0 && token_reserve_before.is_finite() {
-            Some(amount / token_reserve_before)
-        } else {
-            None
-        };
+        let pooled_token_share = meaningful_token_reserve_for_ratio(token_reserve_before)
+            .map(|reserve| amount / reserve);
         append_with_history_limit(
             &mut self.suspicious_pair_token_out_transfers,
             json!({
@@ -369,6 +366,17 @@ mod tests {
 
         assert_eq!(mechanism.mechanism, SCAM_PAIR_BALANCE_BACKDOOR_DRAIN);
         assert_eq!(mechanism.label, "Backdoored Pair-Balance Drain");
+    }
+
+    #[test]
+    fn pair_token_transfer_share_ignores_dust_reserve_denominator() {
+        let mut pool = test_pool();
+        pool.update_reserves(5.6e-17, 1.0, 10, 1_700, "0xDUST");
+
+        pool.record_pair_token_transfer("0xPOOL", "0xACTOR", 1.0, 11, 1_710, "0xXFER", None, false);
+
+        let transfer = pool.suspicious_pair_token_out_transfers.last().unwrap();
+        assert!(transfer.get("pooled_token_share").unwrap().is_null());
     }
 
     #[test]
