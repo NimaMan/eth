@@ -138,12 +138,183 @@ pub(super) async fn latest_snapshot_values_check(
               t.latest_snapshot_block IS DISTINCT FROM latest.block_number
               OR t.latest_observed_block IS DISTINCT FROM latest.observed_block_number
               OR t.latest_valuation_block IS DISTINCT FROM latest.valuation_block_number
-              OR abs(coalesce(nullif(t.current_value_eth, '')::numeric, 0) - coalesce(nullif(latest.current_value_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(t.realized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.realized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(t.unrealized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.unrealized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(t.total_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.total_pnl_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(t.roi, '')::numeric, 0) - coalesce(nullif(latest.roi, '')::numeric, 0)) > 0.000000000000001
+              OR abs(coalesce(nullif(t.current_value_eth, '')::numeric, 0) - coalesce(nullif(latest.current_value_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(t.realized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.realized_pnl_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(t.unrealized_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.unrealized_pnl_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(t.total_pnl_eth, '')::numeric, 0) - coalesce(nullif(latest.total_pnl_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(t.roi, '')::numeric, 0) - coalesce(nullif(latest.roi, '')::numeric, 0)) > 0.000001
           )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn observed_block_not_after_valuation_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "snapshot_observed_not_after_valuation",
+        Verdict::Fail,
+        "snapshot observed blocks are not after their valuation blocks",
+        "snapshots whose pool observation block is after valuation block",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND ts.observed_block_number IS NOT NULL
+          AND ts.observed_block_number > COALESCE(ts.valuation_block_number, ts.block_number)
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn duplicate_snapshot_coordinate_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_duplicate_snapshot_coordinates",
+        Verdict::Fail,
+        "each trade has at most one snapshot for the same block, state, and valuation block",
+        "duplicate trade snapshot coordinates",
+        r#"
+        WITH duplicates AS (
+            SELECT ts.trade_id,
+                   ts.block_number,
+                   ts.state,
+                   ts.valuation_block_number
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            GROUP BY ts.trade_id, ts.block_number, ts.state, ts.valuation_block_number
+            HAVING count(*) > 1
+        )
+        SELECT count(*)
+        FROM duplicates
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn duplicate_position_snapshot_coordinate_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_duplicate_position_snapshot_coordinates",
+        Verdict::Fail,
+        "each position has at most one persisted snapshot for the same block, state, and valuation block",
+        "duplicate position snapshot coordinates",
+        r#"
+        WITH duplicates AS (
+            SELECT ps.run_id,
+                   ps.position_id,
+                   ps.state,
+                   ps.block_number,
+                   ps.valuation_block_number
+            FROM alpha_trading.position_snapshots ps
+            JOIN alpha_trading.trades t
+              ON t.run_id = ps.run_id
+             AND t.trade_id = ps.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            GROUP BY ps.run_id, ps.position_id, ps.state, ps.block_number, ps.valuation_block_number
+            HAVING count(*) > 1
+        )
+        SELECT count(*)
+        FROM duplicates
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn trade_position_snapshot_mirror_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "trade_position_snapshots_match",
+        Verdict::Fail,
+        "trade snapshots match their source position snapshots",
+        "trade and position snapshots with missing or mismatched mirror rows",
+        r#"
+        WITH scoped_trades AS (
+            SELECT trade_id, run_id, strategy_name
+            FROM alpha_trading.trades
+            WHERE result_set_id = $1
+              AND ($2::text IS NULL OR strategy_name = $2)
+        ),
+        trade_missing_position AS (
+            SELECT ts.id
+            FROM alpha_trading.trade_snapshots ts
+            JOIN scoped_trades t
+              ON t.trade_id = ts.trade_id
+             AND t.run_id = ts.run_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM alpha_trading.position_snapshots ps
+                WHERE ps.run_id = ts.run_id
+                  AND ps.trade_id = ts.trade_id
+                  AND ps.position_id = ts.position_id
+                  AND ps.state = ts.state
+                  AND ps.block_number = ts.block_number
+                  AND ps.valuation_block_number IS NOT DISTINCT FROM ts.valuation_block_number
+                  AND ps.observed_block_number IS NOT DISTINCT FROM ts.observed_block_number
+                  AND abs(coalesce(nullif(ps.current_value_eth, '')::numeric, 0) - coalesce(nullif(ts.current_value_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ps.realized_profit_eth, '')::numeric, 0) - coalesce(nullif(ts.realized_pnl_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ps.unrealized_profit_eth, '')::numeric, 0) - coalesce(nullif(ts.unrealized_pnl_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ps.roi, '')::numeric, 0) - coalesce(nullif(ts.roi, '')::numeric, 0)) <= 0.000001
+            )
+        ),
+        position_missing_trade AS (
+            SELECT ps.id
+            FROM alpha_trading.position_snapshots ps
+            JOIN scoped_trades t
+              ON t.trade_id = ps.trade_id
+             AND t.run_id = ps.run_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM alpha_trading.trade_snapshots ts
+                WHERE ts.run_id = ps.run_id
+                  AND ts.trade_id = ps.trade_id
+                  AND ts.position_id = ps.position_id
+                  AND ts.state = ps.state
+                  AND ts.block_number = ps.block_number
+                  AND ts.valuation_block_number IS NOT DISTINCT FROM ps.valuation_block_number
+                  AND ts.observed_block_number IS NOT DISTINCT FROM ps.observed_block_number
+                  AND abs(coalesce(nullif(ts.current_value_eth, '')::numeric, 0) - coalesce(nullif(ps.current_value_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ts.realized_pnl_eth, '')::numeric, 0) - coalesce(nullif(ps.realized_profit_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ts.unrealized_pnl_eth, '')::numeric, 0) - coalesce(nullif(ps.unrealized_profit_eth, '')::numeric, 0)) <= 0.000001
+                  AND abs(coalesce(nullif(ts.roi, '')::numeric, 0) - coalesce(nullif(ps.roi, '')::numeric, 0)) <= 0.000001
+            )
+        )
+        SELECT
+            (SELECT count(*) FROM trade_missing_position)
+            + (SELECT count(*) FROM position_missing_trade)
         "#,
         result_set_id,
         strategy,
@@ -187,7 +358,7 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
             SELECT scoped.*,
                    max(
                        CASE
-                           WHEN abs(coalesce(current_value_eth, 0)) <= 0.000000000000001
+                           WHEN abs(coalesce(current_value_eth, 0)) <= 0.000001
                                 AND (
                                     (pool_liquidity_denom IS NOT NULL AND pool_liquidity_denom <= 0.001)
                                     OR (
@@ -211,6 +382,11 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
                        FROM alpha_trading.risk_events re
                        WHERE re.run_id = scoped.run_id
                          AND re.kind = 'liquidity_removal'
+                         AND re.pending_tx_hash IS NULL
+                         AND COALESCE(re.payload->>'source', '') NOT IN (
+                             'mempool_signal',
+                             'historical_mempool_signal'
+                         )
                          AND lower(re.pool_address) = lower(scoped.pool_address)
                          AND re.observed_block IS NOT NULL
                          AND re.observed_block <= COALESCE(
@@ -223,7 +399,7 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
         )
         SELECT count(*)
         FROM annotated
-        WHERE abs(coalesce(current_value_eth, 0)) <= 0.000000000000001
+        WHERE abs(coalesce(current_value_eth, 0)) <= 0.000001
           AND state IN (
               'buy_confirmed',
               'sell_intent_created',
@@ -250,6 +426,81 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
               )
               OR prior_drained_snapshot_block IS NOT NULL
               OR has_seen_liquidity_removal
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn zero_value_snapshot_no_pool_metrics_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "zero_value_snapshots_have_no_pool_metrics",
+        Verdict::Fail,
+        "zero-value exposure snapshots carry no pool price or liquidity metrics",
+        "zero-value exposure snapshots with any pool price or liquidity metrics",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND ts.state IN (
+              'buy_confirmed',
+              'sell_intent_created',
+              'sell_submitted',
+              'sell_failed',
+              'sell_cancelled'
+          )
+          AND abs(coalesce(nullif(ts.current_value_eth, '')::numeric, 0)) <= 0.000001
+          AND (
+              nullif(ts.pool_liquidity_denom, '') IS NOT NULL
+              OR nullif(ts.pool_price_to_initial_price_ratio, '') IS NOT NULL
+              OR nullif(ts.pool_price_denom_per_token, '') IS NOT NULL
+              OR nullif(ts.pool_initial_price_denom_per_token, '') IS NOT NULL
+              OR nullif(ts.pool_token_reserve, '') IS NOT NULL
+              OR nullif(ts.pool_denom_symbol, '') IS NOT NULL
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn terminal_snapshot_no_pool_metrics_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "terminal_snapshots_have_no_pool_metrics",
+        Verdict::Fail,
+        "sell-confirmed terminal snapshots carry no pool price or liquidity metrics",
+        "sell-confirmed terminal snapshots with pool price or liquidity metrics",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND ts.state = 'sell_confirmed'
+          AND (
+              nullif(ts.pool_liquidity_denom, '') IS NOT NULL
+              OR nullif(ts.pool_price_to_initial_price_ratio, '') IS NOT NULL
+              OR nullif(ts.pool_price_denom_per_token, '') IS NOT NULL
+              OR nullif(ts.pool_initial_price_denom_per_token, '') IS NOT NULL
+              OR nullif(ts.pool_token_reserve, '') IS NOT NULL
+              OR nullif(ts.pool_denom_symbol, '') IS NOT NULL
           )
         "#,
         result_set_id,

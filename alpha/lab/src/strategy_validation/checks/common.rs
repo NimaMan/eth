@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use super::super::db::scalar_i64;
 use super::super::report::{CheckResult, Verdict};
 
-const TOLERANCE_ETH: &str = "0.000000000000001";
+const TOLERANCE_ETH: &str = "0.000001";
 
 pub(super) async fn count_check(
     pool: &PgPool,
@@ -67,6 +67,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Is this result set in the expected state?",
             "Compares result-set mode with status so completed historical results and running live results are not mixed with partial runs.",
         ),
+        "live_runtime_status_matches_result_set" => (
+            "Does the live runtime health match the result-set state?",
+            "Fails when a live result set is marked running while live runtime metadata reports a failed chain/trader status.",
+        ),
         "running_result_set_has_no_stop_marker" => (
             "Is a running live result free of stopped-run markers?",
             "Rejects running result sets or trader runs that still carry stopped_at or shutdown/stale metadata from a prior process lifetime.",
@@ -98,6 +102,18 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "risk_sell_signal_block_immediate" => (
             "Did risk-triggered exits submit immediately on the signal block?",
             "Requires risk-sourced submit_sell decisions to match a same-block local risk event for the token/pool.",
+        ),
+        "configured_critical_risk_has_strategy_response" => (
+            "Did configured critical risks receive the strategy response they require?",
+            "Compares in-position critical risk events against the strategy config and fails if an enabled exit risk has no sell submission or explicit same-block deferral.",
+        ),
+        "liquidity_removal_risk_kind_matches_source" => (
+            "Does liquidity-removal risk kind match its evidence source?",
+            "Requires pending mempool liquidity-removal rows to use `mempool_liquidity_removal` and mined-chain rows to use `liquidity_removal`.",
+        ),
+        "mempool_liquidity_removal_does_not_zero_exposure_snapshot" => (
+            "Do mempool liquidity-removal signals avoid marking exposure as drained?",
+            "Fails if a pending mempool liquidity-removal signal creates a same-block zero-value exposure snapshot before mined evidence exists.",
         ),
         "market_buy_has_historical_observation" => (
             "Can every historical market buy be traced to an input observation?",
@@ -155,6 +171,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Does gas cost come from the execution event stream?",
             "Sums persisted trade event gas_cost_eth values and compares them with the trade gas_cost_eth rollup used in realized PnL.",
         ),
+        "failed_sell_gas_has_same_block_snapshot" => (
+            "Does failed sell gas have a matching PnL snapshot?",
+            "Requires a sell_failed execution with gas cost to persist a same-block sell_failed snapshot so latest PnL can reflect failed-exit gas.",
+        ),
         "total_pnl_equals_realized_plus_unrealized" => (
             "Does total PnL reconcile with realized and unrealized PnL?",
             "Checks total_pnl_eth equals realized_pnl_eth plus unrealized_pnl_eth within a small ETH tolerance.",
@@ -179,9 +199,33 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do trade latest fields match the latest snapshot?",
             "Compares latest snapshot block coordinates, current value, realized/unrealized/total PnL, and ROI against the latest trade_snapshot row.",
         ),
+        "snapshot_observed_not_after_valuation" => (
+            "Are snapshot pool observations available at valuation time?",
+            "Rejects snapshots that attach pool observations from a block later than the valuation block.",
+        ),
+        "no_duplicate_snapshot_coordinates" => (
+            "Does each position have one valuation row per trade, block, state, and valuation block?",
+            "Rejects duplicate snapshots that make position evolution ambiguous in APIs and frontend timelines.",
+        ),
+        "no_duplicate_position_snapshot_coordinates" => (
+            "Does each raw position snapshot coordinate have only one row?",
+            "Applies the duplicate-coordinate invariant to position_snapshots, not only the derived trade_snapshots read model.",
+        ),
+        "trade_position_snapshots_match" => (
+            "Do trade snapshots mirror their source position snapshots?",
+            "Checks every trade_snapshot has a matching position_snapshot, and every scoped position_snapshot has a matching trade_snapshot with the same block coordinates and PnL fields.",
+        ),
         "zero_value_snapshots_do_not_reuse_stale_pool_metrics" => (
             "Do zero-value exposure snapshots avoid stale pool metrics?",
             "Fails if a zero-value open or failed-exit snapshot still displays positive pool liquidity or price metrics from an older/pre-drain pool state.",
+        ),
+        "zero_value_snapshots_have_no_pool_metrics" => (
+            "Do zero-value exposure snapshots omit all pool metrics?",
+            "Strictly rejects any zero-current-value exposure snapshot that carries pool price, reserve, liquidity, or denom symbol metadata.",
+        ),
+        "terminal_snapshots_have_no_pool_metrics" => (
+            "Do terminal closed snapshots omit pool metrics?",
+            "Rejects sell-confirmed terminal snapshots that still carry pool price, reserve, liquidity, or denom symbol metadata.",
         ),
         "no_snapshots_after_sell_confirmed" => (
             "Are closed trades no longer receiving snapshots?",

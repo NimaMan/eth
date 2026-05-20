@@ -345,7 +345,7 @@ impl MempoolSignalWire {
 pub fn signal_kind_and_severity(signal: &MempoolSignalWire) -> (RiskKind, RiskSeverity) {
     match signal.signal_type.as_str() {
         "trading_enabled" => (RiskKind::TradingEnabled, RiskSeverity::Info),
-        "liquidity_removal" => (RiskKind::LiquidityRemoval, RiskSeverity::Critical),
+        "liquidity_removal" => (RiskKind::MempoolLiquidityRemoval, RiskSeverity::Critical),
         "lp_approval" | "lp_position_approval" => (
             RiskKind::LpApproval,
             if signal_flag_is_true(signal) {
@@ -566,6 +566,35 @@ mod tests {
         assert_eq!(event.kind, RiskKind::LpApproval);
         assert_eq!(event.severity, RiskSeverity::Critical);
         assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
+    }
+
+    #[test]
+    fn liquidity_removal_signal_maps_to_mempool_specific_risk_kind() {
+        let signal = MempoolSignalWire {
+            signal_id: "1".to_string(),
+            signal_type: "liquidity_removal".to_string(),
+            detection_timestamp: None,
+            detection_tx_hash: Some(
+                "0x3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+            ),
+            token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            headline: None,
+            value_1: None,
+            value_2: None,
+            flag: Some("true".to_string()),
+            payload: Value::Null,
+        };
+
+        let event = signal
+            .to_risk_event()
+            .expect("risk event")
+            .expect("non-empty event");
+
+        assert_eq!(event.kind, RiskKind::MempoolLiquidityRemoval);
+        assert_eq!(event.severity, RiskSeverity::Critical);
+        assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
+        assert!(event.pending_tx_hash.is_some());
     }
 
     #[test]

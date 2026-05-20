@@ -6,7 +6,7 @@ use crate::render;
 use super::db::{ResultSetRecord, StrategySummary};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BacktestValidationReport {
+pub struct StrategyValidationReport {
     pub result_set: ResultSetRecord,
     pub strategy_filter: Option<String>,
     pub profile: String,
@@ -93,8 +93,8 @@ pub struct TradeSample {
     pub roi: Option<String>,
 }
 
-pub fn print_backtest_validation_report(report: &BacktestValidationReport) {
-    println!("# Backtest Validation: {}", report.result_set.result_set_id);
+pub fn print_strategy_validation_report(report: &StrategyValidationReport) {
+    println!("# Strategy Validation: {}", report.result_set.result_set_id);
     println!();
     println!(
         "- mode/status: `{}` / `{}`",

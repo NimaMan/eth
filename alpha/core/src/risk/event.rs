@@ -15,6 +15,7 @@ pub enum RiskSeverity {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RiskKind {
     LiquidityRemoval,
+    MempoolLiquidityRemoval,
     TaxChange,
     Honeypot,
     TradingDisabled,

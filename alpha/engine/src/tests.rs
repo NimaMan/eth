@@ -16,7 +16,9 @@ use std::sync::{
 };
 
 use super::*;
-use crate::valuation::{should_snapshot_position_for_pool, zero_value_snapshot};
+use crate::valuation::{
+    should_snapshot_position_for_pool, simulated_value_snapshot, zero_value_snapshot,
+};
 
 #[path = "test_support.rs"]
 mod test_support;
@@ -503,6 +505,37 @@ fn zero_value_snapshot_for_closed_position_has_no_unrealized_pnl() {
     assert_eq!(snapshot.unrealized_profit_eth, DecimalAmount::ZERO);
     assert_eq!(snapshot.realized_profit_eth.to_string(), "0.01");
     assert_eq!(snapshot.roi.to_string(), "1");
+}
+
+#[test]
+fn zero_current_value_snapshot_does_not_copy_pool_metrics() {
+    let mut position = test_position(PositionState::BuyConfirmed);
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.01").unwrap());
+    let token = position.key.token_address;
+    let pool_address = Address::repeat_byte(0x22);
+    let mut pool = pool_snapshot(token, pool_address, 10);
+    pool.denom_reserve = DecimalAmount::from_str_exact("1.5").unwrap();
+    pool.token_reserve = DecimalAmount::from_str_exact("1000000").unwrap();
+    pool.price_ratio_to_initial = Some(DecimalAmount::from_str_exact("2").unwrap());
+    pool.price_denom_per_token = Some(DecimalAmount::from_str_exact("0.000000002").unwrap());
+    pool.initial_price_denom_per_token =
+        Some(DecimalAmount::from_str_exact("0.000000001").unwrap());
+
+    let snapshot = simulated_value_snapshot(
+        &position,
+        PositionValueSimulation {
+            block_number: 10,
+            current_value: Amount::zero(18),
+            gas_used: None,
+            error: None,
+        },
+        Some(&pool),
+    );
+
+    assert_eq!(snapshot.current_value_eth, DecimalAmount::ZERO);
+    assert_eq!(snapshot.pool_liquidity_denom, None);
+    assert_eq!(snapshot.pool_price_to_initial_price_ratio, None);
+    assert_eq!(snapshot.pool_price_denom_per_token, None);
 }
 
 #[tokio::test]

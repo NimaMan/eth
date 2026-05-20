@@ -64,8 +64,9 @@ Entry:
 Exit:
 
 - Sell a matching open position on enabled exit risk kinds such as
-  `RiskKind::LiquidityRemoval`, `RiskKind::LpApproval`, `RiskKind::TaxChange`,
-  `RiskKind::Honeypot`, and `RiskKind::ScamConfirmed`.
+  `RiskKind::LiquidityRemoval`, `RiskKind::MempoolLiquidityRemoval`,
+  `RiskKind::LpApproval`, `RiskKind::TaxChange`, `RiskKind::Honeypot`, and
+  `RiskKind::ScamConfirmed`.
 - Keep liquidity-removal and critical LP-approval exits as explicit strategy
   variants or run configs first so each live/historical pair can be backtested
   independently.

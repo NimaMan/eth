@@ -1,7 +1,7 @@
 # Validation Checks
 
 This directory contains the individual checks used by the comprehensive
-backtest validator. Each check asks one trust question about a persisted
+strategy validator. Each check asks one trust question about a persisted
 strategy result and returns a backend-owned `CheckResult`.
 
 ## Module Map
@@ -10,6 +10,8 @@ strategy result and returns a backend-owned `CheckResult`.
 - `signal_scope.rs`: historical/live evidence boundaries and block range scope.
 - `decision_timing.rs`: whether orders can be traced to strategy decisions and
   risk evidence.
+- `risk_policy.rs`: whether persisted risk rows have coherent semantics and
+  configured strategy responses.
 - `execution_replay.rs`: execution-delay and replay-input completeness.
 - `lifecycle.rs`: trade event ordering and trade/position rollup consistency.
 - `accounting.rs`: fill, gas, realized/unrealized/total PnL consistency.
@@ -24,7 +26,7 @@ strategy result and returns a backend-owned `CheckResult`.
 - `Pass` means the scoped invariant had zero violations.
 - `Blocked` means validation could not answer because the result-set shape is
   unsupported or prerequisite data is missing.
-- Numeric accounting uses `0.000000000000001` ETH tolerance.
+- Numeric accounting uses `0.000001` ETH tolerance.
 - The frontend renders these results and must not recalculate membership,
   accounting, or trust verdicts.
 - Distribution, concentration, and profitability robustness questions belong in
@@ -58,6 +60,14 @@ strategy result and returns a backend-owned `CheckResult`.
 | `risk_sell_has_available_signal` | Was each risk-triggered sell based on already-available evidence? | A risk exit should not depend on evidence observed after the decision block. | `decision_timing.rs` |
 | `risk_sell_signal_block_immediate` | Did risk-triggered exits submit immediately on the signal block? | For risk-driven exits, delayed submission can materially change loss and should be explicit. | `decision_timing.rs` |
 
+### Risk Policy
+
+| Code | Question | Why We Ask | File |
+| --- | --- | --- | --- |
+| `configured_critical_risk_has_strategy_response` | Did configured critical risks receive the strategy response they require? | Enabled critical risk exits should submit a sell or record an explicit same-block deferral. | `risk_policy.rs` |
+| `liquidity_removal_risk_kind_matches_source` | Does liquidity-removal risk kind match its evidence source? | Pending mempool removal signals and mined-chain removals have different accounting and valuation semantics. | `risk_policy.rs` |
+| `mempool_liquidity_removal_does_not_zero_exposure_snapshot` | Do mempool liquidity-removal signals avoid marking exposure as drained? | A pending mempool tx can justify an exit, but it should not zero confirmed exposure before mined evidence exists. | `risk_policy.rs` |
+
 ### Execution Replay
 
 | Code | Question | Why We Ask | File |
@@ -85,6 +95,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `entry_cost_matches_buy_fill` | Does entry cost come from the buy simulation fill? | Entry cost is the cost basis for ROI and realized/unrealized PnL. | `accounting.rs` |
 | `exit_value_matches_sell_fill` | Does exit value come from the sell simulation fill? | Exit value is the realized proceeds for closed-trade PnL. | `accounting.rs` |
 | `gas_cost_matches_trade_events` | Does gas cost come from the execution event stream? | Realized PnL must subtract all persisted buy/sell gas, not a stale or partial aggregate. | `accounting.rs` |
+| `failed_sell_gas_has_same_block_snapshot` | Does failed sell gas have a matching PnL snapshot? | Failed sell gas changes realized PnL immediately, so the failure block needs its own sell_failed snapshot. | `accounting.rs` |
 | `total_pnl_equals_realized_plus_unrealized` | Does total PnL reconcile with realized and unrealized PnL? | This catches inconsistent aggregate math before charts or summaries use total PnL. | `accounting.rs` |
 | `realized_sell_pnl_formula` | Does realized PnL reconcile with entry, exit, and gas? | Closed-trade realized PnL should equal `exit_value - entry_cost - gas_cost`. | `accounting.rs` |
 | `closed_trade_has_no_unrealized_value` | Are closed trades fully realized? | A sell-confirmed trade should have zero current value and zero unrealized PnL. | `accounting.rs` |
@@ -98,7 +109,13 @@ strategy result and returns a backend-owned `CheckResult`.
 | `no_open_snapshot_valued_after_sell_confirmed` | Were open-state snapshots valued only before the sell block? | An open-state valuation after sell confirmation creates impossible post-exit exposure. | `snapshots.rs` |
 | `latest_snapshot_block_matches_snapshots` | Does the trade latest snapshot pointer match persisted snapshots? | `trades.latest_snapshot_block` must point at the max persisted snapshot block for the trade. | `snapshots.rs` |
 | `latest_snapshot_values_match_trade` | Do trade latest fields match the latest snapshot? | Latest block coordinates, current value, PnL, and ROI in `trades` must match the latest `trade_snapshots` row. | `snapshots.rs` |
+| `snapshot_observed_not_after_valuation` | Are snapshot pool observations available at valuation time? | A snapshot valued at block N must not display pool observations from a later block. | `snapshots.rs` |
+| `no_duplicate_snapshot_coordinates` | Does each trade have one snapshot per block, state, and valuation block? | Duplicate trade snapshot coordinates make timeline APIs and latest-row selection ambiguous. | `snapshots.rs` |
+| `no_duplicate_position_snapshot_coordinates` | Does each raw position snapshot coordinate have only one row? | Position snapshots are the source rows, so the same duplicate invariant must hold before deriving trade snapshots. | `snapshots.rs` |
+| `trade_position_snapshots_match` | Do trade snapshots mirror their source position snapshots? | The read model should not drift from the raw position snapshot timeline. | `snapshots.rs` |
 | `zero_value_snapshots_do_not_reuse_stale_pool_metrics` | Do zero-value exposure snapshots avoid stale pool metrics? | A zero-value exposure after a drain should not continue to display old pool liquidity or price data. | `snapshots.rs` |
+| `zero_value_snapshots_have_no_pool_metrics` | Do zero-value exposure snapshots omit all pool metrics? | Once current value is zero, pool price/liquidity metadata is not a reliable valuation display. | `snapshots.rs` |
+| `terminal_snapshots_have_no_pool_metrics` | Do terminal closed snapshots omit pool metrics? | A sell-confirmed row is terminal accounting state, not an open pool valuation. | `snapshots.rs` |
 | `closed_trade_final_snapshot` | Does each closed trade have a final closed snapshot? | UI and validators need a clean sell-confirmed snapshot at `exit_block` for terminal valuation. | `snapshots.rs` |
 | `closed_trade_latest_snapshot_is_terminal` | Is the latest closed-trade snapshot terminal? | For a closed trade, the latest snapshot by block/id must be the sell-confirmed exit snapshot, not a stale open valuation. | `snapshots.rs` |
 

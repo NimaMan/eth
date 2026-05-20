@@ -1,16 +1,16 @@
 use eyre::{Context, Result};
 use sqlx::PgPool;
 
-use super::report::{BacktestValidationReport, Verdict};
+use super::report::{StrategyValidationReport, Verdict};
 
 const VALIDATOR_VERSION: &str = concat!(
-    "eth_alpha_lab-backtest-validation-",
+    "eth_alpha_lab-strategy-validation-",
     env!("CARGO_PKG_VERSION")
 );
 
-pub async fn persist_validation_report(
+pub async fn persist_strategy_validation_report(
     pool: &PgPool,
-    report: &BacktestValidationReport,
+    report: &StrategyValidationReport,
 ) -> Result<String> {
     ensure_validation_schema(pool).await?;
     let validation_id = validation_id(report);
@@ -25,7 +25,7 @@ pub async fn persist_validation_report(
 
     sqlx::query(
         r#"
-        INSERT INTO alpha_trading.backtest_validation_reports (
+        INSERT INTO alpha_trading.strategy_validation_reports (
             validation_id,
             result_set_id,
             strategy_name,
@@ -73,7 +73,7 @@ pub async fn persist_validation_report(
 
     sqlx::query(
         r#"
-        DELETE FROM alpha_trading.backtest_validation_reports
+        DELETE FROM alpha_trading.strategy_validation_reports
         WHERE result_set_id = $1
           AND strategy_name IS NOT DISTINCT FROM $2
           AND validation_id <> $3
@@ -92,7 +92,7 @@ pub async fn persist_validation_report(
 async fn ensure_validation_schema(pool: &PgPool) -> Result<()> {
     sqlx::query(
         r#"
-        CREATE TABLE IF NOT EXISTS alpha_trading.backtest_validation_reports (
+        CREATE TABLE IF NOT EXISTS alpha_trading.strategy_validation_reports (
             validation_id TEXT PRIMARY KEY,
             result_set_id TEXT NOT NULL REFERENCES alpha_trading.backtest_result_sets(result_set_id) ON DELETE CASCADE,
             strategy_name TEXT,
@@ -115,8 +115,8 @@ async fn ensure_validation_schema(pool: &PgPool) -> Result<()> {
 
     sqlx::query(
         r#"
-        CREATE INDEX IF NOT EXISTS backtest_validation_reports_latest_idx
-        ON alpha_trading.backtest_validation_reports (
+        CREATE INDEX IF NOT EXISTS strategy_validation_reports_latest_idx
+        ON alpha_trading.strategy_validation_reports (
             result_set_id,
             strategy_name,
             profile,
@@ -128,10 +128,55 @@ async fn ensure_validation_schema(pool: &PgPool) -> Result<()> {
     .await
     .wrap_err("failed to create validation report latest index")?;
 
+    let legacy_table: Option<String> =
+        sqlx::query_scalar("SELECT to_regclass('alpha_trading.backtest_validation_reports')::text")
+            .fetch_one(pool)
+            .await
+            .wrap_err("failed to check legacy validation report table")?;
+    if legacy_table.is_some() {
+        sqlx::query(
+            r#"
+            INSERT INTO alpha_trading.strategy_validation_reports (
+                validation_id,
+                result_set_id,
+                strategy_name,
+                profile,
+                status,
+                passed,
+                warnings,
+                failures,
+                blocked,
+                overall_verdict,
+                report,
+                validator_version,
+                created_at
+            )
+            SELECT validation_id,
+                   result_set_id,
+                   strategy_name,
+                   profile,
+                   status,
+                   passed,
+                   warnings,
+                   failures,
+                   blocked,
+                   overall_verdict,
+                   report,
+                   validator_version,
+                   created_at
+            FROM alpha_trading.backtest_validation_reports
+            ON CONFLICT (validation_id) DO NOTHING
+            "#,
+        )
+        .execute(pool)
+        .await
+        .wrap_err("failed to copy legacy validation reports")?;
+    }
+
     Ok(())
 }
 
-fn overall_verdict(report: &BacktestValidationReport) -> Verdict {
+fn overall_verdict(report: &StrategyValidationReport) -> Verdict {
     if report.summary.failures > 0 {
         Verdict::Fail
     } else if report.summary.blocked > 0 {
@@ -143,7 +188,7 @@ fn overall_verdict(report: &BacktestValidationReport) -> Verdict {
     }
 }
 
-fn validation_id(report: &BacktestValidationReport) -> String {
+fn validation_id(report: &StrategyValidationReport) -> String {
     let strategy = report.strategy_filter.as_deref().unwrap_or("all");
     format!(
         "val_{}_{}_{}",

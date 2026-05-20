@@ -53,6 +53,47 @@ pub(super) fn result_set_status_check(result_set: &ResultSetRecord) -> CheckResu
     )
 }
 
+pub(super) fn live_runtime_status_check(result_set: &ResultSetRecord) -> CheckResult {
+    let live_status = result_set
+        .metadata
+        .get("live_status")
+        .and_then(|value| value.as_str());
+    let verdict = if result_set.mode != "live" {
+        Verdict::Pass
+    } else if result_set.status == "running" && live_status == Some("failed") {
+        Verdict::Fail
+    } else {
+        Verdict::Pass
+    };
+    let message = if result_set.mode != "live" {
+        "non-live result set has no live runtime status expectation".to_string()
+    } else if verdict == Verdict::Pass {
+        format!(
+            "live runtime status `{}` is compatible with result-set status `{}`",
+            live_status.unwrap_or("<unset>"),
+            result_set.status
+        )
+    } else {
+        format!(
+            "result set is marked running but live runtime status is `{}`",
+            live_status.unwrap_or("<unset>")
+        )
+    };
+    check(
+        "metadata",
+        "live_runtime_status_matches_result_set",
+        verdict,
+        message,
+        json!({
+            "mode": result_set.mode,
+            "result_set_status": result_set.status,
+            "live_status": live_status,
+            "live_last_error": result_set.metadata.get("live_last_error"),
+            "poll_error": result_set.metadata.get("poll_error"),
+        }),
+    )
+}
+
 pub(super) async fn result_set_running_state_consistency_check(
     pool: &PgPool,
     result_set_id: &str,

@@ -219,8 +219,10 @@ where
         let event_source = event.source.as_deref().unwrap_or("risk");
         let reports = self.apply_decisions(decisions, event_source, None).await?;
 
-        // Worst-case baseline: mark open positions as drained on
-        // liquidity removal or scam confirmation, even if strategy does not exit.
+        // Worst-case baseline: mark open positions as drained on mined
+        // liquidity removal or scam confirmation, even if strategy does not
+        // exit. Pending mempool removal signals are exit triggers, not
+        // confirmed pool drains.
         if matches!(
             event.kind,
             RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed

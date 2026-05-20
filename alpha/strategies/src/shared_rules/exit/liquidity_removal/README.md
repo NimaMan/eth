@@ -5,7 +5,8 @@ that has an open, non-terminal position.
 
 ## Logic
 
-1. Event kind must be `RiskKind::LiquidityRemoval`.
+1. Event kind must be `RiskKind::LiquidityRemoval` or
+   `RiskKind::MempoolLiquidityRemoval`.
 2. Pool address is taken from `event.pool_address` or falls back to
    `ctx.market.pool_address`.
 3. Strategy must have an open position for that pool.

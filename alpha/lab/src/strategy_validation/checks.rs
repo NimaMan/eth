@@ -10,6 +10,7 @@ mod decision_timing;
 mod execution_replay;
 mod lifecycle;
 mod metadata;
+mod risk_policy;
 mod signal_scope;
 mod snapshots;
 
@@ -22,6 +23,7 @@ pub async fn run_checks(
     let result_set_id = result_set.result_set_id.as_str();
     let mut checks = Vec::new();
     checks.push(metadata::result_set_status_check(result_set));
+    checks.push(metadata::live_runtime_status_check(result_set));
     checks.push(metadata::result_set_running_state_consistency_check(pool, result_set_id).await?);
     checks.push(metadata::strategy_rows_check(strategy_summaries, strategy));
     checks.push(metadata::trade_id_format_check(pool, result_set_id, strategy).await?);
@@ -54,6 +56,26 @@ pub async fn run_checks(
     );
     checks.push(
         decision_timing::risk_sell_decisions_submit_on_signal_block_check(
+            pool,
+            result_set_id,
+            strategy,
+        )
+        .await?,
+    );
+    checks.push(
+        risk_policy::configured_critical_risks_have_strategy_response_check(
+            pool,
+            result_set_id,
+            strategy,
+        )
+        .await?,
+    );
+    checks.push(
+        risk_policy::liquidity_removal_risk_kind_source_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        risk_policy::mempool_liquidity_removal_does_not_zero_snapshot_check(
             pool,
             result_set_id,
             strategy,
@@ -97,6 +119,8 @@ pub async fn run_checks(
     checks
         .push(accounting::exit_value_matches_sell_fill_check(pool, result_set_id, strategy).await?);
     checks.push(accounting::gas_cost_matches_events_check(pool, result_set_id, strategy).await?);
+    checks
+        .push(accounting::failed_sell_gas_has_snapshot_check(pool, result_set_id, strategy).await?);
     checks.push(accounting::pnl_sum_check(pool, result_set_id, strategy).await?);
     checks.push(accounting::realized_sell_pnl_check(pool, result_set_id, strategy).await?);
     checks
@@ -115,7 +139,25 @@ pub async fn run_checks(
     checks.push(snapshots::latest_snapshot_block_check(pool, result_set_id, strategy).await?);
     checks.push(snapshots::latest_snapshot_values_check(pool, result_set_id, strategy).await?);
     checks.push(
+        snapshots::observed_block_not_after_valuation_check(pool, result_set_id, strategy).await?,
+    );
+    checks
+        .push(snapshots::duplicate_snapshot_coordinate_check(pool, result_set_id, strategy).await?);
+    checks.push(
+        snapshots::duplicate_position_snapshot_coordinate_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        snapshots::trade_position_snapshot_mirror_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
         snapshots::zero_value_snapshot_pool_metrics_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        snapshots::zero_value_snapshot_no_pool_metrics_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        snapshots::terminal_snapshot_no_pool_metrics_check(pool, result_set_id, strategy).await?,
     );
     checks.push(snapshots::closed_trade_final_snapshot_check(pool, result_set_id, strategy).await?);
     checks

@@ -4,10 +4,6 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use eth_alpha_lab::{
-    backtest_validation::{
-        self, persistence::persist_validation_report, report::print_backtest_validation_report,
-        ValidationOptions,
-    },
     connect,
     position_lab::{self, PositionSelector},
     strategy_assessment::{
@@ -15,6 +11,10 @@ use eth_alpha_lab::{
     },
     strategy_event_trace::{self, LossScanOptions, TraceSelector},
     strategy_lab,
+    strategy_validation::{
+        self, persistence::persist_strategy_validation_report,
+        report::print_strategy_validation_report, ValidationOptions,
+    },
 };
 use eyre::{eyre, Result};
 
@@ -66,8 +66,9 @@ enum Command {
         json: bool,
     },
 
-    /// Trade-centric backtest result validation for lifecycle, timing, and accounting.
-    BacktestValidation {
+    /// Strategy validation for lifecycle, timing, accounting, and API trust.
+    #[command(name = "strategy-validation", alias = "backtest-validation")]
+    StrategyValidation {
         #[arg(long = "result-set")]
         result_set_id: String,
 
@@ -200,7 +201,7 @@ async fn main() -> Result<()> {
                 position_lab::print_position_report(&report);
             }
         }
-        Command::BacktestValidation {
+        Command::StrategyValidation {
             result_set_id,
             strategy,
             profile: _deprecated_profile,
@@ -208,7 +209,7 @@ async fn main() -> Result<()> {
             json,
             persist,
         } => {
-            let report = backtest_validation::validate_backtest(
+            let report = strategy_validation::validate_strategy(
                 &pool,
                 ValidationOptions {
                     result_set_id,
@@ -217,14 +218,14 @@ async fn main() -> Result<()> {
             )
             .await?;
             let validation_id = if persist {
-                Some(persist_validation_report(&pool, &report).await?)
+                Some(persist_strategy_validation_report(&pool, &report).await?)
             } else {
                 None
             };
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                print_backtest_validation_report(&report);
+                print_strategy_validation_report(&report);
                 if let Some(validation_id) = validation_id {
                     println!();
                     println!("Persisted validation report: {validation_id}");

@@ -108,6 +108,9 @@ pub(crate) fn snapshot_with_pool_metrics(
     if pool.latest_block > valuation_block {
         return snapshot;
     }
+    if snapshot.current_value_eth.is_zero() {
+        return snapshot;
+    }
 
     snapshot.pool_price_to_initial_price_ratio = pool.price_ratio_to_initial;
     snapshot.pool_initial_price_denom_per_token = pool.initial_price_denom_per_token;

@@ -3,7 +3,7 @@ use sqlx::PgPool;
 
 use super::checks::run_checks;
 use super::db::{load_result_set, load_strategy_summaries, load_trade_samples};
-use super::report::{BacktestValidationReport, ValidationSummary};
+use super::report::{StrategyValidationReport, ValidationSummary};
 
 pub const COMPREHENSIVE_VALIDATION_PROFILE: &str = "comprehensive";
 const COMPREHENSIVE_SAMPLE_LIMIT: i64 = 25;
@@ -14,10 +14,10 @@ pub struct ValidationOptions {
     pub strategy: Option<String>,
 }
 
-pub async fn validate_backtest(
+pub async fn validate_strategy(
     pool: &PgPool,
     options: ValidationOptions,
-) -> Result<BacktestValidationReport> {
+) -> Result<StrategyValidationReport> {
     let result_set = load_result_set(pool, &options.result_set_id).await?;
     let strategy_summaries =
         load_strategy_summaries(pool, &options.result_set_id, options.strategy.as_deref()).await?;
@@ -37,7 +37,7 @@ pub async fn validate_backtest(
     .await?;
     let summary = ValidationSummary::from_checks(&checks);
 
-    Ok(BacktestValidationReport {
+    Ok(StrategyValidationReport {
         result_set,
         strategy_filter: options.strategy,
         profile: COMPREHENSIVE_VALIDATION_PROFILE.to_string(),

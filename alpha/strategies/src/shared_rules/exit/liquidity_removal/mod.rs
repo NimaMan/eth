@@ -9,14 +9,17 @@ use crate::baseline::snipe_all::rule::RuleDecision;
 pub const RULE_NAME: &str = "exit.liquidity_removal";
 pub const MEMPOOL_SIGNAL_RULE_NAME: &str = "exit.mempool_liquidity_removal_signal";
 
-/// Exit when a `LiquidityRemoval` risk event targets a pool with an open
-/// position.
+/// Exit when a mined or mempool liquidity-removal risk event targets a pool
+/// with an open position.
 pub fn evaluate(
     ctx: &StrategyContext<'_>,
     strategy_name: &StrategyName,
     event: &RiskEvent,
 ) -> RuleDecision {
-    if event.kind != RiskKind::LiquidityRemoval {
+    if !matches!(
+        event.kind,
+        RiskKind::LiquidityRemoval | RiskKind::MempoolLiquidityRemoval
+    ) {
         return RuleDecision::hold(RULE_NAME, "risk event is not liquidity removal");
     }
 
@@ -38,7 +41,9 @@ pub fn evaluate(
 }
 
 fn exit_rule_name(event: &RiskEvent) -> &'static str {
-    if event.source.as_deref() == Some(RISK_SOURCE_MEMPOOL_SIGNAL) {
+    if event.kind == RiskKind::MempoolLiquidityRemoval
+        || event.source.as_deref() == Some(RISK_SOURCE_MEMPOOL_SIGNAL)
+    {
         MEMPOOL_SIGNAL_RULE_NAME
     } else {
         RULE_NAME

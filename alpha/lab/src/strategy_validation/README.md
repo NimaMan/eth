@@ -1,4 +1,4 @@
-# Backtest Validation
+# Strategy Validation
 
 This module validates persisted alpha strategy results before we trust PnL,
 strategy comparisons, or UI summaries. It reads the `alpha_trading` schema and
@@ -14,7 +14,7 @@ it should not recalculate lifecycle, accounting, or snapshot trust decisions.
 - `report.rs`: report, check result, verdict, and printable output types.
 - `persistence.rs`: persisted validation report upsert and legacy cleanup.
 
-The public API is `validate_backtest(pool, ValidationOptions)`.
+The public API is `validate_strategy(pool, ValidationOptions)`.
 
 ## Validation Mode
 
@@ -54,7 +54,7 @@ It reads these backend tables:
 
 ## Output
 
-`BacktestValidationReport` contains:
+`StrategyValidationReport` contains:
 
 - result-set metadata and optional strategy filter.
 - the `comprehensive` profile label.
@@ -100,7 +100,7 @@ PnL harder to interpret.
 Validate and print markdown:
 
 ```bash
-cargo run -p eth_alpha_lab -- backtest-validation \
+cargo run -p eth_alpha_lab -- strategy-validation \
   --result-set <result_set_id> \
   --strategy <strategy_name>
 ```
@@ -108,7 +108,7 @@ cargo run -p eth_alpha_lab -- backtest-validation \
 Validate and return JSON:
 
 ```bash
-cargo run -p eth_alpha_lab -- backtest-validation \
+cargo run -p eth_alpha_lab -- strategy-validation \
   --result-set <result_set_id> \
   --strategy <strategy_name> \
   --json
@@ -117,7 +117,7 @@ cargo run -p eth_alpha_lab -- backtest-validation \
 Persist the canonical comprehensive report:
 
 ```bash
-cargo run -p eth_alpha_lab -- backtest-validation \
+cargo run -p eth_alpha_lab -- strategy-validation \
   --result-set <result_set_id> \
   --strategy <strategy_name> \
   --persist

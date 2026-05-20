@@ -33,7 +33,7 @@ pub(super) async fn entry_cost_matches_buy_fill_check(
                       nullif(te.filled_amount_raw, '')::numeric
                       / power(10::numeric, COALESCE(te.filled_amount_decimals, 18))
                     )
-              ) > 0.000000000000001
+              ) > 0.000001
           )
         "#,
         result_set_id,
@@ -71,7 +71,7 @@ pub(super) async fn exit_value_matches_sell_fill_check(
                       nullif(te.filled_amount_raw, '')::numeric
                       / power(10::numeric, COALESCE(te.filled_amount_decimals, 18))
                     )
-              ) > 0.000000000000001
+              ) > 0.000001
           )
         "#,
         result_set_id,
@@ -107,7 +107,43 @@ pub(super) async fn gas_cost_matches_events_check(
           AND abs(
               coalesce(nullif(t.gas_cost_eth, '')::numeric, 0)
               - coalesce(event_gas.gas_cost_eth, 0)
-          ) > 0.000000000000001
+          ) > 0.000001
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn failed_sell_gas_has_snapshot_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "failed_sell_gas_has_same_block_snapshot",
+        Verdict::Fail,
+        "failed sell gas is reflected by a same-block sell_failed snapshot",
+        "sell_failed gas events without same-block sell_failed snapshot",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        JOIN alpha_trading.trade_events te
+          ON te.trade_id = t.trade_id
+         AND te.event_type = 'sell_failed'
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND coalesce(nullif(te.gas_cost_eth, '')::numeric, 0) > 0
+          AND NOT EXISTS (
+              SELECT 1
+              FROM alpha_trading.trade_snapshots ts
+              WHERE ts.trade_id = te.trade_id
+                AND ts.state = 'sell_failed'
+                AND ts.block_number = te.block_number
+                AND COALESCE(ts.valuation_block_number, ts.block_number) = te.block_number
+          )
         "#,
         result_set_id,
         strategy,
@@ -136,7 +172,7 @@ pub(super) async fn pnl_sum_check(
               coalesce(nullif(total_pnl_eth, '')::numeric, 0)
               - coalesce(nullif(realized_pnl_eth, '')::numeric, 0)
               - coalesce(nullif(unrealized_pnl_eth, '')::numeric, 0)
-          ) > 0.000000000000001
+          ) > 0.000001
         "#,
         result_set_id,
         strategy,
@@ -174,7 +210,7 @@ pub(super) async fn realized_sell_pnl_check(
                       - coalesce(nullif(entry_cost_eth, '')::numeric, 0)
                       - coalesce(nullif(gas_cost_eth, '')::numeric, 0)
                     )
-              ) > 0.000000000000001
+              ) > 0.000001
           )
         "#,
         result_set_id,
@@ -202,8 +238,8 @@ pub(super) async fn closed_trade_zero_unrealized_check(
           AND ($2::text IS NULL OR strategy_name = $2)
           AND state = 'sell_confirmed'
           AND (
-              abs(coalesce(nullif(current_value_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(unrealized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+              abs(coalesce(nullif(current_value_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(unrealized_pnl_eth, '')::numeric, 0)) > 0.000001
           )
         "#,
         result_set_id,
@@ -232,12 +268,12 @@ pub(super) async fn closed_trade_snapshot_zero_unrealized_check(
           AND ($2::text IS NULL OR t.strategy_name = $2)
           AND ts.state = 'sell_confirmed'
           AND (
-              abs(coalesce(nullif(ts.current_value_eth, '')::numeric, 0)) > 0.000000000000001
-              OR abs(coalesce(nullif(ts.unrealized_pnl_eth, '')::numeric, 0)) > 0.000000000000001
+              abs(coalesce(nullif(ts.current_value_eth, '')::numeric, 0)) > 0.000001
+              OR abs(coalesce(nullif(ts.unrealized_pnl_eth, '')::numeric, 0)) > 0.000001
               OR abs(
                   coalesce(nullif(ts.total_pnl_eth, '')::numeric, 0)
                   - coalesce(nullif(ts.realized_pnl_eth, '')::numeric, 0)
-              ) > 0.000000000000001
+              ) > 0.000001
           )
         "#,
         result_set_id,

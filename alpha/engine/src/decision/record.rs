@@ -61,6 +61,7 @@ pub(crate) fn strategy_decision_action(decision: &StrategyDecision) -> &'static 
 pub(crate) fn risk_kind_key(kind: &RiskKind) -> String {
     match kind {
         RiskKind::LiquidityRemoval => "liquidity_removal".to_string(),
+        RiskKind::MempoolLiquidityRemoval => "mempool_liquidity_removal".to_string(),
         RiskKind::TaxChange => "tax_change".to_string(),
         RiskKind::Honeypot => "honeypot".to_string(),
         RiskKind::TradingDisabled => "trading_disabled".to_string(),

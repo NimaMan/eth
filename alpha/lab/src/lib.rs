@@ -1,10 +1,10 @@
-pub mod backtest_validation;
 pub mod position_lab;
 pub mod render;
 pub mod strategy_assessment;
 #[path = "strategy_lab/event_trace/mod.rs"]
 pub mod strategy_event_trace;
 pub mod strategy_lab;
+pub mod strategy_validation;
 
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
