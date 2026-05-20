@@ -5,7 +5,9 @@ use eth_alpha_core::{
     ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
     market::{PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
+    position::{Position, PositionKey, PositionState},
     risk::{RiskKind, RiskSeverity},
+    strategy::{StrategyContext, StrategyDecision},
     Result, Strategy,
 };
 use std::sync::{
@@ -14,6 +16,7 @@ use std::sync::{
 };
 
 use super::*;
+use crate::snapshots::{should_snapshot_position_for_pool, zero_value_snapshot};
 
 #[path = "test_support.rs"]
 mod test_support;
