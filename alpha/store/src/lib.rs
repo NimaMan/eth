@@ -303,6 +303,30 @@ impl PostgresTradingStore {
                 exit_value_eth = EXCLUDED.exit_value_eth,
                 gas_cost_eth = EXCLUDED.gas_cost_eth,
                 realized_pnl_eth = EXCLUDED.realized_pnl_eth,
+                total_pnl_eth = CASE
+                    WHEN EXCLUDED.state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                         AND NULLIF(EXCLUDED.realized_pnl_eth, '') IS NOT NULL
+                         AND NULLIF(alpha_trading.trades.unrealized_pnl_eth, '') IS NOT NULL
+                    THEN (
+                        NULLIF(EXCLUDED.realized_pnl_eth, '')::numeric
+                        + NULLIF(alpha_trading.trades.unrealized_pnl_eth, '')::numeric
+                    )::text
+                    ELSE alpha_trading.trades.total_pnl_eth
+                END,
+                roi = CASE
+                    WHEN EXCLUDED.state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
+                         AND NULLIF(EXCLUDED.entry_cost_eth, '') IS NOT NULL
+                         AND NULLIF(EXCLUDED.entry_cost_eth, '')::numeric <> 0
+                         AND NULLIF(EXCLUDED.realized_pnl_eth, '') IS NOT NULL
+                         AND NULLIF(alpha_trading.trades.unrealized_pnl_eth, '') IS NOT NULL
+                    THEN (
+                        (
+                            NULLIF(EXCLUDED.realized_pnl_eth, '')::numeric
+                            + NULLIF(alpha_trading.trades.unrealized_pnl_eth, '')::numeric
+                        ) / NULLIF(EXCLUDED.entry_cost_eth, '')::numeric
+                    )::text
+                    ELSE alpha_trading.trades.roi
+                END,
                 payload = EXCLUDED.payload,
                 updated_at = NOW()
             "#,
