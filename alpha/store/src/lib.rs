@@ -352,6 +352,162 @@ impl PostgresTradingStore {
         .execute(&self.pool)
         .await
         .map_err(store_error)?;
+        if position.state == PositionState::SellFailed {
+            if let Some(block_number) = position.last_exit_failure_block {
+                self.append_failed_exit_trade_snapshot(position, block_number)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn append_failed_exit_trade_snapshot(
+        &self,
+        position: &Position,
+        block_number: u64,
+    ) -> Result<()> {
+        let block_number = u64_to_i64(block_number);
+        sqlx::query(
+            r#"
+            WITH source AS (
+                SELECT t.trade_id,
+                       t.run_id,
+                       t.position_id,
+                       t.state,
+                       $2::bigint AS block_number,
+                       LEAST(COALESCE(t.latest_observed_block, $2::bigint), $2::bigint) AS observed_block_number,
+                       $2::bigint AS valuation_block_number,
+                       COALESCE(NULLIF(t.current_value_eth, ''), '0') AS current_value_eth,
+                       COALESCE(NULLIF(t.realized_pnl_eth, ''), '0') AS realized_pnl_eth,
+                       COALESCE(NULLIF(t.unrealized_pnl_eth, ''), '0') AS unrealized_pnl_eth,
+                       (
+                           COALESCE(NULLIF(t.realized_pnl_eth, '')::numeric, 0)
+                           + COALESCE(NULLIF(t.unrealized_pnl_eth, '')::numeric, 0)
+                       )::text AS total_pnl_eth,
+                       CASE
+                           WHEN NULLIF(t.entry_cost_eth, '') IS NOT NULL
+                                AND NULLIF(t.entry_cost_eth, '')::numeric <> 0
+                           THEN (
+                               (
+                                   COALESCE(NULLIF(t.realized_pnl_eth, '')::numeric, 0)
+                                   + COALESCE(NULLIF(t.unrealized_pnl_eth, '')::numeric, 0)
+                               ) / NULLIF(t.entry_cost_eth, '')::numeric
+                           )::text
+                           ELSE COALESCE(NULLIF(t.roi, ''), '0')
+                       END AS roi
+                FROM alpha_trading.trades t
+                WHERE t.trade_id = $1
+                  AND t.state = 'sell_failed'
+            ),
+            updated AS (
+                UPDATE alpha_trading.trade_snapshots ts
+                SET observed_block_number = source.observed_block_number,
+                    valuation_block_number = source.valuation_block_number,
+                    current_value_eth = source.current_value_eth,
+                    realized_pnl_eth = source.realized_pnl_eth,
+                    unrealized_pnl_eth = source.unrealized_pnl_eth,
+                    total_pnl_eth = source.total_pnl_eth,
+                    roi = source.roi,
+                    pool_price_to_initial_price_ratio = NULL,
+                    pool_initial_price_denom_per_token = NULL,
+                    pool_price_denom_per_token = NULL,
+                    pool_liquidity_denom = NULL,
+                    pool_token_reserve = NULL,
+                    pool_denom_symbol = NULL,
+                    payload = jsonb_build_object(
+                        'position_id', source.position_id,
+                        'trade_id', source.trade_id,
+                        'state', 'SellFailed',
+                        'block_number', source.block_number,
+                        'observed_block_number', source.observed_block_number,
+                        'valuation_block_number', source.valuation_block_number,
+                        'current_value_eth', source.current_value_eth,
+                        'realized_profit_eth', source.realized_pnl_eth,
+                        'unrealized_profit_eth', source.unrealized_pnl_eth,
+                        'roi', source.roi
+                    )
+                FROM source
+                WHERE ts.trade_id = source.trade_id
+                  AND ts.state = source.state
+                  AND ts.block_number = source.block_number
+                  AND ts.valuation_block_number IS NOT DISTINCT FROM source.valuation_block_number
+                RETURNING ts.trade_id
+            ),
+            inserted AS (
+                INSERT INTO alpha_trading.trade_snapshots (
+                    trade_id, run_id, position_id, state, block_number,
+                    observed_block_number, valuation_block_number, current_value_eth,
+                    realized_pnl_eth, unrealized_pnl_eth, total_pnl_eth, roi,
+                    pool_price_to_initial_price_ratio, pool_initial_price_denom_per_token,
+                    pool_price_denom_per_token, pool_liquidity_denom, pool_token_reserve,
+                    pool_denom_symbol, payload, created_at
+                )
+                SELECT source.trade_id,
+                       source.run_id,
+                       source.position_id,
+                       source.state,
+                       source.block_number,
+                       source.observed_block_number,
+                       source.valuation_block_number,
+                       source.current_value_eth,
+                       source.realized_pnl_eth,
+                       source.unrealized_pnl_eth,
+                       source.total_pnl_eth,
+                       source.roi,
+                       NULL,
+                       NULL,
+                       NULL,
+                       NULL,
+                       NULL,
+                       NULL,
+                       jsonb_build_object(
+                           'position_id', source.position_id,
+                           'trade_id', source.trade_id,
+                           'state', 'SellFailed',
+                           'block_number', source.block_number,
+                           'observed_block_number', source.observed_block_number,
+                           'valuation_block_number', source.valuation_block_number,
+                           'current_value_eth', source.current_value_eth,
+                           'realized_profit_eth', source.realized_pnl_eth,
+                           'unrealized_profit_eth', source.unrealized_pnl_eth,
+                           'roi', source.roi
+                       ),
+                       NOW()
+                FROM source
+                WHERE NOT EXISTS (SELECT 1 FROM updated)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM alpha_trading.trade_snapshots existing
+                      WHERE existing.trade_id = source.trade_id
+                        AND existing.state = source.state
+                        AND existing.block_number = source.block_number
+                        AND existing.valuation_block_number IS NOT DISTINCT FROM source.valuation_block_number
+                  )
+                RETURNING trade_id
+            )
+            UPDATE alpha_trading.trades t
+            SET latest_snapshot_block = source.block_number,
+                latest_observed_block = source.observed_block_number,
+                latest_valuation_block = source.valuation_block_number,
+                current_value_eth = source.current_value_eth,
+                realized_pnl_eth = source.realized_pnl_eth,
+                unrealized_pnl_eth = source.unrealized_pnl_eth,
+                total_pnl_eth = source.total_pnl_eth,
+                roi = source.roi,
+                updated_at = NOW()
+            FROM source
+            WHERE t.trade_id = source.trade_id
+              AND (
+                  t.latest_snapshot_block IS NULL
+                  OR t.latest_snapshot_block <= source.block_number
+              )
+            "#,
+        )
+        .bind(&position.trade_id.0)
+        .bind(block_number)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
         Ok(())
     }
 
