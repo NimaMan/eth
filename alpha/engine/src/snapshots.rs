@@ -21,6 +21,7 @@ pub(crate) fn zero_value_snapshot(
     block_number: u64,
     pool: Option<&PoolSnapshot>,
 ) -> PositionSnapshot {
+    let pool = valuation_safe_pool(pool, block_number);
     let cost = position.entry_cost_basis.unwrap_or_default();
     let realized = position.realized_pnl();
     let unrealized = if position.is_closed() {
@@ -61,6 +62,7 @@ pub(crate) fn simulated_value_snapshot(
     simulation: PositionValueSimulation,
     pool: Option<&PoolSnapshot>,
 ) -> PositionSnapshot {
+    let pool = valuation_safe_pool(pool, simulation.block_number);
     let current_value = simulation.current_value.to_decimal();
     let cost = position.entry_cost_basis.unwrap_or_default();
     let realized = position.realized_pnl();
@@ -100,6 +102,12 @@ pub(crate) fn snapshot_with_pool_metrics(
     let Some(pool) = pool else {
         return snapshot;
     };
+    let valuation_block = snapshot
+        .valuation_block_number
+        .unwrap_or(snapshot.block_number);
+    if pool.latest_block > valuation_block {
+        return snapshot;
+    }
 
     snapshot.pool_price_to_initial_price_ratio = pool.price_ratio_to_initial;
     snapshot.pool_initial_price_denom_per_token = pool.initial_price_denom_per_token;
@@ -109,4 +117,11 @@ pub(crate) fn snapshot_with_pool_metrics(
     snapshot.pool_denom_symbol = pool.denom_symbol.clone();
 
     snapshot
+}
+
+pub(crate) fn valuation_safe_pool(
+    pool: Option<&PoolSnapshot>,
+    valuation_block: u64,
+) -> Option<&PoolSnapshot> {
+    pool.filter(|pool| pool.latest_block <= valuation_block)
 }

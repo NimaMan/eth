@@ -49,7 +49,7 @@ use event_flow::{
 use ids::new_trade_id;
 use snapshots::{
     should_snapshot_position_for_pool, simulated_value_snapshot, snapshot_with_pool_metrics,
-    zero_value_snapshot,
+    valuation_safe_pool, zero_value_snapshot,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -689,22 +689,22 @@ where
                 self.store.append_position_snapshot(&snapshot).await?;
             }
         } else if position.is_closed() {
-            let pool = self.pool_snapshots.get(&position.key.pool_address);
+            let block_number = report
+                .block_number
+                .or(self.current_event_block)
+                .or_else(|| self.market.as_ref().map(|m| m.block_number))
+                .unwrap_or_default();
+            let pool = valuation_safe_pool(
+                self.pool_snapshots.get(&position.key.pool_address),
+                block_number,
+            );
             let snapshot = PositionSnapshot {
                 position_id: position.id.clone(),
                 trade_id: position.trade_id.clone(),
                 state: position.state.clone(),
-                block_number: report
-                    .block_number
-                    .or(self.current_event_block)
-                    .or_else(|| self.market.as_ref().map(|m| m.block_number))
-                    .unwrap_or_default(),
-                observed_block_number: self.current_event_block.or_else(|| {
-                    self.market
-                        .as_ref()
-                        .and_then(|market| market.pool.as_ref().map(|pool| pool.latest_block))
-                }),
-                valuation_block_number: report.block_number,
+                block_number,
+                observed_block_number: pool.map(|pool| pool.latest_block).or(Some(block_number)),
+                valuation_block_number: Some(block_number),
                 current_value_eth: DecimalAmount::ZERO,
                 realized_profit_eth: position.realized_pnl(),
                 unrealized_profit_eth: DecimalAmount::ZERO,
@@ -741,7 +741,15 @@ where
             return Ok(());
         }
 
-        let Some(pool) = self.pool_snapshots.get(&position.key.pool_address).cloned() else {
+        let valuation_block = position
+            .entry_block
+            .or(self.current_event_block)
+            .unwrap_or_default();
+        let Some(pool) = valuation_safe_pool(
+            self.pool_snapshots.get(&position.key.pool_address),
+            valuation_block,
+        )
+        .cloned() else {
             return Ok(());
         };
 
