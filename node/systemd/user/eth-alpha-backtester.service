@@ -1,0 +1,23 @@
+[Unit]
+Description=Ethereum alpha live backtester (no-capital chain simulation)
+Wants=network-online.target eth-chain-server.service eth-mempool-signal-detector.service
+After=network-online.target eth-chain-server.service eth-mempool-signal-detector.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nima/code/crypto/blockchains/eth
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
+EnvironmentFile=/home/nima/code/crypto/blockchains/eth/node/systemd/user/eth-alpha-backtester.env
+Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
+Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUST_LOG=info
+ExecStartPre=/usr/bin/test -n ${ALPHA_RUN_ID}
+ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SUITE}
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_backtest_trader --run-id ${ALPHA_RUN_ID} --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --min-liquidity-eth ${ALPHA_MIN_LIQUIDITY_ETH} --min-liquidity-usd ${ALPHA_MIN_LIQUIDITY_USD} --strategy-suite ${ALPHA_STRATEGY_SUITE}
+Restart=always
+RestartSec=5
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=default.target
