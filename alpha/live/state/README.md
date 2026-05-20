@@ -2,50 +2,36 @@
 
 Crate: `eth_live_state`
 
-This crate owns the shared live-state protocol used through Redis. It is infrastructure shared by live feed, simulators, mempool risk, and the trading engine.
+This crate owns the shared live-state contracts used by the Ethereum alpha
+runtime. The current live block path is in-process: `eth_chain_server` applies
+confirmed blocks and hands direct live updates to token tracking. There is no
+external live-block or live-state transport in that path.
 
 ## Responsibilities
 
-- Define Redis key builders.
 - Define snapshot schemas.
 - Define reader/writer traits for live-state stores.
-- Own retention and TTL policy helpers.
+- Own retention policy helpers.
 - Version serialized schemas.
-- Provide test fixtures for compatibility.
+- Provide in-memory fixtures for tests and backtests.
 
-This crate intentionally does not own the block processor, processed-block pipeline, tracked-token set, or live-token object cache. Those are writer/consumer responsibilities in higher-level crates.
+This crate intentionally does not own the block processor, processed-block
+pipeline, tracked-token set, or live-token object cache. Those are
+writer/consumer responsibilities in higher-level crates.
 
-`eth_live_feed` should write token snapshots and block-ready markers through these contracts when it owns the write path. The processed block itself remains `tx_processor::ProcessedBlock`; this crate must not define a second processed-block shape.
+`eth_live_feed` writes token snapshots and block-ready markers through these
+contracts when it owns the write path. The processed block itself remains
+`tx_processor::ProcessedBlock`; this crate must not define a second
+processed-block shape.
 
-## Canonical State Namespaces
+## Canonical State
 
-Confirmed-chain state should have one canonical writer. Today that can remain the existing simulator/live processor path; once the Rust feed owns it, that writer should be `eth_live_feed`.
+Confirmed-chain state should have one canonical writer. For the current runtime,
+that writer is the live token runtime hosted by `eth_chain_server`.
 
-```text
-eth/live/latest/block_number
-eth/live/latest/block_hash
-eth/live/latest/chain_state_block_number
-eth/live/blocks
-eth/live/recent_blocks
-eth/live/block/<n>/header
-eth/live/block/<n>/txs
-eth/live/block/<n>/chain_state_snapshot
-eth/live/token/snapshot/<token>
-eth/live/token/snapshot/index
-```
-
-Trading state can live separately:
-
-```text
-eth/live/position/<portfolio>/<token>
-```
-
-Speculative mempool risk should not overwrite canonical state:
-
-```text
-eth/live/risk/...
-eth/live/mempool/signals/...
-```
+Trading state, speculative mempool risk, and durable analytics must live in
+their own stores. They may read live snapshots, but they must not overwrite
+canonical token/pool state.
 
 ## Single Writer Rule
 
@@ -58,19 +44,20 @@ Mempool risk, trading engine, and simulator may read the state, but they should 
 The clean dependency direction is:
 
 ```text
-eth_live_feed    -> eth_live_state
-tx_simulator     -> eth_live_state
-eth_mempool_risk -> eth_live_state
-eth_alpha_engine -> eth_live_state
+eth_live_feed     -> eth_live_state
+tx_simulator      -> eth_live_state
+mempool_processor -> eth_live_state
+eth_alpha_engine  -> eth_live_state
 ```
 
-`eth_live_state` should not depend on those crates. This prevents the live-state protocol from turning into a runtime orchestrator.
+`eth_live_state` should not depend on those crates. This prevents the live-state
+contracts from turning into a runtime orchestrator.
 
 ## Lessons From Current Code
 
-`LiveTxSimulator` already uses MDBX when it is caught up and otherwise uses tracked live state. The improvement is to move shared key/schema ownership out of `tx_simulator` so every crate uses one protocol.
-
-The removed Python live data registry used the same key layout. The Rust contract keeps those keys and preserves the token snapshot index so tracked-token discovery is explicit instead of being hidden inside a process-local cache.
+`LiveTxSimulator` already uses MDBX when it is caught up and otherwise uses
+tracked live state. The improvement is to keep the shared snapshot schemas and
+store traits outside `tx_simulator` so every crate depends on one contract.
 
 When writing a block, publish atomically:
 

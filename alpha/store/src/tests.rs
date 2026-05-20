@@ -1,4 +1,5 @@
 use super::*;
+use eth_alpha_core::{ExecutionStatus, RiskKind};
 use serde_json::json;
 
 #[test]
@@ -13,6 +14,10 @@ fn labels_are_dashboard_friendly() {
         "confirmed"
     );
     assert_eq!(risk_kind_label(&RiskKind::LpApproval), "lp_approval");
+    assert_eq!(
+        risk_kind_label(&RiskKind::MempoolLiquidityRemoval),
+        "mempool_liquidity_removal"
+    );
 }
 
 #[test]

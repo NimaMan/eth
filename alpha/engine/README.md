@@ -76,9 +76,9 @@ Confirmed market state must be updated before strategies run. Strategy decisions
 
 ```text
 mempool transaction observed
-  -> eth_mempool_risk reads confirmed state from eth_live_state
-  -> eth_mempool_risk simulates speculative pending impact through tx_simulator
-  -> eth_mempool_risk emits RiskEvent / MempoolSignal
+  -> mempool_processor reads confirmed state from eth_live_state
+  -> mempool_processor simulates speculative pending impact through tx_simulator
+  -> mempool_processor emits RiskEvent / MempoolSignal
   -> eth_alpha_engine records the active risk view
   -> strategies and risk policy react by holding, rejecting, canceling, reducing, or forcing exit
 ```
@@ -111,8 +111,8 @@ before submission and persist the rank evidence with the order decision;
 | --- | --- |
 | `LiveBlockTokenProcessor` confirmed block updates | `eth_live_feed` plus `eth_token` token/pool state |
 | `LiveTokensCache` canonical token cache | `eth_live_feed` in-process state and `eth_live_state` snapshots |
-| Engine-local `_pool_eth_levels` | confirmed pool snapshots in `eth_live_state` read by `eth_mempool_risk` |
-| `MempoolProcessor` pending transaction checks | `eth_mempool_risk` |
+| Engine-local `_pool_eth_levels` | confirmed pool snapshots in `eth_live_state` read by `mempool_processor` |
+| `MempoolProcessor` pending transaction checks | `mempool_processor` |
 | Strategy engines / position managers | `eth_alpha_engine` plus `eth_alpha_core::PortfolioState` and position types |
 | `TradeSignal` execution-like messages | `StrategyDecision` converted to `OrderIntent` by the engine |
 | Legacy strategy position DB writes | `TradingStore` implementation |

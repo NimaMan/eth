@@ -21,11 +21,10 @@ events, and persists decisions before execution.
 | `block_tx_rank/` | `eth_block_tx_rank` | Rough block-position and gas-before estimates from recent mined transaction fees. |
 | `strategies/` | `eth_strategies` | Concrete strategy rules such as `SnipeAllStrategy`. |
 | `store/` | `eth_alpha_store` | Durable run, observation, order, execution, position, and risk records. |
-| `live/state/` | `eth_live_state` | Legacy live-state schemas and protocol types. |
+| `live/state/` | `eth_live_state` | Shared live-state snapshot schemas, protocol types, and store traits. |
 | `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
 | `live/trading/` | `eth_live_trading` | Live priority-exit policy, tx-prep, value-capped gas planning, and Kartal request/client shape. |
-| `backtest/` | planned | Historical replay over the same core strategy contracts. |
-| `mempool_risk/` | planned | Future crate boundary for pending-risk events; current service is `mempool_processor`. |
+| `backtest/` | `eth_alpha_backtest` | Historical replay over the same core strategy contracts. |
 
 ## Does Not Own
 
@@ -79,8 +78,9 @@ configured by `ALPHA_DATABASE_URL`.
 | `alpha/lab/` | `strategy_validation_reports` in the same `alpha_trading` schema |
 
 Alpha may read `live_trading.signal_events` through chain-server APIs or replay
-tools, but mempool signal persistence is owned by `mempool_processor`, not
-alpha. Historical/backtest execution also reads Reth through `RETH_DATADIR`.
+tools, but mempool signal persistence and speculative pending-risk ownership
+remain in `mempool_processor`, not alpha. Historical/backtest execution also
+reads Reth through `RETH_DATADIR`.
 
 Live strategies should be documented as one policy with two sides. The
 regular/historical side replays stored confirmed-chain observations and only
@@ -101,7 +101,7 @@ liquidity-removal exit and critical LP-approval exit.
 | Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/baseline/snipe_all/` |
 | Live tx prep and Kartal request shape | `live/trading/README.md`, `live/trading/src/tx_prep/` |
 | Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
-| Legacy live-state contract | `live/state/README.md`, `live/state/src/` |
+| Live-state contract | `live/state/README.md`, `live/state/src/` |
 | Service wiring | Thin wrappers in `engine/src/bin/`, shared live runtime in `engine/src/live_trader/`, historical backtest wrapper in `backtest/src/bin/eth_alpha_backtest_trader.rs` |
 
 ## Bottleneck Management
