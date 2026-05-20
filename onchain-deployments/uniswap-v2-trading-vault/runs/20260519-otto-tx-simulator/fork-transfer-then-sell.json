@@ -1,0 +1,43 @@
+{
+  "balances_after": {
+    "owner_eth_wei": "725127817359500253",
+    "owner_token_raw": "79692954324801375168453",
+    "vault_eth_wei": "0",
+    "vault_token_raw": "0"
+  },
+  "balances_before": {
+    "owner_eth_wei": "725173949668084153",
+    "owner_token_raw": "79792954324801375168453",
+    "vault_eth_wei": "0",
+    "vault_token_raw": "0"
+  },
+  "block": 25130777,
+  "chain_state": {
+    "total_gas_used": 275772,
+    "transactions_executed": 2
+  },
+  "deadline": 1800000000,
+  "min_eth_out_wei": "1",
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "requested_transfer_amount_raw": "100000000000000000000",
+  "schema": "uniswap_v2_trading_vault_wallet_token_simulation_v1",
+  "symbol": "OTTO",
+  "token": "0x12512a46d971BD035D9466246bc46DAf389E281c",
+  "transfer": {
+    "gas_used": 76397,
+    "logs": 1,
+    "revert_reason": null,
+    "skipped": false,
+    "success": true,
+    "vault_received_raw": "100000000000000000000"
+  },
+  "vault": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+  "vault_sell": {
+    "gas_used": 199375,
+    "logs": 11,
+    "revert_reason": null,
+    "selector": "0x5f413d10",
+    "sell_amount_raw": "100000000000000000000",
+    "success": true
+  }
+}
