@@ -21,7 +21,7 @@ use eth_alpha_core::{
 };
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 
 use schema::MIGRATIONS;
 
@@ -109,6 +109,7 @@ impl TradingStore for PostgresTradingStore {
 
     async fn append_position_snapshot(&self, snapshot: &PositionSnapshot) -> Result<()> {
         let payload = to_json(snapshot)?;
+        let mut tx = self.pool.begin().await.map_err(store_error)?;
         sqlx::query(
             r#"
             INSERT INTO alpha_trading.position_snapshots (
@@ -116,7 +117,16 @@ impl TradingStore for PostgresTradingStore {
                 observed_block_number, valuation_block_number, current_value_eth,
                 realized_profit_eth, unrealized_profit_eth, roi, payload, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM alpha_trading.position_snapshots existing
+                WHERE existing.run_id = $1
+                  AND existing.position_id = $2
+                  AND existing.state = $4
+                  AND existing.block_number = $5::bigint
+                  AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
+            )
             "#,
         )
         .bind(&self.run_id)
@@ -131,10 +141,11 @@ impl TradingStore for PostgresTradingStore {
         .bind(snapshot.unrealized_profit_eth.to_string())
         .bind(snapshot.roi.to_string())
         .bind(payload)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(store_error)?;
-        self.append_trade_snapshot(snapshot).await?;
+        self.append_trade_snapshot_in_tx(&mut tx, snapshot).await?;
+        tx.commit().await.map_err(store_error)?;
         Ok(())
     }
 
@@ -511,9 +522,13 @@ impl PostgresTradingStore {
         Ok(())
     }
 
-    async fn append_trade_snapshot(&self, snapshot: &PositionSnapshot) -> Result<()> {
+    async fn append_trade_snapshot_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        snapshot: &PositionSnapshot,
+    ) -> Result<()> {
         let payload = to_json(snapshot)?;
-        sqlx::query(
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO alpha_trading.trade_snapshots (
                 trade_id, run_id, position_id, state, block_number,
@@ -523,10 +538,17 @@ impl PostgresTradingStore {
                 pool_price_denom_per_token, pool_liquidity_denom, pool_token_reserve,
                 pool_denom_symbol, payload, created_at
             )
-            VALUES (
+            SELECT
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 ((NULLIF($9, '')::numeric + NULLIF($10, '')::numeric)::text),
                 $11, $12, $13, $14, $15, $16, $17, $18, NOW()
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM alpha_trading.trade_snapshots existing
+                WHERE existing.trade_id = $1
+                  AND existing.state = $4
+                  AND existing.block_number = $5::bigint
+                  AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
             )
             "#,
         )
@@ -560,9 +582,12 @@ impl PostgresTradingStore {
         .bind(snapshot.pool_token_reserve.map(|value| value.to_string()))
         .bind(snapshot.pool_denom_symbol.as_deref())
         .bind(payload)
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(store_error)?;
+        if insert_result.rows_affected() == 0 {
+            return Ok(());
+        }
         sqlx::query(
             r#"
             UPDATE alpha_trading.trades
@@ -592,7 +617,7 @@ impl PostgresTradingStore {
         .bind(snapshot.realized_profit_eth.to_string())
         .bind(snapshot.unrealized_profit_eth.to_string())
         .bind(snapshot.roi.to_string())
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(store_error)?;
         Ok(())

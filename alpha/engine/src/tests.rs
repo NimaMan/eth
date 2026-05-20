@@ -73,6 +73,47 @@ impl Strategy for BuyOnMarketStrategy {
     }
 }
 
+struct BuyOnceThenHoldStrategy;
+
+impl Strategy for BuyOnceThenHoldStrategy {
+    fn name(&self) -> StrategyName {
+        StrategyName("buy-once-then-hold".to_string())
+    }
+
+    fn on_market_event(
+        &mut self,
+        ctx: &StrategyContext<'_>,
+        _event: &MarketEvent,
+    ) -> Result<StrategyDecision> {
+        let pool = ctx.market.pool.as_ref().expect("pool snapshot");
+        let has_position = ctx.portfolio.positions.values().any(|position| {
+            position.key.strategy_name == self.name() && position.key.pool_address == pool.address
+        });
+        if has_position {
+            return Ok(StrategyDecision::hold("position_open"));
+        }
+
+        Ok(StrategyDecision::SubmitOrder(OrderIntent {
+            trade_id: None,
+            portfolio_id: PortfolioId("chain-sim".to_string()),
+            wallet_id: WalletId("chain-sim-wallet".to_string()),
+            strategy_name: self.name(),
+            side: OrderSide::Buy,
+            token_address: pool.token_address,
+            pool_address: pool.address.clone(),
+            protocol: pool.protocol.clone(),
+            amount: Amount {
+                raw: U256::from(1_000_000u64),
+                decimals: 18,
+            },
+            route: None,
+            max_slippage_bps: 500,
+            deadline_secs: 30,
+            decision_reason: None,
+        }))
+    }
+}
+
 struct BuyThenSellWhenConfirmedStrategy;
 
 impl Strategy for BuyThenSellWhenConfirmedStrategy {
@@ -315,6 +356,48 @@ impl EngineExecutionAdapter for ConfirmingTestExecutionAdapter {
     ) -> Result<Option<PositionValueSimulation>> {
         Ok(Some(PositionValueSimulation {
             block_number: 2,
+            current_value: Amount {
+                raw: U256::from(20_000_000_000_000_000u64),
+                decimals: 18,
+            },
+            gas_used: Some(21_000),
+            error: None,
+        }))
+    }
+}
+
+#[derive(Clone, Default)]
+struct CountingNextBlockValuationAdapter {
+    valuation_calls: Arc<AtomicU64>,
+}
+
+#[async_trait::async_trait]
+impl EngineExecutionAdapter for CountingNextBlockValuationAdapter {
+    async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
+        Ok(ExecutionReport {
+            order_id: eth_alpha_core::ids::OrderId("counting-order".to_string()),
+            status: ExecutionStatus::Confirmed,
+            tx_hash: None,
+            block_number: Some(2),
+            filled_amount: Some(intent.amount.clone()),
+            token_amount: Some(intent.amount),
+            gas_used: Some(21_000),
+            gas_cost: Some(Amount {
+                raw: U256::from(21_000_000u64),
+                decimals: 18,
+            }),
+            error: None,
+        })
+    }
+
+    async fn simulate_position_value(
+        &self,
+        _position: &Position,
+        pool: &PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        self.valuation_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(PositionValueSimulation {
+            block_number: pool.latest_block,
             current_value: Amount {
                 raw: U256::from(20_000_000_000_000_000u64),
                 decimals: 18,
@@ -723,6 +806,38 @@ async fn confirmed_buy_gets_value_snapshot_without_later_pool_update() {
         snapshots[0].current_value_eth,
         DecimalAmount::from_str_exact("0.02").unwrap()
     );
+}
+
+#[tokio::test]
+async fn pending_buy_confirmed_during_pool_update_uses_single_market_valuation() {
+    let store = MemoryTradingStore::default();
+    let adapter = CountingNextBlockValuationAdapter::default();
+    let valuation_calls = adapter.valuation_calls.clone();
+    let mut engine = AlphaEngine::new(AllowAllRiskPolicy, store.clone(), adapter);
+    engine.add_strategy(Box::new(BuyOnceThenHoldStrategy));
+
+    let token = Address::repeat_byte(0x11);
+    let pool_address = Address::repeat_byte(0x22);
+    engine
+        .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+            block_number: 1,
+            pool: pool_snapshot(token, pool_address, 1),
+        }))
+        .await
+        .unwrap();
+    engine
+        .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+            block_number: 2,
+            pool: pool_snapshot(token, pool_address, 2),
+        }))
+        .await
+        .unwrap();
+
+    let snapshots = store.snapshots();
+    assert_eq!(valuation_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].state, PositionState::BuyConfirmed);
+    assert_eq!(snapshots[0].block_number, 2);
 }
 
 #[tokio::test]

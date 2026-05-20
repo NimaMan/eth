@@ -16,7 +16,7 @@ mod memory_store;
 mod policy;
 mod snapshots;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
@@ -74,6 +74,22 @@ struct PendingExecutionReport {
     report: ExecutionReport,
 }
 
+fn market_open_valuation_pool(event: &MarketEvent) -> Option<&TokenPoolId> {
+    match event {
+        MarketEvent::PoolUpdated { pool, .. } => Some(&pool.address),
+        MarketEvent::TokenUpdated { .. } | MarketEvent::BlockCompleted { .. } => None,
+    }
+}
+
+fn market_owns_open_valuation(
+    market_valuation_pool: Option<&TokenPoolId>,
+    position: &Position,
+) -> bool {
+    market_valuation_pool
+        .map(|pool_address| pool_address == &position.key.pool_address)
+        .unwrap_or(false)
+}
+
 #[async_trait]
 pub trait EngineExecutionAdapter: Send + Sync {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport>;
@@ -121,6 +137,7 @@ where
     current_event_block: Option<u64>,
     pending_execution_reports: Vec<PendingExecutionReport>,
     pool_snapshots: HashMap<TokenPoolId, PoolSnapshot>,
+    written_snapshot_keys: HashSet<String>,
 }
 
 impl<E, R, S> AlphaEngine<E, R, S>
@@ -141,6 +158,7 @@ where
             current_event_block: None,
             pending_execution_reports: Vec::new(),
             pool_snapshots: HashMap::new(),
+            written_snapshot_keys: HashSet::new(),
         }
     }
 
@@ -169,16 +187,23 @@ where
         self.current_event_block = engine_event_block(&event);
         match event {
             EngineEvent::Market(event) => {
-                self.apply_market_event(&event);
+                let market_valuation_pool = market_open_valuation_pool(&event).cloned();
                 let mut reports = self
-                    .apply_due_pending_execution_reports(market_event_block(&event))
+                    .apply_due_pending_execution_reports(
+                        market_event_block(&event),
+                        market_valuation_pool.as_ref(),
+                    )
                     .await?;
-                reports.extend(self.run_market_strategies(&event).await?);
+                self.apply_market_event(&event);
+                reports.extend(
+                    self.run_market_strategies(&event, market_valuation_pool.as_ref())
+                        .await?,
+                );
                 Ok(reports)
             }
             EngineEvent::Risk(event) => {
                 let mut reports = if let Some(block_number) = event.observed_block {
-                    self.apply_due_pending_execution_reports(block_number)
+                    self.apply_due_pending_execution_reports(block_number, None)
                         .await?
                 } else {
                     Vec::new()
@@ -197,7 +222,7 @@ where
 
     pub async fn flush_pending_executions(&mut self) -> Result<Vec<ExecutionReport>> {
         let pending = std::mem::take(&mut self.pending_execution_reports);
-        self.apply_pending_execution_reports(pending).await
+        self.apply_pending_execution_reports(pending, None).await
     }
 
     fn apply_market_event(&mut self, event: &MarketEvent) {
@@ -233,7 +258,11 @@ where
         }
     }
 
-    async fn run_market_strategies(&mut self, event: &MarketEvent) -> Result<Vec<ExecutionReport>> {
+    async fn run_market_strategies(
+        &mut self,
+        event: &MarketEvent,
+        market_valuation_pool: Option<&TokenPoolId>,
+    ) -> Result<Vec<ExecutionReport>> {
         let market = match self.market.clone() {
             Some(market) => market,
             None if matches!(event, MarketEvent::BlockCompleted { .. }) => MarketSnapshotRef {
@@ -285,9 +314,11 @@ where
             self.record_position_monitor_decision(&strategy_name, block_number, index, &decision)
                 .await?;
         }
-        let mut reports = self.apply_decisions(market_decisions, "market").await?;
+        let mut reports = self
+            .apply_decisions(market_decisions, "market", market_valuation_pool)
+            .await?;
         reports.extend(
-            self.apply_decisions(monitor_decisions, "position_monitor")
+            self.apply_decisions(monitor_decisions, "position_monitor", market_valuation_pool)
                 .await?,
         );
         self.snapshot_open_positions_for_pool(event).await?;
@@ -319,10 +350,27 @@ where
                     .map(|value| simulated_value_snapshot(&position, value, Some(pool)))
             };
             if let Some(snapshot) = snapshot {
-                self.store.append_position_snapshot(&snapshot).await?;
+                self.append_position_snapshot_once(snapshot).await?;
             }
         }
         Ok(())
+    }
+
+    async fn append_position_snapshot_once(&mut self, snapshot: PositionSnapshot) -> Result<()> {
+        let key = format!(
+            "{}:{}:{:?}:{}",
+            snapshot.trade_id.0,
+            snapshot.block_number,
+            snapshot.state,
+            snapshot
+                .valuation_block_number
+                .map(|block| block.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        );
+        if !self.written_snapshot_keys.insert(key) {
+            return Ok(());
+        }
+        self.store.append_position_snapshot(&snapshot).await
     }
 
     async fn run_risk_strategies(&mut self, event: &RiskEvent) -> Result<Vec<ExecutionReport>> {
@@ -380,7 +428,7 @@ where
                 .await?;
         }
         let event_source = event.source.as_deref().unwrap_or("risk");
-        let reports = self.apply_decisions(decisions, event_source).await?;
+        let reports = self.apply_decisions(decisions, event_source, None).await?;
 
         // Worst-case baseline: mark open positions as drained on
         // liquidity removal or scam confirmation, even if strategy does not exit.
@@ -389,6 +437,7 @@ where
             RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed
         ) {
             if let Some(ref pool_address) = event.pool_address {
+                let mut drained_snapshots = Vec::new();
                 for position in self.portfolio.positions.values_mut() {
                     if position.key.pool_address == *pool_address
                         && position.has_exposure()
@@ -427,8 +476,11 @@ where
                                     .unwrap_or(false)
                         });
                         let snapshot = snapshot_with_pool_metrics(snapshot, pool_snapshot);
-                        let _ = self.store.append_position_snapshot(&snapshot).await;
+                        drained_snapshots.push(snapshot);
                     }
+                }
+                for snapshot in drained_snapshots {
+                    let _ = self.append_position_snapshot_once(snapshot).await;
                 }
             }
         }
@@ -440,6 +492,7 @@ where
         &mut self,
         decisions: Vec<StrategyDecision>,
         event_source: &str,
+        market_valuation_pool: Option<&TokenPoolId>,
     ) -> Result<Vec<ExecutionReport>> {
         let mut reports = Vec::new();
         for decision in decisions {
@@ -452,7 +505,10 @@ where
                 StrategyDecision::SubmitOrder(mut intent)
                 | StrategyDecision::SubmitOrderWithReason { mut intent, .. } => {
                     intent.decision_reason = structured_reason;
-                    reports.extend(self.execute_if_allowed(intent).await?);
+                    reports.extend(
+                        self.execute_if_allowed(intent, market_valuation_pool)
+                            .await?,
+                    );
                 }
             }
         }
@@ -552,12 +608,18 @@ where
             .await
     }
 
-    async fn execute_if_allowed(&mut self, intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
+    async fn execute_if_allowed(
+        &mut self,
+        intent: OrderIntent,
+        market_valuation_pool: Option<&TokenPoolId>,
+    ) -> Result<Vec<ExecutionReport>> {
         match self.risk_policy.evaluate_order(&intent, &self.active_risks) {
             RiskDecision::Allow | RiskDecision::ReduceSize { .. } => {
-                self.execute_intent(intent).await
+                self.execute_intent(intent, market_valuation_pool).await
             }
-            RiskDecision::ForceExit { intent, .. } => self.execute_intent(*intent).await,
+            RiskDecision::ForceExit { intent, .. } => {
+                self.execute_intent(*intent, market_valuation_pool).await
+            }
             RiskDecision::Reject { .. } | RiskDecision::CancelOpenOrders { .. } => {
                 self.store.record_order_intent(&intent).await?;
                 Ok(Vec::new())
@@ -565,7 +627,11 @@ where
         }
     }
 
-    async fn execute_intent(&mut self, mut intent: OrderIntent) -> Result<Vec<ExecutionReport>> {
+    async fn execute_intent(
+        &mut self,
+        mut intent: OrderIntent,
+        market_valuation_pool: Option<&TokenPoolId>,
+    ) -> Result<Vec<ExecutionReport>> {
         let mut position = self.position_for_intent(&intent);
         intent.trade_id = Some(position.trade_id.clone());
         self.store.record_order_intent(&intent).await?;
@@ -599,8 +665,13 @@ where
                 report,
             });
         } else {
-            self.apply_final_execution_report(&position_id, intent.side, &report)
-                .await?;
+            self.apply_final_execution_report(
+                &position_id,
+                intent.side,
+                &report,
+                market_valuation_pool,
+            )
+            .await?;
             reports.push(report);
         }
 
@@ -610,6 +681,7 @@ where
     async fn apply_due_pending_execution_reports(
         &mut self,
         block_number: u64,
+        market_valuation_pool: Option<&TokenPoolId>,
     ) -> Result<Vec<ExecutionReport>> {
         let mut due = Vec::new();
         let mut remaining = Vec::new();
@@ -626,18 +698,25 @@ where
             }
         }
         self.pending_execution_reports = remaining;
-        self.apply_pending_execution_reports(due).await
+        self.apply_pending_execution_reports(due, market_valuation_pool)
+            .await
     }
 
     async fn apply_pending_execution_reports(
         &mut self,
         mut pending_reports: Vec<PendingExecutionReport>,
+        market_valuation_pool: Option<&TokenPoolId>,
     ) -> Result<Vec<ExecutionReport>> {
         pending_reports.sort_by_key(|pending| pending.report.block_number.unwrap_or_default());
         let mut reports = Vec::with_capacity(pending_reports.len());
         for pending in pending_reports {
-            self.apply_final_execution_report(&pending.position_id, pending.side, &pending.report)
-                .await?;
+            self.apply_final_execution_report(
+                &pending.position_id,
+                pending.side,
+                &pending.report,
+                market_valuation_pool,
+            )
+            .await?;
             reports.push(pending.report);
         }
         Ok(reports)
@@ -648,6 +727,7 @@ where
         position_id: &PositionId,
         side: OrderSide,
         report: &ExecutionReport,
+        market_valuation_pool: Option<&TokenPoolId>,
     ) -> Result<()> {
         let mut position = self
             .portfolio
@@ -686,7 +766,7 @@ where
                             && pool.latest_block == block_number
                     });
                 let snapshot = zero_value_snapshot(&position, block_number, pool);
-                self.store.append_position_snapshot(&snapshot).await?;
+                self.append_position_snapshot_once(snapshot).await?;
             }
         } else if position.is_closed() {
             let block_number = report
@@ -725,8 +805,11 @@ where
                 pool_denom_symbol: None,
             };
             let snapshot = snapshot_with_pool_metrics(snapshot, pool);
-            self.store.append_position_snapshot(&snapshot).await?;
-        } else if side == OrderSide::Buy && report_status == ExecutionStatus::Confirmed {
+            self.append_position_snapshot_once(snapshot).await?;
+        } else if side == OrderSide::Buy
+            && report_status == ExecutionStatus::Confirmed
+            && !market_owns_open_valuation(market_valuation_pool, &position)
+        {
             self.snapshot_confirmed_buy_position(&position).await?;
         }
 
@@ -759,7 +842,7 @@ where
             .await?
         {
             let snapshot = simulated_value_snapshot(position, value, Some(&pool));
-            self.store.append_position_snapshot(&snapshot).await?;
+            self.append_position_snapshot_once(snapshot).await?;
         }
 
         Ok(())
