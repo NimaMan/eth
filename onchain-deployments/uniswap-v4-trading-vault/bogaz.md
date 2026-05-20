@@ -5,6 +5,7 @@ deployment.
 
 | Gate | Status | Requirement |
 | --- | --- | --- |
+| Assessment criteria | evidence-ready | `audit/assessment-criteria.md` defines shared V2-derived gates and V4-specific gates. |
 | V4 route model | evidence-ready | ETH/USDC 0.05% no-hook fixture defines token path, pool key, fee tier, tick spacing, hooks, and expected command bytes. |
 | Simulator coverage | evidence-ready | tx_simulator compares direct Universal Router execution with candidate vault execution at pinned block 25131251. |
 | Solidity implementation | evidence-ready | Candidate is owner-only, exact-route, hook-policy aware, and non-generic. |

@@ -5,9 +5,14 @@ checklists in this folder.
 
 Required evidence:
 
+- assessment criteria signoff;
 - source and ABI hashes;
 - upstream interface versions;
 - unit, fork, and gas test output;
 - simulator route rehearsal reports;
 - Kartal dry-run reports;
 - operator signoff before any broadcast.
+
+Primary criteria document:
+
+- `assessment-criteria.md`
