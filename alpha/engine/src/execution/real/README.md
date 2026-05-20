@@ -44,7 +44,9 @@ visible in the same store path as simulator failures.
 
 ## Current Status
 
-This adapter is a tested boundary used by the guarded real live entrypoint.
+This adapter is a tested crate-private boundary used by the guarded real live
+entrypoint. It is intentionally not re-exported from `eth_alpha_engine`, so
+external backtest crates cannot import it through the public engine API.
 `eth_alpha_live_trader` selects `TxExecutorAdapter` through
 `LiveTradingPlannerBridge`; `eth_alpha_live_backtest_trader` selects
 `LiveChainSimExecutionAdapter` and has no Kartal path.

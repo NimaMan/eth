@@ -10,16 +10,12 @@ pub mod execution;
 pub mod live_trader;
 pub mod wire;
 
-mod decision_persistence;
-mod decision_record;
-mod event_flow;
-mod execution_flow;
+mod decision;
 mod ids;
-mod memory_store;
 mod policy;
 mod runtime;
-mod snapshot_flow;
-mod snapshots;
+mod store;
+mod valuation;
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,13 +33,12 @@ use eth_alpha_core::{
     strategy::Strategy,
 };
 
-// Re-export chain-simulation adapters at crate root for convenience.
-pub use execution::{
-    ChainSimExecutionAdapter, LiveChainSimExecutionAdapter, LiveTradingPlannerBridge,
-    LiveTxPlanningInputResolver, TxExecutorAdapter,
-};
-pub use memory_store::MemoryTradingStore;
+// Re-export simulation adapters at crate root for convenience. Real tx
+// execution stays inside `execution::real` and `live_trader::real_execution` so
+// historical and no-capital backtests cannot import it accidentally.
+pub use execution::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
 pub use policy::{AllowAllRiskPolicy, BlockCriticalRiskPolicy};
+pub use store::MemoryTradingStore;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {

@@ -7,12 +7,11 @@ use eth_alpha_core::{
     store::TradingStore,
 };
 
-use crate::{
-    snapshots::{
-        should_snapshot_position_for_pool, simulated_value_snapshot, valuation_safe_pool,
-        zero_value_snapshot,
-    },
-    AlphaEngine, EngineExecutionAdapter,
+use crate::{AlphaEngine, EngineExecutionAdapter};
+
+use super::{
+    should_snapshot_position_for_pool, simulated_value_snapshot, valuation_safe_pool,
+    zero_value_snapshot,
 };
 
 pub(crate) fn market_open_valuation_pool(event: &MarketEvent) -> Option<&TokenPoolId> {

@@ -16,7 +16,7 @@ use std::sync::{
 };
 
 use super::*;
-use crate::snapshots::{should_snapshot_position_for_pool, zero_value_snapshot};
+use crate::valuation::{should_snapshot_position_for_pool, zero_value_snapshot};
 
 #[path = "test_support.rs"]
 mod test_support;

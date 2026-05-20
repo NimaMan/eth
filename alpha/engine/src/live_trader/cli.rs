@@ -10,6 +10,16 @@ pub(super) struct Args {
     pub(super) min_liquidity_usd: String,
     pub(super) run_id: Option<String>,
     pub(super) disable_entry: bool,
+    pub(super) replay_current: bool,
+    pub(super) once: bool,
+    pub(super) max_hold_blocks: Option<u64>,
+    pub(super) stop_loss_ratio: Option<String>,
+    pub(super) take_profit_ratio: Option<String>,
+    pub(super) strategy_suite: Option<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct RealExecutionArgs {
     pub(super) kartal_url: String,
     pub(super) kartal_token_env: String,
     pub(super) live_real_from: String,
@@ -18,12 +28,6 @@ pub(super) struct Args {
     pub(super) live_real_shadow_priority_fee_gwei: String,
     pub(super) live_real_shadow_max_fee_gwei: String,
     pub(super) live_real_shadow_predicted_base_fee_gwei: String,
-    pub(super) replay_current: bool,
-    pub(super) once: bool,
-    pub(super) max_hold_blocks: Option<u64>,
-    pub(super) stop_loss_ratio: Option<String>,
-    pub(super) take_profit_ratio: Option<String>,
-    pub(super) strategy_suite: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -131,48 +135,17 @@ struct LiveRealOnlyCli {
     live_real_shadow_predicted_base_fee_gwei: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AlphaTraderEntrypoint {
-    /// Live no-capital runner. Polls live token state and mempool signals, but
-    /// executes with chain-state EVM simulation only.
-    LiveBacktest,
-    /// Guarded real runner. Polls live token state and sends prepared sells to
-    /// Kartal's tx executor boundary. Currently dry-run only.
-    LiveReal,
+pub(super) fn parse_live_backtest_args() -> Args {
+    Args::from(LiveCommonCli::parse())
 }
 
-impl AlphaTraderEntrypoint {
-    pub(super) fn name(self) -> &'static str {
-        match self {
-            Self::LiveBacktest => "eth_alpha_live_backtest_trader",
-            Self::LiveReal => "eth_alpha_live_trader",
-        }
-    }
+pub(super) fn parse_live_real_args() -> (Args, RealExecutionArgs) {
+    let cli = LiveRealCli::parse();
+    (Args::from(cli.common), RealExecutionArgs::from(cli.real))
 }
 
-pub(super) fn parse_args_for_entrypoint(
-    entrypoint: AlphaTraderEntrypoint,
-) -> Result<(Args, TraderExecutionMode)> {
-    match entrypoint {
-        AlphaTraderEntrypoint::LiveBacktest => {
-            let cli = LiveCommonCli::parse();
-            Ok((
-                Args::from_parts(cli, LiveRealOnlyCli::defaults()),
-                TraderExecutionMode::ChainSim,
-            ))
-        }
-        AlphaTraderEntrypoint::LiveReal => {
-            let cli = LiveRealCli::parse();
-            Ok((
-                Args::from_parts(cli.common, cli.real),
-                TraderExecutionMode::KartalReal,
-            ))
-        }
-    }
-}
-
-impl Args {
-    fn from_parts(common: LiveCommonCli, real: LiveRealOnlyCli) -> Self {
+impl From<LiveCommonCli> for Args {
+    fn from(common: LiveCommonCli) -> Self {
         Self {
             poll_interval_ms: common.poll_interval_ms,
             mempool_since_days: common.mempool_since_days,
@@ -182,14 +155,6 @@ impl Args {
             min_liquidity_usd: common.min_liquidity_usd,
             run_id: common.run_id,
             disable_entry: common.disable_entry,
-            kartal_url: real.kartal_url,
-            kartal_token_env: real.kartal_token_env,
-            live_real_from: real.live_real_from,
-            live_real_vault_address: real.live_real_vault_address,
-            live_real_shadow_expected_recovery_eth: real.live_real_shadow_expected_recovery_eth,
-            live_real_shadow_priority_fee_gwei: real.live_real_shadow_priority_fee_gwei,
-            live_real_shadow_max_fee_gwei: real.live_real_shadow_max_fee_gwei,
-            live_real_shadow_predicted_base_fee_gwei: real.live_real_shadow_predicted_base_fee_gwei,
             replay_current: common.replay_current,
             once: common.once,
             max_hold_blocks: common.max_hold_blocks,
@@ -200,17 +165,17 @@ impl Args {
     }
 }
 
-impl LiveRealOnlyCli {
-    fn defaults() -> Self {
+impl From<LiveRealOnlyCli> for RealExecutionArgs {
+    fn from(real: LiveRealOnlyCli) -> Self {
         Self {
-            kartal_url: DEFAULT_KARTAL_URL.to_string(),
-            kartal_token_env: DEFAULT_KARTAL_TOKEN_ENV.to_string(),
-            live_real_from: DEFAULT_LIVE_REAL_FROM.to_string(),
-            live_real_vault_address: DEFAULT_UNISWAP_V2_TRADING_VAULT.to_string(),
-            live_real_shadow_expected_recovery_eth: "0.01".to_string(),
-            live_real_shadow_priority_fee_gwei: "40".to_string(),
-            live_real_shadow_max_fee_gwei: "50".to_string(),
-            live_real_shadow_predicted_base_fee_gwei: "10".to_string(),
+            kartal_url: real.kartal_url,
+            kartal_token_env: real.kartal_token_env,
+            live_real_from: real.live_real_from,
+            live_real_vault_address: real.live_real_vault_address,
+            live_real_shadow_expected_recovery_eth: real.live_real_shadow_expected_recovery_eth,
+            live_real_shadow_priority_fee_gwei: real.live_real_shadow_priority_fee_gwei,
+            live_real_shadow_max_fee_gwei: real.live_real_shadow_max_fee_gwei,
+            live_real_shadow_predicted_base_fee_gwei: real.live_real_shadow_predicted_base_fee_gwei,
         }
     }
 }

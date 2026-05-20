@@ -1,3 +1,6 @@
+mod event_flow;
+mod execution_flow;
+
 use eth_alpha_core::{
     amount::DecimalAmount,
     error::Result,
@@ -10,11 +13,11 @@ use eth_alpha_core::{
 };
 
 use crate::{
-    event_flow::{engine_event_block, market_event_block},
-    snapshot_flow::market_open_valuation_pool,
-    snapshots::snapshot_with_pool_metrics,
+    valuation::{market_open_valuation_pool, snapshot_with_pool_metrics},
     AlphaEngine, EngineEvent, EngineExecutionAdapter,
 };
+
+use event_flow::{engine_event_block, market_event_block};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where

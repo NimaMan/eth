@@ -1,4 +1,34 @@
-use super::*;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use alloy_primitives::Address;
+use async_trait::async_trait;
+use chrono::Utc;
+use eth_alpha_core::{
+    error::AlphaCoreError, execution::ExecutionReport, ids::TokenPoolId, market::PoolSnapshot,
+    position::Position,
+};
+use eth_alpha_store::PostgresTradingStore;
+use eth_live_trading::{
+    FixedGasRankProvider, GasRankPlan, KartalClient, KartalClientConfig, KartalEthTxExecutorStatus,
+    KartalExecutorClient, KartalExecutorClientConfig, KartalStatusBroadcastMode,
+    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
+    LivePrioritySellPlannerInput, PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator,
+    PreparedSellRoute, RankedFeeCandidate, TxPrepConfig, TxPrepRequestContext,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
+};
+use eyre::{eyre, Result, WrapErr};
+use rust_decimal::Decimal;
+use serde_json::json;
+
+use crate::execution::real::{
+    LiveTradingPlannerBridge, LiveTxPlanningInputResolver, TxExecutorAdapter,
+};
+use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
+
+use super::cli::RealExecutionArgs;
 
 struct RealExecutionWithValuation<E, V> {
     execution: E,
@@ -172,7 +202,7 @@ pub(super) struct KartalRealPreflight {
     status: KartalEthTxExecutorStatus,
 }
 
-pub(super) async fn preflight_kartal_real(args: &Args) -> Result<KartalRealPreflight> {
+pub(super) async fn preflight_kartal_real(args: &RealExecutionArgs) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
@@ -183,7 +213,7 @@ pub(super) async fn preflight_kartal_real(args: &Args) -> Result<KartalRealPrefl
 }
 
 pub(super) async fn build_kartal_real_adapter(
-    args: &Args,
+    args: &RealExecutionArgs,
     preflight: KartalRealPreflight,
     store: PostgresTradingStore,
     run_id: String,

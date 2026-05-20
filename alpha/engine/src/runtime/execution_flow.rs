@@ -11,13 +11,16 @@ use eth_alpha_core::{
 };
 
 use crate::{
-    decision_record::strategy_decision_action,
-    event_flow::{fill_price_for_report, should_defer_report, submitted_report_for},
+    decision::strategy_decision_action,
     ids::new_trade_id,
-    snapshot_flow::market_owns_open_valuation,
-    snapshots::{snapshot_with_pool_metrics, valuation_safe_pool, zero_value_snapshot},
+    valuation::{
+        market_owns_open_valuation, snapshot_with_pool_metrics, valuation_safe_pool,
+        zero_value_snapshot,
+    },
     AlphaEngine, EngineExecutionAdapter, PendingExecutionReport,
 };
+
+use super::event_flow::{fill_price_for_report, should_defer_report, submitted_report_for};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where

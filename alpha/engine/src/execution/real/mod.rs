@@ -112,6 +112,7 @@ pub struct TxExecutorAdapter<P, S> {
 }
 
 impl<P, S> TxExecutorAdapter<P, S> {
+    #[cfg(test)]
     pub fn new(planner: P, submitter: S) -> Self {
         Self::with_order_prefix(planner, submitter, "live-tx")
     }

@@ -124,14 +124,29 @@ before submission and persist the rank evidence with the order decision;
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
 - `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` return
   `ExecutionReport`s from EVM simulation against selected chain state.
-- `TxExecutorAdapter` is the real submission boundary. It delegates route,
-  calldata, pre-simulation, and gas-rank decisions to a `LiveTxPlanner`, then
-  submits the prepared signal through Kartal to `tx_executor`.
+- `TxExecutorAdapter` is the real submission boundary. It is crate-private to
+  the engine, delegated only through `src/live_trader/real_execution.rs`, and
+  is not exported for backtest crates.
 - `LiveTradingPlannerBridge` adapts the engine's `LiveTxPlanner` trait to
   `alpha/live/trading::PrioritySellPlanner`; `LiveTxPlanningInputResolver` is
   the runtime hook for loading position, pool, wallet, and observation context.
 - `BlockCriticalRiskPolicy` rejects new orders when a matching critical token/pool risk is active.
 - `MemoryTradingStore`, `AllowAllRiskPolicy`, and `BlockCriticalRiskPolicy` are test/runtime placeholders, not the final persistent store or full risk model.
+
+## Source Layout
+
+Each folder under `src/` has one `README.md` that names its ownership boundary.
+
+| Path | Owns |
+| --- | --- |
+| `src/bin/` | executable wrappers only |
+| `src/execution/` | simulation adapters and crate-private real live adapter |
+| `src/live_trader/` | live polling runner and live-real/live-backtest wiring |
+| `src/runtime/` | `AlphaEngine` event handling and execution flow |
+| `src/decision/` | strategy decision records and persistence |
+| `src/valuation/` | position valuation and snapshot helpers |
+| `src/store/` | engine-local store implementations |
+| `src/wire.rs` | token-server wire types and parsers |
 
 ## Real Submission Status
 
@@ -146,6 +161,9 @@ Alpha has separate trader entrypoints for each runtime boundary:
 The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
 live runner code lives under `src/live_trader/`; real/Kartal wiring is isolated
 in `src/live_trader/real_execution.rs`.
+`eth_alpha_live_trader` calls `run_live_real()` and
+`eth_alpha_live_backtest_trader` calls `run_live_backtest()`, so the binaries do
+not expose a public mode switch.
 
 The real live binary is intentionally sell-only for now: it requires
 `--disable-entry`, targets the deployed `UniswapV2TradingVault`, and uses shadow
@@ -158,8 +176,8 @@ A public-broadcast deployment still needs:
 - receipt tracking that turns Kartal tx hashes into final confirmed or failed
   `ExecutionReport`s.
 
-Backtest binaries must never use `TxExecutorAdapter`; they should remain on
-`ChainSimExecutionAdapter` only.
+Backtest binaries cannot import `TxExecutorAdapter` through the public engine
+API; they should remain on `ChainSimExecutionAdapter` only.
 
 ## Trader Binary
 

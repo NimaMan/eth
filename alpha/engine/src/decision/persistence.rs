@@ -6,10 +6,9 @@ use eth_alpha_core::{
     strategy::StrategyDecision,
 };
 
-use crate::{
-    decision_record::{risk_kind_key, strategy_decision_record},
-    AlphaEngine, EngineExecutionAdapter,
-};
+use crate::{AlphaEngine, EngineExecutionAdapter};
+
+use super::{risk_kind_key, strategy_decision_record};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where

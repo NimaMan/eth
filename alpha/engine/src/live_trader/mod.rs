@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,16 +12,13 @@ use crate::wire::{
 };
 use crate::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, EngineExecutionAdapter,
-    LiveChainSimExecutionAdapter, LiveTradingPlannerBridge, LiveTxPlanningInputResolver,
-    PositionValueSimulation, TxExecutorAdapter,
+    LiveChainSimExecutionAdapter,
 };
-use alloy_primitives::{Address, U256};
-use async_trait::async_trait;
+use alloy_primitives::U256;
 use chrono::Utc;
 use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
-    error::AlphaCoreError,
     execution::ExecutionReport,
     ids::{StrategyName, TokenPoolId},
     market::{MarketEvent, PoolSnapshot},
@@ -30,14 +27,6 @@ use eth_alpha_core::{
     store::TradingStore,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
-use eth_live_trading::{
-    FixedGasRankProvider, GasRankPlan, KartalClient, KartalClientConfig, KartalEthTxExecutorStatus,
-    KartalExecutorClient, KartalExecutorClientConfig, KartalStatusBroadcastMode,
-    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator,
-    PreparedSellRoute, RankedFeeCandidate, TxPrepConfig, TxPrepRequestContext,
-    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
-};
 use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
@@ -61,9 +50,7 @@ mod strategy;
 mod support;
 mod token_server;
 
-pub use cli::AlphaTraderEntrypoint;
-
-use cli::{parse_args_for_entrypoint, Args};
+use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
 use position_state::release_stale_submitted_position;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
 use strategy::{build_strategy_specs, live_strategy_spec_config_json};
@@ -84,25 +71,56 @@ const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 
-pub async fn run(entrypoint: AlphaTraderEntrypoint) -> Result<()> {
+pub async fn run_live_backtest() -> Result<()> {
+    run(
+        "eth_alpha_live_backtest_trader",
+        parse_live_backtest_args(),
+        TraderExecutionMode::ChainSim,
+        None,
+    )
+    .await
+}
+
+pub async fn run_live_real() -> Result<()> {
+    let (args, real_args) = parse_live_real_args();
+    run(
+        "eth_alpha_live_trader",
+        args,
+        TraderExecutionMode::KartalReal,
+        Some(real_args),
+    )
+    .await
+}
+
+async fn run(
+    runner_name: &'static str,
+    args: Args,
+    execution_mode: TraderExecutionMode,
+    real_args: Option<RealExecutionArgs>,
+) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
-    let runner_name = entrypoint.name();
-    let (args, execution_mode) = parse_args_for_entrypoint(entrypoint)?;
     let shared_config = load_shared_config()?;
+    if execution_mode.uses_kartal() != real_args.is_some() {
+        return Err(eyre!(
+            "{} internal configuration mismatch: execution mode {} and real args presence disagree",
+            runner_name,
+            execution_mode.label()
+        ));
+    }
     if execution_mode.uses_kartal() && !args.disable_entry {
         return Err(eyre!(
             "{} requires --disable-entry until the vault buy path is wired into the real planner",
             runner_name
         ));
     }
-    let mut kartal_real_preflight = match execution_mode {
-        TraderExecutionMode::ChainSim => None,
-        TraderExecutionMode::KartalReal => Some(preflight_kartal_real(&args).await?),
+    let mut kartal_real_preflight = match real_args.as_ref() {
+        None => None,
+        Some(real_args) => Some(preflight_kartal_real(real_args).await?),
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
@@ -139,12 +157,12 @@ pub async fn run(entrypoint: AlphaTraderEntrypoint) -> Result<()> {
                 "observation_strategy_name": &observation_strategy_name,
                 "execution_model": execution_mode.execution_model(),
                 "entry_enabled": !args.disable_entry,
-                "kartal": if execution_mode.uses_kartal() {
+                "kartal": if let Some(real_args) = real_args.as_ref() {
                     json!({
-                        "url": &args.kartal_url,
-                        "token_env": &args.kartal_token_env,
-                        "from": &args.live_real_from,
-                        "vault_address": &args.live_real_vault_address,
+                        "url": &real_args.kartal_url,
+                        "token_env": &real_args.kartal_token_env,
+                        "from": &real_args.live_real_from,
+                        "vault_address": &real_args.live_real_vault_address,
                         "broadcast_requirement": "dry_run"
                     })
                 } else {
@@ -240,8 +258,11 @@ pub async fn run(entrypoint: AlphaTraderEntrypoint) -> Result<()> {
     let adapter: Box<dyn EngineExecutionAdapter> = match execution_mode {
         TraderExecutionMode::ChainSim => Box::new(chain_sim_adapter),
         TraderExecutionMode::KartalReal => {
+            let real_args = real_args
+                .as_ref()
+                .expect("kartal-real execution requires real args");
             build_kartal_real_adapter(
-                &args,
+                real_args,
                 kartal_real_preflight
                     .take()
                     .expect("kartal-real preflight must exist"),
