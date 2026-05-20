@@ -21,4 +21,4 @@ This crate is the pure trading domain. It defines types and traits shared by liv
 
 ## Rule
 
-No Redis, PostgreSQL, ZMQ, block fetching, transaction signing, or service orchestration belongs here.
+No external stores, ZMQ, block fetching, transaction signing, or service orchestration belongs here.

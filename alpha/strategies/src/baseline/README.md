@@ -18,7 +18,7 @@ stays in the strategy root and is used by historical replay. Stored mempool
 signal replay is mempool-aware history; only current token tracking plus current
 mempool signals is a live run.
 
-## Backtest Validation Findings
+## Strategy Validation Findings
 
 All measurements below use the EVM-backed backtest with `--skip-primed`
 (excludes warmup observations). Fills are produced by running actual swap

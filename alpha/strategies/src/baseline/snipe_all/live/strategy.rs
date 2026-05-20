@@ -1,5 +1,5 @@
 use eth_alpha_core::{
-    ids::{PoolAddress, StrategyName},
+    ids::{BlockNumber, PoolAddress, PositionId, StrategyName},
     market::MarketEvent,
     risk::RiskEvent,
     Result, Strategy, StrategyContext, StrategyDecision,
@@ -25,6 +25,20 @@ impl LiveSnipeAllStrategy {
     ) -> Self {
         Self {
             inner: SnipeAllStrategy::with_bought_pools(config.strategy, bought_pools),
+        }
+    }
+
+    pub fn with_restored_state(
+        config: LiveSnipeAllConfig,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+    ) -> Self {
+        Self {
+            inner: SnipeAllStrategy::with_restored_state(
+                config.strategy,
+                bought_pools,
+                active_hold_blocks,
+            ),
         }
     }
 

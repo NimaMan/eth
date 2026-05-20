@@ -1,10 +1,11 @@
 //! Pure Ethereum alpha/trading domain contracts.
 //!
-//! This crate intentionally contains no Redis, database, ZMQ, RPC, signing, or
+//! This crate intentionally contains no external stores, ZMQ, RPC, signing, or
 //! runtime orchestration code. It defines the shared language used by the engine,
 //! strategies, backtests, risk processors, stores, and execution adapters.
 
 pub mod amount;
+pub mod decision_rationale;
 pub mod error;
 pub mod execution;
 pub mod ids;
@@ -18,6 +19,7 @@ pub mod strategy;
 pub mod time;
 
 pub use amount::{Amount, DecimalAmount};
+pub use decision_rationale::{DecisionReason, ReasonCategory};
 pub use error::{AlphaCoreError, Result};
 pub use execution::{ExecutionAdapter, ExecutionReport, ExecutionStatus};
 pub use ids::{

@@ -154,8 +154,6 @@ where
                     stop_loss_ratio,
                     take_profit_ratio,
                     max_hold_blocks: spec.max_hold_blocks,
-                    exit_retry_interval_blocks: spec.exit_retry_interval_blocks,
-                    max_exit_retries: spec.max_exit_retries,
                     ..SnipeAllConfig::default()
                 })));
             }

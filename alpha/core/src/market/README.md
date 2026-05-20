@@ -15,7 +15,7 @@ Confirmed-chain market facts consumed by the alpha engine.
 - Portfolio positions.
 - Strategy decisions.
 - Mempool predictions.
-- Redis read/write implementation.
+- External store read/write implementation.
 
 ## Python Lesson
 

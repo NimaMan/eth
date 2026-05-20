@@ -29,3 +29,12 @@ StrategyDecision
 ```
 
 At block level, a strategy receives the market view for a processed block and returns intent from that view. Backtest fill policy, including worst-case block-level price selection, belongs to the backtest execution adapter rather than the strategy trait.
+
+## Decision Rationale
+
+Strategies should return decisions through `StrategyDecision::hold(...)` or
+`StrategyDecision::submit_order(...)` with stable rationale codes. The engine
+normalizes those codes through `decision_rationale` and persists the structured
+fields on strategy decisions and order intents. Avoid anonymous `Hold` or raw
+`SubmitOrder` in production strategies; they make debugging and PnL attribution
+ambiguous.

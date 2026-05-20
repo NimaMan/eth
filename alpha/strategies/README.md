@@ -70,6 +70,12 @@ Exit:
   variants or run configs first so each live/historical pair can be backtested
   independently.
 
+Real execution status: these strategies stop at `StrategyDecision` /
+`OrderIntent`. That is correct. The live-capital gap is not inside strategy
+rules; it is the missing planner that converts an approved sell `OrderIntent`
+into route calldata, simulation evidence, gas-rank candidates, and a Kartal
+direct-raw request.
+
 Planned rule growth:
 
 - Label token creators by public mempool vs private execution behavior.
@@ -91,7 +97,7 @@ Planned rule growth:
 - No transaction submission.
 - No signing.
 - No DB writes.
-- No Redis reads.
+- No external cache reads.
 - No ZMQ publishing.
 - No direct mempool simulation.
 
@@ -115,7 +121,7 @@ That shape is useful for migration, but it should not be copied directly:
 | Python strategy | Entry rule | Exit rule | Rust port target |
 | --- | --- | --- | --- |
 | `MarketTracker` | buy when token lifecycle becomes `TRADING_ENABLED` | never sell; hold for analytics | benchmark strategy that submits small chain-sim buys and keeps positions open |
-| `BuyAll` | buy every trading-enabled token | sell when ROI reaches `profit_target_x`, default `7.0` | simple lifecycle strategy for engine/backtest validation |
+| `BuyAll` | buy every trading-enabled token | sell when ROI reaches `profit_target_x`, default `7.0` | simple lifecycle strategy for engine/strategy validation |
 | `BuyScamStrategy` | buy when `latest_token_assessment.is_scam` is true | sell when ROI reaches `profit_target_x`, default `7.0` | controlled research strategy only; never enable for live execution without explicit risk policy |
 | `WalletTrackerStrategy` | buy healthy trading-enabled tokens while below `max_positions` and not already active | sell on profit target, stop loss, or token scam flag | wallet-scoped strategy using engine portfolio state, not process-local booleans |
 

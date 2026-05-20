@@ -76,7 +76,7 @@ Backtests use the same EVM simulation path as live chain-sim trading:
 ### CLI
 
 ```bash
-cargo run -p eth_alpha_backtest --bin eth_alpha_backtest -- \
+cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader -- \
   --strategy-impl snipe-all \
   --strategy-name snipe-all \
   --replay-run-id "alpha-trader-1715350000-12345" \
@@ -91,8 +91,8 @@ The backtest reads `ALPHA_DATABASE_URL` and `RETH_DATADIR` from
 Backtest persistence goes through `alpha/store/` and writes the
 `alpha_trading` schema: `trader_runs`, `order_intents`, `execution_reports`,
 `positions`, `position_snapshots`, `trades`, `trade_events`,
-`trade_snapshots`, and result-set tables. Backtest validation reports are saved
-by `alpha/lab` in `alpha_trading.backtest_validation_reports`.
+`trade_snapshots`, and result-set tables. Strategy validation reports are saved
+by `alpha/lab` in `alpha_trading.strategy_validation_reports`.
 
 ### Required arguments
 
@@ -124,7 +124,7 @@ strategy decisions, and derived PnL stay separated by `strategy_name`.
 | `adapter` | `BacktestAdapter` trait for state sharing between runner and engine |
 | `config` | `BacktestConfig` |
 | `runner` | `run_backtest` drives events through `AlphaEngine` |
-| `bin/eth_alpha_backtest` | CLI binary — reads observations from Postgres, persists results to Postgres |
+| `bin/eth_alpha_backtest_trader` | Historical backtest trader binary; reads observations from Postgres and persists results to Postgres |
 
 ## Integration with Asena
 
@@ -141,4 +141,4 @@ crate is `ChainSimExecutionAdapter`; do not add Kartal, `TxExecutorAdapter`,
 signer env vars, hot-wallet config, or deployed-vault config to the backtest
 binary. If a historical experiment needs to exercise live tx-prep code, run it
 as a lab/calibration artifact that writes requests or uses Kartal dry-run, not
-as `eth_alpha_backtest`.
+as `eth_alpha_backtest_trader`.

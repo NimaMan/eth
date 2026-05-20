@@ -20,7 +20,7 @@ pub trait Strategy: Send {
         _ctx: &StrategyContext<'_>,
         _event: &RiskEvent,
     ) -> Result<StrategyDecision> {
-        Ok(StrategyDecision::Hold)
+        Ok(StrategyDecision::hold("risk.no_handler"))
     }
 
     fn on_position_monitor(

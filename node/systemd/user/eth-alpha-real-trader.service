@@ -12,7 +12,7 @@ EnvironmentFile=-/home/nima/code/crypto/kartal/.env
 Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUST_LOG=info
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_trader --run-id alpha11-live-real-vault-dryrun-20260519 --mode kartal-real --disable-entry --poll-interval-ms 1000 --mempool-since-days 14 --signal-limit 200 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --strategy-suite alpha11-live-gasguard-hold-sweep --live-real-from 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27 --live-real-vault-address 0x28474cbCd780AeEb3ED1501B68254bEd87cF5597
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id alpha11-live-real-vault-dryrun-20260519 --disable-entry --poll-interval-ms 1000 --mempool-since-days 14 --signal-limit 200 --min-liquidity-eth 0.5 --min-liquidity-usd 1000 --strategy-suite alpha11-live-gasguard-hold-sweep --live-real-from 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27 --live-real-vault-address 0x28474cbCd780AeEb3ED1501B68254bEd87cF5597
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

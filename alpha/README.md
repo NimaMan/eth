@@ -41,20 +41,21 @@ events, and persists decisions before execution.
 ```text
 eth_chain_server LiveChainRuntime
   -> direct processed-block feed + live token/pool views
-  -> eth_alpha_trader polls /live/status, /live/pools, /mempool/signals
+  -> eth_alpha_live_backtest_trader or eth_alpha_live_trader polls /live/status, /live/pools, /mempool/signals
   -> strategies emit StrategyDecision / OrderIntent
   -> chain-sim service or guarded kartal-real service
   -> real adapter prepares a Kartal direct-raw request through live/trading
   -> strategy_observations + orders + reports + positions + risk events
 ```
 
-`eth_alpha_trader --mode chain-sim` is the no-capital live runner. It must not
+`eth_alpha_live_backtest_trader` is the no-capital live runner. It must not
 become decision-active until `/live/status` is `live`; while warming, it records
-heartbeats and primes watermarks only.
+heartbeats and primes watermarks only. It always uses live chain-state EVM
+simulation and has no Kartal execution path.
 
-`eth_alpha_trader --mode kartal-real` is the separate real-executor runner. It
-instantiates `TxExecutorAdapter`, uses the deployed Uniswap V2 trading vault
-route, disables entries, and refuses to start unless Kartal reports
+`eth_alpha_live_trader` is the separate real-executor runner. It instantiates
+`TxExecutorAdapter`, uses the deployed Uniswap V2 trading vault route, requires
+entries to be disabled for now, and refuses to start unless Kartal reports
 `broadcast_mode = dry_run`. This is the dry-run/shadow service boundary for the
 real strategy; public broadcast remains blocked until final simulation,
 production gas-rank inputs, buy routing, and receipt reconciliation are wired.
@@ -75,7 +76,7 @@ configured by `ALPHA_DATABASE_URL`.
 | Owner | Tables |
 | --- | --- |
 | `alpha/store/` | `trader_runs`, `order_intents`, `execution_reports`, `positions`, `position_snapshots`, `backtest_result_sets`, `backtest_result_set_runs`, `trades`, `trade_events`, `trade_snapshots`, `risk_events`, `strategy_decisions`, `strategy_observations` |
-| `alpha/lab/` | `backtest_validation_reports` in the same `alpha_trading` schema |
+| `alpha/lab/` | `strategy_validation_reports` in the same `alpha_trading` schema |
 
 Alpha may read `live_trading.signal_events` through chain-server APIs or replay
 tools, but mempool signal persistence is owned by `mempool_processor`, not
@@ -94,14 +95,14 @@ liquidity-removal exit and critical LP-approval exit.
 | Need | Start here |
 | --- | --- |
 | Event and domain type ownership | `core/src/` and `core/src/README.md` |
-| Strategy runtime and execution adapter behavior | `engine/README.md`, `engine/src/lib.rs` |
+| Strategy runtime and execution adapter behavior | `engine/README.md`, `engine/src/lib.rs`, `engine/src/live_trader/` |
 | Durable decision ledger | `store/README.md`, Postgres `alpha_trading.*` tables |
 | Mined-block transaction rank estimates | `block_tx_rank/README.md`, `block_tx_rank/src/lib.rs` |
 | Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/baseline/snipe_all/` |
 | Live tx prep and Kartal request shape | `live/trading/README.md`, `live/trading/src/tx_prep/` |
 | Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
 | Legacy live-state contract | `live/state/README.md`, `live/state/src/` |
-| Service wiring | `engine/src/bin/eth_alpha_trader.rs` |
+| Service wiring | Thin wrappers in `engine/src/bin/`, shared live runtime in `engine/src/live_trader/`, historical backtest wrapper in `backtest/src/bin/eth_alpha_backtest_trader.rs` |
 
 ## Bottleneck Management
 
@@ -117,7 +118,9 @@ cargo test -p eth_block_tx_rank
 cargo test -p eth_alpha_engine
 cargo test -p eth_alpha_store
 cargo test -p eth_strategies
-cargo run -p eth_alpha_engine --bin eth_alpha_trader
+cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
+cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --disable-entry
+cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```
 
 ## Current Hazards

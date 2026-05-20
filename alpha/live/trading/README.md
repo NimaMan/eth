@@ -16,10 +16,12 @@ request, and submit that request to Kartal.
 
 Current live-runner integration:
 
-`eth_alpha_trader --mode kartal-real --disable-entry` now instantiates
-`TxExecutorAdapter` and the `LiveTradingPlannerBridge` for a sell-only
-Uniswap V2 trading-vault route. That runner refuses to start unless Kartal is in
-`dry_run`, so it proves the real executor boundary without broadcasting.
+`eth_alpha_live_trader --disable-entry` now instantiates `TxExecutorAdapter` and
+the `LiveTradingPlannerBridge` for a sell-only Uniswap V2 trading-vault route.
+That runner refuses to start unless Kartal is in `dry_run`, so it proves the
+real executor boundary without broadcasting. The no-capital live chain-sim
+runner is `eth_alpha_live_backtest_trader`; historical replay is
+`eth_alpha_backtest_trader`.
 
 Missing before a live strategy can use this crate for public real capital:
 
@@ -248,7 +250,7 @@ and public mempool broadcast.
 This crate is not enough to run real capital. Before real-capital deployment,
 the live strategy needs:
 
-- an explicit real execution mode in `eth_alpha_trader`;
+- the explicit `eth_alpha_live_trader` real execution entrypoint;
 - a production `LiveTxPlanningInputResolver` for priority sell intents;
 - live pre-submit simulation against the current state;
 - live gas-rank and base-fee inputs wired into `tx_prep`;

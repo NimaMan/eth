@@ -241,18 +241,6 @@ impl TraderExecutionMode {
     }
 }
 
-pub(super) fn normalize_execution_mode(mode: &str) -> Result<TraderExecutionMode> {
-    match mode.trim().to_ascii_lowercase().as_str() {
-        "chain-sim" | "chain_sim" | "chainsim" => Ok(TraderExecutionMode::ChainSim),
-        "kartal-real" | "kartal_real" | "real" | "live-real" | "live_real" => {
-            Ok(TraderExecutionMode::KartalReal)
-        }
-        other => Err(eyre!(
-            "unsupported execution mode {other:?}; expected chain-sim or kartal-real"
-        )),
-    }
-}
-
 fn shared_config_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")

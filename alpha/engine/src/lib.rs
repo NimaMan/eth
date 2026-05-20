@@ -7,6 +7,7 @@
 //! `tx_executor` adapter.
 
 pub mod execution;
+pub mod live_trader;
 pub mod wire;
 
 mod decision_persistence;

@@ -56,6 +56,13 @@ pub struct StrategyObservationRecord {
     pub payload: Value,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveHoldCounterRecord {
+    pub position_id: PositionId,
+    pub count: u64,
+    pub last_block: Option<u64>,
+}
+
 #[async_trait]
 impl TradingStore for PostgresTradingStore {
     async fn upsert_position(&self, position: &Position) -> Result<()> {

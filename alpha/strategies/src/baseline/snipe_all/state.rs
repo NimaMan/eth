@@ -16,6 +16,21 @@ impl SnipeAllState {
         }
     }
 
+    pub fn with_bought_pools_and_active_hold_blocks(
+        pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+    ) -> Self {
+        Self {
+            bought_pools: pools.into_iter().collect(),
+            active_hold_blocks: active_hold_blocks
+                .into_iter()
+                .map(|(position_id, count, last_block)| {
+                    (position_id, ActiveHoldCounter { count, last_block })
+                })
+                .collect(),
+        }
+    }
+
     pub fn has_bought(&self, pool: &PoolAddress) -> bool {
         self.bought_pools.contains(pool)
     }
@@ -42,6 +57,13 @@ impl SnipeAllState {
             counter.last_block = Some(block_number);
         }
         counter.count
+    }
+
+    pub fn active_hold_block_count(&self, position_id: &PositionId) -> u64 {
+        self.active_hold_blocks
+            .get(position_id)
+            .map(|counter| counter.count)
+            .unwrap_or_default()
     }
 }
 

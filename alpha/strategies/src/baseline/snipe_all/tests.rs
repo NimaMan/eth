@@ -288,6 +288,92 @@ fn max_hold_counts_each_active_block_once() {
 }
 
 #[test]
+fn restored_active_hold_counter_triggers_max_hold_exit() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 101,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let mut portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let strategy_for_position = SnipeAllStrategy::new(SnipeAllConfig::default());
+    let position = confirmed_position(&strategy_for_position, &pool);
+    let position_id = position.id.clone();
+    portfolio.positions.insert(position.id.clone(), position);
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::with_restored_state(
+        SnipeAllConfig {
+            max_hold_blocks: Some(2),
+            ..SnipeAllConfig::default()
+        },
+        vec![pool.address.clone()],
+        vec![(position_id, 1, Some(100))],
+    );
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 101,
+                pool: pool.clone(),
+            },
+        )
+        .unwrap();
+
+    match decision {
+        StrategyDecision::SubmitOrder(intent)
+        | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
+            assert_eq!(intent.side, OrderSide::Sell);
+            assert_eq!(intent.pool_address, pool.address);
+        }
+        StrategyDecision::Hold
+        | StrategyDecision::HoldWithReason { .. }
+        | StrategyDecision::CancelOrders { .. } => {
+            panic!("expected restored counter to trigger sell")
+        }
+    }
+}
+
+#[test]
+fn position_monitor_exits_restored_active_hold_over_limit_without_pool_update() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 250,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: None,
+    };
+    let mut portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let strategy_for_position = SnipeAllStrategy::new(SnipeAllConfig::default());
+    let position = confirmed_position(&strategy_for_position, &pool);
+    let position_id = position.id.clone();
+    portfolio.positions.insert(position.id.clone(), position);
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::with_restored_state(
+        SnipeAllConfig {
+            max_hold_blocks: Some(12),
+            ..SnipeAllConfig::default()
+        },
+        vec![pool.address.clone()],
+        vec![(position_id, 12, Some(200))],
+    );
+
+    let decisions = strategy.on_position_monitor(&ctx, 250).unwrap();
+
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(
+        decisions[0].reason(),
+        Some("exit.max_hold_active_blocks_restored")
+    );
+    assert_eq!(decisions[0].order_intent().unwrap().side, OrderSide::Sell);
+}
+
+#[test]
 fn position_monitor_does_not_retry_failed_exit_every_block() {
     let pool = pool();
     let market = MarketSnapshotRef {
@@ -331,7 +417,7 @@ fn position_monitor_does_not_retry_failed_exit_every_block() {
 }
 
 #[test]
-fn market_event_does_not_retry_failed_exit_without_retry_policy() {
+fn market_event_does_not_retry_failed_exit() {
     let pool = pool();
     let market = MarketSnapshotRef {
         block_number: 250,
@@ -363,98 +449,8 @@ fn market_event_does_not_retry_failed_exit_without_retry_policy() {
     assert!(decision.is_hold());
     assert_eq!(
         decision.reason(),
-        Some("position_exit_waiting_for_retry_policy")
+        Some("position_exit_failed_no_strategy_retry")
     );
-}
-
-#[test]
-fn position_monitor_retries_failed_exit_after_configured_interval() {
-    let pool = pool();
-    let market = MarketSnapshotRef {
-        block_number: 227,
-        token_address: pool.token_address,
-        pool_address: Some(pool.address.clone()),
-        token: None,
-        pool: Some(pool.clone()),
-    };
-    let mut portfolio = PortfolioState::default();
-    let risks = Vec::new();
-    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-        exit_retry_interval_blocks: Some(25),
-        max_exit_retries: Some(3),
-        ..SnipeAllConfig::default()
-    });
-    let position = failed_exit_position(&strategy, &pool);
-    portfolio.positions.insert(position.id.clone(), position);
-    let ctx = ctx(&market, &portfolio, &risks);
-
-    let decisions = strategy.on_position_monitor(&ctx, 227).unwrap();
-
-    assert_eq!(decisions.len(), 1);
-    match &decisions[0] {
-        StrategyDecision::SubmitOrder(intent)
-        | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
-            assert_eq!(intent.side, OrderSide::Sell);
-            assert_eq!(intent.pool_address, pool.address);
-        }
-        StrategyDecision::Hold
-        | StrategyDecision::HoldWithReason { .. }
-        | StrategyDecision::CancelOrders { .. } => {
-            panic!("expected retry sell order")
-        }
-    }
-}
-
-#[test]
-fn position_monitor_waits_for_failed_exit_retry_interval() {
-    let pool = pool();
-    let market = MarketSnapshotRef {
-        block_number: 226,
-        token_address: pool.token_address,
-        pool_address: Some(pool.address.clone()),
-        token: None,
-        pool: Some(pool.clone()),
-    };
-    let mut portfolio = PortfolioState::default();
-    let risks = Vec::new();
-    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-        exit_retry_interval_blocks: Some(25),
-        max_exit_retries: Some(3),
-        ..SnipeAllConfig::default()
-    });
-    let position = failed_exit_position(&strategy, &pool);
-    portfolio.positions.insert(position.id.clone(), position);
-    let ctx = ctx(&market, &portfolio, &risks);
-
-    let decisions = strategy.on_position_monitor(&ctx, 226).unwrap();
-
-    assert!(decisions.is_empty());
-}
-
-#[test]
-fn position_monitor_respects_max_failed_exit_retries() {
-    let pool = pool();
-    let market = MarketSnapshotRef {
-        block_number: 300,
-        token_address: pool.token_address,
-        pool_address: Some(pool.address.clone()),
-        token: None,
-        pool: Some(pool.clone()),
-    };
-    let mut portfolio = PortfolioState::default();
-    let risks = Vec::new();
-    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-        exit_retry_interval_blocks: Some(25),
-        max_exit_retries: Some(1),
-        ..SnipeAllConfig::default()
-    });
-    let position = failed_exit_position(&strategy, &pool);
-    portfolio.positions.insert(position.id.clone(), position);
-    let ctx = ctx(&market, &portfolio, &risks);
-
-    let decisions = strategy.on_position_monitor(&ctx, 300).unwrap();
-
-    assert!(decisions.is_empty());
 }
 
 #[test]

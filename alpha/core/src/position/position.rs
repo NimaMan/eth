@@ -212,8 +212,12 @@ impl Position {
             && self.state == PositionState::SellSubmitted
         {
             self.state = PositionState::SellCancelled;
-            self.exit_failure_reason = None;
-            self.exit_retryable = true;
+            self.exit_failure_reason = report.error.clone();
+            self.exit_retryable = report
+                .error
+                .as_deref()
+                .map(is_retryable_exit_failure)
+                .unwrap_or(true);
             return Ok(());
         }
 
@@ -307,6 +311,7 @@ fn is_retryable_exit_failure(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     !(normalized.contains("unsupported balance storage layout")
         || normalized.contains("unable to inject synthetic erc20 balance"))
+        && !normalized.contains("uneconomic sell")
 }
 
 /// Convert an Amount (U256 raw + decimals) to a DecimalAmount.

@@ -1,7 +1,7 @@
 //! HTTP wire types for the token server API and observation payloads.
 //!
 //! These types mirror the JSON responses from `eth_chain_server` and are used
-//! by both the live trader (`eth_alpha_trader`) and the backtest replay logic
+//! by the live trader entrypoints and the backtest replay logic
 //! to convert wire representations into `eth_alpha_core` domain types.
 
 use std::str::FromStr;
@@ -15,6 +15,7 @@ use eth_alpha_core::{
 use eyre::{eyre, Result};
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LiveStatusResponse {
@@ -107,7 +108,13 @@ pub struct MempoolSignalWire {
     pub token_address: Option<String>,
     pub pool_address: Option<String>,
     pub headline: Option<String>,
+    #[serde(default)]
+    pub value_1: Option<String>,
+    #[serde(default)]
+    pub value_2: Option<String>,
     pub flag: Option<String>,
+    #[serde(default)]
+    pub payload: Value,
 }
 
 impl PoolWire {
@@ -283,11 +290,54 @@ impl MempoolSignalWire {
     }
 
     pub fn message(&self) -> String {
-        match (&self.detection_timestamp, &self.headline) {
+        let base = match (&self.detection_timestamp, &self.headline) {
             (Some(ts), Some(headline)) => format!("{headline} at {ts}"),
             (Some(ts), None) => format!("{} at {ts}", self.signal_type),
             (None, Some(headline)) => headline.clone(),
             (None, None) => self.signal_type.clone(),
+        };
+
+        if self.is_lp_approval_signal() {
+            if let Some(approved_pct) = self.lp_approval_pct() {
+                return format!("{base} approved_pct={approved_pct}%");
+            }
+        }
+
+        base
+    }
+
+    fn is_lp_approval_signal(&self) -> bool {
+        matches!(
+            self.signal_type.as_str(),
+            "lp_approval" | "lp_position_approval"
+        )
+    }
+
+    fn lp_approval_pct(&self) -> Option<String> {
+        [
+            "approved_share_pct",
+            "approval_percentage",
+            "position_share_pct",
+        ]
+        .into_iter()
+        .find_map(|key| Self::pct_from_json(self.payload.get(key)))
+        .or_else(|| {
+            self.value_1
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+    }
+
+    fn pct_from_json(value: Option<&Value>) -> Option<String> {
+        match value? {
+            Value::Number(number) => Some(number.to_string()),
+            Value::String(text) => {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            _ => None,
         }
     }
 }
@@ -502,7 +552,10 @@ mod tests {
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
             pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
             headline: None,
+            value_1: None,
+            value_2: None,
             flag: Some("true".to_string()),
+            payload: Value::Null,
         };
 
         let event = signal
@@ -513,5 +566,29 @@ mod tests {
         assert_eq!(event.kind, RiskKind::LpApproval);
         assert_eq!(event.severity, RiskSeverity::Critical);
         assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
+    }
+
+    #[test]
+    fn lp_position_approval_message_includes_approved_pct_from_payload() {
+        let signal = MempoolSignalWire {
+            signal_id: "1".to_string(),
+            signal_type: "lp_position_approval".to_string(),
+            detection_timestamp: Some("2026-05-19 08:59:54+00".to_string()),
+            detection_tx_hash: None,
+            token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            headline: Some("LP position approval".to_string()),
+            value_1: None,
+            value_2: None,
+            flag: Some("true".to_string()),
+            payload: serde_json::json!({ "approved_share_pct": 100.0 }),
+        };
+
+        let event = signal
+            .to_risk_event()
+            .expect("risk event")
+            .expect("non-empty event");
+
+        assert!(event.message.contains("approved_pct=100.0%"));
     }
 }

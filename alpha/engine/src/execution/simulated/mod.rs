@@ -5,7 +5,7 @@
 //! | Adapter | Use Case | Block Source |
 //! |---------|----------|-------------|
 //! | `ChainSimExecutionAdapter` | Historical backtest | Manually-set `current_block` |
-//! | `LiveChainSimExecutionAdapter` | Live no-capital trading | `LiveTxSimulator::latest_state_block_number()` |
+//! | `LiveChainSimExecutionAdapter` | Live no-capital trading | Observed event block, gated by live chain state |
 //!
 //! Both run the actual swap calldata through the EVM so that token taxes, max
 //! transaction limits, and other contract-level behaviour are captured from
@@ -133,6 +133,7 @@ async fn simulate_sell_at_block(
     pool: &PoolSnapshot,
     block: u64,
     _portfolio: &Arc<Mutex<PortfolioState>>,
+    skip_uneconomic_sell: bool,
 ) -> Result<ExecutionReport> {
     // intent.amount is the token quantity to sell (raw U256 scaled by token decimals).
     let tokens_to_sell = intent.amount.raw;
@@ -199,6 +200,20 @@ async fn simulate_sell_at_block(
         raw: result.denom_received,
         decimals: denom_decimals,
     };
+
+    if skip_uneconomic_sell
+        && pool_has_eth_like_denom(pool)
+        && result.denom_received <= result.gas_cost
+    {
+        return Ok(cancelled_report_at(
+            order_id,
+            format!(
+                "uneconomic sell: simulated WETH proceeds {} wei <= gas cost {} wei",
+                result.denom_received, result.gas_cost
+            ),
+            block,
+        ));
+    }
 
     Ok(ExecutionReport {
         order_id,
@@ -339,6 +354,7 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
                     &pool,
                     execution_block,
                     &self.portfolio,
+                    true,
                 )
                 .await
             }
@@ -367,6 +383,7 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
             pool,
             block,
             &self.portfolio,
+            false,
         )
         .await?;
         Ok(position_value_from_report(report, block))
@@ -538,6 +555,7 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
                     &pool,
                     block,
                     &self.portfolio,
+                    true,
                 )
                 .await
             }
@@ -552,12 +570,19 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
         let Some(intent) = sell_intent_for_position(position) else {
             return Ok(None);
         };
-        let block = match self.live_sim.latest_state_block_number().await {
+        let observed_block = self.current_block.load(Ordering::Relaxed);
+        let observed_block = if observed_block > 0 {
+            observed_block
+        } else {
+            pool.latest_block
+        };
+        let block = match self.wait_for_execution_block(observed_block).await {
             Ok(block) => block,
             Err(error) => {
                 tracing::warn!(
                     error = %error,
-                    "chain-sim position valuation skipped because no live state block is available"
+                    observed_block,
+                    "chain-sim position valuation skipped because required state block is unavailable"
                 );
                 return Ok(None);
             }
@@ -573,6 +598,7 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
             pool,
             block,
             &self.portfolio,
+            false,
         )
         .await?;
         Ok(position_value_from_report(report, block))
@@ -659,6 +685,21 @@ async fn denom_decimals(
     query_erc20_decimals(simulator, denom_address, block).await
 }
 
+fn pool_has_eth_like_denom(pool: &PoolSnapshot) -> bool {
+    if matches!(pool.denom_address, Some(address) if address.is_zero() || address == WETH_ADDRESS) {
+        return true;
+    }
+
+    pool.denom_symbol
+        .as_deref()
+        .map(str::trim)
+        .map(|symbol| {
+            let symbol = symbol.to_ascii_uppercase();
+            symbol == "ETH" || symbol == "WETH"
+        })
+        .unwrap_or(false)
+}
+
 async fn query_erc20_decimals(
     simulator: &Arc<TxSimulator>,
     token_address: Address,
@@ -690,6 +731,24 @@ fn failed_report(order_id: OrderId, reason: impl Into<String>) -> ExecutionRepor
 
 fn failed_report_at(order_id: OrderId, reason: impl Into<String>, block: u64) -> ExecutionReport {
     failed_report_with_block(order_id, reason, Some(block))
+}
+
+fn cancelled_report_at(
+    order_id: OrderId,
+    reason: impl Into<String>,
+    block: u64,
+) -> ExecutionReport {
+    ExecutionReport {
+        order_id,
+        status: ExecutionStatus::Cancelled,
+        tx_hash: None,
+        block_number: Some(block),
+        filled_amount: None,
+        token_amount: None,
+        gas_used: None,
+        gas_cost: None,
+        error: Some(reason.into()),
+    }
 }
 
 fn failed_report_at_with_gas(
@@ -741,6 +800,7 @@ fn sell_intent_for_position(position: &Position) -> Option<OrderIntent> {
         route: None,
         max_slippage_bps: 0,
         deadline_secs: 0,
+        decision_reason: None,
     })
 }
 

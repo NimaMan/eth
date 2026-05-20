@@ -6,7 +6,7 @@ strategy evaluation and backtests.
 ## Behavior
 
 - Builds swap calldata from each `OrderIntent`.
-- Simulates the transaction against selected Reth/Redis chain state.
+- Simulates the transaction against selected Reth or direct live chain state.
 - Records buy token amounts from simulated token balance deltas.
 - Records sell proceeds from simulated denom balance deltas.
 - Records gas used and simulated gas cost from execution transactions so
@@ -22,5 +22,5 @@ adapter.
 - `ChainSimExecutionAdapter`: historical replay/backtest; the runner sets the
   block before each event.
 - `LiveChainSimExecutionAdapter`: live no-capital trading; the adapter selects
-  the latest usable state from local Reth historical context or Redis tracked
+  the latest usable state from local Reth historical context or direct tracked
   live state.

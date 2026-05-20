@@ -1,5 +1,6 @@
 use crate::{
     amount::Amount,
+    decision_rationale::DecisionReason,
     ids::{PoolAddress, PortfolioId, StrategyName, TokenAddress, TradeId, WalletId},
     market::PoolProtocol,
     order::RouteHint,
@@ -28,4 +29,6 @@ pub struct OrderIntent {
     pub route: Option<RouteHint>,
     pub max_slippage_bps: u32,
     pub deadline_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_reason: Option<DecisionReason>,
 }

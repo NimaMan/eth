@@ -25,17 +25,28 @@ PostgreSQL persistence for the alpha runtime. This crate is infrastructure: it i
 read `ALPHA_DATABASE_URL` from the shared `blockchains/eth/config.env` file.
 There is no `MEMPOOL_DATABASE_URL` fallback for alpha state.
 
+`eth_alpha_store` owns the `alpha_trading` migrations embedded in
+`src/lib.rs`. `alpha/lab` may add lab-only validation tables in the same schema,
+but it must document those additions here.
+
 Rows are tagged by `run_id`, so multiple chain-sim/live/replay runs can coexist:
 
-```text
-alpha_trading.trader_runs
-alpha_trading.order_intents
-alpha_trading.execution_reports
-alpha_trading.positions
-alpha_trading.position_snapshots
-alpha_trading.risk_events
-alpha_trading.strategy_observations
-```
+| Table | Purpose |
+| --- | --- |
+| `alpha_trading.trader_runs` | One durable row per live, chain-sim, replay, or backtest run; stores mode/status/config/metadata and heartbeat timestamps. |
+| `alpha_trading.order_intents` | Strategy order intents before execution, including portfolio/wallet, side, token/pool/protocol, amount/slippage/deadline, reason fields, and full payload. |
+| `alpha_trading.execution_reports` | Execution lifecycle reports keyed by order/run, including status, tx hash, block, fill, gas, error, and payload. |
+| `alpha_trading.positions` | Current position state per run/position, including trade id, token/pool/protocol, entry/exit orders, entry/exit blocks, and full payload. |
+| `alpha_trading.position_snapshots` | Mark-to-market position snapshots with block coordinates, current value, realized/unrealized profit, ROI, and payload. |
+| `alpha_trading.backtest_result_sets` | Named strategy/backtest result suites with mode/status/range/config/metadata. |
+| `alpha_trading.backtest_result_set_runs` | Join table linking result sets to the run ids that produced them. |
+| `alpha_trading.trades` | Trade-level rollup rows for result sets, including entry/exit/current value, realized/unrealized/total PnL, gas, ROI, latest snapshot blocks, and payload. |
+| `alpha_trading.trade_events` | Trade execution event stream tied to `trades`, including order side/status, tx hash, block, fill, gas, error, and payload. |
+| `alpha_trading.trade_snapshots` | Trade mark-to-market snapshots with pool price/liquidity context and PnL fields. |
+| `alpha_trading.risk_events` | Strategy/run risk events with kind/severity, token/pool, optional pending tx, observed block, message, and payload. |
+| `alpha_trading.strategy_decisions` | Auditable strategy decisions with event source/key, block, token/pool, action, reason fields, order side, and payload. |
+| `alpha_trading.strategy_observations` | Restart-safe strategy input/watermark log for live pool updates, mempool signals, priming/submission decisions, and observed payloads. |
+| `alpha_trading.strategy_validation_reports` | Lab-owned validation reports for persisted strategy result sets. Created by `alpha/lab` when validation runs are saved. |
 
 The dashboard should read these tables or API endpoints backed by these tables. It should not reconstruct positions from journal logs.
 

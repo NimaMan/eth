@@ -2,7 +2,8 @@
 
 Planned crate: `eth_alpha_core`
 
-This crate owns the pure trading domain. It should compile without Redis, PostgreSQL, ZMQ, RPC clients, `tx_executor`, or service orchestration.
+This crate owns the pure trading domain. It should compile without external
+stores, ZMQ, RPC clients, `tx_executor`, or service orchestration.
 
 ## Responsibilities
 
@@ -34,7 +35,7 @@ This crate owns the pure trading domain. It should compile without Redis, Postgr
 - No mempool polling.
 - No direct transaction signing or broadcasting.
 - No database-specific SQL.
-- No Redis key ownership.
+- No external store key ownership.
 - No strategy implementations except tiny test fixtures.
 
 ## Important Boundary

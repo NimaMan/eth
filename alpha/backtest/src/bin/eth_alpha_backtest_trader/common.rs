@@ -81,22 +81,13 @@ struct Args {
     #[arg(long)]
     max_hold_blocks: Option<u64>,
 
-    /// Retry failed exits after this many blocks. Disabled by default.
-    #[arg(long)]
-    exit_retry_interval_blocks: Option<u64>,
-
-    /// Maximum failed exit reports before retry stops. Requires retry interval to matter.
-    #[arg(long)]
-    max_exit_retries: Option<u32>,
-
     /// Blocks between signal observation/submission and simulated confirmation.
     /// Default 1 means observe N, submit at N, fill against post-block N+1 state.
     #[arg(long, default_value_t = 1)]
     execution_delay_blocks: u64,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+pub async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -116,8 +107,6 @@ async fn main() -> Result<()> {
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: args.max_hold_blocks,
-        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-        max_exit_retries: args.max_exit_retries,
     };
     let strategy_specs = build_strategy_specs(&strategy_options)?;
     if !args.replay_run_id.starts_with("risk-atlas-") {
@@ -162,8 +151,6 @@ async fn main() -> Result<()> {
                 "stop_loss_ratio": args.stop_loss_ratio.clone(),
                 "take_profit_ratio": args.take_profit_ratio.clone(),
                 "max_hold_blocks": args.max_hold_blocks,
-                "exit_retry_interval_blocks": args.exit_retry_interval_blocks,
-                "max_exit_retries": args.max_exit_retries,
                 "execution_delay_blocks": args.execution_delay_blocks,
                 "historical_signal_risk_events": include_historical_signal_risk_events,
                 "risk_atlas_loader_allowed_protocols": risk_atlas_loader_allowed_protocols.clone(),

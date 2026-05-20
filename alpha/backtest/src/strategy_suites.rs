@@ -10,8 +10,6 @@ pub struct StrategySuiteOptions {
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
-    pub exit_retry_interval_blocks: Option<u64>,
-    pub max_exit_retries: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,8 +29,6 @@ pub struct BacktestStrategySpec {
     pub(crate) stop_loss_ratio: Option<String>,
     pub(crate) take_profit_ratio: Option<String>,
     pub(crate) max_hold_blocks: Option<u64>,
-    pub(crate) exit_retry_interval_blocks: Option<u64>,
-    pub(crate) max_exit_retries: Option<u32>,
 }
 
 impl BacktestStrategySpec {
@@ -53,8 +49,6 @@ impl BacktestStrategySpec {
             "stop_loss_ratio": self.stop_loss_ratio,
             "take_profit_ratio": self.take_profit_ratio,
             "max_hold_blocks": self.max_hold_blocks,
-            "exit_retry_interval_blocks": self.exit_retry_interval_blocks,
-            "max_exit_retries": self.max_exit_retries,
         })
     }
 
@@ -119,8 +113,6 @@ pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestS
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: args.max_hold_blocks,
-        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-        max_exit_retries: args.max_exit_retries,
     }])
 }
 
@@ -145,8 +137,6 @@ fn historical_pool_update_hold_suite_specs(
             stop_loss_ratio: args.stop_loss_ratio.clone(),
             take_profit_ratio: args.take_profit_ratio.clone(),
             max_hold_blocks: Some(max_hold_blocks),
-            exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-            max_exit_retries: args.max_exit_retries,
         })
         .collect()
 }
@@ -363,12 +353,6 @@ fn alpha_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestS
         Some("3.0"),
         args,
     );
-    let mut retry =
-        risk_atlas_uniswap_v2_only_spec("alpha10-10-v2-hold15-retry3", true, true, Some(15), args);
-    retry.defer_buy_confirm_block_lp_approval_to_max_hold = true;
-    retry.exit_retry_interval_blocks = Some(1);
-    retry.max_exit_retries = Some(3);
-
     vec![
         baseline,
         v2_baseline,
@@ -379,24 +363,26 @@ fn alpha_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestS
         tp5,
         sl70_tp3,
         sl85_tp3,
-        retry,
     ]
 }
 
 fn alpha_10_risk_atlas_leader_spec(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
-    let mut retry =
-        risk_atlas_uniswap_v2_only_spec("alpha10-10-v2-hold15-retry3", true, true, Some(15), args);
-    retry.defer_buy_confirm_block_lp_approval_to_max_hold = true;
-    retry.exit_retry_interval_blocks = Some(1);
-    retry.max_exit_retries = Some(3);
-    vec![retry]
+    let mut leader = risk_atlas_uniswap_v2_only_spec(
+        "alpha10-02-v2-hold15-buy-confirm",
+        true,
+        true,
+        Some(15),
+        args,
+    );
+    leader.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+    vec![leader]
 }
 
 fn alpha_11_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
     vec![
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-01-v2-hold12-retry3-gasguard", 12, args),
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-02-v2-hold15-retry3-gasguard", 15, args),
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-03-v2-hold20-retry3-gasguard", 20, args),
+        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-01-v2-hold12-gasguard", 12, args),
+        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-02-v2-hold15-gasguard", 15, args),
+        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-03-v2-hold20-gasguard", 20, args),
     ]
 }
 
@@ -408,9 +394,9 @@ fn alpha_11_v2_buy_confirm_gas_guard_spec(
     let mut spec =
         risk_atlas_uniswap_v2_only_spec(strategy_name, true, true, Some(max_hold_blocks), args);
     spec.defer_buy_confirm_block_lp_approval_to_max_hold = true;
-    spec.exit_retry_interval_blocks = Some(1);
-    spec.max_exit_retries = Some(3);
     spec.min_sell_pool_denom_reserve = Some("0".to_string());
+    spec.exit_on_tax = true;
+    spec.exit_on_scam = true;
     spec
 }
 
@@ -429,8 +415,6 @@ fn gamma_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestS
     let hold12 = gamma_10_v2_buy_confirm_spec("gamma10-05-v2-hold12-buy-confirm", 12, args);
     let hold15 = gamma_10_v2_buy_confirm_spec("gamma10-06-v2-hold15-buy-confirm", 15, args);
     let hold20 = gamma_10_v2_buy_confirm_spec("gamma10-07-v2-hold20-buy-confirm", 20, args);
-    let hold12_retry = gamma_10_v2_buy_confirm_retry_spec("gamma10-08-v2-hold12-retry3", 12, args);
-    let hold15_retry = gamma_10_v2_buy_confirm_retry_spec("gamma10-09-v2-hold15-retry3", 15, args);
     let stop_loss_take_profit = gamma_10_v2_buy_confirm_price_spec(
         "gamma10-10-v2-hold15-sl85-tp5x",
         15,
@@ -447,15 +431,13 @@ fn gamma_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestS
         hold12,
         hold15,
         hold20,
-        hold12_retry,
-        hold15_retry,
         stop_loss_take_profit,
     ]
 }
 
 fn gamma_10_risk_atlas_leader_spec(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
-    vec![gamma_10_v2_buy_confirm_retry_spec(
-        "gamma10-09-v2-hold15-retry3",
+    vec![gamma_10_v2_buy_confirm_spec(
+        "gamma10-06-v2-hold15-buy-confirm",
         15,
         args,
     )]
@@ -469,17 +451,6 @@ fn gamma_10_v2_buy_confirm_spec(
     let mut spec =
         risk_atlas_uniswap_v2_only_spec(strategy_name, true, true, Some(max_hold_blocks), args);
     spec.defer_buy_confirm_block_lp_approval_to_max_hold = true;
-    spec
-}
-
-fn gamma_10_v2_buy_confirm_retry_spec(
-    strategy_name: &str,
-    max_hold_blocks: u64,
-    args: &StrategySuiteOptions,
-) -> BacktestStrategySpec {
-    let mut spec = gamma_10_v2_buy_confirm_spec(strategy_name, max_hold_blocks, args);
-    spec.exit_retry_interval_blocks = Some(1);
-    spec.max_exit_retries = Some(3);
     spec
 }
 
@@ -526,8 +497,6 @@ fn risk_atlas_spec(
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks,
-        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-        max_exit_retries: args.max_exit_retries,
     }
 }
 
@@ -603,8 +572,6 @@ fn historical_mempool_aware_lp_approval_warning_exit_spec(
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: None,
-        exit_retry_interval_blocks: args.exit_retry_interval_blocks,
-        max_exit_retries: args.max_exit_retries,
     }
 }
 

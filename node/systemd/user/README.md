@@ -5,8 +5,8 @@ broadcast capability.
 
 | Unit | Purpose | Broadcast capability |
 | --- | --- | --- |
-| `eth-alpha-trader.service` | Live no-capital alpha runner using `--mode chain-sim`. | None; never contacts Kartal. |
-| `eth-alpha-real-trader.service` | Live real-executor runner using `--mode kartal-real --disable-entry`. | Kartal dry-run only; the binary refuses non-dry-run Kartal status. |
+| `eth-alpha-trader.service` | Live no-capital alpha runner using `eth_alpha_live_backtest_trader`. | None; never contacts Kartal. |
+| `eth-alpha-real-trader.service` | Live real-executor runner using `eth_alpha_live_trader --disable-entry`. | Kartal dry-run only; the binary refuses non-dry-run Kartal status. |
 | `eth-live-pipeline.target` | Chain server, mempool signal detector, and chain-sim alpha runner. | None. |
 | `eth-real-trading.target` | Chain server, mempool signal detector, and real-executor alpha runner. | Dry-run until the code and Kartal policy are deliberately changed. |
 

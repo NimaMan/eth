@@ -93,10 +93,12 @@ impl PostgresTradingStore {
                     WHEN alpha_trading.backtest_result_sets.status = 'running' THEN 'running'
                     ELSE EXCLUDED.status
                 END,
+                stopped_at = NULL,
                 strategy_suite = COALESCE(EXCLUDED.strategy_suite, alpha_trading.backtest_result_sets.strategy_suite),
                 start_block = COALESCE(EXCLUDED.start_block, alpha_trading.backtest_result_sets.start_block),
                 end_block = COALESCE(EXCLUDED.end_block, alpha_trading.backtest_result_sets.end_block),
                 config = alpha_trading.backtest_result_sets.config || EXCLUDED.config,
+                metadata = alpha_trading.backtest_result_sets.metadata - 'reason',
                 updated_at = NOW()
             "#,
         )
@@ -149,7 +151,7 @@ impl PostgresTradingStore {
         sqlx::query(
             r#"
             UPDATE alpha_trading.trader_runs
-            SET last_heartbeat_at = NOW(), status = 'running', metadata = $2
+            SET last_heartbeat_at = NOW(), status = 'running', stopped_at = NULL, metadata = $2
             WHERE run_id = $1
             "#,
         )
@@ -162,7 +164,8 @@ impl PostgresTradingStore {
             r#"
             UPDATE alpha_trading.backtest_result_sets rs
             SET status = 'running',
-                metadata = rs.metadata || $2,
+                stopped_at = NULL,
+                metadata = (rs.metadata - 'reason') || $2,
                 updated_at = NOW()
             FROM alpha_trading.backtest_result_set_runs runs
             WHERE runs.result_set_id = rs.result_set_id
@@ -316,6 +319,67 @@ impl PostgresTradingStore {
                 }
                 normalize_position_pool_id(&mut position);
                 Ok(position)
+            })
+            .collect()
+    }
+
+    pub async fn load_active_hold_counters(
+        &self,
+        strategy_name: &str,
+    ) -> Result<Vec<ActiveHoldCounterRecord>> {
+        let rows = sqlx::query(
+            r#"
+            WITH active_positions AS (
+                SELECT position_id, token_address, pool_address, entry_block
+                FROM alpha_trading.positions
+                WHERE run_id = $1
+                  AND strategy_name = $2
+                  AND state = 'buy_confirmed'
+                  AND entry_block IS NOT NULL
+            )
+            SELECT p.position_id,
+                   count(DISTINCT sd.block_number) FILTER (
+                       WHERE sd.reason = 'position_open_no_exit'
+                         AND sd.action = 'hold'
+                         AND sd.block_number IS NOT NULL
+                   ) AS active_hold_blocks,
+                   max(sd.block_number) FILTER (
+                       WHERE sd.reason = 'position_open_no_exit'
+                         AND sd.action = 'hold'
+                   ) AS last_active_hold_block
+            FROM active_positions p
+            LEFT JOIN alpha_trading.strategy_decisions sd
+              ON sd.run_id = $1
+             AND sd.strategy_name = $2
+             AND lower(sd.token_address) = lower(p.token_address)
+             AND lower(sd.pool_address) = lower(p.pool_address)
+             AND sd.block_number >= p.entry_block
+            GROUP BY p.position_id
+            ORDER BY p.position_id
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let count = row
+                    .try_get::<i64, _>("active_hold_blocks")
+                    .map_err(store_error)?;
+                Ok(ActiveHoldCounterRecord {
+                    position_id: PositionId(
+                        row.try_get::<String, _>("position_id")
+                            .map_err(store_error)?,
+                    ),
+                    count: i64_to_u64(count).unwrap_or_default(),
+                    last_block: row
+                        .try_get::<Option<i64>, _>("last_active_hold_block")
+                        .map_err(store_error)?
+                        .and_then(i64_to_u64),
+                })
             })
             .collect()
     }

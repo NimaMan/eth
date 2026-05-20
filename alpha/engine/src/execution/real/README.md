@@ -44,9 +44,10 @@ visible in the same store path as simulator failures.
 
 ## Current Status
 
-This adapter is a tested boundary, not yet the path used by the running trader.
-`eth_alpha_trader` still selects `LiveChainSimExecutionAdapter`, and its mode
-parser rejects anything except `chain-sim`.
+This adapter is a tested boundary used by the guarded real live entrypoint.
+`eth_alpha_live_trader` selects `TxExecutorAdapter` through
+`LiveTradingPlannerBridge`; `eth_alpha_live_backtest_trader` selects
+`LiveChainSimExecutionAdapter` and has no Kartal path.
 
 The engine now has `LiveTradingPlannerBridge` and
 `LiveTxPlanningInputResolver`. The bridge calls `alpha/live/trading`'
@@ -54,10 +55,10 @@ The engine now has `LiveTradingPlannerBridge` and
 is the production hook that must load the matched position, latest pool snapshot,
 wallet tx context, observation metadata, and deadline/min-out inputs.
 
-The remaining production pieces are the guarded trader mode, a real resolver,
-live simulation/gas-rank/allowance providers, and receipt reconciliation. Route
-discovery, calldata construction, slippage, gas-rank policy, and value-capped
-bribe logic must stay outside the engine in `alpha/live/trading`.
+The remaining production pieces are production-grade live simulation,
+gas-rank/allowance providers, buy-route support, and receipt reconciliation.
+Route discovery, calldata construction, slippage, gas-rank policy, and
+value-capped bribe logic must stay outside the engine in `alpha/live/trading`.
 
 ## Responsibilities
 

@@ -13,8 +13,6 @@ pub struct LiveStrategySpecOptions {
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
-    pub exit_retry_interval_blocks: Option<u64>,
-    pub max_exit_retries: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -35,8 +33,6 @@ pub struct LiveStrategySpec {
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
-    pub exit_retry_interval_blocks: Option<u64>,
-    pub max_exit_retries: Option<u32>,
 }
 
 pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
@@ -57,8 +53,6 @@ pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: options.max_hold_blocks,
-        exit_retry_interval_blocks: options.exit_retry_interval_blocks,
-        max_exit_retries: options.max_exit_retries,
     }
 }
 
@@ -118,8 +112,6 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: options.exit_retry_interval_blocks,
-                    max_exit_retries: options.max_exit_retries,
                 },
                 LiveStrategySpec {
                     strategy_name: format!(
@@ -142,8 +134,6 @@ fn liquidity_removal_exit_specs(options: &LiveStrategySpecOptions) -> Vec<LiveSt
                     stop_loss_ratio: options.stop_loss_ratio.clone(),
                     take_profit_ratio: options.take_profit_ratio.clone(),
                     max_hold_blocks: Some(max_hold_blocks),
-                    exit_retry_interval_blocks: options.exit_retry_interval_blocks,
-                    max_exit_retries: options.max_exit_retries,
                 },
             ]
         })
@@ -170,8 +160,6 @@ fn lp_approval_warning_exit_spec(options: &LiveStrategySpecOptions) -> LiveStrat
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: None,
-        exit_retry_interval_blocks: options.exit_retry_interval_blocks,
-        max_exit_retries: options.max_exit_retries,
     }
 }
 
@@ -197,8 +185,6 @@ fn risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: Some(15),
-        exit_retry_interval_blocks: options.exit_retry_interval_blocks,
-        max_exit_retries: options.max_exit_retries,
     }
 }
 
@@ -220,16 +206,14 @@ fn alpha11_live_gasguard_hold_spec(
     options: &LiveStrategySpecOptions,
 ) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!(
-            "alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}-retry3-gasguard"
-        ),
+        strategy_name: format!("alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}-gasguard"),
         strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks} retry3 gasguard"),
+        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks} gasguard"),
         exit_liquidity_removal: true,
-        exit_tax: false,
+        exit_tax: true,
         exit_lp_approval: true,
         exit_lp_approval_critical_only: false,
-        exit_scam: false,
+        exit_scam: true,
         allowed_protocols: vec!["UNISWAP-V2".to_string()],
         block_entry_on_lp_approval: true,
         lp_approval_gate_min_pct: Some(
@@ -240,8 +224,6 @@ fn alpha11_live_gasguard_hold_spec(
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: Some(max_hold_blocks),
-        exit_retry_interval_blocks: Some(1),
-        max_exit_retries: Some(3),
     }
 }
 
@@ -344,8 +326,8 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| !spec.exit_lp_approval_critical_only));
-        assert!(specs.iter().all(|spec| !spec.exit_tax));
-        assert!(specs.iter().all(|spec| !spec.exit_scam));
+        assert!(specs.iter().all(|spec| spec.exit_tax));
+        assert!(specs.iter().all(|spec| spec.exit_scam));
         assert!(specs.iter().all(|spec| spec.block_entry_on_lp_approval));
         assert!(specs
             .iter()
@@ -356,10 +338,6 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.min_sell_pool_denom_reserve.as_deref() == Some("0")));
-        assert!(specs
-            .iter()
-            .all(|spec| spec.exit_retry_interval_blocks == Some(1)));
-        assert!(specs.iter().all(|spec| spec.max_exit_retries == Some(3)));
         assert!(specs
             .iter()
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));

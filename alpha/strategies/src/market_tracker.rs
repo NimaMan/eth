@@ -76,7 +76,9 @@ impl MarketTrackerStrategy {
 
     fn decision_for_pool(&mut self, pool: &PoolSnapshot) -> Result<StrategyDecision> {
         if self.submitted_pools.contains(&pool.address) {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold(
+                "entry.market_tracker.pool_already_submitted",
+            ));
         }
 
         // Shared eligibility gate: reject ineligible pools first.
@@ -84,7 +86,9 @@ impl MarketTrackerStrategy {
         use crate::shared_rules;
         match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
         {
-            RuleDecision::Hold { .. } => return Ok(StrategyDecision::Hold),
+            RuleDecision::Hold { rule, reason } => {
+                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+            }
             _ => {}
         }
 
@@ -102,20 +106,24 @@ impl MarketTrackerStrategy {
         protocol: PoolProtocol,
     ) -> Result<StrategyDecision> {
         self.submitted_pools.insert(pool_address.clone());
-        Ok(StrategyDecision::SubmitOrder(OrderIntent {
-            trade_id: None,
-            portfolio_id: self.config.portfolio_id.clone(),
-            wallet_id: self.config.wallet_id.clone(),
-            strategy_name: self.name(),
-            side: OrderSide::Buy,
-            token_address,
-            pool_address,
-            protocol,
-            amount: self.config.buy_amount.clone(),
-            route: None,
-            max_slippage_bps: self.config.max_slippage_bps,
-            deadline_secs: self.config.deadline_secs,
-        }))
+        Ok(StrategyDecision::submit_order(
+            OrderIntent {
+                trade_id: None,
+                portfolio_id: self.config.portfolio_id.clone(),
+                wallet_id: self.config.wallet_id.clone(),
+                strategy_name: self.name(),
+                side: OrderSide::Buy,
+                token_address,
+                pool_address,
+                protocol,
+                amount: self.config.buy_amount.clone(),
+                route: None,
+                max_slippage_bps: self.config.max_slippage_bps,
+                deadline_secs: self.config.deadline_secs,
+                decision_reason: None,
+            },
+            "entry.market_tracker.eligible_pool",
+        ))
     }
 
     fn has_blocking_risk(
@@ -147,10 +155,10 @@ impl Strategy for MarketTrackerStrategy {
         event: &MarketEvent,
     ) -> Result<StrategyDecision> {
         let MarketEvent::PoolUpdated { pool, .. } = event else {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("market_event_not_pool_update"));
         };
         if Self::has_blocking_risk(ctx, pool.token_address, &pool.address) {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
         self.decision_for_pool(pool)
     }
@@ -161,16 +169,20 @@ impl Strategy for MarketTrackerStrategy {
         event: &RiskEvent,
     ) -> Result<StrategyDecision> {
         if event.kind != RiskKind::TradingEnabled {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("risk.no_exit_rule_matched"));
         }
         let Some(pool_address) = event.pool_address.clone() else {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold(
+                "entry.market_tracker.risk_event_missing_pool",
+            ));
         };
         if self.submitted_pools.contains(&pool_address) {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold(
+                "entry.market_tracker.pool_already_submitted",
+            ));
         }
         if Self::has_blocking_risk(ctx, event.token_address, &pool_address) {
-            return Ok(StrategyDecision::Hold);
+            return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
         if ctx.market.token_address != event.token_address {
             return Err(AlphaCoreError::Strategy(
@@ -254,7 +266,14 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(matches!(decision, StrategyDecision::SubmitOrder(_)));
+        assert!(matches!(
+            decision,
+            StrategyDecision::SubmitOrderWithReason { .. }
+        ));
+        assert_eq!(
+            decision.reason(),
+            Some("entry.market_tracker.eligible_pool")
+        );
 
         let repeat = strategy
             .on_market_event(
@@ -265,7 +284,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(repeat, StrategyDecision::Hold);
+        assert_eq!(
+            repeat.reason(),
+            Some("entry.market_tracker.pool_already_submitted")
+        );
     }
 
     #[test]
@@ -306,6 +328,6 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(decision, StrategyDecision::Hold);
+        assert_eq!(decision.reason(), Some("entry.blocked_by_active_risk"));
     }
 }

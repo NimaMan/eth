@@ -292,7 +292,7 @@ mod tests {
     }
 
     fn strategy_name() -> StrategyName {
-        StrategyName("alpha11-03-live-v2-hold20-retry3-gasguard".to_string())
+        StrategyName("alpha11-03-live-v2-hold20-gasguard".to_string())
     }
 
     fn input() -> LivePrioritySellPlannerInput {

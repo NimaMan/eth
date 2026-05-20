@@ -135,14 +135,19 @@ before submission and persist the rank evidence with the order decision;
 
 ## Real Submission Status
 
-`eth_alpha_trader` now has two explicit execution modes:
+Alpha has separate trader entrypoints for each runtime boundary:
 
-| Mode | Adapter | Broadcast capability |
+| Binary | Adapter | Broadcast capability |
 | --- | --- | --- |
-| `chain-sim` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
-| `kartal-real` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run only. The binary refuses to start if Kartal is not in `dry_run`. |
+| `eth_alpha_live_backtest_trader` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
+| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run only. The binary refuses to start if Kartal is not in `dry_run`. |
+| `eth_alpha_backtest_trader` | `ChainSimExecutionAdapter` | None; historical replay only. |
 
-The `kartal-real` mode is intentionally sell-only for now: it requires
+The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
+live runner code lives under `src/live_trader/`; real/Kartal wiring is isolated
+in `src/live_trader/real_execution.rs`.
+
+The real live binary is intentionally sell-only for now: it requires
 `--disable-entry`, targets the deployed `UniswapV2TradingVault`, and uses shadow
 dry-run simulation/gas-rank providers only to prove the live executor boundary.
 A public-broadcast deployment still needs:
@@ -158,8 +163,7 @@ Backtest binaries must never use `TxExecutorAdapter`; they should remain on
 
 ## Trader Binary
 
-`eth_alpha_trader` is the first runnable alpha runtime inside this crate. Its
-default `chain-sim` mode polls the Rust token server and consumes:
+`eth_alpha_live_backtest_trader` polls the Rust token server and consumes:
 
 - `/live/pools` as confirmed market updates.
 - `/mempool/signals?since_days=14` as speculative risk events.
@@ -168,9 +172,9 @@ The trader registers strategy wrappers from each strategy's `live/` module. For
 Snipe All that is `LiveSnipeAllStrategy`, which composes the regular
 `SnipeAllStrategy` policy while marking the runtime side in code and run config.
 
-The real-executor service uses the same binary with `--mode kartal-real
---disable-entry`. That process is separate from backtests and the no-capital
-chain-sim service.
+`eth_alpha_live_trader --disable-entry` uses the same live input stream but a
+Kartal executor adapter. That process is separate from backtests and the
+no-capital chain-sim service.
 
 ## Live Strategy Model
 
@@ -210,7 +214,7 @@ as `stage=alpha_trader`, `component=token_server_poll`, and
 Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:
 
 ```bash
-cargo run -p eth_alpha_engine --bin eth_alpha_trader -- --once
+cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --once
 ```
 
 Use `--replay-current` for a local smoke test that replays the current

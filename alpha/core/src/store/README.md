@@ -9,7 +9,7 @@ Persistence contract for the trading domain.
 ## Does Not Own
 
 - PostgreSQL connection pools.
-- Redis implementations.
+- External store implementations.
 - SQL schema migrations.
 - JSON compatibility adapters.
 

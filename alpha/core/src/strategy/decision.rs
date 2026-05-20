@@ -1,4 +1,4 @@
-use crate::order::OrderIntent;
+use crate::{decision_rationale::DecisionReason, order::OrderIntent};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,6 +36,14 @@ impl StrategyDecision {
             | Self::CancelOrders { reason } => Some(reason.as_str()),
             Self::SubmitOrder(_) => None,
         }
+    }
+
+    pub fn structured_reason(
+        &self,
+        event_source: Option<&str>,
+        action: Option<&str>,
+    ) -> Option<DecisionReason> {
+        DecisionReason::from_parts(self.reason(), event_source, action)
     }
 
     pub fn order_intent(&self) -> Option<&OrderIntent> {

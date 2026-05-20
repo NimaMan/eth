@@ -20,6 +20,11 @@ pub struct StrategyDecisionRecord {
     pub pool_address: Option<String>,
     pub action: String,
     pub reason: Option<String>,
+    pub reason_code: Option<String>,
+    pub reason_category: Option<String>,
+    pub reason_label: Option<String>,
+    pub reason_source: Option<String>,
+    pub reason_details: Option<Value>,
     pub order_side: Option<OrderSide>,
     pub payload: Value,
 }

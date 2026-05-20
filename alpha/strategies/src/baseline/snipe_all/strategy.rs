@@ -177,27 +177,6 @@ impl SnipeAllStrategy {
         )
     }
 
-    fn should_retry_failed_exit(&self, position: &Position, current_block: u64) -> bool {
-        if position.state != PositionState::SellFailed || !position.can_submit_exit() {
-            return false;
-        }
-
-        let Some(retry_interval) = self.config.exit_retry_interval_blocks else {
-            return false;
-        };
-
-        if let Some(max_retries) = self.config.max_exit_retries {
-            if position.exit_failure_count >= max_retries {
-                return false;
-            }
-        }
-
-        position
-            .last_exit_failure_block
-            .map(|last_failed| current_block >= last_failed.saturating_add(retry_interval))
-            .unwrap_or(true)
-    }
-
     /// Evaluate proactive price-ratio and active-hold exits for an open position.
     /// Returns Some(decision) if an exit should be triggered, None otherwise.
     fn evaluate_proactive_exit(
@@ -361,9 +340,12 @@ impl Strategy for SnipeAllStrategy {
                 return Ok(StrategyDecision::hold("position_open_no_exit"));
             }
 
-            return Ok(StrategyDecision::hold(
-                "position_exit_waiting_for_retry_policy",
-            ));
+            let reason = if position.state == PositionState::SellFailed {
+                "position_exit_failed_no_strategy_retry"
+            } else {
+                "position_exit_pending"
+            };
+            return Ok(StrategyDecision::hold(reason));
         }
 
         // 1. Shared eligibility gate: reject ineligible pools first.
@@ -518,10 +500,9 @@ impl Strategy for SnipeAllStrategy {
     fn on_position_monitor(
         &mut self,
         ctx: &StrategyContext<'_>,
-        block_number: u64,
+        _block_number: u64,
     ) -> Result<Vec<StrategyDecision>> {
-        if self.config.exit_retry_interval_blocks.is_none() && self.config.max_hold_blocks.is_none()
-        {
+        if self.config.max_hold_blocks.is_none() {
             return Ok(Vec::new());
         }
         let strategy_name = self.name();
@@ -542,9 +523,6 @@ impl Strategy for SnipeAllStrategy {
                             self.state.active_hold_block_count(&position.id) >= max_hold
                         })
                         .unwrap_or(false),
-                    PositionState::SellFailed => {
-                        self.should_retry_failed_exit(position, block_number)
-                    }
                     _ => false,
                 }
             })
@@ -555,12 +533,7 @@ impl Strategy for SnipeAllStrategy {
         Ok(positions
             .iter()
             .map(|position| {
-                let reason = match position.state {
-                    PositionState::BuyConfirmed => "exit.max_hold_active_blocks_restored",
-                    PositionState::SellFailed => "exit.failed_retry",
-                    _ => "exit.position_monitor",
-                };
-                self.sell_position(ctx, position, reason)
+                self.sell_position(ctx, position, "exit.max_hold_active_blocks_restored")
             })
             .filter(|decision| !decision.is_hold())
             .collect())
