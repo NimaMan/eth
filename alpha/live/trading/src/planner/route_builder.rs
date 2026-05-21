@@ -292,7 +292,7 @@ mod tests {
     }
 
     fn strategy_name() -> StrategyName {
-        StrategyName("alpha11-03-live-v2-hold20".to_string())
+        StrategyName("alpha11-live-univ2-lp30-riskexit-hold20".to_string())
     }
 
     fn input() -> LivePrioritySellPlannerInput {

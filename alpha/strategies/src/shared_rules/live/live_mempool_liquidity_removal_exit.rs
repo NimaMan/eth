@@ -5,7 +5,8 @@ pub const SUITE_NAME: &str = "mempool-live-exits";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 pub const RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
-pub const ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME: &str = "alpha11-live-hold-sweep";
+pub const ALPHA11_LIVE_UNIV2_LP30_RISKEXIT_HOLD_SWEEP_SUITE_NAME: &str =
+    "alpha11-live-univ2-lp30-riskexit-hold-sweep";
 const ALPHA11_MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 
 #[derive(Clone, Debug, Default)]
@@ -71,7 +72,9 @@ pub fn suite_specs(
                 options,
             )])
         }
-        ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME => Ok(alpha11_live_hold_sweep_specs(options)),
+        ALPHA11_LIVE_UNIV2_LP30_RISKEXIT_HOLD_SWEEP_SUITE_NAME => {
+            Ok(alpha11_live_hold_sweep_specs(options))
+        }
         other => Err(format!("unsupported strategy suite: {other}")),
     }
 }
@@ -189,20 +192,18 @@ fn risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
 fn alpha11_live_hold_sweep_specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
     [12_u64, 15, 20]
         .into_iter()
-        .enumerate()
-        .map(|(index, max_hold_blocks)| alpha11_live_hold_spec(index + 1, max_hold_blocks, options))
+        .map(|max_hold_blocks| alpha11_live_hold_spec(max_hold_blocks, options))
         .collect()
 }
 
 fn alpha11_live_hold_spec(
-    ordinal: usize,
     max_hold_blocks: u64,
     options: &LiveStrategySpecOptions,
 ) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!("alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}"),
+        strategy_name: format!("alpha11-live-univ2-lp30-riskexit-hold{max_hold_blocks}"),
         strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks}"),
+        strategy_label: format!("Alpha11 live Uniswap V2 LP30 risk exits hold {max_hold_blocks}"),
         exit_liquidity_removal: true,
         exit_tax: true,
         exit_lp_approval: true,
@@ -304,7 +305,7 @@ mod tests {
     #[test]
     fn alpha11_live_suite_matches_hold_sweep() {
         let specs = suite_specs(
-            ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME,
+            ALPHA11_LIVE_UNIV2_LP30_RISKEXIT_HOLD_SWEEP_SUITE_NAME,
             &LiveStrategySpecOptions::default(),
         )
         .unwrap();
