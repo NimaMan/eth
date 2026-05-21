@@ -1,21 +1,25 @@
 use alloy_primitives::U256;
 use eth_block_tx_rank::{
-    effective_priority_fee, estimate_from_samples, BlockTxRankEstimate, CandidateTxGas,
-    MinedBlockFeeSample,
+    BlockTxRankEstimate, CandidateTxGas, MinedBlockFeeSample, effective_priority_fee,
+    estimate_from_samples,
 };
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use reth_chain_query::provider::RpcBlockDataFetcher;
 use serde::{Deserialize, Serialize};
 
 use crate::app::config::shared_config_value;
 use crate::http::ServerState;
+use crate::prices::PriceVenue;
 use crate::recent_blocks::RecentProcessedBlock;
 
 const DEFAULT_LOOKBACK_BLOCKS: u64 = 100;
 const MAX_LOOKBACK_BLOCKS: u64 = 100;
 const DEFAULT_GAS_LIMIT: u64 = 300_000;
 const DEFAULT_PRIORITY_FEE_GWEI: f64 = 2.0;
-const TEMPORARY_ETH_USD_PRICE: f64 = 2_000.0;
+const ETH_USD_PAIR: &str = "ETH/USDC";
+const ETH_USD_SPOT_SOURCE: &str = "GET /api/v1/eth/prices/spot?pair=ETH/USDC&venue=uniswap_v2";
+const ETH_USD_MULTI_SOURCE: &str = "GET /api/v1/eth/prices/multi?pair=ETH/USDC";
+const ETH_USD_STABLECOINS_SOURCE: &str = "GET /api/v1/eth/prices/stablecoins";
 const WEI_PER_GWEI: f64 = 1_000_000_000.0;
 const WEI_PER_ETH: f64 = 1_000_000_000_000_000_000.0;
 const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
@@ -39,7 +43,7 @@ pub struct GasRankEstimateRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct GasRankEstimateResponse {
     pub eth_usd_price: f64,
-    pub eth_usd_price_source: &'static str,
+    pub eth_usd_price_source: String,
     pub blocks: RecentBlockWindow,
     pub candidate: CandidateGasRankView,
     pub recommendations: Vec<GasRankRecommendation>,
@@ -142,6 +146,12 @@ struct RecommendationProfile {
     sample_quantile: f64,
 }
 
+#[derive(Debug, Clone)]
+struct EthUsdPrice {
+    price: f64,
+    source: String,
+}
+
 const RECOMMENDATION_PROFILES: [RecommendationProfile; 4] = [
     RecommendationProfile {
         label: "Minimum",
@@ -239,7 +249,7 @@ pub async fn estimate(
         max_priority_fee_per_gas: priority_fee,
     };
     let candidate_rank = estimate_from_samples(candidate, predicted_base_fee, &samples)?;
-    let eth_usd_price = resolve_eth_usd_price();
+    let eth_usd = resolve_eth_usd_price(state).await?;
     let candidate_effective_priority_fee = effective_priority_fee(candidate, predicted_base_fee);
     let candidate_base_cost_eth = gas_spend_eth(predicted_base_fee, estimated_gas_used);
     let candidate_priority_spend_eth =
@@ -255,7 +265,7 @@ pub async fn estimate(
                 gas_limit,
                 estimated_gas_used,
                 predicted_base_fee,
-                eth_usd_price,
+                eth_usd.price,
                 &samples,
             )
         })
@@ -266,8 +276,8 @@ pub async fn estimate(
         .collect::<Vec<_>>();
 
     Ok(GasRankEstimateResponse {
-        eth_usd_price,
-        eth_usd_price_source: "temporary_fixed_usd_2000_until_live_price_resolver",
+        eth_usd_price: eth_usd.price,
+        eth_usd_price_source: eth_usd.source.clone(),
         blocks: RecentBlockWindow {
             source: "eth_chain_server_recent_live_blocks",
             requested_blocks: lookback_blocks,
@@ -298,13 +308,13 @@ pub async fn estimate(
             predicted_base_fee_gwei: wei_to_gwei(predicted_base_fee),
             effective_priority_fee_gwei: wei_to_gwei(candidate_effective_priority_fee),
             estimated_base_cost_eth: candidate_base_cost_eth,
-            estimated_base_cost_usd: eth_to_usd(candidate_base_cost_eth, eth_usd_price),
+            estimated_base_cost_usd: eth_to_usd(candidate_base_cost_eth, eth_usd.price),
             estimated_priority_spend_eth: candidate_priority_spend_eth,
-            estimated_priority_spend_usd: eth_to_usd(candidate_priority_spend_eth, eth_usd_price),
+            estimated_priority_spend_usd: eth_to_usd(candidate_priority_spend_eth, eth_usd.price),
             estimated_total_cost_eth: candidate_total_cost_eth,
-            estimated_total_cost_usd: eth_to_usd(candidate_total_cost_eth, eth_usd_price),
+            estimated_total_cost_usd: eth_to_usd(candidate_total_cost_eth, eth_usd.price),
             estimated_max_cost_eth: candidate_max_cost_eth,
-            estimated_max_cost_usd: eth_to_usd(candidate_max_cost_eth, eth_usd_price),
+            estimated_max_cost_usd: eth_to_usd(candidate_max_cost_eth, eth_usd.price),
             rank: candidate_rank,
         },
         recommendations,
@@ -577,8 +587,123 @@ fn wei_to_gwei(value: U256) -> f64 {
     u256_to_f64(value) / WEI_PER_GWEI
 }
 
-fn resolve_eth_usd_price() -> f64 {
-    TEMPORARY_ETH_USD_PRICE
+async fn resolve_eth_usd_price(state: &ServerState) -> Result<EthUsdPrice> {
+    let mut errors = Vec::new();
+
+    match state
+        .price_service
+        .spot(PriceVenue::UniswapV2, ETH_USD_PAIR, None)
+        .await
+    {
+        Ok(result) => {
+            let source = format!("{ETH_USD_SPOT_SOURCE}; venue={}", result.venue.as_str());
+            let price = result.price.price_as_f64();
+            if is_valid_eth_usd_price(price) {
+                return Ok(EthUsdPrice { price, source });
+            }
+            errors.push(format!(
+                "{source}: invalid ETH/USD price, expected a finite positive value, got {price}"
+            ));
+        }
+        Err(error) => errors.push(format!("{ETH_USD_SPOT_SOURCE}: {error}")),
+    }
+
+    match state.price_service.multi(ETH_USD_PAIR, None, None).await {
+        Ok(result) => {
+            let prices = result
+                .results
+                .iter()
+                .filter_map(|(_, result)| {
+                    result
+                        .as_ref()
+                        .ok()
+                        .map(|price| price.price_as_f64())
+                        .filter(|price| is_valid_eth_usd_price(*price))
+                })
+                .collect::<Vec<_>>();
+            if let Some(price) = median_price(prices) {
+                return Ok(EthUsdPrice {
+                    price,
+                    source: ETH_USD_MULTI_SOURCE.to_string(),
+                });
+            }
+            errors.push(format!("{ETH_USD_MULTI_SOURCE}: no valid venue prices"));
+        }
+        Err(error) => errors.push(format!("{ETH_USD_MULTI_SOURCE}: {error}")),
+    }
+
+    match state.price_service.stablecoins(None).await {
+        Ok(result) => {
+            let preferred_quote_prices = result
+                .by_quote
+                .get("USDC")
+                .or_else(|| result.by_quote.get("usdc"));
+            let venue_prices = match preferred_quote_prices {
+                Some(prices) => prices.values().collect::<Vec<_>>(),
+                None => result
+                    .by_quote
+                    .values()
+                    .flat_map(|prices| prices.values())
+                    .collect::<Vec<_>>(),
+            }
+            .into_iter()
+            .filter_map(stablecoin_eth_usd_price)
+            .filter(|price| is_valid_eth_usd_price(*price))
+            .collect::<Vec<_>>();
+            if let Some(price) = median_price(venue_prices) {
+                return Ok(EthUsdPrice {
+                    price,
+                    source: ETH_USD_STABLECOINS_SOURCE.to_string(),
+                });
+            }
+            errors.push(format!(
+                "{ETH_USD_STABLECOINS_SOURCE}: no valid stablecoin prices"
+            ));
+        }
+        Err(error) => errors.push(format!("{ETH_USD_STABLECOINS_SOURCE}: {error}")),
+    }
+
+    Err(eyre!(
+        "failed to resolve ETH/USD price from chain-server price APIs: {}",
+        errors.join("; ")
+    ))
+}
+
+fn is_valid_eth_usd_price(price: f64) -> bool {
+    price.is_finite() && price > 0.0
+}
+
+fn stablecoin_eth_usd_price(price: &eth_price::PriceData) -> Option<f64> {
+    let base = price.pair.base.symbol.to_ascii_uppercase();
+    let quote = price.pair.quote.symbol.to_ascii_uppercase();
+    if is_eth_symbol(&base) && is_usd_stable_symbol(&quote) {
+        Some(price.price_as_f64())
+    } else if is_usd_stable_symbol(&base) && is_eth_symbol(&quote) {
+        Some(price.inverse_price_as_f64())
+    } else {
+        None
+    }
+}
+
+fn is_eth_symbol(symbol: &str) -> bool {
+    matches!(symbol, "ETH" | "WETH")
+}
+
+fn is_usd_stable_symbol(symbol: &str) -> bool {
+    matches!(symbol, "USDC" | "USDT" | "DAI" | "FRAX" | "LUSD" | "SUSD")
+}
+
+fn median_price(mut prices: Vec<f64>) -> Option<f64> {
+    if prices.is_empty() {
+        return None;
+    }
+    prices.sort_by(|left, right| left.total_cmp(right));
+    let middle = prices.len() / 2;
+    if prices.len() % 2 == 0 {
+        Some((prices[middle - 1] + prices[middle]) / 2.0)
+    } else {
+        Some(prices[middle])
+    }
 }
 
 fn gas_spend_eth(fee_per_gas: U256, estimated_gas_used: u64) -> f64 {

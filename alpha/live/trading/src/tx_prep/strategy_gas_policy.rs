@@ -27,6 +27,12 @@ impl GasRankProfile {
     }
 }
 
+/// Orders named gas-rank profiles for one strategy decision.
+///
+/// Candidate labels must normalize to one of the explicit profile names:
+/// `minimum`, `balanced`, `aggressive`, or `urgent`. Unprofiled candidates are
+/// intentionally ignored so live execution cannot silently fall back to an
+/// old fixed/shadow gas value.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StrategyGasRankPolicy {
     pub allowed_profiles: Vec<GasRankProfile>,
@@ -147,23 +153,42 @@ impl StrategyGasRankPolicy {
     }
 }
 
+/// The live transaction class used to choose the default gas-rank ladder.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum StrategyTxKind {
+    /// Entry buy before we hold inventory.
     EntryBuy,
+    /// Value-capped exit tx built from an LP/risk signal.
     PrioritySell {
         urgency: SellUrgency,
         signal_source: LpSignalSource,
     },
 }
 
+/// Default gas-rank ladders for live strategy transactions.
+///
+/// The low-level route/tx builders only create calldata, value, gas limit, and
+/// estimated gas-used. The live planning/tx-prep layer applies these defaults
+/// before selecting a fee candidate:
+///
+/// - Entry buy: `aggressive -> balanced -> minimum`.
+/// - Mempool LP approval / liquidity-removal exit: `urgent -> aggressive -> balanced -> minimum`.
+/// - Mined approval race: `urgent -> aggressive -> balanced -> minimum`.
+/// - Buy-confirm-block approval: `aggressive -> balanced -> minimum`.
+///
+/// The selected ladder is still value-capped by `PriorityFeeBudget`; if a
+/// higher-rank profile is too expensive, the policy falls back to the next
+/// named profile in the ladder.
 pub struct StrategyGasRankDefaults;
 
 impl StrategyGasRankDefaults {
+    /// Default for live entry buys.
     pub fn entry_buy_policy() -> StrategyGasRankPolicy {
         StrategyGasRankPolicy::aggressive_first()
     }
 
+    /// Default for live priority sells, derived from sell urgency/source.
     pub fn priority_sell_policy(plan: &PrioritySellPlan) -> StrategyGasRankPolicy {
         Self::policy_for(StrategyTxKind::PrioritySell {
             urgency: plan.urgency.clone(),
@@ -171,6 +196,7 @@ impl StrategyGasRankDefaults {
         })
     }
 
+    /// Resolve the strategy transaction kind into its default gas-rank ladder.
     pub fn policy_for(kind: StrategyTxKind) -> StrategyGasRankPolicy {
         match kind {
             StrategyTxKind::EntryBuy => StrategyGasRankPolicy::aggressive_first(),
