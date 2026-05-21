@@ -1,17 +1,36 @@
 use super::*;
+use eth_strategies::alpha11::MAX_ENTRY_PRICE_RATIO_TO_INITIAL;
 
-pub(super) fn build_strategy_specs(args: &Args) -> Result<Vec<LiveStrategySpec>> {
+pub(super) fn build_strategy_specs(
+    args: &Args,
+    execution_mode: TraderExecutionMode,
+) -> Result<Vec<LiveStrategySpec>> {
     let options = LiveStrategySpecOptions {
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
         max_hold_blocks: args.max_hold_blocks,
     };
 
-    if let Some(strategy_set) = args.strategy_set.as_deref() {
-        return strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error));
+    let mut specs = if let Some(strategy_set) = args.strategy_set.as_deref() {
+        strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error))?
+    } else {
+        vec![default_strategy_spec(&options)]
+    };
+
+    if execution_mode.uses_kartal() {
+        apply_live_real_deploy_defaults(&mut specs);
     }
 
-    Ok(vec![default_strategy_spec(&options)])
+    Ok(specs)
+}
+
+fn apply_live_real_deploy_defaults(specs: &mut [LiveStrategySpec]) {
+    for spec in specs {
+        if spec.strategy_impl == ALPHA11_STRATEGY_IMPL {
+            spec.max_entry_price_ratio_to_initial
+                .get_or_insert_with(|| MAX_ENTRY_PRICE_RATIO_TO_INITIAL.to_string());
+        }
+    }
 }
 
 pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
@@ -42,7 +61,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
 mod tests {
     use eth_strategies::{
         alpha11::{INITIAL_ENTRY_BANKROLL_ETH, MAX_ENTRY_PRICE_RATIO_TO_INITIAL},
-        ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME, ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
+        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
     };
     use serde_json::json;
 
@@ -71,20 +90,30 @@ mod tests {
     }
 
     #[test]
-    fn alpha11_hold15_strategy_spine_is_execution_mode_independent() {
+    fn alpha11_hold15_visible_name_is_execution_mode_independent() {
         let args = alpha11_hold15_args();
-        let chain_sim_specs = build_strategy_specs(&args).expect("chain-sim specs");
-        let kartal_real_specs = build_strategy_specs(&args).expect("kartal-real specs");
-        let chain_sim_spine = chain_sim_specs
-            .iter()
-            .map(live_strategy_spec_config_json)
-            .collect::<Vec<_>>();
-        let kartal_real_spine = kartal_real_specs
-            .iter()
-            .map(live_strategy_spec_config_json)
-            .collect::<Vec<_>>();
+        let chain_sim_specs =
+            build_strategy_specs(&args, TraderExecutionMode::ChainSim).expect("chain-sim specs");
+        let kartal_real_specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
+            .expect("kartal-real specs");
 
-        assert_eq!(chain_sim_spine, kartal_real_spine);
+        assert_eq!(chain_sim_specs.len(), 1);
+        assert_eq!(kartal_real_specs.len(), 1);
+        assert_eq!(
+            chain_sim_specs[0].strategy_name,
+            ALPHA11_HOLD15_STRATEGY_NAME
+        );
+        assert_eq!(
+            kartal_real_specs[0].strategy_name,
+            ALPHA11_HOLD15_STRATEGY_NAME
+        );
+        assert_eq!(chain_sim_specs[0].max_entry_price_ratio_to_initial, None);
+        assert_eq!(
+            kartal_real_specs[0]
+                .max_entry_price_ratio_to_initial
+                .as_deref(),
+            Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
+        );
         assert_eq!(TraderExecutionMode::ChainSim.label(), "chain-sim");
         assert_eq!(TraderExecutionMode::KartalReal.label(), "kartal-real");
         assert_ne!(
@@ -96,7 +125,8 @@ mod tests {
     #[test]
     fn alpha11_hold15_strategy_spine_matches_gate_two_contract() {
         let args = alpha11_hold15_args();
-        let specs = build_strategy_specs(&args).expect("alpha11 hold15 specs");
+        let specs = build_strategy_specs(&args, TraderExecutionMode::ChainSim)
+            .expect("alpha11 hold15 specs");
 
         assert_eq!(specs.len(), 1);
         let spec = &specs[0];
@@ -148,19 +178,20 @@ mod tests {
     }
 
     #[test]
-    fn alpha11_deploy_hold15_adds_live_real_price_gate() {
-        let mut args = alpha11_hold15_args();
-        args.strategy_set = Some(ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME.to_string());
+    fn alpha11_live_real_adds_price_gate_without_renaming_strategy() {
+        let args = alpha11_hold15_args();
 
-        let specs = build_strategy_specs(&args).expect("alpha11 deploy hold15 specs");
+        let specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
+            .expect("alpha11 live-real hold15 specs");
 
         assert_eq!(specs.len(), 1);
         let spec = &specs[0];
-        assert_eq!(spec.strategy_name, ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME);
+        assert_eq!(spec.strategy_name, ALPHA11_HOLD15_STRATEGY_NAME);
         assert_eq!(
             spec.max_entry_price_ratio_to_initial.as_deref(),
             Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
         );
-        assert!(spec.strategy_label.contains("price-to-initial <= 1.5"));
+        assert!(!spec.strategy_name.contains("price-to-initial"));
+        assert!(!spec.strategy_label.contains("price-to-initial"));
     }
 }

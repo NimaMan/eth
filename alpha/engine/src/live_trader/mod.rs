@@ -177,7 +177,7 @@ async fn run(
         .wrap_err("invalid --min-liquidity-eth decimal")?;
     let min_liquidity_usd = Decimal::from_str(&args.min_liquidity_usd)
         .wrap_err("invalid --min-liquidity-usd decimal")?;
-    let strategy_specs = build_strategy_specs(&args)?;
+    let strategy_specs = build_strategy_specs(&args, execution_mode)?;
     let entry_bankrolls_wei = strategy_specs
         .iter()
         .map(|spec| resolve_entry_bankroll_wei(&args, spec))

@@ -195,11 +195,11 @@ The real live binary targets the deployed `UniswapV2TradingVault`, derives a
 non-zero min-output from provisional exact-calldata simulation, and simulates
 the final exact vault buy or sell calldata against local Reth state before
 Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
-at most `0.225 ETH`. The live-backtest reference remains
-`alpha11-live-univ2-lp30-pool-update-block-hold15`; the live-real deploy
-candidate we are validating is
-`alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold15`,
-which adds the explicit entry-only price-to-initial cap.
+at most `0.225 ETH`. The visible Alpha11 hold15 strategy name remains
+`alpha11-live-univ2-lp30-pool-update-block-hold15` for both live-backtest and
+live-real. The live-real path applies the deploy-only entry cap
+`price / initial price <= 1.5` through the recorded strategy config instead of
+encoding that cap in the strategy name.
 The gas-rank provider still uses fixed dry-run values to prove the live
 executor boundary.
 A receipt reconciliation worker now exists for real submitted tx hashes: it

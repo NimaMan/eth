@@ -4,13 +4,15 @@ Alpha11 is the deployable live strategy layer for the current ETH validation
 run. It composes the reusable `baseline/snipe_all` engine and owns the product
 defaults that should be explicit in the strategy name.
 
-The live-backtest reference strategy remains:
+The visible live-backtest and live-real hold15 strategy name remains:
 
 `alpha11-live-univ2-lp30-pool-update-block-hold15`
 
-The live-real deploy candidate adds an entry-only price-to-initial cap and uses:
-
-`alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold15`
+The live-real deploy path adds an entry-only `price / initial price <= 1.5` cap
+as runtime config. We intentionally do not encode that cap in the visible
+strategy name; the cap must instead be visible in README/front-end readiness
+copy and in the persisted strategy config field
+`max_entry_price_ratio_to_initial`.
 
 Shared Alpha11 defaults:
 
@@ -26,10 +28,8 @@ Shared Alpha11 defaults:
 Alpha11 entries use all reusable `SnipeAllStrategy` entry checks plus the
 Alpha11-owned launch defaults above.
 
-The `price-to-initial-lte1p5` gate is not part of the live-backtest reference.
-It is a live-real deployment default for the candidate we are trying to deploy.
-The gate is intentionally part of that deploy strategy name because it changes
-the buy universe:
+The price-to-initial gate is not part of the live-backtest reference. It is a
+live-real deployment default for the candidate we are trying to deploy:
 
 - `price_ratio_to_initial > 1.5`: do not buy.
 - `price_ratio_to_initial == 1.5`: buy is still allowed if all other gates pass.
