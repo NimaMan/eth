@@ -11,6 +11,8 @@ strategy evaluation and backtests.
 - Records sell proceeds from simulated denom balance deltas.
 - Records gas used and simulated gas cost from execution transactions so
   backtest PnL can be net of gas.
+- Cancels ETH/WETH-denominated sells when simulated proceeds are less than or
+  equal to simulated gas cost.
 - Persists failed execution reports when state, routing, decimals, or swap
   simulation cannot be proven from chain state.
 

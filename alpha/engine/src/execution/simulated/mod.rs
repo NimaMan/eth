@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256, address};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
@@ -31,12 +31,16 @@ use eth_alpha_core::{
 use tokio::time::sleep;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
-    simulate_buy_swap_with_params, simulate_sell_swap_with_params, BuySwapResult,
-    PoolBuySellParameters, PoolType, SellSwapResult, UniswapV4PoolConfig as TxUniswapV4PoolConfig,
+    BuySwapResult, PoolBuySellParameters, PoolType, SellSwapResult,
+    UniswapV4PoolConfig as TxUniswapV4PoolConfig, simulate_buy_swap_with_params,
+    simulate_sell_swap_with_params,
 };
 use tx_simulator::{LiveTxSimulator, TxSimulator};
 
-use crate::{EngineExecutionAdapter, PositionValueSimulation};
+use crate::{
+    EngineExecutionAdapter, PositionValueSimulation,
+    execution::sell_economics::uneconomic_sell_cancellation_reason,
+};
 
 const ERC20_DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67];
 const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
@@ -72,7 +76,7 @@ async fn simulate_buy_at_block(
                     order_id,
                     format!("invalid pool parameters for chain simulation: {error}"),
                     block,
-                ))
+                ));
             }
         };
 
@@ -89,7 +93,7 @@ async fn simulate_buy_at_block(
                 order_id,
                 format!("chain buy simulation failed: {error}"),
                 block,
-            ))
+            ));
         }
     };
 
@@ -161,7 +165,7 @@ async fn simulate_sell_at_block(
                 order_id,
                 format!("invalid pool parameters for chain simulation: {error}"),
                 block,
-            ))
+            ));
         }
     };
 
@@ -180,7 +184,7 @@ async fn simulate_sell_at_block(
                 order_id,
                 format!("chain sell simulation failed: {error}"),
                 block,
-            ))
+            ));
         }
     };
 
@@ -201,18 +205,12 @@ async fn simulate_sell_at_block(
         decimals: denom_decimals,
     };
 
-    if skip_uneconomic_sell
-        && pool_has_eth_like_denom(pool)
-        && result.denom_received <= result.gas_cost
-    {
-        return Ok(cancelled_report_at(
-            order_id,
-            format!(
-                "uneconomic sell: simulated WETH proceeds {} wei <= gas cost {} wei",
-                result.denom_received, result.gas_cost
-            ),
-            block,
-        ));
+    if skip_uneconomic_sell {
+        if let Some(reason) =
+            uneconomic_sell_cancellation_reason(pool, result.denom_received, result.gas_cost)
+        {
+            return Ok(cancelled_report_at(order_id, reason, block));
+        }
     }
 
     Ok(ExecutionReport {
@@ -683,21 +681,6 @@ async fn denom_decimals(
         return Ok(6);
     }
     query_erc20_decimals(simulator, denom_address, block).await
-}
-
-fn pool_has_eth_like_denom(pool: &PoolSnapshot) -> bool {
-    if matches!(pool.denom_address, Some(address) if address.is_zero() || address == WETH_ADDRESS) {
-        return true;
-    }
-
-    pool.denom_symbol
-        .as_deref()
-        .map(str::trim)
-        .map(|symbol| {
-            let symbol = symbol.to_ascii_uppercase();
-            symbol == "ETH" || symbol == "WETH"
-        })
-        .unwrap_or(false)
 }
 
 async fn query_erc20_decimals(

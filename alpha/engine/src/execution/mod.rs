@@ -11,6 +11,7 @@
 //! | `TxExecutorAdapter` | Crate-private real live submission via Kartal |
 
 pub(crate) mod real;
+mod sell_economics;
 mod simulated;
 
 pub use simulated::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
