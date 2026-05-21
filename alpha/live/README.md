@@ -11,6 +11,7 @@ responsibility while keeping the existing crate names stable:
 | `state/` | `eth_live_state` | Shared live-state snapshot schemas and store traits. |
 | `feed/` | `eth_live_feed` | Confirmed-chain feed contracts and runtime boundary over processed blocks and token updates. |
 | `trading/` | `eth_live_trading` | Live strategy policy that turns token/pool/risk signals into explicit trade actions. |
+| `readiness/` | docs | Repeatable live-capital readiness gates and strategy-specific checklists. |
 
 `state/` is the shared protocol/read model. `feed/` is the writer/runtime side that can own confirmed live token updates. Token server and mempool runtimes can be hosted in one process now while still depending on these narrower crate boundaries.
 
@@ -88,10 +89,10 @@ The boundary should still stay modular:
 - `mempool_processor` consumes live token state and live token events.
 
 Current deployment note: `trading/` now also contains the direct-raw tx-prep
-boundary for Kartal, but the running alpha trader still uses no-capital
-chain-state simulation. A real live strategy now needs runtime wiring around the
-planner: a `LiveTxPlanningInputResolver`, live final simulation, gas-rank
-provider, allowance reader, guarded real mode, and receipt reconciliation.
+boundary for Kartal. The deployed V2 vault buy and emergency-sell paths run
+exact-calldata pre-submit simulation against local Reth state. A real live
+strategy still needs live gas-rank inputs, a guarded capped validation run, and
+receipt operations before public broadcast is allowed.
 
 This lets us split the runtimes into separate services later without changing
 the conceptual data flow.
@@ -101,5 +102,6 @@ the conceptual data flow.
 - `feed/README.md`: crate-level confirmed live-feed and token-runtime contract.
 - `state/README.md`: shared live-state snapshots and store traits.
 - `trading/README.md`: live LP approval priority-exit policy and deployment gates.
+- `readiness/README.md`: live-capital readiness gates, evidence requirements, and strategy-specific checks.
 - `../../eth_chain_server/README.md`: chain-server API and inspector-facing live state exposure.
 - `../../mempool_processor/README.md`: mempool risk processing, token context consumption, and `LiveTxSimulator` use.

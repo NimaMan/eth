@@ -20,6 +20,14 @@ It also carries `max_entry_pools = 1` in the strategy spec. Live runs must not
 pass separate strategy parameters such as buy size, liquidity floors, bankroll,
 entry-pool cap, or hold blocks for Alpha11.
 
+The systematic operator checklist for this one-position mined validation lives
+in `alpha/live/readiness/gates/pre_live_mined_validation/`. Alpha11's concrete
+validation file is
+`alpha/live/readiness/strategies/alpha11/hold3_mined_validation.md`. A failed
+Kartal or signer policy rejection is still useful gate evidence when it records
+the exact rejected request and journal reason; it does not count as a passed
+mined-validation trade.
+
 The live-real deploy path adds an entry-only `price / initial price <= 1.5` cap
 as runtime config. We intentionally do not encode that cap in the visible
 strategy name; the cap must instead be visible in README/front-end readiness
@@ -30,6 +38,14 @@ Shared Alpha11 defaults:
 
 - `univ2`: only enter Uniswap V2 pools.
 - `lp30`: block entry when LP approval exceeds the shared 30% gate.
+- Exit an open position on liquidity-removal risk events. Both confirmed-chain
+  `liquidity_removal` and pending `mempool_liquidity_removal` events are
+  treated as sell signals.
+- Exit an open position on LP approval risk events after entry. In live runs
+  this can come from `mempool_signal` before the approval is mined; in
+  mined-chain/risk-atlas replay it comes from confirmed-chain evidence. Reports
+  should preserve the source so `mempool lp_approval` is not confused with
+  `mined-chain lp_approval`.
 - Buy size is `0.01 ETH` per entry.
 - Liquidity floors are `0.5 ETH` for ETH/WETH pools and `1000` for USD-stable
   quote pools.
@@ -53,6 +69,22 @@ live-real deployment default for the candidate we are trying to deploy:
 This gate uses the pool snapshot's current price divided by the first valid
 tracked pool price. It is an entry-only filter; it does not force sells for
 already-open positions.
+
+## Risk Signal Sources
+
+Alpha11 records the source of each risk-driven decision. The important sources
+for deploy review are:
+
+- `mempool_signal`: pending public mempool evidence, such as LP approval or
+  remove-liquidity transactions before they are mined.
+- `risk_atlas_mined_chain`: confirmed-chain evidence derived from mined blocks.
+- `market`: pool-update or max-hold decisions, not a risk-signal source.
+
+For `alpha11-live-univ2-lp30-pool-update-block-hold15`, a sell reason of
+`exit.lp_approval` means the strategy exited on LP-token approval evidence. A
+sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
+pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`
+means confirmed-chain liquidity removal was already visible.
 
 ## Layout
 

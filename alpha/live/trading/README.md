@@ -54,6 +54,20 @@ capital:
   `0.225 ETH`, until mined validation evidence and receipt operations are
   reviewed.
 
+## Pre-Live Mined Validation Gate
+
+The canonical readiness gate lives outside this crate README:
+
+`../readiness/gates/pre_live_mined_validation/`
+
+Alpha11's concrete hold3 validation instance is:
+
+`../readiness/strategies/alpha11/hold3_mined_validation.md`
+
+Keep this README focused on the transaction-prep boundary. Gate criteria,
+operator runbooks, evidence requirements, and failed-attempt notes belong in the
+readiness folder.
+
 ## Kartal Execution Handoff
 
 The wire contract is `eth_direct_raw_v1`, documented in
