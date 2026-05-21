@@ -26,6 +26,25 @@ enabling the main hold15 strategy.
 
 ## Current Evidence
 
+The mined validation passed on 2026-05-21:
+
+| Field | Value |
+| --- | --- |
+| Run id | `alpha11-hold3-public-validation-20260521-192640Z` |
+| Trade id | `trd_mpfvtkp7_1bn2n_1` |
+| Token | `0xE5C7B9e4d20032D5D7d137C2e5d7633FE7268aC8` |
+| Buy tx | `0x5352907ec78da608fb10142794a7e71ba95022af924d8f0de527ecb471cd62c4` |
+| Sell tx | `0x8edd9c243263e57519d74fda6042093f163a53871c7bbc9839b66948d405182d` |
+| Final state | `sell_confirmed` |
+| Evidence report | `alpha/lab/reports/alpha11_live_validation_20260521_hold3/README.md` |
+
+This clears the one-position happy-path gate for signing, public broadcast,
+mined buy receipt reconciliation, hold3 sell emission, public sell broadcast,
+and mined sell receipt reconciliation. It does not clear multi-position,
+replacement, reorg, delayed inclusion, or production gas-rank readiness.
+
+## Prior Failed Evidence
+
 The latest public-validation attempt reached Kartal and the signer boundary but
 did not pass mined validation.
 
@@ -59,4 +78,3 @@ reconciled.
 - Collect buy and sell receipt evidence.
 - Review Asena, alpha DB, Kartal journal, signer journal, RPC receipts, and
   deployed-vault events.
-
