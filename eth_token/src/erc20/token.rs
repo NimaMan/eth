@@ -864,8 +864,8 @@ impl ERC20Token {
                 tx.block_number,
                 tx.block_timestamp,
                 &denom_address,
-                denom_in,
                 denom_out,
+                denom_in,
             );
         }
 

@@ -801,8 +801,10 @@ impl UniswapV4Pool {
 
         let token0_amount = scale_i128(event.amount0, token0_decimals(self));
         let token1_amount = scale_i128(event.amount1, token1_decimals(self));
-        let (token_amount, denom_amount) =
+        let (event_token_amount, event_denom_amount) =
             self.base.map_token_and_denom(token0_amount, token1_amount);
+        let token_amount = -event_token_amount;
+        let denom_amount = -event_denom_amount;
         self.base.state.record_swap(
             denom_amount.max(0.0),
             token_amount.max(0.0),

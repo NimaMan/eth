@@ -49,6 +49,7 @@ impl ObservationAddressRole {
 #[derive(Clone, Debug)]
 pub(super) struct ObservationRoleContext {
     selected_pool_address: String,
+    selected_pool_alias_addresses: HashSet<String>,
     token_address: String,
     pool_addresses: HashSet<String>,
     control_addresses: HashSet<String>,
@@ -67,6 +68,13 @@ pub(super) fn observation_role_context(
         .filter(|address| is_evm_address(address))
         .collect();
     pool_addresses.insert(selected_pool_address.clone());
+    let mut selected_pool_alias_addresses = HashSet::new();
+    if let Some(v4_pool) = token.v4_pools.get(&selected_pool_address) {
+        let pool_manager_address = normalize_address(&v4_pool.pool_manager_address);
+        if is_evm_address(&pool_manager_address) {
+            selected_pool_alias_addresses.insert(pool_manager_address);
+        }
+    }
 
     let mut control_addresses: HashSet<String> = token
         .token_control_addresses
@@ -96,6 +104,7 @@ pub(super) fn observation_role_context(
 
     ObservationRoleContext {
         selected_pool_address,
+        selected_pool_alias_addresses,
         token_address,
         pool_addresses,
         control_addresses,
@@ -141,7 +150,9 @@ pub(super) fn address_role(
     if address == ZERO_ADDRESS {
         return ObservationAddressRole::Zero;
     }
-    if address == context.selected_pool_address {
+    if address == context.selected_pool_address
+        || context.selected_pool_alias_addresses.contains(&address)
+    {
         return ObservationAddressRole::SelectedPool;
     }
     if context.pool_addresses.contains(&address) {

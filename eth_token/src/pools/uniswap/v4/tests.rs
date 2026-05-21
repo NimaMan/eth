@@ -78,6 +78,47 @@ fn unknown_pool_id_is_not_a_match() {
 }
 
 #[test]
+fn swap_amounts_are_recorded_from_pool_perspective() {
+    let mut event = initialize_event();
+    event.currency0 = address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
+    event.currency1 = address!("0000000000000000000000000000000000000001");
+    let mut pool = UniswapV4Pool::from_initialize_event(
+        &event,
+        "0x0000000000000000000000000000000000000001",
+        display_denom_for_v4_currency(event.currency0),
+        BasePoolConfig {
+            token_decimals: 18,
+            denom_decimals: Some(18),
+            token1_is_denom: Some(false),
+            ..BasePoolConfig::new(18)
+        },
+    );
+    let (mut processed, ctx) = tx();
+    processed.uniswap_v4_swaps.push(ProcessedV4SwapEvent {
+        pool_manager_address: event.pool_manager_address,
+        event_id: event.event_id,
+        sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        amount0: -1_000_000_000_000_000_000,
+        amount1: 50_000_000_000_000_000_000,
+        sqrt_price_x96: U256::from(1u128) << 96,
+        liquidity: 1_000_000_000_000_000_000,
+        tick: 0,
+        fee: 3000,
+        log_index: 2,
+    });
+
+    pool.update_from_processed_transaction(&processed, &ctx)
+        .unwrap();
+
+    assert_eq!(pool.base.state.denom_volume_in, 1.0);
+    assert_eq!(pool.base.state.token_volume_out, 50.0);
+    assert_eq!(pool.base.state.denom_volume_out, 0.0);
+    assert_eq!(pool.base.state.token_volume_in, 0.0);
+    assert_eq!(pool.base.swap_events[0]["is_buy"], true);
+    assert_eq!(pool.base.swap_events[0]["is_sell"], false);
+}
+
+#[test]
 fn modifies_active_liquidity_only_when_current_tick_inside_range() {
     let event = initialize_event();
     let mut pool = UniswapV4Pool::from_initialize_event(

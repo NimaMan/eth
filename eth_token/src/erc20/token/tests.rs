@@ -2,11 +2,14 @@ use super::*;
 use crate::pools::uniswap::v2::{
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UNISWAP_V2_PROTOCOL,
 };
+use crate::pools::uniswap::v4::{display_denom_for_v4_currency, UniswapV4Pool};
 use crate::pools::{
     BalancerPoolToken, CurvePoolToken, BALANCER_V2_PROTOCOL, CURVE_V1_PROTOCOL,
     SUSHISWAP_V2_PROTOCOL,
 };
-use alloy_primitives::Address;
+use crate::token_analytics::{build_current_observation, ActiveObservationReason};
+use alloy_primitives::{address, b256, Address, U256};
+use tx_processor::tx_processor::data_models::{ERC20TransferEvent, UniswapV4SwapEvent};
 
 fn token() -> ERC20Token {
     ERC20Token::new(ERC20TokenMetadata::new(
@@ -223,6 +226,154 @@ fn updates_v2_pool_from_event_batch() {
         summary.total_buy_volume_by_denom["0x0000000000000000000000000000000000000003"],
         1.0
     );
+}
+
+#[test]
+fn token_tracks_uniswap_v4_swap_activity_from_pool_perspective() {
+    let mut token = token();
+    let pool_manager = address!("000000000004444c5dc75cb358380d2e3de08a90");
+    let pool_id = b256!("1111111111111111111111111111111111111111111111111111111111111111");
+    let weth = address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
+    let trader = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let initialize = tx_processor::tx_processor::data_models::UniswapV4InitializeEvent {
+        pool_manager_address: pool_manager,
+        event_id: pool_id,
+        currency0: weth,
+        currency1: address!("0000000000000000000000000000000000000001"),
+        fee: 3000,
+        tick_spacing: 60,
+        hooks: Address::ZERO,
+        sqrt_price_x96: U256::from(1u128) << 96,
+        tick: 0,
+        log_index: 1,
+    };
+    let pool = UniswapV4Pool::from_initialize_event(
+        &initialize,
+        token.contract_address.clone(),
+        display_denom_for_v4_currency(initialize.currency0),
+        BasePoolConfig {
+            denom_decimals: Some(18),
+            token1_is_denom: Some(false),
+            ..BasePoolConfig::new(18)
+        },
+    );
+    let pool_key = pool.base.identity.pool_address.clone();
+    token.add_uniswap_v4_pool(pool);
+
+    let mut buy_tx = ProcessedTransaction::new(
+        b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        20,
+        1_800,
+        1,
+        trader,
+        Some(pool_manager),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    buy_tx.uniswap_v4_swaps.push(UniswapV4SwapEvent {
+        pool_manager_address: pool_manager,
+        event_id: pool_id,
+        sender: trader,
+        amount0: -1_000_000_000_000_000_000,
+        amount1: 50_000_000_000_000_000_000,
+        sqrt_price_x96: U256::from(1u128) << 96,
+        liquidity: 1_000_000_000_000_000_000,
+        tick: 0,
+        fee: 3000,
+        log_index: 2,
+    });
+    token
+        .update_uniswap_v4_pool_from_processed_transaction(&pool_key, &buy_tx)
+        .unwrap();
+
+    let block = token.activity.blocks.get(&20).unwrap();
+    assert_eq!(
+        block
+            .buy_volume_by_denom
+            .get("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+            .copied(),
+        Some(1.0)
+    );
+    assert!(!block
+        .sell_volume_by_denom
+        .contains_key("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"));
+
+    let mut sell_tx = ProcessedTransaction::new(
+        b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        21,
+        1_812,
+        1,
+        trader,
+        Some(pool_manager),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    sell_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: address!("0000000000000000000000000000000000000001"),
+        from_address: trader,
+        to_address: pool_manager,
+        amount: U256::from(25_000_000_000_000_000_000u128),
+        log_index: 1,
+    });
+    sell_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: weth,
+        from_address: pool_manager,
+        to_address: trader,
+        amount: U256::from(500_000_000_000_000_000u128),
+        log_index: 2,
+    });
+    sell_tx.uniswap_v4_swaps.push(UniswapV4SwapEvent {
+        pool_manager_address: pool_manager,
+        event_id: pool_id,
+        sender: trader,
+        amount0: 500_000_000_000_000_000,
+        amount1: -25_000_000_000_000_000_000,
+        sqrt_price_x96: U256::from(1u128) << 96,
+        liquidity: 1_000_000_000_000_000_000,
+        tick: 0,
+        fee: 3000,
+        log_index: 3,
+    });
+    token
+        .update_token_state_from_processed_transaction(&sell_tx)
+        .unwrap();
+    token
+        .update_uniswap_v4_pool_from_processed_transaction(&pool_key, &sell_tx)
+        .unwrap();
+
+    let block = token.activity.blocks.get(&21).unwrap();
+    assert_eq!(
+        block
+            .sell_volume_by_denom
+            .get("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+            .copied(),
+        Some(0.5)
+    );
+    assert!(!block
+        .buy_volume_by_denom
+        .contains_key("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"));
+
+    let pool = &token.uniswap_v4_pool(&pool_key).unwrap().base;
+    let observation = build_current_observation(
+        &token,
+        pool,
+        1,
+        21,
+        Some(1_812),
+        vec![ActiveObservationReason::NetworkActivity],
+        token.activity.blocks.get(&21),
+    );
+    let sell_flow = observation.sell_flow.unwrap();
+    assert_eq!(sell_flow.sell_tx_count, 1);
+    assert_eq!(sell_flow.seller_token_to_pool, 25.0);
+    assert_eq!(sell_flow.seller_token_to_other, 0.0);
+    assert!(!sell_flow.has_taxed_sell_pattern);
 }
 
 #[test]
