@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::erc20::ERC20Token;
 use crate::pools::BasePool;
-use crate::state::TokenTransferRecord;
+use crate::state::{TokenTransferFromCallRecord, TokenTransferRecord};
 use crate::token_analytics::{
     ObservationBlockAction, ObservationBlockActivity, ObservationBlockEventFlags,
     ObservationSellFlow,
@@ -58,14 +58,15 @@ pub(super) fn block_actions(
         );
     }
     if flags.liquidity_removal_in_block {
-        add_action(
-            &mut actions,
-            ObservationBlockAction::new(
-                "liquidity_removed",
-                "Liquidity event",
-                "The pool is marked as having a liquidity or reserve-removal event.",
-            ),
+        let mut action = ObservationBlockAction::new(
+            "liquidity_removed",
+            "Liquidity event",
+            "The pool is marked as having a liquidity or reserve-removal event.",
         );
+        if let Some(tx_hash) = pool.scam_tx_hash.as_deref() {
+            action = action.with_tx_hash(tx_hash);
+        }
+        add_action(&mut actions, action);
     }
     if activity.total_bribe_eth > 0.0 {
         add_action(
@@ -109,6 +110,8 @@ pub(super) fn block_actions(
     );
 
     let context = observation_role_context(token, pool);
+    add_token_control_transfer_from_actions(token, block_number, &context, &mut actions);
+    add_token_control_transaction_actions(token, block_number, &context, &mut actions);
     for record in token_transfer_records_at_block(token, block_number) {
         if let Some(action) =
             transfer_action_for_record(record, TransferAssetClass::Token, &context)
@@ -347,6 +350,113 @@ fn add_lp_actions(
             "Liquidity position event observed for this pool.",
         );
     }
+}
+
+fn add_token_control_transfer_from_actions(
+    token: &ERC20Token,
+    block_number: u64,
+    context: &ObservationRoleContext,
+    actions: &mut Vec<ObservationBlockAction>,
+) {
+    for call in token
+        .transfer_tracker
+        .transfer_from_calls
+        .iter()
+        .filter(|call| call.block_number == block_number)
+    {
+        if address_role(&call.caller, context) != ObservationAddressRole::Control {
+            continue;
+        }
+        let action = token_control_transfer_from_action(token, call, context);
+        add_action(actions, action);
+    }
+}
+
+fn add_token_control_transaction_actions(
+    token: &ERC20Token,
+    block_number: u64,
+    context: &ObservationRoleContext,
+    actions: &mut Vec<ObservationBlockAction>,
+) {
+    for transaction in token
+        .activity
+        .transactions_by_hash
+        .values()
+        .filter(|transaction| transaction.block_number == block_number)
+    {
+        let Some(maker) = transaction.maker.as_deref() else {
+            continue;
+        };
+        if address_role(maker, context) != ObservationAddressRole::Control {
+            continue;
+        }
+        add_action(
+            actions,
+            ObservationBlockAction::new(
+                "token_control_call",
+                "Token control call",
+                "Known owner/control address touched token state in this block.",
+            )
+            .with_tx_hash(&transaction.tx_hash),
+        );
+    }
+}
+
+fn token_control_transfer_from_action(
+    token: &ERC20Token,
+    call: &TokenTransferFromCallRecord,
+    context: &ObservationRoleContext,
+) -> ObservationBlockAction {
+    let from_role = address_role(&call.from_address, context);
+    let to_role = address_role(&call.to_address, context);
+    let from_pair_to_control = from_role.is_pool() && to_role == ObservationAddressRole::Control;
+    let holder_to_burn = reth_chain_query::common_addresses::is_burn_address_str(&call.to_address);
+    let without_transfer_log = call.emitted_transfer_count == 0;
+    let after_renounce = token
+        .authority_tracker
+        .renouncement_block
+        .is_some_and(|block| call.block_number >= block);
+    let (key, label, title_prefix) = if from_pair_to_control {
+        (
+            "token_control_transfer_from_pair",
+            "Control transferFrom pair",
+            "Control caller used transferFrom to pull tokens from a pool.",
+        )
+    } else if holder_to_burn {
+        (
+            "token_control_transfer_from_holder_to_burn",
+            "Control transferFrom holder -> burn",
+            "Control caller used transferFrom to move holder tokens to a burn address.",
+        )
+    } else if without_transfer_log {
+        (
+            "token_control_transfer_from_without_transfer",
+            "Control transferFrom without transfer",
+            "Control caller used transferFrom without a matching token Transfer log.",
+        )
+    } else if after_renounce {
+        (
+            "token_control_transfer_from_after_renounce",
+            "Control transferFrom after renounce",
+            "Control caller used transferFrom after token ownership was renounced.",
+        )
+    } else {
+        (
+            "token_control_transfer_from",
+            "Control transferFrom",
+            "Control caller used transferFrom on the token contract.",
+        )
+    };
+    let amount = finite_non_negative(call.amount);
+    let title = format!(
+        "{title_prefix} {} from {} to {}",
+        transfer_amount_label(amount, TransferAssetClass::Token),
+        from_role.as_str(),
+        to_role.as_str(),
+    );
+    ObservationBlockAction::new(key, label, title)
+        .with_amount(amount)
+        .with_tx_hash(&call.tx_hash)
 }
 
 fn transfer_action_for_record(

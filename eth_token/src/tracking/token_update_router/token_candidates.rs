@@ -249,11 +249,15 @@ fn insert_v4_position_approval_candidates(
 fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
     let mut addresses = BTreeSet::new();
 
-    addresses.extend(tx.unique_addresses.iter().copied());
-    addresses.extend(tx.erc20_contracts.iter().copied());
+    addresses.insert(tx.from_address);
+    if let Some(address) = tx.to_address {
+        addresses.insert(address);
+    }
     if let Some(address) = tx.contract_address {
         addresses.insert(address);
     }
+    addresses.extend(tx.unique_addresses.iter().copied());
+    addresses.extend(tx.erc20_contracts.iter().copied());
 
     for transfer in &tx.erc20_transfers {
         addresses.insert(transfer.token_address);
@@ -513,6 +517,20 @@ mod tests {
         let mut tx = tx();
         tx.unique_addresses
             .insert(address!("1111111111111111111111111111111111111111"));
+
+        let candidates = candidate_token_addresses(&registry, &index, &tx);
+
+        assert_eq!(
+            candidates,
+            vec!["0x1111111111111111111111111111111111111111".to_string()]
+        );
+    }
+
+    #[test]
+    fn candidates_route_from_direct_to_address() {
+        let (registry, index) = registry_with_token();
+        let mut tx = tx();
+        tx.to_address = Some(address!("1111111111111111111111111111111111111111"));
 
         let candidates = candidate_token_addresses(&registry, &index, &tx);
 

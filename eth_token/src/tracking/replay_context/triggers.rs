@@ -11,9 +11,9 @@ pub(crate) fn tx_is_token_control_replay_candidate(
 ) -> bool {
     let token_address = normalize_address(&token.contract_address);
     token_control_event_addresses(tx).contains(&token_address)
-        || (tx_action_indicates_token_control(tx)
-            && tx_directly_touches_token(tx, token)
-            && tx_touches_any_token_control_address(tx, token))
+        || (tx_directly_touches_token(tx, token)
+            && tx_touches_any_token_control_address(tx, token)
+            && (tx_action_indicates_token_control(tx) || tx_direct_call_to_token(tx, token)))
 }
 
 fn token_control_event_addresses(tx: &ProcessedTransaction) -> BTreeSet<String> {
@@ -67,6 +67,13 @@ fn tx_directly_touches_token(tx: &ProcessedTransaction, token: &ERC20Token) -> b
             .any(|address| same_address_str(*address, &token_address))
 }
 
+fn tx_direct_call_to_token(tx: &ProcessedTransaction, token: &ERC20Token) -> bool {
+    let token_address = normalize_address(&token.contract_address);
+    tx.to_address
+        .is_some_and(|address| same_address_str(address, &token_address))
+        && !tx.input.is_empty()
+}
+
 fn tx_touches_any_token_control_address(tx: &ProcessedTransaction, token: &ERC20Token) -> bool {
     let control_addresses = tx_control_addresses(tx);
     token
@@ -100,4 +107,48 @@ fn tx_action_indicates_token_control(tx: &ProcessedTransaction) -> bool {
             || action.contains("control")
             || action.contains("role")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{address, b256, U256};
+    use tx_processor::ProcessedTransaction;
+
+    use crate::erc20::{ERC20Token, ERC20TokenMetadata};
+
+    use super::*;
+
+    fn token_with_control() -> ERC20Token {
+        let mut token = ERC20Token::new(ERC20TokenMetadata::new(
+            "0x1111111111111111111111111111111111111111",
+            "Token",
+            "TKN",
+            18,
+            "1000000000000000000",
+        ));
+        token
+            .token_control_addresses
+            .insert("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string());
+        token
+    }
+
+    #[test]
+    fn direct_control_call_to_token_forces_replay_without_action_keyword() {
+        let token = token_with_control();
+        let tx = ProcessedTransaction::new(
+            b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            10,
+            1000,
+            0,
+            address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some(address!("1111111111111111111111111111111111111111")),
+            U256::ZERO,
+            true,
+            0,
+            2,
+            vec![0x30, 0x1e, 0x57, 0x46],
+        );
+
+        assert!(tx_is_token_control_replay_candidate(&token, &tx));
+    }
 }

@@ -8,6 +8,7 @@ mod liquidity;
 mod lp_control;
 mod reasons;
 mod roles;
+mod token_control;
 mod transfers;
 mod utils;
 

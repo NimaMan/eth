@@ -6,9 +6,10 @@ use crate::token_activity::TokenBlockActivity;
 use crate::token_analytics::{
     ActiveObservationReason, FeatureEvidenceBlocks, ObservationBlockActivity,
     ObservationBlockActivitySource, ObservationPoolTradingState, ObservationTransactionSummary,
-    ObservedSellTransferFlow, PoolActivityFeatures, PoolMarketFeatures, TokenAuthorityFeatures,
-    TokenNetworkFeatures, TokenPoolCurrentObservation, TokenPoolObservationContext,
-    TokenPoolObservationFeatures, TokenPoolObservationKey, TokenStaticFeatures,
+    ObservationTransactionType, ObservedSellTransferFlow, PoolActivityFeatures, PoolMarketFeatures,
+    TokenAuthorityFeatures, TokenNetworkFeatures, TokenPoolCurrentObservation,
+    TokenPoolObservationContext, TokenPoolObservationFeatures, TokenPoolObservationKey,
+    TokenStaticFeatures,
 };
 use crate::tracking::{TokenBlockUpdateReport, TokenRegistry};
 
@@ -18,10 +19,11 @@ use super::flags::event_flags;
 use super::liquidity::liquidity_features;
 use super::lp_control::lp_control_features;
 use super::reasons::{append_activity_reasons, append_event_reasons};
+use super::token_control::token_control_features;
 use super::transfers::{block_transfer_summary, observed_sell_flow, token_pool_movement};
 use super::utils::{
-    display_tax, economic_sellable, normalize_address, observation_pool_key,
-    pool_token_reserve_ratio_denominator, tax_bucket_key,
+    activity_has_signal_for_denom, display_tax, economic_sellable, normalize_address,
+    observation_pool_key, pool_token_reserve_ratio_denominator, tax_bucket_key,
 };
 
 pub fn collect_current_observations(
@@ -73,6 +75,21 @@ pub fn collect_current_observations(
                 ActiveObservationReason::TradingStatusChange,
             );
         }
+
+        if update.token_state_updated {
+            let Some(token) = registry.token(&update.token_address) else {
+                continue;
+            };
+            for pool in token.all_pool_bases() {
+                let reason = token_state_activity_reason(token, pool, report.block_number);
+                push_reason(
+                    &mut touched,
+                    &update.token_address,
+                    &pool.identity.pool_address,
+                    reason,
+                );
+            }
+        }
     }
 
     let mut observations = Vec::with_capacity(touched.len());
@@ -105,6 +122,44 @@ pub fn collect_current_observations(
     }
 
     observations
+}
+
+fn token_state_activity_reason(
+    token: &ERC20Token,
+    pool: &BasePool,
+    block_number: u64,
+) -> ActiveObservationReason {
+    if block_has_control_address_activity(token, block_number) {
+        return ActiveObservationReason::ControlAddressActivity;
+    }
+    if token
+        .activity
+        .blocks
+        .get(&block_number)
+        .is_some_and(|activity| {
+            activity_has_signal_for_denom(activity, &pool.identity.denom_address)
+        })
+    {
+        return ActiveObservationReason::NetworkActivity;
+    }
+    ActiveObservationReason::Manual
+}
+
+fn block_has_control_address_activity(token: &ERC20Token, block_number: u64) -> bool {
+    token
+        .activity
+        .transactions_by_hash
+        .values()
+        .filter(|transaction| transaction.block_number == block_number)
+        .filter_map(|transaction| transaction.maker.as_deref())
+        .any(|maker| {
+            let maker = normalize_address(maker);
+            token
+                .token_control_addresses
+                .iter()
+                .map(|address| normalize_address(address))
+                .any(|control| control == maker)
+        })
 }
 
 fn push_reason(
@@ -163,6 +218,7 @@ pub fn build_current_observation(
     );
     let transfer_summary = block_transfer_summary(token, block_number);
     let token_pool_movement = token_pool_movement(token, pool, block_number);
+    let token_control = token_control_features(token, pool, block_number, &token_pool_movement);
     let sell_flow = observed_sell_flow(token, pool, block_number);
     activity_features.set_observed_sell_transfer_flow(ObservedSellTransferFlow {
         observed_sell_tx_count: sell_flow.sell_tx_count,
@@ -273,6 +329,9 @@ pub fn build_current_observation(
             .as_ref()
             .map(|snapshot| snapshot.block_number),
         lp_control_latest_block: lp_control.last_lp_approval_block,
+        token_control_latest_block: token_control
+            .last_pair_balance_backdoor_signal_block
+            .or(token_control.last_control_transfer_from_block),
         activity_latest_block: Some(block_number),
         network_latest_block: None,
     };
@@ -282,7 +341,18 @@ pub fn build_current_observation(
         .transactions_by_hash
         .values()
         .filter(|transaction| transaction.block_number == block_number)
-        .map(ObservationTransactionSummary::from)
+        .map(|transaction| {
+            let mut summary = ObservationTransactionSummary::from(transaction);
+            if transaction
+                .maker
+                .as_deref()
+                .is_some_and(|maker| token_control_addresses_contain(token, maker))
+            {
+                summary.add_type(ObservationTransactionType::ControlAddressActivity);
+                summary.refresh_classification();
+            }
+            summary
+        })
         .collect();
     let block_actions = block_actions(
         token,
@@ -312,6 +382,7 @@ pub fn build_current_observation(
             market: market_features,
             liquidity: liquidity_features,
             lp_control,
+            token_control,
             activity: activity_features,
             network: TokenNetworkFeatures {
                 unique_address_count: Some(token.unique_addresses().len() as u32),
@@ -325,5 +396,86 @@ pub fn build_current_observation(
         token_pool_movement: Some(token_pool_movement),
         sell_flow: Some(sell_flow),
         block_actions,
+    }
+}
+
+fn token_control_addresses_contain(token: &ERC20Token, address: &str) -> bool {
+    let address = normalize_address(address);
+    token
+        .token_control_addresses
+        .iter()
+        .map(|control| normalize_address(control))
+        .any(|control| control == address)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::erc20::ERC20TokenMetadata;
+    use crate::pools::BasePoolConfig;
+    use crate::tracking::{TokenBlockUpdateReport, TokenRegistry, TokenStateUpdateReport};
+
+    use super::*;
+
+    const TOKEN: &str = "0x1111111111111111111111111111111111111111";
+    const POOL: &str = "0x2222222222222222222222222222222222222222";
+    const WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    const CONTROL: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn token_state_update_creates_observation_without_pool_event() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token(ERC20TokenMetadata::new(
+            TOKEN,
+            "Token",
+            "TKN",
+            18,
+            "1000000000000000000",
+        ));
+        let token = registry.token_mut(TOKEN).expect("token exists");
+        token.create_uniswap_v2_pool(POOL, WETH, BasePoolConfig::new(18), Vec::<&str>::new());
+        token.token_control_addresses.insert(CONTROL.to_string());
+        token
+            .activity
+            .record_transaction("0xaaaaaaaa", Some(CONTROL), 42, Some(1_700));
+
+        let report = TokenBlockUpdateReport {
+            block_number: 42,
+            block_hash: "0xblock".to_string(),
+            block_timestamp: 1_700,
+            transaction_count: 1,
+            processed_transaction_count: 1,
+            failed_transaction_count: 0,
+            pool_simulation_failure_count: 0,
+            already_processed: false,
+            created_token_addresses: Vec::new(),
+            updated_token_addresses: vec![TOKEN.to_string()],
+            token_updates: vec![TokenStateUpdateReport {
+                token_address: TOKEN.to_string(),
+                token_state_updated: true,
+                ..Default::default()
+            }],
+            transaction_errors: Vec::new(),
+        };
+
+        let mut active_counts = BTreeMap::new();
+        let observations = collect_current_observations(&registry, &report, &mut active_counts);
+
+        assert_eq!(observations.len(), 1);
+        let observation = &observations[0];
+        assert_eq!(observation.context.block_number, 42);
+        assert!(observation
+            .context
+            .active_reasons
+            .contains(&ActiveObservationReason::ControlAddressActivity));
+        assert!(observation
+            .block_actions
+            .iter()
+            .any(|action| action.key == "token_control_call"));
+        assert!(observation
+            .transactions
+            .iter()
+            .any(|transaction| transaction
+                .tx_types
+                .contains(&ObservationTransactionType::ControlAddressActivity)));
     }
 }

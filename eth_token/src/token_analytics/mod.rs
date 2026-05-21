@@ -9,8 +9,9 @@ pub mod observation;
 
 pub use features::{
     FeatureEvidenceBlocks, LpControlFeatures, ObservedSellTransferFlow, PoolActivityFeatures,
-    PoolLiquidityFeatures, PoolMarketFeatures, TokenAuthorityFeatures, TokenNetworkFeatures,
-    TokenPoolAnalyticsFeatures, TokenPoolObservationFeatures, TokenStaticFeatures,
+    PoolLiquidityFeatures, PoolMarketFeatures, TokenAuthorityFeatures, TokenControlFeatures,
+    TokenNetworkFeatures, TokenPoolAnalyticsFeatures, TokenPoolObservationFeatures,
+    TokenStaticFeatures,
 };
 pub use observation::{
     build_current_observation, build_historical_observations_for_pool,

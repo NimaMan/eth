@@ -11,6 +11,7 @@ pub mod market;
 pub mod network;
 pub mod sell_flow;
 pub mod token;
+pub mod token_control;
 pub mod utils;
 
 pub use activity::PoolActivityFeatures;
@@ -22,6 +23,7 @@ pub use market::PoolMarketFeatures;
 pub use network::TokenNetworkFeatures;
 pub use sell_flow::ObservedSellTransferFlow;
 pub use token::TokenStaticFeatures;
+pub use token_control::TokenControlFeatures;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenPoolAnalyticsFeatures {
@@ -52,6 +54,7 @@ pub struct TokenPoolObservationFeatures {
     pub market: PoolMarketFeatures,
     pub liquidity: PoolLiquidityFeatures,
     pub lp_control: LpControlFeatures,
+    pub token_control: TokenControlFeatures,
     pub activity: PoolActivityFeatures,
     pub network: TokenNetworkFeatures,
     pub evidence_blocks: FeatureEvidenceBlocks,
@@ -98,7 +101,15 @@ mod tests {
             Some(5)
         );
         assert_eq!(
+            features.pool_creation_to_last_lp_approval_chain_block_delta,
+            Some(5)
+        );
+        assert_eq!(
             features.blocks_from_trading_enabled_to_last_lp_approval,
+            Some(-5)
+        );
+        assert_eq!(
+            features.trading_enabled_to_last_lp_approval_chain_block_delta,
             Some(-5)
         );
     }
@@ -198,5 +209,13 @@ mod tests {
 
         assert_eq!(features.blocks_from_first_lp_approval_to_as_of, Some(10));
         assert_eq!(features.blocks_from_last_lp_approval_to_as_of, Some(5));
+        assert_eq!(
+            features.first_lp_approval_to_as_of_chain_block_delta,
+            Some(10)
+        );
+        assert_eq!(
+            features.last_lp_approval_to_as_of_chain_block_delta,
+            Some(5)
+        );
     }
 }
