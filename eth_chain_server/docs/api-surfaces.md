@@ -47,6 +47,11 @@ GET  /api/v1/eth/ranges/<run>/errors
 GET  /api/v1/eth/ranges/<run>/stream
 POST /api/v1/eth/ranges/<run>/risk-atlas/export
 
+GET  /api/v1/eth/prices/spot?pair=ETH/USDC&venue=uniswap_v2
+GET  /api/v1/eth/prices/multi?pair=ETH/USDC
+GET  /api/v1/eth/prices/stablecoins
+POST /api/v1/eth/prices/swap-quote
+
 GET  /api/v1/eth/analytics/risk-atlas
 GET  /api/v1/eth/analytics/risk-atlas/runs
 GET  /api/v1/eth/analytics/risk-atlas/runs/<atlas_run>

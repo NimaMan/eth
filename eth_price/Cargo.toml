@@ -7,4 +7,69 @@ workspace = ".."
 
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["rlp", "serde"] }
+hex.workspace = true
+lazy_static = "1.5"
+reth_chain_query = { path = "../reth_chain_query" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
 serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tx_processor = { path = "../tx_processor" }
+tx_simulator = { path = "../tx_simulator" }
+
+[[example]]
+name = "eth_price_uniswap_v2_price_feed"
+path = "examples/snapshot/uniswap_v2_price_feed.rs"
+
+[[example]]
+name = "eth_price_uniswap_v3_price_feed"
+path = "examples/snapshot/uniswap_v3_price_feed.rs"
+
+[[example]]
+name = "eth_price_sushiswap_price_feed"
+path = "examples/snapshot/sushiswap_price_feed.rs"
+
+[[example]]
+name = "eth_price_chainlink_price_feed"
+path = "examples/snapshot/chainlink_price_feed.rs"
+
+[[example]]
+name = "eth_price_curve_price_feed"
+path = "examples/snapshot/curve_price_feed.rs"
+
+[[example]]
+name = "eth_price_balancer_price_feed"
+path = "examples/snapshot/balancer_price_feed.rs"
+
+[[example]]
+name = "eth_price_pancakeswap_v3_price_feed"
+path = "examples/snapshot/pancakeswap_v3_price_feed.rs"
+
+[[example]]
+name = "eth_price_dodo_price_feed"
+path = "examples/snapshot/dodo_price_feed.rs"
+
+[[example]]
+name = "eth_price_fraxswap_price_feed"
+path = "examples/snapshot/fraxswap_price_feed.rs"
+
+[[example]]
+name = "eth_price_multi_venue_snapshot"
+path = "examples/snapshot/multi_venue_snapshot.rs"
+
+[[example]]
+name = "eth_price_stablecoin_prices"
+path = "examples/stablecoins/eth_stablecoin_snapshot.rs"
+
+[[example]]
+name = "eth_price_uniswap_v2_bid_ask"
+path = "examples/swap_sim/uniswap_v2_bid_ask.rs"
+
+[[example]]
+name = "eth_price_unique_price_identification"
+path = "examples/price_data_models/unique_price_identification.rs"
+
+[[example]]
+name = "eth_price_price_id_demonstration"
+path = "examples/price_data_models/price_id_demonstration.rs"

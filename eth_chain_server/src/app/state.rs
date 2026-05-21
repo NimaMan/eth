@@ -3,10 +3,11 @@ use std::sync::Arc;
 use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenRuntimeConfig};
 use eyre::{eyre, Result};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
-use token_lab_scam_risk_atlas::{RiskAtlasConfig, RiskAtlasReader};
+use token_lab_scam_risk_atlas::RiskAtlasReader;
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
+use crate::prices::ChainPriceService;
 use crate::ranges::RangeIndexManager;
 use crate::recent_blocks::RecentLiveBlocks;
 use crate::stores::alpha_trading::AlphaTradingStore;
@@ -29,6 +30,7 @@ pub struct ServerState {
     pub mempool_signals: MempoolSignalStore,
     pub alpha_trading: AlphaTradingStore,
     pub risk_atlas: RiskAtlasReader,
+    pub price_service: ChainPriceService,
 }
 
 impl ServerState {
@@ -80,7 +82,8 @@ impl ServerState {
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
         let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
-        let risk_atlas = RiskAtlasReader::connect_lazy(&RiskAtlasConfig::default().database_url)?;
+        let risk_atlas = RiskAtlasReader::connect_lazy(&config.alpha_database_url)?;
+        let price_service = ChainPriceService::new(provider.provider_factory().clone())?;
 
         Ok(Self {
             config,
@@ -95,6 +98,7 @@ impl ServerState {
             mempool_signals,
             alpha_trading,
             risk_atlas,
+            price_service,
         })
     }
 

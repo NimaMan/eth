@@ -5,6 +5,7 @@ mod health;
 mod live;
 mod mempool;
 mod ops;
+mod price;
 mod range;
 mod simulation;
 mod token_activity;

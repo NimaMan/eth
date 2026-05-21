@@ -1,7 +1,7 @@
 use warp::{Filter, Reply};
 
 use super::{
-    agent, alpha, backtest, health, live, mempool, ops, range, simulation, token_activity,
+    agent, alpha, backtest, health, live, mempool, ops, price, range, simulation, token_activity,
     token_analytics,
 };
 use crate::http::ServerState;
@@ -153,6 +153,30 @@ pub(super) fn routes(
         .and(warp::get())
         .and(super::with_state(state.clone()))
         .and_then(range::processed_block_disk_cache_coverage);
+
+    let price_spot = warp::path!("api" / "v1" / "eth" / "prices" / "spot")
+        .and(warp::get())
+        .and(warp::query::<price::SpotPriceQuery>())
+        .and(super::with_state(state.clone()))
+        .and_then(price::spot);
+
+    let price_multi = warp::path!("api" / "v1" / "eth" / "prices" / "multi")
+        .and(warp::get())
+        .and(warp::query::<price::MultiPriceQuery>())
+        .and(super::with_state(state.clone()))
+        .and_then(price::multi);
+
+    let price_stablecoins = warp::path!("api" / "v1" / "eth" / "prices" / "stablecoins")
+        .and(warp::get())
+        .and(warp::query::<price::StablecoinPriceQuery>())
+        .and(super::with_state(state.clone()))
+        .and_then(price::stablecoins);
+
+    let price_swap_quote = warp::path!("api" / "v1" / "eth" / "prices" / "swap-quote")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(super::with_state(state.clone()))
+        .and_then(price::swap_quote);
 
     let range_progress = warp::path!("api" / "v1" / "eth" / "ranges" / String / "progress")
         .and(warp::get())
@@ -481,6 +505,12 @@ pub(super) fn routes(
         .or(cache_coverage)
         .boxed();
 
+    let price_routes = price_spot
+        .or(price_multi)
+        .or(price_stablecoins)
+        .or(price_swap_quote)
+        .boxed();
+
     let range_detail_routes = range_token_detail
         .or(range_tokens)
         .or(range_progress)
@@ -540,6 +570,7 @@ pub(super) fn routes(
         .or(frontend_live_routes)
         .or(trading_routes)
         .or(range_root_routes)
+        .or(price_routes)
         .or(range_detail_routes)
         .or(ops_routes)
         .or(alpha_result_set_routes)

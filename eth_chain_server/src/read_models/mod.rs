@@ -5,6 +5,7 @@ pub mod gas_rank;
 pub mod live;
 pub mod ops;
 pub mod pool;
+pub mod price;
 pub mod risk_atlas;
 pub mod run;
 pub mod simulation;

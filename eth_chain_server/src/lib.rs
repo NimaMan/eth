@@ -5,6 +5,7 @@ pub mod error;
 pub mod http;
 pub mod live;
 pub mod memory;
+pub mod prices;
 pub mod ranges;
 pub mod read_models;
 pub mod recent_blocks;
@@ -39,7 +40,8 @@ pub mod server {
 
 pub mod views {
     pub use crate::read_models::{
-        activity, cache, error, live, ops, pool, run, strategy, surface, token, token_analytics,
+        activity, cache, error, live, ops, pool, price, run, strategy, surface, token,
+        token_analytics,
     };
 }
 
