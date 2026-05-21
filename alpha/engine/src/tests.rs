@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
-    execution::ExecutionStatus,
+    execution::{ExecutionReport, ExecutionStatus},
     ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
     market::{PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
@@ -991,6 +991,70 @@ async fn pending_reports_apply_before_same_block_risk_updates() {
     let sell_order_reason = sell_order_reason.expect("sell order decision rationale");
     assert_eq!(sell_order_reason.code, "exit.risk");
     assert_eq!(sell_order_reason.source.as_deref(), Some("risk"));
+}
+
+#[tokio::test]
+async fn external_execution_report_updates_matching_submitted_position() {
+    let store = MemoryTradingStore::default();
+    let token = Address::repeat_byte(0x11);
+    let pool_address = Address::repeat_byte(0x22);
+    let key = PositionKey {
+        portfolio_id: PortfolioId("real".to_string()),
+        wallet_id: WalletId("real-wallet".to_string()),
+        strategy_name: StrategyName("real-receipt".to_string()),
+        token_address: token,
+        pool_address: TokenPoolId::new(token, pool_address.to_string()),
+        protocol: PoolProtocol::UniswapV2,
+    };
+    let mut position = Position::new(position_id_for_key(&key), key);
+    position.state = PositionState::BuySubmitted;
+    position.entry_order_id = Some(OrderId("order-1".to_string()));
+
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        ConfirmingTestExecutionAdapter,
+    )
+    .with_portfolio(portfolio);
+
+    let reports = engine
+        .handle_event(EngineEvent::Execution(ExecutionReport {
+            order_id: OrderId("order-1".to_string()),
+            status: ExecutionStatus::Confirmed,
+            tx_hash: Some(
+                "0x1111111111111111111111111111111111111111111111111111111111111111"
+                    .parse()
+                    .unwrap(),
+            ),
+            block_number: Some(100),
+            filled_amount: Some(Amount {
+                raw: U256::from(10u64),
+                decimals: 18,
+            }),
+            token_amount: Some(Amount {
+                raw: U256::from(20u64),
+                decimals: 18,
+            }),
+            gas_used: Some(21_000),
+            gas_cost: Some(Amount {
+                raw: U256::from(21_000_000_000_000u64),
+                decimals: 18,
+            }),
+            error: None,
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(store.positions()[0].state, PositionState::BuyConfirmed);
+    assert_eq!(store.positions()[0].entry_block, Some(100));
+    assert_eq!(store.execution_reports().len(), 1);
+    assert_eq!(
+        store.execution_reports()[0].status,
+        ExecutionStatus::Confirmed
+    );
 }
 
 #[tokio::test]

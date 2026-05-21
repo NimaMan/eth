@@ -56,7 +56,7 @@ where
                 Ok(reports)
             }
             EngineEvent::Execution(report) => {
-                self.store.record_execution_report(&report).await?;
+                let report = self.apply_external_execution_report(report).await?;
                 Ok(vec![report])
             }
         }

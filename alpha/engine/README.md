@@ -191,13 +191,15 @@ not expose a public mode switch.
 The real live binary is intentionally sell-only for now: it requires
 `--disable-entry`, targets the deployed `UniswapV2TradingVault`, and uses shadow
 dry-run simulation/gas-rank providers only to prove the live executor boundary.
-A public-broadcast deployment still needs:
+A receipt reconciliation worker now exists for real submitted tx hashes: it
+polls Kartal's configured RPC, requires successful receipts, and confirms V2
+vault fills only from `BoughtV2` or `EmergencySoldV2` events. A
+public-broadcast deployment still needs:
 
 - production `PreSubmitSimulator` for the exact calldata;
 - production `GasRankProvider` backed by recent block-rank evidence;
 - real vault buy route planning and position reconciliation;
-- receipt tracking that turns Kartal tx hashes into final confirmed or failed
-  `ExecutionReport`s.
+- operational finality policy and alerting around the receipt worker.
 
 Backtest binaries cannot import `TxExecutorAdapter` through the public engine
 API; they should remain on `ChainSimExecutionAdapter` only.

@@ -1,6 +1,6 @@
 use super::*;
 use eth_alpha_core::{
-    ids::{PoolAddress, PositionId},
+    ids::{OrderId, PoolAddress, PositionId, TradeId},
     market::PoolProtocol,
     position::Position,
 };
@@ -326,6 +326,86 @@ impl PostgresTradingStore {
                 }
                 normalize_position_pool_id(&mut position);
                 Ok(position)
+            })
+            .collect()
+    }
+
+    pub async fn load_submitted_executions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<SubmittedExecutionRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT ON (er.order_id)
+                   er.order_id,
+                   er.tx_hash,
+                   er.position_id,
+                   er.trade_id,
+                   er.order_side,
+                   positions.token_address
+            FROM alpha_trading.execution_reports er
+            JOIN alpha_trading.positions positions
+              ON positions.run_id = er.run_id
+             AND positions.position_id = er.position_id
+            WHERE er.run_id = $1
+              AND er.status = 'submitted'
+              AND er.tx_hash IS NOT NULL
+              AND er.position_id IS NOT NULL
+              AND er.order_side IN ('buy', 'sell')
+              AND (
+                    (er.order_side = 'buy' AND positions.state = 'buy_submitted')
+                 OR (er.order_side = 'sell' AND positions.state = 'sell_submitted')
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.execution_reports final
+                  WHERE final.run_id = er.run_id
+                    AND final.order_id = er.order_id
+                    AND final.status IN ('confirmed', 'failed', 'cancelled')
+              )
+            ORDER BY er.order_id, er.created_at DESC, er.id DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(usize_to_i32(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let order_id = OrderId(row.try_get::<String, _>("order_id").map_err(store_error)?);
+                let tx_hash = row
+                    .try_get::<String, _>("tx_hash")
+                    .map_err(store_error)?
+                    .parse()
+                    .map_err(store_error)?;
+                let position_id = PositionId(
+                    row.try_get::<String, _>("position_id")
+                        .map_err(store_error)?,
+                );
+                let trade_id = row
+                    .try_get::<Option<String>, _>("trade_id")
+                    .map_err(store_error)?
+                    .map(TradeId);
+                let order_side = parse_order_side_label(
+                    &row.try_get::<String, _>("order_side")
+                        .map_err(store_error)?,
+                )?;
+                let token_address = row
+                    .try_get::<String, _>("token_address")
+                    .map_err(store_error)?
+                    .parse()
+                    .map_err(store_error)?;
+                Ok(SubmittedExecutionRecord {
+                    order_id,
+                    tx_hash,
+                    position_id,
+                    trade_id,
+                    order_side,
+                    token_address,
+                })
             })
             .collect()
     }

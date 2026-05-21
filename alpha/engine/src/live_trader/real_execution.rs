@@ -198,8 +198,8 @@ impl PreSubmitSimulator for ShadowDryRunPreSubmitSimulator {
 }
 
 pub(super) struct KartalRealPreflight {
-    token: String,
-    status: KartalEthTxExecutorStatus,
+    pub(super) token: String,
+    pub(super) status: KartalEthTxExecutorStatus,
 }
 
 pub(super) async fn preflight_kartal_real(args: &RealExecutionArgs) -> Result<KartalRealPreflight> {

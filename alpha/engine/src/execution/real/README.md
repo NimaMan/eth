@@ -26,6 +26,11 @@ confirmation evidence. Kartal broadcast can only move an order to
 emit the `BuyConfirmed`, `SellConfirmed`, `BuyFailed`, or `SellFailed`
 `ExecutionReport`.
 
+The first reconciliation worker lives in `src/live_trader/receipt_reconciliation.rs`.
+It polls `eth_getTransactionReceipt` for submitted tx hashes and confirms only
+when the receipt succeeded and the deployed V2 vault emitted the expected fill
+event. Missing vault evidence is treated as unresolved, not confirmed.
+
 ## Data Contract
 
 `TxExecutorAdapter` receives an already-approved `OrderIntent`. It does not
@@ -64,9 +69,10 @@ is the production hook that must load the matched position, latest pool snapshot
 wallet tx context, observation metadata, and deadline/min-out inputs.
 
 The remaining production pieces are production-grade live simulation,
-gas-rank/allowance providers, buy-route support, and receipt reconciliation.
-Route discovery, calldata construction, slippage, gas-rank policy, and
-value-capped bribe logic must stay outside the engine in `alpha/live/trading`.
+gas-rank/allowance providers, buy-route support, and final broadcast/finality
+operations around the receipt worker. Route discovery, calldata construction,
+slippage, gas-rank policy, and value-capped bribe logic must stay outside the
+engine in `alpha/live/trading`.
 
 ## Responsibilities
 
@@ -97,5 +103,5 @@ value-capped bribe logic must stay outside the engine in `alpha/live/trading`.
 - Backtest confirmation semantics must not leak into this adapter. Real live
   cannot mark a buy or sell as confirmed from planning, simulation, or Kartal
   request acceptance alone.
-- Do not deploy this adapter without a receipt/reconciliation worker. Submitted
-  is not confirmed.
+- Do not run public broadcast without receipt reconciliation enabled and
+  monitored. Submitted is not confirmed.

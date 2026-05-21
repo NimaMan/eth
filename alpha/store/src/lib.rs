@@ -12,7 +12,7 @@ mod trading_store;
 
 pub use postgres::{
     ActiveHoldCounterRecord, PostgresTradingStore, StrategyObservationCursor,
-    StrategyObservationRecord,
+    StrategyObservationRecord, SubmittedExecutionRecord,
 };
 
 pub(crate) use codec::*;

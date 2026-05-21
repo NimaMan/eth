@@ -1,4 +1,7 @@
-use eth_alpha_core::ids::PositionId;
+use eth_alpha_core::{
+    ids::{OrderId, PositionId, TokenAddress, TradeId, TxHash},
+    order::OrderSide,
+};
 use serde_json::Value;
 use sqlx::postgres::PgPool;
 
@@ -38,4 +41,14 @@ pub struct ActiveHoldCounterRecord {
     pub position_id: PositionId,
     pub count: u64,
     pub last_block: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmittedExecutionRecord {
+    pub order_id: OrderId,
+    pub tx_hash: TxHash,
+    pub position_id: PositionId,
+    pub trade_id: Option<TradeId>,
+    pub order_side: OrderSide,
+    pub token_address: TokenAddress,
 }

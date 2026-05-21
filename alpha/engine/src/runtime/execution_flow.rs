@@ -174,6 +174,42 @@ where
         Ok(reports)
     }
 
+    pub(crate) async fn apply_external_execution_report(
+        &mut self,
+        report: ExecutionReport,
+    ) -> Result<ExecutionReport> {
+        if !matches!(
+            report.status,
+            ExecutionStatus::Confirmed | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+        ) {
+            self.store.record_execution_report(&report).await?;
+            return Ok(report);
+        }
+
+        let matched = self
+            .portfolio
+            .positions
+            .iter()
+            .find_map(|(position_id, position)| {
+                if position.entry_order_id.as_ref() == Some(&report.order_id) {
+                    Some((position_id.clone(), OrderSide::Buy))
+                } else if position.exit_order_id.as_ref() == Some(&report.order_id) {
+                    Some((position_id.clone(), OrderSide::Sell))
+                } else {
+                    None
+                }
+            });
+
+        let Some((position_id, side)) = matched else {
+            self.store.record_execution_report(&report).await?;
+            return Ok(report);
+        };
+
+        self.apply_final_execution_report(&position_id, side, &report, None)
+            .await?;
+        Ok(report)
+    }
+
     async fn apply_final_execution_report(
         &mut self,
         position_id: &PositionId,

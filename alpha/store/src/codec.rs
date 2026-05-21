@@ -112,6 +112,16 @@ pub(crate) fn order_side_label(side: OrderSide) -> &'static str {
     }
 }
 
+pub(crate) fn parse_order_side_label(value: &str) -> Result<OrderSide> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "buy" => Ok(OrderSide::Buy),
+        "sell" => Ok(OrderSide::Sell),
+        other => Err(AlphaCoreError::Store(format!(
+            "unknown order side label {other:?}"
+        ))),
+    }
+}
+
 pub(crate) fn protocol_label(protocol: &PoolProtocol) -> String {
     protocol.label().into_owned()
 }

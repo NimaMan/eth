@@ -46,6 +46,7 @@ use tracing::{info, warn};
 mod cli;
 mod position_state;
 mod real_execution;
+mod receipt_reconciliation;
 mod strategy;
 mod support;
 mod token_server;
@@ -53,6 +54,7 @@ mod token_server;
 use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
 use position_state::release_stale_submitted_position;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
+use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
 use strategy::{build_strategy_specs, live_strategy_spec_config_json};
 use support::*;
 use token_server::TokenServerClient;
@@ -256,6 +258,20 @@ async fn run(
     let adapter_current_block = chain_sim_adapter.current_block();
     let pool_updates = chain_sim_adapter.pools();
     let state_status_adapter = chain_sim_adapter.clone();
+    let receipt_reconciler = match (
+        execution_mode,
+        real_args.as_ref(),
+        kartal_real_preflight.as_ref(),
+    ) {
+        (TraderExecutionMode::KartalReal, Some(real_args), Some(preflight)) => {
+            let vault = parse_address(&real_args.live_real_vault_address)?;
+            Some(VaultReceiptReconciler::new(
+                JsonRpcReceiptProvider::new(preflight.status.rpc_url.clone()),
+                vault,
+            ))
+        }
+        _ => None,
+    };
     let adapter: Box<dyn EngineExecutionAdapter> = match execution_mode {
         TraderExecutionMode::ChainSim => Box::new(chain_sim_adapter),
         TraderExecutionMode::KartalReal => {
@@ -475,6 +491,8 @@ async fn run(
         let mut risk_events = 0usize;
         let mut position_monitor_events = 0usize;
         let mut reports = 0usize;
+        let mut receipt_reports = 0usize;
+        let mut receipt_unresolved = 0usize;
 
         let mut signal_wires = signals.signals;
         signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
@@ -697,6 +715,48 @@ async fn run(
             }
         }
 
+        if let Some(reconciler) = &receipt_reconciler {
+            match store.load_submitted_executions(50).await {
+                Ok(submitted) if submitted.is_empty() => {}
+                Ok(submitted) => match reconciler.reconcile(submitted).await {
+                    Ok(batch) => {
+                        receipt_unresolved = batch.unresolved.len();
+                        for issue in batch.unresolved {
+                            warn!(
+                                order_id = %issue.order_id,
+                                tx_hash = %issue.tx_hash,
+                                reason = %issue.reason,
+                                "real receipt reconciliation has no final vault evidence yet"
+                            );
+                        }
+                        for report in batch.reports {
+                            let event_reports =
+                                engine.handle_event(EngineEvent::Execution(report)).await?;
+                            receipt_reports += event_reports.len();
+                            reports += event_reports.len();
+                            for report in event_reports {
+                                info!(
+                                    order_id = %report.order_id.0,
+                                    status = ?report.status,
+                                    tx_hash = ?report.tx_hash,
+                                    block_number = ?report.block_number,
+                                    gas_used = ?report.gas_used,
+                                    error = ?report.error,
+                                    "real receipt reconciled execution report"
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "real receipt reconciliation failed");
+                    }
+                },
+                Err(error) => {
+                    warn!(error = %error, "failed to load submitted executions for receipt reconciliation");
+                }
+            }
+        }
+
         if first_poll && !args.replay_current {
             info!(
                 pools = seen_pool_blocks.len(),
@@ -742,6 +802,8 @@ async fn run(
             market_events,
             risk_events,
             position_monitor_events,
+            receipt_reports,
+            receipt_unresolved,
             reports,
             strategy_count = strategy_specs.len(),
             positions = engine.portfolio().active_position_count(),
@@ -771,6 +833,8 @@ async fn run(
             "market_events": market_events,
             "risk_events": risk_events,
             "position_monitor_events": position_monitor_events,
+            "receipt_reports": receipt_reports,
+            "receipt_unresolved": receipt_unresolved,
             "reports": reports,
             "strategy_count": strategy_specs.len(),
             "observation_strategy_name": &observation_strategy_name,
@@ -813,6 +877,12 @@ async fn run(
             "position_monitor_events".to_string(),
             json!(position_monitor_events),
         );
+        health
+            .metrics
+            .insert("receipt_reports".to_string(), json!(receipt_reports));
+        health
+            .metrics
+            .insert("receipt_unresolved".to_string(), json!(receipt_unresolved));
         health.metrics.insert("reports".to_string(), json!(reports));
         health
             .metrics
