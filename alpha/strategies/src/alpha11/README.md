@@ -16,6 +16,8 @@ That variant has the same Uniswap V2, LP30, pool-update-block, and deployed V2
 vault assumptions, but it uses hold3 and a `0.01 ETH` entry bankroll so we can
 prove one mined buy, one mined sell, receipt reconciliation, tx index, actual
 gas cost, and finality recheck before enabling the main hold15 strategy.
+The hold window is part of the named strategy spec. Live runs must not pass a
+separate `--max-hold-blocks` parameter for Alpha11.
 
 The live-real deploy path adds an entry-only `price / initial price <= 1.5` cap
 as runtime config. We intentionally do not encode that cap in the visible

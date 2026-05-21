@@ -203,7 +203,8 @@ Kartal reports `public_mempool`, the CLI includes
 the buy value plus entry bankroll are both capped at `0.01 ETH`. The visible
 Alpha11 hold15 strategy name remains
 `alpha11-live-univ2-lp30-pool-update-block-hold15` for both live-backtest and
-live-real. The live-real path applies the deploy-only entry cap
+live-real. Hold duration is part of the named strategy spec rather than a
+live-run CLI override. The live-real path applies the deploy-only entry cap
 `price / initial price <= 1.5` through the recorded strategy config instead of
 encoding that cap in the strategy name.
 The gas-rank provider still uses fixed dry-run values to prove the live

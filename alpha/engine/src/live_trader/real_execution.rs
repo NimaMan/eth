@@ -749,7 +749,6 @@ mod tests {
             once: false,
             max_entry_pools: Some(1),
             entry_bankroll_eth: Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string()),
-            max_hold_blocks: None,
             stop_loss_ratio: None,
             take_profit_ratio: None,
             strategy_set: Some(HOLD3_VALIDATION_STRATEGY_NAME.to_string()),

@@ -8,7 +8,6 @@ pub(super) fn build_strategy_specs(
     let options = LiveStrategySpecOptions {
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
-        max_hold_blocks: args.max_hold_blocks,
     };
 
     let mut specs = if let Some(strategy_set) = args.strategy_set.as_deref() {
@@ -82,7 +81,6 @@ mod tests {
             once: false,
             max_entry_pools: Some(5),
             entry_bankroll_eth: None,
-            max_hold_blocks: None,
             stop_loss_ratio: None,
             take_profit_ratio: None,
             strategy_set: Some(ALPHA11_HOLD15_STRATEGY_NAME.to_string()),

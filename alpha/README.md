@@ -63,6 +63,8 @@ the explicit one-pool Alpha11 hold3 mined-validation run. That exception require
 must resolve to a bankroll of at most `0.225 ETH`; Alpha11 carries that default
 in its strategy spec, and `--entry-bankroll-eth` is an override. Buys consume
 that bankroll, confirmed sells replenish it, and profits can be redeployed. The
+hold window is not a live-run CLI parameter; named live strategies own their
+`max_hold_blocks` value in the strategy spec. The
 V2 buy and emergency-sell paths derive non-zero min-output from provisional
 exact-calldata simulation and simulate the final exact vault calldata before
 Kartal submission.

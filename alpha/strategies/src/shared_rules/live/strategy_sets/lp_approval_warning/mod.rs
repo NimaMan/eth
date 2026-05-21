@@ -31,10 +31,7 @@ mod tests {
 
     #[test]
     fn suite_is_single_non_hold_strategy() {
-        let spec = spec(&LiveStrategySpecOptions {
-            max_hold_blocks: Some(20),
-            ..LiveStrategySpecOptions::default()
-        });
+        let spec = spec(&LiveStrategySpecOptions::default());
 
         assert_eq!(
             spec.strategy_name,

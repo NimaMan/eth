@@ -7,7 +7,6 @@ pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 pub struct LiveStrategySpecOptions {
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
-    pub max_hold_blocks: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,7 +50,7 @@ pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
         entry_bankroll_eth: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
-        max_hold_blocks: options.max_hold_blocks,
+        max_hold_blocks: None,
     }
 }
 

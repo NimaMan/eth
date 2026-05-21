@@ -14,7 +14,6 @@ pub(super) struct Args {
     pub(super) once: bool,
     pub(super) max_entry_pools: Option<usize>,
     pub(super) entry_bankroll_eth: Option<String>,
-    pub(super) max_hold_blocks: Option<u64>,
     pub(super) stop_loss_ratio: Option<String>,
     pub(super) take_profit_ratio: Option<String>,
     pub(super) strategy_set: Option<String>,
@@ -75,11 +74,6 @@ struct LiveCommonCli {
     /// Buys consume it; confirmed sells replenish it; profits can be redeployed.
     #[arg(long = "entry-bankroll-eth")]
     entry_bankroll_eth: Option<String>,
-
-    /// Ad-hoc/default strategy max hold in active pool-update blocks.
-    /// Named strategy sets own their hold window in the strategy spec.
-    #[arg(long)]
-    max_hold_blocks: Option<u64>,
 
     /// Stop-loss ratio: sell if price drops to this fraction of entry price.
     /// E.g., 0.7 = sell at -30% loss. Disabled by default.
@@ -172,7 +166,6 @@ impl From<LiveCommonCli> for Args {
             once: common.once,
             max_entry_pools: common.max_entry_pools,
             entry_bankroll_eth: common.entry_bankroll_eth,
-            max_hold_blocks: common.max_hold_blocks,
             stop_loss_ratio: common.stop_loss_ratio,
             take_profit_ratio: common.take_profit_ratio,
             strategy_set: common.strategy_set,
