@@ -505,7 +505,7 @@ pub(super) async fn build_kartal_real_adapter(
     store: PostgresTradingStore,
     run_id: String,
     valuation_adapter: LiveChainSimExecutionAdapter,
-    reth_datadir: &str,
+    exact_pre_submit_live_simulator: tx_simulator::LiveTxSimulator,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
@@ -524,11 +524,8 @@ pub(super) async fn build_kartal_real_adapter(
         .live_real_shadow_predicted_base_fee_gwei
         .parse::<Decimal>()
         .wrap_err("invalid --live-real-shadow-predicted-base-fee-gwei")?;
-    let pre_submit_simulator = UniswapV2TradingVaultPreSubmitSimulator::new(
-        tx_simulator::LiveTxSimulator::new(reth_datadir)
-            .wrap_err("failed to initialize exact pre-submit tx simulator")?,
-        vault,
-    );
+    let pre_submit_simulator =
+        UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
     let gas_rank_plan = GasRankPlan {
         predicted_base_fee_gwei,
         candidates: vec![RankedFeeCandidate {

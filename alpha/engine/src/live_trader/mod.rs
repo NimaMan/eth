@@ -355,6 +355,7 @@ async fn run(
     .wrap_err("failed to initialize chain-sim execution adapter")?;
     let adapter_current_block = chain_sim_adapter.current_block();
     let pool_updates = chain_sim_adapter.pools();
+    let exact_pre_submit_live_simulator = chain_sim_adapter.live_simulator();
     let state_status_adapter = chain_sim_adapter.clone();
     let receipt_reconciler = match (
         execution_mode,
@@ -384,7 +385,7 @@ async fn run(
                 store.clone(),
                 run_id.clone(),
                 chain_sim_adapter,
-                &reth_datadir,
+                exact_pre_submit_live_simulator,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
             )

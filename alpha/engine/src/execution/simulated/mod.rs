@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use alloy_primitives::{Address, Bytes, U256, address};
+use alloy_primitives::{address, Address, Bytes, U256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
@@ -31,15 +31,14 @@ use eth_alpha_core::{
 use tokio::time::sleep;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
-    BuySwapResult, PoolBuySellParameters, PoolType, SellSwapResult,
-    UniswapV4PoolConfig as TxUniswapV4PoolConfig, simulate_buy_swap_with_params,
-    simulate_sell_swap_with_params,
+    simulate_buy_swap_with_params, simulate_sell_swap_with_params, BuySwapResult,
+    PoolBuySellParameters, PoolType, SellSwapResult, UniswapV4PoolConfig as TxUniswapV4PoolConfig,
 };
 use tx_simulator::{LiveTxSimulator, TxSimulator};
 
 use crate::{
-    EngineExecutionAdapter, PositionValueSimulation,
-    execution::sell_economics::uneconomic_sell_cancellation_reason,
+    execution::sell_economics::uneconomic_sell_cancellation_reason, EngineExecutionAdapter,
+    PositionValueSimulation,
 };
 
 const ERC20_DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67];
@@ -454,6 +453,10 @@ impl LiveChainSimExecutionAdapter {
 
     pub fn current_block(&self) -> Arc<AtomicU64> {
         self.current_block.clone()
+    }
+
+    pub fn live_simulator(&self) -> LiveTxSimulator {
+        self.live_sim.clone()
     }
 
     pub fn with_execution_delay_blocks(mut self, delay_blocks: u64) -> Self {

@@ -1,6 +1,6 @@
 use crate::block_context::{BlockContext, BlockContextLoader};
 use crate::types::SimulationDefaults;
-use eyre::{eyre, Result};
+use eyre::{eyre, Report, Result};
 use std::future::Future;
 use std::path::Path;
 /// Core transaction simulator implementation
@@ -8,6 +8,8 @@ use std::path::Path;
 /// This module contains the main TxSimulator struct and its core methods
 /// for initialization and database access.
 use std::sync::{Arc, OnceLock};
+use std::thread;
+use std::time::Duration;
 use tokio::{runtime::Runtime, task};
 
 // Core Reth imports
@@ -22,6 +24,9 @@ use reth_provider::{
     providers::{RocksDBProvider, StaticFileProvider},
     BlockNumReader, EthStorage, ProviderFactory, StateProviderBox,
 };
+
+const DB_OPEN_RETRY_ATTEMPTS: usize = 50;
+const DB_OPEN_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 type EthereumProviderTypes = AnyNodeTypes<EthPrimitives, ChainSpec, EthStorage, EthEngineTypes>;
 pub(crate) type EthereumProviderFactory =
@@ -49,10 +54,7 @@ impl TxSimulator {
         let static_files_path = datadir.join("static_files");
 
         // Open database read-only
-        let db = Arc::new(open_db_read_only(
-            db_path.as_path(),
-            DatabaseArguments::new(ClientVersion::default()),
-        )?);
+        let db = Arc::new(open_db_read_only_with_retry(db_path.as_path())?);
 
         let chain_spec = MAINNET.clone();
 
@@ -234,9 +236,52 @@ impl TxSimulator {
 // Alias for compatibility
 pub type RethTxSimulator = TxSimulator;
 
+fn open_db_read_only_with_retry(db_path: &Path) -> Result<DatabaseEnv> {
+    let mut last_error = None;
+    for attempt in 0..DB_OPEN_RETRY_ATTEMPTS {
+        match open_db_read_only(db_path, DatabaseArguments::new(ClientVersion::default())) {
+            Ok(db) => return Ok(db),
+            Err(error) if is_transient_mdbx_open_error(&error) => {
+                last_error = Some(error);
+                if attempt + 1 < DB_OPEN_RETRY_ATTEMPTS {
+                    thread::sleep(DB_OPEN_RETRY_DELAY);
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(last_error
+        .expect("retry loop must store the final transient database-open error")
+        .into())
+}
+
+fn is_transient_mdbx_open_error(error: &Report) -> bool {
+    error
+        .chain()
+        .any(|cause| is_transient_mdbx_open_error_text(&cause.to_string()))
+        || is_transient_mdbx_open_error_text(&format!("{error:?}"))
+}
+
+fn is_transient_mdbx_open_error_text(message: &str) -> bool {
+    message.contains("another write transaction is running")
+}
+
 fn loader_runtime() -> &'static Runtime {
     static LOADER_RUNTIME: OnceLock<Runtime> = OnceLock::new();
     LOADER_RUNTIME.get_or_init(|| {
         Runtime::new().expect("failed to create tx_simulator block-context loader runtime")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_transient_mdbx_open_error_text;
+
+    #[test]
+    fn detects_transient_mdbx_writer_open_error() {
+        assert!(is_transient_mdbx_open_error_text(
+            "failed to open the database: another write transaction is running (-30778)"
+        ));
+        assert!(!is_transient_mdbx_open_error_text("permission denied"));
+    }
 }
