@@ -136,22 +136,39 @@ impl PostgresTradingStore {
     }
 
     pub async fn mark_stale_runs(&self, max_age_secs: u64) -> Result<u64> {
-        let result = sqlx::query(
+        let stale_count: i64 = sqlx::query_scalar(
             r#"
-            UPDATE alpha_trading.trader_runs
-            SET status = 'stale',
-                metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
-            WHERE run_id <> $1
-              AND status = 'running'
-              AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
+            WITH stale_runs AS (
+                UPDATE alpha_trading.trader_runs
+                SET status = 'stale',
+                    stopped_at = COALESCE(stopped_at, NOW()),
+                    metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
+                WHERE run_id <> $1
+                  AND status = 'running'
+                  AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
+                RETURNING run_id
+            ),
+            stale_result_sets AS (
+                UPDATE alpha_trading.backtest_result_sets rs
+                SET status = 'stale',
+                    stopped_at = COALESCE(rs.stopped_at, NOW()),
+                    metadata = rs.metadata || jsonb_build_object('reason', 'stale_heartbeat'),
+                    updated_at = NOW()
+                FROM alpha_trading.backtest_result_set_runs runs
+                JOIN stale_runs sr ON sr.run_id = runs.run_id
+                WHERE runs.result_set_id = rs.result_set_id
+                  AND rs.status = 'running'
+                RETURNING rs.result_set_id
+            )
+            SELECT COUNT(*)::bigint FROM stale_runs
             "#,
         )
         .bind(&self.run_id)
         .bind(u64_to_i64(max_age_secs))
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(store_error)?;
-        Ok(result.rows_affected())
+        Ok(stale_count.max(0) as u64)
     }
 
     pub async fn heartbeat(&self, metadata: Value) -> Result<()> {
