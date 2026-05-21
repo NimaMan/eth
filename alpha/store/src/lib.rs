@@ -352,28 +352,28 @@ impl PostgresTradingStore {
         snapshot: &PositionSnapshot,
     ) -> Result<()> {
         let payload = to_json(snapshot)?;
-        let insert_result = sqlx::query(
+        let update_result = sqlx::query(
             r#"
-            INSERT INTO alpha_trading.trade_snapshots (
-                trade_id, run_id, position_id, state, block_number,
-                observed_block_number, valuation_block_number, current_value_eth,
-                realized_pnl_eth, unrealized_pnl_eth, total_pnl_eth, roi,
-                pool_price_to_initial_price_ratio, pool_initial_price_denom_per_token,
-                pool_price_denom_per_token, pool_liquidity_denom, pool_token_reserve,
-                pool_denom_symbol, payload, created_at
-            )
-            SELECT
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                ((NULLIF($9, '')::numeric + NULLIF($10, '')::numeric)::text),
-                $11, $12, $13, $14, $15, $16, $17, $18, NOW()
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM alpha_trading.trade_snapshots existing
-                WHERE existing.trade_id = $1
-                  AND existing.state = $4
-                  AND existing.block_number = $5::bigint
-                  AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
-            )
+            UPDATE alpha_trading.trade_snapshots
+            SET run_id = $2,
+                position_id = $3,
+                observed_block_number = $6,
+                current_value_eth = $8,
+                realized_pnl_eth = $9,
+                unrealized_pnl_eth = $10,
+                total_pnl_eth = ((NULLIF($9, '')::numeric + NULLIF($10, '')::numeric)::text),
+                roi = $11,
+                pool_price_to_initial_price_ratio = $12,
+                pool_initial_price_denom_per_token = $13,
+                pool_price_denom_per_token = $14,
+                pool_liquidity_denom = $15,
+                pool_token_reserve = $16,
+                pool_denom_symbol = $17,
+                payload = $18
+            WHERE trade_id = $1
+              AND state = $4
+              AND block_number = $5::bigint
+              AND valuation_block_number IS NOT DISTINCT FROM $7::bigint
             "#,
         )
         .bind(&snapshot.trade_id.0)
@@ -405,11 +405,72 @@ impl PostgresTradingStore {
         .bind(snapshot.pool_liquidity_denom.map(|value| value.to_string()))
         .bind(snapshot.pool_token_reserve.map(|value| value.to_string()))
         .bind(snapshot.pool_denom_symbol.as_deref())
-        .bind(payload)
+        .bind(&payload)
         .execute(&mut **tx)
         .await
         .map_err(store_error)?;
-        if insert_result.rows_affected() == 0 {
+        let mut rows_affected = update_result.rows_affected();
+        if rows_affected == 0 {
+            let insert_result = sqlx::query(
+                r#"
+                INSERT INTO alpha_trading.trade_snapshots (
+                    trade_id, run_id, position_id, state, block_number,
+                    observed_block_number, valuation_block_number, current_value_eth,
+                    realized_pnl_eth, unrealized_pnl_eth, total_pnl_eth, roi,
+                    pool_price_to_initial_price_ratio, pool_initial_price_denom_per_token,
+                    pool_price_denom_per_token, pool_liquidity_denom, pool_token_reserve,
+                    pool_denom_symbol, payload, created_at
+                )
+                SELECT
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    ((NULLIF($9, '')::numeric + NULLIF($10, '')::numeric)::text),
+                    $11, $12, $13, $14, $15, $16, $17, $18, NOW()
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM alpha_trading.trade_snapshots existing
+                    WHERE existing.trade_id = $1
+                      AND existing.state = $4
+                      AND existing.block_number = $5::bigint
+                      AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
+                )
+                "#,
+            )
+            .bind(&snapshot.trade_id.0)
+            .bind(&self.run_id)
+            .bind(&snapshot.position_id.0)
+            .bind(position_state_label(&snapshot.state))
+            .bind(u64_to_i64(snapshot.block_number))
+            .bind(snapshot.observed_block_number.map(u64_to_i64))
+            .bind(snapshot.valuation_block_number.map(u64_to_i64))
+            .bind(snapshot.current_value_eth.to_string())
+            .bind(snapshot.realized_profit_eth.to_string())
+            .bind(snapshot.unrealized_profit_eth.to_string())
+            .bind(snapshot.roi.to_string())
+            .bind(
+                snapshot
+                    .pool_price_to_initial_price_ratio
+                    .map(|value| value.to_string()),
+            )
+            .bind(
+                snapshot
+                    .pool_initial_price_denom_per_token
+                    .map(|value| value.to_string()),
+            )
+            .bind(
+                snapshot
+                    .pool_price_denom_per_token
+                    .map(|value| value.to_string()),
+            )
+            .bind(snapshot.pool_liquidity_denom.map(|value| value.to_string()))
+            .bind(snapshot.pool_token_reserve.map(|value| value.to_string()))
+            .bind(snapshot.pool_denom_symbol.as_deref())
+            .bind(&payload)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_error)?;
+            rows_affected = insert_result.rows_affected();
+        }
+        if rows_affected == 0 {
             return Ok(());
         }
         sqlx::query(

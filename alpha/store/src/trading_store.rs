@@ -68,23 +68,21 @@ impl TradingStore for PostgresTradingStore {
     async fn append_position_snapshot(&self, snapshot: &PositionSnapshot) -> Result<()> {
         let payload = to_json(snapshot)?;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
-        sqlx::query(
+        let update_result = sqlx::query(
             r#"
-            INSERT INTO alpha_trading.position_snapshots (
-                run_id, position_id, trade_id, state, block_number,
-                observed_block_number, valuation_block_number, current_value_eth,
-                realized_profit_eth, unrealized_profit_eth, roi, payload, created_at
-            )
-            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM alpha_trading.position_snapshots existing
-                WHERE existing.run_id = $1
-                  AND existing.position_id = $2
-                  AND existing.state = $4
-                  AND existing.block_number = $5::bigint
-                  AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
-            )
+            UPDATE alpha_trading.position_snapshots
+            SET trade_id = $3,
+                observed_block_number = $6,
+                current_value_eth = $8,
+                realized_profit_eth = $9,
+                unrealized_profit_eth = $10,
+                roi = $11,
+                payload = $12
+            WHERE run_id = $1
+              AND position_id = $2
+              AND state = $4
+              AND block_number = $5::bigint
+              AND valuation_block_number IS NOT DISTINCT FROM $7::bigint
             "#,
         )
         .bind(&self.run_id)
@@ -98,10 +96,46 @@ impl TradingStore for PostgresTradingStore {
         .bind(snapshot.realized_profit_eth.to_string())
         .bind(snapshot.unrealized_profit_eth.to_string())
         .bind(snapshot.roi.to_string())
-        .bind(payload)
+        .bind(&payload)
         .execute(&mut *tx)
         .await
         .map_err(store_error)?;
+        if update_result.rows_affected() == 0 {
+            sqlx::query(
+                r#"
+                INSERT INTO alpha_trading.position_snapshots (
+                    run_id, position_id, trade_id, state, block_number,
+                    observed_block_number, valuation_block_number, current_value_eth,
+                    realized_profit_eth, unrealized_profit_eth, roi, payload, created_at
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM alpha_trading.position_snapshots existing
+                    WHERE existing.run_id = $1
+                      AND existing.position_id = $2
+                      AND existing.state = $4
+                      AND existing.block_number = $5::bigint
+                      AND existing.valuation_block_number IS NOT DISTINCT FROM $7::bigint
+                )
+                "#,
+            )
+            .bind(&self.run_id)
+            .bind(&snapshot.position_id.0)
+            .bind(&snapshot.trade_id.0)
+            .bind(position_state_label(&snapshot.state))
+            .bind(u64_to_i64(snapshot.block_number))
+            .bind(snapshot.observed_block_number.map(u64_to_i64))
+            .bind(snapshot.valuation_block_number.map(u64_to_i64))
+            .bind(snapshot.current_value_eth.to_string())
+            .bind(snapshot.realized_profit_eth.to_string())
+            .bind(snapshot.unrealized_profit_eth.to_string())
+            .bind(snapshot.roi.to_string())
+            .bind(&payload)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_error)?;
+        }
         self.append_trade_snapshot_in_tx(&mut tx, snapshot).await?;
         tx.commit().await.map_err(store_error)?;
         Ok(())
