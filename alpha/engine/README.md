@@ -72,6 +72,27 @@ processed block arrives
 
 Confirmed market state must be updated before strategies run. Strategy decisions should never mutate position state directly; position transitions come from `ExecutionReport`.
 
+### Shared Trade Lifecycle
+
+The engine uses one lifecycle for live real trading, live backtest, and
+historical backtest:
+
+```text
+BuyIntentCreated
+  -> BuySubmitted
+  -> BuyConfirmed | BuyFailed | BuyCancelled
+  -> SellIntentCreated
+  -> SellSubmitted
+  -> SellConfirmed | SellFailed | SellCancelled
+```
+
+The adapter decides what counts as execution evidence. Real live trading must
+only confirm from receipt/reconciliation evidence after Kartal broadcast. The
+chain-sim adapters used by live backtest and historical backtest confirm from
+EVM simulation at the configured execution block, usually the next block after
+the strategy decision. The engine applies both through the same
+`ExecutionReport` path.
+
 ### Mempool Risk Flow
 
 ```text
@@ -98,12 +119,14 @@ Critical in-memory decisions happen before lower-priority analytics writes:
 7. Analytics writers can derive PnL, strategy metrics, and dashboard summaries from store records after the critical path.
 
 Backtest and live no-capital execution use the same sequence and the same
-chain-sim fill source. The guarded live-real runner swaps in
-`TxExecutorAdapter`, but the systemd service keeps that path in Kartal dry-run
-until production simulation, gas-rank, buy-route, and receipt reconciliation
-gates are complete. Public real execution must consult `eth_block_tx_rank`
-before submission and persist the rank evidence with the order decision;
-`tx_executor` only receives the final prepared transaction.
+chain-sim fill source. Their confirmation reports mean that the EVM simulation
+succeeded at the target execution block, not that a real transaction was mined.
+The guarded live-real runner swaps in `TxExecutorAdapter`, but the systemd
+service keeps that path in Kartal dry-run until production simulation,
+gas-rank, buy-route, and receipt reconciliation gates are complete. Public real
+execution must consult `eth_block_tx_rank` before submission and persist the
+rank evidence with the order decision; `tx_executor` only receives the final
+prepared transaction.
 
 ### Python Concept Mapping
 

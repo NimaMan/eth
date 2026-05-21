@@ -38,6 +38,19 @@ StrategyDecision
 
 The Python version had separate `BacktestStrategyEngine` and `LiveStrategyEngine` paths with duplicated state transitions. This crate removes that duplication.
 
+Backtests use the same lifecycle as real live trading:
+
+```text
+BuyIntentCreated -> BuySubmitted -> BuyConfirmed
+SellIntentCreated -> SellSubmitted -> SellConfirmed
+```
+
+The only semantic difference is the confirmation source. Historical backtest
+and live backtest do not wait for real tx receipts. They emit `Confirmed` when
+the EVM simulation for the target execution block succeeds, and `Failed` when
+that simulation reverts or cannot produce the fill. Strategy decisions must
+still never directly mark a position as confirmed.
+
 ## Historical Inputs
 
 Historical backtests replay stored confirmed-chain observations from
@@ -59,6 +72,11 @@ processed block N
   -> ChainSimExecutionAdapter runs the swap against post-block N+1 state by default
   -> confirmed/failed ExecutionReport updates order and position state at N+1
 ```
+
+That means a buy that simulates successfully at `N+1` becomes `BuyConfirmed` at
+`N+1`. A sell that simulates successfully at its target execution block becomes
+`SellConfirmed` at that block. No real tx hash, receipt, nonce, or finality is
+implied by a backtest confirmation.
 
 Do not treat a strategy decision as if it had been known before every transaction in the same block unless the replay input explicitly provides transaction-level ordering.
 

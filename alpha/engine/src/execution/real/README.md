@@ -20,6 +20,12 @@ StrategyDecision::submit_order(reason)
   -> TradingStore position and execution report updates
 ```
 
+Real live uses the same lifecycle as backtest, but it uses different
+confirmation evidence. Kartal broadcast can only move an order to
+`BuySubmitted` or `SellSubmitted`. A later receipt/reconciliation worker must
+emit the `BuyConfirmed`, `SellConfirmed`, `BuyFailed`, or `SellFailed`
+`ExecutionReport`.
+
 ## Data Contract
 
 `TxExecutorAdapter` receives an already-approved `OrderIntent`. It does not
@@ -88,5 +94,8 @@ value-capped bribe logic must stay outside the engine in `alpha/live/trading`.
   engine/store before a trade is considered settled.
 - A Kartal `dry_run` response is treated as cancelled, because no transaction
   was broadcast and no on-chain fill can arrive.
+- Backtest confirmation semantics must not leak into this adapter. Real live
+  cannot mark a buy or sell as confirmed from planning, simulation, or Kartal
+  request acceptance alone.
 - Do not deploy this adapter without a receipt/reconciliation worker. Submitted
   is not confirmed.
