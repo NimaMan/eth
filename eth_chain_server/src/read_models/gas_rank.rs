@@ -15,6 +15,7 @@ const DEFAULT_LOOKBACK_BLOCKS: u64 = 100;
 const MAX_LOOKBACK_BLOCKS: u64 = 100;
 const DEFAULT_GAS_LIMIT: u64 = 300_000;
 const DEFAULT_PRIORITY_FEE_GWEI: f64 = 2.0;
+const TEMPORARY_ETH_USD_PRICE: f64 = 2_000.0;
 const WEI_PER_GWEI: f64 = 1_000_000_000.0;
 const WEI_PER_ETH: f64 = 1_000_000_000_000_000_000.0;
 const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
@@ -37,6 +38,8 @@ pub struct GasRankEstimateRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GasRankEstimateResponse {
+    pub eth_usd_price: f64,
+    pub eth_usd_price_source: &'static str,
     pub blocks: RecentBlockWindow,
     pub candidate: CandidateGasRankView,
     pub recommendations: Vec<GasRankRecommendation>,
@@ -66,8 +69,14 @@ pub struct CandidateGasRankView {
     pub max_priority_fee_per_gas_gwei: f64,
     pub predicted_base_fee_gwei: f64,
     pub effective_priority_fee_gwei: f64,
+    pub estimated_base_cost_eth: f64,
+    pub estimated_base_cost_usd: f64,
     pub estimated_priority_spend_eth: f64,
+    pub estimated_priority_spend_usd: f64,
+    pub estimated_total_cost_eth: f64,
+    pub estimated_total_cost_usd: f64,
     pub estimated_max_cost_eth: f64,
+    pub estimated_max_cost_usd: f64,
     pub rank: BlockTxRankEstimate,
 }
 
@@ -79,8 +88,14 @@ pub struct GasRankRecommendation {
     pub priority_fee_gwei: f64,
     pub max_fee_per_gas_gwei: f64,
     pub effective_priority_fee_gwei: f64,
+    pub estimated_base_cost_eth: f64,
+    pub estimated_base_cost_usd: f64,
     pub estimated_priority_spend_eth: f64,
+    pub estimated_priority_spend_usd: f64,
+    pub estimated_total_cost_eth: f64,
+    pub estimated_total_cost_usd: f64,
     pub estimated_max_cost_eth: f64,
+    pub estimated_max_cost_usd: f64,
     pub rank: BlockTxRankEstimate,
 }
 
@@ -224,6 +239,13 @@ pub async fn estimate(
         max_priority_fee_per_gas: priority_fee,
     };
     let candidate_rank = estimate_from_samples(candidate, predicted_base_fee, &samples)?;
+    let eth_usd_price = resolve_eth_usd_price();
+    let candidate_effective_priority_fee = effective_priority_fee(candidate, predicted_base_fee);
+    let candidate_base_cost_eth = gas_spend_eth(predicted_base_fee, estimated_gas_used);
+    let candidate_priority_spend_eth =
+        gas_spend_eth(candidate_effective_priority_fee, estimated_gas_used);
+    let candidate_total_cost_eth = candidate_base_cost_eth + candidate_priority_spend_eth;
+    let candidate_max_cost_eth = max_cost_eth(max_fee, gas_limit);
 
     let recommendations = RECOMMENDATION_PROFILES
         .iter()
@@ -233,6 +255,7 @@ pub async fn estimate(
                 gas_limit,
                 estimated_gas_used,
                 predicted_base_fee,
+                eth_usd_price,
                 &samples,
             )
         })
@@ -243,6 +266,8 @@ pub async fn estimate(
         .collect::<Vec<_>>();
 
     Ok(GasRankEstimateResponse {
+        eth_usd_price,
+        eth_usd_price_source: "temporary_fixed_usd_2000_until_live_price_resolver",
         blocks: RecentBlockWindow {
             source: "eth_chain_server_recent_live_blocks",
             requested_blocks: lookback_blocks,
@@ -271,12 +296,15 @@ pub async fn estimate(
             max_fee_per_gas_gwei: wei_to_gwei(max_fee),
             max_priority_fee_per_gas_gwei: wei_to_gwei(priority_fee),
             predicted_base_fee_gwei: wei_to_gwei(predicted_base_fee),
-            effective_priority_fee_gwei: wei_to_gwei(effective_priority_fee(
-                candidate,
-                predicted_base_fee,
-            )),
-            estimated_priority_spend_eth: priority_spend_eth(priority_fee, estimated_gas_used),
-            estimated_max_cost_eth: max_cost_eth(max_fee, gas_limit),
+            effective_priority_fee_gwei: wei_to_gwei(candidate_effective_priority_fee),
+            estimated_base_cost_eth: candidate_base_cost_eth,
+            estimated_base_cost_usd: eth_to_usd(candidate_base_cost_eth, eth_usd_price),
+            estimated_priority_spend_eth: candidate_priority_spend_eth,
+            estimated_priority_spend_usd: eth_to_usd(candidate_priority_spend_eth, eth_usd_price),
+            estimated_total_cost_eth: candidate_total_cost_eth,
+            estimated_total_cost_usd: eth_to_usd(candidate_total_cost_eth, eth_usd_price),
+            estimated_max_cost_eth: candidate_max_cost_eth,
+            estimated_max_cost_usd: eth_to_usd(candidate_max_cost_eth, eth_usd_price),
             rank: candidate_rank,
         },
         recommendations,
@@ -391,6 +419,7 @@ fn recommendation(
     gas_limit: u64,
     estimated_gas_used: u64,
     predicted_base_fee: U256,
+    eth_usd_price: f64,
     samples: &[MinedBlockFeeSample],
 ) -> Result<GasRankRecommendation> {
     let priority_fee =
@@ -402,18 +431,26 @@ fn recommendation(
         max_priority_fee_per_gas: priority_fee,
     };
     let rank = estimate_from_samples(candidate, predicted_base_fee, samples)?;
+    let effective_priority = effective_priority_fee(candidate, predicted_base_fee);
+    let base_cost_eth = gas_spend_eth(predicted_base_fee, estimated_gas_used);
+    let priority_spend_eth = gas_spend_eth(effective_priority, estimated_gas_used);
+    let total_cost_eth = base_cost_eth + priority_spend_eth;
+    let max_cost_eth_value = max_cost_eth(max_fee, gas_limit);
     Ok(GasRankRecommendation {
         label: profile.label,
         target_position: profile.target_position,
         sample_quantile: profile.sample_quantile,
         priority_fee_gwei: wei_to_gwei(priority_fee),
         max_fee_per_gas_gwei: wei_to_gwei(max_fee),
-        effective_priority_fee_gwei: wei_to_gwei(effective_priority_fee(
-            candidate,
-            predicted_base_fee,
-        )),
-        estimated_priority_spend_eth: priority_spend_eth(priority_fee, estimated_gas_used),
-        estimated_max_cost_eth: max_cost_eth(max_fee, gas_limit),
+        effective_priority_fee_gwei: wei_to_gwei(effective_priority),
+        estimated_base_cost_eth: base_cost_eth,
+        estimated_base_cost_usd: eth_to_usd(base_cost_eth, eth_usd_price),
+        estimated_priority_spend_eth: priority_spend_eth,
+        estimated_priority_spend_usd: eth_to_usd(priority_spend_eth, eth_usd_price),
+        estimated_total_cost_eth: total_cost_eth,
+        estimated_total_cost_usd: eth_to_usd(total_cost_eth, eth_usd_price),
+        estimated_max_cost_eth: max_cost_eth_value,
+        estimated_max_cost_usd: eth_to_usd(max_cost_eth_value, eth_usd_price),
         rank,
     })
 }
@@ -540,12 +577,20 @@ fn wei_to_gwei(value: U256) -> f64 {
     u256_to_f64(value) / WEI_PER_GWEI
 }
 
-fn priority_spend_eth(priority_fee: U256, estimated_gas_used: u64) -> f64 {
-    u256_to_f64(priority_fee) * estimated_gas_used as f64 / WEI_PER_ETH
+fn resolve_eth_usd_price() -> f64 {
+    TEMPORARY_ETH_USD_PRICE
+}
+
+fn gas_spend_eth(fee_per_gas: U256, estimated_gas_used: u64) -> f64 {
+    u256_to_f64(fee_per_gas) * estimated_gas_used as f64 / WEI_PER_ETH
 }
 
 fn max_cost_eth(max_fee: U256, gas_limit: u64) -> f64 {
     u256_to_f64(max_fee) * gas_limit as f64 / WEI_PER_ETH
+}
+
+fn eth_to_usd(eth_amount: f64, eth_usd_price: f64) -> f64 {
+    eth_amount * eth_usd_price
 }
 
 fn u256_to_f64(value: U256) -> f64 {

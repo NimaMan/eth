@@ -12,15 +12,19 @@ mod policy;
 mod request;
 mod route;
 mod simulation;
+mod strategy_gas_policy;
 
-pub use budget::{estimate_eth_cost_from_gwei, PriorityFeeBudget, PriorityFeeBudgetInput};
-pub use gas_plan::{choose_ranked_fee, GasPlan, GasPlanDecision, RankedFeeCandidate};
+pub use budget::{PriorityFeeBudget, PriorityFeeBudgetInput, estimate_eth_cost_from_gwei};
+pub use gas_plan::{GasPlan, GasPlanDecision, RankedFeeCandidate, choose_ranked_fee};
 pub use policy::{
-    prepare_priority_sell, PrioritySellTxPrep, TxPrepConfig, TxPrepOutcome, TxPrepReject,
+    PrioritySellTxPrep, TxPrepConfig, TxPrepOutcome, TxPrepReject, prepare_priority_sell,
 };
-pub use request::{build_priority_sell_request, TxPrepRequestContext};
+pub use request::{TxPrepRequestContext, build_priority_sell_request};
 pub use route::{PreparedSellRoute, TxPrepRouteError};
 pub use simulation::{PreSubmitSimulation, TxPrepSimulationError};
+pub use strategy_gas_policy::{
+    GasRankProfile, StrategyGasRankDefaults, StrategyGasRankPolicy, StrategyTxKind,
+};
 
 pub(crate) fn gwei_to_wei_string(gwei: eth_alpha_core::amount::DecimalAmount) -> String {
     decimal_floor_string(gwei.max(eth_alpha_core::amount::DecimalAmount::ZERO) * wei_per_gwei())

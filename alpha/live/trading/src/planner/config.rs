@@ -1,7 +1,7 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
 
-use crate::{PriorityRoute, TxPrepConfig};
+use crate::{PriorityRoute, StrategyGasRankPolicy, TxPrepConfig};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LivePrioritySellPlannerConfig {
@@ -20,6 +20,7 @@ impl Default for LivePrioritySellPlannerConfig {
                 max_total_fee_eth: DecimalAmount::new(2, 2),
                 max_priority_fee_gwei: DecimalAmount::from(100),
                 safety_buffer_eth: DecimalAmount::new(1, 3),
+                gas_rank_policy: StrategyGasRankPolicy::urgent_first(),
             },
             priority_route: PriorityRoute::PublicMempool,
             max_priority_fee_per_gas_gwei: DecimalAmount::from(100),

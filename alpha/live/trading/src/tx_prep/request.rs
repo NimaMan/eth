@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    gas_plan::GasPlan, gwei_to_wei_string, metadata::tx_prep_metadata, PreSubmitSimulation,
-    PreparedSellRoute, PriorityFeeBudget,
+    PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget, StrategyGasRankPolicy,
+    gas_plan::GasPlan, gwei_to_wei_string, metadata::tx_prep_metadata,
 };
 use crate::{
     KartalBribeRequest, KartalSimulationReference, LiveDirectRawTransactionRequest,
@@ -29,6 +29,7 @@ pub fn build_priority_sell_request(
     simulation: &PreSubmitSimulation,
     budget: &PriorityFeeBudget,
     gas_plan: &GasPlan,
+    gas_rank_policy: &StrategyGasRankPolicy,
 ) -> LiveTraderTxSignal {
     let request = LiveDirectRawTransactionRequest {
         attempt_id: Some(format!(
@@ -63,6 +64,7 @@ pub fn build_priority_sell_request(
             simulation,
             budget,
             gas_plan,
+            gas_rank_policy,
             context.source_metadata.clone(),
         ),
     };

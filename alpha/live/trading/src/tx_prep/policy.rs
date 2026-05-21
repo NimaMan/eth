@@ -1,11 +1,11 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    build_priority_sell_request, choose_ranked_fee, GasPlanDecision, PreSubmitSimulation,
-    PreparedSellRoute, PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate,
-    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError,
+    GasPlanDecision, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget,
+    PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepRequestContext,
+    TxPrepRouteError, TxPrepSimulationError, build_priority_sell_request,
 };
 use crate::LiveTraderTxSignal;
 use crate::PrioritySellPlan;
@@ -15,6 +15,7 @@ pub struct TxPrepConfig {
     pub max_total_fee_eth: DecimalAmount,
     pub max_priority_fee_gwei: DecimalAmount,
     pub safety_buffer_eth: DecimalAmount,
+    pub gas_rank_policy: StrategyGasRankPolicy,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,6 +27,8 @@ pub struct PrioritySellTxPrep {
     pub predicted_base_fee_gwei: DecimalAmount,
     pub expected_late_recovery_eth: DecimalAmount,
     pub ranked_fee_candidates: Vec<RankedFeeCandidate>,
+    #[serde(default)]
+    pub gas_rank_policy: Option<StrategyGasRankPolicy>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -63,7 +66,12 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
             .min(input.plan.max_priority_fee_per_gas_gwei),
     });
 
-    match choose_ranked_fee(&budget, &input.ranked_fee_candidates) {
+    let gas_rank_policy = input
+        .gas_rank_policy
+        .clone()
+        .unwrap_or_else(|| config.gas_rank_policy.clone());
+
+    match gas_rank_policy.choose_ranked_fee(&budget, &input.ranked_fee_candidates) {
         GasPlanDecision::UseRanked(gas_plan) => {
             let signal = build_priority_sell_request(
                 &input.context,
@@ -72,6 +80,7 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
                 &input.simulation,
                 &budget,
                 &gas_plan,
+                &gas_rank_policy,
             );
             TxPrepOutcome::Submit { signal, budget }
         }
@@ -87,6 +96,7 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
                 "max_priority_fee_gwei": max_priority_fee_gwei,
                 "max_priority_spend_eth": max_priority_spend_eth,
                 "ranked_fee_candidates": input.ranked_fee_candidates,
+                "strategy_gas_rank_policy": gas_rank_policy,
                 "budget": budget,
             }),
         }),
@@ -173,6 +183,7 @@ mod tests {
                 likely_fits_at_p50: Some(true),
                 source: Some("gas_rank".to_string()),
             }],
+            gas_rank_policy: None,
         }
     }
 
@@ -181,6 +192,7 @@ mod tests {
             max_total_fee_eth: DecimalAmount::new(2, 2),
             max_priority_fee_gwei: DecimalAmount::from(max_priority_gwei),
             safety_buffer_eth: DecimalAmount::new(1, 3),
+            gas_rank_policy: StrategyGasRankPolicy::urgent_first(),
         }
     }
 

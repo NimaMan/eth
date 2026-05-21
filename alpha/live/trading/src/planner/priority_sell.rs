@@ -4,11 +4,12 @@ use eth_alpha_core::{
     order::{OrderIntent, OrderSide},
     position::Position,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
-    derive_min_output_from_expected_output, prepare_priority_sell, LpSignalSource,
-    PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep, TxPrepOutcome,
+    LpSignalSource, PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep,
+    StrategyGasRankDefaults, TxPrepOutcome, derive_min_output_from_expected_output,
+    prepare_priority_sell,
 };
 
 use super::{
@@ -90,6 +91,7 @@ where
         let simulation = self.simulator.simulate(&input, &route).await?;
         let gas_rank = self.gas_rank.ranked_fee_candidates(&input, &route).await?;
         let plan = priority_sell_plan(&self.config, &input);
+        let gas_rank_policy = StrategyGasRankDefaults::priority_sell_policy(&plan);
 
         let tx_prep = PrioritySellTxPrep {
             context: input.context.tx.clone(),
@@ -99,6 +101,7 @@ where
             predicted_base_fee_gwei: gas_rank.predicted_base_fee_gwei,
             expected_late_recovery_eth: self.config.expected_late_recovery_eth,
             ranked_fee_candidates: gas_rank.candidates,
+            gas_rank_policy: Some(gas_rank_policy),
         };
 
         match prepare_priority_sell(&self.config.tx_prep, tx_prep) {
@@ -478,10 +481,12 @@ mod tests {
 
         match outcome {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
-                assert!(signal
-                    .request
-                    .to
-                    .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"));
+                assert!(
+                    signal
+                        .request
+                        .to
+                        .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d")
+                );
                 assert!(signal.request.data.starts_with("0x791ac947"));
                 assert_eq!(signal.request.max_priority_fee_per_gas, "40000000000");
                 assert_eq!(

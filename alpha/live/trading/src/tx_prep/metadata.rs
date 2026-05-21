@@ -1,6 +1,8 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
-use super::{GasPlan, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget};
+use super::{
+    GasPlan, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget, StrategyGasRankPolicy,
+};
 use crate::PrioritySellPlan;
 
 pub fn tx_prep_metadata(
@@ -9,6 +11,7 @@ pub fn tx_prep_metadata(
     simulation: &PreSubmitSimulation,
     budget: &PriorityFeeBudget,
     gas_plan: &GasPlan,
+    gas_rank_policy: &StrategyGasRankPolicy,
     source: Value,
 ) -> Value {
     let mut map = Map::new();
@@ -60,6 +63,10 @@ pub fn tx_prep_metadata(
             "likely_fits_at_p50": gas_plan.likely_fits_at_p50,
             "source": gas_plan.source,
         }),
+    );
+    map.insert(
+        "strategy_gas_rank_policy".to_string(),
+        json!(gas_rank_policy),
     );
     map.insert(
         "route".to_string(),

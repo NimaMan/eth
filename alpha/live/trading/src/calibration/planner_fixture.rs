@@ -220,7 +220,7 @@ fn gas_rank() -> FixedGasRankProvider {
     FixedGasRankProvider::new(GasRankPlan {
         predicted_base_fee_gwei: DecimalAmount::from(10),
         candidates: vec![RankedFeeCandidate {
-            label: "calibration_aggressive".to_string(),
+            label: "aggressive".to_string(),
             priority_fee_gwei: DecimalAmount::from(40),
             max_fee_per_gas_gwei: DecimalAmount::from(50),
             rank_position_p50: Some(10),

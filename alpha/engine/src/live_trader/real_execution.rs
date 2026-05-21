@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
@@ -15,17 +15,17 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, FixedGasRankProvider, GasRankPlan, KartalBribeRequest,
-    KartalClient, KartalClientConfig, KartalEthTxExecutorStatus, KartalExecutorClient,
-    KartalExecutorClientConfig, KartalSimulationReference, KartalStatusBroadcastMode,
-    LiveDirectRawTransactionRequest, LivePrioritySellPlanner, LivePrioritySellPlannerConfig,
-    LivePrioritySellPlannerError, LivePrioritySellPlannerInput, LiveTraderTxSignal,
-    PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator, RankedFeeCandidate, TxPrepConfig,
-    TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
+    FixedGasRankProvider, GasRankPlan, KartalBribeRequest, KartalClient, KartalClientConfig,
+    KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
+    KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
+    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, PlannerTxContext, PreSubmitSimulation,
+    PreSubmitSimulator, RankedFeeCandidate, StrategyGasRankDefaults, StrategyGasRankPolicy,
+    TxPrepConfig, TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
     UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
-    VaultInternalAllowanceChecker,
+    VaultInternalAllowanceChecker, derive_min_output_from_expected_output,
 };
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use rust_decimal::Decimal;
 use serde_json::json;
 
@@ -316,7 +316,8 @@ impl<P> KartalRealPlanner<P> {
             .await
             .map_err(planner_error)?;
         ensure_simulation_ok(&simulation)?;
-        let fee = fixed_gas_fee(&self.gas_plan)?;
+        let gas_rank_policy = StrategyGasRankDefaults::entry_buy_policy();
+        let fee = select_gas_fee(&self.gas_plan, &gas_rank_policy)?;
         let trade_id = input.intent.trade_id.clone().ok_or_else(|| {
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
@@ -374,6 +375,7 @@ impl<P> KartalRealPlanner<P> {
                         "max_fee_per_gas_gwei": fee.max_fee_per_gas_gwei,
                         "source": fee.source,
                     },
+                    "strategy_gas_rank_policy": gas_rank_policy,
                     "simulation": simulation.metadata(),
                     "source": input.context.tx.source_metadata,
                 }),
@@ -425,9 +427,15 @@ fn ensure_simulation_ok(simulation: &PreSubmitSimulation) -> eth_alpha_core::err
     Ok(())
 }
 
-fn fixed_gas_fee(plan: &GasRankPlan) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
-    plan.candidates.first().cloned().ok_or_else(|| {
-        AlphaCoreError::Execution("live real buy planner has no gas fee candidate".to_string())
+fn select_gas_fee(
+    plan: &GasRankPlan,
+    policy: &StrategyGasRankPolicy,
+) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
+    policy.choose_candidate(&plan.candidates).ok_or_else(|| {
+        AlphaCoreError::Execution(
+            "live real buy planner has no gas fee candidate matching strategy gas rank policy"
+                .to_string(),
+        )
     })
 }
 
@@ -518,7 +526,7 @@ pub(super) async fn build_kartal_real_adapter(
     let gas_rank_plan = GasRankPlan {
         predicted_base_fee_gwei,
         candidates: vec![RankedFeeCandidate {
-            label: "shadow_dry_run_fixed".to_string(),
+            label: "aggressive".to_string(),
             priority_fee_gwei,
             max_fee_per_gas_gwei: max_fee_gwei,
             rank_position_p50: None,
@@ -534,6 +542,7 @@ pub(super) async fn build_kartal_real_adapter(
         max_total_fee_eth: Decimal::new(2, 2),
         max_priority_fee_gwei: Decimal::from(100),
         safety_buffer_eth: Decimal::new(1, 3),
+        gas_rank_policy: StrategyGasRankPolicy::urgent_first(),
     };
     planner_config.max_priority_fee_per_gas_gwei = Decimal::from(100);
     planner_config.max_total_fee_eth = Decimal::new(2, 2);
