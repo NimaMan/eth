@@ -42,12 +42,23 @@ items:
     area: gas-rank
     status: todo
     requirement: Confirm ranked gas candidates are required and unranked value-cap fallback is rejected.
+    note: Blocked until alpha uses a production GasRankProvider backed by recent eth_block_tx_rank evidence instead of fixed shadow values.
   - id: final-simulation-reviewed
     area: simulation
     status: partial
     requirement: Confirm exact buy and emergency-sell calldata are simulated against current state before submission.
     evidence: onchain-deployments/uniswap-v2-trading-vault/simulations/
     note: Deployed-vault simulator now covers functional success and negative cases. Keep partial until the live planner's exact final Kartal request is simulated and attached for each real submission.
+  - id: production-min-output-reviewed
+    area: simulation
+    status: todo
+    requirement: Confirm public-broadcast requests reject empty min-output or 1-wei dry-run placeholders.
+    note: Current real planner uses temporary 1-wei min-output and must stay dry-run only.
+  - id: live-buy-route-reviewed
+    area: alpha-state
+    status: todo
+    requirement: Confirm live entry route is implemented through the deployed vault, or the first public run is explicitly sell-only with entry disabled.
+    note: Current real live trader requires --disable-entry.
   - id: kartal-policy-reviewed
     area: execution
     status: reviewed
@@ -60,8 +71,26 @@ items:
     requirement: Confirm Kartal dry-run or safe policy-reject evidence is stored in the run folder.
   - id: receipt-reconciliation-reviewed
     area: alpha-state
-    status: todo
+    status: partial
     requirement: Confirm alpha records submitted, confirmed, reverted, or replaced outcomes.
+    evidence: alpha/engine/src/live_trader/receipt_reconciliation.rs
+    note: Receipt worker and unit tests exist. Keep partial until live integration evidence, finality depth, stuck tx handling, and replacement handling are reviewed.
+  - id: finality-and-stuck-tx-reviewed
+    area: alpha-state
+    status: todo
+    requirement: Confirm null receipts, dropped/replaced transactions, reorgs, and confirmation depth are handled before marking trades settled.
+  - id: per-strategy-token-caps-reviewed
+    area: execution
+    status: todo
+    requirement: Confirm Kartal enforces per-strategy and per-token spend caps in addition to per-tx and daily caps.
+  - id: live-observability-reviewed
+    area: operations
+    status: todo
+    requirement: Confirm frontend and logs expose broadcast mode, signer backend, execution disabled state, spend caps, submitted/confirmed/failed counts, unresolved receipts, and stuck tx age.
+  - id: kill-switch-drill-reviewed
+    area: operations
+    status: todo
+    requirement: Confirm KARTAL_EXECUTION_DISABLED stops signing/broadcast and the live trader reports the disabled state without corrupting positions.
   - id: post-deploy-smoke-reviewed
     area: deployment
     status: reviewed

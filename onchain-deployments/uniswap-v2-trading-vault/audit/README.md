@@ -12,6 +12,7 @@ controls.
 | File | Purpose |
 | --- | --- |
 | `checklist.yaml` | Required review checklist before mainnet deployment. |
+| `live-go-live-readiness.md` | Required gates before relaxing Kartal from dry-run to public mempool for live trading. |
 | `findings.jsonl` | Append-only findings and resolutions. One JSON object per line. |
 | `contract-test-gas-review-2026-05-19.md` | Current contract test and gas review evidence. |
 | `../simulations/` | Deployed-vault current-state simulation suite and reports. |
