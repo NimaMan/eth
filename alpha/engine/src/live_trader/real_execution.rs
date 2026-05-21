@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
@@ -15,17 +15,18 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    FixedGasRankProvider, GasRankPlan, KartalBribeRequest, KartalClient, KartalClientConfig,
-    KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
-    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, PlannerTxContext, PreSubmitSimulation,
-    PreSubmitSimulator, RankedFeeCandidate, StrategyGasRankDefaults, StrategyGasRankPolicy,
-    TxPrepConfig, TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
-    UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
-    VaultInternalAllowanceChecker, derive_min_output_from_expected_output,
+    derive_min_output_from_expected_output, FixedGasRankProvider, GasRankPlan, KartalBribeRequest,
+    KartalClient, KartalClientConfig, KartalEthTxExecutorStatus, KartalExecutorClient,
+    KartalExecutorClientConfig, KartalSimulationReference, KartalStatusBroadcastMode,
+    LiveDirectRawTransactionRequest, LivePrioritySellPlanner, LivePrioritySellPlannerConfig,
+    LivePrioritySellPlannerError, LivePrioritySellPlannerInput, LiveTraderTxSignal,
+    PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator, RankedFeeCandidate,
+    StrategyGasRankDefaults, StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
+    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
-use eyre::{Result, WrapErr, eyre};
+use eth_strategies::alpha11::{HOLD3_VALIDATION_STRATEGY_NAME, LIVE_VALIDATION_ENTRY_BANKROLL_ETH};
+use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 use serde_json::json;
 
@@ -34,7 +35,9 @@ use crate::execution::real::{
 };
 use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
 
-use super::cli::RealExecutionArgs;
+use super::cli::{Args, RealExecutionArgs};
+
+const LIVE_VALIDATION_BUY_WEI: &str = "10000000000000000";
 
 struct RealExecutionWithValuation<E, V> {
     execution: E,
@@ -483,13 +486,16 @@ pub(super) struct KartalRealPreflight {
     pub(super) status: KartalEthTxExecutorStatus,
 }
 
-pub(super) async fn preflight_kartal_real(args: &RealExecutionArgs) -> Result<KartalRealPreflight> {
+pub(super) async fn preflight_kartal_real(
+    args: &RealExecutionArgs,
+    live_args: &Args,
+) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
         .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(&status)?;
+    validate_kartal_real_status(&status, args, live_args)?;
     Ok(KartalRealPreflight { token, status })
 }
 
@@ -581,7 +587,11 @@ pub(super) async fn build_kartal_real_adapter(
     )))
 }
 
-fn validate_kartal_real_status(status: &KartalEthTxExecutorStatus) -> Result<()> {
+fn validate_kartal_real_status(
+    status: &KartalEthTxExecutorStatus,
+    args: &RealExecutionArgs,
+    live_args: &Args,
+) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
     }
@@ -591,18 +601,114 @@ fn validate_kartal_real_status(status: &KartalEthTxExecutorStatus) -> Result<()>
     if !status.signer_available {
         return Err(eyre!("Kartal ETH signer is not available"));
     }
-    if status.broadcast_mode != KartalStatusBroadcastMode::DryRun {
-        return Err(eyre!(
-            "kartal-real trader currently requires Kartal broadcast_mode=dry_run; got {:?}",
-            status.broadcast_mode
-        ));
-    }
     if status.policy.allowed_target_count == 0 || status.policy.allowed_selector_count == 0 {
         return Err(eyre!(
             "Kartal ETH tx policy must have non-empty target and selector allowlists"
         ));
     }
+    match status.broadcast_mode {
+        KartalStatusBroadcastMode::DryRun => Ok(()),
+        KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
+            validate_public_mempool_live_validation(status, live_args)
+        }
+        KartalStatusBroadcastMode::PublicMempool => Err(eyre!(
+            "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold3 validation strategy"
+        )),
+        KartalStatusBroadcastMode::Unknown => Err(eyre!(
+            "kartal-real trader cannot run with unknown Kartal broadcast_mode"
+        )),
+    }
+}
+
+fn validate_public_mempool_live_validation(
+    status: &KartalEthTxExecutorStatus,
+    args: &Args,
+) -> Result<()> {
+    if args.strategy_set.as_deref() != Some(HOLD3_VALIDATION_STRATEGY_NAME) {
+        return Err(eyre!(
+            "public mempool validation requires --strategy-set {HOLD3_VALIDATION_STRATEGY_NAME}"
+        ));
+    }
+    if args.max_entry_pools != Some(1) {
+        return Err(eyre!(
+            "public mempool validation requires --max-entry-pools 1"
+        ));
+    }
+    if args.disable_entry {
+        return Err(eyre!(
+            "public mempool validation requires entries enabled for the single validation buy"
+        ));
+    }
+    if args.once {
+        return Err(eyre!(
+            "public mempool validation must keep running after the buy so receipt reconciliation and hold3 sell can complete"
+        ));
+    }
+    if args.replay_current {
+        return Err(eyre!(
+            "public mempool validation must not use --replay-current; start from fresh live observations only"
+        ));
+    }
+
+    let buy_wei = parse_policy_wei(&args.buy_wei, "--buy-wei")?;
+    let max_buy_wei = parse_policy_wei(LIVE_VALIDATION_BUY_WEI, "validation buy cap")?;
+    if buy_wei.is_zero() || buy_wei > max_buy_wei {
+        return Err(eyre!(
+            "public mempool validation requires 0 < --buy-wei <= {LIVE_VALIDATION_BUY_WEI}; got {}",
+            args.buy_wei
+        ));
+    }
+
+    let entry_bankroll_eth = args
+        .entry_bankroll_eth
+        .as_deref()
+        .unwrap_or(LIVE_VALIDATION_ENTRY_BANKROLL_ETH);
+    let entry_bankroll_wei =
+        super::support::parse_eth_decimal_to_wei(entry_bankroll_eth, "--entry-bankroll-eth")?;
+    if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_buy_wei {
+        return Err(eyre!(
+            "public mempool validation requires entry bankroll in (0, {LIVE_VALIDATION_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
+        ));
+    }
+
+    let max_value_wei = parse_policy_wei(&status.policy.max_value_wei, "policy max_value_wei")?;
+    if max_value_wei < buy_wei {
+        return Err(eyre!(
+            "Kartal max_value_wei {} is below validation buy value {buy_wei}",
+            status.policy.max_value_wei
+        ));
+    }
+    let max_transaction_cost_wei = parse_policy_wei(
+        &status.policy.max_transaction_cost_wei,
+        "policy max_transaction_cost_wei",
+    )?;
+    if max_transaction_cost_wei.is_zero() {
+        return Err(eyre!(
+            "Kartal max_transaction_cost_wei must be nonzero for public mempool validation"
+        ));
+    }
+    let max_daily_cost_wei = parse_policy_wei(
+        &status.policy.max_daily_cost_wei,
+        "policy max_daily_cost_wei",
+    )?;
+    if max_daily_cost_wei < max_transaction_cost_wei {
+        return Err(eyre!(
+            "Kartal max_daily_cost_wei {} is below max_transaction_cost_wei {}",
+            status.policy.max_daily_cost_wei,
+            status.policy.max_transaction_cost_wei
+        ));
+    }
+    if !status.policy.require_simulation || status.policy.max_simulation_age_blocks > 2 {
+        return Err(eyre!(
+            "public mempool validation requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
+        ));
+    }
     Ok(())
+}
+
+fn parse_policy_wei(value: &str, label: &str) -> Result<U256> {
+    U256::from_str_radix(value.trim(), 10)
+        .wrap_err_with(|| format!("invalid {label} decimal wei value {value:?}"))
 }
 
 fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
@@ -622,4 +728,150 @@ fn parse_live_real_address(value: &str, label: &str) -> Result<Address> {
     value
         .parse::<Address>()
         .wrap_err_with(|| format!("invalid {label} address {value:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use eth_live_trading::{
+        KartalDailySpendStatus, KartalEthTxPolicyStatus, KartalStatusBroadcastMode,
+    };
+
+    use super::*;
+
+    fn live_args() -> Args {
+        Args {
+            poll_interval_ms: 2_000,
+            mempool_since_days: 14,
+            signal_limit: 200,
+            buy_wei: LIVE_VALIDATION_BUY_WEI.to_string(),
+            min_liquidity_eth: "0.5".to_string(),
+            min_liquidity_usd: "1000".to_string(),
+            run_id: None,
+            disable_entry: false,
+            replay_current: false,
+            once: false,
+            max_entry_pools: Some(1),
+            entry_bankroll_eth: Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string()),
+            max_hold_blocks: None,
+            stop_loss_ratio: None,
+            take_profit_ratio: None,
+            strategy_set: Some(HOLD3_VALIDATION_STRATEGY_NAME.to_string()),
+        }
+    }
+
+    fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
+        RealExecutionArgs {
+            kartal_url: "http://127.0.0.1:5004".to_string(),
+            kartal_token_env: "KARTAL_API_TOKEN".to_string(),
+            live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
+            live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
+            live_real_shadow_priority_fee_gwei: "40".to_string(),
+            live_real_shadow_max_fee_gwei: "50".to_string(),
+            live_real_shadow_predicted_base_fee_gwei: "10".to_string(),
+            allow_public_mempool_live_validation,
+        }
+    }
+
+    fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
+        KartalEthTxExecutorStatus {
+            service: "eth_tx_executor".to_string(),
+            enabled: true,
+            api_token_configured: true,
+            signer_available: true,
+            execution_disabled: false,
+            broadcast_mode: mode,
+            chain_id: 1,
+            rpc_url: "http://172.18.0.1:8545".to_string(),
+            journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
+            direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
+            policy: KartalEthTxPolicyStatus {
+                version: "eth_tx_policy_v1".to_string(),
+                allowed_from_count: 1,
+                allowed_target_count: 1,
+                allowed_selector_count: 2,
+                max_value_wei: LIVE_VALIDATION_BUY_WEI.to_string(),
+                max_gas_limit: 500_000,
+                max_fee_per_gas_wei: "1000000000000".to_string(),
+                max_priority_fee_per_gas_wei: "500000000000".to_string(),
+                max_transaction_cost_wei: "30000000000000000".to_string(),
+                max_daily_cost_wei: "50000000000000000".to_string(),
+                daily_spend: KartalDailySpendStatus {
+                    spend_day: "2026-05-21".to_string(),
+                    spent_wei: "0".to_string(),
+                    remaining_daily_cost_wei: Some("50000000000000000".to_string()),
+                },
+                require_simulation: true,
+                max_simulation_age_blocks: 2,
+                required_metadata_fields: vec![
+                    "wire_protocol".to_string(),
+                    "intent_kind".to_string(),
+                    "strategy_name".to_string(),
+                    "strategy_run_id".to_string(),
+                    "trade_id".to_string(),
+                    "token_address".to_string(),
+                    "pool_address".to_string(),
+                ],
+            },
+        }
+    }
+
+    #[test]
+    fn dry_run_status_is_allowed_without_public_validation_flag() {
+        validate_kartal_real_status(
+            &status(KartalStatusBroadcastMode::DryRun),
+            &real_args(false),
+            &live_args(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn public_mempool_requires_explicit_validation_flag() {
+        let error = validate_kartal_real_status(
+            &status(KartalStatusBroadcastMode::PublicMempool),
+            &real_args(false),
+            &live_args(),
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("--allow-public-mempool-live-validation"));
+    }
+
+    #[test]
+    fn public_mempool_validation_requires_hold3_single_pool_scope() {
+        let mut args = live_args();
+        args.strategy_set = Some("alpha11-live-univ2-lp30-pool-update-block-hold15".to_string());
+
+        let error = validate_kartal_real_status(
+            &status(KartalStatusBroadcastMode::PublicMempool),
+            &real_args(true),
+            &args,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(HOLD3_VALIDATION_STRATEGY_NAME));
+    }
+
+    #[test]
+    fn public_mempool_validation_accepts_hold3_single_pool_scope() {
+        validate_kartal_real_status(
+            &status(KartalStatusBroadcastMode::PublicMempool),
+            &real_args(true),
+            &live_args(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn public_mempool_validation_requires_value_cap_for_buy() {
+        let mut status = status(KartalStatusBroadcastMode::PublicMempool);
+        status.policy.max_value_wei = "0".to_string();
+
+        let error =
+            validate_kartal_real_status(&status, &real_args(true), &live_args()).unwrap_err();
+
+        assert!(error.to_string().contains("max_value_wei"));
+    }
 }

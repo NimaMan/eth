@@ -19,6 +19,9 @@ pub fn strategy_set_specs(
         ]),
         alpha11_specs::SET_NAME => Ok(alpha11_specs::specs(options)),
         crate::alpha11::HOLD15_STRATEGY_NAME => Ok(vec![alpha11_specs::hold15_spec(options)]),
+        crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME => {
+            Ok(vec![alpha11_specs::hold3_validation_spec(options)])
+        }
         other => Err(format!("unsupported strategy set: {other}")),
     }
 }
@@ -68,5 +71,18 @@ mod tests {
             crate::alpha11::HOLD15_STRATEGY_NAME
         );
         assert!(hold15[0].max_entry_price_ratio_to_initial.is_none());
+
+        let hold3_validation =
+            strategy_set_specs(crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME, &options).unwrap();
+        assert_eq!(hold3_validation.len(), 1);
+        assert_eq!(
+            hold3_validation[0].strategy_name,
+            crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME
+        );
+        assert_eq!(hold3_validation[0].max_hold_blocks, Some(3));
+        assert_eq!(
+            hold3_validation[0].entry_bankroll_eth.as_deref(),
+            Some("0.01")
+        );
     }
 }

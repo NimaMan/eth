@@ -1,5 +1,8 @@
 use crate::{
-    alpha11::{HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH, STRATEGY_IMPL},
+    alpha11::{
+        HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
+        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, STRATEGY_IMPL,
+    },
     shared_rules::live::{LiveStrategySpec, LiveStrategySpecOptions},
 };
 
@@ -16,6 +19,15 @@ pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
 
 pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     spec(15, options)
+}
+
+pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+    let mut spec = spec(3, options);
+    spec.strategy_name = HOLD3_VALIDATION_STRATEGY_NAME.to_string();
+    spec.strategy_label =
+        "Alpha11 live validation Uniswap V2 LP30 pool-update-block hold 3".to_string();
+    spec.entry_bankroll_eth = Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string());
+    spec
 }
 
 fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategySpec {
@@ -100,5 +112,24 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
+    }
+
+    #[test]
+    fn hold3_validation_spec_is_single_trade_live_probe() {
+        let spec = hold3_validation_spec(&LiveStrategySpecOptions::default());
+
+        assert_eq!(spec.strategy_name, HOLD3_VALIDATION_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, STRATEGY_IMPL);
+        assert_eq!(spec.max_hold_blocks, Some(3));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_lp_approval);
+        assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert!(spec.strategy_label.contains("validation"));
+        assert!(!spec.strategy_name.contains("price-to-initial"));
     }
 }

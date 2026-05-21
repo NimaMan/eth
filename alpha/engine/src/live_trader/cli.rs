@@ -29,6 +29,7 @@ pub(super) struct RealExecutionArgs {
     pub(super) live_real_shadow_priority_fee_gwei: String,
     pub(super) live_real_shadow_max_fee_gwei: String,
     pub(super) live_real_shadow_predicted_base_fee_gwei: String,
+    pub(super) allow_public_mempool_live_validation: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -75,9 +76,8 @@ struct LiveCommonCli {
     #[arg(long = "entry-bankroll-eth")]
     entry_bankroll_eth: Option<String>,
 
-    /// Max hold active pool-update blocks: force sell after this many distinct
-    /// pool-update blocks while the position is open.
-    /// Disabled by default.
+    /// Ad-hoc/default strategy max hold in active pool-update blocks.
+    /// Named strategy sets own their hold window in the strategy spec.
     #[arg(long)]
     max_hold_blocks: Option<u64>,
 
@@ -140,6 +140,12 @@ struct LiveRealOnlyCli {
     /// provider is wired.
     #[arg(long, default_value = "10")]
     live_real_shadow_predicted_base_fee_gwei: String,
+
+    /// Allow Kartal public_mempool only for the explicit Alpha11 hold3
+    /// one-pool validation strategy. Without this flag the live trader refuses
+    /// any non-dry-run Kartal status.
+    #[arg(long, default_value_t = false)]
+    allow_public_mempool_live_validation: bool,
 }
 
 pub(super) fn parse_live_backtest_args() -> Args {
@@ -184,6 +190,7 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             live_real_shadow_priority_fee_gwei: real.live_real_shadow_priority_fee_gwei,
             live_real_shadow_max_fee_gwei: real.live_real_shadow_max_fee_gwei,
             live_real_shadow_predicted_base_fee_gwei: real.live_real_shadow_predicted_base_fee_gwei,
+            allow_public_mempool_live_validation: real.allow_public_mempool_live_validation,
         }
     }
 }

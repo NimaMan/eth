@@ -181,7 +181,7 @@ Alpha has separate trader entrypoints for each runtime boundary:
 | Binary | Adapter | Broadcast capability |
 | --- | --- | --- |
 | `eth_alpha_live_backtest_trader` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
-| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run only. The binary refuses to start if Kartal is not in `dry_run`. |
+| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run by default. `public_mempool` is only accepted for the explicit one-pool Alpha11 hold3 validation strategy. |
 | `eth_alpha_backtest_trader` | `ChainSimExecutionAdapter` | None; historical replay only. |
 
 The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
@@ -195,7 +195,13 @@ The real live binary targets the deployed `UniswapV2TradingVault`, derives a
 non-zero min-output from provisional exact-calldata simulation, and simulates
 the final exact vault buy or sell calldata against local Reth state before
 Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
-at most `0.225 ETH`. The visible Alpha11 hold15 strategy name remains
+at most `0.225 ETH`. Public broadcast is rejected unless all of these are true:
+Kartal reports `public_mempool`, the CLI includes
+`--allow-public-mempool-live-validation`, the strategy set is
+`alpha11-live-univ2-lp30-pool-update-block-hold3-validation`,
+`--max-entry-pools 1`, `--replay-current` is absent, `--once` is absent, and
+the buy value plus entry bankroll are both capped at `0.01 ETH`. The visible
+Alpha11 hold15 strategy name remains
 `alpha11-live-univ2-lp30-pool-update-block-hold15` for both live-backtest and
 live-real. The live-real path applies the deploy-only entry cap
 `price / initial price <= 1.5` through the recorded strategy config instead of
@@ -209,8 +215,8 @@ vault fills only from `BoughtV2` or `EmergencySoldV2` events. The final
 actual gas/effective price/paid cost, selected max-fee/priority/bribe metadata,
 and the comparison to the live-backtest `submitted block + 1` assumption. The
 first validation policy accepts a receipt at `1` confirmation and records a
-`3` confirmation recheck depth. A
-public-broadcast deployment still needs:
+`3` confirmation recheck depth. The hold3 validation run is the first
+public-broadcast proof point. The main hold15 public deployment still needs:
 
 - production `GasRankProvider` backed by recent block-rank evidence;
 - validation evidence for the capped deployed-vault buy route and position

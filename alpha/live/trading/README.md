@@ -20,12 +20,17 @@ Current live-runner integration:
 
 `eth_alpha_live_trader` now instantiates `TxExecutorAdapter` and the
 `LiveTradingPlannerBridge` for deployed Uniswap V2 trading-vault buys and
-emergency sells. That runner refuses to start unless Kartal is in `dry_run`, so
-it proves the real executor boundary without broadcasting. While entry is in
-validation mode, live-real startup also requires a resolved strategy bankroll
-of at most `0.225 ETH`; buys consume that starting bankroll, confirmed sells
-replenish it, and profits can be redeployed. The no-capital live chain-sim runner is
-`eth_alpha_live_backtest_trader`; historical replay is
+emergency sells. That runner refuses non-dry-run Kartal status by default. The
+only public broadcast exception is the explicit one-pool Alpha11 hold3 mined
+validation run, enabled with `--allow-public-mempool-live-validation` and
+`--strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation`.
+That run must use `--max-entry-pools 1`, no `--replay-current`, no `--once`, and
+`0.01 ETH` buy/bankroll caps so it can buy once, reconcile the mined receipt,
+sell after 3 pool-update blocks, and record the mined evidence. While entry is
+otherwise in validation mode, live-real startup also requires a resolved
+strategy bankroll of at most `0.225 ETH`; buys consume that starting bankroll,
+confirmed sells replenish it, and profits can be redeployed. The no-capital
+live chain-sim runner is `eth_alpha_live_backtest_trader`; historical replay is
 `eth_alpha_backtest_trader`.
 
 The deployed Uniswap V2 trading vault is
@@ -35,13 +40,16 @@ Mode A must target this vault. Direct Uniswap V2 router simulation is retained
 only as a gas and behavior baseline; it is not the final pre-submit check for a
 real live order.
 
-Missing before a live strategy can use this crate for public real capital:
+Missing before the main hold15 strategy can use this crate for public real
+capital:
 
 - Replace `FixedGasRankProvider` with live gas-rank/base-fee inputs that produce
   `RankedFeeCandidate`s.
-- Reconcile Kartal tx hashes into confirmed or failed alpha execution reports.
-- Keep live-real entry bounded to a small validation bankroll, currently
-  `0.225 ETH`, until dry-run evidence and receipt reconciliation are reviewed.
+- Review one complete hold3 public validation trade with mined buy, mined sell,
+  actual fees, tx indexes, and 3-confirmation rechecks persisted in alpha.
+- Keep hold15 entry bounded to a small validation bankroll, currently
+  `0.225 ETH`, until mined validation evidence and receipt operations are
+  reviewed.
 
 ## Kartal Execution Handoff
 
@@ -108,12 +116,12 @@ Planner-fixture calibration appends a UTC timestamp to the generated
 `attempt_id` by default. That keeps repeated dry-run signing attempts separate
 in Kartal's policy journal and spend ledger.
 
-Current bottleneck: the real-runner boundary exists, but it is deliberately
-Kartal dry-run only. The deployed V2 vault buy and sell paths simulate the exact
-prepared calldata against local Reth state and reject stale simulation state.
-Gas rank still uses fixed values from the trader CLI. Public broadcast must
-remain disabled until gas-rank/base-fee inputs, dry-run evidence, and receipt
-operations are production-ready.
+Current bottleneck: the real-runner boundary exists, and public broadcast is
+limited to the one-pool Alpha11 hold3 validation path. The deployed V2 vault buy
+and sell paths simulate the exact prepared calldata against local Reth state and
+reject stale simulation state. Gas rank still uses fixed values from the trader
+CLI. Main-strategy public broadcast must remain disabled until gas-rank/base-fee
+inputs, hold3 mined evidence, and receipt operations are reviewed.
 
 ## Tx Submission Data Flow
 

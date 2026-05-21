@@ -168,7 +168,7 @@ async fn run(
         .transpose()?;
     let mut kartal_real_preflight = match real_args.as_ref() {
         None => None,
-        Some(real_args) => Some(preflight_kartal_real(real_args).await?),
+        Some(real_args) => Some(preflight_kartal_real(real_args, &args).await?),
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
@@ -253,7 +253,12 @@ async fn run(
                         "token_env": &real_args.kartal_token_env,
                         "from": &real_args.live_real_from,
                         "vault_address": &real_args.live_real_vault_address,
-                        "broadcast_requirement": "dry_run"
+                        "broadcast_requirement": if real_args.allow_public_mempool_live_validation {
+                            "dry_run_or_explicit_hold3_validation_public_mempool"
+                        } else {
+                            "dry_run"
+                        },
+                        "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation
                     })
                 } else {
                     Value::Null
