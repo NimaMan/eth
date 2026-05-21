@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS: u64 = 500;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedSellRoute {
     pub protocol: String,
@@ -13,6 +15,26 @@ pub struct PreparedSellRoute {
 }
 
 impl PreparedSellRoute {
+    pub fn apply_simulated_gas_used(
+        &mut self,
+        simulated_gas_used: u64,
+    ) -> Result<(), TxPrepRouteError> {
+        if simulated_gas_used == 0 {
+            return Err(TxPrepRouteError::MissingEstimatedGasUsed);
+        }
+        if simulated_gas_used > self.gas_limit {
+            return Err(TxPrepRouteError::EstimatedGasExceedsLimit);
+        }
+
+        let buffered = add_bps_ceil(
+            simulated_gas_used,
+            DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS,
+        )
+        .min(self.gas_limit);
+        self.estimated_gas_used = self.estimated_gas_used.max(buffered);
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), TxPrepRouteError> {
         if self.router_address.trim().is_empty() {
             return Err(TxPrepRouteError::MissingRouterAddress);
@@ -33,6 +55,12 @@ impl PreparedSellRoute {
     }
 }
 
+fn add_bps_ceil(value: u64, bps: u64) -> u64 {
+    let increment = (u128::from(value) * u128::from(bps)).div_ceil(10_000);
+    let total = u128::from(value).saturating_add(increment);
+    total.min(u128::from(u64::MAX)) as u64
+}
+
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TxPrepRouteError {
     #[error("prepared route is missing router address")]
@@ -45,4 +73,39 @@ pub enum TxPrepRouteError {
     MissingEstimatedGasUsed,
     #[error("prepared route estimated_gas_used exceeds gas_limit")]
     EstimatedGasExceedsLimit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn route(estimated_gas_used: u64, gas_limit: u64) -> PreparedSellRoute {
+        PreparedSellRoute {
+            protocol: "uniswap_v2_trading_vault".to_string(),
+            router_address: "0x0000000000000000000000000000000000000001".to_string(),
+            calldata: "0x1234".to_string(),
+            value_wei: "0".to_string(),
+            gas_limit,
+            estimated_gas_used,
+            max_slippage_bps: Some(500),
+        }
+    }
+
+    #[test]
+    fn simulated_gas_used_raises_route_estimate_with_buffer() {
+        let mut route = route(130_000, 300_000);
+
+        route.apply_simulated_gas_used(182_564).unwrap();
+
+        assert_eq!(route.estimated_gas_used, 191_693);
+    }
+
+    #[test]
+    fn simulated_gas_used_does_not_lower_existing_estimate() {
+        let mut route = route(180_000, 300_000);
+
+        route.apply_simulated_gas_used(120_000).unwrap();
+
+        assert_eq!(route.estimated_gas_used, 180_000);
+    }
 }

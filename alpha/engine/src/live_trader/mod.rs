@@ -375,6 +375,7 @@ async fn run(
                 kartal_real_preflight
                     .take()
                     .expect("kartal-real preflight must exist"),
+                token_server_url.clone(),
                 store.clone(),
                 run_id.clone(),
                 chain_sim_adapter,

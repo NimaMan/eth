@@ -209,8 +209,8 @@ live-real. Hold duration is part of the named strategy spec rather than a
 live-run CLI override. The live-real path applies the deploy-only entry cap
 `price / initial price <= 1.5` through the recorded strategy config instead of
 encoding that cap in the strategy name.
-The gas-rank provider still uses fixed dry-run values to prove the live
-executor boundary.
+The live-real gas-rank provider calls `eth_chain_server` for route-specific
+ranked fee candidates before building each Kartal request.
 A receipt reconciliation worker now exists for real submitted tx hashes: it
 polls Kartal's configured RPC, requires successful receipts, and confirms V2
 vault fills only from `BoughtV2` or `EmergencySoldV2` events. The final

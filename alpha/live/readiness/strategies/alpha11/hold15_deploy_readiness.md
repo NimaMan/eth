@@ -15,8 +15,8 @@ to public real capital.
 - Gate 3 chain-facing assumptions reviewed.
 - `alpha11-live-univ2-lp30-pool-update-block-hold3-validation` passes the
   pre-live mined-validation gate.
-- Live gas-rank/base-fee inputs replace the fixed validation gas-rank provider
-  or are explicitly accepted as a bounded validation risk.
+- Live gas-rank/base-fee inputs from `eth_chain_server` are reviewed against
+  mined validation evidence.
 - Receipt worker alerting and operator review are in place.
 - Initial bankroll remains capped at `0.225 ETH`.
 - Entry-only `price / initial price <= 1.5` live-real cap is visible in
@@ -27,4 +27,3 @@ to public real capital.
 Hold15 cannot use public real capital until the hold3 mined-validation file has
 a passed run with buy and sell receipts, or the operator explicitly records a
 different approved validation path.
-

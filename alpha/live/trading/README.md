@@ -43,11 +43,15 @@ Mode A must target this vault. Direct Uniswap V2 router simulation is retained
 only as a gas and behavior baseline; it is not the final pre-submit check for a
 real live order.
 
+Exact pre-submit simulation is also the source of gas-used for live tx
+economics. Route builders may carry static fallback gas estimates, but after the
+final exact simulation the planner raises `route.estimated_gas_used` to at least
+the simulated gas used plus the configured 5% buffer before gas-rank lookup,
+value-cap budgeting, and Kartal request metadata are built.
+
 Missing before the main hold15 strategy can use this crate for public real
 capital:
 
-- Replace `FixedGasRankProvider` with live gas-rank/base-fee inputs that produce
-  `RankedFeeCandidate`s.
 - Review one complete hold3 public validation trade with mined buy, mined sell,
   actual fees, tx indexes, and 3-confirmation rechecks persisted in alpha.
 - Keep hold15 entry bounded to a small validation bankroll, currently
@@ -135,10 +139,12 @@ in Kartal's policy journal and spend ledger.
 
 Current bottleneck: the real-runner boundary exists, and public broadcast is
 limited to the one-pool Alpha11 hold3 validation path. The deployed V2 vault buy
-and sell paths simulate the exact prepared calldata against local Reth state and
-reject stale simulation state. Gas rank still uses fixed values from the trader
-CLI. Main-strategy public broadcast must remain disabled until gas-rank/base-fee
-inputs, hold3 mined evidence, and receipt operations are reviewed.
+and sell paths simulate the exact prepared calldata against local Reth state,
+reject stale simulation state, use simulated gas with a buffer for fee
+economics, and fetch route-specific gas-rank recommendations from
+`eth_chain_server` before building the Kartal request. Main-strategy public
+broadcast must remain disabled until the new gas-rank wiring, hold3 mined
+evidence, and receipt operations are reviewed.
 
 ## Tx Submission Data Flow
 
@@ -296,7 +302,8 @@ the live strategy needs:
 - a production `LiveTxPlanningInputResolver` for entry and priority sell intents;
 - live pre-submit simulation against the current state for any route beyond the
   deployed V2 vault buy/emergency sell;
-- live gas-rank and base-fee inputs wired into `tx_prep`;
+- live gas-rank and base-fee inputs from `eth_chain_server` reviewed against
+  mined validation evidence;
 - route policy that selects the deployed trading vault for Mode A scam exits, or
   a real allowance/pre-approval policy before direct EOA sells are allowed;
 - per-trade max fee, capital limit, and circuit breaker enforcement;
@@ -320,8 +327,9 @@ the live strategy needs:
   direct Uniswap V2 ETH/WETH sells and deployed Uniswap V2 trading vault buys
   and emergency sells through `tx_simulator::tx_builders`. The deployed V2 vault
   simulator executes the exact route calldata against local Reth state, while
-  gas-rank and allowance providers remain injected so production code can
-  replace fixed test implementations.
+  the live-real runner uses `ChainServerGasRankProvider` for route-specific
+  recommendations. Fixed gas-rank providers remain only for tests and
+  calibration fixtures.
 - `src/kartal_executor.rs` exposes the Kartal client and JSON contract for
   submitting already-prepared direct raw transactions.
 - `src/kartal/` exposes status and policy-journal readers used by calibration

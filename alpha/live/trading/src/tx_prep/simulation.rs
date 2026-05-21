@@ -10,6 +10,8 @@ pub struct PreSubmitSimulation {
     pub expected_output_amount: Option<String>,
     pub min_output_amount: Option<String>,
     pub expected_recovery_eth: eth_alpha_core::amount::DecimalAmount,
+    #[serde(default)]
+    pub gas_used: Option<u64>,
     pub would_revert: bool,
     #[serde(default)]
     pub metadata: Value,
@@ -30,6 +32,7 @@ impl PreSubmitSimulation {
         json!({
             "expected_recovery_eth": self.expected_recovery_eth,
             "would_revert": self.would_revert,
+            "gas_used": self.gas_used,
             "extra": self.metadata,
         })
     }

@@ -10,14 +10,14 @@ use eth_alpha_core::{
     position::{Position, PositionKey, PositionState},
 };
 use eth_live_trading::{
-    KartalBribeRequest, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, PreSubmitSimulation, derive_min_output_from_expected_output,
+    derive_min_output_from_expected_output, KartalBribeRequest, KartalSubmitDirectRawResult,
+    LiveDirectRawTransactionRequest, LiveTraderTxSignal, PreSubmitSimulation,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
-    EngineExecutionAdapter,
     execution::real::{LiveTxPlanner, LiveTxSubmitter, TxExecutorAdapter},
+    EngineExecutionAdapter,
 };
 
 #[derive(Clone)]
@@ -205,6 +205,7 @@ fn gate3_a8_min_output_and_reverting_simulation_fail_safely() {
         expected_output_amount: Some(expected_output.to_string()),
         min_output_amount: Some(min_output.to_string()),
         expected_recovery_eth: DecimalAmount::from(1),
+        gas_used: Some(150_000),
         would_revert: true,
         metadata: json!({ "gate": "gate3-a8" }),
     };

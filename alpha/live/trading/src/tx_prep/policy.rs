@@ -1,11 +1,11 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::{
-    GasPlanDecision, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget,
-    PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepRequestContext,
-    TxPrepRouteError, TxPrepSimulationError, build_priority_sell_request,
+    build_priority_sell_request, GasPlanDecision, PreSubmitSimulation, PreparedSellRoute,
+    PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy,
+    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError,
 };
 use crate::LiveTraderTxSignal;
 use crate::PrioritySellPlan;
@@ -169,6 +169,7 @@ mod tests {
                 expected_output_amount: Some("10000000000000000".to_string()),
                 min_output_amount: Some("9000000000000000".to_string()),
                 expected_recovery_eth: DecimalAmount::new(1, 2),
+                gas_used: Some(150_000),
                 would_revert: false,
                 metadata: json!({ "sim": "ok" }),
             },

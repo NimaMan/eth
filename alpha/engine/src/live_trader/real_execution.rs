@@ -15,13 +15,14 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, FixedGasRankProvider, GasRankPlan, KartalBribeRequest,
-    KartalClient, KartalClientConfig, KartalEthTxExecutorStatus, KartalExecutorClient,
-    KartalExecutorClientConfig, KartalSimulationReference, KartalStatusBroadcastMode,
-    LiveDirectRawTransactionRequest, LivePrioritySellPlanner, LivePrioritySellPlannerConfig,
-    LivePrioritySellPlannerError, LivePrioritySellPlannerInput, LiveTraderTxSignal,
-    PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator, RankedFeeCandidate,
-    StrategyGasRankDefaults, StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
+    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasRankPlan,
+    GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
+    KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
+    KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
+    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, PlannerTxContext, PreSubmitSimulation,
+    PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate, StrategyGasRankDefaults,
+    StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
@@ -131,7 +132,7 @@ impl LiveTxPlanningInputResolver for LiveRealInputResolver {
                         "execution_mode": "kartal-real",
                         "route": "uniswap_v2_trading_vault",
                         "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
-                        "gas_rank_provider": "shadow_dry_run_only",
+                        "gas_rank_provider": "eth_chain_server_gas_rank",
                         "min_output_policy": "exact_pre_submit_simulation_slippage_bps"
                     }),
                 },
@@ -192,7 +193,7 @@ impl LiveRealInputResolver {
                         "execution_mode": "kartal-real",
                         "route": "uniswap_v2_trading_vault",
                         "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
-                        "gas_rank_provider": "shadow_dry_run_only",
+                        "gas_rank_provider": "eth_chain_server_gas_rank",
                         "min_output_policy": "exact_pre_submit_simulation_slippage_bps"
                     }),
                 },
@@ -261,18 +262,19 @@ impl LiveRealInputResolver {
     }
 }
 
-struct KartalRealPlanner<P> {
+struct KartalRealPlanner<P, G> {
     sell_planner: P,
     resolver: LiveRealInputResolver,
     simulator: UniswapV2TradingVaultPreSubmitSimulator,
     buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder,
-    gas_plan: GasRankPlan,
+    gas_rank: G,
 }
 
 #[async_trait]
-impl<P> LiveTxPlanner for KartalRealPlanner<P>
+impl<P, G> LiveTxPlanner for KartalRealPlanner<P, G>
 where
     P: LiveTxPlanner,
+    G: GasRankProvider,
 {
     async fn prepare_signal(
         &self,
@@ -285,7 +287,10 @@ where
     }
 }
 
-impl<P> KartalRealPlanner<P> {
+impl<P, G> KartalRealPlanner<P, G>
+where
+    G: GasRankProvider,
+{
     async fn prepare_buy_signal(
         &self,
         intent: &OrderIntent,
@@ -315,7 +320,7 @@ impl<P> KartalRealPlanner<P> {
                 "max_slippage_bps": input.intent.max_slippage_bps,
             }
         });
-        let route = self
+        let mut route = self
             .buy_route_builder
             .build_route(&input, min_output)
             .map_err(planner_error)?;
@@ -325,8 +330,14 @@ impl<P> KartalRealPlanner<P> {
             .await
             .map_err(planner_error)?;
         ensure_simulation_ok(&simulation)?;
+        apply_simulated_gas_used(&mut route, &simulation)?;
+        let gas_rank = self
+            .gas_rank
+            .ranked_fee_candidates(&input, &route)
+            .await
+            .map_err(planner_error)?;
         let gas_rank_policy = StrategyGasRankDefaults::entry_buy_policy();
-        let fee = select_gas_fee(&self.gas_plan, &gas_rank_policy)?;
+        let fee = select_gas_fee(&gas_rank, &gas_rank_policy)?;
         let trade_id = input.intent.trade_id.clone().ok_or_else(|| {
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
@@ -436,6 +447,18 @@ fn ensure_simulation_ok(simulation: &PreSubmitSimulation) -> eth_alpha_core::err
     Ok(())
 }
 
+fn apply_simulated_gas_used(
+    route: &mut PreparedSellRoute,
+    simulation: &PreSubmitSimulation,
+) -> eth_alpha_core::error::Result<()> {
+    let Some(gas_used) = simulation.gas_used else {
+        return Ok(());
+    };
+    route
+        .apply_simulated_gas_used(gas_used)
+        .map_err(|error| AlphaCoreError::Execution(error.to_string()))
+}
+
 fn select_gas_fee(
     plan: &GasRankPlan,
     policy: &StrategyGasRankPolicy,
@@ -509,6 +532,7 @@ pub(super) async fn preflight_kartal_real(
 pub(super) async fn build_kartal_real_adapter(
     args: &RealExecutionArgs,
     preflight: KartalRealPreflight,
+    chain_server_url: String,
     store: PostgresTradingStore,
     run_id: String,
     valuation_adapter: LiveChainSimExecutionAdapter,
@@ -519,32 +543,9 @@ pub(super) async fn build_kartal_real_adapter(
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
     let vault =
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
-    let priority_fee_gwei = args
-        .live_real_shadow_priority_fee_gwei
-        .parse::<Decimal>()
-        .wrap_err("invalid --live-real-shadow-priority-fee-gwei")?;
-    let max_fee_gwei = args
-        .live_real_shadow_max_fee_gwei
-        .parse::<Decimal>()
-        .wrap_err("invalid --live-real-shadow-max-fee-gwei")?;
-    let predicted_base_fee_gwei = args
-        .live_real_shadow_predicted_base_fee_gwei
-        .parse::<Decimal>()
-        .wrap_err("invalid --live-real-shadow-predicted-base-fee-gwei")?;
     let pre_submit_simulator =
         UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
-    let gas_rank_plan = GasRankPlan {
-        predicted_base_fee_gwei,
-        candidates: vec![RankedFeeCandidate {
-            label: "aggressive".to_string(),
-            priority_fee_gwei,
-            max_fee_per_gas_gwei: max_fee_gwei,
-            rank_position_p50: None,
-            gas_before_p50: None,
-            likely_fits_at_p50: None,
-            source: Some("shadow_dry_run_only".to_string()),
-        }],
-    };
+    let gas_rank_provider = ChainServerGasRankProvider::new(chain_server_url);
 
     let mut planner_config = LivePrioritySellPlannerConfig::default();
     planner_config.require_existing_allowance = false;
@@ -561,7 +562,7 @@ pub(super) async fn build_kartal_real_adapter(
         planner_config,
         UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
         pre_submit_simulator.clone(),
-        FixedGasRankProvider::new(gas_rank_plan.clone()),
+        gas_rank_provider.clone(),
         VaultInternalAllowanceChecker,
     );
     let resolver = LiveRealInputResolver {
@@ -578,7 +579,7 @@ pub(super) async fn build_kartal_real_adapter(
         resolver,
         simulator: pre_submit_simulator,
         buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder::with_default_gas(vault),
-        gas_plan: gas_rank_plan,
+        gas_rank: gas_rank_provider,
     };
     let submitter = KartalExecutorClient::new(KartalExecutorClientConfig::new(
         &args.kartal_url,
@@ -782,9 +783,6 @@ mod tests {
             kartal_token_env: "KARTAL_API_TOKEN".to_string(),
             live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
             live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
-            live_real_shadow_priority_fee_gwei: "40".to_string(),
-            live_real_shadow_max_fee_gwei: "50".to_string(),
-            live_real_shadow_predicted_base_fee_gwei: "10".to_string(),
             allow_public_mempool_live_validation,
         }
     }

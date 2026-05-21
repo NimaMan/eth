@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{GasPlanDecision, PriorityFeeBudget, RankedFeeCandidate, choose_ranked_fee};
+use super::{choose_ranked_fee, GasPlanDecision, PriorityFeeBudget, RankedFeeCandidate};
 use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

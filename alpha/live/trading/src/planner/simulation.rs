@@ -113,7 +113,9 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
         {
             return Err(LivePrioritySellPlannerError::Simulation(format!(
                 "exact V2 vault simulation state is stale: selected_block={} current_block={} max_state_lag_blocks={}",
-                status.selected_block_number, input.context.current_block, self.max_state_lag_blocks
+                status.selected_block_number,
+                input.context.current_block,
+                self.max_state_lag_blocks
             )));
         }
 
@@ -172,6 +174,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
                 expected_output_amount: None,
                 min_output_amount: input.min_output_amount.clone(),
                 expected_recovery_eth: DecimalAmount::ZERO,
+                gas_used: Some(result.gas_used),
                 would_revert: true,
                 metadata: base_metadata,
             });
@@ -200,6 +203,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
                         decimals: 18,
                     }
                     .to_decimal(),
+                    gas_used: Some(result.gas_used),
                     would_revert: false,
                     metadata: json!({
                         "provider": "reth_exact_calldata_uniswap_v2_trading_vault",
@@ -235,6 +239,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
                         decimals: 18,
                     }
                     .to_decimal(),
+                    gas_used: Some(result.gas_used),
                     would_revert: false,
                     metadata: json!({
                         "provider": "reth_exact_calldata_uniswap_v2_trading_vault",

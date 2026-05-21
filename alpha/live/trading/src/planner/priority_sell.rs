@@ -4,12 +4,12 @@ use eth_alpha_core::{
     order::{OrderIntent, OrderSide},
     position::Position,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
-    LpSignalSource, PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep,
-    StrategyGasRankDefaults, TxPrepOutcome, derive_min_output_from_expected_output,
-    prepare_priority_sell,
+    derive_min_output_from_expected_output, prepare_priority_sell, LpSignalSource,
+    PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep,
+    StrategyGasRankDefaults, TxPrepOutcome,
 };
 
 use super::{
@@ -87,8 +87,9 @@ where
         if self.config.require_existing_allowance {
             allowance.decision.ensure_preapproved()?;
         }
-        let route = allowance.route;
+        let mut route = allowance.route;
         let simulation = self.simulator.simulate(&input, &route).await?;
+        apply_simulated_gas_used(&mut route, &simulation)?;
         let gas_rank = self.gas_rank.ranked_fee_candidates(&input, &route).await?;
         let plan = priority_sell_plan(&self.config, &input);
         let gas_rank_policy = StrategyGasRankDefaults::priority_sell_policy(&plan);
@@ -111,6 +112,18 @@ where
             TxPrepOutcome::Reject(reject) => Ok(PrioritySellPlannerOutcome::Reject(reject)),
         }
     }
+}
+
+fn apply_simulated_gas_used(
+    route: &mut PreparedSellRoute,
+    simulation: &PreSubmitSimulation,
+) -> Result<(), LivePrioritySellPlannerError> {
+    let Some(gas_used) = simulation.gas_used else {
+        return Ok(());
+    };
+    route
+        .apply_simulated_gas_used(gas_used)
+        .map_err(|error| LivePrioritySellPlannerError::Route(error.to_string()))
 }
 
 fn should_derive_vault_min_output(
@@ -394,6 +407,7 @@ mod tests {
                 expected_output_amount: Some("10000000000000000".to_string()),
                 min_output_amount: Some("9000000000000000".to_string()),
                 expected_recovery_eth: DecimalAmount::new(1, 2),
+                gas_used: Some(150_000),
                 would_revert: false,
                 metadata: json!({ "sim": "ok" }),
             }),
@@ -422,6 +436,7 @@ mod tests {
             expected_output_amount: Some("10000000000000000".to_string()),
             min_output_amount: Some("9000000000000000".to_string()),
             expected_recovery_eth: DecimalAmount::new(1, 2),
+            gas_used: Some(150_000),
             would_revert: false,
             metadata: json!({ "sim": "ok" }),
         })
@@ -466,6 +481,7 @@ mod tests {
                 expected_output_amount: Some("10000000000000000".to_string()),
                 min_output_amount: input.min_output_amount.clone(),
                 expected_recovery_eth: DecimalAmount::new(1, 2),
+                gas_used: Some(150_000),
                 would_revert: false,
                 metadata: json!({ "sim": "ok" }),
             })
@@ -481,12 +497,10 @@ mod tests {
 
         match outcome {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
-                assert!(
-                    signal
-                        .request
-                        .to
-                        .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d")
-                );
+                assert!(signal
+                    .request
+                    .to
+                    .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"));
                 assert!(signal.request.data.starts_with("0x791ac947"));
                 assert_eq!(signal.request.max_priority_fee_per_gas, "40000000000");
                 assert_eq!(
@@ -524,6 +538,18 @@ mod tests {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
                 assert!(signal.request.to.eq_ignore_ascii_case(&vault.to_string()));
                 assert!(signal.request.data.starts_with("0x5f413d10"));
+                assert_eq!(
+                    signal.request.metadata["route"]["estimated_gas_used"],
+                    json!(157_500)
+                );
+                assert_eq!(
+                    signal.request.metadata["budget"]["estimated_gas_used"],
+                    json!(157_500)
+                );
+                assert_eq!(
+                    signal.request.metadata["simulation"]["gas_used"],
+                    json!(150_000)
+                );
             }
             other => panic!("expected submit, got {other:?}"),
         }

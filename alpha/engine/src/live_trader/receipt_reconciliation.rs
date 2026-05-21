@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, U256, hex, keccak256};
+use alloy_primitives::{hex, keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
@@ -7,7 +7,7 @@ use eth_alpha_core::{
     order::OrderSide,
 };
 use eth_alpha_store::SubmittedExecutionRecord;
-use eyre::{Result, WrapErr, eyre};
+use eyre::{eyre, Result, WrapErr};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -511,8 +511,8 @@ mod tests {
     };
     use serde_json::json;
     use std::sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     use super::*;

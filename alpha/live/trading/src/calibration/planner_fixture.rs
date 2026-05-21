@@ -211,6 +211,7 @@ fn simulator() -> FixedPreSubmitSimulator {
         expected_output_amount: Some("10000000000000000".to_string()),
         min_output_amount: Some("9000000000000000".to_string()),
         expected_recovery_eth: DecimalAmount::new(1, 2),
+        gas_used: Some(150_000),
         would_revert: false,
         metadata: json!({ "calibration_simulation": "fixed_success" }),
     })
