@@ -123,6 +123,7 @@ async fn simulate_buy_at_block(
         token_amount: Some(token_amount),
         gas_used: Some(result.buy_transaction.fees.gas_used),
         gas_cost: Some(gas_cost_amount(result.buy_transaction.fees.tx_fee)),
+        mined_evidence: None,
         error: None,
     })
 }
@@ -222,6 +223,7 @@ async fn simulate_sell_at_block(
         token_amount: None,
         gas_used: Some(result.gas_used),
         gas_cost: Some(gas_cost_amount(result.gas_cost)),
+        mined_evidence: None,
         error: None,
     })
 }
@@ -730,6 +732,7 @@ fn cancelled_report_at(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: None,
         error: Some(reason.into()),
     }
 }
@@ -761,6 +764,7 @@ fn failed_report_with_block(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: None,
         error: Some(reason.into()),
     }
 }
@@ -855,6 +859,7 @@ mod tests {
             token_amount: None,
             gas_used: Some(123),
             gas_cost: None,
+            mined_evidence: None,
             error: Some("unable to inject synthetic ERC20 balance".to_string()),
         };
 

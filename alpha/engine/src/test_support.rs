@@ -19,6 +19,7 @@ impl EngineExecutionAdapter for CancelledSellWithValueAdapter {
                     raw: U256::from(21_000_000u64),
                     decimals: 18,
                 }),
+                mined_evidence: None,
                 error: None,
             },
             OrderSide::Sell => ExecutionReport {
@@ -30,6 +31,7 @@ impl EngineExecutionAdapter for CancelledSellWithValueAdapter {
                 token_amount: None,
                 gas_used: None,
                 gas_cost: None,
+                mined_evidence: None,
                 error: Some("uneconomic sell".to_string()),
             },
         })
@@ -67,6 +69,7 @@ impl EngineExecutionAdapter for NoopTestExecutionAdapter {
             token_amount: None,
             gas_used: None,
             gas_cost: None,
+            mined_evidence: None,
             error: Some(format!("unexpected {:?} execution in test", intent.side)),
         })
     }

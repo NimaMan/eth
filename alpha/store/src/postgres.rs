@@ -52,4 +52,9 @@ pub struct SubmittedExecutionRecord {
     pub trade_id: Option<TradeId>,
     pub order_side: OrderSide,
     pub token_address: TokenAddress,
+    pub selected_gas_limit: Option<String>,
+    pub selected_max_fee_per_gas_wei: Option<String>,
+    pub selected_max_priority_fee_per_gas_wei: Option<String>,
+    pub selected_bribe_priority_fee_per_gas_wei: Option<String>,
+    pub selected_bribe_max_fee_per_gas_wei: Option<String>,
 }

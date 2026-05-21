@@ -21,7 +21,7 @@ pub mod time;
 pub use amount::{Amount, DecimalAmount};
 pub use decision_rationale::{DecisionReason, ReasonCategory};
 pub use error::{AlphaCoreError, Result};
-pub use execution::{ExecutionAdapter, ExecutionReport, ExecutionStatus};
+pub use execution::{ExecutionAdapter, ExecutionReport, ExecutionStatus, MinedExecutionEvidence};
 pub use ids::{
     BlockHash, BlockNumber, ChainId, OrderId, PortfolioId, PositionId, StrategyName, TokenPoolId,
     TxHash, WalletId,

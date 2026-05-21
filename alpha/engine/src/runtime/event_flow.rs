@@ -20,6 +20,7 @@ pub(crate) fn submitted_report_for(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: None,
         error: None,
     }
 }

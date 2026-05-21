@@ -17,6 +17,7 @@ fn failed_buy_status_is_terminal_but_failed_sell_keeps_exposure() {
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: None,
         error: Some("reverted".to_string()),
     };
 

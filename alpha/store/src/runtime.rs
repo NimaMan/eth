@@ -343,7 +343,12 @@ impl PostgresTradingStore {
                    er.position_id,
                    er.trade_id,
                    er.order_side,
-                   positions.token_address
+                   positions.token_address,
+                   er.payload #>> '{mined_evidence,selected_gas_limit}' AS selected_gas_limit,
+                   er.payload #>> '{mined_evidence,selected_max_fee_per_gas_wei}' AS selected_max_fee_per_gas_wei,
+                   er.payload #>> '{mined_evidence,selected_max_priority_fee_per_gas_wei}' AS selected_max_priority_fee_per_gas_wei,
+                   er.payload #>> '{mined_evidence,selected_bribe_priority_fee_per_gas_wei}' AS selected_bribe_priority_fee_per_gas_wei,
+                   er.payload #>> '{mined_evidence,selected_bribe_max_fee_per_gas_wei}' AS selected_bribe_max_fee_per_gas_wei
             FROM alpha_trading.execution_reports er
             JOIN alpha_trading.positions positions
               ON positions.run_id = er.run_id
@@ -403,6 +408,21 @@ impl PostgresTradingStore {
                     .map_err(store_error)?
                     .parse()
                     .map_err(store_error)?;
+                let selected_gas_limit = row
+                    .try_get::<Option<String>, _>("selected_gas_limit")
+                    .map_err(store_error)?;
+                let selected_max_fee_per_gas_wei = row
+                    .try_get::<Option<String>, _>("selected_max_fee_per_gas_wei")
+                    .map_err(store_error)?;
+                let selected_max_priority_fee_per_gas_wei = row
+                    .try_get::<Option<String>, _>("selected_max_priority_fee_per_gas_wei")
+                    .map_err(store_error)?;
+                let selected_bribe_priority_fee_per_gas_wei = row
+                    .try_get::<Option<String>, _>("selected_bribe_priority_fee_per_gas_wei")
+                    .map_err(store_error)?;
+                let selected_bribe_max_fee_per_gas_wei = row
+                    .try_get::<Option<String>, _>("selected_bribe_max_fee_per_gas_wei")
+                    .map_err(store_error)?;
                 Ok(SubmittedExecutionRecord {
                     order_id,
                     tx_hash,
@@ -411,6 +431,11 @@ impl PostgresTradingStore {
                     trade_id,
                     order_side,
                     token_address,
+                    selected_gas_limit,
+                    selected_max_fee_per_gas_wei,
+                    selected_max_priority_fee_per_gas_wei,
+                    selected_bribe_priority_fee_per_gas_wei,
+                    selected_bribe_max_fee_per_gas_wei,
                 })
             })
             .collect()

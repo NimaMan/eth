@@ -82,6 +82,7 @@ pub(super) fn confirmed_position(strategy: &SnipeAllStrategy, pool: &PoolSnapsho
             }),
             gas_used: Some(21_000),
             gas_cost: None,
+            mined_evidence: None,
             error: None,
         })
         .unwrap();
@@ -117,6 +118,7 @@ pub(super) fn failed_exit_position(strategy: &SnipeAllStrategy, pool: &PoolSnaps
             token_amount: None,
             gas_used: Some(21_000),
             gas_cost: None,
+            mined_evidence: None,
             error: Some("temporary sell failure".to_string()),
         })
         .unwrap();

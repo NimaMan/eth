@@ -1,6 +1,6 @@
 use crate::{
     amount::Amount,
-    ids::{BlockNumber, OrderId, TxHash},
+    ids::{BlockHash, BlockNumber, OrderId, TxHash},
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,5 +26,47 @@ pub struct ExecutionReport {
     pub gas_used: Option<u64>,
     #[serde(default)]
     pub gas_cost: Option<Amount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mined_evidence: Option<MinedExecutionEvidence>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MinedExecutionEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_block_number: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<BlockHash>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transaction_index: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cumulative_gas_used: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_block_number: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_confirmation_block: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation_lag_blocks: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_gas_price_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_gas_price_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_gas_cost_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_gas_limit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_max_fee_per_gas_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_max_priority_fee_per_gas_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_bribe_priority_fee_per_gas_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_bribe_max_fee_per_gas_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_confirmation_depth: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recheck_confirmation_depth: Option<u64>,
 }

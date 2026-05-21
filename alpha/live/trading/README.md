@@ -154,7 +154,8 @@ mempool/confirmed risk signal
   -> LiveTraderTxSignal carries LiveDirectRawTransactionRequest to Kartal
   -> tx_executor validates, reserves nonce, signs, journals, and dry-runs or broadcasts
   -> TxExecutorAdapter records submitted/cancelled/failed ExecutionReport
-  -> receipt reconciler later records confirmed/reverted/replaced outcome
+  -> receipt reconciler later records confirmed/reverted outcome plus mined
+     block, tx index, fee, bribe, and finality evidence
 ```
 
 The planner must reject instead of submitting when any critical input is stale,

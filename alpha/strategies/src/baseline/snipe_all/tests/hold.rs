@@ -253,6 +253,7 @@ fn position_monitor_does_not_retry_failed_exit_every_block() {
             token_amount: None,
             gas_used: Some(21_000),
             gas_cost: None,
+            mined_evidence: None,
             error: Some("temporary sell failure".to_string()),
         })
         .unwrap();

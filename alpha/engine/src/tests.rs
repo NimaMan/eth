@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
+    Result, Strategy,
     amount::{Amount, DecimalAmount},
     execution::{ExecutionReport, ExecutionStatus},
     ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
@@ -8,11 +9,10 @@ use eth_alpha_core::{
     position::{Position, PositionKey, PositionState},
     risk::{RiskKind, RiskSeverity},
     strategy::{StrategyContext, StrategyDecision},
-    Result, Strategy,
 };
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
 };
 
 use super::*;
@@ -350,6 +350,7 @@ impl EngineExecutionAdapter for ConfirmingTestExecutionAdapter {
                 raw: U256::from(21_000_000u64),
                 decimals: 18,
             }),
+            mined_evidence: None,
             error: None,
         })
     }
@@ -391,6 +392,7 @@ impl EngineExecutionAdapter for CountingNextBlockValuationAdapter {
                 raw: U256::from(21_000_000u64),
                 decimals: 18,
             }),
+            mined_evidence: None,
             error: None,
         })
     }
@@ -438,6 +440,7 @@ impl EngineExecutionAdapter for SequencedNextBlockExecutionAdapter {
                 raw: U256::from(21_000_000u64),
                 decimals: 18,
             }),
+            mined_evidence: None,
             error: None,
         })
     }
@@ -1042,6 +1045,7 @@ async fn external_execution_report_updates_matching_submitted_position() {
                 raw: U256::from(21_000_000_000_000u64),
                 decimals: 18,
             }),
+            mined_evidence: None,
             error: None,
         }))
         .await

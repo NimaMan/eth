@@ -31,6 +31,17 @@ live trader tick it:
 Successful receipts without matching vault evidence stay unresolved. The trader
 logs them but does not mark the position confirmed.
 
+Final receipt reports include `mined_evidence` in the persisted JSON payload:
+receipt block number/hash, transaction index, cumulative gas, receipt status,
+actual gas used, effective gas price, paid gas cost, selected gas limit,
+selected max fee, selected priority fee, selected bribe metadata, and the
+live-backtest comparison fields `submitted_block_number`,
+`expected_confirmation_block`, and `confirmation_lag_blocks`.
+
+The validation finality policy is explicit in the evidence: a mined receipt is
+accepted after `1` confirmation for lifecycle accounting, and should be rechecked
+at `3` confirmations during the first live validation trades.
+
 ## Gate 3 Validation
 
 The live-readiness Gate 3 tests live in `src/gate3_validation.rs` and
@@ -46,9 +57,14 @@ The suite currently locks these real-live assumptions:
   `rejected` responses never become confirmed without receipt evidence.
 - `dry_run` is evidence only and maps to a cancelled report because no
   transaction was broadcast.
+- Submitted reports carry the selected gas limit, max fee, priority fee, and
+  bribe metadata that will later be merged into mined receipt evidence.
 - Exact-simulation min-output is non-zero and reverting/full-slippage cases
   reject before submission.
 - Successful receipts confirm only when the expected deployed V2 vault event is
   present, and the resulting report uses actual vault event amounts plus receipt
   gas cost.
+- Receipt evidence records the mined block hash, transaction index,
+  cumulative gas used, effective gas price, paid gas cost, the N+1 backtest
+  comparison, and the `1`/`3` confirmation policy.
 - A buy that is only submitted, pending, or dry-run-cancelled is not sellable.

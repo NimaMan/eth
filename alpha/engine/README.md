@@ -204,13 +204,18 @@ The gas-rank provider still uses fixed dry-run values to prove the live
 executor boundary.
 A receipt reconciliation worker now exists for real submitted tx hashes: it
 polls Kartal's configured RPC, requires successful receipts, and confirms V2
-vault fills only from `BoughtV2` or `EmergencySoldV2` events. A
+vault fills only from `BoughtV2` or `EmergencySoldV2` events. The final
+`ExecutionReport` payload records mined receipt block/hash, transaction index,
+actual gas/effective price/paid cost, selected max-fee/priority/bribe metadata,
+and the comparison to the live-backtest `submitted block + 1` assumption. The
+first validation policy accepts a receipt at `1` confirmation and records a
+`3` confirmation recheck depth. A
 public-broadcast deployment still needs:
 
 - production `GasRankProvider` backed by recent block-rank evidence;
 - validation evidence for the capped deployed-vault buy route and position
   reconciliation;
-- operational finality policy and alerting around the receipt worker.
+- alerting around the receipt worker and confirmation-depth rechecks.
 
 Backtest binaries cannot import `TxExecutorAdapter` through the public engine
 API; they should remain on `ChainSimExecutionAdapter` only.

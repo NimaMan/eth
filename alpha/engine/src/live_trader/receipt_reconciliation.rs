@@ -2,7 +2,7 @@ use alloy_primitives::{Address, B256, U256, hex, keccak256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
-    execution::{ExecutionReport, ExecutionStatus},
+    execution::{ExecutionReport, ExecutionStatus, MinedExecutionEvidence},
     ids::TxHash,
     order::OrderSide,
 };
@@ -13,6 +13,8 @@ use serde_json::json;
 
 const BOUGHT_V2_SIGNATURE: &str = "BoughtV2(address,uint256,uint256,uint256)";
 const EMERGENCY_SOLD_V2_SIGNATURE: &str = "EmergencySoldV2(address,uint256,uint256,uint256)";
+const ACCEPTED_CONFIRMATION_DEPTH: u64 = 1;
+const RECHECK_CONFIRMATION_DEPTH: u64 = 3;
 
 #[async_trait]
 pub(super) trait ReceiptProvider: Send + Sync {
@@ -144,18 +146,23 @@ fn reconcile_receipt(
     let block_number = receipt.block_number()?;
     let gas_used = receipt.gas_used()?;
     let gas_cost = receipt.gas_cost()?;
-    match receipt.status()? {
-        ReceiptStatus::Failed => Ok(ReceiptReconciliation::Final(ExecutionReport {
-            order_id: record.order_id.clone(),
-            status: ExecutionStatus::Failed,
-            tx_hash: Some(record.tx_hash),
-            block_number,
-            filled_amount: None,
-            token_amount: None,
-            gas_used,
-            gas_cost,
-            error: Some("transaction receipt status=0x0".to_string()),
-        })),
+    let receipt_status = receipt.status()?;
+    match receipt_status {
+        ReceiptStatus::Failed => {
+            let mined_evidence = Some(mined_evidence(record, receipt, &gas_cost)?);
+            Ok(ReceiptReconciliation::Final(ExecutionReport {
+                order_id: record.order_id.clone(),
+                status: ExecutionStatus::Failed,
+                tx_hash: Some(record.tx_hash),
+                block_number,
+                filled_amount: None,
+                token_amount: None,
+                gas_used,
+                gas_cost,
+                mined_evidence,
+                error: Some("transaction receipt status=0x0".to_string()),
+            }))
+        }
         ReceiptStatus::Succeeded => {
             let Some(fill) = extract_v2_vault_fill(
                 receipt,
@@ -174,6 +181,7 @@ fn reconcile_receipt(
                 ));
             };
 
+            let mined_evidence = Some(mined_evidence(record, receipt, &gas_cost)?);
             Ok(ReceiptReconciliation::Final(ExecutionReport {
                 order_id: record.order_id.clone(),
                 status: ExecutionStatus::Confirmed,
@@ -183,6 +191,7 @@ fn reconcile_receipt(
                 token_amount: fill.token_amount,
                 gas_used,
                 gas_cost,
+                mined_evidence,
                 error: None,
             }))
         }
@@ -194,6 +203,44 @@ fn reconcile_receipt(
             },
         )),
     }
+}
+
+fn mined_evidence(
+    record: &SubmittedExecutionRecord,
+    receipt: &RpcTransactionReceipt,
+    gas_cost: &Option<Amount>,
+) -> Result<MinedExecutionEvidence> {
+    let block_number = receipt.block_number()?;
+    let expected_confirmation_block = record
+        .submitted_block_number
+        .map(|block| block.saturating_add(1));
+    let confirmation_lag_blocks = match (block_number, expected_confirmation_block) {
+        (Some(actual), Some(expected)) => Some(actual as i64 - expected as i64),
+        _ => None,
+    };
+
+    Ok(MinedExecutionEvidence {
+        receipt_block_number: block_number,
+        block_hash: receipt.block_hash()?,
+        transaction_index: receipt.transaction_index()?,
+        cumulative_gas_used: receipt.cumulative_gas_used()?,
+        receipt_status: receipt.normalized_status(),
+        submitted_block_number: record.submitted_block_number,
+        expected_confirmation_block,
+        confirmation_lag_blocks,
+        effective_gas_price_wei: receipt.effective_gas_price_wei()?,
+        legacy_gas_price_wei: receipt.legacy_gas_price_wei()?,
+        paid_gas_cost_wei: gas_cost.as_ref().map(|amount| amount.raw.to_string()),
+        selected_gas_limit: record.selected_gas_limit.clone(),
+        selected_max_fee_per_gas_wei: record.selected_max_fee_per_gas_wei.clone(),
+        selected_max_priority_fee_per_gas_wei: record.selected_max_priority_fee_per_gas_wei.clone(),
+        selected_bribe_priority_fee_per_gas_wei: record
+            .selected_bribe_priority_fee_per_gas_wei
+            .clone(),
+        selected_bribe_max_fee_per_gas_wei: record.selected_bribe_max_fee_per_gas_wei.clone(),
+        accepted_confirmation_depth: Some(ACCEPTED_CONFIRMATION_DEPTH),
+        recheck_confirmation_depth: Some(RECHECK_CONFIRMATION_DEPTH),
+    })
 }
 
 fn ready_for_receipt_reconciliation(
@@ -213,9 +260,15 @@ fn ready_for_receipt_reconciliation(
 pub(super) struct RpcTransactionReceipt {
     #[serde(rename = "blockNumber")]
     block_number: Option<String>,
+    #[serde(rename = "blockHash")]
+    block_hash: Option<String>,
+    #[serde(rename = "transactionIndex")]
+    transaction_index: Option<String>,
     status: Option<String>,
     #[serde(rename = "gasUsed")]
     gas_used: Option<String>,
+    #[serde(rename = "cumulativeGasUsed")]
+    cumulative_gas_used: Option<String>,
     #[serde(rename = "effectiveGasPrice")]
     effective_gas_price: Option<String>,
     #[serde(rename = "gasPrice")]
@@ -252,6 +305,14 @@ enum ReceiptStatus {
 }
 
 impl RpcTransactionReceipt {
+    fn normalized_status(&self) -> Option<String> {
+        self.status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    }
+
     fn status(&self) -> Result<ReceiptStatus> {
         match self.status.as_deref().map(str::trim) {
             Some("0x1") => Ok(ReceiptStatus::Succeeded),
@@ -260,6 +321,14 @@ impl RpcTransactionReceipt {
             Some(value) => Err(eyre!("unknown receipt status {value:?}")),
             None => Ok(ReceiptStatus::Unknown),
         }
+    }
+
+    fn block_hash(&self) -> Result<Option<B256>> {
+        self.block_hash
+            .as_deref()
+            .map(parse_b256)
+            .transpose()
+            .wrap_err("invalid receipt blockHash")
     }
 
     fn block_number(&self) -> Result<Option<u64>> {
@@ -276,6 +345,40 @@ impl RpcTransactionReceipt {
             .map(parse_hex_u64)
             .transpose()
             .wrap_err("invalid receipt gasUsed")
+    }
+
+    fn transaction_index(&self) -> Result<Option<u64>> {
+        self.transaction_index
+            .as_deref()
+            .map(parse_hex_u64)
+            .transpose()
+            .wrap_err("invalid receipt transactionIndex")
+    }
+
+    fn cumulative_gas_used(&self) -> Result<Option<u64>> {
+        self.cumulative_gas_used
+            .as_deref()
+            .map(parse_hex_u64)
+            .transpose()
+            .wrap_err("invalid receipt cumulativeGasUsed")
+    }
+
+    fn effective_gas_price_wei(&self) -> Result<Option<String>> {
+        self.effective_gas_price
+            .as_deref()
+            .map(parse_hex_u256)
+            .transpose()
+            .map(|value| value.map(|value| value.to_string()))
+            .wrap_err("invalid receipt effectiveGasPrice")
+    }
+
+    fn legacy_gas_price_wei(&self) -> Result<Option<String>> {
+        self.gas_price
+            .as_deref()
+            .map(parse_hex_u256)
+            .transpose()
+            .map(|value| value.map(|value| value.to_string()))
+            .wrap_err("invalid receipt gasPrice")
     }
 
     fn gas_cost(&self) -> Result<Option<Amount>> {
@@ -396,6 +499,10 @@ fn parse_hex_u256(value: &str) -> Result<U256> {
     U256::from_str_radix(value, 16).map_err(|error| eyre!("{error}"))
 }
 
+fn parse_b256(value: &str) -> Result<B256> {
+    value.parse::<B256>().map_err(|error| eyre!("{error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use eth_alpha_core::{
@@ -421,6 +528,11 @@ mod tests {
             trade_id: Some(TradeId("trade-1".to_string())),
             order_side: side,
             token_address: token,
+            selected_gas_limit: Some("500000".to_string()),
+            selected_max_fee_per_gas_wei: Some("100000000000".to_string()),
+            selected_max_priority_fee_per_gas_wei: Some("50000000000".to_string()),
+            selected_bribe_priority_fee_per_gas_wei: Some("40000000000".to_string()),
+            selected_bribe_max_fee_per_gas_wei: Some("100000000000".to_string()),
         }
     }
 
@@ -433,9 +545,13 @@ mod tests {
     ) -> RpcTransactionReceipt {
         serde_json::from_value(json!({
             "blockNumber": "0x64",
+            "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "transactionIndex": "0x7",
             "status": status,
             "gasUsed": "0x5208",
+            "cumulativeGasUsed": "0xa410",
             "effectiveGasPrice": "0x3b9aca00",
+            "gasPrice": "0x3b9aca00",
             "logs": [{
                 "address": vault.to_string(),
                 "topics": [
@@ -480,6 +596,119 @@ mod tests {
             report.gas_cost.as_ref().map(|amount| amount.raw),
             Some(U256::from(21_000_000_000_000u64))
         );
+    }
+
+    #[test]
+    fn gate3_a3_receipt_evidence_records_inclusion_position_and_backtest_lag() {
+        let vault = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let receipt = receipt(
+            "0x1",
+            vault,
+            token,
+            BOUGHT_V2_SIGNATURE,
+            [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+        );
+
+        let report =
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+                ReceiptReconciliation::Final(report) => report,
+                ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
+            };
+        let evidence = report.mined_evidence.expect("mined evidence");
+
+        assert_eq!(evidence.receipt_block_number, Some(100));
+        assert_eq!(
+            evidence.block_hash,
+            Some(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .parse()
+                    .unwrap()
+            )
+        );
+        assert_eq!(evidence.transaction_index, Some(7));
+        assert_eq!(evidence.cumulative_gas_used, Some(42_000));
+        assert_eq!(evidence.submitted_block_number, Some(99));
+        assert_eq!(evidence.expected_confirmation_block, Some(100));
+        assert_eq!(evidence.confirmation_lag_blocks, Some(0));
+    }
+
+    #[test]
+    fn gate3_a6_receipt_evidence_records_actual_paid_gas_cost() {
+        let vault = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let receipt = receipt(
+            "0x1",
+            vault,
+            token,
+            BOUGHT_V2_SIGNATURE,
+            [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+        );
+
+        let report =
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+                ReceiptReconciliation::Final(report) => report,
+                ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
+            };
+        let evidence = report.mined_evidence.expect("mined evidence");
+
+        assert_eq!(
+            evidence.effective_gas_price_wei.as_deref(),
+            Some("1000000000")
+        );
+        assert_eq!(evidence.legacy_gas_price_wei.as_deref(), Some("1000000000"));
+        assert_eq!(
+            evidence.paid_gas_cost_wei.as_deref(),
+            Some("21000000000000")
+        );
+        assert_eq!(evidence.selected_gas_limit.as_deref(), Some("500000"));
+        assert_eq!(
+            evidence.selected_max_fee_per_gas_wei.as_deref(),
+            Some("100000000000")
+        );
+        assert_eq!(
+            evidence.selected_max_priority_fee_per_gas_wei.as_deref(),
+            Some("50000000000")
+        );
+        assert_eq!(
+            evidence.selected_bribe_priority_fee_per_gas_wei.as_deref(),
+            Some("40000000000")
+        );
+        assert_eq!(
+            evidence.selected_bribe_max_fee_per_gas_wei.as_deref(),
+            Some("100000000000")
+        );
+        assert_eq!(
+            report
+                .gas_cost
+                .as_ref()
+                .map(|amount| amount.raw.to_string()),
+            evidence.paid_gas_cost_wei
+        );
+    }
+
+    #[test]
+    fn gate3_a7_receipt_evidence_records_finality_policy() {
+        let vault = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let receipt = receipt(
+            "0x1",
+            vault,
+            token,
+            BOUGHT_V2_SIGNATURE,
+            [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+        );
+
+        let report =
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+                ReceiptReconciliation::Final(report) => report,
+                ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
+            };
+        let evidence = report.mined_evidence.expect("mined evidence");
+
+        assert_eq!(evidence.receipt_status.as_deref(), Some("0x1"));
+        assert_eq!(evidence.accepted_confirmation_depth, Some(1));
+        assert_eq!(evidence.recheck_confirmation_depth, Some(3));
     }
 
     #[test]

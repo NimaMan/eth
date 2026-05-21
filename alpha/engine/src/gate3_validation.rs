@@ -10,8 +10,8 @@ use eth_alpha_core::{
     position::{Position, PositionKey, PositionState},
 };
 use eth_live_trading::{
-    KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest, LiveTraderTxSignal,
-    PreSubmitSimulation, derive_min_output_from_expected_output,
+    KartalBribeRequest, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
+    LiveTraderTxSignal, PreSubmitSimulation, derive_min_output_from_expected_output,
 };
 use serde_json::{Value, json};
 
@@ -92,7 +92,10 @@ fn signal() -> LiveTraderTxSignal {
             max_fee_per_gas: "1000000000".to_string(),
             max_priority_fee_per_gas: "100000000".to_string(),
             nonce: None,
-            bribe: None,
+            bribe: Some(KartalBribeRequest {
+                priority_fee_per_gas: "100000000".to_string(),
+                max_fee_per_gas: Some("1000000000".to_string()),
+            }),
             simulation: None,
             metadata: json!({ "wire_protocol": "eth_direct_raw_v1" }),
         },
@@ -160,6 +163,34 @@ async fn gate3_a2_dry_run_is_evidence_only_not_submitted_or_confirmed() {
     );
 }
 
+#[tokio::test]
+async fn gate3_a6_submission_report_records_selected_fee_policy() {
+    let tx_hash = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    let report = execute_status("broadcast", Some(tx_hash)).await;
+    let evidence = report
+        .mined_evidence
+        .expect("submitted report should carry selected tx policy");
+
+    assert_eq!(evidence.submitted_block_number, Some(25_128_246));
+    assert_eq!(evidence.selected_gas_limit.as_deref(), Some("500000"));
+    assert_eq!(
+        evidence.selected_max_fee_per_gas_wei.as_deref(),
+        Some("1000000000")
+    );
+    assert_eq!(
+        evidence.selected_max_priority_fee_per_gas_wei.as_deref(),
+        Some("100000000")
+    );
+    assert_eq!(
+        evidence.selected_bribe_priority_fee_per_gas_wei.as_deref(),
+        Some("100000000")
+    );
+    assert_eq!(
+        evidence.selected_bribe_max_fee_per_gas_wei.as_deref(),
+        Some("1000000000")
+    );
+}
+
 #[test]
 fn gate3_a8_min_output_and_reverting_simulation_fail_safely() {
     let expected_output = U256::from(10_000_000_000_000_000u128);
@@ -217,6 +248,7 @@ fn gate3_a9_buy_submitted_or_pending_is_not_sellable() {
             token_amount: None,
             gas_used: None,
             gas_cost: None,
+            mined_evidence: None,
             error: None,
         })
         .unwrap();
@@ -234,6 +266,7 @@ fn gate3_a9_buy_submitted_or_pending_is_not_sellable() {
             token_amount: None,
             gas_used: None,
             gas_cost: None,
+            mined_evidence: None,
             error: Some("tx executor dry-run; transaction was not broadcast".to_string()),
         })
         .unwrap();

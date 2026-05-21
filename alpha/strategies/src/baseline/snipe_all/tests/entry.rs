@@ -472,6 +472,7 @@ fn entry_bankroll_allows_redeploying_confirmed_profit() {
             token_amount: None,
             gas_used: Some(120_000),
             gas_cost: None,
+            mined_evidence: None,
             error: None,
         })
         .unwrap();

@@ -13,13 +13,14 @@ use alloy_primitives::B256;
 use async_trait::async_trait;
 use eth_alpha_core::{
     error::{AlphaCoreError, Result},
-    execution::{ExecutionReport, ExecutionStatus},
+    execution::{ExecutionReport, ExecutionStatus, MinedExecutionEvidence},
     ids::{BlockNumber, OrderId, TxHash},
     order::OrderIntent,
 };
 use eth_live_trading::{
-    KartalExecutorClient, KartalSubmitDirectRawResult, LivePrioritySellPlannerInput,
-    LiveTraderTxSignal, PrioritySellPlanner, PrioritySellPlannerOutcome,
+    KartalExecutorClient, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
+    PrioritySellPlannerOutcome,
 };
 
 use crate::EngineExecutionAdapter;
@@ -176,6 +177,7 @@ where
             order_id,
             result,
             observed_block,
+            &signal.request,
         ))
     }
 }
@@ -184,6 +186,7 @@ fn execution_report_from_kartal_result(
     order_id: OrderId,
     result: KartalSubmitDirectRawResult,
     observed_block: Option<BlockNumber>,
+    request: &LiveDirectRawTransactionRequest,
 ) -> ExecutionReport {
     let status_key = result.status.trim().to_ascii_lowercase();
     let status = match status_key.as_str() {
@@ -205,8 +208,33 @@ fn execution_report_from_kartal_result(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: Some(submission_evidence(observed_block, request)),
         error,
     }
+}
+
+fn submission_evidence(
+    observed_block: Option<BlockNumber>,
+    request: &LiveDirectRawTransactionRequest,
+) -> MinedExecutionEvidence {
+    let bribe = request.bribe.as_ref();
+    MinedExecutionEvidence {
+        submitted_block_number: observed_block,
+        selected_gas_limit: non_empty_string(&request.gas_limit),
+        selected_max_fee_per_gas_wei: non_empty_string(&request.max_fee_per_gas),
+        selected_max_priority_fee_per_gas_wei: non_empty_string(&request.max_priority_fee_per_gas),
+        selected_bribe_priority_fee_per_gas_wei: bribe
+            .and_then(|bribe| non_empty_string(&bribe.priority_fee_per_gas)),
+        selected_bribe_max_fee_per_gas_wei: bribe
+            .and_then(|bribe| bribe.max_fee_per_gas.as_deref())
+            .and_then(non_empty_string),
+        ..MinedExecutionEvidence::default()
+    }
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn parse_tx_hash(value: Option<&str>) -> (Option<TxHash>, Option<String>) {
@@ -257,6 +285,7 @@ fn failed_report(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
+        mined_evidence: None,
         error: Some(reason.into()),
     }
 }
@@ -279,7 +308,7 @@ mod tests {
         LivePrioritySellPlannerInput, PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput,
         PrioritySellPlannerOutcome, TxPrepRequestContext,
     };
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
 
