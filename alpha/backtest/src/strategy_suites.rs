@@ -81,9 +81,9 @@ pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestS
                 Ok(risk_atlas_lp_buy_confirm_block_comparison_uniswap_v2_only_specs(args))
             }
             lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME
-            | lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_STRATEGY_NAME => {
-                Ok(vec![historical_mempool_aware_lp_approval_warning_exit_spec(args)])
-            }
+            | lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_STRATEGY_NAME => Ok(vec![
+                historical_mempool_aware_lp_approval_warning_exit_spec(args),
+            ]),
             lp_approval_warning_exit::SUITE_NAME | lp_approval_warning_exit::STRATEGY_NAME => {
                 Err(eyre::eyre!(
                     "historical replay of stored mempool_signal rows must use a mempool-aware name. Use --strategy-suite {}",
@@ -380,13 +380,13 @@ fn alpha_10_risk_atlas_leader_spec(args: &StrategySuiteOptions) -> Vec<BacktestS
 
 fn alpha_11_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
     vec![
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-01-v2-hold12-gasguard", 12, args),
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-02-v2-hold15-gasguard", 15, args),
-        alpha_11_v2_buy_confirm_gas_guard_spec("alpha11-03-v2-hold20-gasguard", 20, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-01-v2-hold12", 12, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-02-v2-hold15", 15, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-03-v2-hold20", 20, args),
     ]
 }
 
-fn alpha_11_v2_buy_confirm_gas_guard_spec(
+fn alpha_11_v2_buy_confirm_spec(
     strategy_name: &str,
     max_hold_blocks: u64,
     args: &StrategySuiteOptions,

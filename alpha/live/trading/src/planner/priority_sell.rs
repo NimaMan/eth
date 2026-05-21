@@ -6,7 +6,7 @@ use eth_alpha_core::{
 use serde_json::json;
 
 use crate::{
-    prepare_priority_sell, LpSignalSource, PrioritySellPlan, PrioritySellTxPrep, TxPrepOutcome,
+    LpSignalSource, PrioritySellPlan, PrioritySellTxPrep, TxPrepOutcome, prepare_priority_sell,
 };
 
 use super::{
@@ -185,7 +185,7 @@ mod tests {
             trade_id: Some(TradeId("trd_test".to_string())),
             portfolio_id: PortfolioId("portfolio".to_string()),
             wallet_id: WalletId("wallet".to_string()),
-            strategy_name: StrategyName("alpha11-03-live-v2-hold20-gasguard".to_string()),
+            strategy_name: StrategyName("alpha11-03-live-v2-hold20".to_string()),
             side: OrderSide::Sell,
             token_address: token(),
             pool_address: pool_address(),
@@ -208,7 +208,7 @@ mod tests {
             PositionKey {
                 portfolio_id: PortfolioId("portfolio".to_string()),
                 wallet_id: WalletId("wallet".to_string()),
-                strategy_name: StrategyName("alpha11-03-live-v2-hold20-gasguard".to_string()),
+                strategy_name: StrategyName("alpha11-03-live-v2-hold20".to_string()),
                 token_address: token(),
                 pool_address: pool_address(),
                 protocol: PoolProtocol::UniswapV2,
@@ -248,7 +248,7 @@ mod tests {
                 tx: TxPrepRequestContext {
                     chain_id: 1,
                     from: Address::with_last_byte(0x33).to_string(),
-                    strategy_name: "alpha11-03-live-v2-hold20-gasguard".to_string(),
+                    strategy_name: "alpha11-03-live-v2-hold20".to_string(),
                     strategy_run_id: Some("run-1".to_string()),
                     observed_block: Some(25_128_246),
                     source_metadata: json!({ "signal_id": 222 }),
@@ -340,10 +340,12 @@ mod tests {
 
         match outcome {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
-                assert!(signal
-                    .request
-                    .to
-                    .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"));
+                assert!(
+                    signal
+                        .request
+                        .to
+                        .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d")
+                );
                 assert!(signal.request.data.starts_with("0x791ac947"));
                 assert_eq!(signal.request.max_priority_fee_per_gas, "40000000000");
                 assert_eq!(

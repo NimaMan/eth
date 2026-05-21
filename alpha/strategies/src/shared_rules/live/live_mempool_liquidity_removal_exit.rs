@@ -5,7 +5,7 @@ pub const SUITE_NAME: &str = "mempool-live-exits";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 pub const RISK_ATLAS_LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
-pub const ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME: &str = "alpha11-live-gasguard-hold-sweep";
+pub const ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME: &str = "alpha11-live-hold-sweep";
 const ALPHA11_MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 
 #[derive(Clone, Debug, Default)]
@@ -71,9 +71,7 @@ pub fn suite_specs(
                 options,
             )])
         }
-        ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME => {
-            Ok(alpha11_live_gasguard_hold_sweep_specs(options))
-        }
+        ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME => Ok(alpha11_live_hold_sweep_specs(options)),
         other => Err(format!("unsupported strategy suite: {other}")),
     }
 }
@@ -188,27 +186,23 @@ fn risk_atlas_lp_gate_hold15_buy_confirm_lp_maxhold_spec(
     }
 }
 
-fn alpha11_live_gasguard_hold_sweep_specs(
-    options: &LiveStrategySpecOptions,
-) -> Vec<LiveStrategySpec> {
+fn alpha11_live_hold_sweep_specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
     [12_u64, 15, 20]
         .into_iter()
         .enumerate()
-        .map(|(index, max_hold_blocks)| {
-            alpha11_live_gasguard_hold_spec(index + 1, max_hold_blocks, options)
-        })
+        .map(|(index, max_hold_blocks)| alpha11_live_hold_spec(index + 1, max_hold_blocks, options))
         .collect()
 }
 
-fn alpha11_live_gasguard_hold_spec(
+fn alpha11_live_hold_spec(
     ordinal: usize,
     max_hold_blocks: u64,
     options: &LiveStrategySpecOptions,
 ) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!("alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}-gasguard"),
+        strategy_name: format!("alpha11-{ordinal:02}-live-v2-hold{max_hold_blocks}"),
         strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks} gasguard"),
+        strategy_label: format!("Alpha11 live V2 hold {max_hold_blocks}"),
         exit_liquidity_removal: true,
         exit_tax: true,
         exit_lp_approval: true,
@@ -249,9 +243,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(critical_lp_specs.len(), 3);
         assert!(critical_lp_specs.iter().all(|spec| spec.exit_lp_approval));
-        assert!(critical_lp_specs
-            .iter()
-            .all(|spec| spec.exit_lp_approval_critical_only));
+        assert!(
+            critical_lp_specs
+                .iter()
+                .all(|spec| spec.exit_lp_approval_critical_only)
+        );
     }
 
     #[test]
@@ -306,9 +302,9 @@ mod tests {
     }
 
     #[test]
-    fn alpha11_live_gasguard_suite_matches_hold_sweep() {
+    fn alpha11_live_suite_matches_hold_sweep() {
         let specs = suite_specs(
-            ALPHA11_LIVE_GASGUARD_HOLD_SWEEP_SUITE_NAME,
+            ALPHA11_LIVE_HOLD_SWEEP_SUITE_NAME,
             &LiveStrategySpecOptions::default(),
         )
         .unwrap();
@@ -323,23 +319,33 @@ mod tests {
         );
         assert!(specs.iter().all(|spec| spec.exit_liquidity_removal));
         assert!(specs.iter().all(|spec| spec.exit_lp_approval));
-        assert!(specs
-            .iter()
-            .all(|spec| !spec.exit_lp_approval_critical_only));
+        assert!(
+            specs
+                .iter()
+                .all(|spec| !spec.exit_lp_approval_critical_only)
+        );
         assert!(specs.iter().all(|spec| spec.exit_tax));
         assert!(specs.iter().all(|spec| spec.exit_scam));
         assert!(specs.iter().all(|spec| spec.block_entry_on_lp_approval));
-        assert!(specs
-            .iter()
-            .all(|spec| spec.lp_approval_gate_min_pct.as_deref() == Some("30")));
-        assert!(specs
-            .iter()
-            .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold));
-        assert!(specs
-            .iter()
-            .all(|spec| spec.min_sell_pool_denom_reserve.as_deref() == Some("0")));
-        assert!(specs
-            .iter()
-            .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.lp_approval_gate_min_pct.as_deref() == Some("30"))
+        );
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold)
+        );
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.min_sell_pool_denom_reserve.as_deref() == Some("0"))
+        );
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()])
+        );
     }
 }

@@ -1,11 +1,11 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    build_priority_sell_request, choose_ranked_fee, GasPlanDecision, PreSubmitSimulation,
-    PreparedSellRoute, PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate,
-    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError,
+    GasPlanDecision, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget,
+    PriorityFeeBudgetInput, RankedFeeCandidate, TxPrepRequestContext, TxPrepRouteError,
+    TxPrepSimulationError, build_priority_sell_request, choose_ranked_fee,
 };
 use crate::LiveTraderTxSignal;
 use crate::PrioritySellPlan;
@@ -136,7 +136,7 @@ mod tests {
             context: TxPrepRequestContext {
                 chain_id: 1,
                 from: "0x0000000000000000000000000000000000000001".to_string(),
-                strategy_name: "alpha11-03-live-v2-hold20-gasguard".to_string(),
+                strategy_name: "alpha11-03-live-v2-hold20".to_string(),
                 strategy_run_id: Some("run-1".to_string()),
                 observed_block: Some(25_128_246),
                 source_metadata: json!({ "signal_id": 222 }),

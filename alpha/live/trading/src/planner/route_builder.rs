@@ -6,8 +6,8 @@ use eth_alpha_core::{
 };
 use serde::{Deserialize, Serialize};
 use tx_simulator::tx_builders::{
-    build_sell_swap_with_min_out,
-    build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth, AmmSwapRoute,
+    AmmSwapRoute, build_sell_swap_with_min_out,
+    build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth,
 };
 
 use crate::PreparedSellRoute;
@@ -292,7 +292,7 @@ mod tests {
     }
 
     fn strategy_name() -> StrategyName {
-        StrategyName("alpha11-03-live-v2-hold20-gasguard".to_string())
+        StrategyName("alpha11-03-live-v2-hold20".to_string())
     }
 
     fn input() -> LivePrioritySellPlannerInput {
@@ -377,9 +377,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(route.protocol, "uniswap_v2_trading_vault");
-        assert!(route
-            .router_address
-            .eq_ignore_ascii_case(&vault.to_string()));
+        assert!(
+            route
+                .router_address
+                .eq_ignore_ascii_case(&vault.to_string())
+        );
         assert!(route.calldata.starts_with("0x5f413d10"));
         assert_eq!(route.value_wei, "0");
         assert_eq!(
