@@ -1,4 +1,4 @@
-use alloy_primitives::{hex, keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, hex, keccak256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::Amount,
@@ -7,7 +7,7 @@ use eth_alpha_core::{
     order::OrderSide,
 };
 use eth_alpha_store::SubmittedExecutionRecord;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -404,8 +404,8 @@ mod tests {
     };
     use serde_json::json;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     use super::*;
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn successful_buy_receipt_confirms_from_bought_event() {
+    fn gate3_a5_successful_buy_receipt_records_vault_event_amounts_and_gas() {
         let vault = Address::repeat_byte(0x22);
         let token = Address::repeat_byte(0x33);
         let receipt = receipt(
@@ -476,10 +476,14 @@ mod tests {
         assert_eq!(report.filled_amount.unwrap().raw, U256::from(10u64));
         assert_eq!(report.token_amount.unwrap().raw, U256::from(20u64));
         assert_eq!(report.gas_used, Some(21_000));
+        assert_eq!(
+            report.gas_cost.as_ref().map(|amount| amount.raw),
+            Some(U256::from(21_000_000_000_000u64))
+        );
     }
 
     #[test]
-    fn successful_sell_receipt_confirms_from_emergency_sell_event() {
+    fn gate3_a5_successful_sell_receipt_records_vault_event_amounts_and_gas() {
         let vault = Address::repeat_byte(0x22);
         let token = Address::repeat_byte(0x33);
         let receipt = receipt(
@@ -499,10 +503,14 @@ mod tests {
         assert_eq!(report.status, ExecutionStatus::Confirmed);
         assert_eq!(report.filled_amount.unwrap().raw, U256::from(9u64));
         assert!(report.token_amount.is_none());
+        assert_eq!(
+            report.gas_cost.as_ref().map(|amount| amount.raw),
+            Some(U256::from(21_000_000_000_000u64))
+        );
     }
 
     #[test]
-    fn successful_receipt_without_vault_event_stays_unresolved() {
+    fn gate3_a4_successful_receipt_without_vault_event_stays_unresolved() {
         let vault = Address::repeat_byte(0x22);
         let token = Address::repeat_byte(0x33);
         let wrong_token = Address::repeat_byte(0x44);

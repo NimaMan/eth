@@ -30,3 +30,25 @@ live trader tick it:
 
 Successful receipts without matching vault evidence stay unresolved. The trader
 logs them but does not mark the position confirmed.
+
+## Gate 3 Validation
+
+The live-readiness Gate 3 tests live in `src/gate3_validation.rs` and
+`src/live_trader/receipt_reconciliation.rs`. Run them with:
+
+```bash
+cargo test -p eth_alpha_engine gate3 --lib
+```
+
+The suite currently locks these real-live assumptions:
+
+- Kartal `broadcast`, `received`, `signed`, `dry_run`, `broadcast_error`, and
+  `rejected` responses never become confirmed without receipt evidence.
+- `dry_run` is evidence only and maps to a cancelled report because no
+  transaction was broadcast.
+- Exact-simulation min-output is non-zero and reverting/full-slippage cases
+  reject before submission.
+- Successful receipts confirm only when the expected deployed V2 vault event is
+  present, and the resulting report uses actual vault event amounts plus receipt
+  gas cost.
+- A buy that is only submitted, pending, or dry-run-cancelled is not sellable.

@@ -157,4 +157,6 @@ where
 }
 
 #[cfg(test)]
+mod gate3_validation;
+#[cfg(test)]
 mod tests;
