@@ -1,6 +1,6 @@
 use super::super::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
 
-pub const SUITE_NAME: &str = "alpha11-live-univ2-lp30-riskexit-hold-sweep";
+pub const SET_NAME: &str = "alpha11-live-univ2-lp30-pool-update-block-hold-sweep";
 
 const MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 
@@ -13,9 +13,11 @@ pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
 
 fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!("alpha11-live-univ2-lp30-riskexit-hold{max_hold_blocks}"),
+        strategy_name: format!("alpha11-live-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
         strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: format!("Alpha11 live Uniswap V2 LP30 risk exits hold {max_hold_blocks}"),
+        strategy_label: format!(
+            "Alpha11 live Uniswap V2 LP30 pool-update-block hold {max_hold_blocks}"
+        ),
         exit_liquidity_removal: true,
         exit_tax: true,
         exit_lp_approval: true,
@@ -39,10 +41,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn suite_matches_hold_sweep() {
+    fn set_matches_hold_sweep() {
         let specs = specs(&LiveStrategySpecOptions::default());
 
         assert_eq!(specs.len(), 3);
+        assert_eq!(
+            specs
+                .iter()
+                .map(|spec| spec.strategy_name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "alpha11-live-univ2-lp30-pool-update-block-hold12",
+                "alpha11-live-univ2-lp30-pool-update-block-hold15",
+                "alpha11-live-univ2-lp30-pool-update-block-hold20",
+            ]
+        );
         assert_eq!(
             specs
                 .iter()

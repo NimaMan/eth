@@ -136,7 +136,7 @@ mod tests {
             context: TxPrepRequestContext {
                 chain_id: 1,
                 from: "0x0000000000000000000000000000000000000001".to_string(),
-                strategy_name: "alpha11-live-univ2-lp30-riskexit-hold20".to_string(),
+                strategy_name: "alpha11-live-univ2-lp30-pool-update-block-hold20".to_string(),
                 strategy_run_id: Some("run-1".to_string()),
                 observed_block: Some(25_128_246),
                 source_metadata: json!({ "signal_id": 222 }),

@@ -1,6 +1,6 @@
 use super::super::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
 
-pub const SUITE_NAME: &str = "mempool-live-exits";
+pub const SET_NAME: &str = "mempool-live-exits";
 
 pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
     [10_u64, 20, 50]
@@ -61,7 +61,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn suite_enables_liquidity_removal_for_every_variant() {
+    fn set_enables_liquidity_removal_for_every_variant() {
         let specs = specs(&LiveStrategySpecOptions::default());
 
         assert_eq!(specs.len(), 6);

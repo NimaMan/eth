@@ -380,9 +380,9 @@ fn alpha_10_risk_atlas_leader_spec(args: &StrategySuiteOptions) -> Vec<BacktestS
 
 fn alpha_11_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
     vec![
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-riskexit-hold12", 12, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-riskexit-hold15", 15, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-riskexit-hold20", 20, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold12", 12, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold15", 15, args),
+        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold20", 20, args),
     ]
 }
 

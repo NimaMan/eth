@@ -15,7 +15,7 @@ pub(super) struct Args {
     pub(super) max_hold_blocks: Option<u64>,
     pub(super) stop_loss_ratio: Option<String>,
     pub(super) take_profit_ratio: Option<String>,
-    pub(super) strategy_suite: Option<String>,
+    pub(super) strategy_set: Option<String>,
 }
 
 #[derive(Debug)]
@@ -80,11 +80,11 @@ struct LiveCommonCli {
     #[arg(long)]
     take_profit_ratio: Option<String>,
 
-    /// Register a named live strategy suite instead of the default single strategy.
-    /// Examples: `alpha11-live-univ2-lp30-riskexit-hold-sweep`,
+    /// Register a named live strategy set instead of the default single strategy.
+    /// Examples: `alpha11-live-univ2-lp30-pool-update-block-hold-sweep`,
     /// `mempool-live-exits`.
-    #[arg(long)]
-    strategy_suite: Option<String>,
+    #[arg(long = "strategy-set", alias = "strategy-suite")]
+    strategy_set: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -161,7 +161,7 @@ impl From<LiveCommonCli> for Args {
             max_hold_blocks: common.max_hold_blocks,
             stop_loss_ratio: common.stop_loss_ratio,
             take_profit_ratio: common.take_profit_ratio,
-            strategy_suite: common.strategy_suite,
+            strategy_set: common.strategy_set,
         }
     }
 }

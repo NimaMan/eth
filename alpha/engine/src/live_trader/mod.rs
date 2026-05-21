@@ -32,7 +32,7 @@ use eth_ops_events::{
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
 use eth_strategies::shared_rules::live::{
-    default_strategy_spec, observation_strategy_name, suite_specs, LiveStrategySpec,
+    default_strategy_spec, observation_strategy_name, strategy_set_specs, LiveStrategySpec,
     LiveStrategySpecOptions, STRATEGY_RUNTIME,
 };
 use eth_strategies::{LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig};
@@ -148,9 +148,10 @@ async fn run(
             execution_mode.label(),
             json!({
                 "strategy_name": &observation_strategy_name,
-                "strategy_impl": if strategy_specs.len() == 1 { strategy_specs[0].strategy_impl.clone() } else { "multi-strategy-live-suite".to_string() },
-                "strategy_label": if strategy_specs.len() == 1 { strategy_specs[0].strategy_label.clone() } else { "Mempool Live Exit Suite".to_string() },
-                "strategy_suite": args.strategy_suite.clone(),
+                "strategy_impl": if strategy_specs.len() == 1 { strategy_specs[0].strategy_impl.clone() } else { "multi-strategy-live-set".to_string() },
+                "strategy_label": if strategy_specs.len() == 1 { strategy_specs[0].strategy_label.clone() } else { "Live Strategy Set".to_string() },
+                "strategy_set": args.strategy_set.clone(),
+                "strategy_suite": args.strategy_set.clone(),
                 "strategy_count": strategy_specs.len(),
                 "strategies": strategy_specs.iter().map(live_strategy_spec_config_json).collect::<Vec<_>>(),
                 "strategy_runtime": STRATEGY_RUNTIME,
@@ -357,7 +358,7 @@ async fn run(
         reth_datadir = %reth_datadir,
         run_id = %run_id,
         mode = %execution_mode.label(),
-        strategy_suite = ?args.strategy_suite,
+        strategy_set = ?args.strategy_set,
         strategy_count = strategy_specs.len(),
         observation_strategy_name = %observation_strategy_name,
         stale_runs,

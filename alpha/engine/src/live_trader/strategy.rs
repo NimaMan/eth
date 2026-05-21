@@ -7,8 +7,8 @@ pub(super) fn build_strategy_specs(args: &Args) -> Result<Vec<LiveStrategySpec>>
         max_hold_blocks: args.max_hold_blocks,
     };
 
-    if let Some(suite) = args.strategy_suite.as_deref() {
-        return suite_specs(suite, &options).map_err(|error| eyre!(error));
+    if let Some(strategy_set) = args.strategy_set.as_deref() {
+        return strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error));
     }
 
     Ok(vec![default_strategy_spec(&options)])
