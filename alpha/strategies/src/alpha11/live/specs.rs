@@ -1,7 +1,7 @@
 use crate::{
     alpha11::{
-        HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH, MAX_ENTRY_PRICE_RATIO_TO_INITIAL,
-        STRATEGY_IMPL,
+        DEPLOY_HOLD_SWEEP_SET_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
+        MAX_ENTRY_PRICE_RATIO_TO_INITIAL, STRATEGY_IMPL,
     },
     shared_rules::live::{LiveStrategySpec, LiveStrategySpecOptions},
 };
@@ -9,26 +9,52 @@ use crate::{
 const MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 
 pub const SET_NAME: &str = HOLD_SWEEP_SET_NAME;
+pub const DEPLOY_SET_NAME: &str = DEPLOY_HOLD_SWEEP_SET_NAME;
 
 pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
     [12_u64, 15, 20]
         .into_iter()
-        .map(|max_hold_blocks| spec(max_hold_blocks, options))
+        .map(|max_hold_blocks| spec(max_hold_blocks, options, false))
         .collect()
 }
 
 pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
-    spec(15, options)
+    spec(15, options, false)
 }
 
-fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+pub fn deploy_specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
+    [12_u64, 15, 20]
+        .into_iter()
+        .map(|max_hold_blocks| spec(max_hold_blocks, options, true))
+        .collect()
+}
+
+pub fn deploy_hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+    spec(15, options, true)
+}
+
+fn spec(
+    max_hold_blocks: u64,
+    options: &LiveStrategySpecOptions,
+    price_to_initial_entry_cap: bool,
+) -> LiveStrategySpec {
+    let price_gate_name = if price_to_initial_entry_cap {
+        "-price-to-initial-lte1p5"
+    } else {
+        ""
+    };
+    let price_gate_label = if price_to_initial_entry_cap {
+        " price-to-initial <= 1.5"
+    } else {
+        ""
+    };
     LiveStrategySpec {
         strategy_name: format!(
-            "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold{max_hold_blocks}"
+            "alpha11-live-univ2-lp30{price_gate_name}-pool-update-block-hold{max_hold_blocks}"
         ),
         strategy_impl: STRATEGY_IMPL.to_string(),
         strategy_label: format!(
-            "Alpha11 live Uniswap V2 LP30 price-to-initial <= 1.5 pool-update-block hold {max_hold_blocks}"
+            "Alpha11 live Uniswap V2 LP30{price_gate_label} pool-update-block hold {max_hold_blocks}"
         ),
         exit_liquidity_removal: true,
         exit_tax: true,
@@ -40,7 +66,8 @@ fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategy
         lp_approval_gate_min_pct: Some(
             crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
-        max_entry_price_ratio_to_initial: Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL.to_string()),
+        max_entry_price_ratio_to_initial: price_to_initial_entry_cap
+            .then(|| MAX_ENTRY_PRICE_RATIO_TO_INITIAL.to_string()),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: Some(MIN_SELL_POOL_DENOM_RESERVE.to_string()),
         entry_bankroll_eth: Some(INITIAL_ENTRY_BANKROLL_ETH.to_string()),
@@ -53,7 +80,7 @@ fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategy
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alpha11::HOLD15_STRATEGY_NAME;
+    use crate::alpha11::{DEPLOY_HOLD15_STRATEGY_NAME, HOLD15_STRATEGY_NAME};
 
     #[test]
     fn set_matches_hold_sweep() {
@@ -66,9 +93,9 @@ mod tests {
                 .map(|spec| spec.strategy_name.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold12",
+                "alpha11-live-univ2-lp30-pool-update-block-hold12",
                 HOLD15_STRATEGY_NAME,
-                "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold20",
+                "alpha11-live-univ2-lp30-pool-update-block-hold20",
             ]
         );
         assert_eq!(
@@ -92,8 +119,7 @@ mod tests {
             .all(|spec| spec.lp_approval_gate_min_pct.as_deref() == Some("30")));
         assert!(specs
             .iter()
-            .all(|spec| spec.max_entry_price_ratio_to_initial.as_deref()
-                == Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)));
+            .all(|spec| spec.max_entry_price_ratio_to_initial.is_none()));
         assert!(specs
             .iter()
             .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold));
@@ -106,5 +132,17 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
+    }
+
+    #[test]
+    fn deploy_set_adds_price_to_initial_entry_cap() {
+        let spec = deploy_hold15_spec(&LiveStrategySpecOptions::default());
+
+        assert_eq!(spec.strategy_name, DEPLOY_HOLD15_STRATEGY_NAME);
+        assert_eq!(
+            spec.max_entry_price_ratio_to_initial.as_deref(),
+            Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
+        );
+        assert!(spec.strategy_label.contains("price-to-initial <= 1.5"));
     }
 }

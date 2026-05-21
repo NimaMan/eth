@@ -124,6 +124,7 @@ cargo test -p eth_alpha_engine
 cargo test -p eth_alpha_store
 cargo test -p eth_strategies
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
+cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold15
 cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold15
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```

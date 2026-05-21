@@ -2,12 +2,20 @@
 
 Alpha11 is the deployable live strategy layer for the current ETH validation
 run. It composes the reusable `baseline/snipe_all` engine and owns the product
-defaults that should be explicit in the strategy name:
+defaults that should be explicit in the strategy name.
+
+The live-backtest reference strategy remains:
+
+`alpha11-live-univ2-lp30-pool-update-block-hold15`
+
+The live-real deploy candidate adds an entry-only price-to-initial cap and uses:
+
+`alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold15`
+
+Shared Alpha11 defaults:
 
 - `univ2`: only enter Uniswap V2 pools.
 - `lp30`: block entry when LP approval exceeds the shared 30% gate.
-- `price-to-initial-lte1p5`: block entry when the known pool price-to-initial
-  ratio is greater than `1.5`; missing ratio data does not block entry.
 - `pool-update-block-hold15`: force exit after 15 distinct pool-update blocks
   while the position is open.
 - Initial entry bankroll is `0.225 ETH`; buys consume bankroll, confirmed sells
@@ -16,8 +24,12 @@ defaults that should be explicit in the strategy name:
 ## Entry Gates
 
 Alpha11 entries use all reusable `SnipeAllStrategy` entry checks plus the
-Alpha11-owned launch defaults above. The price-to-initial gate is intentionally
-part of the strategy name because it changes the buy universe:
+Alpha11-owned launch defaults above.
+
+The `price-to-initial-lte1p5` gate is not part of the live-backtest reference.
+It is a live-real deployment default for the candidate we are trying to deploy.
+The gate is intentionally part of that deploy strategy name because it changes
+the buy universe:
 
 - `price_ratio_to_initial > 1.5`: do not buy.
 - `price_ratio_to_initial == 1.5`: buy is still allowed if all other gates pass.

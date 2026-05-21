@@ -1,13 +1,9 @@
 use alloy_primitives::U256;
 use eth_alpha_core::{amount::Amount, ids::StrategyName};
 use rust_decimal::Decimal;
-use std::str::FromStr;
 
 use crate::{
-    alpha11::{
-        initial_entry_bankroll_wei, Alpha11Config, HOLD15_STRATEGY_NAME,
-        MAX_ENTRY_PRICE_RATIO_TO_INITIAL,
-    },
+    alpha11::{initial_entry_bankroll_wei, Alpha11Config, HOLD15_STRATEGY_NAME},
     baseline::snipe_all::SnipeAllConfig,
 };
 
@@ -36,10 +32,6 @@ pub fn snipe_all_config() -> SnipeAllConfig {
         block_entry_on_lp_approval: true,
         lp_approval_gate_min_pct: Some(
             crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.into(),
-        ),
-        max_entry_price_ratio_to_initial: Some(
-            Decimal::from_str(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
-                .expect("valid Alpha11 max entry price ratio"),
         ),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         max_hold_blocks: Some(HOLD_BLOCKS),

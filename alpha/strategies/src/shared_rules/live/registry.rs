@@ -18,7 +18,11 @@ pub fn strategy_set_specs(
             strategy_sets::risk_atlas::lp_gate_hold15_buy_confirm_lp_maxhold_spec(options),
         ]),
         alpha11_specs::SET_NAME => Ok(alpha11_specs::specs(options)),
+        alpha11_specs::DEPLOY_SET_NAME => Ok(alpha11_specs::deploy_specs(options)),
         crate::alpha11::HOLD15_STRATEGY_NAME => Ok(vec![alpha11_specs::hold15_spec(options)]),
+        crate::alpha11::DEPLOY_HOLD15_STRATEGY_NAME => {
+            Ok(vec![alpha11_specs::deploy_hold15_spec(options)])
+        }
         other => Err(format!("unsupported strategy set: {other}")),
     }
 }
@@ -66,6 +70,18 @@ mod tests {
         assert_eq!(
             hold15[0].strategy_name,
             crate::alpha11::HOLD15_STRATEGY_NAME
+        );
+        assert!(hold15[0].max_entry_price_ratio_to_initial.is_none());
+        let deploy_hold15 =
+            strategy_set_specs(crate::alpha11::DEPLOY_HOLD15_STRATEGY_NAME, &options).unwrap();
+        assert_eq!(deploy_hold15.len(), 1);
+        assert_eq!(
+            deploy_hold15[0].strategy_name,
+            crate::alpha11::DEPLOY_HOLD15_STRATEGY_NAME
+        );
+        assert_eq!(
+            deploy_hold15[0].max_entry_price_ratio_to_initial.as_deref(),
+            Some(crate::alpha11::MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
         );
     }
 }

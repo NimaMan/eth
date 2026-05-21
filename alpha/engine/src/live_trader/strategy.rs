@@ -42,7 +42,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
 mod tests {
     use eth_strategies::{
         alpha11::{INITIAL_ENTRY_BANKROLL_ETH, MAX_ENTRY_PRICE_RATIO_TO_INITIAL},
-        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
+        ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME, ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
     };
     use serde_json::json;
 
@@ -110,10 +110,7 @@ mod tests {
         assert!(spec.exit_scam);
         assert!(spec.block_entry_on_lp_approval);
         assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
-        assert_eq!(
-            spec.max_entry_price_ratio_to_initial.as_deref(),
-            Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
-        );
+        assert_eq!(spec.max_entry_price_ratio_to_initial, None);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
         assert_eq!(spec.min_sell_pool_denom_reserve.as_deref(), Some("0"));
         assert_eq!(
@@ -129,7 +126,7 @@ mod tests {
             json!({
                 "strategy_name": ALPHA11_HOLD15_STRATEGY_NAME,
                 "strategy_impl": ALPHA11_STRATEGY_IMPL,
-                "strategy_label": "Alpha11 live Uniswap V2 LP30 price-to-initial <= 1.5 pool-update-block hold 15",
+                "strategy_label": "Alpha11 live Uniswap V2 LP30 pool-update-block hold 15",
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "exit_liquidity_removal": true,
                 "exit_tax": true,
@@ -139,7 +136,7 @@ mod tests {
                 "allowed_protocols": ["UNISWAP-V2"],
                 "block_entry_on_lp_approval": true,
                 "lp_approval_gate_min_pct": "30",
-                "max_entry_price_ratio_to_initial": MAX_ENTRY_PRICE_RATIO_TO_INITIAL,
+                "max_entry_price_ratio_to_initial": null,
                 "defer_buy_confirm_block_lp_approval_to_max_hold": true,
                 "min_sell_pool_denom_reserve": "0",
                 "entry_bankroll_eth": INITIAL_ENTRY_BANKROLL_ETH,
@@ -148,5 +145,22 @@ mod tests {
                 "max_hold_blocks": 15,
             })
         );
+    }
+
+    #[test]
+    fn alpha11_deploy_hold15_adds_live_real_price_gate() {
+        let mut args = alpha11_hold15_args();
+        args.strategy_set = Some(ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME.to_string());
+
+        let specs = build_strategy_specs(&args).expect("alpha11 deploy hold15 specs");
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(spec.strategy_name, ALPHA11_DEPLOY_HOLD15_STRATEGY_NAME);
+        assert_eq!(
+            spec.max_entry_price_ratio_to_initial.as_deref(),
+            Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
+        );
+        assert!(spec.strategy_label.contains("price-to-initial <= 1.5"));
     }
 }
