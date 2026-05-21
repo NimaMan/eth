@@ -8,19 +8,24 @@ request, attaches audit metadata, and submits it to Kartal.
 
 ## Current Deployment Status
 
-This crate is now the transaction-prep boundary plus the first priority-sell
-planner scaffold. It can model LP approval priority exits, build a Uniswap V2
-ETH/WETH sell route, build a Uniswap V2 trading vault emergency-sell route, consume final
-simulation and gas-rank inputs, value-cap the priority fee, build the Kartal JSON
-request, and submit that request to Kartal.
+This crate is now the transaction-prep boundary plus the first deployed V2 vault
+planner scaffold. It can model LP approval priority exits, build Uniswap V2
+ETH/WETH direct-sell calldata, build deployed Uniswap V2 trading vault buy and
+emergency-sell calldata, derive a non-zero min-output from provisional
+exact-calldata simulation, run a second exact-calldata pre-submit simulation for
+the final deployed V2 vault calldata, consume gas-rank inputs, value-cap the
+priority fee, build the Kartal JSON request, and submit that request to Kartal.
 
 Current live-runner integration:
 
-`eth_alpha_live_trader --disable-entry` now instantiates `TxExecutorAdapter` and
-the `LiveTradingPlannerBridge` for a sell-only Uniswap V2 trading-vault route.
-That runner refuses to start unless Kartal is in `dry_run`, so it proves the
-real executor boundary without broadcasting. The no-capital live chain-sim
-runner is `eth_alpha_live_backtest_trader`; historical replay is
+`eth_alpha_live_trader` now instantiates `TxExecutorAdapter` and the
+`LiveTradingPlannerBridge` for deployed Uniswap V2 trading-vault buys and
+emergency sells. That runner refuses to start unless Kartal is in `dry_run`, so
+it proves the real executor boundary without broadcasting. While entry is in
+validation mode, live-real startup also requires a resolved strategy bankroll
+of at most `0.225 ETH`; buys consume that starting bankroll, confirmed sells
+replenish it, and profits can be redeployed. The no-capital live chain-sim runner is
+`eth_alpha_live_backtest_trader`; historical replay is
 `eth_alpha_backtest_trader`.
 
 The deployed Uniswap V2 trading vault is
@@ -32,16 +37,11 @@ real live order.
 
 Missing before a live strategy can use this crate for public real capital:
 
-- Replace the temporary trader resolver with a production
-  `LiveTxPlanningInputResolver` that maps `OrderIntent` plus current
-  pool/position/store state into fully audited `LivePrioritySellPlannerInput`.
-- Replace `FixedPreSubmitSimulator` with a live final simulation provider and
-  produce `PreSubmitSimulation` for the exact planned calldata.
 - Replace `FixedGasRankProvider` with live gas-rank/base-fee inputs that produce
   `RankedFeeCandidate`s.
-- Wire the vault buy route so the real runner can open positions through the
-  same contract it later uses for emergency sells.
 - Reconcile Kartal tx hashes into confirmed or failed alpha execution reports.
+- Keep live-real entry bounded to a small validation bankroll, currently
+  `0.225 ETH`, until dry-run evidence and receipt reconciliation are reviewed.
 
 ## Kartal Execution Handoff
 
@@ -109,9 +109,11 @@ Planner-fixture calibration appends a UTC timestamp to the generated
 in Kartal's policy journal and spend ledger.
 
 Current bottleneck: the real-runner boundary exists, but it is deliberately
-Kartal dry-run only. The planner still uses shadow dry-run simulation and gas
-rank values from the trader CLI, and receipt reconciliation is not wired. Public
-broadcast must remain disabled until those providers are production inputs.
+Kartal dry-run only. The deployed V2 vault buy and sell paths simulate the exact
+prepared calldata against local Reth state and reject stale simulation state.
+Gas rank still uses fixed values from the trader CLI. Public broadcast must
+remain disabled until gas-rank/base-fee inputs, dry-run evidence, and receipt
+operations are production-ready.
 
 ## Tx Submission Data Flow
 
@@ -145,6 +147,8 @@ mempool/confirmed risk signal
   -> AllowanceChecker proves the sell token can be spent, or marks the trading
      vault route as internally approved by the emergency-sell call
   -> PreSubmitSimulator simulates the exact calldata against current state
+       for the deployed V2 vault and extracts tokens from BoughtV2 or recovered
+       ETH from EmergencySoldV2
   -> GasRankProvider converts recent block-rank evidence into fee candidates
   -> tx_prep computes the value cap and chooses/rejects the gas plan
   -> LiveTraderTxSignal carries LiveDirectRawTransactionRequest to Kartal
@@ -263,8 +267,9 @@ This crate is not enough to run real capital. Before real-capital deployment,
 the live strategy needs:
 
 - the explicit `eth_alpha_live_trader` real execution entrypoint;
-- a production `LiveTxPlanningInputResolver` for priority sell intents;
-- live pre-submit simulation against the current state;
+- a production `LiveTxPlanningInputResolver` for entry and priority sell intents;
+- live pre-submit simulation against the current state for any route beyond the
+  deployed V2 vault buy/emergency sell;
 - live gas-rank and base-fee inputs wired into `tx_prep`;
 - route policy that selects the deployed trading vault for Mode A scam exits, or
   a real allowance/pre-approval policy before direct EOA sells are allowed;
@@ -284,11 +289,13 @@ the live strategy needs:
   the scam path, after late-recovery and safety buffers. The request metadata
   includes structured decision-rationale fields such as `reason_code`,
   `reason_source`, and `decision_reason`.
-- `src/planner/` orchestrates the v1 live priority-sell path from
+- `src/planner/` orchestrates live transaction planning from
   `LivePrioritySellPlannerInput` to `LiveTraderTxSignal`. Route builders support
-  direct Uniswap V2 ETH/WETH sells and Uniswap V2 trading vault emergency sells through
-  `tx_simulator::tx_builders`; the simulation, gas-rank, and allowance providers
-  are injected so production code can replace the fixed test implementations.
+  direct Uniswap V2 ETH/WETH sells and deployed Uniswap V2 trading vault buys
+  and emergency sells through `tx_simulator::tx_builders`. The deployed V2 vault
+  simulator executes the exact route calldata against local Reth state, while
+  gas-rank and allowance providers remain injected so production code can
+  replace fixed test implementations.
 - `src/kartal_executor.rs` exposes the Kartal client and JSON contract for
   submitting already-prepared direct raw transactions.
 - `src/kartal/` exposes status and policy-journal readers used by calibration

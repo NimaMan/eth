@@ -17,6 +17,7 @@ pub fn spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
         lp_approval_gate_min_pct: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
         min_sell_pool_denom_reserve: None,
+        entry_bankroll_eth: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: None,

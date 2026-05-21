@@ -6,3 +6,7 @@ The live trader accepts a set name from CLI/config, the registry resolves that
 name, and the returned specs are persisted as concrete strategy rows for the
 run. Default exit behavior belongs to the shared strategy config, not to an
 individual set.
+
+This folder is for shared diagnostics and reusable comparison suites. Product
+strategy families keep their launch specs next to their implementation; for
+example Alpha11 specs live in `../../../alpha11/live/specs.rs`.

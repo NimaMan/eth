@@ -6,8 +6,9 @@ use eth_alpha_core::{
 };
 use serde::{Deserialize, Serialize};
 use tx_simulator::tx_builders::{
-    AmmSwapRoute, build_sell_swap_with_min_out,
-    build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth,
+    build_sell_swap_with_min_out, build_uniswap_v2_trading_vault_buy_v2_exact_eth_for_tokens,
+    build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth, AmmSwapRoute,
+    DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
 };
 
 use crate::PreparedSellRoute;
@@ -16,6 +17,7 @@ use super::{LivePrioritySellPlannerError, LivePrioritySellPlannerInput};
 
 const DEFAULT_UNISWAP_V2_SELL_GAS_LIMIT: u64 = 500_000;
 const DEFAULT_UNISWAP_V2_ESTIMATED_SELL_GAS_USED: u64 = 180_000;
+const DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED: u64 = 155_000;
 const DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT: u64 = 300_000;
 const DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED: u64 = 130_000;
 const WETH_ADDRESS: Address =
@@ -42,6 +44,65 @@ pub trait SellRouteBuilder: Send + Sync {
         &self,
         input: &LivePrioritySellPlannerInput,
     ) -> Result<PreparedSellRoute, LivePrioritySellPlannerError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct UniswapV2TradingVaultBuyRouteBuilder {
+    vault_address: Address,
+    request: RouteBuildRequest,
+}
+
+impl UniswapV2TradingVaultBuyRouteBuilder {
+    pub fn new(vault_address: Address, request: RouteBuildRequest) -> Self {
+        Self {
+            vault_address,
+            request,
+        }
+    }
+
+    pub fn with_default_gas(vault_address: Address) -> Self {
+        Self {
+            vault_address,
+            request: RouteBuildRequest {
+                gas_limit: DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
+                estimated_gas_used: DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED,
+            },
+        }
+    }
+
+    pub fn build_route(
+        &self,
+        input: &LivePrioritySellPlannerInput,
+        min_tokens_out: U256,
+    ) -> Result<PreparedSellRoute, LivePrioritySellPlannerError> {
+        validate_buy_intent(&input.intent, &input.pool)?;
+        ensure_weth_denom(&input.pool)?;
+        let unsigned = build_uniswap_v2_trading_vault_buy_v2_exact_eth_for_tokens(
+            self.vault_address,
+            parse_owner_address(input)?,
+            input.intent.token_address,
+            input.intent.amount.raw,
+            min_tokens_out,
+            input.context.deadline_unix_secs,
+        );
+        let to = unsigned.to.ok_or_else(|| {
+            LivePrioritySellPlannerError::Route("tx builder returned no vault address".to_string())
+        })?;
+        let data = unsigned.data.ok_or_else(|| {
+            LivePrioritySellPlannerError::Route("tx builder returned no calldata".to_string())
+        })?;
+        let gas_limit = self.request.gas_limit.max(unsigned.gas.unwrap_or(0));
+
+        Ok(PreparedSellRoute {
+            protocol: "uniswap_v2_trading_vault".to_string(),
+            router_address: to.to_string(),
+            calldata: format!("0x{}", hex::encode(data.as_ref())),
+            value_wei: unsigned.value.unwrap_or(U256::ZERO).to_string(),
+            gas_limit,
+            estimated_gas_used: self.request.estimated_gas_used.min(gas_limit),
+            max_slippage_bps: Some(input.intent.max_slippage_bps),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,6 +253,46 @@ fn validate_sell_intent(
     if !pool.can_sell {
         return Err(LivePrioritySellPlannerError::InvalidInput(
             "pool snapshot says can_sell=false".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_buy_intent(
+    intent: &OrderIntent,
+    pool: &PoolSnapshot,
+) -> Result<(), LivePrioritySellPlannerError> {
+    if intent.side != OrderSide::Buy {
+        return Err(LivePrioritySellPlannerError::UnsupportedIntent(
+            "live V2 vault buy route only supports buy intents".to_string(),
+        ));
+    }
+    if intent.protocol != PoolProtocol::UniswapV2 || pool.protocol != PoolProtocol::UniswapV2 {
+        return Err(LivePrioritySellPlannerError::UnsupportedIntent(format!(
+            "live V2 vault buy route only supports Uniswap V2 buys; intent={:?} pool={:?}",
+            intent.protocol, pool.protocol
+        )));
+    }
+    if intent.token_address != pool.token_address {
+        return Err(LivePrioritySellPlannerError::InvalidInput(format!(
+            "intent token {} does not match pool token {}",
+            intent.token_address, pool.token_address
+        )));
+    }
+    if intent.pool_address != pool.address {
+        return Err(LivePrioritySellPlannerError::InvalidInput(format!(
+            "intent pool {} does not match snapshot pool {}",
+            intent.pool_address, pool.address
+        )));
+    }
+    if intent.amount.raw.is_zero() {
+        return Err(LivePrioritySellPlannerError::InvalidInput(
+            "buy amount is zero".to_string(),
+        ));
+    }
+    if !pool.can_buy {
+        return Err(LivePrioritySellPlannerError::InvalidInput(
+            "pool snapshot says can_buy=false".to_string(),
         ));
     }
     Ok(())
@@ -369,6 +470,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn uniswap_v2_trading_vault_buy_route_targets_vault_and_internal_buy_selector() {
+        let vault = Address::with_last_byte(0xaa);
+        let mut input = input();
+        input.intent.side = OrderSide::Buy;
+        input.intent.amount.raw = U256::from(10_000_000_000_000_000u128);
+
+        let route = UniswapV2TradingVaultBuyRouteBuilder::with_default_gas(vault)
+            .build_route(&input, U256::from(123u64))
+            .unwrap();
+
+        assert_eq!(route.protocol, "uniswap_v2_trading_vault");
+        assert!(route
+            .router_address
+            .eq_ignore_ascii_case(&vault.to_string()));
+        assert!(route.calldata.starts_with("0x8a62666c"));
+        assert_eq!(route.value_wei, "10000000000000000");
+        assert_eq!(
+            route.gas_limit,
+            DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT
+        );
+        assert_eq!(
+            route.estimated_gas_used,
+            DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED
+        );
+    }
+
+    #[tokio::test]
     async fn uniswap_v2_trading_vault_route_targets_vault_and_internal_sell_selector() {
         let vault = Address::with_last_byte(0xaa);
         let route = UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault)
@@ -377,11 +505,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(route.protocol, "uniswap_v2_trading_vault");
-        assert!(
-            route
-                .router_address
-                .eq_ignore_ascii_case(&vault.to_string())
-        );
+        assert!(route
+            .router_address
+            .eq_ignore_ascii_case(&vault.to_string()));
         assert!(route.calldata.starts_with("0x5f413d10"));
         assert_eq!(route.value_wei, "0");
         assert_eq!(

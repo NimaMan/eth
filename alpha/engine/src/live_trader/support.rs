@@ -318,6 +318,16 @@ pub(super) fn parse_u256_decimal(value: &str) -> Result<U256> {
     U256::from_str_radix(value, 10).map_err(|error| eyre!("invalid decimal U256 {value}: {error}"))
 }
 
+pub(super) fn parse_eth_decimal_to_wei(value: &str, label: &str) -> Result<U256> {
+    let decimal = value
+        .parse::<Decimal>()
+        .wrap_err_with(|| format!("invalid {label} decimal {value:?}"))?;
+    if decimal < Decimal::ZERO {
+        return Err(eyre!("{label} must be non-negative; got {value}"));
+    }
+    Ok(Amount::from_decimal(decimal, 18).raw)
+}
+
 pub(super) fn resolve_database_url(config: &HashMap<String, String>) -> Result<String> {
     required_shared_config_value(config, ALPHA_DATABASE_URL_CONFIG)
 }

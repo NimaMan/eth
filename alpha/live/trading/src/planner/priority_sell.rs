@@ -1,12 +1,14 @@
+use alloy_primitives::U256;
 use async_trait::async_trait;
 use eth_alpha_core::{
     order::{OrderIntent, OrderSide},
     position::Position,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::{
-    LpSignalSource, PrioritySellPlan, PrioritySellTxPrep, TxPrepOutcome, prepare_priority_sell,
+    derive_min_output_from_expected_output, prepare_priority_sell, LpSignalSource,
+    PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep, TxPrepOutcome,
 };
 
 use super::{
@@ -68,7 +70,18 @@ where
             });
         }
 
-        let route = self.route_builder.build_route(&input).await?;
+        let mut route = self.route_builder.build_route(&input).await?;
+        if should_derive_vault_min_output(&input, &route) {
+            let quote_simulation = self.simulator.simulate(&input, &route).await?;
+            let min_output = derive_min_output_from_quote_simulation(
+                &quote_simulation,
+                input.intent.max_slippage_bps,
+            )?;
+            input.min_output_amount = Some(min_output.to_string());
+            attach_min_output_quote_metadata(&mut input, &quote_simulation, min_output);
+            route = self.route_builder.build_route(&input).await?;
+        }
+
         let allowance = self.allowance.check_allowance(&input, route).await?;
         if self.config.require_existing_allowance {
             allowance.decision.ensure_preapproved()?;
@@ -95,6 +108,96 @@ where
             TxPrepOutcome::Reject(reject) => Ok(PrioritySellPlannerOutcome::Reject(reject)),
         }
     }
+}
+
+fn should_derive_vault_min_output(
+    input: &LivePrioritySellPlannerInput,
+    route: &PreparedSellRoute,
+) -> bool {
+    input
+        .min_output_amount
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+        && route.protocol == "uniswap_v2_trading_vault"
+}
+
+fn derive_min_output_from_quote_simulation(
+    simulation: &PreSubmitSimulation,
+    max_slippage_bps: u32,
+) -> Result<U256, LivePrioritySellPlannerError> {
+    simulation.validate().map_err(|error| {
+        LivePrioritySellPlannerError::Simulation(format!(
+            "cannot derive min-output from failed provisional simulation: {error}"
+        ))
+    })?;
+    let expected_output = simulation
+        .expected_output_amount
+        .as_deref()
+        .ok_or_else(|| {
+            LivePrioritySellPlannerError::Simulation(
+                "provisional simulation did not return expected_output_amount".to_string(),
+            )
+        })
+        .and_then(|value| parse_u256_quantity(value, "expected_output_amount"))?;
+    let min_output = derive_min_output_from_expected_output(expected_output, max_slippage_bps)
+        .map_err(|error| {
+            LivePrioritySellPlannerError::Simulation(format!(
+                "failed to derive min-output from provisional simulation: {error}"
+            ))
+        })?;
+    if min_output.is_zero() {
+        return Err(LivePrioritySellPlannerError::Simulation(
+            "simulation-derived min-output is zero".to_string(),
+        ));
+    }
+    Ok(min_output)
+}
+
+fn attach_min_output_quote_metadata(
+    input: &mut LivePrioritySellPlannerInput,
+    simulation: &PreSubmitSimulation,
+    min_output: U256,
+) {
+    let metadata = json!({
+        "provider": "exact_pre_submit_simulation",
+        "simulation_block": simulation.block_number,
+        "expected_output_token": simulation.expected_output_token,
+        "expected_output_amount": simulation.expected_output_amount,
+        "min_output_amount": min_output.to_string(),
+        "max_slippage_bps": input.intent.max_slippage_bps,
+    });
+
+    match &mut input.context.tx.source_metadata {
+        Value::Object(map) => {
+            map.insert("min_output_quote".to_string(), metadata);
+        }
+        existing if existing.is_null() => {
+            input.context.tx.source_metadata = json!({ "min_output_quote": metadata });
+        }
+        existing => {
+            let previous = existing.take();
+            input.context.tx.source_metadata = json!({
+                "previous": previous,
+                "min_output_quote": metadata,
+            });
+        }
+    }
+}
+
+fn parse_u256_quantity(value: &str, label: &str) -> Result<U256, LivePrioritySellPlannerError> {
+    let trimmed = value.trim();
+    let parsed = if let Some(hex) = trimmed.strip_prefix("0x") {
+        U256::from_str_radix(hex, 16)
+    } else {
+        U256::from_str_radix(trimmed, 10)
+    };
+    parsed.map_err(|error| {
+        LivePrioritySellPlannerError::Simulation(format!(
+            "invalid {label} quantity {trimmed:?}: {error}"
+        ))
+    })
 }
 
 fn validate_position_matches_intent(
@@ -159,6 +262,7 @@ mod tests {
         position::{Position, PositionKey},
     };
     use serde_json::json;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::{
@@ -335,6 +439,36 @@ mod tests {
         })
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingPreSubmitSimulator {
+        min_output_calls: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl PreSubmitSimulator for RecordingPreSubmitSimulator {
+        async fn simulate(
+            &self,
+            input: &LivePrioritySellPlannerInput,
+            _route: &PreparedSellRoute,
+        ) -> Result<PreSubmitSimulation, LivePrioritySellPlannerError> {
+            self.min_output_calls
+                .lock()
+                .unwrap()
+                .push(input.min_output_amount.clone());
+            Ok(PreSubmitSimulation {
+                block_number: 25_128_246,
+                block_hash: Some("0xabc".to_string()),
+                state_root: None,
+                expected_output_token: Some("ETH".to_string()),
+                expected_output_amount: Some("10000000000000000".to_string()),
+                min_output_amount: input.min_output_amount.clone(),
+                expected_recovery_eth: DecimalAmount::new(1, 2),
+                would_revert: false,
+                metadata: json!({ "sim": "ok" }),
+            })
+        }
+    }
+
     #[tokio::test]
     async fn planner_prepares_value_capped_kartal_signal() {
         let outcome = planner(StaticAllowanceChecker::pre_approved())
@@ -344,12 +478,10 @@ mod tests {
 
         match outcome {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
-                assert!(
-                    signal
-                        .request
-                        .to
-                        .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d")
-                );
+                assert!(signal
+                    .request
+                    .to
+                    .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"));
                 assert!(signal.request.data.starts_with("0x791ac947"));
                 assert_eq!(signal.request.max_priority_fee_per_gas, "40000000000");
                 assert_eq!(
@@ -387,6 +519,48 @@ mod tests {
             PrioritySellPlannerOutcome::Submit { signal, .. } => {
                 assert!(signal.request.to.eq_ignore_ascii_case(&vault.to_string()));
                 assert!(signal.request.data.starts_with("0x5f413d10"));
+            }
+            other => panic!("expected submit, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn planner_derives_vault_min_output_from_provisional_exact_simulation() {
+        let vault = Address::with_last_byte(0xaa);
+        let simulator = RecordingPreSubmitSimulator::default();
+        let calls = Arc::clone(&simulator.min_output_calls);
+        let planner = LivePrioritySellPlanner::new(
+            LivePrioritySellPlannerConfig::default(),
+            UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
+            simulator,
+            gas_rank(),
+            VaultInternalAllowanceChecker,
+        );
+        let mut input = input();
+        input.min_output_amount = None;
+
+        let outcome = planner.plan_priority_sell(input).await.unwrap();
+
+        match outcome {
+            PrioritySellPlannerOutcome::Submit { signal, .. } => {
+                assert_eq!(
+                    calls.lock().unwrap().as_slice(),
+                    &[None, Some("9500000000000000".to_string())]
+                );
+                assert_eq!(
+                    signal
+                        .request
+                        .simulation
+                        .as_ref()
+                        .unwrap()
+                        .min_output_amount
+                        .as_deref(),
+                    Some("9500000000000000")
+                );
+                assert_eq!(
+                    signal.request.metadata["source"]["min_output_quote"]["provider"],
+                    json!("exact_pre_submit_simulation")
+                );
             }
             other => panic!("expected submit, got {other:?}"),
         }

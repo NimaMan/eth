@@ -15,9 +15,10 @@ Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:
 Environment=RUST_LOG=info
 ExecStartPre=/usr/bin/test -n ${ALPHA_RUN_ID}
 ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SUITE}
+ExecStartPre=/usr/bin/test -n ${ALPHA_BUY_WEI}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_FROM}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --disable-entry --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --min-liquidity-eth ${ALPHA_MIN_LIQUIDITY_ETH} --min-liquidity-usd ${ALPHA_MIN_LIQUIDITY_USD} --strategy-suite ${ALPHA_STRATEGY_SUITE} --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --buy-wei ${ALPHA_BUY_WEI} --min-liquidity-eth ${ALPHA_MIN_LIQUIDITY_ETH} --min-liquidity-usd ${ALPHA_MIN_LIQUIDITY_USD} --strategy-suite ${ALPHA_STRATEGY_SUITE} --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

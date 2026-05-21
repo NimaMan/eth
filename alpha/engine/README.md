@@ -122,11 +122,14 @@ Backtest and live no-capital execution use the same sequence and the same
 chain-sim fill source. Their confirmation reports mean that the EVM simulation
 succeeded at the target execution block, not that a real transaction was mined.
 The guarded live-real runner swaps in `TxExecutorAdapter`, but the systemd
-service keeps that path in Kartal dry-run until production simulation,
-gas-rank, buy-route, and receipt reconciliation gates are complete. Public real
-execution must consult `eth_block_tx_rank` before submission and persist the
-rank evidence with the order decision; `tx_executor` only receives the final
-prepared transaction.
+service keeps that path in Kartal dry-run until gas-rank, dry-run evidence, and
+receipt-operation gates are complete. The deployed V2 vault buy and emergency
+sell paths now run exact-calldata pre-submit simulation. Live-real entries
+must resolve to a bankroll of at most `0.225 ETH` during validation. Alpha11
+sets that bankroll in its strategy spec; `--entry-bankroll-eth` is an override.
+Public real execution must consult `eth_block_tx_rank` before submission and
+persist the rank evidence with the order decision; `tx_executor` only receives
+the final prepared transaction.
 
 ### Python Concept Mapping
 
@@ -188,17 +191,23 @@ in `src/live_trader/real_execution.rs`.
 `eth_alpha_live_backtest_trader` calls `run_live_backtest()`, so the binaries do
 not expose a public mode switch.
 
-The real live binary is intentionally sell-only for now: it requires
-`--disable-entry`, targets the deployed `UniswapV2TradingVault`, and uses shadow
-dry-run simulation/gas-rank providers only to prove the live executor boundary.
+The real live binary targets the deployed `UniswapV2TradingVault`, derives a
+non-zero min-output from provisional exact-calldata simulation, and simulates
+the final exact vault buy or sell calldata against local Reth state before
+Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
+at most `0.225 ETH`. The Alpha11 hold15 spec provides this default for the
+first validation run of
+`alpha11-live-univ2-lp30-pool-update-block-hold15`.
+The gas-rank provider still uses fixed dry-run values to prove the live
+executor boundary.
 A receipt reconciliation worker now exists for real submitted tx hashes: it
 polls Kartal's configured RPC, requires successful receipts, and confirms V2
 vault fills only from `BoughtV2` or `EmergencySoldV2` events. A
 public-broadcast deployment still needs:
 
-- production `PreSubmitSimulator` for the exact calldata;
 - production `GasRankProvider` backed by recent block-rank evidence;
-- real vault buy route planning and position reconciliation;
+- validation evidence for the capped deployed-vault buy route and position
+  reconciliation;
 - operational finality policy and alerting around the receipt worker.
 
 Backtest binaries cannot import `TxExecutorAdapter` through the public engine
@@ -214,10 +223,14 @@ API; they should remain on `ChainSimExecutionAdapter` only.
 The trader registers strategy wrappers from each strategy's `live/` module. For
 Snipe All that is `LiveSnipeAllStrategy`, which composes the regular
 `SnipeAllStrategy` policy while marking the runtime side in code and run config.
+For Alpha11 that is `LiveAlpha11Strategy`, which composes the same reusable
+baseline engine but owns the Alpha11 launch defaults under
+`alpha/strategies/src/alpha11`.
 
-`eth_alpha_live_trader --disable-entry` uses the same live input stream but a
-Kartal executor adapter. That process is separate from backtests and the
-no-capital chain-sim service.
+`eth_alpha_live_trader` uses the same live input stream but a Kartal executor
+adapter. That process is separate from backtests and the no-capital chain-sim
+service. During validation, entry-enabled runs must resolve to a small bankroll;
+the CLI `--entry-bankroll-eth` value overrides any strategy-spec default.
 
 ## Live Strategy Model
 

@@ -1,5 +1,6 @@
 use super::spec::{LiveStrategySpec, LiveStrategySpecOptions};
 use super::strategy_sets;
+use crate::alpha11::live::specs as alpha11_specs;
 
 pub fn strategy_set_specs(
     set_name: &str,
@@ -16,9 +17,8 @@ pub fn strategy_set_specs(
         strategy_sets::risk_atlas::LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME => Ok(vec![
             strategy_sets::risk_atlas::lp_gate_hold15_buy_confirm_lp_maxhold_spec(options),
         ]),
-        strategy_sets::alpha11_hold_sweep::SET_NAME => {
-            Ok(strategy_sets::alpha11_hold_sweep::specs(options))
-        }
+        alpha11_specs::SET_NAME => Ok(alpha11_specs::specs(options)),
+        crate::alpha11::HOLD15_STRATEGY_NAME => Ok(vec![alpha11_specs::hold15_spec(options)]),
         other => Err(format!("unsupported strategy set: {other}")),
     }
 }
@@ -56,10 +56,16 @@ mod tests {
             1
         );
         assert_eq!(
-            strategy_set_specs(strategy_sets::alpha11_hold_sweep::SET_NAME, &options)
+            strategy_set_specs(alpha11_specs::SET_NAME, &options)
                 .unwrap()
                 .len(),
             3
+        );
+        let hold15 = strategy_set_specs(crate::alpha11::HOLD15_STRATEGY_NAME, &options).unwrap();
+        assert_eq!(hold15.len(), 1);
+        assert_eq!(
+            hold15[0].strategy_name,
+            crate::alpha11::HOLD15_STRATEGY_NAME
         );
     }
 }

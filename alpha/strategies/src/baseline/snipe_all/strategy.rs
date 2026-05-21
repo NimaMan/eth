@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+
+use alloy_primitives::U256;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{BlockNumber, PoolAddress, PositionId, StrategyName, TokenAddress},
@@ -286,6 +289,30 @@ impl SnipeAllStrategy {
                 && position.can_submit_exit()
         })
     }
+
+    fn entry_bankroll_available_wei(&self, ctx: &StrategyContext<'_>) -> Option<U256> {
+        let mut available = self.config.entry_bankroll_wei?;
+        let strategy_name = self.name();
+        let mut portfolio_pools = HashSet::new();
+
+        for position in ctx
+            .portfolio
+            .positions
+            .values()
+            .filter(|position| position.key.strategy_name == strategy_name)
+        {
+            portfolio_pools.insert(position.key.pool_address.clone());
+            available = apply_position_to_entry_bankroll(available, position, &self.config);
+        }
+
+        for pool in self.state.bought_pools() {
+            if !portfolio_pools.contains(pool) {
+                available = available.saturating_sub(self.config.buy_amount.raw);
+            }
+        }
+
+        Some(available)
+    }
 }
 
 fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) -> Option<Amount> {
@@ -295,6 +322,47 @@ fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) 
     }
     let scaled_amount = raw_amount.to_decimal() * sell_fraction;
     Some(Amount::from_decimal(scaled_amount, raw_amount.decimals))
+}
+
+fn position_entry_spend_wei(position: &Position, config: &SnipeAllConfig) -> U256 {
+    position
+        .entry_cost_basis
+        .map(|cost| Amount::from_decimal(cost, 18).raw)
+        .unwrap_or(config.buy_amount.raw)
+}
+
+fn position_exit_proceeds_wei(position: &Position) -> U256 {
+    position
+        .exit_proceeds
+        .map(|proceeds| Amount::from_decimal(proceeds, 18).raw)
+        .unwrap_or(U256::ZERO)
+}
+
+fn apply_position_to_entry_bankroll(
+    available: U256,
+    position: &Position,
+    config: &SnipeAllConfig,
+) -> U256 {
+    match position.state {
+        PositionState::Init
+        | PositionState::BuyFailed
+        | PositionState::BuyCancelled
+        | PositionState::Cancelled => available,
+        PositionState::BuyIntentCreated | PositionState::BuySubmitted => {
+            available.saturating_sub(config.buy_amount.raw)
+        }
+        PositionState::BuyConfirmed
+        | PositionState::SellIntentCreated
+        | PositionState::SellSubmitted
+        | PositionState::SellFailed
+        | PositionState::SellCancelled
+        | PositionState::Scammed => {
+            available.saturating_sub(position_entry_spend_wei(position, config))
+        }
+        PositionState::SellConfirmed => available
+            .saturating_sub(position_entry_spend_wei(position, config))
+            .saturating_add(position_exit_proceeds_wei(position)),
+    }
 }
 
 impl Strategy for SnipeAllStrategy {
@@ -362,6 +430,19 @@ impl Strategy for SnipeAllStrategy {
         }
         if !self.config.entry_enabled {
             return Ok(StrategyDecision::hold("entry.disabled"));
+        }
+        if self
+            .config
+            .max_entry_pools
+            .map(|limit| self.state.bought_pool_count() >= limit)
+            .unwrap_or(false)
+        {
+            return Ok(StrategyDecision::hold("entry.max_entry_pools_reached"));
+        }
+        if let Some(available) = self.entry_bankroll_available_wei(ctx) {
+            if available < self.config.buy_amount.raw {
+                return Ok(StrategyDecision::hold("entry.bankroll_insufficient"));
+            }
         }
         if self.config.block_entry_on_lp_approval {
             match shared_rules::lp_approval::entry_gate::evaluate(

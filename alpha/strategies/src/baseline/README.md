@@ -10,6 +10,10 @@ reference against which selective strategies are measured.
 |----------|------|-------------|
 | Snipe All | `snipe_all/` | Buy every eligible pool once (0.01 ETH). Exit on liquidity-removal / tax / LP-approval / scam signals. |
 
+Deployable product strategies should not put launch defaults here. For example,
+Alpha11 lives in `../alpha11/` and composes `snipe_all` with its own named
+protocol filter, LP gate, hold window, and bankroll.
+
 ## Live Runtime Convention
 
 Any baseline strategy that runs against the current live token tracker must put

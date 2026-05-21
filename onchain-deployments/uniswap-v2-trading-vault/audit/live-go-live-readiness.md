@@ -18,14 +18,12 @@ Do not relax dry-run yet.
 The receipt reconciliation worker now exists in alpha, but the real-live path
 still has blockers:
 
-- real live entry is disabled; `eth_alpha_live_trader` currently requires
-  `--disable-entry`;
-- the live planner uses a shadow pre-submit simulator, not production exact
-  calldata simulation;
+- real live entry is enabled only for capped validation runs with a resolved
+  strategy bankroll of at most `0.225 ETH`;
+- deployed V2 vault buy and sell paths use production exact calldata
+  simulation, but still need live dry-run evidence for the target strategy;
 - the gas-rank provider is fixed/shadow, not backed by recent block-rank
   evidence;
-- the current sell min-output policy is `1 wei`, which is dry-run-only and not
-  acceptable for public broadcast;
 - stuck, dropped, replaced, and reorged transactions do not yet have a finality
   policy;
 - per-strategy and per-token spend caps are not implemented in Kartal.
@@ -37,10 +35,10 @@ Every item in this section must be `ready` before broadcast.
 | Gate | Status | Required Evidence |
 | --- | --- | --- |
 | Strategy scope | blocked | The live strategy name includes every protocol/filter restriction. If using this V2 vault, live broadcast strategy must be explicitly V2-only. |
-| Entry route | blocked | Vault buy route is implemented, simulated, and wired into real live trading, or the first production run is explicitly sell-only with no new entries. |
-| Exit route | partial | Vault emergency-sell route exists. It still needs production min-output and exact final simulation. |
-| Exact pre-submit simulation | blocked | Each submitted request includes exact calldata simulation from current chain state, with block number/hash evidence and non-stale simulation age. |
-| Min-output/slippage | blocked | `min_output_amount` is derived from simulation and policy. `1 wei` or empty min-output is rejected for public broadcast. |
+| Entry route | partial | Vault buy route is implemented, simulated, and wired into real live trading. Need capped live dry-run evidence for `alpha11-live-univ2-lp30-pool-update-block-hold15`. |
+| Exit route | partial | Vault emergency-sell route exists with production min-output and exact final simulation. Need live dry-run evidence. |
+| Exact pre-submit simulation | partial | Submitted V2 vault buy/sell requests include exact calldata simulation from current chain state and reject stale state. Need run-folder evidence from the target strategy. |
+| Min-output/slippage | partial | `min_output_amount` is derived from exact simulation and policy for V2 vault buy/sell. Need live dry-run evidence proving non-zero min-output on real candidates. |
 | Gas-rank provider | blocked | Chosen EIP-1559 fees come from recent `eth_block_tx_rank` evidence. Fixed shadow fees are rejected for broadcast. |
 | Value cap | blocked | Priority spend and total max-fee spend are capped by protected value, late-recovery value, and safety buffer from final simulation. |
 | Kartal policy | partial | Target, selector, `from`, value, gas, fee, simulation freshness, metadata, and daily spend gates exist. Need final deployed config proof. |

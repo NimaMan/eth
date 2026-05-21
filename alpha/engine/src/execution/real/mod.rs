@@ -146,7 +146,7 @@ where
                     self.next_order_id(),
                     format!("live tx planning failed: {error}"),
                     None,
-                ))
+                ));
             }
         };
 
@@ -168,7 +168,7 @@ where
                     order_id,
                     format!("Kartal tx executor submission failed: {error}"),
                     observed_block,
-                ))
+                ));
             }
         };
 

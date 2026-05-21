@@ -10,6 +10,7 @@ mod config;
 mod error;
 mod gas_rank;
 mod input;
+mod min_output;
 mod output;
 mod priority_sell;
 mod route_builder;
@@ -23,10 +24,13 @@ pub use config::LivePrioritySellPlannerConfig;
 pub use error::LivePrioritySellPlannerError;
 pub use gas_rank::{FixedGasRankProvider, GasRankPlan, GasRankProvider};
 pub use input::{LivePrioritySellPlannerInput, PlannerTxContext};
+pub use min_output::derive_min_output_from_expected_output;
 pub use output::PrioritySellPlannerOutcome;
 pub use priority_sell::{LivePrioritySellPlanner, PrioritySellPlanner};
 pub use route_builder::{
     RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder,
-    UniswapV2TradingVaultSellRouteBuilder,
+    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
 };
-pub use simulation::{FixedPreSubmitSimulator, PreSubmitSimulator};
+pub use simulation::{
+    FixedPreSubmitSimulator, PreSubmitSimulator, UniswapV2TradingVaultPreSubmitSimulator,
+};

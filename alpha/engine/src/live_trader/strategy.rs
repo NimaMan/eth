@@ -30,6 +30,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "lp_approval_gate_min_pct": spec.lp_approval_gate_min_pct,
         "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
         "min_sell_pool_denom_reserve": spec.min_sell_pool_denom_reserve,
+        "entry_bankroll_eth": &spec.entry_bankroll_eth,
         "stop_loss_ratio": spec.stop_loss_ratio,
         "take_profit_ratio": spec.take_profit_ratio,
         "max_hold_blocks": spec.max_hold_blocks,

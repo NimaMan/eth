@@ -11,8 +11,8 @@ StrategyDecision::submit_order(reason)
   -> OrderIntent with decision_reason
   -> AlphaEngine risk policy
   -> TxExecutorAdapter
-  -> LiveTradingPlannerBridge
-  -> LivePrioritySellPlanner in alpha/live/trading
+  -> LiveTxPlanner / LiveTradingPlannerBridge
+  -> deployed-vault buy or priority-sell planner in alpha/live/trading
   -> LiveTraderTxSignal / LiveDirectRawTransactionRequest
   -> Kartal POST /eth/tx/direct-raw
   -> tx_executor validate/sign/dry-run-or-broadcast
@@ -38,13 +38,17 @@ build calldata and it does not choose gas. Its only live-capital job is to obtai
 a `LiveTraderTxSignal`, send that signal to Kartal, and convert Kartal's response
 into the normal engine `ExecutionReport` path.
 
-The bridge/resolver split is intentional:
+The planner/resolver split is intentional:
 
 - `LiveTradingPlannerBridge` is generic glue from the engine trait to
   `alpha/live/trading::PrioritySellPlanner`.
 - `LiveTxPlanningInputResolver` is the runtime loader. It must gather the open
   position, latest pool snapshot, signer context, observation metadata,
   deadline, and min-output evidence.
+- `KartalRealPlanner` dispatches sell intents to the priority-sell planner and
+  buy intents to the deployed V2 vault buy builder. The buy path quotes with
+  exact calldata and zero min-output, derives the production min-output from
+  the quote, then simulates the final exact calldata before Kartal submission.
 - `alpha/live/trading` validates those inputs, builds the route, checks
   allowance, runs final simulation, chooses the gas-rank candidate under the
   value cap, and returns the direct-raw Kartal request.
@@ -68,11 +72,15 @@ The engine now has `LiveTradingPlannerBridge` and
 is the production hook that must load the matched position, latest pool snapshot,
 wallet tx context, observation metadata, and deadline/min-out inputs.
 
-The remaining production pieces are production-grade live simulation,
-gas-rank/allowance providers, buy-route support, and final broadcast/finality
-operations around the receipt worker. Route discovery, calldata construction,
-slippage, gas-rank policy, and value-capped bribe logic must stay outside the
-engine in `alpha/live/trading`.
+The deployed V2 vault buy and sell paths now derive min-out from provisional
+exact-calldata simulation and run a second exact-calldata simulation before
+Kartal submission. The live-real binary permits entries only when the resolved
+strategy bankroll is at most `0.225 ETH`; buys consume that bankroll, confirmed
+sells replenish it, and profits can be redeployed. The
+remaining production pieces are live gas-rank providers and final
+broadcast/finality operations around the receipt worker. Route discovery,
+calldata construction, slippage, gas-rank policy, and value-capped bribe logic
+must stay outside the engine in `alpha/live/trading`.
 
 ## Responsibilities
 

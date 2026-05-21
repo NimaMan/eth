@@ -12,6 +12,8 @@ pub(super) struct Args {
     pub(super) disable_entry: bool,
     pub(super) replay_current: bool,
     pub(super) once: bool,
+    pub(super) max_entry_pools: Option<usize>,
+    pub(super) entry_bankroll_eth: Option<String>,
     pub(super) max_hold_blocks: Option<u64>,
     pub(super) stop_loss_ratio: Option<String>,
     pub(super) take_profit_ratio: Option<String>,
@@ -24,7 +26,6 @@ pub(super) struct RealExecutionArgs {
     pub(super) kartal_token_env: String,
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
-    pub(super) live_real_shadow_expected_recovery_eth: String,
     pub(super) live_real_shadow_priority_fee_gwei: String,
     pub(super) live_real_shadow_max_fee_gwei: String,
     pub(super) live_real_shadow_predicted_base_fee_gwei: String,
@@ -63,6 +64,16 @@ struct LiveCommonCli {
 
     #[arg(long, default_value_t = false)]
     once: bool,
+
+    /// Hard cap on distinct pools each live strategy may buy in this run.
+    /// Restored bought pools count toward the cap.
+    #[arg(long)]
+    max_entry_pools: Option<usize>,
+
+    /// Starting ETH bankroll each live strategy may deploy into entries.
+    /// Buys consume it; confirmed sells replenish it; profits can be redeployed.
+    #[arg(long = "entry-bankroll-eth")]
+    entry_bankroll_eth: Option<String>,
 
     /// Max hold active pool-update blocks: force sell after this many distinct
     /// pool-update blocks while the position is open.
@@ -115,11 +126,6 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value = DEFAULT_UNISWAP_V2_TRADING_VAULT)]
     live_real_vault_address: String,
 
-    /// Temporary dry-run simulation recovery value until the production final
-    /// simulator is wired.
-    #[arg(long, default_value = "0.01")]
-    live_real_shadow_expected_recovery_eth: String,
-
     /// Temporary dry-run gas rank candidate until the production gas-rank
     /// provider is wired.
     #[arg(long, default_value = "40")]
@@ -158,6 +164,8 @@ impl From<LiveCommonCli> for Args {
             disable_entry: common.disable_entry,
             replay_current: common.replay_current,
             once: common.once,
+            max_entry_pools: common.max_entry_pools,
+            entry_bankroll_eth: common.entry_bankroll_eth,
             max_hold_blocks: common.max_hold_blocks,
             stop_loss_ratio: common.stop_loss_ratio,
             take_profit_ratio: common.take_profit_ratio,
@@ -173,7 +181,6 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             kartal_token_env: real.kartal_token_env,
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
-            live_real_shadow_expected_recovery_eth: real.live_real_shadow_expected_recovery_eth,
             live_real_shadow_priority_fee_gwei: real.live_real_shadow_priority_fee_gwei,
             live_real_shadow_max_fee_gwei: real.live_real_shadow_max_fee_gwei,
             live_real_shadow_predicted_base_fee_gwei: real.live_real_shadow_predicted_base_fee_gwei,

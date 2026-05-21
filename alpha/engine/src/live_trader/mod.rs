@@ -25,6 +25,7 @@ use eth_alpha_core::{
     portfolio::PortfolioState,
     position::{Position, PositionState},
     store::TradingStore,
+    Strategy,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
 use eth_ops_events::{
@@ -35,7 +36,10 @@ use eth_strategies::shared_rules::live::{
     default_strategy_spec, observation_strategy_name, strategy_set_specs, LiveStrategySpec,
     LiveStrategySpecOptions, STRATEGY_RUNTIME,
 };
-use eth_strategies::{LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig};
+use eth_strategies::{
+    Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
+    LiveSnipeAllStrategy, SnipeAllConfig, ALPHA11_STRATEGY_IMPL,
+};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -72,6 +76,49 @@ const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
+const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.225";
+
+fn resolve_entry_bankroll_wei(args: &Args, spec: &LiveStrategySpec) -> Result<Option<U256>> {
+    let Some(value) = args
+        .entry_bankroll_eth
+        .as_deref()
+        .or(spec.entry_bankroll_eth.as_deref())
+    else {
+        return Ok(None);
+    };
+    let label = if args.entry_bankroll_eth.is_some() {
+        "--entry-bankroll-eth".to_string()
+    } else {
+        format!("strategy {} entry_bankroll_eth", spec.strategy_name)
+    };
+    parse_eth_decimal_to_wei(value, &label).map(Some)
+}
+
+fn entry_bankroll_summary_json(
+    args: &Args,
+    specs: &[LiveStrategySpec],
+    bankrolls_wei: &[Option<U256>],
+) -> Vec<Value> {
+    specs
+        .iter()
+        .zip(bankrolls_wei.iter())
+        .map(|(spec, bankroll_wei)| {
+            let source = if args.entry_bankroll_eth.is_some() {
+                "cli"
+            } else if spec.entry_bankroll_eth.is_some() {
+                "strategy_spec"
+            } else {
+                "none"
+            };
+            json!({
+                "strategy_name": &spec.strategy_name,
+                "entry_bankroll_eth": args.entry_bankroll_eth.as_deref().or(spec.entry_bankroll_eth.as_deref()),
+                "entry_bankroll_wei": bankroll_wei.as_ref().map(|value| value.to_string()),
+                "source": source,
+            })
+        })
+        .collect()
+}
 
 pub async fn run_live_backtest() -> Result<()> {
     run(
@@ -114,12 +161,11 @@ async fn run(
             execution_mode.label()
         ));
     }
-    if execution_mode.uses_kartal() && !args.disable_entry {
-        return Err(eyre!(
-            "{} requires --disable-entry until the vault buy path is wired into the real planner",
-            runner_name
-        ));
-    }
+    let entry_bankroll_override_wei = args
+        .entry_bankroll_eth
+        .as_deref()
+        .map(|value| parse_eth_decimal_to_wei(value, "--entry-bankroll-eth"))
+        .transpose()?;
     let mut kartal_real_preflight = match real_args.as_ref() {
         None => None,
         Some(real_args) => Some(preflight_kartal_real(real_args).await?),
@@ -132,6 +178,47 @@ async fn run(
     let min_liquidity_usd = Decimal::from_str(&args.min_liquidity_usd)
         .wrap_err("invalid --min-liquidity-usd decimal")?;
     let strategy_specs = build_strategy_specs(&args)?;
+    let entry_bankrolls_wei = strategy_specs
+        .iter()
+        .map(|spec| resolve_entry_bankroll_wei(&args, spec))
+        .collect::<Result<Vec<_>>>()?;
+    if execution_mode.uses_kartal() && !args.disable_entry {
+        let validation_limit = parse_eth_decimal_to_wei(
+            LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH,
+            "live-real validation entry bankroll",
+        )?;
+        for (spec, bankroll) in strategy_specs.iter().zip(entry_bankrolls_wei.iter()) {
+            let bankroll = bankroll.ok_or_else(|| {
+                eyre!(
+                    "{} requires an entry bankroll <= {} for strategy {} while live-real entries are in validation mode",
+                    runner_name,
+                    LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH,
+                    spec.strategy_name
+                )
+            })?;
+            if bankroll.is_zero() || bankroll > validation_limit {
+                return Err(eyre!(
+                    "{} requires entry bankroll in the range (0, {}] for strategy {}; got CLI {:?}, spec {:?}",
+                    runner_name,
+                    LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH,
+                    spec.strategy_name,
+                    &args.entry_bankroll_eth,
+                    &spec.entry_bankroll_eth
+                ));
+            }
+        }
+    }
+    let entry_bankroll_summary =
+        entry_bankroll_summary_json(&args, &strategy_specs, &entry_bankrolls_wei);
+    let single_entry_bankroll_wei = entry_bankrolls_wei.first().copied().flatten();
+    let single_entry_bankroll_eth = if strategy_specs.len() == 1 {
+        args.entry_bankroll_eth
+            .as_deref()
+            .or(strategy_specs[0].entry_bankroll_eth.as_deref())
+            .map(str::to_string)
+    } else {
+        args.entry_bankroll_eth.clone()
+    };
     let observation_strategy_name = observation_strategy_name(&strategy_specs);
     let database_url = resolve_database_url(&shared_config)?;
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
@@ -179,6 +266,12 @@ async fn run(
                 "mempool_since_days": args.mempool_since_days,
                 "signal_limit": args.signal_limit,
                 "buy_wei": &args.buy_wei,
+                "max_entry_pools": args.max_entry_pools,
+                "entry_bankroll_eth": &single_entry_bankroll_eth,
+                "entry_bankroll_override_eth": &args.entry_bankroll_eth,
+                "entry_bankroll_override_wei": entry_bankroll_override_wei.map(|value| value.to_string()),
+                "entry_bankroll_wei": single_entry_bankroll_wei.map(|value| value.to_string()),
+                "entry_bankrolls": &entry_bankroll_summary,
                 "min_liquidity_eth": &args.min_liquidity_eth,
                 "min_liquidity_usd": &args.min_liquidity_usd,
                 "replay_current": args.replay_current,
@@ -286,6 +379,7 @@ async fn run(
                 store.clone(),
                 run_id.clone(),
                 chain_sim_adapter,
+                &reth_datadir,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
             )
@@ -295,7 +389,10 @@ async fn run(
 
     let mut engine =
         AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter).with_portfolio(portfolio);
-    for spec in &strategy_specs {
+    for (spec, entry_bankroll_wei) in strategy_specs
+        .iter()
+        .zip(entry_bankrolls_wei.iter().copied())
+    {
         let stop_loss_ratio = spec
             .stop_loss_ratio
             .as_deref()
@@ -313,7 +410,7 @@ async fn run(
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok())
             .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
-        let config = LiveSnipeAllConfig::new(SnipeAllConfig {
+        let snipe_all_config = SnipeAllConfig {
             strategy_name: StrategyName(spec.strategy_name.clone()),
             buy_amount: Amount {
                 raw: buy_wei,
@@ -324,6 +421,8 @@ async fn run(
             min_stable_denom_reserve: min_liquidity_usd,
             min_sell_pool_denom_reserve,
             entry_enabled: !args.disable_entry,
+            max_entry_pools: args.max_entry_pools,
+            entry_bankroll_wei,
             stop_loss_ratio,
             take_profit_ratio,
             max_hold_blocks: spec.max_hold_blocks,
@@ -338,7 +437,7 @@ async fn run(
             defer_buy_confirm_block_lp_approval_to_max_hold: spec
                 .defer_buy_confirm_block_lp_approval_to_max_hold,
             ..SnipeAllConfig::default()
-        });
+        };
         let seen_pools = seen_pools_by_strategy
             .get(&spec.strategy_name)
             .cloned()
@@ -355,11 +454,27 @@ async fn run(
                 )
             })
             .collect::<Vec<_>>();
-        engine.add_strategy(Box::new(LiveSnipeAllStrategy::with_restored_state(
-            config,
-            seen_pools,
-            active_hold_counters,
-        )));
+        let strategy: Box<dyn Strategy> = match spec.strategy_impl.as_str() {
+            ALPHA11_STRATEGY_IMPL => Box::new(LiveAlpha11Strategy::with_restored_state(
+                LiveAlpha11Config::new(Alpha11Config::new(snipe_all_config)),
+                seen_pools,
+                active_hold_counters,
+            )),
+            "snipe-all" => Box::new(LiveSnipeAllStrategy::with_restored_state(
+                LiveSnipeAllConfig::new(snipe_all_config),
+                seen_pools,
+                active_hold_counters,
+            )),
+            other => {
+                return Err(eyre!(
+                    "{} cannot instantiate unsupported live strategy_impl {} for {}",
+                    runner_name,
+                    other,
+                    spec.strategy_name
+                ));
+            }
+        };
+        engine.add_strategy(strategy);
     }
 
     let client = TokenServerClient::new(token_server_url.clone());
@@ -379,6 +494,10 @@ async fn run(
         observation_strategy_name = %observation_strategy_name,
         stale_runs,
         replay_current = args.replay_current,
+        max_entry_pools = ?args.max_entry_pools,
+        entry_bankroll_eth = ?single_entry_bankroll_eth,
+        entry_bankroll_override_eth = ?args.entry_bankroll_eth,
+        entry_bankroll_wei = ?single_entry_bankroll_wei.map(|value| value.to_string()),
         restored_pool_watermarks = seen_pool_blocks.len(),
         restored_signal_watermarks = seen_signal_ids.len(),
         restored_seen_pools = seen_pools_by_strategy
@@ -840,6 +959,11 @@ async fn run(
             "observation_strategy_name": &observation_strategy_name,
             "positions": engine.portfolio().active_position_count(),
             "entry_enabled": !args.disable_entry,
+            "max_entry_pools": args.max_entry_pools,
+            "entry_bankroll_eth": &single_entry_bankroll_eth,
+            "entry_bankroll_override_eth": &args.entry_bankroll_eth,
+            "entry_bankroll_wei": single_entry_bankroll_wei.map(|value| value.to_string()),
+            "entry_bankrolls": &entry_bankroll_summary,
             "kartal_enabled": execution_mode.uses_kartal(),
         });
         let mut health = PipelineHealth::new(

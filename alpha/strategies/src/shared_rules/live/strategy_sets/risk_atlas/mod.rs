@@ -22,6 +22,7 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         ),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: None,
+        entry_bankroll_eth: None,
         stop_loss_ratio: options.stop_loss_ratio.clone(),
         take_profit_ratio: options.take_profit_ratio.clone(),
         max_hold_blocks: Some(15),

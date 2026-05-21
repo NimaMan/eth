@@ -29,6 +29,14 @@ pub struct SnipeAllConfig {
     /// If false, the strategy will not open new positions. Existing positions
     /// can still be managed and exited.
     pub entry_enabled: bool,
+    /// Hard cap on distinct pools this strategy may buy in one run. Restored
+    /// bought pools count toward this limit.
+    pub max_entry_pools: Option<usize>,
+    /// Starting ETH/WETH bankroll for entries. Buys consume it, confirmed sells
+    /// replenish it, and profitable sells increase the amount available.
+    /// Restored seen pools without a loaded position count as one configured
+    /// buy amount until their position is available.
+    pub entry_bankroll_wei: Option<U256>,
     pub exit_on_liquidity_removal: bool,
     pub exit_on_tax: bool,
     pub exit_on_lp_approval: bool,
@@ -83,6 +91,8 @@ impl Default for SnipeAllConfig {
             max_slippage_bps: 500,
             deadline_secs: 30,
             entry_enabled: true,
+            max_entry_pools: None,
+            entry_bankroll_wei: None,
             exit_on_liquidity_removal: true,
             exit_on_tax: true,
             exit_on_lp_approval: true,

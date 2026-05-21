@@ -1,4 +1,10 @@
 use super::*;
+use alloy_primitives::{Address, U256};
+use eth_alpha_core::{
+    amount::Amount,
+    execution::{ExecutionReport, ExecutionStatus},
+    ids::{OrderId, TokenPoolId},
+};
 
 #[test]
 fn uses_configured_strategy_name() {
@@ -315,4 +321,104 @@ fn restored_seen_pool_prevents_duplicate_buy_after_closed_position() {
         decision.reason(),
         Some("entry.buy_eligible_pool_once:pool already bought")
     );
+}
+
+#[test]
+fn entry_bankroll_blocks_buy_when_restored_seen_pool_consumes_bankroll() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 1,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::with_bought_pools(
+        SnipeAllConfig {
+            entry_bankroll_wei: Some(U256::from(10_000_000_000_000_000u64)),
+            ..SnipeAllConfig::default()
+        },
+        vec![TokenPoolId::new(
+            Address::repeat_byte(0xaa),
+            Address::repeat_byte(0xbb).to_string(),
+        )],
+    );
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 2,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(decision.reason(), Some("entry.bankroll_insufficient"));
+}
+
+#[test]
+fn entry_bankroll_allows_redeploying_confirmed_profit() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 3,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let risks = Vec::new();
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        entry_bankroll_wei: Some(U256::from(10_000_000_000_000_000u64)),
+        ..SnipeAllConfig::default()
+    });
+
+    let mut closed_pool = pool.clone();
+    closed_pool.token_address = Address::repeat_byte(0xcc);
+    closed_pool.address = TokenPoolId::new(
+        closed_pool.token_address,
+        Address::repeat_byte(0xdd).to_string(),
+    );
+    let mut closed = confirmed_position(&strategy, &closed_pool);
+    closed.entry_cost_basis = Some(Decimal::new(1, 2));
+    closed.mark_intent_created(OrderSide::Sell).unwrap();
+    closed
+        .mark_order_submitted(OrderId("sell-profit".to_string()), OrderSide::Sell)
+        .unwrap();
+    closed
+        .apply_execution_report(&ExecutionReport {
+            order_id: OrderId("sell-profit".to_string()),
+            status: ExecutionStatus::Confirmed,
+            tx_hash: None,
+            block_number: Some(2),
+            filled_amount: Some(Amount {
+                raw: U256::from(20_000_000_000_000_000u64),
+                decimals: 18,
+            }),
+            token_amount: None,
+            gas_used: Some(120_000),
+            gas_cost: None,
+            error: None,
+        })
+        .unwrap();
+
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(closed.id.clone(), closed);
+    let ctx = ctx(&market, &portfolio, &risks);
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 3,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(decision.order_intent().is_some());
 }

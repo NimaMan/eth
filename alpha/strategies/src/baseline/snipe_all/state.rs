@@ -43,6 +43,10 @@ impl SnipeAllState {
         &self.bought_pools
     }
 
+    pub fn bought_pool_count(&self) -> usize {
+        self.bought_pools.len()
+    }
+
     pub fn observe_active_hold_block(
         &mut self,
         position_id: &PositionId,
