@@ -17,3 +17,11 @@ machine-local secret paths here.
 | `kartal-policy.mainnet.json` | Intended Kartal allowlist and request-policy shape for this deployed address. |
 
 The resolved run inputs belong under `../runs/<run-id>/inputs.json`.
+
+The deployed mainnet address is also duplicated in the ETH root config files:
+
+- `config.toml`: `ethereum.mainnet.trading_vaults.uniswap_v2.address`;
+- `config.env`: `ETH_MAINNET_UNISWAP_V2_TRADING_VAULT`.
+
+Keep those values aligned with `mainnet.toml`, `alpha-route-policy.mainnet.toml`,
+and `kartal-policy.mainnet.json`.

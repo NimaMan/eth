@@ -44,8 +44,10 @@ items:
     requirement: Confirm ranked gas candidates are required and unranked value-cap fallback is rejected.
   - id: final-simulation-reviewed
     area: simulation
-    status: todo
+    status: partial
     requirement: Confirm exact buy and emergency-sell calldata are simulated against current state before submission.
+    evidence: onchain-deployments/uniswap-v2-trading-vault/simulations/
+    note: Deployed-vault simulator now covers functional success and negative cases. Keep partial until the live planner's exact final Kartal request is simulated and attached for each real submission.
   - id: kartal-policy-reviewed
     area: execution
     status: reviewed

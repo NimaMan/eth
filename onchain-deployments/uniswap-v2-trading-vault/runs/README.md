@@ -32,3 +32,7 @@ network, and version, for example:
 | `verification-output.json` | Contract verification result. |
 | `post-deploy-smoke.json` | Immutable readback checks. |
 | `signoff.json` | Final operator and reviewer approval. |
+
+Deployed-vault functional and performance simulations live under
+`../simulations/reports/<run-id>/`, because they can be rerun against current
+local Reth state after deployment.

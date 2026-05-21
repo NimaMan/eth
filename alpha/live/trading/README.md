@@ -23,6 +23,13 @@ real executor boundary without broadcasting. The no-capital live chain-sim
 runner is `eth_alpha_live_backtest_trader`; historical replay is
 `eth_alpha_backtest_trader`.
 
+The deployed Uniswap V2 trading vault is
+`0x28474cbCd780AeEb3ED1501B68254bEd87cF5597`, also recorded in the root
+`config.toml` and `config.env`. Live final simulation and Kartal submission for
+Mode A must target this vault. Direct Uniswap V2 router simulation is retained
+only as a gas and behavior baseline; it is not the final pre-submit check for a
+real live order.
+
 Missing before a live strategy can use this crate for public real capital:
 
 - Replace the temporary trader resolver with a production
@@ -130,6 +137,11 @@ mempool/confirmed risk signal
        calldata
        ETH value
        gas limit and estimated gas used
+     For Mode A Uniswap V2 live trading, the target is the deployed
+     UniswapV2TradingVault, not the router. Buy calldata leaves output tokens in
+     the vault. Emergency-sell calldata lets the vault approve the exact token
+     amount internally, execute the router sell, and send recovered ETH to the
+     configured treasury.
   -> AllowanceChecker proves the sell token can be spent, or marks the trading
      vault route as internally approved by the emergency-sell call
   -> PreSubmitSimulator simulates the exact calldata against current state

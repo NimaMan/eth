@@ -14,6 +14,7 @@ controls.
 | `checklist.yaml` | Required review checklist before mainnet deployment. |
 | `findings.jsonl` | Append-only findings and resolutions. One JSON object per line. |
 | `contract-test-gas-review-2026-05-19.md` | Current contract test and gas review evidence. |
+| `../simulations/` | Deployed-vault current-state simulation suite and reports. |
 
 Resolve all high and medium findings before deployment. Any accepted low/info
 finding must name the owner and reason in `findings.jsonl`.

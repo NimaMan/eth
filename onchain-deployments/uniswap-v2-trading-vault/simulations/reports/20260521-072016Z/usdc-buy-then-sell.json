@@ -1,0 +1,62 @@
+{
+  "balances_after": {
+    "owner_eth_wei": "724459730584636493",
+    "owner_token_raw": "0",
+    "vault_eth_wei": "0",
+    "vault_token_raw": "0"
+  },
+  "balances_before": {
+    "owner_eth_wei": "725173949668084153",
+    "owner_token_raw": "0",
+    "vault_eth_wei": "0",
+    "vault_token_raw": "0"
+  },
+  "block": 25142083,
+  "buy": {
+    "effective_gas_price_wei": "2106752488",
+    "effective_priority_fee_per_gas_wei": "2000000000",
+    "estimated_priority_fee_spend_wei": "292398000000000",
+    "gas_used": 146199,
+    "logs": 6,
+    "revert_reason": null,
+    "success": true
+  },
+  "chain_state": {
+    "total_gas_used": 310577,
+    "transactions_executed": 2
+  },
+  "deadline": 1800000000,
+  "gas_policy": {
+    "block_base_fee_per_gas_wei": "106752488",
+    "direct_coinbase_payment_supported_by_deployed_vault": false,
+    "kind": "eip1559_public_priority_fee",
+    "max_fee_per_gas_wei": "50000000000",
+    "note": "This models the current v1 bribe path: public EIP-1559 priority fee. Direct block.coinbase or private bundle bribes require a new contract/protocol path.",
+    "priority_fee_per_gas_wei": "2000000000"
+  },
+  "inputs": {
+    "buy_eth_wei": "10000000000000000",
+    "min_eth_out_wei": "1",
+    "min_tokens_out_raw": "1",
+    "sell_amount_raw": "21241070",
+    "transfer_amount_raw": "100000000000000000000"
+  },
+  "latest_context_block": 25142083,
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "reth_datadir": "/home/nima/storage/samsung8tb/ethereum/reth",
+  "scenario": "BuyThenSell",
+  "schema": "uniswap_v2_trading_vault_deployed_simulation_v1",
+  "symbol": "USDC",
+  "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "transfer": null,
+  "vault": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597",
+  "vault_sell": {
+    "effective_gas_price_wei": "2106752488",
+    "effective_priority_fee_per_gas_wei": "2000000000",
+    "estimated_priority_fee_spend_wei": "328756000000000",
+    "gas_used": 164378,
+    "logs": 9,
+    "revert_reason": null,
+    "success": true
+  }
+}

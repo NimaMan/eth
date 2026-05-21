@@ -71,6 +71,36 @@ fn encode_swap_exact_eth_for_tokens(
     Bytes::from(data)
 }
 
+/// Encode swapExactETHForTokensSupportingFeeOnTransferTokens(amountOutMin, path, to, deadline)
+fn encode_swap_exact_eth_for_tokens_supporting_fee(
+    amount_out_min: U256,
+    path: &[Address],
+    to: Address,
+    deadline: U256,
+) -> Bytes {
+    // Function selector: 0xb6f9de95
+    let mut data = vec![0xb6, 0xf9, 0xde, 0x95];
+
+    // amountOutMin
+    data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+
+    // path offset (dynamic array) -> 0x80
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&[0, 0, 0, 0x80]);
+
+    // to address (padded)
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(to.as_slice());
+
+    // deadline
+    data.extend_from_slice(&deadline.to_be_bytes::<32>());
+
+    // path dynamic array
+    data.extend_from_slice(&encode_dynamic_address_array(path));
+
+    Bytes::from(data)
+}
+
 /// Build a V2-style buy swap (ETH -> token) via router.
 fn default_buy_path(token_out: Address) -> [Address; 2] {
     [weth_address(), token_out]
@@ -150,6 +180,56 @@ pub fn build_buy_swap_v2_with_min_out_path(
 ) -> UnsignedTransaction {
     let calldata =
         encode_swap_exact_eth_for_tokens(amount_out_min, path, buyer, U256::from(deadline));
+
+    UnsignedTransaction {
+        from: Some(buyer),
+        to: Some(router_address(router)),
+        gas: Some(500_000),
+        gas_price: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(amount_in_eth),
+        data: Some(calldata),
+        nonce: None,
+        ..Default::default()
+    }
+}
+
+/// Build a V2-style buy swap through the supporting-fee-on-transfer router
+/// method. This matches the UniswapV2TradingVault buy path.
+pub fn build_buy_swap_v2_supporting_fee_with_min_out(
+    router: Router,
+    buyer: Address,
+    token_out: Address,
+    amount_in_eth: U256,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let path = default_buy_path(token_out);
+    build_buy_swap_v2_supporting_fee_with_min_out_path(
+        router,
+        buyer,
+        amount_in_eth,
+        &path,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_buy_swap_v2_supporting_fee_with_min_out_path(
+    router: Router,
+    buyer: Address,
+    amount_in_eth: U256,
+    path: &[Address],
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_swap_exact_eth_for_tokens_supporting_fee(
+        amount_out_min,
+        path,
+        buyer,
+        U256::from(deadline),
+    );
 
     UnsignedTransaction {
         from: Some(buyer),
@@ -484,5 +564,50 @@ pub fn build_token_to_token_swap_v2_with_min_out(
         data: Some(calldata),
         nonce: None,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::keccak256;
+
+    #[test]
+    fn encodes_supporting_fee_buy_selector_and_fields() {
+        let token = Address::with_last_byte(0x22);
+        let path = default_buy_path(token);
+        let data = encode_swap_exact_eth_for_tokens_supporting_fee(
+            U256::from(123),
+            &path,
+            Address::with_last_byte(0x33),
+            U256::from(1_800_000_000u64),
+        );
+        let selector = keccak256(
+            "swapExactETHForTokensSupportingFeeOnTransferTokens(uint256,address[],address,uint256)"
+                .as_bytes(),
+        );
+
+        assert_eq!(&data[..4], &selector[..4]);
+        assert_eq!(data.len(), 4 + 32 * 4 + 32 + 32 * 2);
+    }
+
+    #[test]
+    fn builds_supporting_fee_buy_to_router() {
+        let buyer = Address::with_last_byte(0x44);
+        let token = Address::with_last_byte(0x55);
+        let tx = build_buy_swap_v2_supporting_fee_with_min_out(
+            Router::UniswapV2,
+            buyer,
+            token,
+            U256::from(1_000_000_000_000_000u128),
+            U256::from(1),
+            1_800_000_000,
+        );
+
+        assert_eq!(tx.from, Some(buyer));
+        assert_eq!(tx.to, Some(router_address(Router::UniswapV2)));
+        assert_eq!(tx.value, Some(U256::from(1_000_000_000_000_000u128)));
+        assert_eq!(tx.gas, Some(500_000));
+        assert_eq!(&tx.data.expect("calldata")[..4], &[0xb6, 0xf9, 0xde, 0x95]);
     }
 }

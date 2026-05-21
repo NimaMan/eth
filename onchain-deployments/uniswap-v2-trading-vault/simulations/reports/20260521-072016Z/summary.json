@@ -1,0 +1,34 @@
+{
+  "schema": "uniswap_v2_trading_vault_simulation_suite_v1",
+  "run_id": "20260521-072016Z",
+  "report_dir": "/home/nima/code/crypto/blockchains/eth/onchain-deployments/uniswap-v2-trading-vault/simulations/reports/20260521-072016Z",
+  "passed": true,
+  "cases": {
+    "usdc-buy-then-sell": {
+      "block": 25142083,
+      "vault_buy_gas_used": 146199,
+      "vault_sell_gas_used": 164378,
+      "vault_total_gas_used": 310577,
+      "direct_buy_gas_used": 122335,
+      "direct_approve_gas_used": 55570,
+      "direct_sell_gas_used": 113885,
+      "direct_total_gas_used": 291790,
+      "vault_minus_direct_total_gas": 18787
+    },
+    "otto-wallet-transfer-then-sell": {
+      "block": 25142083,
+      "vault_transfer_gas_used": 76397,
+      "vault_sell_gas_used": 199375,
+      "vault_total_gas_used": 275772,
+      "direct_approve_gas_used": 46328,
+      "direct_sell_gas_used": 160936,
+      "direct_total_gas_used": 207264,
+      "vault_minus_direct_total_gas": 68508
+    },
+    "otto-current-state-sell-negative": {
+      "block": 25142083,
+      "sell_success": false,
+      "revert_reason": "TransferHelper: TRANSFER_FROM_FAILED"
+    }
+  }
+}

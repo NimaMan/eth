@@ -10,6 +10,9 @@ those pieces into one deployable, auditable on-chain surface.
 
 ## Scope
 
+Mainnet deployed vault:
+`0x28474cbCd780AeEb3ED1501B68254bEd87cF5597`.
+
 The vault supports Mode A for Uniswap V2-style exits:
 
 - buy ETH to token through the vault and hold the token in the vault;
@@ -23,6 +26,39 @@ The vault does not contain direct `block.coinbase` payments, private relay
 logic, route discovery, quote logic, or gas-rank logic. Miner-bribe policy is
 handled off-chain by `alpha/live/trading` and Kartal through the outer
 transaction's EIP-1559 fee fields.
+
+## Live Trading Sequence
+
+For live trading, the final transaction target is the deployed vault, not the
+Uniswap V2 router. The vault then calls the router internally:
+
+```text
+strategy signal
+  -> alpha planner builds vault calldata
+  -> final simulator executes the exact vault calldata against current state
+  -> Kartal policy verifies from, target, selector, value, gas, fee, and metadata
+  -> Kartal signs and dry-runs or broadcasts the vault transaction
+  -> UniswapV2TradingVault calls the Uniswap V2 router internally
+  -> alpha reconciles the tx receipt into execution state
+```
+
+The production target and selectors are:
+
+| Action | `to` | Selector | Custody effect |
+| --- | --- | --- | --- |
+| Buy | `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` | `0x8a62666c` | Bought tokens stay in the vault. |
+| Emergency sell | `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` | `0x5f413d10` | The vault approves the exact token amount, sells, clears allowance by reverting on failure, and sends ETH proceeds to treasury. |
+
+Direct-router simulations remain useful only as a baseline for gas and
+functional comparison. They are not the final live readiness gate because they
+do not exercise the production custody, approval, treasury, or Kartal allowlist
+surface.
+
+The extra gas versus direct router calls is an accepted tradeoff for Mode A.
+The vault owns token custody after buy, avoids standing router allowances, and
+performs the exact approve-and-sell sequence when a sell is submitted. This is
+the behavior we want for live trading because alpha and Kartal only need to
+submit a narrow vault call instead of broad arbitrary router calldata.
 
 ## Deployment Flow
 
@@ -44,7 +80,8 @@ transaction's EIP-1559 fee fields.
     WETH, gas policy, and Kartal policy are signed off.
 12. Run `scripts/06_verify_contract.sh`.
 13. Run `scripts/07_post_deploy_smoke.sh`.
-14. Store the final receipt, verification, smoke result, and `signoff.json` in
+14. Run `scripts/08_run_simulation_suite.sh` against the deployed vault.
+15. Store the final receipt, verification, smoke result, and `signoff.json` in
     the run folder.
 
 ## Required Mainnet Inputs

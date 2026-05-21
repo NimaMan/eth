@@ -33,3 +33,15 @@ latest_chain_state_block_number_key = "eth/live/latest/chain_state_block_number"
 reth_rpc = "http://127.0.0.1:8545"
 reth_engine = "http://127.0.0.1:8551"
 rabbitmq_url_env = "RABBITMQ_URL"
+
+[ethereum.mainnet.contracts]
+weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+uniswap_v2_router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+uniswap_v2_trading_vault = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
+
+[ethereum.mainnet.trading_vaults.uniswap_v2]
+address = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
+owner = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+custody_model = "vault_holds_bought_tokens_and_sells_with_exact_internal_approval"

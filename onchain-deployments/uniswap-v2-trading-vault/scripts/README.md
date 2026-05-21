@@ -21,5 +21,6 @@ variables are present.
 | `05_deploy.sh` | Deploy the vault to mainnet after explicit confirmation. |
 | `06_verify_contract.sh` | Verify the deployed contract and constructor arguments. |
 | `07_post_deploy_smoke.sh` | Read deployed immutable values and compare them to expected config. |
+| `08_run_simulation_suite.sh` | Run deployed-vault functional and gas-threshold simulations. |
 
 Run evidence belongs under `../runs/<run-id>/`.

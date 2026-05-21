@@ -1,0 +1,57 @@
+{
+  "approve": {
+    "effective_gas_price_wei": "2106752488",
+    "effective_priority_fee_per_gas_wei": "2000000000",
+    "estimated_priority_fee_spend_wei": "92656000000000",
+    "gas_used": 46328,
+    "logs": 1,
+    "revert_reason": null,
+    "success": true
+  },
+  "balances_after": {
+    "owner_eth_wei": "724740823860257433",
+    "owner_token_raw": "79692954324801375168453"
+  },
+  "balances_before": {
+    "owner_eth_wei": "725173949668084153",
+    "owner_token_raw": "79792954324801375168453"
+  },
+  "block": 25142083,
+  "chain_state": {
+    "total_gas_used": 207264,
+    "transactions_executed": 2
+  },
+  "deadline": 1800000000,
+  "direct_buy": null,
+  "direct_sell": {
+    "effective_gas_price_wei": "2106752488",
+    "effective_priority_fee_per_gas_wei": "2000000000",
+    "estimated_priority_fee_spend_wei": "321872000000000",
+    "gas_used": 160936,
+    "logs": 7,
+    "revert_reason": null,
+    "success": true
+  },
+  "gas_policy": {
+    "block_base_fee_per_gas_wei": "106752488",
+    "direct_coinbase_payment_supported": false,
+    "kind": "eip1559_public_priority_fee",
+    "max_fee_per_gas_wei": "50000000000",
+    "note": "Direct-router baseline uses the same public EIP-1559 fee model. It is not the production trading surface.",
+    "priority_fee_per_gas_wei": "2000000000"
+  },
+  "inputs": {
+    "buy_eth_wei": "10000000000000000",
+    "min_eth_out_wei": "1",
+    "min_tokens_out_raw": "1",
+    "sell_amount_raw": "100000000000000000000"
+  },
+  "latest_context_block": 25142083,
+  "owner": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
+  "reth_datadir": "/home/nima/storage/samsung8tb/ethereum/reth",
+  "router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+  "scenario": "WalletApproveThenSell",
+  "schema": "uniswap_v2_direct_router_simulation_v1",
+  "symbol": "OTTO",
+  "token": "0x12512a46d971BD035D9466246bc46DAf389E281c"
+}

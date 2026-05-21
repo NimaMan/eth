@@ -165,3 +165,7 @@ path = "examples/tx_builders/uniswap_v4_trading_vault/candidate_vault_rehearsal.
 [[example]]
 name = "uniswap_v2_trading_vault_deployed"
 path = "examples/tx_builders/uniswap_v2_trading_vault_deployed.rs"
+
+[[example]]
+name = "uniswap_v2_direct_router"
+path = "examples/tx_builders/uniswap_v2_direct_router.rs"
