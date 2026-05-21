@@ -110,14 +110,14 @@ impl PostgresTradingStore {
         .map_err(store_error)?;
         if position.state == PositionState::SellFailed {
             if let Some(block_number) = position.last_exit_failure_block {
-                self.append_failed_exit_trade_snapshot(position, block_number)
+                self.append_failed_exit_snapshot(position, block_number)
                     .await?;
             }
         }
         Ok(())
     }
 
-    async fn append_failed_exit_trade_snapshot(
+    async fn append_failed_exit_snapshot(
         &self,
         position: &Position,
         block_number: u64,
@@ -155,6 +155,83 @@ impl PostgresTradingStore {
                 WHERE t.trade_id = $1
                   AND t.state = 'sell_failed'
             ),
+            position_updated AS (
+                UPDATE alpha_trading.position_snapshots ps
+                SET observed_block_number = source.observed_block_number,
+                    current_value_eth = source.current_value_eth,
+                    realized_profit_eth = source.realized_pnl_eth,
+                    unrealized_profit_eth = source.unrealized_pnl_eth,
+                    roi = source.roi,
+                    payload = jsonb_build_object(
+                        'position_id', source.position_id,
+                        'trade_id', source.trade_id,
+                        'state', 'SellFailed',
+                        'block_number', source.block_number,
+                        'observed_block_number', source.observed_block_number,
+                        'valuation_block_number', source.valuation_block_number,
+                        'current_value_eth', source.current_value_eth,
+                        'realized_profit_eth', source.realized_pnl_eth,
+                        'unrealized_profit_eth', source.unrealized_pnl_eth,
+                        'roi', source.roi
+                    )
+                FROM source
+                WHERE ps.run_id = source.run_id
+                  AND ps.position_id = source.position_id
+                  AND ps.trade_id = source.trade_id
+                  AND ps.state = source.state
+                  AND ps.block_number = source.block_number
+                  AND ps.valuation_block_number IS NOT DISTINCT FROM source.valuation_block_number
+                RETURNING ps.id
+            ),
+            position_inserted AS (
+                INSERT INTO alpha_trading.position_snapshots (
+                    run_id, position_id, trade_id, state, block_number,
+                    observed_block_number, valuation_block_number, current_value_eth,
+                    realized_profit_eth, unrealized_profit_eth, roi, payload, created_at
+                )
+                SELECT source.run_id,
+                       source.position_id,
+                       source.trade_id,
+                       source.state,
+                       source.block_number,
+                       source.observed_block_number,
+                       source.valuation_block_number,
+                       source.current_value_eth,
+                       source.realized_pnl_eth,
+                       source.unrealized_pnl_eth,
+                       source.roi,
+                       jsonb_build_object(
+                           'position_id', source.position_id,
+                           'trade_id', source.trade_id,
+                           'state', 'SellFailed',
+                           'block_number', source.block_number,
+                           'observed_block_number', source.observed_block_number,
+                           'valuation_block_number', source.valuation_block_number,
+                           'current_value_eth', source.current_value_eth,
+                           'realized_profit_eth', source.realized_pnl_eth,
+                           'unrealized_profit_eth', source.unrealized_pnl_eth,
+                           'roi', source.roi
+                       ),
+                       NOW()
+                FROM source
+                WHERE NOT EXISTS (SELECT 1 FROM position_updated)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM alpha_trading.position_snapshots existing
+                      WHERE existing.run_id = source.run_id
+                        AND existing.position_id = source.position_id
+                        AND existing.trade_id = source.trade_id
+                        AND existing.state = source.state
+                        AND existing.block_number = source.block_number
+                        AND existing.valuation_block_number IS NOT DISTINCT FROM source.valuation_block_number
+                  )
+                RETURNING id
+            ),
+            position_written AS (
+                SELECT id FROM position_updated
+                UNION ALL
+                SELECT id FROM position_inserted
+            ),
             updated AS (
                 UPDATE alpha_trading.trade_snapshots ts
                 SET observed_block_number = source.observed_block_number,
@@ -187,6 +264,7 @@ impl PostgresTradingStore {
                   AND ts.state = source.state
                   AND ts.block_number = source.block_number
                   AND ts.valuation_block_number IS NOT DISTINCT FROM source.valuation_block_number
+                  AND EXISTS (SELECT 1 FROM position_written)
                 RETURNING ts.trade_id
             ),
             inserted AS (
@@ -230,7 +308,8 @@ impl PostgresTradingStore {
                        ),
                        NOW()
                 FROM source
-                WHERE NOT EXISTS (SELECT 1 FROM updated)
+                WHERE EXISTS (SELECT 1 FROM position_written)
+                  AND NOT EXISTS (SELECT 1 FROM updated)
                   AND NOT EXISTS (
                       SELECT 1
                       FROM alpha_trading.trade_snapshots existing
