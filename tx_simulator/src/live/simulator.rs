@@ -68,6 +68,12 @@ impl LiveTxSimulator {
 
     /// Full state-selection diagnostics for live simulation.
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
+        self.latest_state_status_blocking()
+    }
+
+    /// Blocking variant for callers that already run this work outside an async
+    /// hot path.
+    pub fn latest_state_status_blocking(&self) -> Result<LiveStateStatus> {
         let latest_reth_finished = self.latest_reth_finished_block_number()?;
         let latest_historical_context = self.latest_historical_context_block_number()?;
         select_state_status(latest_reth_finished, latest_historical_context, None, None)

@@ -209,7 +209,7 @@ async fn main() -> Result<()> {
     );
 
     info!("  Report Interval: {}s", cfg_report_interval);
-    info!("  Live data Redis: disabled; simulations use local Reth historical context");
+    info!("  Live state source: local Reth historical context or direct live session");
     info!("================================");
 
     let allow_database_disabled =
@@ -318,11 +318,9 @@ async fn main() -> Result<()> {
                 .provider_factory()
                 .clone();
             let writer = std::sync::Arc::new(
-                reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new_with_fallbacks(
+                reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
                     db.clone(),
                     std::sync::Arc::new(provider_factory),
-                    cfg_reth_db_path.clone(),
-                    mempool_processor::config::eth_rpc_url_from_env(),
                 ),
             );
             let cfg = ArrivalRecorderConfig {
@@ -462,6 +460,7 @@ async fn main() -> Result<()> {
     let mut consecutive_empty = 0u64;
     let mut last_report_total = 0u64;
     let start_time = Instant::now();
+    let simulation_status_probe_in_flight = Arc::new(AtomicBool::new(false));
 
     // Main processing loop
     loop {
@@ -624,10 +623,16 @@ async fn main() -> Result<()> {
                 publisher_stats.errors
             );
             info!(
-                "📊 Mempool ingress: received={} dropped={} ipc_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
+                "📊 Mempool ingress: received={} dropped={} critical_received={} critical_dropped={} ipc_queue={} normal_queue={} critical_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
                 ipc_stats.total,
                 ipc_stats.total_dropped,
+                ipc_stats.critical_received,
+                ipc_stats.critical_dropped,
                 ipc_stats.queue_size,
+                ipc_stats
+                    .queue_size
+                    .saturating_sub(ipc_stats.critical_queue_size),
+                ipc_stats.critical_queue_size,
                 manager_stats.queue_current_size,
                 manager_stats.queue_total_enqueued,
                 manager_stats.queue_total_processed,
@@ -715,29 +720,11 @@ async fn main() -> Result<()> {
             );
             last_report_total = total;
 
-            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-            match mempool_simulator.latest_simulation_status().await {
-                Ok(status) => {
-                    let line = format!(
-                        "[{}]  INFO 📡 Latest simulation block target: {} source={:?} reth_finished={} historical_context={} live_head={:?} tracked_state={:?}",
-                        timestamp,
-                        status.selected_block_number,
-                        status.source,
-                        status.latest_reth_finished_block_number,
-                        status.latest_historical_context_block_number,
-                        status.latest_live_block_number,
-                        status.latest_tracked_state_block_number
-                    );
-                    append_line_to_file(&external_data_log_path, &line);
-                }
-                Err(err) => {
-                    let line = format!(
-                        "[{}]  WARN 📡 Unable to determine latest simulation block: {}",
-                        timestamp, err
-                    );
-                    append_line_to_file(&external_data_log_path, &line);
-                }
-            }
+            schedule_latest_simulation_status_log(
+                mempool_simulator.clone(),
+                external_data_log_path.clone(),
+                simulation_status_probe_in_flight.clone(),
+            );
             last_report = Instant::now();
         }
 
@@ -862,4 +849,69 @@ fn append_line_to_file(path: &Path, line: &str) {
             err
         );
     }
+}
+
+fn schedule_latest_simulation_status_log(
+    mempool_simulator: Arc<MempoolSimulator>,
+    external_data_log_path: PathBuf,
+    probe_in_flight: Arc<AtomicBool>,
+) {
+    if probe_in_flight.swap(true, Ordering::Relaxed) {
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        append_line_to_file(
+            &external_data_log_path,
+            &format!(
+                "[{}]  WARN 📡 Skipping latest simulation block probe; previous probe is still running",
+                timestamp
+            ),
+        );
+        return;
+    }
+
+    tokio::spawn(async move {
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let status_task = tokio::task::spawn_blocking(move || {
+            mempool_simulator.latest_simulation_status_blocking()
+        });
+
+        match time::timeout(Duration::from_secs(2), status_task).await {
+            Ok(Ok(Ok(status))) => {
+                let line = format!(
+                    "[{}]  INFO 📡 Latest simulation block target: {} source={:?} reth_finished={} historical_context={} live_head={:?} tracked_state={:?}",
+                    timestamp,
+                    status.selected_block_number,
+                    status.source,
+                    status.latest_reth_finished_block_number,
+                    status.latest_historical_context_block_number,
+                    status.latest_live_block_number,
+                    status.latest_tracked_state_block_number
+                );
+                append_line_to_file(&external_data_log_path, &line);
+                probe_in_flight.store(false, Ordering::Relaxed);
+            }
+            Ok(Ok(Err(err))) => {
+                let line = format!(
+                    "[{}]  WARN 📡 Unable to determine latest simulation block: {}",
+                    timestamp, err
+                );
+                append_line_to_file(&external_data_log_path, &line);
+                probe_in_flight.store(false, Ordering::Relaxed);
+            }
+            Ok(Err(err)) => {
+                let line = format!(
+                    "[{}]  WARN 📡 Latest simulation block probe task failed: {}",
+                    timestamp, err
+                );
+                append_line_to_file(&external_data_log_path, &line);
+                probe_in_flight.store(false, Ordering::Relaxed);
+            }
+            Err(_) => {
+                let line = format!(
+                    "[{}]  WARN 📡 Latest simulation block probe timed out after 2s; disabling further probes for this process",
+                    timestamp
+                );
+                append_line_to_file(&external_data_log_path, &line);
+            }
+        }
+    });
 }

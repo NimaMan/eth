@@ -233,6 +233,12 @@ impl MempoolSimulator {
     pub async fn latest_simulation_status(&self) -> Result<LiveStateStatus> {
         self.live_tx_simulator.latest_state_status().await
     }
+
+    /// Blocking variant for status diagnostics that must not run on the async
+    /// mempool drain loop.
+    pub fn latest_simulation_status_blocking(&self) -> Result<LiveStateStatus> {
+        self.live_tx_simulator.latest_state_status_blocking()
+    }
 }
 
 /// Convert mempool transaction to UnsignedTransaction (convenience function)

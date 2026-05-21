@@ -5,7 +5,7 @@
 mod classify;
 mod lanes;
 mod metrics;
-mod protocol;
+pub(crate) mod protocol;
 mod router;
 pub mod types;
 

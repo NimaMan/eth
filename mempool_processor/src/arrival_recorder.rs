@@ -123,8 +123,15 @@ impl MempoolArrivalRecorder {
                     }
                 }
 
-                match writer_clone.write_arrivals_by_hashes_ms_return_resolved(&batch) {
-                    Ok(resolved) => {
+                let writer_for_flush = writer_clone.clone();
+                let batch_for_flush = batch.clone();
+                let write_result = tokio::task::spawn_blocking(move || {
+                    writer_for_flush.write_arrivals_by_hashes_ms_return_resolved(&batch_for_flush)
+                })
+                .await;
+
+                match write_result {
+                    Ok(Ok(resolved)) => {
                         let resolved_set: HashSet<B256> = resolved.into_iter().collect();
                         let resolved_count = resolved_set.len() as u64;
                         counters_clone
@@ -147,8 +154,19 @@ impl MempoolArrivalRecorder {
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         tracing::warn!("MempoolArrivalRecorder flush error: {}", e);
+                        counters_clone.flush_errors.fetch_add(1, Ordering::Relaxed);
+                        let mut map = pending_clone.lock();
+                        for (hash, _) in &batch {
+                            if let Some(arrival) = map.get_mut(hash) {
+                                arrival.attempts = arrival.attempts.saturating_add(1);
+                                arrival.last_attempt_ms = now_ms;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("MempoolArrivalRecorder flush task join error: {}", e);
                         counters_clone.flush_errors.fetch_add(1, Ordering::Relaxed);
                         let mut map = pending_clone.lock();
                         for (hash, _) in &batch {
