@@ -123,9 +123,17 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Were submitted decisions made inside the replayed input range?",
             "Rejects submitted buy/sell decisions whose decision block is outside the result set start/end blocks.",
         ),
+        "trades_match_allowed_protocols" => (
+            "Did trades respect configured protocol filters?",
+            "Checks every persisted trade protocol against the strategy's allowed_protocols config when that allowlist is non-empty.",
+        ),
         "terminal_report_matches_execution_delay" => (
             "Do fills land at the configured execution delay?",
             "Checks each order's terminal confirmed/failed/cancelled report block equals submitted_block + execution_delay_blocks.",
+        ),
+        "submitted_orders_have_terminal_report_after_delay" => (
+            "Does every elapsed submitted order have a terminal execution report?",
+            "Fails if a submitted buy or sell order has no confirmed, failed, or cancelled report after the configured execution delay has elapsed.",
         ),
         "confirmed_reports_have_simulation_outputs" => (
             "Are confirmed fills backed by persisted EVM simulation output?",
@@ -179,6 +187,14 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Does total PnL reconcile with realized and unrealized PnL?",
             "Checks total_pnl_eth equals realized_pnl_eth plus unrealized_pnl_eth within a small ETH tolerance.",
         ),
+        "open_trade_pnl_formula" => (
+            "Does open-trade PnL reconcile with entry, current value, and gas?",
+            "For open trades, checks realized_pnl_eth equals negative accumulated gas and unrealized_pnl_eth equals current_value_eth minus entry_cost_eth.",
+        ),
+        "open_snapshot_pnl_formula" => (
+            "Do open-state snapshots reconcile with entry, current value, and gas?",
+            "For every open-state snapshot, checks realized PnL equals gas accumulated through the valuation block and unrealized PnL equals snapshot current value minus entry cost.",
+        ),
         "realized_sell_pnl_formula" => (
             "Does realized PnL reconcile with entry, exit, and gas?",
             "For closed trades, checks realized_pnl_eth equals exit_value_eth minus entry_cost_eth minus gas_cost_eth.",
@@ -217,11 +233,7 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         ),
         "zero_value_snapshots_do_not_reuse_stale_pool_metrics" => (
             "Do zero-value exposure snapshots avoid stale pool metrics?",
-            "Fails if a zero-value open or failed-exit snapshot still displays positive pool liquidity or price metrics from an older/pre-drain pool state.",
-        ),
-        "zero_value_snapshots_have_no_pool_metrics" => (
-            "Do zero-value exposure snapshots omit all pool metrics?",
-            "Strictly rejects any zero-current-value exposure snapshot that carries pool price, reserve, liquidity, or denom symbol metadata.",
+            "Fails if a display-near-zero open or failed-exit snapshot reuses positive pool liquidity or price metrics from an older/pre-drain pool state.",
         ),
         "terminal_snapshots_have_no_pool_metrics" => (
             "Do terminal closed snapshots omit pool metrics?",

@@ -89,7 +89,12 @@ pub async fn run_checks(
         .await?,
     );
     checks.push(signal_scope::submit_decisions_in_range_check(pool, result_set, strategy).await?);
+    checks.push(
+        signal_scope::trades_match_allowed_protocols_check(pool, result_set_id, strategy).await?,
+    );
     checks.push(execution_replay::execution_delay_check(pool, result_set, strategy).await?);
+    checks
+        .push(execution_replay::terminal_report_presence_check(pool, result_set, strategy).await?);
     checks.push(
         execution_replay::confirmed_reports_have_simulated_outputs_check(
             pool,
@@ -122,6 +127,8 @@ pub async fn run_checks(
     checks
         .push(accounting::failed_sell_gas_has_snapshot_check(pool, result_set_id, strategy).await?);
     checks.push(accounting::pnl_sum_check(pool, result_set_id, strategy).await?);
+    checks.push(accounting::open_trade_pnl_formula_check(pool, result_set_id, strategy).await?);
+    checks.push(accounting::open_snapshot_pnl_formula_check(pool, result_set_id, strategy).await?);
     checks.push(accounting::realized_sell_pnl_check(pool, result_set_id, strategy).await?);
     checks
         .push(accounting::closed_trade_zero_unrealized_check(pool, result_set_id, strategy).await?);
@@ -152,9 +159,6 @@ pub async fn run_checks(
     );
     checks.push(
         snapshots::zero_value_snapshot_pool_metrics_check(pool, result_set_id, strategy).await?,
-    );
-    checks.push(
-        snapshots::zero_value_snapshot_no_pool_metrics_check(pool, result_set_id, strategy).await?,
     );
     checks.push(
         snapshots::terminal_snapshot_no_pool_metrics_check(pool, result_set_id, strategy).await?,

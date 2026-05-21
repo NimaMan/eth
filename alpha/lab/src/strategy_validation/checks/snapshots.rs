@@ -434,47 +434,6 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
     .await
 }
 
-pub(super) async fn zero_value_snapshot_no_pool_metrics_check(
-    pool: &PgPool,
-    result_set_id: &str,
-    strategy: Option<&str>,
-) -> Result<CheckResult> {
-    count_check(
-        pool,
-        "snapshots",
-        "zero_value_snapshots_have_no_pool_metrics",
-        Verdict::Fail,
-        "zero-value exposure snapshots carry no pool price or liquidity metrics",
-        "zero-value exposure snapshots with any pool price or liquidity metrics",
-        r#"
-        SELECT count(*)
-        FROM alpha_trading.trade_snapshots ts
-        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
-        WHERE t.result_set_id = $1
-          AND ($2::text IS NULL OR t.strategy_name = $2)
-          AND ts.state IN (
-              'buy_confirmed',
-              'sell_intent_created',
-              'sell_submitted',
-              'sell_failed',
-              'sell_cancelled'
-          )
-          AND abs(coalesce(nullif(ts.current_value_eth, '')::numeric, 0)) <= 0.000001
-          AND (
-              nullif(ts.pool_liquidity_denom, '') IS NOT NULL
-              OR nullif(ts.pool_price_to_initial_price_ratio, '') IS NOT NULL
-              OR nullif(ts.pool_price_denom_per_token, '') IS NOT NULL
-              OR nullif(ts.pool_initial_price_denom_per_token, '') IS NOT NULL
-              OR nullif(ts.pool_token_reserve, '') IS NOT NULL
-              OR nullif(ts.pool_denom_symbol, '') IS NOT NULL
-          )
-        "#,
-        result_set_id,
-        strategy,
-    )
-    .await
-}
-
 pub(super) async fn terminal_snapshot_no_pool_metrics_check(
     pool: &PgPool,
     result_set_id: &str,

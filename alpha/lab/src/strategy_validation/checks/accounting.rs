@@ -180,6 +180,114 @@ pub(super) async fn pnl_sum_check(
     .await
 }
 
+pub(super) async fn open_trade_pnl_formula_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "open_trade_pnl_formula",
+        Verdict::Fail,
+        "open trade PnL equals realized gas loss plus current value minus entry cost",
+        "open trades with inconsistent realized or unrealized PnL",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades
+        WHERE result_set_id = $1
+          AND ($2::text IS NULL OR strategy_name = $2)
+          AND state IN (
+              'buy_confirmed',
+              'sell_intent_created',
+              'sell_submitted',
+              'sell_failed',
+              'sell_cancelled'
+          )
+          AND (
+              nullif(entry_cost_eth, '') IS NULL
+              OR nullif(current_value_eth, '') IS NULL
+              OR nullif(realized_pnl_eth, '') IS NULL
+              OR nullif(unrealized_pnl_eth, '') IS NULL
+              OR nullif(gas_cost_eth, '') IS NULL
+              OR abs(
+                  coalesce(nullif(realized_pnl_eth, '')::numeric, 0)
+                  + coalesce(nullif(gas_cost_eth, '')::numeric, 0)
+              ) > 0.000001
+              OR abs(
+                  coalesce(nullif(unrealized_pnl_eth, '')::numeric, 0)
+                  - (
+                      coalesce(nullif(current_value_eth, '')::numeric, 0)
+                      - coalesce(nullif(entry_cost_eth, '')::numeric, 0)
+                    )
+              ) > 0.000001
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn open_snapshot_pnl_formula_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "accounting",
+        "open_snapshot_pnl_formula",
+        Verdict::Fail,
+        "open-state snapshots reconcile current value, entry cost, and gas through their valuation block",
+        "open-state snapshots with inconsistent realized or unrealized PnL",
+        r#"
+        WITH event_gas AS (
+            SELECT ts.id,
+                   coalesce(sum(coalesce(nullif(te.gas_cost_eth, '')::numeric, 0)), 0) AS gas_cost_eth
+            FROM alpha_trading.trade_snapshots ts
+            LEFT JOIN alpha_trading.trade_events te
+              ON te.trade_id = ts.trade_id
+             AND te.block_number <= COALESCE(ts.valuation_block_number, ts.block_number)
+            GROUP BY ts.id
+        )
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        JOIN event_gas ON event_gas.id = ts.id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND ts.state IN (
+              'buy_confirmed',
+              'sell_intent_created',
+              'sell_submitted',
+              'sell_failed',
+              'sell_cancelled'
+          )
+          AND (
+              nullif(t.entry_cost_eth, '') IS NULL
+              OR nullif(ts.current_value_eth, '') IS NULL
+              OR nullif(ts.realized_pnl_eth, '') IS NULL
+              OR nullif(ts.unrealized_pnl_eth, '') IS NULL
+              OR abs(
+                  coalesce(nullif(ts.realized_pnl_eth, '')::numeric, 0)
+                  + coalesce(event_gas.gas_cost_eth, 0)
+              ) > 0.000001
+              OR abs(
+                  coalesce(nullif(ts.unrealized_pnl_eth, '')::numeric, 0)
+                  - (
+                      coalesce(nullif(ts.current_value_eth, '')::numeric, 0)
+                      - coalesce(nullif(t.entry_cost_eth, '')::numeric, 0)
+                    )
+              ) > 0.000001
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn realized_sell_pnl_check(
     pool: &PgPool,
     result_set_id: &str,

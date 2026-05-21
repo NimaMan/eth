@@ -144,3 +144,65 @@ pub(super) async fn submit_decisions_in_range_check(
     )
     .await
 }
+
+pub(super) async fn trades_match_allowed_protocols_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "signal_scope",
+        "trades_match_allowed_protocols",
+        Verdict::Fail,
+        "trades respect configured allowed_protocols filters",
+        "trades whose protocol is outside the configured allowed_protocols list",
+        r#"
+        WITH strategy_cfg AS (
+            SELECT spec->>'strategy_name' AS strategy_name,
+                   ARRAY(
+                       SELECT jsonb_array_elements_text(
+                           CASE
+                               WHEN jsonb_typeof(spec->'allowed_protocols') = 'array'
+                               THEN spec->'allowed_protocols'
+                               ELSE '[]'::jsonb
+                           END
+                       )
+                   ) AS allowed_protocols
+            FROM alpha_trading.backtest_result_sets rs
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE
+                    WHEN jsonb_typeof(rs.config->'strategies') = 'array'
+                    THEN rs.config->'strategies'
+                    ELSE '[]'::jsonb
+                END
+            ) AS spec
+            WHERE rs.result_set_id = $1
+            UNION ALL
+            SELECT rs.config->>'strategy_name' AS strategy_name,
+                   ARRAY(
+                       SELECT jsonb_array_elements_text(
+                           CASE
+                               WHEN jsonb_typeof(rs.config->'allowed_protocols') = 'array'
+                               THEN rs.config->'allowed_protocols'
+                               ELSE '[]'::jsonb
+                           END
+                       )
+                   ) AS allowed_protocols
+            FROM alpha_trading.backtest_result_sets rs
+            WHERE rs.result_set_id = $1
+              AND rs.config ? 'strategy_name'
+        )
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        JOIN strategy_cfg cfg ON cfg.strategy_name = t.strategy_name
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND cardinality(cfg.allowed_protocols) > 0
+          AND NOT (t.protocol = ANY(cfg.allowed_protocols))
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}

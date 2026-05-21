@@ -50,6 +50,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `historical_mempool_rows` | Did a historical backtest avoid pending mempool evidence? | Historical backtests must use mined/local evidence only. Pending mempool rows would leak live-only information into historical evaluation. | `signal_scope.rs` |
 | `market_buy_has_historical_observation` | Can every historical market buy be traced to an input observation? | A buy decision in historical mode should come from the replayed Risk Atlas observation for the same token, pool, and block. | `signal_scope.rs` |
 | `submit_decisions_within_result_range` | Were submitted decisions made inside the replayed input range? | Decisions outside the result-set block window would contaminate the backtest window. | `signal_scope.rs` |
+| `trades_match_allowed_protocols` | Did trades respect configured protocol filters? | A V2-only candidate should not accidentally persist V3/V4 trades because entry filtering or read-model wiring drifted. | `signal_scope.rs` |
 
 ### Decision Timing
 
@@ -73,6 +74,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | Code | Question | Why We Ask | File |
 | --- | --- | --- | --- |
 | `terminal_report_matches_execution_delay` | Do fills land at the configured execution delay? | Backtests should honor the configured delay from submission to terminal execution result. | `execution_replay.rs` |
+| `submitted_orders_have_terminal_report_after_delay` | Does every elapsed submitted order have a terminal execution report? | A submitted order stuck past the execution delay means the execution adapter or persistence pipeline dropped the terminal outcome. | `execution_replay.rs` |
 | `confirmed_reports_have_simulation_outputs` | Are confirmed fills backed by persisted EVM simulation output? | A confirmed fill must carry fill amount, gas, gas cost, and buy token output so PnL can be reconstructed. | `execution_replay.rs` |
 | `closed_trade_replay_inputs_present` | Can this closed trade be independently replayed? | Closed trades need buy token amount, sell order amount, and sell fill data for independent chain-sim replay. | `execution_replay.rs` |
 
@@ -97,6 +99,8 @@ strategy result and returns a backend-owned `CheckResult`.
 | `gas_cost_matches_trade_events` | Does gas cost come from the execution event stream? | Realized PnL must subtract all persisted buy/sell gas, not a stale or partial aggregate. | `accounting.rs` |
 | `failed_sell_gas_has_same_block_snapshot` | Does failed sell gas have a matching PnL snapshot? | Failed sell gas changes realized PnL immediately, so the failure block needs its own sell_failed snapshot. | `accounting.rs` |
 | `total_pnl_equals_realized_plus_unrealized` | Does total PnL reconcile with realized and unrealized PnL? | This catches inconsistent aggregate math before charts or summaries use total PnL. | `accounting.rs` |
+| `open_trade_pnl_formula` | Does open-trade PnL reconcile with entry, current value, and gas? | Open trades should realize only gas while unrealized PnL equals current value minus entry cost. | `accounting.rs` |
+| `open_snapshot_pnl_formula` | Do open-state snapshots reconcile with entry, current value, and gas? | Intermediate open snapshots should use gas accumulated through the valuation block and current value at that snapshot. | `accounting.rs` |
 | `realized_sell_pnl_formula` | Does realized PnL reconcile with entry, exit, and gas? | Closed-trade realized PnL should equal `exit_value - entry_cost - gas_cost`. | `accounting.rs` |
 | `closed_trade_has_no_unrealized_value` | Are closed trades fully realized? | A sell-confirmed trade should have zero current value and zero unrealized PnL. | `accounting.rs` |
 | `closed_trade_snapshots_have_no_unrealized_value` | Do closed-trade snapshots stay fully realized? | The terminal snapshot should not keep current value or unrealized PnL after sell confirmation. | `accounting.rs` |
@@ -113,8 +117,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `no_duplicate_snapshot_coordinates` | Does each trade have one snapshot per block, state, and valuation block? | Duplicate trade snapshot coordinates make timeline APIs and latest-row selection ambiguous. | `snapshots.rs` |
 | `no_duplicate_position_snapshot_coordinates` | Does each raw position snapshot coordinate have only one row? | Position snapshots are the source rows, so the same duplicate invariant must hold before deriving trade snapshots. | `snapshots.rs` |
 | `trade_position_snapshots_match` | Do trade snapshots mirror their source position snapshots? | The read model should not drift from the raw position snapshot timeline. | `snapshots.rs` |
-| `zero_value_snapshots_do_not_reuse_stale_pool_metrics` | Do zero-value exposure snapshots avoid stale pool metrics? | A zero-value exposure after a drain should not continue to display old pool liquidity or price data. | `snapshots.rs` |
-| `zero_value_snapshots_have_no_pool_metrics` | Do zero-value exposure snapshots omit all pool metrics? | Once current value is zero, pool price/liquidity metadata is not a reliable valuation display. | `snapshots.rs` |
+| `zero_value_snapshots_do_not_reuse_stale_pool_metrics` | Do zero-value exposure snapshots avoid stale pool metrics? | A display-near-zero exposure may retain same-block pool metrics such as `0x` price/init, but it must not reuse old positive pre-drain metrics. | `snapshots.rs` |
 | `terminal_snapshots_have_no_pool_metrics` | Do terminal closed snapshots omit pool metrics? | A sell-confirmed row is terminal accounting state, not an open pool valuation. | `snapshots.rs` |
 | `closed_trade_final_snapshot` | Does each closed trade have a final closed snapshot? | UI and validators need a clean sell-confirmed snapshot at `exit_block` for terminal valuation. | `snapshots.rs` |
 | `closed_trade_latest_snapshot_is_terminal` | Is the latest closed-trade snapshot terminal? | For a closed trade, the latest snapshot by block/id must be the sell-confirmed exit snapshot, not a stale open valuation. | `snapshots.rs` |

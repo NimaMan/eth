@@ -47,6 +47,50 @@ pub(super) async fn execution_delay_check(
     .await
 }
 
+pub(super) async fn terminal_report_presence_check(
+    pool: &PgPool,
+    result_set: &ResultSetRecord,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "submitted_orders_have_terminal_report_after_delay",
+        Verdict::Fail,
+        "submitted orders have a terminal report once the execution delay has elapsed",
+        "submitted orders past execution delay without terminal report",
+        r#"
+        WITH cfg AS (
+            SELECT COALESCE(NULLIF(metadata->>'live_current_block', '')::bigint, end_block) AS current_block,
+                   COALESCE(NULLIF(config->>'execution_delay_blocks', '')::bigint, 1) AS delay_blocks
+            FROM alpha_trading.backtest_result_sets
+            WHERE result_set_id = $1
+        ),
+        order_events AS (
+            SELECT t.trade_id,
+                   te.order_id,
+                   te.order_side,
+                   MIN(te.block_number) FILTER (WHERE te.status = 'submitted') AS submitted_block,
+                   MIN(te.block_number) FILTER (WHERE te.status IN ('confirmed', 'failed', 'cancelled')) AS terminal_block
+            FROM alpha_trading.trades t
+            JOIN alpha_trading.trade_events te ON te.trade_id = t.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            GROUP BY t.trade_id, te.order_id, te.order_side
+        )
+        SELECT count(*)
+        FROM order_events, cfg
+        WHERE submitted_block IS NOT NULL
+          AND terminal_block IS NULL
+          AND cfg.current_block IS NOT NULL
+          AND cfg.current_block >= submitted_block + cfg.delay_blocks
+        "#,
+        &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn confirmed_reports_have_simulated_outputs_check(
     pool: &PgPool,
     result_set_id: &str,
