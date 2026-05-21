@@ -80,8 +80,9 @@ struct LiveCommonCli {
     #[arg(long)]
     take_profit_ratio: Option<String>,
 
-    /// Register a named strategy suite instead of the default single strategy.
-    /// `mempool-live-exits` runs the live mempool liquidity-removal exit variants.
+    /// Register a named live strategy suite instead of the default single strategy.
+    /// Examples: `alpha11-live-univ2-lp30-riskexit-hold-sweep`,
+    /// `mempool-live-exits`.
     #[arg(long)]
     strategy_suite: Option<String>,
 }

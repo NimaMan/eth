@@ -31,7 +31,7 @@ use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
-use eth_strategies::shared_rules::live::live_mempool_liquidity_removal_exit::{
+use eth_strategies::shared_rules::live::{
     default_strategy_spec, observation_strategy_name, suite_specs, LiveStrategySpec,
     LiveStrategySpecOptions, STRATEGY_RUNTIME,
 };
