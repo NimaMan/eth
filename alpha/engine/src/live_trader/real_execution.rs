@@ -25,7 +25,13 @@ use eth_live_trading::{
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
-use eth_strategies::alpha11::{HOLD3_VALIDATION_STRATEGY_NAME, LIVE_VALIDATION_ENTRY_BANKROLL_ETH};
+use eth_strategies::{
+    alpha11::{
+        HOLD3_VALIDATION_STRATEGY_NAME, LIVE_VALIDATION_ENTRY_BANKROLL_ETH,
+        LIVE_VALIDATION_MAX_ENTRY_POOLS,
+    },
+    shared_rules::live::LiveStrategySpec,
+};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -489,13 +495,14 @@ pub(super) struct KartalRealPreflight {
 pub(super) async fn preflight_kartal_real(
     args: &RealExecutionArgs,
     live_args: &Args,
+    strategy_specs: &[LiveStrategySpec],
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
         .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(&status, args, live_args)?;
+    validate_kartal_real_status(&status, args, live_args, strategy_specs)?;
     Ok(KartalRealPreflight { token, status })
 }
 
@@ -588,6 +595,7 @@ fn validate_kartal_real_status(
     status: &KartalEthTxExecutorStatus,
     args: &RealExecutionArgs,
     live_args: &Args,
+    strategy_specs: &[LiveStrategySpec],
 ) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
@@ -606,7 +614,7 @@ fn validate_kartal_real_status(
     match status.broadcast_mode {
         KartalStatusBroadcastMode::DryRun => Ok(()),
         KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
-            validate_public_mempool_live_validation(status, live_args)
+            validate_public_mempool_live_validation(status, live_args, strategy_specs)
         }
         KartalStatusBroadcastMode::PublicMempool => Err(eyre!(
             "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold3 validation strategy"
@@ -620,15 +628,24 @@ fn validate_kartal_real_status(
 fn validate_public_mempool_live_validation(
     status: &KartalEthTxExecutorStatus,
     args: &Args,
+    strategy_specs: &[LiveStrategySpec],
 ) -> Result<()> {
     if args.strategy_set.as_deref() != Some(HOLD3_VALIDATION_STRATEGY_NAME) {
         return Err(eyre!(
             "public mempool validation requires --strategy-set {HOLD3_VALIDATION_STRATEGY_NAME}"
         ));
     }
-    if args.max_entry_pools != Some(1) {
+    if strategy_specs.len() != 1
+        || strategy_specs[0].strategy_name != HOLD3_VALIDATION_STRATEGY_NAME
+    {
         return Err(eyre!(
-            "public mempool validation requires --max-entry-pools 1"
+            "public mempool validation requires exactly one resolved strategy spec named {HOLD3_VALIDATION_STRATEGY_NAME}"
+        ));
+    }
+    let spec = &strategy_specs[0];
+    if spec.max_entry_pools != Some(LIVE_VALIDATION_MAX_ENTRY_POOLS) {
+        return Err(eyre!(
+            "public mempool validation requires strategy spec max_entry_pools={LIVE_VALIDATION_MAX_ENTRY_POOLS}"
         ));
     }
     if args.disable_entry {
@@ -647,21 +664,23 @@ fn validate_public_mempool_live_validation(
         ));
     }
 
-    let buy_wei = parse_policy_wei(&args.buy_wei, "--buy-wei")?;
+    let buy_wei = parse_policy_wei(&spec.buy_wei, "strategy buy_wei")?;
     let max_buy_wei = parse_policy_wei(LIVE_VALIDATION_BUY_WEI, "validation buy cap")?;
     if buy_wei.is_zero() || buy_wei > max_buy_wei {
         return Err(eyre!(
-            "public mempool validation requires 0 < --buy-wei <= {LIVE_VALIDATION_BUY_WEI}; got {}",
-            args.buy_wei
+            "public mempool validation requires 0 < strategy buy_wei <= {LIVE_VALIDATION_BUY_WEI}; got {}",
+            spec.buy_wei
         ));
     }
 
-    let entry_bankroll_eth = args
+    let entry_bankroll_eth = spec
         .entry_bankroll_eth
         .as_deref()
-        .unwrap_or(LIVE_VALIDATION_ENTRY_BANKROLL_ETH);
-    let entry_bankroll_wei =
-        super::support::parse_eth_decimal_to_wei(entry_bankroll_eth, "--entry-bankroll-eth")?;
+        .ok_or_else(|| eyre!("public mempool validation requires strategy entry_bankroll_eth"))?;
+    let entry_bankroll_wei = super::support::parse_eth_decimal_to_wei(
+        entry_bankroll_eth,
+        "strategy entry_bankroll_eth",
+    )?;
     if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_buy_wei {
         return Err(eyre!(
             "public mempool validation requires entry bankroll in (0, {LIVE_VALIDATION_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
@@ -732,6 +751,7 @@ mod tests {
     use eth_live_trading::{
         KartalDailySpendStatus, KartalEthTxPolicyStatus, KartalStatusBroadcastMode,
     };
+    use eth_strategies::shared_rules::live::{strategy_set_specs, LiveStrategySpecOptions};
 
     use super::*;
 
@@ -740,19 +760,20 @@ mod tests {
             poll_interval_ms: 2_000,
             mempool_since_days: 14,
             signal_limit: 200,
-            buy_wei: LIVE_VALIDATION_BUY_WEI.to_string(),
-            min_liquidity_eth: "0.5".to_string(),
-            min_liquidity_usd: "1000".to_string(),
             run_id: None,
             disable_entry: false,
             replay_current: false,
             once: false,
-            max_entry_pools: Some(1),
-            entry_bankroll_eth: Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string()),
-            stop_loss_ratio: None,
-            take_profit_ratio: None,
             strategy_set: Some(HOLD3_VALIDATION_STRATEGY_NAME.to_string()),
         }
+    }
+
+    fn specs(args: &Args) -> Vec<LiveStrategySpec> {
+        strategy_set_specs(
+            args.strategy_set.as_deref().expect("test strategy set"),
+            &LiveStrategySpecOptions,
+        )
+        .expect("test strategy specs")
     }
 
     fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
@@ -817,6 +838,7 @@ mod tests {
             &status(KartalStatusBroadcastMode::DryRun),
             &real_args(false),
             &live_args(),
+            &specs(&live_args()),
         )
         .unwrap();
     }
@@ -827,6 +849,7 @@ mod tests {
             &status(KartalStatusBroadcastMode::PublicMempool),
             &real_args(false),
             &live_args(),
+            &specs(&live_args()),
         )
         .unwrap_err();
 
@@ -844,6 +867,7 @@ mod tests {
             &status(KartalStatusBroadcastMode::PublicMempool),
             &real_args(true),
             &args,
+            &specs(&args),
         )
         .unwrap_err();
 
@@ -856,6 +880,7 @@ mod tests {
             &status(KartalStatusBroadcastMode::PublicMempool),
             &real_args(true),
             &live_args(),
+            &specs(&live_args()),
         )
         .unwrap();
     }
@@ -865,8 +890,13 @@ mod tests {
         let mut status = status(KartalStatusBroadcastMode::PublicMempool);
         status.policy.max_value_wei = "0".to_string();
 
-        let error =
-            validate_kartal_real_status(&status, &real_args(true), &live_args()).unwrap_err();
+        let error = validate_kartal_real_status(
+            &status,
+            &real_args(true),
+            &live_args(),
+            &specs(&live_args()),
+        )
+        .unwrap_err();
 
         assert!(error.to_string().contains("max_value_wei"));
     }

@@ -24,16 +24,17 @@ emergency sells. That runner refuses non-dry-run Kartal status by default. The
 only public broadcast exception is the explicit one-pool Alpha11 hold3 mined
 validation run, enabled with `--allow-public-mempool-live-validation` and
 `--strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation`.
-That run must use `--max-entry-pools 1`, no `--replay-current`, no `--once`, and
-`0.01 ETH` buy/bankroll caps so it can buy once, reconcile the mined receipt,
-sell after 3 pool-update blocks, and record the mined evidence. While entry is
-otherwise in validation mode, live-real startup also requires a resolved
-strategy bankroll of at most `0.225 ETH`; buys consume that starting bankroll,
-confirmed sells replenish it, and profits can be redeployed. The no-capital
-live chain-sim runner is `eth_alpha_live_backtest_trader`; historical replay is
-`eth_alpha_backtest_trader`. Hold duration belongs to the selected strategy
-spec, so operators choose hold3/hold15/etc. by strategy name instead of passing
-a `--max-hold-blocks` run parameter.
+That strategy spec owns `max_entry_pools = 1`, no `--replay-current`, no
+`--once`, and `0.01 ETH` buy/bankroll caps so it can buy once, reconcile the
+mined receipt, sell after 3 pool-update blocks, and record the mined evidence.
+While entry is otherwise in validation mode, live-real startup also requires a
+resolved strategy bankroll of at most `0.225 ETH`; buys consume that starting
+bankroll, confirmed sells replenish it, and profits can be redeployed. The
+no-capital live chain-sim runner is `eth_alpha_live_backtest_trader`; historical
+replay is `eth_alpha_backtest_trader`. Strategy economics and gates belong to
+the selected strategy spec, so operators choose hold3/hold15/etc. by strategy
+name instead of passing run parameters for buy size, liquidity floors, bankroll,
+entry-pool cap, or hold duration.
 
 The deployed Uniswap V2 trading vault is
 `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597`, also recorded in the root

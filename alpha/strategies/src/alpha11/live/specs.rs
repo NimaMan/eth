@@ -1,7 +1,8 @@
 use crate::{
     alpha11::{
-        HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
-        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, STRATEGY_IMPL,
+        BUY_WEI, HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
+        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, LIVE_VALIDATION_MAX_ENTRY_POOLS, MIN_LIQUIDITY_ETH,
+        MIN_LIQUIDITY_USD, STRATEGY_IMPL,
     },
     shared_rules::live::{LiveStrategySpec, LiveStrategySpecOptions},
 };
@@ -27,10 +28,11 @@ pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
     spec.strategy_label =
         "Alpha11 live validation Uniswap V2 LP30 pool-update-block hold 3".to_string();
     spec.entry_bankroll_eth = Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string());
+    spec.max_entry_pools = Some(LIVE_VALIDATION_MAX_ENTRY_POOLS);
     spec
 }
 
-fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
         strategy_name: format!("alpha11-live-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
         strategy_impl: STRATEGY_IMPL.to_string(),
@@ -50,9 +52,13 @@ fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategy
         max_entry_price_ratio_to_initial: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: Some(MIN_SELL_POOL_DENOM_RESERVE.to_string()),
+        buy_wei: BUY_WEI.to_string(),
+        min_liquidity_eth: MIN_LIQUIDITY_ETH.to_string(),
+        min_liquidity_usd: MIN_LIQUIDITY_USD.to_string(),
+        max_entry_pools: None,
         entry_bankroll_eth: Some(INITIAL_ENTRY_BANKROLL_ETH.to_string()),
-        stop_loss_ratio: options.stop_loss_ratio.clone(),
-        take_profit_ratio: options.take_profit_ratio.clone(),
+        stop_loss_ratio: None,
+        take_profit_ratio: None,
         max_hold_blocks: Some(max_hold_blocks),
     }
 }
@@ -109,6 +115,14 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.entry_bankroll_eth.as_deref() == Some(INITIAL_ENTRY_BANKROLL_ETH)));
+        assert!(specs.iter().all(|spec| spec.buy_wei == BUY_WEI));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.min_liquidity_eth == MIN_LIQUIDITY_ETH));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.min_liquidity_usd == MIN_LIQUIDITY_USD));
+        assert!(specs.iter().all(|spec| spec.max_entry_pools.is_none()));
         assert!(specs
             .iter()
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
@@ -125,6 +139,8 @@ mod tests {
             spec.entry_bankroll_eth.as_deref(),
             Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH)
         );
+        assert_eq!(spec.max_entry_pools, Some(LIVE_VALIDATION_MAX_ENTRY_POOLS));
+        assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
         assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);

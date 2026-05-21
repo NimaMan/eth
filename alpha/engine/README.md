@@ -126,7 +126,8 @@ service keeps that path in Kartal dry-run until gas-rank, dry-run evidence, and
 receipt-operation gates are complete. The deployed V2 vault buy and emergency
 sell paths now run exact-calldata pre-submit simulation. Live-real entries
 must resolve to a bankroll of at most `0.225 ETH` during validation. Alpha11
-sets that bankroll in its strategy spec; `--entry-bankroll-eth` is an override.
+sets that bankroll in its strategy spec; live runs do not override it from the
+CLI.
 Public real execution must consult `eth_block_tx_rank` before submission and
 persist the rank evidence with the order decision; `tx_executor` only receives
 the final prepared transaction.
@@ -199,8 +200,9 @@ at most `0.225 ETH`. Public broadcast is rejected unless all of these are true:
 Kartal reports `public_mempool`, the CLI includes
 `--allow-public-mempool-live-validation`, the strategy set is
 `alpha11-live-univ2-lp30-pool-update-block-hold3-validation`,
-`--max-entry-pools 1`, `--replay-current` is absent, `--once` is absent, and
-the buy value plus entry bankroll are both capped at `0.01 ETH`. The visible
+`--replay-current` is absent, `--once` is absent, and the resolved strategy spec
+has `max_entry_pools = 1` plus buy value and entry bankroll both capped at
+`0.01 ETH`. The visible
 Alpha11 hold15 strategy name remains
 `alpha11-live-univ2-lp30-pool-update-block-hold15` for both live-backtest and
 live-real. Hold duration is part of the named strategy spec rather than a
@@ -244,7 +246,7 @@ baseline engine but owns the Alpha11 launch defaults under
 `eth_alpha_live_trader` uses the same live input stream but a Kartal executor
 adapter. That process is separate from backtests and the no-capital chain-sim
 service. During validation, entry-enabled runs must resolve to a small bankroll;
-the CLI `--entry-bankroll-eth` value overrides any strategy-spec default.
+the selected strategy spec supplies that bankroll.
 
 ## Live Strategy Model
 
@@ -294,7 +296,7 @@ The deployed no-capital runtime uses a stable Snipe All chain-sim live run id.
 On startup it restores active positions
 from `alpha_trading.positions` and restores pool/signal watermarks from
 `alpha_trading.strategy_observations`.
-The deployed Snipe All thresholds are `--min-liquidity-eth 0.5` for ETH/WETH pools and `--min-liquidity-usd 1000` for USDC/USDT/DAI pools.
+The deployed Snipe All thresholds are strategy-spec values: `min_liquidity_eth = 0.5` for ETH/WETH pools and `min_liquidity_usd = 1000` for USDC/USDT/DAI pools.
 
 Pool matching uses `TokenPoolId` from `eth_alpha_core`: `token_address:pool_identity`. For V2/V3 the pool identity is the pool contract address; for V4 it is `pool_manager#pool_id`. The engine should never coerce V4 pools into fake EVM addresses just to fit order or position keys.
 

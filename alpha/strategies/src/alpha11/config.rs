@@ -7,8 +7,12 @@ pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-live-univ2-lp30-pool-update-block
 pub const HOLD15_STRATEGY_NAME: &str = "alpha11-live-univ2-lp30-pool-update-block-hold15";
 pub const HOLD3_VALIDATION_STRATEGY_NAME: &str =
     "alpha11-live-univ2-lp30-pool-update-block-hold3-validation";
+pub const BUY_WEI: &str = "10000000000000000";
+pub const MIN_LIQUIDITY_ETH: &str = "0.5";
+pub const MIN_LIQUIDITY_USD: &str = "1000";
 pub const INITIAL_ENTRY_BANKROLL_ETH: &str = "0.225";
 pub const LIVE_VALIDATION_ENTRY_BANKROLL_ETH: &str = "0.01";
+pub const LIVE_VALIDATION_MAX_ENTRY_POOLS: usize = 1;
 pub const MAX_ENTRY_PRICE_RATIO_TO_INITIAL: &str = "1.5";
 
 const INITIAL_ENTRY_BANKROLL_WEI: u64 = 225_000_000_000_000_000;

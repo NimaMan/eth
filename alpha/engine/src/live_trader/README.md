@@ -6,8 +6,9 @@ Live trader owns the live polling process.
   Kartal.
 - `run_live_real()` uses the crate-private real execution boundary, requires
   Kartal dry-run, and requires each entry-enabled strategy to resolve to a
-  bankroll of at most `0.225 ETH` during validation. Strategy specs can provide
-  defaults; `--entry-bankroll-eth` overrides them.
+  bankroll of at most `0.225 ETH` during validation. Strategy specs provide
+  buy size, liquidity floors, bankroll, entry-pool caps, and hold windows; live
+  runs select those parameters by strategy name.
 
 Real tx wiring belongs in `real_execution.rs`; common live polling and
 observation persistence stays in `mod.rs` and `support.rs`.

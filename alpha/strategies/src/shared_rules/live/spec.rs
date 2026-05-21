@@ -4,10 +4,7 @@ pub const STRATEGY_RUNTIME: &str = "live";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
 
 #[derive(Clone, Debug, Default)]
-pub struct LiveStrategySpecOptions {
-    pub stop_loss_ratio: Option<String>,
-    pub take_profit_ratio: Option<String>,
-}
+pub struct LiveStrategySpecOptions;
 
 #[derive(Clone, Debug)]
 pub struct LiveStrategySpec {
@@ -25,13 +22,17 @@ pub struct LiveStrategySpec {
     pub max_entry_price_ratio_to_initial: Option<String>,
     pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
     pub min_sell_pool_denom_reserve: Option<String>,
+    pub buy_wei: String,
+    pub min_liquidity_eth: String,
+    pub min_liquidity_usd: String,
+    pub max_entry_pools: Option<usize>,
     pub entry_bankroll_eth: Option<String>,
     pub stop_loss_ratio: Option<String>,
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
 }
 
-pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+pub fn default_strategy_spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
         strategy_name: DEFAULT_STRATEGY_NAME.to_string(),
         strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
@@ -47,9 +48,13 @@ pub fn default_strategy_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
         max_entry_price_ratio_to_initial: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
         min_sell_pool_denom_reserve: None,
+        buy_wei: "10000000000000000".to_string(),
+        min_liquidity_eth: "0.5".to_string(),
+        min_liquidity_usd: "1000".to_string(),
+        max_entry_pools: None,
         entry_bankroll_eth: None,
-        stop_loss_ratio: options.stop_loss_ratio.clone(),
-        take_profit_ratio: options.take_profit_ratio.clone(),
+        stop_loss_ratio: None,
+        take_profit_ratio: None,
         max_hold_blocks: None,
     }
 }

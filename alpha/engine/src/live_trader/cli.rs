@@ -5,17 +5,10 @@ pub(super) struct Args {
     pub(super) poll_interval_ms: u64,
     pub(super) mempool_since_days: i64,
     pub(super) signal_limit: i64,
-    pub(super) buy_wei: String,
-    pub(super) min_liquidity_eth: String,
-    pub(super) min_liquidity_usd: String,
     pub(super) run_id: Option<String>,
     pub(super) disable_entry: bool,
     pub(super) replay_current: bool,
     pub(super) once: bool,
-    pub(super) max_entry_pools: Option<usize>,
-    pub(super) entry_bankroll_eth: Option<String>,
-    pub(super) stop_loss_ratio: Option<String>,
-    pub(super) take_profit_ratio: Option<String>,
     pub(super) strategy_set: Option<String>,
 }
 
@@ -42,15 +35,6 @@ struct LiveCommonCli {
     #[arg(long, default_value_t = 200)]
     signal_limit: i64,
 
-    #[arg(long = "buy-wei", default_value = "10000000000000000")]
-    buy_wei: String,
-
-    #[arg(long, default_value = "0.5")]
-    min_liquidity_eth: String,
-
-    #[arg(long, default_value = "1000")]
-    min_liquidity_usd: String,
-
     #[arg(long)]
     run_id: Option<String>,
 
@@ -64,26 +48,6 @@ struct LiveCommonCli {
 
     #[arg(long, default_value_t = false)]
     once: bool,
-
-    /// Hard cap on distinct pools each live strategy may buy in this run.
-    /// Restored bought pools count toward the cap.
-    #[arg(long)]
-    max_entry_pools: Option<usize>,
-
-    /// Starting ETH bankroll each live strategy may deploy into entries.
-    /// Buys consume it; confirmed sells replenish it; profits can be redeployed.
-    #[arg(long = "entry-bankroll-eth")]
-    entry_bankroll_eth: Option<String>,
-
-    /// Stop-loss ratio: sell if price drops to this fraction of entry price.
-    /// E.g., 0.7 = sell at -30% loss. Disabled by default.
-    #[arg(long)]
-    stop_loss_ratio: Option<String>,
-
-    /// Take-profit ratio: sell if price rises to this multiple of entry price.
-    /// E.g., 3.0 = sell at +200% profit. Disabled by default.
-    #[arg(long)]
-    take_profit_ratio: Option<String>,
 
     /// Register a named live strategy set instead of the default single strategy.
     /// Examples: `alpha11-live-univ2-lp30-pool-update-block-hold-sweep`,
@@ -157,17 +121,10 @@ impl From<LiveCommonCli> for Args {
             poll_interval_ms: common.poll_interval_ms,
             mempool_since_days: common.mempool_since_days,
             signal_limit: common.signal_limit,
-            buy_wei: common.buy_wei,
-            min_liquidity_eth: common.min_liquidity_eth,
-            min_liquidity_usd: common.min_liquidity_usd,
             run_id: common.run_id,
             disable_entry: common.disable_entry,
             replay_current: common.replay_current,
             once: common.once,
-            max_entry_pools: common.max_entry_pools,
-            entry_bankroll_eth: common.entry_bankroll_eth,
-            stop_loss_ratio: common.stop_loss_ratio,
-            take_profit_ratio: common.take_profit_ratio,
             strategy_set: common.strategy_set,
         }
     }

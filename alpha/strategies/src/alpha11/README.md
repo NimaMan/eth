@@ -16,8 +16,9 @@ That variant has the same Uniswap V2, LP30, pool-update-block, and deployed V2
 vault assumptions, but it uses hold3 and a `0.01 ETH` entry bankroll so we can
 prove one mined buy, one mined sell, receipt reconciliation, tx index, actual
 gas cost, and finality recheck before enabling the main hold15 strategy.
-The hold window is part of the named strategy spec. Live runs must not pass a
-separate `--max-hold-blocks` parameter for Alpha11.
+It also carries `max_entry_pools = 1` in the strategy spec. Live runs must not
+pass separate strategy parameters such as buy size, liquidity floors, bankroll,
+entry-pool cap, or hold blocks for Alpha11.
 
 The live-real deploy path adds an entry-only `price / initial price <= 1.5` cap
 as runtime config. We intentionally do not encode that cap in the visible
@@ -29,6 +30,9 @@ Shared Alpha11 defaults:
 
 - `univ2`: only enter Uniswap V2 pools.
 - `lp30`: block entry when LP approval exceeds the shared 30% gate.
+- Buy size is `0.01 ETH` per entry.
+- Liquidity floors are `0.5 ETH` for ETH/WETH pools and `1000` for USD-stable
+  quote pools.
 - `pool-update-block-hold15`: force exit after 15 distinct pool-update blocks
   while the position is open.
 - Initial entry bankroll is `0.225 ETH`; buys consume bankroll, confirmed sells

@@ -5,10 +5,7 @@ pub(super) fn build_strategy_specs(
     args: &Args,
     execution_mode: TraderExecutionMode,
 ) -> Result<Vec<LiveStrategySpec>> {
-    let options = LiveStrategySpecOptions {
-        stop_loss_ratio: args.stop_loss_ratio.clone(),
-        take_profit_ratio: args.take_profit_ratio.clone(),
-    };
+    let options = LiveStrategySpecOptions;
 
     let mut specs = if let Some(strategy_set) = args.strategy_set.as_deref() {
         strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error))?
@@ -49,6 +46,10 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "max_entry_price_ratio_to_initial": spec.max_entry_price_ratio_to_initial,
         "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
         "min_sell_pool_denom_reserve": spec.min_sell_pool_denom_reserve,
+        "buy_wei": spec.buy_wei,
+        "min_liquidity_eth": spec.min_liquidity_eth,
+        "min_liquidity_usd": spec.min_liquidity_usd,
+        "max_entry_pools": spec.max_entry_pools,
         "entry_bankroll_eth": &spec.entry_bankroll_eth,
         "stop_loss_ratio": spec.stop_loss_ratio,
         "take_profit_ratio": spec.take_profit_ratio,
@@ -72,17 +73,10 @@ mod tests {
             poll_interval_ms: 2_000,
             mempool_since_days: 14,
             signal_limit: 200,
-            buy_wei: "10000000000000000".to_string(),
-            min_liquidity_eth: "0.5".to_string(),
-            min_liquidity_usd: "1000".to_string(),
             run_id: None,
             disable_entry: false,
             replay_current: false,
             once: false,
-            max_entry_pools: Some(5),
-            entry_bankroll_eth: None,
-            stop_loss_ratio: None,
-            take_profit_ratio: None,
             strategy_set: Some(ALPHA11_HOLD15_STRATEGY_NAME.to_string()),
         }
     }
@@ -141,6 +135,10 @@ mod tests {
         assert_eq!(spec.max_entry_price_ratio_to_initial, None);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
         assert_eq!(spec.min_sell_pool_denom_reserve.as_deref(), Some("0"));
+        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.min_liquidity_eth, "0.5");
+        assert_eq!(spec.min_liquidity_usd, "1000");
+        assert_eq!(spec.max_entry_pools, None);
         assert_eq!(
             spec.entry_bankroll_eth.as_deref(),
             Some(INITIAL_ENTRY_BANKROLL_ETH)
@@ -167,6 +165,10 @@ mod tests {
                 "max_entry_price_ratio_to_initial": null,
                 "defer_buy_confirm_block_lp_approval_to_max_hold": true,
                 "min_sell_pool_denom_reserve": "0",
+                "buy_wei": "10000000000000000",
+                "min_liquidity_eth": "0.5",
+                "min_liquidity_usd": "1000",
+                "max_entry_pools": null,
                 "entry_bankroll_eth": INITIAL_ENTRY_BANKROLL_ETH,
                 "stop_loss_ratio": null,
                 "take_profit_ratio": null,

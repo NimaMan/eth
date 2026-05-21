@@ -2,7 +2,7 @@ use super::super::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRA
 
 pub const SET_NAME: &str = "mempool-live-exits";
 
-pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
+pub fn specs(_options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
     [10_u64, 20, 50]
         .into_iter()
         .flat_map(|max_hold_blocks| {
@@ -26,9 +26,13 @@ pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     max_entry_price_ratio_to_initial: None,
                     defer_buy_confirm_block_lp_approval_to_max_hold: false,
                     min_sell_pool_denom_reserve: None,
+                    buy_wei: "10000000000000000".to_string(),
+                    min_liquidity_eth: "0.5".to_string(),
+                    min_liquidity_usd: "1000".to_string(),
+                    max_entry_pools: None,
                     entry_bankroll_eth: None,
-                    stop_loss_ratio: options.stop_loss_ratio.clone(),
-                    take_profit_ratio: options.take_profit_ratio.clone(),
+                    stop_loss_ratio: None,
+                    take_profit_ratio: None,
                     max_hold_blocks: Some(max_hold_blocks),
                 },
                 LiveStrategySpec {
@@ -50,9 +54,13 @@ pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     max_entry_price_ratio_to_initial: None,
                     defer_buy_confirm_block_lp_approval_to_max_hold: false,
                     min_sell_pool_denom_reserve: None,
+                    buy_wei: "10000000000000000".to_string(),
+                    min_liquidity_eth: "0.5".to_string(),
+                    min_liquidity_usd: "1000".to_string(),
+                    max_entry_pools: None,
                     entry_bankroll_eth: None,
-                    stop_loss_ratio: options.stop_loss_ratio.clone(),
-                    take_profit_ratio: options.take_profit_ratio.clone(),
+                    stop_loss_ratio: None,
+                    take_profit_ratio: None,
                     max_hold_blocks: Some(max_hold_blocks),
                 },
             ]

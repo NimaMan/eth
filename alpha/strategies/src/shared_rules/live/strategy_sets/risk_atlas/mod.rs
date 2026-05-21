@@ -4,7 +4,7 @@ pub const LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
 
 pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
-    options: &LiveStrategySpecOptions,
+    _options: &LiveStrategySpecOptions,
 ) -> LiveStrategySpec {
     LiveStrategySpec {
         strategy_name: LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME.to_string(),
@@ -23,9 +23,13 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         max_entry_price_ratio_to_initial: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: None,
+        buy_wei: "10000000000000000".to_string(),
+        min_liquidity_eth: "0.5".to_string(),
+        min_liquidity_usd: "1000".to_string(),
+        max_entry_pools: None,
         entry_bankroll_eth: None,
-        stop_loss_ratio: options.stop_loss_ratio.clone(),
-        take_profit_ratio: options.take_profit_ratio.clone(),
+        stop_loss_ratio: None,
+        take_profit_ratio: None,
         max_hold_blocks: Some(15),
     }
 }

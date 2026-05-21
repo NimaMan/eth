@@ -58,14 +58,14 @@ refuses to start unless Kartal reports `broadcast_mode = dry_run`, except for
 the explicit one-pool Alpha11 hold3 mined-validation run. That exception requires
 `--allow-public-mempool-live-validation`, strategy
 `alpha11-live-univ2-lp30-pool-update-block-hold3-validation`,
-`--max-entry-pools 1`, no `--replay-current`, and buy/bankroll caps of
-`0.01 ETH`. While real entries are otherwise in validation mode, each strategy
-must resolve to a bankroll of at most `0.225 ETH`; Alpha11 carries that default
-in its strategy spec, and `--entry-bankroll-eth` is an override. Buys consume
-that bankroll, confirmed sells replenish it, and profits can be redeployed. The
-hold window is not a live-run CLI parameter; named live strategies own their
-`max_hold_blocks` value in the strategy spec. The
-V2 buy and emergency-sell paths derive non-zero min-output from provisional
+no `--replay-current`, and strategy-spec buy/bankroll caps of `0.01 ETH`.
+While real entries are otherwise in validation mode, each strategy must resolve
+to a bankroll of at most `0.225 ETH`; Alpha11 carries that default in its
+strategy spec. Buys consume that bankroll, confirmed sells replenish it, and
+profits can be redeployed. Strategy economics and gates, including buy size,
+liquidity floors, entry-pool caps, bankroll, and hold window, are not live-run
+CLI parameters; named live strategies own those values in their strategy specs.
+The V2 buy and emergency-sell paths derive non-zero min-output from provisional
 exact-calldata simulation and simulate the final exact vault calldata before
 Kartal submission.
 
@@ -131,7 +131,7 @@ cargo test -p eth_strategies
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold15
 cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation --max-entry-pools 1 --entry-bankroll-eth 0.01 --allow-public-mempool-live-validation
+cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation --allow-public-mempool-live-validation
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```
 
