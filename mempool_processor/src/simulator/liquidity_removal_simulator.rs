@@ -183,6 +183,11 @@ impl LiquidityRemovalSimulator {
             Ok(p) => p,
             Err(e) => {
                 if let Some(expected_nonce) = Self::parse_nonce_mismatch(&e) {
+                    let debug_info = Some(Self::nonce_mismatch_debug_info(
+                        &unsigned_tx,
+                        expected_nonce,
+                        block_number,
+                    ));
                     return Ok(LiquidityRemovalResult {
                         success: false,
                         revert_reason: Some(format!(
@@ -200,7 +205,7 @@ impl LiquidityRemovalSimulator {
                         drain_percentage: 0.0,
                         remaining_eth: 0.0,
                         is_scam: true,
-                        debug_info: None,
+                        debug_info,
                     });
                 }
 
@@ -328,13 +333,25 @@ impl LiquidityRemovalSimulator {
             }
         };
 
+        self.result_from_processed_transaction(&processed, Some(&unsigned_tx))
+            .await
+    }
+
+    pub(crate) async fn result_from_processed_transaction(
+        &self,
+        processed: &ProcessedTransaction,
+        unsigned_tx: Option<&UnsignedTransaction>,
+    ) -> Result<LiquidityRemovalResult> {
         // 2) Convert balance deltas to canonical map
-        let address_balance_changes = Self::convert_processed_changes(&processed);
+        let address_balance_changes = Self::convert_processed_changes(processed);
 
         // 3) Compute drain from deltas (deterministic, cache-backed pools only)
         let drain = self.compute_pool_drain(&address_balance_changes).await;
-        let protocol_removal = self.protocol_removal_from_processed(&processed).await;
-        let tx_protocol_removal = self.protocol_removal_from_unsigned_tx(&unsigned_tx).await;
+        let protocol_removal = self.protocol_removal_from_processed(processed).await;
+        let tx_protocol_removal = match unsigned_tx {
+            Some(tx) => self.protocol_removal_from_unsigned_tx(tx).await,
+            None => None,
+        };
 
         let (
             pool_address,
@@ -789,6 +806,53 @@ impl LiquidityRemovalSimulator {
         }
 
         expected_str.parse::<u64>().ok()
+    }
+
+    fn nonce_mismatch_debug_info(
+        unsigned_tx: &UnsignedTransaction,
+        expected_nonce: u64,
+        block_number: Option<u64>,
+    ) -> String {
+        let sender = unsigned_tx
+            .from
+            .map(|address| to_checksum_address(&address))
+            .unwrap_or_else(|| "unknown".to_string());
+        let tx_nonce = unsigned_tx
+            .nonce
+            .map(|nonce| nonce.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let sim_block = block_number
+            .map(|block| block.to_string())
+            .unwrap_or_else(|| "latest".to_string());
+        format!(
+            "sender={} tx_nonce={} expected_nonce={} sim_block={} dependency_replay_attempted=false",
+            sender, tx_nonce, expected_nonce, sim_block
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonce_mismatch_debug_info_includes_replay_fields() {
+        let sender = "0x85BA869eC1279db68Bb718ac26dC190fB1A45410"
+            .parse::<Address>()
+            .unwrap();
+        let tx = UnsignedTransaction {
+            from: Some(sender),
+            nonce: Some(5),
+            ..Default::default()
+        };
+
+        let debug = LiquidityRemovalSimulator::nonce_mismatch_debug_info(&tx, 4, Some(25143719));
+
+        assert!(debug.contains("sender=0x85BA869eC1279db68Bb718ac26dC190fB1A45410"));
+        assert!(debug.contains("tx_nonce=5"));
+        assert!(debug.contains("expected_nonce=4"));
+        assert!(debug.contains("sim_block=25143719"));
+        assert!(debug.contains("dependency_replay_attempted=false"));
     }
 }
 

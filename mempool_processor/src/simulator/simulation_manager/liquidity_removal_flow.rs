@@ -1,22 +1,32 @@
 use alloy_primitives::Address;
 use tracing::{error, info};
+use tx_processor::ProcessedTransaction;
 
-use crate::common::convert::ipc_to_call_request;
 use crate::tx_router::TransactionCategory;
 
-use super::{SimulationManager, SimulationResult, TxSimulationJob};
+use super::{mempool_tx_to_unsigned_tx, SimulationManager, SimulationResult, TxSimulationJob};
 
 impl SimulationManager {
     pub(super) async fn simulate_liquidity_removal(
         &self,
         request: &TxSimulationJob,
+        processed: &ProcessedTransaction,
+        dependency_count: usize,
     ) -> Vec<SimulationResult> {
         info!(
-            "💧 Starting liquidity removal simulation for TX {}",
+            "💧 Starting dependency-aware liquidity removal analysis for TX {}",
             request.tx.hash
         );
+        if dependency_count > 0 {
+            info!(
+                "💧 Liquidity removal TX {} includes {} same-sender nonce dependenc{} in replay",
+                request.tx.hash,
+                dependency_count,
+                if dependency_count == 1 { "y" } else { "ies" }
+            );
+        }
 
-        let call_request = match ipc_to_call_request(&request.tx.data) {
+        let unsigned_tx = match mempool_tx_to_unsigned_tx(&request.tx) {
             Ok(req) => req,
             Err(e) => {
                 error!("Failed to convert transaction to call request: {}", e);
@@ -35,37 +45,21 @@ impl SimulationManager {
             }
         };
 
-        let block_number = match self.mempool_simulator.latest_simulation_block().await {
-            Ok(number) => Some(number),
-            Err(err) => {
-                error!(
-                    "Failed to resolve target block for liquidity removal simulation: {}",
-                    err
-                );
-                None
-            }
-        };
-
         let sim_start = std::time::Instant::now();
 
         let removal_result = match self
             .liquidity_removal_simulator
-            .simulate_removal_with_retry(
-                call_request,
-                block_number,
-                true,
-                Some(request.tx.hash.as_str()),
-            )
+            .result_from_processed_transaction(processed, Some(&unsigned_tx))
             .await
         {
             Ok(result) => result,
             Err(e) => {
-                error!("Liquidity removal simulation failed: {}", e);
+                error!("Liquidity removal result extraction failed: {}", e);
                 return vec![SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
                     liquidity_removal_result: None,
-                    error: Some(format!("Simulation failed: {}", e)),
+                    error: Some(format!("Liquidity removal result extraction failed: {}", e)),
                     token_address: None,
                     pool_address: None,
                     pool_type: None,

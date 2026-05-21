@@ -40,25 +40,12 @@ impl SimulationManager {
         };
         let processed = processed_with_dependencies.transaction.clone();
 
-        let replay_sequence =
-            if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
-                let stored_sequence = self
-                    .record_pending_transaction(key, request.tx_hash, processed.clone(), now)
-                    .await;
-                merge_nonce_dependencies_with_replay_sequence(
-                    processed_with_dependencies.dependencies,
-                    stored_sequence,
-                )
-            } else {
-                merge_nonce_dependencies_with_replay_sequence(
-                    processed_with_dependencies.dependencies,
-                    vec![processed.clone()],
-                )
-            };
-
         if let TransactionCategory::CreatorTransaction { function_type, .. } = &request.category {
             if matches!(function_type, CreatorFunctionType::LiquidityRemoval) {
-                let removal_results = self.simulate_liquidity_removal(request).await;
+                let dependency_count = processed_with_dependencies.dependencies.len();
+                let removal_results = self
+                    .simulate_liquidity_removal(request, &processed, dependency_count)
+                    .await;
                 if removal_results.is_empty() {
                     aggregate_result.error = Some("No pools found for token".to_string());
                     aggregate_result.debug_info =
@@ -101,6 +88,22 @@ impl SimulationManager {
                 return aggregate_result;
             }
         }
+
+        let replay_sequence =
+            if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
+                let stored_sequence = self
+                    .record_pending_transaction(key, request.tx_hash, processed.clone(), now)
+                    .await;
+                merge_nonce_dependencies_with_replay_sequence(
+                    processed_with_dependencies.dependencies,
+                    stored_sequence,
+                )
+            } else {
+                merge_nonce_dependencies_with_replay_sequence(
+                    processed_with_dependencies.dependencies,
+                    vec![processed.clone()],
+                )
+            };
 
         let all_results = self
             .simulate_tx_with_buy_sell_all_pools(request, &replay_sequence)

@@ -551,6 +551,15 @@ impl SignalManager {
                 );
 
                 if !removal_result.success {
+                    let reason = removal_result
+                        .revert_reason
+                        .as_deref()
+                        .unwrap_or("Unknown error");
+                    let debug_suffix = removal_result
+                        .debug_info
+                        .as_deref()
+                        .map(|debug| format!(" | Debug: {}", debug))
+                        .unwrap_or_default();
                     // Write to liquidity_removals.log file directly
                     let liquidity_log_path = self
                         .signal_log_path
@@ -572,12 +581,13 @@ impl SignalManager {
                             .map(|a| to_checksum_address(&a))
                             .unwrap_or_else(|| "Unknown".to_string());
                         let remover_str = to_checksum_address(&from_address);
-                        writeln!(file, "[{}] REMOVAL_FAILED | Pool: {} | Token: {} | Remover: {} | Reason: {} | TxHash: {}",
+                        writeln!(file, "[{}] REMOVAL_FAILED | Pool: {} | Token: {} | Remover: {} | Reason: {}{} | TxHash: {}",
                             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                             pool_str,
                             token_str,
                             remover_str,
-                            removal_result.revert_reason.as_ref().unwrap_or(&"Unknown error".to_string()),
+                            reason,
+                            debug_suffix,
                             result.request.tx.hash
                         ).ok();
                         writeln!(file, "").ok();
@@ -586,21 +596,13 @@ impl SignalManager {
                     self.log_activity(
                         "LIQUIDITY_REMOVAL_FAILED",
                         &format!(
-                            "TX: {} | Reason: {}",
-                            result.request.tx.hash,
-                            removal_result
-                                .revert_reason
-                                .as_ref()
-                                .unwrap_or(&"Unknown error".to_string())
+                            "TX: {} | Reason: {}{}",
+                            result.request.tx.hash, reason, debug_suffix
                         ),
                     );
                     error!(
-                        "❌ LIQUIDITY_REMOVAL_FAILED | TX: {} | Reason: {}",
-                        result.request.tx.hash,
-                        removal_result
-                            .revert_reason
-                            .as_ref()
-                            .unwrap_or(&"Unknown error".to_string())
+                        "❌ LIQUIDITY_REMOVAL_FAILED | TX: {} | Reason: {}{}",
+                        result.request.tx.hash, reason, debug_suffix
                     );
                 }
 
