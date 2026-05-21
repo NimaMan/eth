@@ -18,10 +18,12 @@ observation persistence stays in `mod.rs` and `support.rs`.
 live trader tick it:
 
 1. loads submitted execution reports with tx hashes from `alpha_store`;
-2. calls `eth_getTransactionReceipt` on the same RPC URL Kartal reports in
+2. waits until the live processed-block watermark is at least
+   `submitted_block + 1`;
+3. calls `eth_getTransactionReceipt` on the same RPC URL Kartal reports in
    `/eth/tx/status`;
-3. turns receipt `status = 0x0` into a failed `ExecutionReport`;
-4. turns receipt `status = 0x1` into a confirmed `ExecutionReport` only when
+4. turns receipt `status = 0x0` into a failed `ExecutionReport`;
+5. turns receipt `status = 0x1` into a confirmed `ExecutionReport` only when
    the expected V2 vault event is present:
    - `BoughtV2` for buys;
    - `EmergencySoldV2` for sells.

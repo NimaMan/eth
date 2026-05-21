@@ -27,9 +27,11 @@ emit the `BuyConfirmed`, `SellConfirmed`, `BuyFailed`, or `SellFailed`
 `ExecutionReport`.
 
 The first reconciliation worker lives in `src/live_trader/receipt_reconciliation.rs`.
-It polls `eth_getTransactionReceipt` for submitted tx hashes and confirms only
-when the receipt succeeded and the deployed V2 vault emitted the expected fill
-event. Missing vault evidence is treated as unresolved, not confirmed.
+It waits until the live processed-block watermark reaches at least
+`submitted_block + 1`, then polls `eth_getTransactionReceipt` for submitted tx
+hashes and confirms only when the receipt succeeded and the deployed V2 vault
+emitted the expected fill event. Missing vault evidence is treated as unresolved,
+not confirmed.
 
 ## Data Contract
 

@@ -117,6 +117,18 @@ where
             unresolved,
         })
     }
+
+    pub(super) async fn reconcile_after_processed_block(
+        &self,
+        submitted: Vec<SubmittedExecutionRecord>,
+        current_processed_block: Option<u64>,
+    ) -> Result<ReceiptReconciliationBatch> {
+        let ready = submitted
+            .into_iter()
+            .filter(|record| ready_for_receipt_reconciliation(record, current_processed_block))
+            .collect();
+        self.reconcile(ready).await
+    }
 }
 
 enum ReceiptReconciliation {
@@ -181,6 +193,19 @@ fn reconcile_receipt(
                 reason: "receipt status is missing or unknown".to_string(),
             },
         )),
+    }
+}
+
+fn ready_for_receipt_reconciliation(
+    record: &SubmittedExecutionRecord,
+    current_processed_block: Option<u64>,
+) -> bool {
+    match (record.submitted_block_number, current_processed_block) {
+        (Some(submitted_block), Some(current_block)) => {
+            current_block >= submitted_block.saturating_add(1)
+        }
+        (Some(_), None) => false,
+        (None, _) => true,
     }
 }
 
@@ -378,6 +403,10 @@ mod tests {
         order::OrderSide,
     };
     use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     use super::*;
 
@@ -387,6 +416,7 @@ mod tests {
             tx_hash: "0x1111111111111111111111111111111111111111111111111111111111111111"
                 .parse()
                 .unwrap(),
+            submitted_block_number: Some(99),
             position_id: PositionId("pos-1".to_string()),
             trade_id: Some(TradeId("trade-1".to_string())),
             order_side: side,
@@ -509,5 +539,60 @@ mod tests {
 
         assert_eq!(report.status, ExecutionStatus::Failed);
         assert!(report.error.unwrap().contains("status=0x0"));
+    }
+
+    #[derive(Clone)]
+    struct CountingReceiptProvider {
+        calls: Arc<AtomicUsize>,
+        receipt: Option<RpcTransactionReceipt>,
+    }
+
+    #[async_trait]
+    impl ReceiptProvider for CountingReceiptProvider {
+        async fn transaction_receipt(
+            &self,
+            _tx_hash: TxHash,
+        ) -> Result<Option<RpcTransactionReceipt>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.receipt.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn reconciliation_waits_until_next_processed_block() {
+        let vault = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reconciler = VaultReceiptReconciler::new(
+            CountingReceiptProvider {
+                calls: calls.clone(),
+                receipt: Some(receipt(
+                    "0x1",
+                    vault,
+                    token,
+                    BOUGHT_V2_SIGNATURE,
+                    [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+                )),
+            },
+            vault,
+        );
+
+        let early = reconciler
+            .reconcile_after_processed_block(vec![submitted(OrderSide::Buy, token)], Some(99))
+            .await
+            .unwrap();
+
+        assert!(early.reports.is_empty());
+        assert!(early.unresolved.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let ready = reconciler
+            .reconcile_after_processed_block(vec![submitted(OrderSide::Buy, token)], Some(100))
+            .await
+            .unwrap();
+
+        assert_eq!(ready.reports.len(), 1);
+        assert_eq!(ready.reports[0].status, ExecutionStatus::Confirmed);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

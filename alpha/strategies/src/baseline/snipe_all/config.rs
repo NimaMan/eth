@@ -53,6 +53,10 @@ pub struct SnipeAllConfig {
     /// When set, LP approval only blocks entry or triggers exit if approved_pct > threshold.
     /// None preserves the legacy "any LP approval" behavior.
     pub lp_approval_gate_min_pct: Option<DecimalAmount>,
+    /// Optional launch-momentum entry cap. When set, skip entries whose current
+    /// pool price / initial pool price ratio is greater than this value.
+    /// Missing ratio data does not block entry.
+    pub max_entry_price_ratio_to_initial: Option<DecimalAmount>,
     /// If true, an LP approval observed in the same block as buy confirmation
     /// is not an immediate LP-approval exit. The position remains governed by
     /// proactive exits such as max active-hold blocks.
@@ -101,6 +105,7 @@ impl Default for SnipeAllConfig {
             allowed_protocols: Vec::new(),
             block_entry_on_lp_approval: false,
             lp_approval_gate_min_pct: None,
+            max_entry_price_ratio_to_initial: None,
             defer_buy_confirm_block_lp_approval_to_max_hold: false,
             stop_loss_ratio: None,
             take_profit_ratio: None,

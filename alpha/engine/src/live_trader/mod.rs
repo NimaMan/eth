@@ -405,6 +405,10 @@ async fn run(
             .lp_approval_gate_min_pct
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
+        let max_entry_price_ratio_to_initial = spec
+            .max_entry_price_ratio_to_initial
+            .as_deref()
+            .and_then(|s| Decimal::from_str(s).ok());
         let min_sell_pool_denom_reserve = spec
             .min_sell_pool_denom_reserve
             .as_deref()
@@ -434,6 +438,7 @@ async fn run(
             allowed_protocols: spec.allowed_protocols.clone(),
             block_entry_on_lp_approval: spec.block_entry_on_lp_approval,
             lp_approval_gate_min_pct,
+            max_entry_price_ratio_to_initial,
             defer_buy_confirm_block_lp_approval_to_max_hold: spec
                 .defer_buy_confirm_block_lp_approval_to_max_hold,
             ..SnipeAllConfig::default()
@@ -837,7 +842,10 @@ async fn run(
         if let Some(reconciler) = &receipt_reconciler {
             match store.load_submitted_executions(50).await {
                 Ok(submitted) if submitted.is_empty() => {}
-                Ok(submitted) => match reconciler.reconcile(submitted).await {
+                Ok(submitted) => match reconciler
+                    .reconcile_after_processed_block(submitted, status.progress.current_block)
+                    .await
+                {
                     Ok(batch) => {
                         receipt_unresolved = batch.unresolved.len();
                         for issue in batch.unresolved {

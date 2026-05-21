@@ -15,6 +15,7 @@ pub fn spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
         allowed_protocols: Vec::new(),
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
+        max_entry_price_ratio_to_initial: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
         min_sell_pool_denom_reserve: None,
         entry_bankroll_eth: None,

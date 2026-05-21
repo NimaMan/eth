@@ -143,6 +143,76 @@ fn lp_approval_entry_gate_allows_at_threshold() {
 }
 
 #[test]
+fn price_to_initial_entry_gate_blocks_above_threshold() {
+    let mut pool = pool();
+    pool.price_ratio_to_initial = Some(Decimal::new(151, 2));
+    let market = MarketSnapshotRef {
+        block_number: 1,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        max_entry_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+        ..SnipeAllConfig::default()
+    });
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(
+        decision.reason(),
+        Some("entry.price_to_initial_ratio_gt_max")
+    );
+}
+
+#[test]
+fn price_to_initial_entry_gate_allows_at_threshold_and_missing_ratio() {
+    for price_ratio_to_initial in [Some(Decimal::new(15, 1)), None] {
+        let mut pool = pool();
+        pool.price_ratio_to_initial = price_ratio_to_initial;
+        let market = MarketSnapshotRef {
+            block_number: 1,
+            token_address: pool.token_address,
+            pool_address: Some(pool.address.clone()),
+            token: None,
+            pool: Some(pool.clone()),
+        };
+        let portfolio = PortfolioState::default();
+        let risks = Vec::new();
+        let ctx = ctx(&market, &portfolio, &risks);
+        let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+            max_entry_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+            ..SnipeAllConfig::default()
+        });
+
+        let decision = strategy
+            .on_market_event(
+                &ctx,
+                &MarketEvent::PoolUpdated {
+                    block_number: 1,
+                    pool,
+                },
+            )
+            .unwrap();
+
+        assert!(decision.order_intent().is_some());
+    }
+}
+
+#[test]
 fn buys_usd_stable_pool_at_stable_liquidity_floor() {
     let mut pool = pool();
     pool.denom_symbol = Some("USDC".to_string());

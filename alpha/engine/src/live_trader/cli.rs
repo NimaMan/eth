@@ -92,7 +92,7 @@ struct LiveCommonCli {
     take_profit_ratio: Option<String>,
 
     /// Register a named live strategy set instead of the default single strategy.
-    /// Examples: `alpha11-live-univ2-lp30-pool-update-block-hold-sweep`,
+    /// Examples: `alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold-sweep`,
     /// `mempool-live-exits`.
     #[arg(long = "strategy-set", alias = "strategy-suite")]
     strategy_set: Option<String>,

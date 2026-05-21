@@ -20,6 +20,7 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         lp_approval_gate_min_pct: Some(
             crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
+        max_entry_price_ratio_to_initial: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: None,
         entry_bankroll_eth: None,

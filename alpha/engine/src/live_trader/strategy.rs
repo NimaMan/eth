@@ -28,6 +28,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "allowed_protocols": spec.allowed_protocols,
         "block_entry_on_lp_approval": spec.block_entry_on_lp_approval,
         "lp_approval_gate_min_pct": spec.lp_approval_gate_min_pct,
+        "max_entry_price_ratio_to_initial": spec.max_entry_price_ratio_to_initial,
         "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
         "min_sell_pool_denom_reserve": spec.min_sell_pool_denom_reserve,
         "entry_bankroll_eth": &spec.entry_bankroll_eth,
@@ -35,4 +36,117 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "take_profit_ratio": spec.take_profit_ratio,
         "max_hold_blocks": spec.max_hold_blocks,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use eth_strategies::{
+        alpha11::{INITIAL_ENTRY_BANKROLL_ETH, MAX_ENTRY_PRICE_RATIO_TO_INITIAL},
+        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
+    };
+    use serde_json::json;
+
+    use super::*;
+    use crate::live_trader::support::TraderExecutionMode;
+
+    fn alpha11_hold15_args() -> Args {
+        Args {
+            poll_interval_ms: 2_000,
+            mempool_since_days: 14,
+            signal_limit: 200,
+            buy_wei: "10000000000000000".to_string(),
+            min_liquidity_eth: "0.5".to_string(),
+            min_liquidity_usd: "1000".to_string(),
+            run_id: None,
+            disable_entry: false,
+            replay_current: false,
+            once: false,
+            max_entry_pools: Some(5),
+            entry_bankroll_eth: None,
+            max_hold_blocks: None,
+            stop_loss_ratio: None,
+            take_profit_ratio: None,
+            strategy_set: Some(ALPHA11_HOLD15_STRATEGY_NAME.to_string()),
+        }
+    }
+
+    #[test]
+    fn alpha11_hold15_strategy_spine_is_execution_mode_independent() {
+        let args = alpha11_hold15_args();
+        let chain_sim_specs = build_strategy_specs(&args).expect("chain-sim specs");
+        let kartal_real_specs = build_strategy_specs(&args).expect("kartal-real specs");
+        let chain_sim_spine = chain_sim_specs
+            .iter()
+            .map(live_strategy_spec_config_json)
+            .collect::<Vec<_>>();
+        let kartal_real_spine = kartal_real_specs
+            .iter()
+            .map(live_strategy_spec_config_json)
+            .collect::<Vec<_>>();
+
+        assert_eq!(chain_sim_spine, kartal_real_spine);
+        assert_eq!(TraderExecutionMode::ChainSim.label(), "chain-sim");
+        assert_eq!(TraderExecutionMode::KartalReal.label(), "kartal-real");
+        assert_ne!(
+            TraderExecutionMode::ChainSim.execution_model(),
+            TraderExecutionMode::KartalReal.execution_model()
+        );
+    }
+
+    #[test]
+    fn alpha11_hold15_strategy_spine_matches_gate_two_contract() {
+        let args = alpha11_hold15_args();
+        let specs = build_strategy_specs(&args).expect("alpha11 hold15 specs");
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(spec.strategy_name, ALPHA11_HOLD15_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, ALPHA11_STRATEGY_IMPL);
+        assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_tax);
+        assert!(spec.exit_lp_approval);
+        assert!(!spec.exit_lp_approval_critical_only);
+        assert!(spec.exit_scam);
+        assert!(spec.block_entry_on_lp_approval);
+        assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
+        assert_eq!(
+            spec.max_entry_price_ratio_to_initial.as_deref(),
+            Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)
+        );
+        assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert_eq!(spec.min_sell_pool_denom_reserve.as_deref(), Some("0"));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(INITIAL_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.max_hold_blocks, Some(15));
+        assert_eq!(spec.stop_loss_ratio, None);
+        assert_eq!(spec.take_profit_ratio, None);
+
+        assert_eq!(
+            live_strategy_spec_config_json(spec),
+            json!({
+                "strategy_name": ALPHA11_HOLD15_STRATEGY_NAME,
+                "strategy_impl": ALPHA11_STRATEGY_IMPL,
+                "strategy_label": "Alpha11 live Uniswap V2 LP30 price-to-initial <= 1.5 pool-update-block hold 15",
+                "strategy_runtime": STRATEGY_RUNTIME,
+                "exit_liquidity_removal": true,
+                "exit_tax": true,
+                "exit_lp_approval": true,
+                "exit_lp_approval_critical_only": false,
+                "exit_scam": true,
+                "allowed_protocols": ["UNISWAP-V2"],
+                "block_entry_on_lp_approval": true,
+                "lp_approval_gate_min_pct": "30",
+                "max_entry_price_ratio_to_initial": MAX_ENTRY_PRICE_RATIO_TO_INITIAL,
+                "defer_buy_confirm_block_lp_approval_to_max_hold": true,
+                "min_sell_pool_denom_reserve": "0",
+                "entry_bankroll_eth": INITIAL_ENTRY_BANKROLL_ETH,
+                "stop_loss_ratio": null,
+                "take_profit_ratio": null,
+                "max_hold_blocks": 15,
+            })
+        );
+    }
 }

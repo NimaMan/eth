@@ -1,5 +1,8 @@
 use crate::{
-    alpha11::{HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH, STRATEGY_IMPL},
+    alpha11::{
+        HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH, MAX_ENTRY_PRICE_RATIO_TO_INITIAL,
+        STRATEGY_IMPL,
+    },
     shared_rules::live::{LiveStrategySpec, LiveStrategySpecOptions},
 };
 
@@ -20,10 +23,12 @@ pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
 
 fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!("alpha11-live-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
+        strategy_name: format!(
+            "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold{max_hold_blocks}"
+        ),
         strategy_impl: STRATEGY_IMPL.to_string(),
         strategy_label: format!(
-            "Alpha11 live Uniswap V2 LP30 pool-update-block hold {max_hold_blocks}"
+            "Alpha11 live Uniswap V2 LP30 price-to-initial <= 1.5 pool-update-block hold {max_hold_blocks}"
         ),
         exit_liquidity_removal: true,
         exit_tax: true,
@@ -35,6 +40,7 @@ fn spec(max_hold_blocks: u64, options: &LiveStrategySpecOptions) -> LiveStrategy
         lp_approval_gate_min_pct: Some(
             crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
+        max_entry_price_ratio_to_initial: Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL.to_string()),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
         min_sell_pool_denom_reserve: Some(MIN_SELL_POOL_DENOM_RESERVE.to_string()),
         entry_bankroll_eth: Some(INITIAL_ENTRY_BANKROLL_ETH.to_string()),
@@ -60,9 +66,9 @@ mod tests {
                 .map(|spec| spec.strategy_name.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "alpha11-live-univ2-lp30-pool-update-block-hold12",
+                "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold12",
                 HOLD15_STRATEGY_NAME,
-                "alpha11-live-univ2-lp30-pool-update-block-hold20",
+                "alpha11-live-univ2-lp30-price-to-initial-lte1p5-pool-update-block-hold20",
             ]
         );
         assert_eq!(
@@ -84,6 +90,10 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.lp_approval_gate_min_pct.as_deref() == Some("30")));
+        assert!(specs
+            .iter()
+            .all(|spec| spec.max_entry_price_ratio_to_initial.as_deref()
+                == Some(MAX_ENTRY_PRICE_RATIO_TO_INITIAL)));
         assert!(specs
             .iter()
             .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold));

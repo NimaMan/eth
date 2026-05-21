@@ -457,6 +457,16 @@ impl Strategy for SnipeAllStrategy {
                 _ => {}
             }
         }
+        if let (Some(max_ratio), Some(price_ratio)) = (
+            self.config.max_entry_price_ratio_to_initial,
+            pool.price_ratio_to_initial,
+        ) {
+            if price_ratio > max_ratio {
+                return Ok(StrategyDecision::hold(
+                    "entry.price_to_initial_ratio_gt_max",
+                ));
+            }
+        }
         if !self.config.allowed_protocols.is_empty() {
             let protocol = pool.protocol.label();
             if !self

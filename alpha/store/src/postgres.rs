@@ -47,6 +47,7 @@ pub struct ActiveHoldCounterRecord {
 pub struct SubmittedExecutionRecord {
     pub order_id: OrderId,
     pub tx_hash: TxHash,
+    pub submitted_block_number: Option<u64>,
     pub position_id: PositionId,
     pub trade_id: Option<TradeId>,
     pub order_side: OrderSide,

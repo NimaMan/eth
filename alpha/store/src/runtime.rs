@@ -339,6 +339,7 @@ impl PostgresTradingStore {
             SELECT DISTINCT ON (er.order_id)
                    er.order_id,
                    er.tx_hash,
+                   er.block_number AS submitted_block_number,
                    er.position_id,
                    er.trade_id,
                    er.order_side,
@@ -381,6 +382,10 @@ impl PostgresTradingStore {
                     .map_err(store_error)?
                     .parse()
                     .map_err(store_error)?;
+                let submitted_block_number = row
+                    .try_get::<Option<i64>, _>("submitted_block_number")
+                    .map_err(store_error)?
+                    .and_then(i64_to_u64);
                 let position_id = PositionId(
                     row.try_get::<String, _>("position_id")
                         .map_err(store_error)?,
@@ -401,6 +406,7 @@ impl PostgresTradingStore {
                 Ok(SubmittedExecutionRecord {
                     order_id,
                     tx_hash,
+                    submitted_block_number,
                     position_id,
                     trade_id,
                     order_side,
