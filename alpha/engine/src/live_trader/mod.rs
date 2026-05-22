@@ -47,6 +47,7 @@ use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
 
+mod backtest;
 mod cli;
 mod gas_policy;
 mod position_state;
@@ -56,6 +57,7 @@ mod strategy;
 mod support;
 mod token_server;
 
+use backtest::ChainSimGasPolicyBacktestAdapter;
 use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
 use gas_policy::load_live_real_gas_policy;
 use position_state::release_stale_submitted_position;
@@ -173,6 +175,29 @@ fn single_strategy_value<T>(
     }
 }
 
+fn live_gas_policy_run_metadata_json(
+    policy: &gas_policy::LiveRealGasPolicy,
+    execution_mode: TraderExecutionMode,
+) -> Value {
+    json!({
+        "mode": if execution_mode.uses_kartal() { "kartal-real" } else { "chain-sim-shadow" },
+        "required_gas_rank_source": &policy.required_gas_rank_source,
+        "gas_rank_lookback_blocks": policy.gas_rank_lookback_blocks,
+        "simulated_gas_buffer_bps": policy.simulated_gas_buffer_bps,
+        "max_priority_fee_gwei": policy.max_priority_fee_gwei.to_string(),
+        "entry_max_estimated_gas_fee_eth": policy.entry_max_estimated_gas_fee_eth.to_string(),
+        "exit_max_estimated_gas_fee_eth": policy.exit_max_estimated_gas_fee_eth.to_string(),
+        "safety_buffer_eth": policy.safety_buffer_eth.to_string(),
+        "v2_vault_buy_gas_limit": policy.v2_vault_buy_gas_limit,
+        "v2_vault_sell_gas_limit": policy.v2_vault_sell_gas_limit,
+        "entry_buy_profiles": &policy.entry_buy_gas_rank_policy,
+        "normal_exit_profiles": &policy.normal_exit_gas_rank_policy,
+        "mempool_race_exit_profiles": &policy.mempool_pre_mine_gas_rank_policy,
+        "mined_approval_race_profiles": &policy.mined_approval_race_gas_rank_policy,
+        "buy_confirm_approval_profiles": &policy.buy_confirm_block_approval_gas_rank_policy,
+    })
+}
+
 pub async fn run_live_backtest() -> Result<()> {
     run(
         "eth_alpha_live_backtest_trader",
@@ -215,8 +240,9 @@ async fn run(
         ));
     }
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
+    let live_gas_policy = load_live_real_gas_policy(&shared_config)?;
     let live_real_gas_policy = if execution_mode.uses_kartal() {
-        Some(load_live_real_gas_policy(&shared_config)?)
+        Some(live_gas_policy.clone())
     } else {
         None
     };
@@ -278,6 +304,7 @@ async fn run(
     let process_started_at = Utc::now();
     let process_started_at_text = process_started_at.to_rfc3339();
     let process_started_at_unix_secs = process_started_at.timestamp();
+    let gas_policy_metadata = live_gas_policy_run_metadata_json(&live_gas_policy, execution_mode);
     if let Err(error) = init_alpha_trader_ops_events(&run_id, &shared_config) {
         warn!(error = %error, "failed to initialize alpha trader ops events");
     }
@@ -331,6 +358,7 @@ async fn run(
                 "min_liquidity_eth": &single_min_liquidity_eth,
                 "min_liquidity_usd": &single_min_liquidity_usd,
                 "replay_current": args.replay_current,
+                "gas_policy": gas_policy_metadata,
             }),
         )
         .await
@@ -460,7 +488,11 @@ async fn run(
         _ => None,
     };
     let adapter: Box<dyn EngineExecutionAdapter> = match execution_mode {
-        TraderExecutionMode::ChainSim => Box::new(chain_sim_adapter),
+        TraderExecutionMode::ChainSim => Box::new(ChainSimGasPolicyBacktestAdapter::new(
+            chain_sim_adapter,
+            token_server_url.clone(),
+            live_gas_policy.clone(),
+        )),
         TraderExecutionMode::KartalReal => {
             let real_args = real_args
                 .as_ref()

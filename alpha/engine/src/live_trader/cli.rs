@@ -68,8 +68,7 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value = DEFAULT_KARTAL_URL)]
     kartal_url: String,
 
-    /// Env var containing the Kartal bearer token. KARTAL_API_TOKEN is also
-    /// tried as a fallback.
+    /// Env var containing the Kartal bearer token.
     #[arg(long, default_value = DEFAULT_KARTAL_TOKEN_ENV)]
     kartal_token_env: String,
 
