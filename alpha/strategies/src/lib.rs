@@ -12,6 +12,7 @@ pub use alpha11::{
     HOLD_SWEEP_SET_NAME as ALPHA11_HOLD_SWEEP_SET_NAME, STRATEGY_IMPL as ALPHA11_STRATEGY_IMPL,
 };
 pub use baseline::snipe_all::{
-    LiveSnipeAllConfig, LiveSnipeAllStrategy, SnipeAllConfig, SnipeAllStrategy,
+    LiveSnipeAllConfig, LiveSnipeAllStrategy, RestoredEntryBankroll, SnipeAllConfig,
+    SnipeAllStrategy,
 };
 pub use market_tracker::{MarketTrackerConfig, MarketTrackerStrategy};

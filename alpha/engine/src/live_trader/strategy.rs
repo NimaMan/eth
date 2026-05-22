@@ -152,7 +152,7 @@ mod tests {
             json!({
                 "strategy_name": ALPHA11_HOLD15_STRATEGY_NAME,
                 "strategy_impl": ALPHA11_STRATEGY_IMPL,
-                "strategy_label": "Alpha11 live Uniswap V2 LP30 pool-update-block hold 15",
+                "strategy_label": "Alpha11 Uniswap V2 LP30 pool-update-block hold 15",
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "exit_liquidity_removal": true,
                 "exit_tax": true,

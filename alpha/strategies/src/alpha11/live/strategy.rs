@@ -5,7 +5,10 @@ use eth_alpha_core::{
     Result, Strategy, StrategyContext, StrategyDecision,
 };
 
-use crate::alpha11::{Alpha11Strategy, LiveAlpha11Config};
+use crate::{
+    alpha11::{Alpha11Strategy, LiveAlpha11Config},
+    baseline::snipe_all::RestoredEntryBankroll,
+};
 
 #[derive(Clone, Debug)]
 pub struct LiveAlpha11Strategy {
@@ -38,6 +41,22 @@ impl LiveAlpha11Strategy {
                 config.alpha11,
                 bought_pools,
                 active_hold_blocks,
+            ),
+        }
+    }
+
+    pub fn with_restored_runtime_state(
+        config: LiveAlpha11Config,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+        restored_entry_bankroll: RestoredEntryBankroll,
+    ) -> Self {
+        Self {
+            inner: Alpha11Strategy::with_restored_runtime_state(
+                config.alpha11,
+                bought_pools,
+                active_hold_blocks,
+                restored_entry_bankroll,
             ),
         }
     }

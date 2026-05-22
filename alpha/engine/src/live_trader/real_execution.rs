@@ -859,7 +859,7 @@ mod tests {
     #[test]
     fn public_mempool_validation_requires_hold3_single_pool_scope() {
         let mut args = live_args();
-        args.strategy_set = Some("alpha11-live-univ2-lp30-pool-update-block-hold15".to_string());
+        args.strategy_set = Some("alpha11-univ2-lp30-pool-update-block-hold15".to_string());
 
         let error = validate_kartal_real_status(
             &status(KartalStatusBroadcastMode::PublicMempool),

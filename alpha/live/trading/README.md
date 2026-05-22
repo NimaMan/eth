@@ -23,7 +23,7 @@ Current live-runner integration:
 emergency sells. That runner refuses non-dry-run Kartal status by default. The
 only public broadcast exception is the explicit one-pool Alpha11 hold3 mined
 validation run, enabled with `--allow-public-mempool-live-validation` and
-`--strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation`.
+`--strategy-set alpha11-univ2-lp30-pool-update-block-hold3-validation`.
 That strategy spec owns `max_entry_pools = 1`, no `--replay-current`, no
 `--once`, and `0.01 ETH` buy/bankroll caps so it can buy once, reconcile the
 mined receipt, sell after 3 pool-update blocks, and record the mined evidence.

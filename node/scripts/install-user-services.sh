@@ -25,7 +25,10 @@ ln -sfn "$REPO_DIR/systemd/user/reth.service" "$USER_SYSTEMD_DIR/reth.service"
 ln -sfn "$REPO_DIR/systemd/user/lighthouse-beacon.service" "$USER_SYSTEMD_DIR/lighthouse-beacon.service"
 ln -sfn "$REPO_DIR/systemd/user/eth-chain-server.service" "$USER_SYSTEMD_DIR/eth-chain-server.service"
 ln -sfn "$REPO_DIR/systemd/user/eth-mempool-signal-detector.service" "$USER_SYSTEMD_DIR/eth-mempool-signal-detector.service"
-ln -sfn "$REPO_DIR/systemd/user/eth-live-pipeline.target" "$USER_SYSTEMD_DIR/eth-live-pipeline.target"
+ln -sfn "$REPO_DIR/systemd/user/eth-alpha-live-backtest.service" "$USER_SYSTEMD_DIR/eth-alpha-live-backtest.service"
+ln -sfn "$REPO_DIR/systemd/user/eth-alpha-live-real-trading.service" "$USER_SYSTEMD_DIR/eth-alpha-live-real-trading.service"
+ln -sfn "$REPO_DIR/systemd/user/eth-alpha-live-backtest.target" "$USER_SYSTEMD_DIR/eth-alpha-live-backtest.target"
+ln -sfn "$REPO_DIR/systemd/user/eth-alpha-live-real-trading.target" "$USER_SYSTEMD_DIR/eth-alpha-live-real-trading.target"
 
 XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user daemon-reload
 
@@ -55,4 +58,5 @@ echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start reth.service"
 echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start lighthouse-beacon.service"
 echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start eth-chain-server.service"
 echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start eth-mempool-signal-detector.service"
-echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start eth-live-pipeline.target"
+echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start eth-alpha-live-backtest.target"
+echo "  XDG_RUNTIME_DIR=$RUNTIME_DIR systemctl --user start eth-alpha-live-real-trading.target"

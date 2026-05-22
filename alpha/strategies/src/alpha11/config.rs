@@ -3,10 +3,10 @@ use alloy_primitives::U256;
 use crate::baseline::snipe_all::SnipeAllConfig;
 
 pub const STRATEGY_IMPL: &str = "alpha11";
-pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-live-univ2-lp30-pool-update-block-hold-sweep";
-pub const HOLD15_STRATEGY_NAME: &str = "alpha11-live-univ2-lp30-pool-update-block-hold15";
+pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold-sweep";
+pub const HOLD15_STRATEGY_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold15";
 pub const HOLD3_VALIDATION_STRATEGY_NAME: &str =
-    "alpha11-live-univ2-lp30-pool-update-block-hold3-validation";
+    "alpha11-univ2-lp30-pool-update-block-hold3-validation";
 pub const BUY_WEI: &str = "10000000000000000";
 pub const MIN_LIQUIDITY_ETH: &str = "0.5";
 pub const MIN_LIQUIDITY_USD: &str = "1000";

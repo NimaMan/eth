@@ -38,7 +38,7 @@ use eth_strategies::shared_rules::live::{
 };
 use eth_strategies::{
     Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
-    LiveSnipeAllStrategy, SnipeAllConfig, ALPHA11_STRATEGY_IMPL,
+    LiveSnipeAllStrategy, RestoredEntryBankroll, SnipeAllConfig, ALPHA11_STRATEGY_IMPL,
 };
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
@@ -107,6 +107,57 @@ fn entry_bankroll_summary_json(
             })
         })
         .collect()
+}
+
+fn position_entry_spend_wei(position: &Position, fallback_buy_wei: U256) -> U256 {
+    position
+        .entry_cost_basis
+        .map(|cost| Amount::from_decimal(cost, 18).raw)
+        .unwrap_or(fallback_buy_wei)
+}
+
+fn position_exit_proceeds_wei(position: &Position) -> U256 {
+    position
+        .exit_proceeds
+        .map(|proceeds| Amount::from_decimal(proceeds, 18).raw)
+        .unwrap_or(U256::ZERO)
+}
+
+fn restored_entry_bankroll_from_terminal_positions(
+    positions: &[Position],
+    fallback_buy_wei: U256,
+) -> RestoredEntryBankroll {
+    let mut bankroll = RestoredEntryBankroll::default();
+    for position in positions {
+        match position.state {
+            PositionState::BuyFailed | PositionState::BuyCancelled | PositionState::Cancelled => {
+                bankroll.record_accounted_pool(position.key.pool_address.clone());
+            }
+            PositionState::SellConfirmed => {
+                bankroll.record_position_result(
+                    position.key.pool_address.clone(),
+                    position_entry_spend_wei(position, fallback_buy_wei),
+                    position_exit_proceeds_wei(position),
+                );
+            }
+            PositionState::Scammed => {
+                bankroll.record_position_result(
+                    position.key.pool_address.clone(),
+                    position_entry_spend_wei(position, fallback_buy_wei),
+                    U256::ZERO,
+                );
+            }
+            PositionState::Init
+            | PositionState::BuyIntentCreated
+            | PositionState::BuySubmitted
+            | PositionState::BuyConfirmed
+            | PositionState::SellIntentCreated
+            | PositionState::SellSubmitted
+            | PositionState::SellFailed
+            | PositionState::SellCancelled => {}
+        }
+    }
+    bankroll
 }
 
 fn single_strategy_value<T>(
@@ -232,8 +283,8 @@ async fn run(
             execution_mode.label(),
             json!({
                 "strategy_name": &observation_strategy_name,
-                "strategy_impl": if strategy_specs.len() == 1 { strategy_specs[0].strategy_impl.clone() } else { "multi-strategy-live-set".to_string() },
-                "strategy_label": if strategy_specs.len() == 1 { strategy_specs[0].strategy_label.clone() } else { "Live Strategy Set".to_string() },
+                "strategy_impl": if strategy_specs.len() == 1 { strategy_specs[0].strategy_impl.clone() } else { "multi-strategy-set".to_string() },
+                "strategy_label": if strategy_specs.len() == 1 { strategy_specs[0].strategy_label.clone() } else { "Strategy Set".to_string() },
                 "strategy_set": args.strategy_set.clone(),
                 "strategy_suite": args.strategy_set.clone(),
                 "strategy_count": strategy_specs.len(),
@@ -284,8 +335,16 @@ async fn run(
     let mut portfolio = PortfolioState::default();
     let mut seen_pools_by_strategy = HashMap::new();
     let mut active_hold_counters_by_strategy = HashMap::new();
+    let mut restored_entry_bankrolls_by_strategy = HashMap::new();
+    let mut restored_entry_bankroll_position_count = 0usize;
     let mut restored_stale_submitted_positions = 0usize;
     for spec in &strategy_specs {
+        let buy_wei = parse_u256_decimal(&spec.buy_wei).wrap_err_with(|| {
+            format!(
+                "invalid buy_wei for live strategy {}: {}",
+                spec.strategy_name, spec.buy_wei
+            )
+        })?;
         let seen_pools = store
             .load_seen_pools(&spec.strategy_name)
             .await
@@ -307,6 +366,21 @@ async fn run(
                 )
             })?;
         active_hold_counters_by_strategy.insert(spec.strategy_name.clone(), active_hold_counters);
+
+        let terminal_positions = store
+            .load_terminal_positions(&spec.strategy_name)
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "failed to restore terminal alpha positions for {}",
+                    spec.strategy_name
+                )
+            })?;
+        restored_entry_bankroll_position_count += terminal_positions.len();
+        let restored_entry_bankroll =
+            restored_entry_bankroll_from_terminal_positions(&terminal_positions, buy_wei);
+        restored_entry_bankrolls_by_strategy
+            .insert(spec.strategy_name.clone(), restored_entry_bankroll);
 
         let restored_positions = store
             .load_active_positions(&spec.strategy_name)
@@ -331,6 +405,20 @@ async fn run(
         }
     }
     let restored_position_count = portfolio.active_position_count();
+    let restored_entry_bankroll_accounted_pool_count = restored_entry_bankrolls_by_strategy
+        .values()
+        .map(RestoredEntryBankroll::accounted_pool_count)
+        .sum::<usize>();
+    let restored_entry_bankroll_spent_wei = restored_entry_bankrolls_by_strategy
+        .values()
+        .fold(U256::ZERO, |acc, bankroll| {
+            acc.saturating_add(bankroll.spent_wei())
+        });
+    let restored_entry_bankroll_recovered_wei = restored_entry_bankrolls_by_strategy
+        .values()
+        .fold(U256::ZERO, |acc, bankroll| {
+            acc.saturating_add(bankroll.recovered_wei())
+        });
 
     let live_simulator = tx_simulator::LiveTxSimulator::new(&reth_datadir)
         .wrap_err("failed to initialize live chain simulator")?;
@@ -477,16 +565,22 @@ async fn run(
                 )
             })
             .collect::<Vec<_>>();
+        let restored_entry_bankroll = restored_entry_bankrolls_by_strategy
+            .get(&spec.strategy_name)
+            .cloned()
+            .unwrap_or_default();
         let strategy: Box<dyn Strategy> = match spec.strategy_impl.as_str() {
-            ALPHA11_STRATEGY_IMPL => Box::new(LiveAlpha11Strategy::with_restored_state(
+            ALPHA11_STRATEGY_IMPL => Box::new(LiveAlpha11Strategy::with_restored_runtime_state(
                 LiveAlpha11Config::new(Alpha11Config::new(snipe_all_config)),
                 seen_pools,
                 active_hold_counters,
+                restored_entry_bankroll,
             )),
-            "snipe-all" => Box::new(LiveSnipeAllStrategy::with_restored_state(
+            "snipe-all" => Box::new(LiveSnipeAllStrategy::with_restored_runtime_state(
                 LiveSnipeAllConfig::new(snipe_all_config),
                 seen_pools,
                 active_hold_counters,
+                restored_entry_bankroll,
             )),
             other => {
                 return Err(eyre!(
@@ -530,6 +624,10 @@ async fn run(
             .values()
             .map(Vec::len)
             .sum::<usize>(),
+        restored_entry_bankroll_positions = restored_entry_bankroll_position_count,
+        restored_entry_bankroll_accounted_pools = restored_entry_bankroll_accounted_pool_count,
+        restored_entry_bankroll_spent_wei = %restored_entry_bankroll_spent_wei,
+        restored_entry_bankroll_recovered_wei = %restored_entry_bankroll_recovered_wei,
         restored_stale_submitted_positions,
         restored_positions = restored_position_count,
         next_order_sequence,

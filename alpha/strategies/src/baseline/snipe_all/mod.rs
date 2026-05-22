@@ -8,4 +8,5 @@ pub mod rules;
 
 pub use config::SnipeAllConfig;
 pub use live::{LiveSnipeAllConfig, LiveSnipeAllStrategy};
+pub use state::RestoredEntryBankroll;
 pub use strategy::SnipeAllStrategy;

@@ -199,12 +199,12 @@ Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
 at most `0.225 ETH`. Public broadcast is rejected unless all of these are true:
 Kartal reports `public_mempool`, the CLI includes
 `--allow-public-mempool-live-validation`, the strategy set is
-`alpha11-live-univ2-lp30-pool-update-block-hold3-validation`,
+`alpha11-univ2-lp30-pool-update-block-hold3-validation`,
 `--replay-current` is absent, `--once` is absent, and the resolved strategy spec
 has `max_entry_pools = 1` plus buy value and entry bankroll both capped at
 `0.01 ETH`. The visible
 Alpha11 hold15 strategy name remains
-`alpha11-live-univ2-lp30-pool-update-block-hold15` for both live-backtest and
+`alpha11-univ2-lp30-pool-update-block-hold15` for both live-backtest and
 live-real. Hold duration is part of the named strategy spec rather than a
 live-run CLI override. The live-real path applies the deploy-only entry cap
 `price / initial price <= 1.5` through the recorded strategy config instead of

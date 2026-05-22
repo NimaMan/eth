@@ -493,3 +493,53 @@ fn entry_bankroll_allows_redeploying_confirmed_profit() {
 
     assert!(decision.order_intent().is_some());
 }
+
+#[test]
+fn entry_bankroll_restores_closed_profit_without_portfolio_position() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 3,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let risks = Vec::new();
+    let portfolio = PortfolioState::default();
+    let ctx = ctx(&market, &portfolio, &risks);
+
+    let mut closed_pool = pool.clone();
+    closed_pool.token_address = Address::repeat_byte(0xcc);
+    closed_pool.address = TokenPoolId::new(
+        closed_pool.token_address,
+        Address::repeat_byte(0xdd).to_string(),
+    );
+
+    let mut restored_bankroll = RestoredEntryBankroll::default();
+    restored_bankroll.record_position_result(
+        closed_pool.address.clone(),
+        U256::from(10_000_000_000_000_000u64),
+        U256::from(20_000_000_000_000_000u64),
+    );
+    let mut strategy = SnipeAllStrategy::with_restored_runtime_state(
+        SnipeAllConfig {
+            entry_bankroll_wei: Some(U256::from(10_000_000_000_000_000u64)),
+            ..SnipeAllConfig::default()
+        },
+        vec![closed_pool.address],
+        Vec::new(),
+        restored_bankroll,
+    );
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 3,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(decision.order_intent().is_some());
+}

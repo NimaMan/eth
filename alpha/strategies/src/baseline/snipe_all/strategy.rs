@@ -17,7 +17,7 @@ use super::{
     config::SnipeAllConfig,
     rule::RuleDecision,
     rules::{creator_label, entry},
-    state::SnipeAllState,
+    state::{RestoredEntryBankroll, SnipeAllState},
 };
 
 #[derive(Clone, Debug)]
@@ -55,6 +55,22 @@ impl SnipeAllStrategy {
                 bought_pools,
                 active_hold_blocks,
             ),
+        }
+    }
+
+    pub fn with_restored_runtime_state(
+        config: SnipeAllConfig,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+        restored_entry_bankroll: RestoredEntryBankroll,
+    ) -> Self {
+        Self {
+            config,
+            state: SnipeAllState::with_bought_pools_and_active_hold_blocks(
+                bought_pools,
+                active_hold_blocks,
+            )
+            .with_restored_entry_bankroll(restored_entry_bankroll),
         }
     }
 
@@ -305,8 +321,12 @@ impl SnipeAllStrategy {
             available = apply_position_to_entry_bankroll(available, position, &self.config);
         }
 
+        available = self.state.restored_entry_bankroll().apply_to(available);
+
         for pool in self.state.bought_pools() {
-            if !portfolio_pools.contains(pool) {
+            if !portfolio_pools.contains(pool)
+                && !self.state.restored_entry_bankroll().accounts_for(pool)
+            {
                 available = available.saturating_sub(self.config.buy_amount.raw);
             }
         }

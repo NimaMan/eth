@@ -26,7 +26,7 @@ pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
     let mut spec = spec(3, options);
     spec.strategy_name = HOLD3_VALIDATION_STRATEGY_NAME.to_string();
     spec.strategy_label =
-        "Alpha11 live validation Uniswap V2 LP30 pool-update-block hold 3".to_string();
+        "Alpha11 validation Uniswap V2 LP30 pool-update-block hold 3".to_string();
     spec.entry_bankroll_eth = Some(LIVE_VALIDATION_ENTRY_BANKROLL_ETH.to_string());
     spec.max_entry_pools = Some(LIVE_VALIDATION_MAX_ENTRY_POOLS);
     spec
@@ -34,10 +34,10 @@ pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategyS
 
 fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
-        strategy_name: format!("alpha11-live-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
+        strategy_name: format!("alpha11-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
         strategy_impl: STRATEGY_IMPL.to_string(),
         strategy_label: format!(
-            "Alpha11 live Uniswap V2 LP30 pool-update-block hold {max_hold_blocks}"
+            "Alpha11 Uniswap V2 LP30 pool-update-block hold {max_hold_blocks}"
         ),
         exit_liquidity_removal: true,
         exit_tax: true,
@@ -79,9 +79,9 @@ mod tests {
                 .map(|spec| spec.strategy_name.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "alpha11-live-univ2-lp30-pool-update-block-hold12",
+                "alpha11-univ2-lp30-pool-update-block-hold12",
                 HOLD15_STRATEGY_NAME,
-                "alpha11-live-univ2-lp30-pool-update-block-hold20",
+                "alpha11-univ2-lp30-pool-update-block-hold20",
             ]
         );
         assert_eq!(

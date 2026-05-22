@@ -1,7 +1,0 @@
-[Unit]
-Description=Ethereum live chain, mempool, and no-capital alpha backtester pipeline
-Wants=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-backtester.service
-After=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-backtester.service
-
-[Install]
-WantedBy=default.target

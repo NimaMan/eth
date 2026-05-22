@@ -6,11 +6,11 @@ defaults that should be explicit in the strategy name.
 
 The visible live-backtest and live-real hold15 strategy name remains:
 
-`alpha11-live-univ2-lp30-pool-update-block-hold15`
+`alpha11-univ2-lp30-pool-update-block-hold15`
 
 The controlled public validation variant is:
 
-`alpha11-live-univ2-lp30-pool-update-block-hold3-validation`
+`alpha11-univ2-lp30-pool-update-block-hold3-validation`
 
 That variant has the same Uniswap V2, LP30, pool-update-block, and deployed V2
 vault assumptions, but it uses hold3 and a `0.01 ETH` entry bankroll so we can
@@ -80,7 +80,7 @@ for deploy review are:
 - `risk_atlas_mined_chain`: confirmed-chain evidence derived from mined blocks.
 - `market`: pool-update or max-hold decisions, not a risk-signal source.
 
-For `alpha11-live-univ2-lp30-pool-update-block-hold15`, a sell reason of
+For `alpha11-univ2-lp30-pool-update-block-hold15`, a sell reason of
 `exit.lp_approval` means the strategy exited on LP-token approval evidence. A
 sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
 pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`

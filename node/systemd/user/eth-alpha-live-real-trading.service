@@ -1,5 +1,5 @@
 [Unit]
-Description=Ethereum alpha live trader (Kartal real-executor dry run)
+Description=Ethereum alpha live real trading (Kartal real-executor dry-run guarded)
 Wants=network-online.target eth-chain-server.service eth-mempool-signal-detector.service kartal-eth-signer.service
 After=network-online.target eth-chain-server.service eth-mempool-signal-detector.service kartal-eth-signer.service
 StartLimitIntervalSec=0
@@ -9,16 +9,15 @@ Type=simple
 WorkingDirectory=/home/nima/code/crypto/blockchains/eth
 EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
 EnvironmentFile=-/home/nima/code/crypto/kartal/.env
-EnvironmentFile=/home/nima/code/crypto/blockchains/eth/node/systemd/user/eth-alpha-real-trader.env
+EnvironmentFile=/home/nima/code/crypto/blockchains/eth/node/systemd/user/eth-alpha-live-real-trading.env
 Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUST_LOG=info
 ExecStartPre=/usr/bin/test -n ${ALPHA_RUN_ID}
-ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SUITE}
-ExecStartPre=/usr/bin/test -n ${ALPHA_BUY_WEI}
+ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SET}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_FROM}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --buy-wei ${ALPHA_BUY_WEI} --min-liquidity-eth ${ALPHA_MIN_LIQUIDITY_ETH} --min-liquidity-usd ${ALPHA_MIN_LIQUIDITY_USD} --strategy-suite ${ALPHA_STRATEGY_SUITE} --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --strategy-set ${ALPHA_STRATEGY_SET} --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

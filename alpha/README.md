@@ -57,7 +57,7 @@ simulation and has no Kartal execution path.
 refuses to start unless Kartal reports `broadcast_mode = dry_run`, except for
 the explicit one-pool Alpha11 hold3 mined-validation run. That exception requires
 `--allow-public-mempool-live-validation`, strategy
-`alpha11-live-univ2-lp30-pool-update-block-hold3-validation`,
+`alpha11-univ2-lp30-pool-update-block-hold3-validation`,
 no `--replay-current`, and strategy-spec buy/bankroll caps of `0.01 ETH`.
 While real entries are otherwise in validation mode, each strategy must resolve
 to a bankroll of at most `0.225 ETH`; Alpha11 carries that default in its
@@ -129,9 +129,9 @@ cargo test -p eth_alpha_engine
 cargo test -p eth_alpha_store
 cargo test -p eth_strategies
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
-cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-live-univ2-lp30-pool-update-block-hold3-validation --allow-public-mempool-live-validation
+cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
+cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
+cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold3-validation --allow-public-mempool-live-validation
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```
 

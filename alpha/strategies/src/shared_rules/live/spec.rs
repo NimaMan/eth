@@ -1,7 +1,7 @@
 pub const DEFAULT_STRATEGY_NAME: &str = "snipe-all";
 pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All";
 pub const STRATEGY_RUNTIME: &str = "live";
-pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-live-suite";
+pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-strategy-set";
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveStrategySpecOptions;

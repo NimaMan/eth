@@ -5,7 +5,7 @@ use eth_alpha_core::{
     Result, Strategy, StrategyContext, StrategyDecision,
 };
 
-use crate::baseline::snipe_all::SnipeAllStrategy;
+use crate::baseline::snipe_all::{RestoredEntryBankroll, SnipeAllStrategy};
 
 use super::Alpha11Config;
 
@@ -40,6 +40,22 @@ impl Alpha11Strategy {
                 config.snipe_all,
                 bought_pools,
                 active_hold_blocks,
+            ),
+        }
+    }
+
+    pub fn with_restored_runtime_state(
+        config: Alpha11Config,
+        bought_pools: impl IntoIterator<Item = PoolAddress>,
+        active_hold_blocks: impl IntoIterator<Item = (PositionId, u64, Option<BlockNumber>)>,
+        restored_entry_bankroll: RestoredEntryBankroll,
+    ) -> Self {
+        Self {
+            inner: SnipeAllStrategy::with_restored_runtime_state(
+                config.snipe_all,
+                bought_pools,
+                active_hold_blocks,
+                restored_entry_bankroll,
             ),
         }
     }

@@ -347,6 +347,41 @@ impl PostgresTradingStore {
             .collect()
     }
 
+    pub async fn load_terminal_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT protocol, payload::text AS payload
+            FROM alpha_trading.positions
+            WHERE run_id = $1
+              AND strategy_name = $2
+              AND state IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(strategy_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let payload = row.try_get::<String, _>("payload").map_err(store_error)?;
+                let mut position =
+                    serde_json::from_str::<Position>(&payload).map_err(store_error)?;
+                let protocol = row
+                    .try_get::<Option<String>, _>("protocol")
+                    .map_err(store_error)?;
+                if let Some(protocol) = protocol.as_deref().filter(|value| !value.trim().is_empty())
+                {
+                    position.key.protocol = PoolProtocol::from_label(protocol);
+                }
+                normalize_position_pool_id(&mut position);
+                Ok(position)
+            })
+            .collect()
+    }
+
     pub async fn load_submitted_executions(
         &self,
         limit: usize,

@@ -306,7 +306,7 @@ mod tests {
             portfolio_id: PortfolioId("portfolio".to_string()),
             wallet_id: WalletId("wallet".to_string()),
             strategy_name: StrategyName(
-                "alpha11-live-univ2-lp30-pool-update-block-hold20".to_string(),
+                "alpha11-univ2-lp30-pool-update-block-hold20".to_string(),
             ),
             side: OrderSide::Sell,
             token_address: token(),
@@ -331,7 +331,7 @@ mod tests {
                 portfolio_id: PortfolioId("portfolio".to_string()),
                 wallet_id: WalletId("wallet".to_string()),
                 strategy_name: StrategyName(
-                    "alpha11-live-univ2-lp30-pool-update-block-hold20".to_string(),
+                    "alpha11-univ2-lp30-pool-update-block-hold20".to_string(),
                 ),
                 token_address: token(),
                 pool_address: pool_address(),
@@ -372,7 +372,7 @@ mod tests {
                 tx: TxPrepRequestContext {
                     chain_id: 1,
                     from: Address::with_last_byte(0x33).to_string(),
-                    strategy_name: "alpha11-live-univ2-lp30-pool-update-block-hold20".to_string(),
+                    strategy_name: "alpha11-univ2-lp30-pool-update-block-hold20".to_string(),
                     strategy_run_id: Some("run-1".to_string()),
                     observed_block: Some(25_128_246),
                     source_metadata: json!({ "signal_id": 222 }),
