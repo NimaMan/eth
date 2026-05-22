@@ -30,6 +30,7 @@ The root Rust workspace is this directory. Current workspace members from
 | `alpha/engine/` | `eth_alpha_engine` | Strategy runtime, portfolio/order state, risk gating, and execution adapter boundary. |
 | `alpha/live/state/` | `eth_live_state` | Legacy live-state schemas and protocol helpers; not the normal chain-server live transport. |
 | `alpha/live/feed/` | `eth_live_feed` | Live confirmed-chain feed over processed blocks and token updates. |
+| `alpha/live/trading/` | `eth_live_trading` | Live tx-prep, priority-exit policy, Kartal direct-raw client shape, and value-capped gas/bribe planning. |
 
 Important adjacent code that is not currently a root workspace member:
 
@@ -80,6 +81,7 @@ alpha
   <- mempool signal rows
   <- recent mined block fee samples for block-rank evidence
   -> strategy observations, chain-sim orders, positions, risk events in Postgres
+  -> prepared direct-raw tx requests only after real planner wiring exists
 
 pyreth
   -> Python-facing wrappers around simulator/query/processor APIs
@@ -112,7 +114,8 @@ Use this map before broad searching:
 | How do I estimate rough tx position from recent mined blocks? | `alpha/block_tx_rank/README.md` | `alpha/block_tx_rank/src/lib.rs`, `reth_chain_query/src/provider/block/` |
 | Where are current pipeline bottlenecks tracked? | `bogaz.md` | service memory, cache fill/read metrics, live readiness, mempool timing, alpha decision bottlenecks |
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
-| How is a real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
+| How does alpha prepare a live transaction? | `alpha/live/trading/README.md` | `alpha/live/trading/src/tx_prep/`, `alpha/engine/src/execution/real/README.md`, `alpha/block_tx_rank/README.md` |
+| How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
 | How do we deploy and audit an ETH on-chain contract? | `onchain-deployments/README.md` | contract-specific folders such as `onchain-deployments/uniswap-v2-trading-vault/` |
 | How do I investigate token behavior or launch strategy stats? | `token_lab/README.md` | `token_lab/cases/README.md`, `token_lab/strategy/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
 | How are node paths and services configured? | `node/README.md` | `config.env`, `node/scripts/`, `node/systemd/` |
@@ -140,15 +143,16 @@ Keep new code inside the crate that owns the behavior:
 | `eth_token` | Token and pool state machines, token health, control-address/activity state, network views, block-level token update logic from processed blocks. | Direct tracing/RPC, duplicate transaction decoding, live service hosting. |
 | `eth_chain_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
-| `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
+| `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, live tx-prep, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
 | `tx_executor` | Validate prepared transactions, reserve nonce, enforce fee caps, sign, broadcast, record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery, tx rank estimation. |
 | `tx_fund_flow` | Fund-flow network construction, ranking, analytics, visualization. | Core transaction simulation or decoding duplicates. |
 
 ## Common Runtime Inputs
 
-Shared defaults live in `config.env` at this repository root. Exported
-environment variables with the same names override the file.
+Shared defaults live in this repository root. New durable service settings
+should go in `config.toml`; legacy path/process settings still live in
+`config.env` until they are migrated.
 
 Important defaults currently used by local services:
 
@@ -159,13 +163,45 @@ RETH_HTTP_RPC=http://127.0.0.1:8545
 RETH_WS_RPC=ws://127.0.0.1:8546
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
 CHAIN_SERVER_BIND=127.0.0.1:8765
-MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 MEMPOOL_ZMQ_SIGNAL_ENDPOINT=tcp://127.0.0.1:5556
+```
+
+Database URLs are TOML settings:
+
+```toml
+[databases.alpha]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
+
+[databases.mempool]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
+
+[databases.token_pnl]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 ```
 
 Prefer direct DB access for performance-sensitive paths. RPC is acceptable for
 node operations, broadcast, comparisons, and explicit verification examples.
+
+## Persistent Stores And Databases
+
+The ETH module uses a small number of persistent stores with different owners.
+Do not add a new DB or schema until this table and the owner README are updated.
+
+| Store | Type / config | Owner README | Purpose |
+| --- | --- | --- | --- |
+| Reth node datadir | Local Reth data under `RETH_DATADIR`; includes `db/` MDBX, `static_files/`, and Reth `rocksdb/` provider data. | `tx_simulator/README.md`, `reth_chain_query/README.md` | Canonical local Ethereum chain source for state, headers, transactions, receipts, and simulation forks. Opened read-only by normal application code. |
+| Processed-block disk cache | File store at `PROCESSED_BLOCK_DISK_CACHE_DIR`; optional retention via `PROCESSED_BLOCK_DISK_CACHE_BLOCKS`. | `tx_processor/README.md`, `tx_processor/src/processed_tx_provider/block/README.md` | Compact `.pblock.zst` replay cache for `ProcessedBlock` payloads. Speeds live warmup, historical ranges, Risk Atlas exports, and token/network analysis. |
+| RethIndex | Sidecar MDBX directory at `RETH_INDEX_DIR`, defaulting to `<RETH_DATADIR>/reth_index`. | `reth_chain_query/src/reth_index/README.md`, `reth_chain_query/src/reth_index/tables/README.md` | Custom low-latency indexes missing from canonical Reth. Current active tables are `address_to_blocks` and `mempool_tx_arrival_times`. |
+| Fund-flow `eth_db` | PostgreSQL schema `eth_db`, read with `DATABASE_URL`. | `reth_chain_query/src/postgres_db/README.md`, `tx_fund_flow/README.md` | Legacy/curated relational chain analytics: addresses, transactions, tx participants, related addresses, token metadata, pool metadata, and trade aggregates used by fund-flow graph discovery and analytics. |
+| Token PnL store | PostgreSQL schema `token_pnl`, configured by `databases.token_pnl.url`. | `eth_token_pnl_store/README.md` | Pool-scoped address PnL ledger and rollups: calculation runs, pool conservation totals, address-level PnL, and movement rows. |
+| Mempool signal store | PostgreSQL schema `live_trading`, configured by `databases.mempool.url`. | `mempool_processor/README.md`, `mempool_processor/src/db_writers/README.md` | Source of truth for public pending-transaction signals. Core row table is `live_trading.signal_events`; typed detail tables hang off `signal_id`. |
+| Alpha trading store | PostgreSQL schema `alpha_trading`, configured by `databases.alpha.url`. | `alpha/store/README.md`, `alpha/README.md` | Durable decision ledger for runs, observations, orders, execution reports, positions, position snapshots, trades, trade events/snapshots, risk events, decisions, result sets, performance views, and validation reports. |
+| Risk Atlas read model | PostgreSQL tables `risk_atlas_*` in the same database used by `databases.alpha.url` in `eth_chain_server`. | `token_lab/risk_atlas/scam_analytics/risk_atlas/README.md` | Durable scam/risk analytics read model for Risk Atlas pages: runs, eligibility, observations, distributions, active targets, decision questions, review examples, model readiness, and page snapshots. |
+
+The Postgres schemas may live in the same physical database during local
+development, but their ownership is separate. `databases.mempool.url` should not
+be used as a fallback for alpha state, and frontend pages should read backend
+APIs backed by these stores instead of reconstructing DB semantics client-side.
 
 ## Useful Commands
 

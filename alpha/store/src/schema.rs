@@ -245,14 +245,36 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         filled_amount_decimals SMALLINT,
         gas_used BIGINT,
         gas_cost_eth TEXT,
+        gas_policy_action TEXT,
+        gas_policy_signal TEXT,
+        gas_policy_status TEXT,
+        gas_policy_profile TEXT,
+        gas_policy_profiles JSONB,
+        gas_rank_source TEXT,
+        gas_estimated_max_cost_eth TEXT,
+        gas_estimated_priority_spend_eth TEXT,
+        gas_policy_guard TEXT,
         error TEXT,
         payload JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     "#,
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_action TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_signal TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_status TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_profile TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_profiles JSONB",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_rank_source TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_estimated_max_cost_eth TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_estimated_priority_spend_eth TEXT",
+    "ALTER TABLE alpha_trading.trade_events ADD COLUMN IF NOT EXISTS gas_policy_guard TEXT",
     r#"
     CREATE INDEX IF NOT EXISTS trade_events_trade_created_idx
     ON alpha_trading.trade_events (trade_id, created_at ASC, id ASC)
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS trade_events_gas_policy_idx
+    ON alpha_trading.trade_events (run_id, gas_policy_action, gas_policy_profile, created_at DESC)
     "#,
     r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.trade_snapshots (

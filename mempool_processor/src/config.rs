@@ -18,7 +18,7 @@ pub const MEMPOOL_RETH_DATADIR_ENV: &str = "MEMPOOL_RETH_DATADIR";
 pub const MEMPOOL_LOG_DIR_ENV: &str = "MEMPOOL_LOG_DIR";
 pub const MEMPOOL_SIM_WORKERS_ENV: &str = "MEMPOOL_SIM_WORKERS";
 pub const MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_SIGNAL_ENDPOINT";
-pub const MEMPOOL_DATABASE_URL_ENV: &str = "MEMPOOL_DATABASE_URL";
+pub const MEMPOOL_DATABASE_CONFIG_KEY: &str = "databases.mempool.url";
 pub const MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV: &str = "MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD";
 pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
@@ -46,6 +46,15 @@ pub fn eth_config_path() -> PathBuf {
                 .join("../..")
                 .join("config.env")
         })
+}
+
+fn eth_toml_config_path() -> PathBuf {
+    let path = eth_config_path();
+    if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+        path
+    } else {
+        path.with_file_name("config.toml")
+    }
 }
 
 /// Reth data directory for examples and runtime defaults.
@@ -114,6 +123,20 @@ fn config_value(keys: &[&str]) -> Option<String> {
     }
 
     None
+}
+
+fn toml_config_value(key: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(eth_toml_config_path()).ok()?;
+    let root = contents.parse::<toml::Value>().ok()?;
+    let mut value = &root;
+    for part in key.split('.') {
+        value = value.get(part)?;
+    }
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn explicit_or_shared_config_value(
@@ -524,7 +547,7 @@ impl MempoolProcessorConfig {
             config.zmq.signal_endpoint = endpoint;
         }
 
-        if let Some(url) = config_value(&[MEMPOOL_DATABASE_URL_ENV]) {
+        if let Some(url) = toml_config_value(MEMPOOL_DATABASE_CONFIG_KEY) {
             config.database.url = Some(url);
             config.database.enabled = true;
         }

@@ -131,8 +131,7 @@ Failure isolation rules:
 For live runs, Postgres signal persistence is required. token-server and ASENA
 read mempool signals from `live_trading.signal_events` plus typed detail tables;
 ZMQ and signal logs are diagnostic outputs. `mempool_signal_detector` loads
-`MEMPOOL_DATABASE_URL` from the process environment or the shared
-`ETH_CONFIG_PATH` config file and refuses to start without it unless
+`databases.mempool.url` from `blockchains/eth/config.toml` and refuses to start without it unless
 `--allow-database-disabled` is passed for a diagnostic run.
 
 Persistent outputs:
@@ -202,7 +201,7 @@ Required or primary live settings:
 | --- | --- |
 | `MEMPOOL_IPC_PATH` / `RETH_IPC_PATH` | Local Reth IPC socket used for pending tx ingestion. |
 | `MEMPOOL_RETH_DATADIR` / `RETH_DATADIR` | Reth data directory used for simulations and the `<datadir>/reth_index` arrival sidecar. |
-| `MEMPOOL_DATABASE_URL` | Required Postgres URL for live semantic signal persistence. |
+| `databases.mempool.url` | Required Postgres URL for live semantic signal persistence. |
 | `MEMPOOL_LIVE_TOKEN_SERVER_URL` | Token-server base URL for `/live/tokens`, `/live/pools`, and `/live/updates`. |
 | `MEMPOOL_LOG_DIR` / `ETH_LOG_DIR` | Run log directory. |
 | `MEMPOOL_SIM_WORKERS` | Simulation worker count; default is 4. |

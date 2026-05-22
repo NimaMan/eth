@@ -633,14 +633,24 @@ impl PostgresTradingStore {
         report: &ExecutionReport,
     ) -> Result<()> {
         let payload = to_json(report)?;
+        let evidence = report.mined_evidence.as_ref();
+        let gas_policy_profiles = evidence
+            .and_then(|evidence| evidence.gas_policy_profiles.as_ref())
+            .and_then(|profiles| serde_json::to_value(profiles).ok());
         sqlx::query(
             r#"
             INSERT INTO alpha_trading.trade_events (
                 trade_id, run_id, event_type, order_side, status, order_id, tx_hash,
                 block_number, filled_amount_raw, filled_amount_decimals, gas_used,
-                gas_cost_eth, error, payload, created_at
+                gas_cost_eth, gas_policy_action, gas_policy_signal, gas_policy_status,
+                gas_policy_profile, gas_policy_profiles, gas_rank_source,
+                gas_estimated_max_cost_eth, gas_estimated_priority_spend_eth,
+                gas_policy_guard, error, payload, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW()
+            )
             "#,
         )
         .bind(trade_id)
@@ -660,6 +670,15 @@ impl PostgresTradingStore {
         )
         .bind(report.gas_used.map(u64_to_i64))
         .bind(report.gas_cost.as_ref().map(amount_to_eth_string))
+        .bind(evidence.and_then(|evidence| evidence.gas_policy_action.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_policy_signal.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_policy_status.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_policy_profile.as_deref()))
+        .bind(gas_policy_profiles)
+        .bind(evidence.and_then(|evidence| evidence.gas_rank_source.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_estimated_max_cost_eth.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_estimated_priority_spend_eth.as_deref()))
+        .bind(evidence.and_then(|evidence| evidence.gas_policy_guard.as_deref()))
         .bind(report.error.as_deref())
         .bind(payload)
         .execute(&self.pool)

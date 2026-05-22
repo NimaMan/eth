@@ -15,7 +15,7 @@ eth_pool_classification = { path = "../alpha/pool_classification" }
 eth_price = { path = "../eth_price" }
 eth_token = { path = "../eth_token" }
 reth_chain_query = { path = "../reth_chain_query" }
-token_lab_scam_risk_atlas = { path = "../token_lab/scam_analytics/risk_atlas" }
+token_lab_scam_risk_atlas = { path = "../token_lab/risk_atlas/scam_analytics/risk_atlas" }
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
 
@@ -28,6 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres"] }
 tokio.workspace = true
+toml.workspace = true
 zstd = "0.13"
 
 futures-util = "0.3"

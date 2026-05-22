@@ -161,7 +161,7 @@ should consume the committed state/event stream directly, while the frontend use
 snapshot/read-model endpoints.
 
 Resolved live-tail bottleneck target: V2 pool identity/metadata lookups became
-expensive when they fell back through Redis live-state snapshots. See
+expensive when they fell back through external live-state snapshots. See
 [`docs/live-v2-metadata-bottleneck.md`](docs/live-v2-metadata-bottleneck.md)
 for evidence and the migration plan that led to the direct handoff.
 
@@ -361,7 +361,27 @@ Runtime values come from the config file. `--config <path>` is only a path
 selector for isolated runs such as profiling; it is not an environment fallback.
 Without `--config`, the server reads `blockchains/eth/config.env`.
 
-Key config defaults come from `config.env`:
+## Persistent Store Dependencies
+
+`eth_chain_server` is a host and read gateway; it opens stores owned by other
+crates and exposes API read models over them.
+
+| Store | Config | Used for | Owner |
+| --- | --- | --- | --- |
+| Reth datadir | `RETH_DATADIR` | Direct chain reads and simulation provider setup through `RethQueryProvider`. | `tx_simulator` / `reth_chain_query` |
+| RethIndex | `RETH_INDEX_DIR` or `<RETH_DATADIR>/reth_index` | `address_to_blocks` reads for token activity-block lookups, and optional address-index writes when processed-block replay writes are enabled. | `reth_chain_query/src/reth_index/` |
+| Processed-block disk cache | `PROCESSED_BLOCK_DISK_CACHE_DIR`, `PROCESSED_BLOCK_DISK_CACHE_BLOCKS` | Live warmup, historical range reads, and processed-block replay writes. | `tx_processor/src/processed_tx_provider/block/` |
+| Mempool signals | `databases.mempool.url` | Reads `live_trading.signal_events` and typed detail tables for mempool signal API routes. | `mempool_processor/src/db_writers/` |
+| Alpha trading | `databases.alpha.url` | Reads and resets `alpha_trading.*` strategy/run/trade tables for alpha pages and APIs. | `alpha/store/` |
+| Risk Atlas | `databases.alpha.url` | Reads/writes `risk_atlas_*` tables for Risk Atlas pages and range exports. | `token_lab/risk_atlas/scam_analytics/risk_atlas/` |
+
+The server should not compute these stores' business semantics in HTTP routes.
+Routes should call the owner crate/read model and return backend-provided fields
+as-is. If a value is missing from the backend, the frontend should show it empty
+rather than re-derive it client-side.
+
+Path/runtime defaults still come from `config.env`; database URLs come from
+`config.toml`:
 
 ```bash
 RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth
@@ -371,8 +391,14 @@ RETH_WS_RPC=ws://127.0.0.1:8546
 CHAIN_SERVER_BIND=127.0.0.1:8765
 CHAIN_SERVER_AUTO_START_LIVE=true
 PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-block-cache
-MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+```
+
+```toml
+[databases.mempool]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
+
+[databases.alpha]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 ```
 
 ## Current Hazards

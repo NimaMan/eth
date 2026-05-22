@@ -22,8 +22,8 @@ PostgreSQL persistence for the alpha runtime. This crate is infrastructure: it i
 ## Runtime Contract
 
 `eth_alpha_trader`, `eth_alpha_backtest`, `eth_alpha_lab`, and `eth_chain_server`
-read `ALPHA_DATABASE_URL` from the shared `blockchains/eth/config.env` file.
-There is no `MEMPOOL_DATABASE_URL` fallback for alpha state.
+read `databases.alpha.url` from the shared `blockchains/eth/config.toml` file.
+There is no `databases.mempool.url` fallback for alpha state.
 
 `eth_alpha_store` owns the `alpha_trading` migrations embedded in
 `src/lib.rs`. `alpha/lab` may add lab-only validation tables in the same schema,

@@ -217,9 +217,9 @@ async fn main() -> Result<()> {
     if !base_config.database.enabled && !allow_database_disabled {
         bail!(
             "mempool_signal_detector live profile requires persisted signal writes. \
-             Set {} in the environment or shared ETH_CONFIG_PATH config.env, or pass \
+             Set {} in blockchains/eth/config.toml, or pass \
              --allow-database-disabled only for a diagnostic ZMQ/log-only run.",
-            mempool_processor::config::MEMPOOL_DATABASE_URL_ENV
+            mempool_processor::config::MEMPOOL_DATABASE_CONFIG_KEY
         );
     }
 

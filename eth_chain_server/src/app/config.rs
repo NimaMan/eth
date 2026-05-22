@@ -21,8 +21,8 @@ const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_CONFIG: &str = "PROCESSED_BLOCK_DISK_CAC
 const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed-block-cache";
 const LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG: &str =
     "LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS";
-const MEMPOOL_DATABASE_URL_CONFIG: &str = "MEMPOOL_DATABASE_URL";
-const ALPHA_DATABASE_URL_CONFIG: &str = "ALPHA_DATABASE_URL";
+const MEMPOOL_DATABASE_CONFIG_KEY: &str = "databases.mempool.url";
+const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const MEMPOOL_SIGNAL_LIMIT_CONFIG: &str = "MEMPOOL_SIGNAL_LIMIT";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
@@ -110,8 +110,8 @@ impl ChainServerConfig {
             LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG,
             DEFAULT_BLOCK_APPLY_TIMEOUT_MS,
         )?;
-        let mempool_database_url = required_config_string(config, MEMPOOL_DATABASE_URL_CONFIG)?;
-        let alpha_database_url = required_config_string(config, ALPHA_DATABASE_URL_CONFIG)?;
+        let mempool_database_url = required_config_string(config, MEMPOOL_DATABASE_CONFIG_KEY)?;
+        let alpha_database_url = required_config_string(config, ALPHA_DATABASE_CONFIG_KEY)?;
         let mempool_signal_limit = config_parse(
             config,
             MEMPOOL_SIGNAL_LIMIT_CONFIG,
@@ -150,10 +150,10 @@ impl ChainServerConfig {
             ));
         }
         if mempool_database_url.trim().is_empty() {
-            return Err(eyre!("{MEMPOOL_DATABASE_URL_CONFIG} must not be empty"));
+            return Err(eyre!("{MEMPOOL_DATABASE_CONFIG_KEY} must not be empty"));
         }
         if alpha_database_url.trim().is_empty() {
-            return Err(eyre!("{ALPHA_DATABASE_URL_CONFIG} must not be empty"));
+            return Err(eyre!("{ALPHA_DATABASE_CONFIG_KEY} must not be empty"));
         }
         if mempool_signal_limit <= 0 {
             return Err(eyre!(
@@ -234,7 +234,53 @@ fn load_config_env_from_path(path: &Path) -> Result<HashMap<String, String>> {
             path.display()
         )
     })?;
-    Ok(parse_env_config(&contents))
+    let mut values = parse_env_config(&contents);
+    merge_toml_database_config(&mut values, &toml_config_path_for(path))?;
+    Ok(values)
+}
+
+fn toml_config_path_for(path: &Path) -> PathBuf {
+    if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+        path.to_path_buf()
+    } else {
+        path.with_file_name("config.toml")
+    }
+}
+
+fn merge_toml_database_config(values: &mut HashMap<String, String>, path: &Path) -> Result<()> {
+    let contents = fs::read_to_string(path).map_err(|err| {
+        eyre!(
+            "failed to read shared TOML config file {}: {err}",
+            path.display()
+        )
+    })?;
+    let root = contents.parse::<toml::Value>().map_err(|err| {
+        eyre!(
+            "failed to parse shared TOML config file {}: {err}",
+            path.display()
+        )
+    })?;
+    insert_toml_database_url(values, &root, "mempool", MEMPOOL_DATABASE_CONFIG_KEY);
+    insert_toml_database_url(values, &root, "alpha", ALPHA_DATABASE_CONFIG_KEY);
+    Ok(())
+}
+
+fn insert_toml_database_url(
+    values: &mut HashMap<String, String>,
+    root: &toml::Value,
+    database_name: &str,
+    key: &str,
+) {
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get(database_name))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(key.to_string(), url.to_string());
+    }
 }
 
 fn parse_env_config(contents: &str) -> HashMap<String, String> {
@@ -324,8 +370,8 @@ mod tests {
             LIVE_TOKEN_TRACKER_WARMUP_BLOCKS=7000
             RETH_HTTP_RPC=http://127.0.0.1:8545
             RETH_WS_RPC=ws://127.0.0.1:8546
-            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -341,8 +387,8 @@ mod tests {
         let values = parse_env_config(
             r#"
             CHAIN_SERVER_LIVE_WARMUP_BLOCKS=2000
-            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -357,8 +403,8 @@ mod tests {
             r#"
             CHAIN_SERVER_BIND="127.0.0.1:9999"
             LIVE_TOKEN_TRACKER_WARMUP_BLOCKS='123'
-            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -373,8 +419,8 @@ mod tests {
         let values = parse_env_config(
             r#"
             CHAIN_SERVER_AUTO_START_LIVE=false
-            MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
-            ALPHA_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 

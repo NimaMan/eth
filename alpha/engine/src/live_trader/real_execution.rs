@@ -15,16 +15,16 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasRankPlan,
-    GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
+    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasEstimateConfig,
+    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
     KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
     KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
     LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
     LivePrioritySellPlannerInput, LiveTraderTxSignal, PlannerTxContext, PreSubmitSimulation,
-    PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate, StrategyGasRankDefaults,
-    StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
-    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
-    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
+    PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig,
+    TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
+    UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
+    VaultInternalAllowanceChecker,
 };
 use eth_strategies::{
     alpha11::{
@@ -43,6 +43,7 @@ use crate::execution::real::{
 use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
 
 use super::cli::{Args, RealExecutionArgs};
+use super::gas_policy::LiveRealGasPolicy;
 
 const LIVE_VALIDATION_BUY_WEI: &str = "10000000000000000";
 
@@ -268,6 +269,8 @@ struct KartalRealPlanner<P, G> {
     simulator: UniswapV2TradingVaultPreSubmitSimulator,
     buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder,
     gas_rank: G,
+    gas_estimate: GasEstimateConfig,
+    gas_policy: LiveRealGasPolicy,
 }
 
 #[async_trait]
@@ -330,14 +333,17 @@ where
             .await
             .map_err(planner_error)?;
         ensure_simulation_ok(&simulation)?;
-        apply_simulated_gas_used(&mut route, &simulation)?;
+        apply_simulated_gas_used(&mut route, &simulation, &self.gas_estimate)?;
         let gas_rank = self
             .gas_rank
             .ranked_fee_candidates(&input, &route)
             .await
             .map_err(planner_error)?;
-        let gas_rank_policy = StrategyGasRankDefaults::entry_buy_policy();
-        let fee = select_gas_fee(&gas_rank, &gas_rank_policy)?;
+        let gas_rank_policy = self.gas_policy.entry_buy_gas_rank_policy.clone();
+        let fee = select_entry_gas_fee(&gas_rank, &gas_rank_policy, &route, &self.gas_policy)?;
+        let estimated_gas_used = route
+            .require_estimated_gas_used()
+            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
         let trade_id = input.intent.trade_id.clone().ok_or_else(|| {
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
@@ -393,7 +399,25 @@ where
                         "label": fee.label,
                         "priority_fee_gwei": fee.priority_fee_gwei,
                         "max_fee_per_gas_gwei": fee.max_fee_per_gas_gwei,
+                        "estimated_priority_spend_eth": fee.estimated_priority_spend_eth(estimated_gas_used),
+                        "estimated_max_cost_eth": fee.estimated_max_cost_eth(estimated_gas_used),
                         "source": fee.source,
+                    },
+                    "gas_policy": {
+                        "action": "entry_buy",
+                        "signal": "entry.buy_eligible_pool_once",
+                        "status": "selected",
+                        "profiles": gas_policy_profile_labels(&gas_rank_policy),
+                        "selected_profile": fee.label,
+                        "gas_rank_source": fee.source,
+                        "guard": "entry_estimated_gas_fee_cap",
+                        "estimated_max_cost_eth": fee.estimated_max_cost_eth(estimated_gas_used),
+                        "estimated_priority_spend_eth": fee.estimated_priority_spend_eth(estimated_gas_used),
+                    },
+                    "production_gas_guard": {
+                        "required_gas_rank_source": self.gas_policy.required_gas_rank_source.as_str(),
+                        "max_priority_fee_gwei": self.gas_policy.max_priority_fee_gwei,
+                        "max_estimated_gas_fee_eth": self.gas_policy.entry_max_estimated_gas_fee_eth,
                     },
                     "strategy_gas_rank_policy": gas_rank_policy,
                     "simulation": simulation.metadata(),
@@ -450,25 +474,59 @@ fn ensure_simulation_ok(simulation: &PreSubmitSimulation) -> eth_alpha_core::err
 fn apply_simulated_gas_used(
     route: &mut PreparedSellRoute,
     simulation: &PreSubmitSimulation,
+    gas_estimate: &GasEstimateConfig,
 ) -> eth_alpha_core::error::Result<()> {
-    let Some(gas_used) = simulation.gas_used else {
-        return Ok(());
-    };
+    let gas_used = simulation.gas_used.ok_or_else(|| {
+        AlphaCoreError::Execution(
+            "exact live transaction simulation did not report gas_used; fallback gas estimates are not allowed"
+                .to_string(),
+        )
+    })?;
     route
-        .apply_simulated_gas_used(gas_used)
+        .apply_simulated_gas_used(gas_used, gas_estimate)
         .map_err(|error| AlphaCoreError::Execution(error.to_string()))
 }
 
-fn select_gas_fee(
+fn select_entry_gas_fee(
     plan: &GasRankPlan,
     policy: &StrategyGasRankPolicy,
+    route: &PreparedSellRoute,
+    gas_policy: &LiveRealGasPolicy,
 ) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
-    policy.choose_candidate(&plan.candidates).ok_or_else(|| {
+    let estimated_gas_used = route
+        .require_estimated_gas_used()
+        .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+    let candidates = plan
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.source.as_deref() == Some(gas_policy.required_gas_rank_source.as_str())
+                && candidate.priority_fee_gwei <= gas_policy.max_priority_fee_gwei
+                && candidate.estimated_max_cost_eth(estimated_gas_used)
+                    <= gas_policy.entry_max_estimated_gas_fee_eth
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    policy.choose_candidate(&candidates).ok_or_else(|| {
         AlphaCoreError::Execution(
-            "live real buy planner has no gas fee candidate matching strategy gas rank policy"
-                .to_string(),
+            format!(
+                "live real buy planner has no gas fee candidate matching production gas guard: required_source={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
+                gas_policy.required_gas_rank_source,
+                gas_policy.max_priority_fee_gwei,
+                gas_policy.entry_max_estimated_gas_fee_eth,
+                serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
+            ),
         )
     })
+}
+
+fn gas_policy_profile_labels(policy: &StrategyGasRankPolicy) -> Vec<&'static str> {
+    policy
+        .preference_order
+        .iter()
+        .map(|profile| profile.label())
+        .collect()
 }
 
 fn decimal_gwei_to_wei_string(value: Decimal) -> String {
@@ -539,28 +597,46 @@ pub(super) async fn build_kartal_real_adapter(
     exact_pre_submit_live_simulator: tx_simulator::LiveTxSimulator,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
+    gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
     let vault =
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
     let pre_submit_simulator =
         UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
-    let gas_rank_provider = ChainServerGasRankProvider::new(chain_server_url);
+    let gas_rank_provider = ChainServerGasRankProvider::new(chain_server_url)
+        .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks);
 
     let mut planner_config = LivePrioritySellPlannerConfig::default();
     planner_config.require_existing_allowance = false;
     planner_config.tx_prep = TxPrepConfig {
-        max_total_fee_eth: Decimal::new(2, 2),
-        max_priority_fee_gwei: Decimal::from(100),
-        safety_buffer_eth: Decimal::new(1, 3),
-        gas_rank_policy: StrategyGasRankPolicy::urgent_first(),
+        max_total_fee_eth: gas_policy.exit_max_estimated_gas_fee_eth,
+        max_priority_fee_gwei: gas_policy.max_priority_fee_gwei,
+        safety_buffer_eth: gas_policy.safety_buffer_eth,
+        gas_rank_policy: gas_policy.normal_exit_gas_rank_policy.clone(),
+        required_gas_rank_source: Some(gas_policy.required_gas_rank_source.clone()),
     };
-    planner_config.max_priority_fee_per_gas_gwei = Decimal::from(100);
-    planner_config.max_total_fee_eth = Decimal::new(2, 2);
+    planner_config.max_priority_fee_per_gas_gwei = gas_policy.max_priority_fee_gwei;
+    planner_config.max_total_fee_eth = gas_policy.exit_max_estimated_gas_fee_eth;
+    planner_config
+        .gas_estimate
+        .simulated_gas_estimate_buffer_bps = gas_policy.simulated_gas_buffer_bps;
+    planner_config.normal_exit_gas_rank_policy = gas_policy.normal_exit_gas_rank_policy.clone();
+    planner_config.mempool_pre_mine_gas_rank_policy =
+        gas_policy.mempool_pre_mine_gas_rank_policy.clone();
+    planner_config.mined_approval_race_gas_rank_policy =
+        gas_policy.mined_approval_race_gas_rank_policy.clone();
+    planner_config.buy_confirm_block_approval_gas_rank_policy = gas_policy
+        .buy_confirm_block_approval_gas_rank_policy
+        .clone();
+    let gas_estimate = planner_config.gas_estimate.clone();
 
     let planner = LivePrioritySellPlanner::new(
         planner_config,
-        UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
+        UniswapV2TradingVaultSellRouteBuilder::with_gas_limit(
+            vault,
+            gas_policy.v2_vault_sell_gas_limit,
+        ),
         pre_submit_simulator.clone(),
         gas_rank_provider.clone(),
         VaultInternalAllowanceChecker,
@@ -578,8 +654,13 @@ pub(super) async fn build_kartal_real_adapter(
         sell_planner: bridge,
         resolver,
         simulator: pre_submit_simulator,
-        buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder::with_default_gas(vault),
+        buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder::with_gas_limit(
+            vault,
+            gas_policy.v2_vault_buy_gas_limit,
+        ),
         gas_rank: gas_rank_provider,
+        gas_estimate,
+        gas_policy,
     };
     let submitter = KartalExecutorClient::new(KartalExecutorClientConfig::new(
         &args.kartal_url,
@@ -732,12 +813,7 @@ fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
     let token = std::env::var(token_env)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            std::env::var("KARTAL_API_TOKEN")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env} or KARTAL_API_TOKEN"))?;
+        .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env}"))?;
     Ok(token)
 }
 
@@ -780,7 +856,7 @@ mod tests {
     fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
         RealExecutionArgs {
             kartal_url: "http://127.0.0.1:5004".to_string(),
-            kartal_token_env: "KARTAL_API_TOKEN".to_string(),
+            kartal_token_env: "ETH_TX_EXECUTOR_API_TOKEN".to_string(),
             live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
             live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
             allow_public_mempool_live_validation,

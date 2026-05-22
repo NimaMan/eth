@@ -66,6 +66,24 @@ pub struct MinedExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_bribe_max_fee_per_gas_wei: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_signal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_profiles: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_rank_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_estimated_max_cost_eth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_estimated_priority_spend_eth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_guard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted_confirmation_depth: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recheck_confirmation_depth: Option<u64>,

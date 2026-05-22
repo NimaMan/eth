@@ -18,6 +18,8 @@ use eth_alpha_store::PostgresTradingStore;
 use eyre::{Result, WrapErr};
 use rust_decimal::Decimal;
 
+const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
+
 #[derive(Debug, Parser)]
 struct Args {
     /// Unique run identifier for this backtest.
@@ -96,7 +98,7 @@ pub async fn run() -> Result<()> {
 
     let args = Args::parse();
     let shared_config = load_shared_config()?;
-    let database_url = required_shared_config_value(&shared_config, "ALPHA_DATABASE_URL")?;
+    let database_url = required_shared_config_value(&shared_config, ALPHA_DATABASE_CONFIG_KEY)?;
     let reth_datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
 
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
@@ -226,7 +228,9 @@ fn load_shared_config() -> Result<HashMap<String, String>> {
     let path = shared_config_path();
     let contents = fs::read_to_string(&path)
         .wrap_err_with(|| format!("failed to read shared config file {}", path.display()))?;
-    Ok(parse_shared_config(&contents))
+    let mut values = parse_shared_config(&contents);
+    merge_toml_database_config(&mut values)?;
+    Ok(values)
 }
 
 fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> Result<String> {
@@ -238,7 +242,12 @@ fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> 
         .ok_or_else(|| {
             eyre::eyre!(
                 "{key} must be set in shared config file {}",
-                shared_config_path().display()
+                if key == ALPHA_DATABASE_CONFIG_KEY {
+                    shared_toml_config_path()
+                } else {
+                    shared_config_path()
+                }
+                .display()
             )
         })
 }
@@ -248,6 +257,30 @@ fn shared_config_path() -> PathBuf {
         .join("..")
         .join("..")
         .join("config.env")
+}
+
+fn shared_toml_config_path() -> PathBuf {
+    shared_config_path().with_file_name("config.toml")
+}
+
+fn merge_toml_database_config(values: &mut HashMap<String, String>) -> Result<()> {
+    let path = shared_toml_config_path();
+    let contents = fs::read_to_string(&path)
+        .wrap_err_with(|| format!("failed to read shared TOML config file {}", path.display()))?;
+    let root = contents
+        .parse::<toml::Value>()
+        .wrap_err_with(|| format!("failed to parse shared TOML config file {}", path.display()))?;
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get("alpha"))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(ALPHA_DATABASE_CONFIG_KEY.to_string(), url.to_string());
+    }
+    Ok(())
 }
 
 fn parse_shared_config(contents: &str) -> HashMap<String, String> {

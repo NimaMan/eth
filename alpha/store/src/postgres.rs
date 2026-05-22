@@ -57,4 +57,13 @@ pub struct SubmittedExecutionRecord {
     pub selected_max_priority_fee_per_gas_wei: Option<String>,
     pub selected_bribe_priority_fee_per_gas_wei: Option<String>,
     pub selected_bribe_max_fee_per_gas_wei: Option<String>,
+    pub gas_policy_action: Option<String>,
+    pub gas_policy_signal: Option<String>,
+    pub gas_policy_status: Option<String>,
+    pub gas_policy_profile: Option<String>,
+    pub gas_policy_profiles: Option<Vec<String>>,
+    pub gas_rank_source: Option<String>,
+    pub gas_estimated_max_cost_eth: Option<String>,
+    pub gas_estimated_priority_spend_eth: Option<String>,
+    pub gas_policy_guard: Option<String>,
 }

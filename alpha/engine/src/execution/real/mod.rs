@@ -22,6 +22,7 @@ use eth_live_trading::{
     LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
     PrioritySellPlannerOutcome,
 };
+use serde_json::Value;
 
 use crate::EngineExecutionAdapter;
 
@@ -218,6 +219,7 @@ fn submission_evidence(
     request: &LiveDirectRawTransactionRequest,
 ) -> MinedExecutionEvidence {
     let bribe = request.bribe.as_ref();
+    let metadata = &request.metadata;
     MinedExecutionEvidence {
         submitted_block_number: observed_block,
         selected_gas_limit: non_empty_string(&request.gas_limit),
@@ -228,6 +230,31 @@ fn submission_evidence(
         selected_bribe_max_fee_per_gas_wei: bribe
             .and_then(|bribe| bribe.max_fee_per_gas.as_deref())
             .and_then(non_empty_string),
+        gas_policy_action: metadata_string(metadata, &["gas_policy", "action"])
+            .or_else(|| metadata_string(metadata, &["intent_kind"])),
+        gas_policy_signal: metadata_string(metadata, &["gas_policy", "signal"])
+            .or_else(|| metadata_string(metadata, &["signal_source"]))
+            .or_else(|| metadata_string(metadata, &["reason"])),
+        gas_policy_status: metadata_string(metadata, &["gas_policy", "status"]),
+        gas_policy_profile: metadata_string(metadata, &["gas_policy", "selected_profile"])
+            .or_else(|| metadata_string(metadata, &["gas_plan", "label"])),
+        gas_policy_profiles: metadata_string_array(metadata, &["gas_policy", "profiles"]).or_else(
+            || metadata_string_array(metadata, &["strategy_gas_rank_policy", "preference_order"]),
+        ),
+        gas_rank_source: metadata_string(metadata, &["gas_policy", "gas_rank_source"])
+            .or_else(|| metadata_string(metadata, &["gas_plan", "source"])),
+        gas_estimated_max_cost_eth: metadata_string(
+            metadata,
+            &["gas_policy", "estimated_max_cost_eth"],
+        )
+        .or_else(|| metadata_string(metadata, &["gas_plan", "estimated_max_cost_eth"])),
+        gas_estimated_priority_spend_eth: metadata_string(
+            metadata,
+            &["gas_policy", "estimated_priority_spend_eth"],
+        )
+        .or_else(|| metadata_string(metadata, &["gas_plan", "estimated_priority_spend_eth"])),
+        gas_policy_guard: metadata_string(metadata, &["gas_policy", "guard"])
+            .or_else(|| metadata_string(metadata, &["gas_policy", "economic_guard"])),
         ..MinedExecutionEvidence::default()
     }
 }
@@ -235,6 +262,34 @@ fn submission_evidence(
 fn non_empty_string(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_string())
+}
+
+fn metadata_string(metadata: &Value, path: &[&str]) -> Option<String> {
+    let value = metadata_path(metadata, path)?;
+    let text = value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string());
+    non_empty_string(&text)
+}
+
+fn metadata_string_array(metadata: &Value, path: &[&str]) -> Option<Vec<String>> {
+    let values = metadata_path(metadata, path)?.as_array()?;
+    let strings = values
+        .iter()
+        .filter_map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+                .and_then(|text| non_empty_string(&text))
+        })
+        .collect::<Vec<_>>();
+    (!strings.is_empty()).then_some(strings)
+}
+
+fn metadata_path<'a>(metadata: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter().try_fold(metadata, |value, key| value.get(*key))
 }
 
 fn parse_tx_hash(value: Option<&str>) -> (Option<TxHash>, Option<String>) {
@@ -308,7 +363,7 @@ mod tests {
         LivePrioritySellPlannerInput, PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput,
         PrioritySellPlannerOutcome, TxPrepRequestContext,
     };
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::*;
 
@@ -422,7 +477,19 @@ mod tests {
                 nonce: None,
                 bribe: None,
                 simulation: None,
-                metadata: json!({}),
+                metadata: json!({
+                    "gas_policy": {
+                        "action": "entry_buy",
+                        "signal": "entry.buy_eligible_pool_once",
+                        "status": "selected",
+                        "profiles": ["balanced", "minimum"],
+                        "selected_profile": "balanced",
+                        "gas_rank_source": "chain_server_gas_rank",
+                        "guard": "entry_estimated_gas_fee_cap",
+                        "estimated_max_cost_eth": "0.0021",
+                        "estimated_priority_spend_eth": "0.0002"
+                    }
+                }),
             },
         }
     }
@@ -546,6 +613,13 @@ mod tests {
         assert_eq!(report.status, ExecutionStatus::Submitted);
         assert!(report.tx_hash.is_some());
         assert_eq!(report.block_number, Some(25_128_246));
+        let evidence = report.mined_evidence.expect("submitted evidence");
+        assert_eq!(evidence.gas_policy_action.as_deref(), Some("entry_buy"));
+        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("balanced"));
+        assert_eq!(
+            evidence.gas_policy_profiles.as_deref(),
+            Some(["balanced".to_string(), "minimum".to_string()].as_slice())
+        );
     }
 
     #[tokio::test]

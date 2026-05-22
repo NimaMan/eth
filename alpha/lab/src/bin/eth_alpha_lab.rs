@@ -18,6 +18,8 @@ use eth_alpha_lab::{
 };
 use eyre::{eyre, Result};
 
+const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
+
 #[derive(Debug, Parser)]
 #[command(name = "eth_alpha_lab")]
 #[command(about = "Offline diagnostics for ETH alpha strategy and position sanity checks")]
@@ -143,7 +145,7 @@ enum Command {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let shared_config = load_shared_config()?;
-    let database_url = required_shared_config_value(&shared_config, "ALPHA_DATABASE_URL")?;
+    let database_url = required_shared_config_value(&shared_config, ALPHA_DATABASE_CONFIG_KEY)?;
     let pool = connect(&database_url).await?;
 
     match args.command {
@@ -309,6 +311,10 @@ fn shared_config_path() -> PathBuf {
         .join("config.env")
 }
 
+fn shared_toml_config_path() -> PathBuf {
+    shared_config_path().with_file_name("config.toml")
+}
+
 fn load_shared_config() -> Result<HashMap<String, String>> {
     let path = shared_config_path();
     let contents = fs::read_to_string(&path).map_err(|error| {
@@ -317,7 +323,36 @@ fn load_shared_config() -> Result<HashMap<String, String>> {
             path.display()
         )
     })?;
-    Ok(parse_shared_config(&contents))
+    let mut values = parse_shared_config(&contents);
+    merge_toml_database_config(&mut values)?;
+    Ok(values)
+}
+
+fn merge_toml_database_config(values: &mut HashMap<String, String>) -> Result<()> {
+    let path = shared_toml_config_path();
+    let contents = fs::read_to_string(&path).map_err(|error| {
+        eyre!(
+            "failed to read shared TOML config file {}: {error}",
+            path.display()
+        )
+    })?;
+    let root = contents.parse::<toml::Value>().map_err(|error| {
+        eyre!(
+            "failed to parse shared TOML config file {}: {error}",
+            path.display()
+        )
+    })?;
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get("alpha"))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(ALPHA_DATABASE_CONFIG_KEY.to_string(), url.to_string());
+    }
+    Ok(())
 }
 
 fn parse_shared_config(contents: &str) -> HashMap<String, String> {
@@ -351,7 +386,12 @@ fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> 
         .ok_or_else(|| {
             eyre!(
                 "{key} must be set in shared config file {}",
-                shared_config_path().display()
+                if key == ALPHA_DATABASE_CONFIG_KEY {
+                    shared_toml_config_path()
+                } else {
+                    shared_config_path()
+                }
+                .display()
             )
         })
 }

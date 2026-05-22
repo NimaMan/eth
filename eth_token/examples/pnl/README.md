@@ -25,3 +25,20 @@ cargo run -p eth_token --example uniswap_v2_pool_user_pnl_conservation -- \
 
 Use `--list-known` to print available fixtures. Override `--end` when checking a
 larger local Reth range.
+
+## Persistence
+
+Database persistence lives in `eth_token_pnl_store` so `eth_token` remains a
+pure calculation crate.
+
+```bash
+cargo run -p eth_token_pnl_store --example persist_uniswap_v2_pool_pnl -- \
+  --run-id hodl-weth-pnl-v1 \
+  --token 0x538F76361ad5e94f21dB670e07f3b4DfF186AF3F \
+  --pool 0xb1440adcAc60dCd82d7F40205DaF5f2cC96Edc61 \
+  --start 25106317 \
+  --end 25106381 \
+  --config /home/nima/code/crypto/blockchains/eth/config.toml
+```
+
+Set `databases.token_pnl.url` in `blockchains/eth/config.toml`.

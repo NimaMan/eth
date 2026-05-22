@@ -252,11 +252,37 @@ fn shared_config_path() -> PathBuf {
         .join("config.env")
 }
 
+fn shared_toml_config_path() -> PathBuf {
+    shared_config_path().with_file_name("config.toml")
+}
+
 pub(super) fn load_shared_config() -> Result<HashMap<String, String>> {
     let path = shared_config_path();
     let contents = fs::read_to_string(&path)
         .wrap_err_with(|| format!("failed to read shared config file {}", path.display()))?;
-    Ok(parse_shared_config(&contents))
+    let mut values = parse_shared_config(&contents);
+    merge_toml_database_config(&mut values)?;
+    Ok(values)
+}
+
+fn merge_toml_database_config(values: &mut HashMap<String, String>) -> Result<()> {
+    let path = shared_toml_config_path();
+    let contents = fs::read_to_string(&path)
+        .wrap_err_with(|| format!("failed to read shared TOML config file {}", path.display()))?;
+    let root = contents
+        .parse::<toml::Value>()
+        .wrap_err_with(|| format!("failed to parse shared TOML config file {}", path.display()))?;
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get("alpha"))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(ALPHA_DATABASE_CONFIG_KEY.to_string(), url.to_string());
+    }
+    Ok(())
 }
 
 fn parse_shared_config(contents: &str) -> HashMap<String, String> {
@@ -296,7 +322,12 @@ pub(super) fn required_shared_config_value(
     optional_shared_config_value(config, key).ok_or_else(|| {
         eyre!(
             "{key} must be set in shared config file {}",
-            shared_config_path().display()
+            if key == ALPHA_DATABASE_CONFIG_KEY {
+                shared_toml_config_path()
+            } else {
+                shared_config_path()
+            }
+            .display()
         )
     })
 }
@@ -333,7 +364,7 @@ pub(super) fn parse_eth_decimal_to_wei(value: &str, label: &str) -> Result<U256>
 }
 
 pub(super) fn resolve_database_url(config: &HashMap<String, String>) -> Result<String> {
-    required_shared_config_value(config, ALPHA_DATABASE_URL_CONFIG)
+    required_shared_config_value(config, ALPHA_DATABASE_CONFIG_KEY)
 }
 
 pub(super) fn default_run_id() -> String {

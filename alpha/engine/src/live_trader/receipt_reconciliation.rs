@@ -238,6 +238,15 @@ fn mined_evidence(
             .selected_bribe_priority_fee_per_gas_wei
             .clone(),
         selected_bribe_max_fee_per_gas_wei: record.selected_bribe_max_fee_per_gas_wei.clone(),
+        gas_policy_action: record.gas_policy_action.clone(),
+        gas_policy_signal: record.gas_policy_signal.clone(),
+        gas_policy_status: record.gas_policy_status.clone(),
+        gas_policy_profile: record.gas_policy_profile.clone(),
+        gas_policy_profiles: record.gas_policy_profiles.clone(),
+        gas_rank_source: record.gas_rank_source.clone(),
+        gas_estimated_max_cost_eth: record.gas_estimated_max_cost_eth.clone(),
+        gas_estimated_priority_spend_eth: record.gas_estimated_priority_spend_eth.clone(),
+        gas_policy_guard: record.gas_policy_guard.clone(),
         accepted_confirmation_depth: Some(ACCEPTED_CONFIRMATION_DEPTH),
         recheck_confirmation_depth: Some(RECHECK_CONFIRMATION_DEPTH),
     })
@@ -533,6 +542,19 @@ mod tests {
             selected_max_priority_fee_per_gas_wei: Some("50000000000".to_string()),
             selected_bribe_priority_fee_per_gas_wei: Some("40000000000".to_string()),
             selected_bribe_max_fee_per_gas_wei: Some("100000000000".to_string()),
+            gas_policy_action: Some("mempool_race_exit".to_string()),
+            gas_policy_signal: Some("MempoolLpApproval".to_string()),
+            gas_policy_status: Some("selected".to_string()),
+            gas_policy_profile: Some("aggressive".to_string()),
+            gas_policy_profiles: Some(vec![
+                "aggressive".to_string(),
+                "balanced".to_string(),
+                "minimum".to_string(),
+            ]),
+            gas_rank_source: Some("chain_server_gas_rank".to_string()),
+            gas_estimated_max_cost_eth: Some("0.01".to_string()),
+            gas_estimated_priority_spend_eth: Some("0.004".to_string()),
+            gas_policy_guard: Some("priority_fee_budget".to_string()),
         }
     }
 
@@ -677,6 +699,26 @@ mod tests {
         assert_eq!(
             evidence.selected_bribe_max_fee_per_gas_wei.as_deref(),
             Some("100000000000")
+        );
+        assert_eq!(
+            evidence.gas_policy_action.as_deref(),
+            Some("mempool_race_exit")
+        );
+        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("aggressive"));
+        assert_eq!(
+            evidence.gas_policy_profiles.as_deref(),
+            Some(
+                [
+                    "aggressive".to_string(),
+                    "balanced".to_string(),
+                    "minimum".to_string()
+                ]
+                .as_slice()
+            )
+        );
+        assert_eq!(
+            evidence.gas_policy_guard.as_deref(),
+            Some("priority_fee_budget")
         );
         assert_eq!(
             report

@@ -400,7 +400,16 @@ impl PostgresTradingStore {
                    er.payload #>> '{mined_evidence,selected_max_fee_per_gas_wei}' AS selected_max_fee_per_gas_wei,
                    er.payload #>> '{mined_evidence,selected_max_priority_fee_per_gas_wei}' AS selected_max_priority_fee_per_gas_wei,
                    er.payload #>> '{mined_evidence,selected_bribe_priority_fee_per_gas_wei}' AS selected_bribe_priority_fee_per_gas_wei,
-                   er.payload #>> '{mined_evidence,selected_bribe_max_fee_per_gas_wei}' AS selected_bribe_max_fee_per_gas_wei
+                   er.payload #>> '{mined_evidence,selected_bribe_max_fee_per_gas_wei}' AS selected_bribe_max_fee_per_gas_wei,
+                   er.payload #>> '{mined_evidence,gas_policy_action}' AS gas_policy_action,
+                   er.payload #>> '{mined_evidence,gas_policy_signal}' AS gas_policy_signal,
+                   er.payload #>> '{mined_evidence,gas_policy_status}' AS gas_policy_status,
+                   er.payload #>> '{mined_evidence,gas_policy_profile}' AS gas_policy_profile,
+                   er.payload #> '{mined_evidence,gas_policy_profiles}' AS gas_policy_profiles,
+                   er.payload #>> '{mined_evidence,gas_rank_source}' AS gas_rank_source,
+                   er.payload #>> '{mined_evidence,gas_estimated_max_cost_eth}' AS gas_estimated_max_cost_eth,
+                   er.payload #>> '{mined_evidence,gas_estimated_priority_spend_eth}' AS gas_estimated_priority_spend_eth,
+                   er.payload #>> '{mined_evidence,gas_policy_guard}' AS gas_policy_guard
             FROM alpha_trading.execution_reports er
             JOIN alpha_trading.positions positions
               ON positions.run_id = er.run_id
@@ -475,6 +484,34 @@ impl PostgresTradingStore {
                 let selected_bribe_max_fee_per_gas_wei = row
                     .try_get::<Option<String>, _>("selected_bribe_max_fee_per_gas_wei")
                     .map_err(store_error)?;
+                let gas_policy_action = row
+                    .try_get::<Option<String>, _>("gas_policy_action")
+                    .map_err(store_error)?;
+                let gas_policy_signal = row
+                    .try_get::<Option<String>, _>("gas_policy_signal")
+                    .map_err(store_error)?;
+                let gas_policy_status = row
+                    .try_get::<Option<String>, _>("gas_policy_status")
+                    .map_err(store_error)?;
+                let gas_policy_profile = row
+                    .try_get::<Option<String>, _>("gas_policy_profile")
+                    .map_err(store_error)?;
+                let gas_policy_profiles = row
+                    .try_get::<Option<Value>, _>("gas_policy_profiles")
+                    .map_err(store_error)?
+                    .and_then(json_string_array);
+                let gas_rank_source = row
+                    .try_get::<Option<String>, _>("gas_rank_source")
+                    .map_err(store_error)?;
+                let gas_estimated_max_cost_eth = row
+                    .try_get::<Option<String>, _>("gas_estimated_max_cost_eth")
+                    .map_err(store_error)?;
+                let gas_estimated_priority_spend_eth = row
+                    .try_get::<Option<String>, _>("gas_estimated_priority_spend_eth")
+                    .map_err(store_error)?;
+                let gas_policy_guard = row
+                    .try_get::<Option<String>, _>("gas_policy_guard")
+                    .map_err(store_error)?;
                 Ok(SubmittedExecutionRecord {
                     order_id,
                     tx_hash,
@@ -488,6 +525,15 @@ impl PostgresTradingStore {
                     selected_max_priority_fee_per_gas_wei,
                     selected_bribe_priority_fee_per_gas_wei,
                     selected_bribe_max_fee_per_gas_wei,
+                    gas_policy_action,
+                    gas_policy_signal,
+                    gas_policy_status,
+                    gas_policy_profile,
+                    gas_policy_profiles,
+                    gas_rank_source,
+                    gas_estimated_max_cost_eth,
+                    gas_estimated_priority_spend_eth,
+                    gas_policy_guard,
                 })
             })
             .collect()
@@ -602,4 +648,19 @@ impl PostgresTradingStore {
             .map_err(store_error)
             .map(|value| i64_to_u64(value).unwrap_or_default())
     }
+}
+
+fn json_string_array(value: Value) -> Option<Vec<String>> {
+    let values = value.as_array()?;
+    let strings = values
+        .iter()
+        .filter_map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+                .filter(|text| !text.trim().is_empty())
+        })
+        .collect::<Vec<_>>();
+    (!strings.is_empty()).then_some(strings)
 }

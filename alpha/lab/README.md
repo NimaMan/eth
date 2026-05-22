@@ -17,7 +17,7 @@ live trading path. It currently uses:
 - `risk_events`
 - `strategy_decisions`
 
-The backtest validator writes `alpha_trading.backtest_validation_reports` when a
+The strategy validator writes `alpha_trading.strategy_validation_reports` when a
 validation report is persisted. That table belongs to lab diagnostics, but it is
 documented in `alpha/store/README.md` because it lives in the shared
 `alpha_trading` schema.
@@ -31,7 +31,7 @@ top-level module under `src/` rather than nesting modules under a generic
 ```text
 src/
   bin/eth_alpha_lab.rs
-  backtest_validation/
+  strategy_validation/
   strategy_assessment/
   strategy_lab/event_trace/
   position_lab.rs
@@ -44,7 +44,7 @@ src/
 Run-level checks for PnL, concentration, failures, protocol mix, missing
 snapshots, open failed exits, and accounting anomalies.
 
-The lab reads `ALPHA_DATABASE_URL` from `blockchains/eth/config.env` by default.
+The lab reads `databases.alpha.url` from `blockchains/eth/config.toml` by default.
 
 ```bash
 eth_alpha_lab strategy \
@@ -112,7 +112,7 @@ If more than one position matches a token, use `--position-id`.
 
 Both commands support `--json` for automation.
 
-## Backtest Validation
+## Strategy Validation
 
 Trade-centric validation for a persisted backtest result set. This is the first
 gate before trusting a strategy comparison, a top winner, or a reported PnL.
@@ -180,7 +180,7 @@ layer fails.
    tail-loss questions are assessed after validation by `strategy_assessment`.
 
 ```bash
-eth_alpha_lab backtest-validation \
+eth_alpha_lab strategy-validation \
   --result-set historical-25090165-25110164 \
   --strategy snipe-all-risk-atlas-lp-gate-hold15-v2-uniswap-v2-only
 ```
@@ -268,7 +268,7 @@ eth_alpha_lab strategy-assessment \
 
 ### EVM Replay Policy
 
-The current `backtest-validation` command validates DB coherence and replay
+The current `strategy-validation` command validates DB coherence and replay
 readiness. It does not yet prove full strategy reproducibility or independent
 EVM execution replay for every sampled trade.
 
@@ -344,13 +344,12 @@ Run facts from Strategy Lab:
 - Strategy Lab now prints `Buy Failed Entries` and `Open Failed Exits` tables
   so failed entries and retryable failed exits are visible without ad hoc SQL.
 
-Keep this ledger short and move fixed rows into tests, focused investigation
-folders, or commit history.
+Keep this ledger focused on strategy work. Token/pool parity investigations
+belong in `token_lab/investigations/README.md`.
 
 | Priority | Status | Issue | Evidence | Fix / Next Check |
 | --- | --- | --- | --- | --- |
-| P0 | confirmed | Failed sells remain open, retryable exposure | The run has 20 failed sell reports but 8 sell-failed positions. BCB2 failed at block `25,074,899` and then sold successfully at `25,074,918`; the 8 still-open failed exits all have zero-value snapshots and remain `sell_failed`. | Keep this lifecycle behavior; next work is policy, not accounting |
-| P1 | investigating | V4 observed-flow-only entries polluted strategy eligibility | 6 V4 Universal Router buy failures were selected from observed third-party flow even though same-route buy probes failed at entry block and `block-1` for `0.01`, `0.001`, and `0.0001 ETH`; all six stored observations say top-level `can_buy=true` / `can_sell=true`, but lack `runtime_state.can_buy/can_sell` | Rebuild the source observations from a token-server response that includes runtime trading flags, then rerun the 15k backtest; these should become skips, not failed buys |
-| P1 | confirmed | Sell exits are root-cause bucketed | Current failed-position split: 7 V2 `TRANSFER_FROM_FAILED` exits and 1 V3 `V3InvalidSwap`. DF1A/BE74/2834 are address-specific: observed chain sellers simulate successfully with gross proceeds, while the strategy seller fails at every tested size. 11AE sells in 5%/2%/1% chunks. Pancake V2 fails down to 1% and has no token-to-pool sell logs through current head. BCB2 confirms after a later retry. The V3 case is drained zero-liquidity exposure at exit block. | Choose strategy rules for retry cadence, chunked exits, and address-specific/no-observed-sell exposure |
-| P1 | confirmed | Fixed entry size fails on thin WETH pools | The 3 V2 `TRANSFER_FAILED` and 2 V3 `TF` WETH buy failures fail at `0.01 ETH` but representative same-route probes succeed at `0.001 ETH` on both `block-1` and the entry block | Decide whether this strategy remains fixed-size, adds adaptive entry sizing, or skips pools that cannot support the target size |
-| P2 | investigating | PnL is too concentrated for strategy conclusions | Total PnL is positive, but excluding the top five positions is `-0.219822746621256746 ETH`; excluding the top ten is `-2.606516897707689237 ETH` | Add concentration-aware reporting to the strategy table and use it as a baseline gate before treating `Snipe All v1` as profitable |
+| P0 | confirmed | V4 observed-flow-only entries polluted strategy eligibility | 6 V4 Universal Router buy failures were selected from observed third-party flow even though same-route probes failed at entry block and `block-1` for `0.01`, `0.001`, and `0.0001 ETH`; all six stored observations say top-level `can_buy=true` / `can_sell=true`, but lack `runtime_state.can_buy/can_sell`. | Rebuild source observations with runtime trading flags, then rerun the 15k baseline. These should become skipped eligibility decisions rather than failed buys. |
+| P1 | explained | Failed sells remain open, retryable exposure | BCB2 failed at block `25,074,899` and sold successfully at block `25,074,918`; the 8 still-open failed exits have zero-value snapshots and remain `sell_failed`. | Keep lifecycle behavior. Strategy policy work is retry cadence, max retries, chunked exits, and address-specific/no-observed-sell exposure treatment. |
+| P1 | explained | Fixed entry size fails on thin WETH pools | The 3 V2 `TRANSFER_FAILED` and 2 V3 `TF` WETH buy failures fail at `0.01 ETH`, but representative probes succeed at `0.001 ETH` on both `block-1` and the entry block. | Current baseline remains fixed-size. Adaptive sizing or pre-entry size guards are separate strategy variants. |
+| P2 | investigating | PnL is too concentrated for strategy conclusions | Total PnL is positive, but excluding the top five positions is `-0.219822746621256746 ETH`; excluding the top ten is `-2.606516897707689237 ETH`. | Add concentration-aware reporting to the strategy table and use it as a baseline gate before treating `Snipe All v1` as profitable. |

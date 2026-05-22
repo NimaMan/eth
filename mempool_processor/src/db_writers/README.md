@@ -10,7 +10,7 @@ Overview
 - Goal: Persist public mempool trading/risk signals for token-server, ASENA, and
   alpha consumers.
 - Storage: PostgreSQL schema `live_trading`, configured by
-  `MEMPOOL_DATABASE_URL`.
+  `databases.mempool.url` in `blockchains/eth/config.toml`.
 - Canonical writer: `UnifiedSignalWriter` in `unified_signal_writer.rs`.
 
 Tables

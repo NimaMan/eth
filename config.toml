@@ -21,18 +21,19 @@ checkpoint_sync_url = "https://sync-mainnet.beaconcha.in"
 p2p_port_tcp = 9000
 p2p_port_udp = 9000
 
-[live_data_registry]
-redis_url_env = "LIVE_BLOCKCHAIN_DATA_REDIS_URL"
-block_header_prefix = "eth/live/block/<block_number>/header"
-processed_transactions_prefix = "eth/live/block/<block_number>/txs"
-latest_block_number_key = "eth/live/latest/block_number"
-chain_state_snapshot_prefix = "eth/live/block/<block_number>/chain_state_snapshot"
-latest_chain_state_block_number_key = "eth/live/latest/chain_state_block_number"
-
 [services]
 reth_rpc = "http://127.0.0.1:8545"
 reth_engine = "http://127.0.0.1:8551"
 rabbitmq_url_env = "RABBITMQ_URL"
+
+[databases.alpha]
+url = "postgresql://postgres:postgres@localhost:5432/eth_db"
+
+[databases.mempool]
+url = "postgresql://postgres:postgres@localhost:5432/eth_db"
+
+[databases.token_pnl]
+url = "postgresql://postgres:postgres@localhost:5432/eth_db"
 
 [ethereum.mainnet.contracts]
 weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

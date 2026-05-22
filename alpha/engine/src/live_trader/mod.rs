@@ -48,6 +48,7 @@ use tokio::time;
 use tracing::{info, warn};
 
 mod cli;
+mod gas_policy;
 mod position_state;
 mod real_execution;
 mod receipt_reconciliation;
@@ -56,6 +57,7 @@ mod support;
 mod token_server;
 
 use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
+use gas_policy::load_live_real_gas_policy;
 use position_state::release_stale_submitted_position;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
 use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
@@ -66,7 +68,7 @@ use token_server::TokenServerClient;
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
-const ALPHA_DATABASE_URL_CONFIG: &str = "ALPHA_DATABASE_URL";
+const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
 const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
@@ -213,6 +215,11 @@ async fn run(
         ));
     }
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
+    let live_real_gas_policy = if execution_mode.uses_kartal() {
+        Some(load_live_real_gas_policy(&shared_config)?)
+    } else {
+        None
+    };
     let mut kartal_real_preflight = match real_args.as_ref() {
         None => None,
         Some(real_args) => Some(preflight_kartal_real(real_args, &args, &strategy_specs).await?),
@@ -470,6 +477,9 @@ async fn run(
                 exact_pre_submit_live_simulator,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
+                live_real_gas_policy
+                    .clone()
+                    .expect("kartal-real gas policy must exist"),
             )
             .await?
         }

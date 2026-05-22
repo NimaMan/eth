@@ -80,7 +80,7 @@ USDC/USDT/DAI pools by raw reserve amount.
 ## Persistent Stores
 
 Alpha durable state lives in PostgreSQL under the `alpha_trading` schema,
-configured by `ALPHA_DATABASE_URL`.
+configured by `databases.alpha.url` in `blockchains/eth/config.toml`.
 
 | Owner | Tables |
 | --- | --- |
