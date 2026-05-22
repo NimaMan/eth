@@ -195,6 +195,10 @@ pub(super) async fn record_signal_observation(
             report_count,
             payload: json!({
                 "signal": signal,
+                "signal_source": signal.signal_source.clone(),
+                "signal_created_at": signal.signal_created_at.clone(),
+                "mempool_first_seen_at": signal.mempool_first_seen_at.clone(),
+                "mempool_first_seen_ms": signal.mempool_first_seen_ms,
                 "first_poll": first_poll,
                 "suppress_events": suppress_events,
                 "live_status": status.progress.status,

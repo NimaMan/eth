@@ -754,6 +754,18 @@ async fn run(
                 }
                 continue;
             }
+            record_signal_observation(
+                &store,
+                &observation_strategy_name,
+                &signal,
+                "received",
+                0,
+                first_poll,
+                suppress_events,
+                &status,
+                json!({ "phase": "received", "reports": [] }),
+            )
+            .await?;
             let mut event = match signal.to_risk_event() {
                 Ok(Some(event)) => event,
                 Ok(None) => {

@@ -103,6 +103,14 @@ pub struct MempoolSignalsResponse {
 pub struct MempoolSignalWire {
     pub signal_id: String,
     pub signal_type: String,
+    #[serde(default)]
+    pub signal_source: Option<String>,
+    #[serde(default)]
+    pub signal_created_at: Option<String>,
+    #[serde(default)]
+    pub mempool_first_seen_at: Option<String>,
+    #[serde(default)]
+    pub mempool_first_seen_ms: Option<i64>,
     pub detection_timestamp: Option<String>,
     pub detection_tx_hash: Option<String>,
     pub token_address: Option<String>,
@@ -547,6 +555,10 @@ mod tests {
         let signal = MempoolSignalWire {
             signal_id: "1".to_string(),
             signal_type: "lp_position_approval".to_string(),
+            signal_source: None,
+            signal_created_at: None,
+            mempool_first_seen_at: None,
+            mempool_first_seen_ms: None,
             detection_timestamp: None,
             detection_tx_hash: None,
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
@@ -573,6 +585,10 @@ mod tests {
         let signal = MempoolSignalWire {
             signal_id: "1".to_string(),
             signal_type: "liquidity_removal".to_string(),
+            signal_source: None,
+            signal_created_at: None,
+            mempool_first_seen_at: None,
+            mempool_first_seen_ms: None,
             detection_timestamp: None,
             detection_tx_hash: Some(
                 "0x3333333333333333333333333333333333333333333333333333333333333333".to_string(),
@@ -602,6 +618,10 @@ mod tests {
         let signal = MempoolSignalWire {
             signal_id: "1".to_string(),
             signal_type: "lp_position_approval".to_string(),
+            signal_source: None,
+            signal_created_at: None,
+            mempool_first_seen_at: None,
+            mempool_first_seen_ms: None,
             detection_timestamp: Some("2026-05-19 08:59:54+00".to_string()),
             detection_tx_hash: None,
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),

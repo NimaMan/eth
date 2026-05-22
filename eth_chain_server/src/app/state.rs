@@ -80,7 +80,8 @@ impl ServerState {
         );
         let recent_live_blocks = RecentLiveBlocks::new(config.history_limit.max(128));
         let mempool_signals =
-            MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
+            MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?
+                .with_arrival_provider(provider.clone());
         let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
         let risk_atlas = RiskAtlasReader::connect_lazy(&config.alpha_database_url)?;
         let price_service = ChainPriceService::new(provider.provider_factory().clone())?;

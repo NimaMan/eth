@@ -1,8 +1,15 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use alloy_primitives::B256;
+use chrono::{DateTime, Utc};
 use eyre::{eyre, Result};
+use reth_chain_query::RethQueryProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
+use tracing::debug;
 
 const MAX_SIGNAL_LIMIT: i64 = 1_000;
 const MAX_SIGNAL_LOOKBACK_DAYS: i64 = 3_650;
@@ -11,6 +18,7 @@ const MAX_SIGNAL_LOOKBACK_DAYS: i64 = 3_650;
 pub struct MempoolSignalStore {
     pool: PgPool,
     default_limit: i64,
+    arrival_provider: Option<Arc<RethQueryProvider>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,6 +49,10 @@ pub struct MempoolSignalsResponse {
 pub struct MempoolSignalView {
     pub signal_id: String,
     pub signal_type: String,
+    pub signal_source: Option<String>,
+    pub signal_created_at: Option<String>,
+    pub mempool_first_seen_at: Option<String>,
+    pub mempool_first_seen_ms: Option<i64>,
     pub detection_timestamp: Option<String>,
     pub detection_tx_hash: Option<String>,
     pub token_address: Option<String>,
@@ -63,7 +75,13 @@ impl MempoolSignalStore {
         Ok(Self {
             pool,
             default_limit: default_limit.clamp(1, MAX_SIGNAL_LIMIT),
+            arrival_provider: None,
         })
+    }
+
+    pub fn with_arrival_provider(mut self, provider: Arc<RethQueryProvider>) -> Self {
+        self.arrival_provider = Some(provider);
+        self
     }
 
     pub async fn list(
@@ -87,7 +105,12 @@ impl MempoolSignalStore {
             .bind(since_days)
             .fetch_all(&self.pool)
             .await?;
-        let signals = rows.iter().map(row_to_signal).collect::<Result<Vec<_>>>()?;
+        let mut signals = rows.iter().map(row_to_signal).collect::<Result<Vec<_>>>()?;
+        if let Some(provider) = self.arrival_provider.as_deref() {
+            for signal in &mut signals {
+                attach_mempool_arrival(signal, provider);
+            }
+        }
 
         Ok(MempoolSignalsResponse {
             signal_type: kind.as_str().to_string(),
@@ -162,6 +185,8 @@ fn signal_sql(kind: MempoolSignalKind) -> String {
         SELECT
             signal_id::text AS signal_id,
             public_signal_type AS signal_type,
+            signal_source,
+            created_at::text AS signal_created_at,
             detection_timestamp::text AS detection_timestamp,
             pending_tx_hash AS detection_tx_hash,
             token_address,
@@ -213,6 +238,14 @@ async fn ensure_signal_events_table(pool: &PgPool) -> Result<()> {
         )
         "#,
         r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS signal_source TEXT NOT NULL DEFAULT 'mempool'
+        "#,
+        r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        "#,
+        r#"
         CREATE UNIQUE INDEX IF NOT EXISTS signal_events_dedupe_key_uidx
             ON live_trading.signal_events (dedupe_key)
         "#,
@@ -233,6 +266,10 @@ fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
     Ok(MempoolSignalView {
         signal_id: text(row, "signal_id")?,
         signal_type: text(row, "signal_type")?,
+        signal_source: optional_text(row, "signal_source")?,
+        signal_created_at: optional_text(row, "signal_created_at")?,
+        mempool_first_seen_at: None,
+        mempool_first_seen_ms: None,
         detection_timestamp: optional_text(row, "detection_timestamp")?,
         detection_tx_hash: optional_text(row, "detection_tx_hash")?,
         token_address: optional_text(row, "token_address")?,
@@ -246,6 +283,35 @@ fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
         flag: optional_text(row, "flag")?,
         payload,
     })
+}
+
+fn attach_mempool_arrival(signal: &mut MempoolSignalView, provider: &RethQueryProvider) {
+    let Some(tx_hash) = signal.detection_tx_hash.as_deref() else {
+        return;
+    };
+    let Ok(hash) = B256::from_str(tx_hash) else {
+        return;
+    };
+
+    let arrival_ms = match provider.get_tx_arrival_ms(hash) {
+        Ok(arrival_ms) => arrival_ms,
+        Err(error) => {
+            debug!(
+                signal_id = %signal.signal_id,
+                tx_hash,
+                error = %error,
+                "failed to read mempool arrival for signal tx"
+            );
+            return;
+        }
+    };
+    let Some(arrival_ms) = arrival_ms.and_then(|value| i64::try_from(value).ok()) else {
+        return;
+    };
+
+    signal.mempool_first_seen_ms = Some(arrival_ms);
+    signal.mempool_first_seen_at =
+        DateTime::<Utc>::from_timestamp_millis(arrival_ms).map(|time| time.to_rfc3339());
 }
 
 fn text(row: &sqlx::postgres::PgRow, column: &str) -> Result<String> {
@@ -284,6 +350,8 @@ mod tests {
         assert!(sql.contains("FROM live_trading.signal_events"));
         assert!(sql.contains("pool_identifier AS pool_address"));
         assert!(sql.contains("pool_protocol AS pool_type"));
+        assert!(sql.contains("signal_source"));
+        assert!(sql.contains("created_at::text AS signal_created_at"));
         assert!(sql.contains("event_kind = 'sell_blocked'"));
     }
 }
