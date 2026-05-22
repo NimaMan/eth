@@ -27,8 +27,7 @@ eth_chain_server applies confirmed block
 ```
 
 The update endpoint is only a wakeup path. Token and pool context always comes
-from `/live/tokens` and `/live/pools`. Redis token snapshots and token-update
-ZMQ are intentionally not part of this module anymore.
+from `/live/tokens` and `/live/pools`.
 
 Refresh sequence:
 

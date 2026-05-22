@@ -7,7 +7,8 @@ The mempool processor is a high-performance system designed to:
 2. **Detect function signatures** in transaction calldata
 3. **Simulate transactions** to analyze state changes
 4. **Identify signals** (liquidity removals, trading enabled, scams, tax detection)
-5. **Process as fast as possible** (currently 2-7μs detection latency)
+5. **Persist public semantic signals** and sidecar arrival-time analytics
+6. **Process as fast as possible** (currently 2-7μs detection latency)
 
 ## Current Module Structure
 ## Architecture Flow
@@ -24,8 +25,9 @@ The mempool processor is a high-performance system designed to:
 5. Signal Manager
    ↓ Detected signals (tax, trading, liquidity, scam)
 6. Signal Publisher
-   ↓ ZMQ + Log files
-7. DB Writers (optional)
+   ↓ Postgres + semantic logs + ZMQ
+7. Arrival Recorder
+   ↓ RethIndex first-seen timing for mined txs
 ```
 
 ### Core Processing Pipeline
@@ -58,9 +60,10 @@ src/
 │       ├── tax_calculator.rs          # Buy/sell tax functions (USED)
 │       └── tax_calculator_from_...    # Alternate approach (unused)
 ├── signal_publisher.rs                # Log & ZMQ publishing (ACTIVE)
+├── arrival_recorder.rs                # RethIndex first-seen timing sidecar
 ├── db_writers/                       # Database persistence
 │   ├── unified_signal_writer.rs       # signal_events + typed detail tables
-│   └── mempool_timestamp_tracker.rs   # arrival-time persistence
+│   └── mempool_timestamp_tracker.rs   # legacy eth_db first_seen updater
 └── config.rs                         # Configuration types
 ```
 
@@ -113,6 +116,13 @@ src/
 - Database writing via `live_trading.signal_events`; required for live runs
   because token-server and ASENA read persisted signals
 
+**MempoolArrivalRecorder** (`arrival_recorder.rs`):
+- Records the earliest first-seen timestamp per pending tx hash in memory.
+- Uses `MempoolArrivalWriter` and the shared Reth provider factory to resolve
+  mined tx hashes to txumbers.
+- Writes arrival timing to RethIndex `mempool_tx_arrival_times`.
+- This is analytics metadata, not the public signal/event store.
+
 **Simulation diagnostics**:
 - `simulation_errors.log` at the run root is the focused artifact for failed
   simulations and buy/sell branch errors.
@@ -159,8 +169,11 @@ RETH_IPC_PATH=/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc
 # Simulation RPC (required)  
 RETH_HTTP_RPC=http://127.0.0.1:8545
 
-# Database (optional)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+# Signal database (required for live runs unless --allow-database-disabled)
+MEMPOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+
+# Reth datadir for simulation and the RethIndex arrival sidecar
+MEMPOOL_RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth
 ```
 
 ### Key Configuration Values
@@ -168,6 +181,10 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 - **Tax thresholds**: 25% for buy/sell tax warnings
 - **Channel buffer**: 50,000 transactions
 - **Signal ZMQ endpoint**: tcp://127.0.0.1:5556
+- **Signal DB**: `MEMPOOL_DATABASE_URL` / `live_trading.signal_events` is the
+  stable consumer path; ZMQ and logs are diagnostic mirrors
+- **Arrival timing**: `<MEMPOOL_RETH_DATADIR>/reth_index`, table
+  `mempool_tx_arrival_times`
 
 
 ## Notes for Future Development

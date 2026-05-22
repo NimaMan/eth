@@ -93,8 +93,7 @@ Failure isolation rules:
 - Mempool token context comes only from token-server `/live/tokens` and
   `/live/pools`. `/live/updates` is a notification-only long-poll wakeup: when
   token-server broadcasts `BlockApplied`, the request returns and mempool
-  immediately reloads `/live/tokens` and `/live/pools`. Redis token snapshots
-  and token-update ZMQ are not context sources.
+  immediately reloads `/live/tokens` and `/live/pools`.
 - Live token-server snapshots are accepted while `status=warming` until the
   first live context is accepted. After that, only `status=live` snapshots are
   accepted, and lower-block snapshots are rejected and counted.
@@ -110,6 +109,20 @@ ZMQ and signal logs are diagnostic outputs. `mempool_signal_detector` loads
 `MEMPOOL_DATABASE_URL` from the process environment or the shared
 `ETH_CONFIG_PATH` config file and refuses to start without it unless
 `--allow-database-disabled` is passed for a diagnostic run.
+
+Persistent outputs:
+
+| Store | Tables / keys | Purpose |
+| --- | --- | --- |
+| PostgreSQL `live_trading` schema | `signal_events`, `trading_enabled_details`, `sell_blocked_details`, `tax_change_details`, `liquidity_removal_details`, `lp_position_approval_details`, `token_supply_risk_details` | Canonical public semantic signal store for token-server, ASENA, and alpha. |
+| RethIndex MDBX | `mempool_tx_arrival_times` | First-seen mempool arrival time for transactions after they are mined and resolved to Reth txumber. |
+| Legacy `eth_db` timestamp updater | `eth_db.transactions.mempool_first_seen` | Older optional batch updater in `mempool_timestamp_tracker`; not the live public signal source. |
+
+The public signal store is the PostgreSQL `live_trading` schema. Arrival timing
+is analytics metadata and should not be used as a signal/event substitute.
+`mempool_signal_detector` writes arrival timing through `MempoolArrivalRecorder`
+and RethIndex; the legacy timestamp updater is not wired into the current live
+detector path.
 
 ## Logging Contract
 

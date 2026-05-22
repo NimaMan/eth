@@ -68,8 +68,7 @@ Cache acceptance is monotonic:
   counters.
 
 This prevents a token-server restart or warmup response from rolling the mempool
-processor back to stale token/pool mappings. Redis token snapshots and
-token-update ZMQ are not used for token context.
+processor back to stale token/pool mappings.
 
 ## Unresolved Intent Lane
 
@@ -170,6 +169,12 @@ ZMQ topics are diagnostic/low-latency fanout:
 
 The stable consumer path for token-server, ASENA, and alpha is the persisted
 `live_trading.signal_events` signal store plus typed detail tables.
+
+Arrival timing is separate from public signals. The runtime initializes
+`MempoolArrivalRecorder` after the simulator so it can reuse the active Reth
+provider factory, then writes resolved mined tx arrival times to
+`<MEMPOOL_RETH_DATADIR>/reth_index`. If that sidecar index is unavailable,
+signal processing continues without first-seen analytics.
 
 ## Log Structure
 
