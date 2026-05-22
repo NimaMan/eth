@@ -5,7 +5,7 @@ simulation, and semantic signal emission.
 
 ## Purpose
 
-- Read pending transactions from local Reth IPC/RPC.
+- Read full pending transactions from local Reth IPC.
 - Detect relevant function selectors, classify creator/pool/token actions, and
   simulate effects against live token context.
 - Queue critical pending intents whose token/pool mapping has not reached the
@@ -65,6 +65,31 @@ sell-blocked, liquidity-removal, tax, supply-risk, and LP-position-approval
 events only after the tx is mapped to a tracked token/pool and the decoder or
 simulator confirms the risk. Cache waits are internal telemetry, not public
 signals.
+
+## Component Responsibilities
+
+| Component | Responsibility |
+| --- | --- |
+| `MempoolFetcherIPCClient` | Maintains the local Reth IPC subscription and delivers full pending tx data without per-tx RPC fetches. |
+| `function_detector` | Adds selector/function facts used by routing and diagnostics. |
+| `tx_router` | Classifies txs against `TokenTrackingCache` as known critical, unresolved critical, or ordinary. |
+| `SimulationManager` | Replays txs with nonce/funding dependencies, dispatches per-pool simulations, and emits `SimulationResult` values. |
+| `SignalManager` | Converts mapped decoder/simulation facts into semantic per-pool signals. |
+| `SignalPublisher` | Writes the public Postgres signal rows and diagnostic logs/ZMQ topics. |
+| `MempoolArrivalRecorder` | Records first-seen pending tx timing and writes resolved mined tx timing to RethIndex. |
+
+Key signal rules:
+
+- Per-pool signals are independent; one token can produce separate signals for
+  multiple tracked pools.
+- `sell_blocked` requires a buy and approval path to work while the sell path
+  fails for the same pool.
+- `tax_change` is for configured threshold/bucket risk, not every routine tax
+  calculation.
+- Successful simulations are tracked through interval metrics. They are not
+  persisted as one row per simulation.
+- Tax and transfer math should come from `tx_processor` and the existing
+  token-tracking calculation helpers, not duplicated in detectors.
 
 ## Live Pipeline Boundary
 
@@ -165,6 +190,33 @@ Run-root diagnostics:
 | Signal decisions | `src/signal_detector/README.md`, `src/signal_detector/` |
 | Persistence/publishing | `src/db_writers/`, `src/signal_publisher.rs` |
 | Replay/diagnostic examples | `examples/README.md` |
+
+## Runtime Configuration
+
+The binary reads CLI flags, `MEMPOOL_*` environment variables, and shared
+`ETH_CONFIG_PATH` values where supported.
+
+Required or primary live settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `MEMPOOL_IPC_PATH` / `RETH_IPC_PATH` | Local Reth IPC socket used for pending tx ingestion. |
+| `MEMPOOL_RETH_DATADIR` / `RETH_DATADIR` | Reth data directory used for simulations and the `<datadir>/reth_index` arrival sidecar. |
+| `MEMPOOL_DATABASE_URL` | Required Postgres URL for live semantic signal persistence. |
+| `MEMPOOL_LIVE_TOKEN_SERVER_URL` | Token-server base URL for `/live/tokens`, `/live/pools`, and `/live/updates`. |
+| `MEMPOOL_LOG_DIR` / `ETH_LOG_DIR` | Run log directory. |
+| `MEMPOOL_SIM_WORKERS` | Simulation worker count; default is 4. |
+| `MEMPOOL_ZMQ_SIGNAL_ENDPOINT` | Diagnostic ZMQ publisher endpoint; default is `tcp://127.0.0.1:5556`. |
+| `MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD` | Minimum ETH threshold used by token-cache pool heuristics. |
+
+Operational defaults in the current binary:
+
+- `--batch-size 100`
+- `--sim-workers 4`
+- `--simulation-timeout-ms 5000`
+- `--report-interval 60`
+- unresolved intents live for two seconds and retry every 250ms
+- function-detection channel buffer is 50,000
 
 ## Tests And Commands
 
