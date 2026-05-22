@@ -34,11 +34,38 @@ impl TaxBucket {
         Self::from_percent(buy_tax).max(Self::from_percent(sell_tax))
     }
 
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::NoTax => "no_tax",
+            Self::LowTax => "low_tax",
+            Self::ModerateTax => "moderate_tax",
+            Self::HighTax => "high_tax",
+            Self::ExtremeTax => "extreme_tax",
+        }
+    }
+
     pub fn risk_label(self) -> Option<&'static str> {
         match self {
             Self::HighTax => Some("high_tax"),
             Self::ExtremeTax => Some("extreme_tax"),
             _ => None,
+        }
+    }
+
+    pub fn is_risky(self) -> bool {
+        self.risk_label().is_some()
+    }
+
+    pub fn is_acceptable_for_trading_enabled(self) -> bool {
+        matches!(self, Self::NoTax | Self::LowTax | Self::ModerateTax)
+    }
+
+    pub fn economic_sellable(self) -> Option<bool> {
+        match self {
+            Self::Unknown => None,
+            Self::ExtremeTax => Some(false),
+            Self::NoTax | Self::LowTax | Self::ModerateTax | Self::HighTax => Some(true),
         }
     }
 }
@@ -70,5 +97,21 @@ mod tests {
         );
         assert_eq!(TaxBucket::combined(None, Some(42.0)), TaxBucket::ExtremeTax);
         assert_eq!(TaxBucket::combined(None, None), TaxBucket::Unknown);
+    }
+
+    #[test]
+    fn tax_bucket_policy_flags_are_centralized() {
+        assert_eq!(TaxBucket::HighTax.key(), "high_tax");
+        assert!(TaxBucket::HighTax.is_risky());
+        assert!(TaxBucket::ExtremeTax.is_risky());
+        assert!(!TaxBucket::ModerateTax.is_risky());
+
+        assert!(TaxBucket::ModerateTax.is_acceptable_for_trading_enabled());
+        assert!(!TaxBucket::HighTax.is_acceptable_for_trading_enabled());
+        assert!(!TaxBucket::Unknown.is_acceptable_for_trading_enabled());
+
+        assert_eq!(TaxBucket::HighTax.economic_sellable(), Some(true));
+        assert_eq!(TaxBucket::ExtremeTax.economic_sellable(), Some(false));
+        assert_eq!(TaxBucket::Unknown.economic_sellable(), None);
     }
 }

@@ -1,9 +1,11 @@
 /// Trading Status Detector
 ///
 /// Detects when trading becomes enabled on pools based on simulation results.
-/// Triggers signals when: can_buy && can_sell && taxes <= 25% && not already enabled
+/// Triggers signals when: can_buy && can_sell && taxes are acceptable by eth_token::TaxBucket
+/// and not already enabled.
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
+use eth_token::pools::TaxBucket;
 use reth_chain_query::to_checksum_address;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -37,8 +39,6 @@ pub enum TradingStatusChange {
 }
 
 pub struct TradingStatusDetector {
-    /// Tax threshold for considering trading "enabled" (default: 25%)
-    tax_threshold: f64,
     /// Token tracking cache to check existing trading status
     token_cache: Option<Arc<TokenTrackingCache>>,
     /// Tracks (token, pool) pairs we have already emitted signals for during this run
@@ -48,7 +48,6 @@ pub struct TradingStatusDetector {
 impl TradingStatusDetector {
     pub fn new() -> Self {
         Self {
-            tax_threshold: 25.0, // 25% tax threshold
             token_cache: None,
             emitted_trading_pairs: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -60,7 +59,8 @@ impl TradingStatusDetector {
     }
 
     /// Detect trading enabled signals from simulation results
-    /// Triggers when: can_buy && can_sell && taxes <= threshold && not already enabled
+    /// Triggers when: can_buy && can_sell && taxes are in an acceptable TaxBucket
+    /// and not already enabled.
     /// Tax values are extracted from sim_result.buy_sell_result (calculated in simulation_manager)
     pub async fn detect(
         &self,
@@ -113,10 +113,11 @@ impl TradingStatusDetector {
             .is_trading_already_enabled(&token_address, &pool_address)
             .await;
         if already_enabled_in_cache {
-            debug!(
-                "Pool {} for token {} already marked trading_enabled in cache",
-                pool_address, token_address
+            info!(
+                "ℹ️ TradingEnabled skipped for token {} pool {} (tx {}): pool is already tradable in cache",
+                token_address, pool_address, tx_hash
             );
+            return None;
         }
 
         // Get executor from transaction category
@@ -143,14 +144,21 @@ impl TradingStatusDetector {
             return None;
         }
 
-        // Check if taxes are reasonable (below threshold)
-        // If taxes are too high, trading is not really "enabled" in a practical sense
+        // Check if taxes are in the accepted bucket range.
+        // If taxes are too high, trading is not really "enabled" in a practical sense.
+        // The accepted buckets live in eth_token so mempool signals use the same
+        // labels and boundaries as token analytics.
         // IMPORTANT: If tax calculation fails (None), we cannot generate a TRADING_ENABLED signal
+        let buy_tax_bucket = TaxBucket::from_percent(buy_tax);
         match buy_tax {
-            Some(buy_t) if buy_t > self.tax_threshold => {
+            Some(buy_t) if !buy_tax_bucket.is_acceptable_for_trading_enabled() => {
                 info!(
-                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): buy tax {:.1}% exceeds threshold {:.1}%",
-                    token_address, pool_address, tx_hash, buy_t, self.tax_threshold
+                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): buy tax {:.1}% classified as {}",
+                    token_address,
+                    pool_address,
+                    tx_hash,
+                    buy_t,
+                    buy_tax_bucket.key()
                 );
                 return None;
             }
@@ -169,17 +177,25 @@ impl TradingStatusDetector {
             }
             Some(buy_t) => {
                 debug!(
-                    "Token {} pool {} - Buy tax acceptable: {:.1}%",
-                    token_address, pool_address, buy_t
+                    "Token {} pool {} - Buy tax acceptable: {:.1}% ({})",
+                    token_address,
+                    pool_address,
+                    buy_t,
+                    buy_tax_bucket.key()
                 );
             }
         }
 
+        let sell_tax_bucket = TaxBucket::from_percent(sell_tax);
         match sell_tax {
-            Some(sell_t) if sell_t > self.tax_threshold => {
+            Some(sell_t) if !sell_tax_bucket.is_acceptable_for_trading_enabled() => {
                 info!(
-                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): sell tax {:.1}% exceeds threshold {:.1}%",
-                    token_address, pool_address, tx_hash, sell_t, self.tax_threshold
+                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): sell tax {:.1}% classified as {}",
+                    token_address,
+                    pool_address,
+                    tx_hash,
+                    sell_t,
+                    sell_tax_bucket.key()
                 );
                 return None;
             }
@@ -198,8 +214,11 @@ impl TradingStatusDetector {
             }
             Some(sell_t) => {
                 debug!(
-                    "Token {} pool {} - Sell tax acceptable: {:.1}%",
-                    token_address, pool_address, sell_t
+                    "Token {} pool {} - Sell tax acceptable: {:.1}% ({})",
+                    token_address,
+                    pool_address,
+                    sell_t,
+                    sell_tax_bucket.key()
                 );
             }
         }
@@ -254,17 +273,140 @@ impl TradingStatusDetector {
             let pools = cache.get_pools_for_token(&token_address.to_string()).await;
 
             // Find the specific pool
-            if let Some(pool_state) = pools.iter().find(|p| p.address == pool_address) {
-                // Check the actual trading_enabled flag for this pool
-                if pool_state.trading_enabled {
+            if let Some(pool_state) = pools
+                .iter()
+                .find(|p| p.address.eq_ignore_ascii_case(pool_address))
+            {
+                // Treat the pool as already enabled when either the explicit
+                // flag is set or the current pool snapshot can both buy and
+                // sell. Some live snapshots can have the tradable booleans
+                // ahead of the legacy trading_enabled flag.
+                if pool_state.trading_enabled || (pool_state.can_buy && pool_state.can_sell) {
                     debug!(
-                        "Pool {} already has trading_enabled=true in cache",
-                        pool_address
+                        "Pool {} already has trading_enabled={} can_buy={} can_sell={} in cache",
+                        pool_address,
+                        pool_state.trading_enabled,
+                        pool_state.can_buy,
+                        pool_state.can_sell
                     );
                     return true;
                 }
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token_tracking::{
+        types::PoolLifecycle, Pool, PoolType, Token, TokenUpdate, TokenWithPools,
+    };
+    use std::collections::HashMap;
+
+    const TOKEN: &str = "0x1000000000000000000000000000000000000001";
+    const POOL: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const CREATOR: &str = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    async fn detector_with_pool(
+        trading_enabled: bool,
+        can_buy: bool,
+        can_sell: bool,
+    ) -> TradingStatusDetector {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let token = Token {
+            address: TOKEN.to_string(),
+            symbol: "TEST".to_string(),
+            name: "Test".to_string(),
+            decimals: 18,
+            total_supply: Some("1000000000000000000".to_string()),
+            creator_address: CREATOR.to_string(),
+            current_owner: CREATOR.to_string(),
+            tax_setter_addresses: Vec::new(),
+            ownership_renounced: false,
+            renouncement_block: None,
+            buy_tax: None,
+            sell_tax: None,
+            last_tax_change_block: None,
+            tax_history: Vec::new(),
+            creation_block: 1,
+            creation_tx: "0xcreate".to_string(),
+            creation_timestamp: None,
+            latest_activity_block: 1,
+            is_scam: false,
+            scam_label: None,
+            total_liquidity: 0.0,
+        };
+        let pool = Pool {
+            address: POOL.to_string(),
+            token_address: TOKEN.to_string(),
+            pool_type: PoolType::UniswapV2,
+            token_reserve: 1_000_000.0,
+            eth_reserve: 1.0,
+            denom_currency: "WETH".to_string(),
+            denom_address: "0xC02aaa39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            trading_enabled,
+            trading_enabled_block: trading_enabled.then_some(1),
+            trading_enabled_tx: trading_enabled.then_some("0xenabled".to_string()),
+            fee_tier: None,
+            pool_id: None,
+            lp_token_address: None,
+            position_manager_address: None,
+            lp_total_supply: None,
+            liquidity_positions: Vec::new(),
+            last_updated_block: 1,
+            last_updated_time: 0.0,
+            is_scam: false,
+            scam_label: None,
+            lp_tokens_approved_percentage: None,
+            lifecycle: PoolLifecycle::Active,
+            control_addresses: Vec::new(),
+            can_buy,
+            can_sell,
+            received_at: std::time::Instant::now(),
+        };
+        let mut pools = HashMap::new();
+        pools.insert(POOL.to_string(), pool);
+        let mut data = HashMap::new();
+        data.insert(TOKEN.to_string(), TokenWithPools { token, pools });
+        cache
+            .batch_update(TokenUpdate {
+                message_type: "test".to_string(),
+                token_count: 1,
+                block_number: 1,
+                timestamp: 0.0,
+                data,
+            })
+            .await;
+
+        let mut detector = TradingStatusDetector::new();
+        detector.set_token_cache(cache);
+        detector
+    }
+
+    #[tokio::test]
+    async fn already_enabled_when_cache_can_buy_and_can_sell() {
+        let detector = detector_with_pool(false, true, true).await;
+
+        assert!(detector.is_trading_already_enabled(TOKEN, POOL).await);
+    }
+
+    #[tokio::test]
+    async fn already_enabled_pool_match_is_case_insensitive() {
+        let detector = detector_with_pool(true, false, false).await;
+
+        assert!(
+            detector
+                .is_trading_already_enabled(TOKEN, "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa")
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn not_enabled_when_cache_only_can_buy() {
+        let detector = detector_with_pool(false, true, false).await;
+
+        assert!(!detector.is_trading_already_enabled(TOKEN, POOL).await);
     }
 }

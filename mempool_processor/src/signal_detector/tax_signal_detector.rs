@@ -87,9 +87,9 @@ impl TaxDetector {
         let buy_tax_bucket = TaxBucket::from_percent(calculated_buy_tax);
         let sell_tax_bucket = TaxBucket::from_percent(calculated_sell_tax);
         let combined_tax_bucket = TaxBucket::combined(calculated_buy_tax, calculated_sell_tax);
-        let buy_tax_bucket_key = tax_bucket_key(buy_tax_bucket);
-        let sell_tax_bucket_key = tax_bucket_key(sell_tax_bucket);
-        let combined_tax_bucket_key = tax_bucket_key(combined_tax_bucket);
+        let buy_tax_bucket_key = buy_tax_bucket.key();
+        let sell_tax_bucket_key = sell_tax_bucket.key();
+        let combined_tax_bucket_key = combined_tax_bucket.key();
 
         // Check for high taxes. Sell-blocked/honeypot is emitted as a separate
         // semantic signal by SignalManager, not as a tax signal.
@@ -97,10 +97,7 @@ impl TaxDetector {
             calculated_buy_tax.unwrap_or(0.0) >= self.config.max_acceptable_buy_tax as f64;
         let sell_tax_exceeds_threshold =
             calculated_sell_tax.unwrap_or(0.0) >= self.config.max_acceptable_sell_tax as f64;
-        let bucket_is_risky = matches!(
-            combined_tax_bucket,
-            TaxBucket::HighTax | TaxBucket::ExtremeTax
-        );
+        let bucket_is_risky = combined_tax_bucket.is_risky();
 
         if buy_tax_exceeds_threshold || sell_tax_exceeds_threshold || bucket_is_risky {
             let details = format!(
@@ -140,15 +137,16 @@ impl TaxDetector {
                     sell_tax: Some(sell_tax),
                     buy_tax_bucket_from: None,
                     buy_tax_bucket_to: Some(
-                        tax_bucket_key(TaxBucket::from_percent(Some(buy_tax))).to_string(),
+                        TaxBucket::from_percent(Some(buy_tax)).key().to_string(),
                     ),
                     sell_tax_bucket_from: None,
                     sell_tax_bucket_to: Some(
-                        tax_bucket_key(TaxBucket::from_percent(Some(sell_tax))).to_string(),
+                        TaxBucket::from_percent(Some(sell_tax)).key().to_string(),
                     ),
                     combined_tax_bucket_from: None,
                     combined_tax_bucket_to: Some(
-                        tax_bucket_key(TaxBucket::combined(Some(buy_tax), Some(sell_tax)))
+                        TaxBucket::combined(Some(buy_tax), Some(sell_tax))
+                            .key()
                             .to_string(),
                     ),
                     details: format!(
@@ -191,17 +189,6 @@ impl TaxDetector {
         }
 
         true
-    }
-}
-
-fn tax_bucket_key(bucket: TaxBucket) -> &'static str {
-    match bucket {
-        TaxBucket::Unknown => "unknown",
-        TaxBucket::NoTax => "no_tax",
-        TaxBucket::LowTax => "low_tax",
-        TaxBucket::ModerateTax => "moderate_tax",
-        TaxBucket::HighTax => "high_tax",
-        TaxBucket::ExtremeTax => "extreme_tax",
     }
 }
 

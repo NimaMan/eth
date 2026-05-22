@@ -129,9 +129,7 @@ pub(super) fn economic_sellable(can_sell: bool, sell_tax: Option<f64>) -> Option
     if !can_sell {
         return Some(false);
     }
-    sell_tax
-        .filter(|tax| tax.is_finite() && *tax >= 0.0)
-        .map(|tax| tax <= 40.0)
+    TaxBucket::from_percent(sell_tax).economic_sellable()
 }
 
 pub(super) fn activity_has_signal_for_denom(activity: &TokenBlockActivity, denom: &str) -> bool {
@@ -159,15 +157,7 @@ pub(super) fn denom_key_matches(key: &str, denom: &str) -> bool {
 }
 
 pub(super) fn tax_bucket_key(bucket: TaxBucket) -> String {
-    match bucket {
-        TaxBucket::Unknown => "unknown",
-        TaxBucket::NoTax => "no_tax",
-        TaxBucket::LowTax => "low_tax",
-        TaxBucket::ModerateTax => "moderate_tax",
-        TaxBucket::HighTax => "high_tax",
-        TaxBucket::ExtremeTax => "extreme_tax",
-    }
-    .to_string()
+    bucket.key().to_string()
 }
 
 pub(super) fn display_tax(value: Option<f64>) -> Option<f64> {
