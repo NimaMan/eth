@@ -585,151 +585,158 @@ async fn main() -> Result<()> {
             let rate = delta as f64 / interval_secs;
             let sims = metrics.simulations_completed.load(Ordering::Relaxed);
             let sim_errs = metrics.simulation_errors.load(Ordering::Relaxed);
-            let publisher_stats = {
-                let publisher = signal_publisher.lock().await;
-                publisher.get_stats()
-            };
-            let ipc_stats = ipc_client.get_stats().await;
-            let manager_stats = simulation_manager.stats().await;
+            let report_result = time::timeout(Duration::from_secs(2), async {
+                let publisher_stats = {
+                    let publisher = signal_publisher.lock().await;
+                    publisher.get_stats()
+                };
+                let ipc_stats = ipc_client.get_stats().await;
+                let manager_stats = simulation_manager.stats().await;
 
-            info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SELL_BLOCKED:{} SUPPLY_RISK:{} | Published:{} ZMQ:{} DB:{} Err:{}",
-                total,
-                delta,
-                rate,
-                metrics.simulations_submitted.load(Ordering::Relaxed),
-                sims,
-                sim_errs,
-                publisher_stats.trading_enabled,
-                publisher_stats.liquidity_removals,
-                publisher_stats.lp_approvals,
-                publisher_stats.tax_signals,
-                publisher_stats.sell_blocked_signals,
-                publisher_stats.token_supply_risks,
-                publisher_stats.total_published,
-                publisher_stats.zmq_published,
-                publisher_stats.db_written,
-                publisher_stats.errors
-            );
-            info!(
-                "📊 Mempool ingress: received={} filtered_irrelevant={} dropped={} critical_received={} critical_dropped={} ipc_queue={} normal_queue={} critical_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
-                ipc_stats.total,
-                ipc_stats.total_filtered_irrelevant,
-                ipc_stats.total_dropped,
-                ipc_stats.critical_received,
-                ipc_stats.critical_dropped,
-                ipc_stats.queue_size,
-                ipc_stats
-                    .queue_size
-                    .saturating_sub(ipc_stats.critical_queue_size),
-                ipc_stats.critical_queue_size,
-                manager_stats.queue_current_size,
-                manager_stats.queue_total_enqueued,
-                manager_stats.queue_total_processed,
-                manager_stats.queue_total_dropped
-            );
-            let timing_snapshot = detector_timing.snapshot();
-            info!(
-                "📊 Detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
-                timing_snapshot.completed_loops,
-                timing_snapshot.current_stage,
-                timing_snapshot.current_stage_ms,
-                timing_snapshot.last_loop_ms_ago,
-                timing_snapshot.max_stage,
-                timing_snapshot.max_stage_ms,
-                timing_snapshot.slow_stage_count
-            );
-            let critical_timing_snapshot = critical_detector_timing.snapshot();
-            info!(
-                "📊 Critical detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
-                critical_timing_snapshot.completed_loops,
-                critical_timing_snapshot.current_stage,
-                critical_timing_snapshot.current_stage_ms,
-                critical_timing_snapshot.last_loop_ms_ago,
-                critical_timing_snapshot.max_stage,
-                critical_timing_snapshot.max_stage_ms,
-                critical_timing_snapshot.slow_stage_count
-            );
-            if let Some(ref recorder) = arrival_recorder {
-                let arrival_stats = recorder.stats();
                 info!(
-                    "📊 Arrival recorder: seen={} pending={} resolved={} written={} unresolved={} expired={} flush_errors={}",
-                    arrival_stats.seen,
-                    arrival_stats.pending,
-                    arrival_stats.resolved,
-                    arrival_stats.written,
-                    arrival_stats.unresolved,
-                    arrival_stats.expired,
-                    arrival_stats.flush_errors
+                    "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims submitted/done/actionable_err: {}/{}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SELL_BLOCKED:{} SUPPLY_RISK:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                    total,
+                    delta,
+                    rate,
+                    metrics.simulations_submitted.load(Ordering::Relaxed),
+                    sims,
+                    sim_errs,
+                    publisher_stats.trading_enabled,
+                    publisher_stats.liquidity_removals,
+                    publisher_stats.lp_approvals,
+                    publisher_stats.tax_signals,
+                    publisher_stats.sell_blocked_signals,
+                    publisher_stats.token_supply_risks,
+                    publisher_stats.total_published,
+                    publisher_stats.zmq_published,
+                    publisher_stats.db_written,
+                    publisher_stats.errors
                 );
+                info!(
+                    "📊 Mempool ingress: received={} filtered_irrelevant={} dropped={} critical_received={} critical_dropped={} ipc_queue={} normal_queue={} critical_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
+                    ipc_stats.total,
+                    ipc_stats.total_filtered_irrelevant,
+                    ipc_stats.total_dropped,
+                    ipc_stats.critical_received,
+                    ipc_stats.critical_dropped,
+                    ipc_stats.queue_size,
+                    ipc_stats
+                        .queue_size
+                        .saturating_sub(ipc_stats.critical_queue_size),
+                    ipc_stats.critical_queue_size,
+                    manager_stats.queue_current_size,
+                    manager_stats.queue_total_enqueued,
+                    manager_stats.queue_total_processed,
+                    manager_stats.queue_total_dropped
+                );
+                let timing_snapshot = detector_timing.snapshot();
+                info!(
+                    "📊 Detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                    timing_snapshot.completed_loops,
+                    timing_snapshot.current_stage,
+                    timing_snapshot.current_stage_ms,
+                    timing_snapshot.last_loop_ms_ago,
+                    timing_snapshot.max_stage,
+                    timing_snapshot.max_stage_ms,
+                    timing_snapshot.slow_stage_count
+                );
+                let critical_timing_snapshot = critical_detector_timing.snapshot();
+                info!(
+                    "📊 Critical detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                    critical_timing_snapshot.completed_loops,
+                    critical_timing_snapshot.current_stage,
+                    critical_timing_snapshot.current_stage_ms,
+                    critical_timing_snapshot.last_loop_ms_ago,
+                    critical_timing_snapshot.max_stage,
+                    critical_timing_snapshot.max_stage_ms,
+                    critical_timing_snapshot.slow_stage_count
+                );
+                if let Some(ref recorder) = arrival_recorder {
+                    let arrival_stats = recorder.stats();
+                    info!(
+                        "📊 Arrival recorder: seen={} pending={} resolved={} written={} unresolved={} expired={} flush_errors={}",
+                        arrival_stats.seen,
+                        arrival_stats.pending,
+                        arrival_stats.resolved,
+                        arrival_stats.written,
+                        arrival_stats.unresolved,
+                        arrival_stats.expired,
+                        arrival_stats.flush_errors
+                    );
+                }
+                let lp_approval_stats = tx_router.lp_approval_stats();
+                info!(
+                    "📊 LP approval path: ingress_txs erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | retry_attempts erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | published={} db_errors={}",
+                    lp_approval_stats.ingress_erc20_approval_txs,
+                    lp_approval_stats.ingress_ownership_token_pool_hits,
+                    lp_approval_stats.ingress_position_approval_txs,
+                    lp_approval_stats.ingress_position_manager_hits,
+                    lp_approval_stats.ingress_pool_cache_miss_txs,
+                    lp_approval_stats.retry_erc20_approval_attempts,
+                    lp_approval_stats.retry_ownership_token_pool_hits,
+                    lp_approval_stats.retry_position_approval_attempts,
+                    lp_approval_stats.retry_position_manager_hits,
+                    lp_approval_stats.retry_pool_cache_miss_attempts,
+                    publisher_stats.lp_approvals,
+                    publisher_stats.db_errors
+                );
+                let cache_stats = token_cache.stats().await;
+                info!(
+                    "📊 Token cache stats: {} tokens, {} pools, {} creators",
+                    cache_stats.total_tokens, cache_stats.total_pools, cache_stats.total_creators
+                );
+                let cache_context = token_cache.context_snapshot().await;
+                info!(
+                    "📊 Token cache context: block={} status={:?} source={:?} accepted={} rejected_stale={} rejected_non_live={}",
+                    cache_context.last_accepted_block,
+                    cache_context.last_accepted_status,
+                    cache_context.last_accepted_source,
+                    cache_context.accepted_updates,
+                    cache_context.rejected_stale_snapshots,
+                    cache_context.rejected_non_live_snapshots
+                );
+                let unresolved_stats = unresolved_intent_store.stats().await;
+                info!(
+                    "📊 Unresolved intents: pending={} in_flight={} recorded={} resolved={} expired={} dropped={} avg_cache_wait_ms={:.1}",
+                    unresolved_stats.pending,
+                    unresolved_stats.in_flight,
+                    unresolved_stats.recorded_total,
+                    unresolved_stats.resolved_total,
+                    unresolved_stats.expired_total,
+                    unresolved_stats.dropped_total,
+                    unresolved_stats.cache_wait_avg_ms
+                );
+                let nonce_dependency_stats =
+                    simulation_manager.pending_nonce_dependency_stats().await;
+                info!(
+                    "📊 Pending nonce dependencies: senders={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
+                    nonce_dependency_stats.senders,
+                    nonce_dependency_stats.transactions,
+                    nonce_dependency_stats.recorded,
+                    nonce_dependency_stats.replaced,
+                    nonce_dependency_stats.lookups,
+                    nonce_dependency_stats.hits,
+                    nonce_dependency_stats.gaps,
+                    nonce_dependency_stats.expired
+                );
+                let funding_dependency_stats =
+                    simulation_manager.pending_funding_dependency_stats().await;
+                info!(
+                    "📊 Pending funding dependencies: recipients={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
+                    funding_dependency_stats.recipients,
+                    funding_dependency_stats.transactions,
+                    funding_dependency_stats.recorded,
+                    funding_dependency_stats.replaced,
+                    funding_dependency_stats.lookups,
+                    funding_dependency_stats.hits,
+                    funding_dependency_stats.gaps,
+                    funding_dependency_stats.expired
+                );
+            })
+            .await;
+            if report_result.is_err() {
+                warn!("detector stage timed out lane=normal stage=interval_report timeout_ms=2000");
             }
-            let lp_approval_stats = tx_router.lp_approval_stats();
-            info!(
-                "📊 LP approval path: ingress_txs erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | retry_attempts erc20={} ownership_hits={} position={} manager_hits={} cache_misses={} | published={} db_errors={}",
-                lp_approval_stats.ingress_erc20_approval_txs,
-                lp_approval_stats.ingress_ownership_token_pool_hits,
-                lp_approval_stats.ingress_position_approval_txs,
-                lp_approval_stats.ingress_position_manager_hits,
-                lp_approval_stats.ingress_pool_cache_miss_txs,
-                lp_approval_stats.retry_erc20_approval_attempts,
-                lp_approval_stats.retry_ownership_token_pool_hits,
-                lp_approval_stats.retry_position_approval_attempts,
-                lp_approval_stats.retry_position_manager_hits,
-                lp_approval_stats.retry_pool_cache_miss_attempts,
-                publisher_stats.lp_approvals,
-                publisher_stats.db_errors
-            );
-            let cache_stats = token_cache.stats().await;
-            info!(
-                "📊 Token cache stats: {} tokens, {} pools, {} creators",
-                cache_stats.total_tokens, cache_stats.total_pools, cache_stats.total_creators
-            );
-            let cache_context = token_cache.context_snapshot().await;
-            info!(
-                "📊 Token cache context: block={} status={:?} source={:?} accepted={} rejected_stale={} rejected_non_live={}",
-                cache_context.last_accepted_block,
-                cache_context.last_accepted_status,
-                cache_context.last_accepted_source,
-                cache_context.accepted_updates,
-                cache_context.rejected_stale_snapshots,
-                cache_context.rejected_non_live_snapshots
-            );
-            let unresolved_stats = unresolved_intent_store.stats().await;
-            info!(
-                "📊 Unresolved intents: pending={} in_flight={} recorded={} resolved={} expired={} dropped={} avg_cache_wait_ms={:.1}",
-                unresolved_stats.pending,
-                unresolved_stats.in_flight,
-                unresolved_stats.recorded_total,
-                unresolved_stats.resolved_total,
-                unresolved_stats.expired_total,
-                unresolved_stats.dropped_total,
-                unresolved_stats.cache_wait_avg_ms
-            );
-            let nonce_dependency_stats = simulation_manager.pending_nonce_dependency_stats().await;
-            info!(
-                "📊 Pending nonce dependencies: senders={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
-                nonce_dependency_stats.senders,
-                nonce_dependency_stats.transactions,
-                nonce_dependency_stats.recorded,
-                nonce_dependency_stats.replaced,
-                nonce_dependency_stats.lookups,
-                nonce_dependency_stats.hits,
-                nonce_dependency_stats.gaps,
-                nonce_dependency_stats.expired
-            );
-            let funding_dependency_stats =
-                simulation_manager.pending_funding_dependency_stats().await;
-            info!(
-                "📊 Pending funding dependencies: recipients={} txs={} recorded={} replaced={} lookups={} hits={} gaps={} expired={}",
-                funding_dependency_stats.recipients,
-                funding_dependency_stats.transactions,
-                funding_dependency_stats.recorded,
-                funding_dependency_stats.replaced,
-                funding_dependency_stats.lookups,
-                funding_dependency_stats.hits,
-                funding_dependency_stats.gaps,
-                funding_dependency_stats.expired
-            );
             last_report_total = total;
 
             schedule_latest_simulation_status_log(

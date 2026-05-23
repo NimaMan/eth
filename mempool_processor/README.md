@@ -307,14 +307,14 @@ Changes now in the detector:
 - signal-path awaits for routing, dependency recording, LP approval publishing,
   unresolved-intent writes, and simulation submission are bounded by short
   stage timeouts
+- interval reporting is best-effort and time bounded; slow stats reads cannot
+  stop the normal detector consumer from draining the IPC queue
 - synchronous function detection no longer performs blocking async cache reads
 
 The next failure should identify the stuck stage directly in
 `signal_detector.log`. Proper fixes should then target that stage with a hard
-timeout or isolation. The likely architectural fixes are:
+timeout or isolation. The remaining architectural fixes are:
 
-- put hard timeouts around publisher, routing, unresolved-intent retry,
-  simulation-result drain, dependency recording, and interval-report awaits
 - keep ZMQ/log publishing non-blocking or time bounded
 - fail the process or mark it unhealthy when the watchdog sees a stuck stage,
   so the supervisor restarts instead of letting the queue silently fill
