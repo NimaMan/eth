@@ -217,6 +217,105 @@ Operational defaults in the current binary:
 - unresolved intents live for two seconds and retry every 250ms
 - function-detection channel buffer is 50,000
 
+## Live Signal Timing Evaluation
+
+Before changing queueing, priority, or detector code, first verify the running
+processes are on the latest timing-aware code and measure the current live
+pipeline.
+
+Latest-code checks:
+
+- token-server/chain-server signal API must expose `signal_source`,
+  `signal_created_at`, `mempool_first_seen_at`, and `mempool_first_seen_ms` on
+  `/eth/tokens/api/mempool/signals`. If those fields are missing, the running
+  server has not picked up the timing-field commit.
+- `eth_alpha_trader` must create a `strategy_observations` row with decision
+  `received` before `engine.handle_event` updates the same row to `submitted`,
+  `hold`, `ignored`, or `invalid`. If no `received` phase appears for new
+  signals after restart, the trader is not running the latest timing code.
+- Use the persisted DB rows as the source of truth. ZMQ and logs are diagnostic.
+
+What to measure after the latest code has run for a while:
+
+| Stage | Source | Healthy expectation |
+| --- | --- | --- |
+| Mempool detection to signal store | `live_trading.signal_events.detection_timestamp` -> `created_at` | Usually sub-second for recent examples. |
+| Signal store to API visibility | `signal_events.created_at` -> API row visible with same `signal_id` | Should be near the next API poll; missing timing fields means old server code. |
+| API/trader receive time | `strategy_observations.first_seen_at` for event source `mempool_signal` and decision `received` | Should be bounded by trader poll cadence unless the trader is blocked. |
+| Receive to risk/decision finish | `first_seen_at` -> `risk_events.created_at`, `strategy_decisions.created_at`, final observation `last_seen_at` | This is where chain-sim/report work can block later signals. |
+| Decision to execution report | `strategy_decisions.created_at` -> `execution_reports.created_at` | Needed to separate decision latency from execution adapter latency. |
+
+Current assessment from 2026-05-22 before restarting onto the latest timing
+code:
+
+- Recent `live_trading.signal_events` rows were written quickly: sampled
+  detect-to-store latency ranged from about `6 ms` to `962 ms`.
+- The running API at `40019` returned the old signal shape, so it was not yet
+  exposing the committed timing fields.
+- The running trader showed store-to-risk delays far above the `2000 ms` poll
+  interval for some signals, including roughly `7.9s`, `9.2s`, `33.9s`,
+  `56.4s`, and `68.6s`.
+- The large delays looked like sequential trader-side blocking: one expensive
+  `engine.handle_event`/chain-sim/report path can hold later mempool signals
+  behind it.
+
+Evaluation rule:
+
+Do not treat mempool signal generation as the bottleneck until the timing table
+shows `detection_timestamp -> signal_events.created_at` is slow. If that stage
+is fast and `created_at -> received` or `received -> decision` is slow, fix the
+trader/API critical path first.
+
+Known item to revisit after the timing table is current:
+
+- `src/simulator/simulation_queue.rs` should be audited for full-queue priority
+  drop behavior. `SimulationPriority` uses lower numeric values for higher
+  priority (`Critical=0`, `High=1`, `Normal=2`, `Low=3`), so any comparison that
+  treats `<= Normal` as low priority is suspicious. Patch it only with a focused
+  test and only after confirming whether queue pressure is actually present in
+  the latest live run.
+
+## Queue-Fill Failure Assessment
+
+The repeated `IPC ingress queue full` failure should not be treated as normal
+busy-period pressure. The old run logs show a stop-and-fill pattern:
+
+- the last healthy interval has `ipc_queue=0`, no critical backlog, and
+  `simulation_queue current=0`
+- `simulation_queue enqueued` and `processed` are equal at the last interval
+- interval reporting then stops, while the live token cache task keeps logging
+  snapshots and IPC ingress later fills the 50,000 normal queue plus the 10,000
+  critical queue
+
+That means ingress is still alive, token-cache sync is still alive, and
+simulation workers are not saturated. The detector consumer loop stopped
+draining. Bigger queues or more simulation workers do not solve that class of
+failure.
+
+Changes now in the detector:
+
+- arrival recording is a sidecar channel and no longer takes the arrival
+  recorder mutex on the urgent signal path
+- the IPC reader filters unrelated transactions before the signal queue, while
+  still sending every tx to the arrival observer
+- the critical lane now only admits tracked LP approvals, tracked position
+  approvals, and tracked liquidity removals
+- the main detector loop records the current stage and logs a watchdog warning
+  if it remains in one stage for more than five seconds
+
+The next failure should identify the stuck stage directly in
+`signal_detector.log`. Proper fixes should then target that stage with a hard
+timeout or isolation. The likely architectural fixes are:
+
+- make critical signals an independent consumer path, not only a higher
+  priority input queue behind the same detector loop
+- put hard timeouts around publisher, routing, unresolved-intent retry,
+  simulation-result drain, dependency recording, and interval-report awaits
+- remove blocking `block_on` cache reads from function detection
+- keep ZMQ/log publishing non-blocking or time bounded
+- fail the process or mark it unhealthy when the watchdog sees a stuck stage,
+  so the supervisor restarts instead of letting the queue silently fill
+
 ## Tests And Commands
 
 ```bash
