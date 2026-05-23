@@ -44,10 +44,45 @@ only as a gas and behavior baseline; it is not the final pre-submit check for a
 real live order.
 
 Exact pre-submit simulation is also the source of gas-used for live tx
-economics. Route builders may carry static fallback gas estimates, but after the
-final exact simulation the planner raises `route.estimated_gas_used` to at least
-the simulated gas used plus the configured 5% buffer before gas-rank lookup,
-value-cap budgeting, and Kartal request metadata are built.
+economics. Route builders carry gas limits, not fallback gas-used estimates.
+After the final exact simulation the planner raises `route.estimated_gas_used`
+to at least the simulated gas used plus the configured buffer, currently 5000
+bps / 50%, before gas-rank lookup, value-cap budgeting, and Kartal request
+metadata are built.
+
+Production gas-rank readiness is tracked in:
+
+`../readiness/gates/production_gas_rank/`
+
+The real Alpha runner currently requires gas-rank candidates from
+`eth_chain_server_gas_rank`, uses `p85 -> p75 -> p50 -> normal` for entries,
+uses `p50 -> normal` for routine strategy exits, maps mempool risk exits to
+`p95 -> p90 -> p75 -> p50 -> normal`, maps mined approval races to
+`p90 -> p75 -> p50 -> normal`, caps selected priority fee at `3.5 gwei`, caps
+entry estimated gas fee at `0.0012 ETH`, and caps exit estimated gas fee at
+`0.002 ETH`.
+
+The decision loop is:
+
+| Strategy signal | Decision reason | Execution category | Gas ladder | Execution route | Current usage |
+| --- | --- | --- | --- | --- | --- |
+| Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault buy | Active Alpha11 path |
+| Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
+| Mined LP approval after entry | `exit.lp_approval_mined_race` | `mined_approval_race_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available risk exit |
+| Mempool LP/removal risk | `exit.mempool_liquidity_removal_signal` | `mempool_lp_race_exit` | `p95 -> p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Only when live mempool evidence exists |
+| Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
+| Buy-confirm block LP approval | `exit.lp_approval_buy_confirm_block` | `buy_confirm_approval_exit` | `p90 -> p75 -> p50` | Reserved priority sell | Unused by registered active strategies; Alpha11 defers this to max-hold |
+| Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |
+
+`P50`, `P75`, `P85`, `P90`, and `P95` mean mined priority-fee percentiles.
+They do not mean transaction positions. The separate `normal` profile is the
+low-cost rank-target fallback: sampled priority needed to beat roughly
+transaction position 50.
+
+The gas-rank service adds `ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI` to the
+selected raw sample value before returning a submit candidate. This avoids
+submitting common whole-gwei prices such as exactly `2 gwei`, which would leave
+our tx in the same priority-fee bucket as many other transactions.
 
 Missing before the main hold15 strategy can use this crate for public real
 capital:
@@ -208,9 +243,9 @@ The selection rule is:
    scam path.
 2. `PriorityFeeBudget` subtracts expected late recovery, safety buffer, and
    mandatory base-fee cost. The remainder is the maximum priority spend.
-3. `eth_block_tx_rank` should produce candidate bands such as `p50_top_10`,
-   `p50_top_25`, or `next_block_aggressive`, each with priority fee, max fee,
-   expected rank, gas-before, and source window.
+3. `eth_block_tx_rank` should produce named candidates such as `normal`, `p50`,
+   `p75`, `p85`, `p90`, and `p95`, each with priority fee, max fee, expected rank,
+   gas-before, and source window.
 4. `tx_prep` filters out candidates whose priority spend or total max fee
    exceeds the protected-value cap.
 5. Among eligible candidates, `tx_prep` chooses the best ranked candidate. If no
@@ -220,9 +255,10 @@ The selection rule is:
 This deliberately prevents us from paying more to escape than the position can
 recover. The practical tuning question is not "highest bribe wins"; it is "what
 recent rank band is fast enough for this signal, and does that band fit inside
-the protected value?" Mempool LP approval exits should start at aggressive
-recent-rank bands because the expected edge is pre-mine. Mined LP approval exits
-should be more conservative unless the next-block removal probability is high.
+the protected value?" Mempool LP approval exits should start at the P95 ladder
+because the expected edge is pre-mine. Mined LP approval exits should start at
+P90 unless the next-block removal probability pushes a future strategy to a
+different explicit ladder.
 
 Every submitted request should persist the chosen gas-rank label, priority fee,
 max fee, estimated ETH spend, rank position, gas-before estimate, predicted base
@@ -236,7 +272,7 @@ Question:
 
 ```text
 If a pool's LP token is already materially approved, or becomes materially
-approved while we hold the position, should we block entry or submit an urgent
+approved while we hold the position, should we block entry or submit a priority
 sell before direct liquidity removal?
 ```
 
@@ -264,7 +300,7 @@ The policy separates three signal sources:
 
 | Source | Meaning | Action |
 | --- | --- | --- |
-| `MempoolLpApproval` | LP approval was seen before mining. | Submit urgent sell before the approval/removal path lands. |
+| `MempoolLpApproval` | LP approval was seen before mining. | Submit a P95-ladder priority sell before the approval/removal path lands. |
 | `MinedLpApproval` | LP approval is confirmed, but removal is not confirmed yet. | Race the next block with a priority sell. |
 | `MinedLiquidityRemoval` | Direct removal is already confirmed. | Mark too late for the priority edge. |
 
@@ -321,7 +357,9 @@ the live strategy needs:
   the selected bribe must fit inside the ETH value protected by escaping before
   the scam path, after late-recovery and safety buffers. The request metadata
   includes structured decision-rationale fields such as `reason_code`,
-  `reason_source`, and `decision_reason`.
+  `reason_source`, and `decision_reason`. Production callers can require a
+  specific gas-rank source so fixed/test gas candidates cannot pass the real
+  execution boundary.
 - `src/planner/` orchestrates live transaction planning from
   `LivePrioritySellPlannerInput` to `LiveTraderTxSignal`. Route builders support
   direct Uniswap V2 ETH/WETH sells and deployed Uniswap V2 trading vault buys
