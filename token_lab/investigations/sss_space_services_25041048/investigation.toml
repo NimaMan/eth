@@ -1,4 +1,8 @@
 name = "sss_space_services_25041048"
+title = "SSS Space Services reserve-quality and display parity"
+status = "investigating"
+area = "reserve quality / display"
+classification = "token_builder_reproduced_pending_detector_display"
 token = "0x144742cc48cacb0f2e49dd03af5cfca3fa30e7bc"
 pool = "0x06f53d7c71f91060d7e698218d78ff293f4f2aa5"
 denom = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
@@ -6,6 +10,21 @@ denom_symbol = "WETH"
 creator = "0xd962715b742d7a761a09a5141d85679e8472a6b0"
 start_block = 25041048
 end_block = 25041137
+
+[token_builder_replay]
+date = "2026-05-20"
+local_run_id = "run-1"
+api = "POST /api/v1/eth/ranges"
+scope = "range_end_snapshot_not_current_market_state"
+transaction_failures = 0
+pool_simulation_failures = 0
+final_can_buy = true
+final_can_sell = false
+final_has_observed_sell = true
+final_risk_label = "cannot_sell"
+final_risk_level = "honeypot"
+raw_price_ratio_to_initial = 2128397.249802325
+pooled_token_supply_percent = 0.0000697712149384
 
 [key_txs]
 initial_liquidity = "0x1d8bcaff714a59ba96aba2db3ac58e7862723382d02394aaac6d541d2bcbbe5e"
@@ -20,4 +39,5 @@ sync_without_transfer = true
 token_reserve_dust = true
 price_ratio_extreme_low_supply = true
 cannot_sell = true
-observed_sell_simulator_fail = "to_investigate"
+privileged_seller_reserve_drain = "candidate"
+observed_sell_simulator_fail = "not_proven_by_range_replay"

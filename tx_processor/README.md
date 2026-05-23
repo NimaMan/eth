@@ -23,7 +23,8 @@ transaction and block facts.
 - Pool buy/approve/sell viability orchestration in `src/trade_simulation/`.
 - `processed_tx_builder` helpers for rebuilding signed or unsigned transaction
   payloads from `ProcessedTransaction` values.
-- `live_block_processor` that publishes compact processed blocks to Redis.
+- `LiveBlockProcessor`, the direct live block processing engine used by
+  `eth_chain_server`.
 
 ## Does Not Own
 
@@ -40,17 +41,18 @@ tx hash / unsigned tx / raw block
   -> TxProcessor / BlockProcessor
   -> decoded logs + internal calls + balance deltas + metadata/errors
   -> ProcessedTransaction / ProcessedBlock
-  -> eth_token, mempool_processor, pyreth, tx_fund_flow, alpha live feed
+  -> eth_token, mempool_processor, tx_fund_flow, alpha live feed
 ```
 
-Live path:
+Production live path:
 
 ```text
-live_block_processor
-  -> compact ProcessedBlock payload
+eth_chain_server LiveChainRuntime
+  -> LiveBlockProcessor
+  -> LiveProcessedBlock
+  -> in-process live token runtime
   -> ProcessedBlockReplayStoreWriter
   -> processed-block disk cache + address_to_blocks
-  -> Redis stream eth/live/blocks
 ```
 
 Backfill path:
@@ -62,6 +64,20 @@ refresh_processed_block_disk_cache
   -> processed-block disk cache + address_to_blocks
 ```
 
+## Persistent Stores
+
+`tx_processor` owns the processed-block disk cache and writes derived block
+indexes only through the replay-store writer.
+
+| Store | Config/path | Owner path | Purpose |
+| --- | --- | --- | --- |
+| Processed-block disk cache | `PROCESSED_BLOCK_DISK_CACHE_DIR`; files under `<cache>/<network>/<block>.pblock.zst` | `src/processed_tx_provider/block/disk_cache/` | Compact, zstd-compressed binary `ProcessedBlock` payloads for replay and range reads. |
+| Address block participation index | `RETH_INDEX_DIR` or `<RETH_DATADIR>/reth_index`; table `address_to_blocks` | `reth_chain_query/src/reth_index/` | Derived side index written from processed blocks so address/token activity lookups can find candidate blocks quickly. |
+
+`ProcessedBlockDiskCacheStore` is a raw file store. Production writers should
+use `ProcessedBlockReplayStoreWriter` so cache files and derived indexes remain
+consistent.
+
 ## Where To Look First
 
 | Need | Start here |
@@ -71,7 +87,7 @@ refresh_processed_block_disk_cache
 | Process tx by hash/unsigned tx | `src/processed_tx_provider/` |
 | Process block/ranges | `src/block_processor/`, `src/processed_tx_provider/block/` |
 | Persistent block cache | `src/processed_tx_provider/block/disk_cache/` |
-| Live Redis publisher | `src/bin/live_block_processor/README.md` |
+| Direct live block processor | `src/live/live_block_processor.rs` |
 | Buy/sell/tax simulation | `src/trade_simulation/`, `examples/trade_simulation/` |
 | Processed tx rebuild helpers | `src/processed_tx_builder/` |
 | Profiling harness | `examples/blocks/profile/README.md` |
@@ -89,16 +105,15 @@ refresh_processed_block_disk_cache
 
 Router-based sell simulation covers the known V2-style protocols represented by
 `PoolType` (`UniswapV2`, `SushiSwap`, `PancakeSwapV2`, `ShibaSwapV2`,
-`FraxswapV2`) plus known V3 router protocols such as `SushiSwapV3`. Uniswap V3
-and V4 Universal Router flows live in their own modules because they require
-Permit2 and protocol-specific calldata.
+`FraxswapV2`) plus known V3 router protocols such as `SushiSwapV3` and
+`PancakeSwapV3`. Uniswap V3 and V4 Universal Router flows live in their own
+modules because they require Permit2 and protocol-specific calldata.
 
 ## Tests And Commands
 
 ```bash
 cargo run -p tx_processor --example process_transaction_by_hash -- <tx_hash>
 cargo run -p tx_processor --example process_block -- <block>
-cargo run -p tx_processor --bin live_block_processor
 cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- --blocks 100000
 cargo run -p tx_processor --release --example profile_processed_blocks -- --mode all
 cargo test -p tx_processor

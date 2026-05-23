@@ -13,12 +13,12 @@ Scope and Philosophy
 1) Mempool Arrival Times (Minimal)
 - Goal: Know if a mined tx passed through mempool and when it first arrived.
 - Storage: single compact table keyed by txumber.
-  - Table: `tx_arrival_by_txum`
+  - Table: `mempool_tx_arrival_times`
   - Key: `tx_number` (u64, big‑endian)
-  - Value: `first_seen_ns` (u64)
+  - Value: `first_seen_ms` (u64, epoch milliseconds)
 - Write path:
-  - In mempool processor, keep an in‑memory map `tx_hash → first_seen_ns`.
-  - When a tx is included (mined), resolve `tx_number` from Reth (via `TransactionHashNumbers: TxHash → txumber`) and write one row: `tx_number → first_seen_ns`.
+  - In mempool processor, keep an in‑memory map `tx_hash → first_seen_ms`.
+  - When a tx is included (mined), resolve `tx_number` from Reth (via `TransactionHashNumbers: TxHash → txumber`) and write one row: `tx_number → first_seen_ms`.
   - Acceptable trade‑off: if the process restarts before inclusion, some arrivals are lost (keeps design minimal).
 - Why txumber:
   - Matches Reth’s primary sequencing and composes with other tables (e.g., block mapping via `TransactionBlocks`, position via `BlockBodyIndices`).
@@ -48,18 +48,19 @@ Preserving Ordering
 - Within a block: ordering is by `transactionIndex` or by txumber, where `tx_number = first_tx_num(block) + tx_index` using `BlockBodyIndices`.
 - For token/address reconstruction that requires causality within a block, process the full block and feed transactions through `tx_processor` in block order.
 
-Minimal Table Set (Recommended Now)
-- `tx_arrival_by_txum` (required):
+Current Active Table Set
+- `mempool_tx_arrival_times` (required):
   - Key: BE u64 (txumber)
-  - Value: u64 (first_seen_ns)
-- `address_to_blocks` (optional):
+  - Value: u64 (first_seen_ms)
+- `address_to_blocks` (active when populated by processed-block replay/backfill):
   - Key: 20‑byte address; Value: BE u64 block number, dupsort+dupfixed
-- Existing curated tables (optional depending on usage):
-  - `tokens`, `pools`, `trades`, `address_metrics` — keep lean; prefer computing dynamic views via Reth + tx_processor.
+- Dormant model files:
+  - `tokens`, `pools`, `trades`, `address_metrics` exist as Rust table-model
+    scaffolding, but `RethIndexDB` does not currently open or write them.
 
 Query Patterns
 - By tx hash → arrival time:
-  - Reth `TransactionHashNumbers`: `hash → tx_number` → lookup `tx_arrival_by_txum[tx_number]`.
+  - Reth `TransactionHashNumbers`: `hash → tx_number` → lookup `mempool_tx_arrival_times[tx_number]`.
 - By token → blocks → processed txs:
   - Logs on token (+pool addresses) → union block numbers → fetch full blocks → run `tx_processor` → filter by token/pool/participants.
 - By generic address (EOA/contract):

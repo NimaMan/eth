@@ -1,5 +1,9 @@
 # Live V2 Metadata Bottleneck
 
+Archived postmortem. Redis references below describe the old live-state
+fallback path that caused the bottleneck. Current live block processing uses
+direct in-process handoff and does not use Redis live-state snapshots.
+
 ## Summary
 
 Live Uniswap V2 pool metadata lookups are cheap only when the requested block is
@@ -11,7 +15,7 @@ view call.
 The immediate mitigation is to keep the live V2 pool metadata timeout low. As of
 2026-05-13, `LIVE_POOL_METADATA_LOOKUP_TIMEOUT_MS` is `250ms`.
 
-The real fix is to stop using Redis-serialized live state as the normal
+The real fix was to stop using Redis-serialized live state as the normal
 in-process path between the live block processor and the live token tracker.
 
 ## Observed Evidence
@@ -91,10 +95,10 @@ blocking work immediately; it only stops waiting on it. So lowering the timeout
 reduces block-apply wait time, but it does not make the underlying state-loading
 work cheap.
 
-## Why Redis Should Not Be The Critical Path
+## Why Redis Should Not Have Been The Critical Path
 
-Redis is still useful as a process boundary and recovery/diagnostic surface, but
-the hot path is doing unnecessary work:
+The old architecture treated Redis as a process boundary and
+recovery/diagnostic surface, but the hot path was doing unnecessary work:
 
 ```text
 live block processor builds current live state
@@ -117,7 +121,8 @@ length; the data path itself is backwards.
 
 The real fix is a topology and ownership change: live token tracking should
 consume the live block processor's current block state directly, not reconstruct
-that state from Redis for metadata and simulation view calls.
+that state from serialized external snapshots for metadata and simulation view
+calls.
 
 The acceptable live-state source order should be explicit:
 
@@ -125,14 +130,14 @@ The acceptable live-state source order should be explicit:
 2. Use an in-process live block context/session when processing the current live
    block.
 3. Defer optional metadata discovery when neither source is cheap.
-4. Use Redis snapshots only for restart recovery, diagnostics, or an explicit
-   fallback mode, not as the normal metadata lookup path.
+4. Defer optional metadata when direct live state is unavailable instead of
+   falling back to serialized external snapshots.
 
 The current `BlockStateSession` pattern is the right local primitive because it
 keeps one block state warm and gives callers isolated branches for individual
-view calls. But using it through Redis-hydrated state is still only a partial
-fix. It reduces many expensive snapshot loads to one expensive snapshot load per
-block; it does not remove the expensive snapshot from the hot path.
+view calls. The old Redis-hydrated path was only a partial fix because it
+reduced many expensive snapshot loads to one expensive snapshot load per block;
+it did not remove the expensive snapshot from the hot path.
 
 For correctness, deferral must be explicit. A live-tail metadata lookup that
 cannot get cheap state should be recorded as `state_unavailable` or `deferred`,
@@ -220,15 +225,10 @@ reth/live chain ingestion
   -> token/pool read models
 ```
 
-Redis remains for:
-
-- external consumers
-- process restart recovery
-- cross-process diagnostics
-- fallback when components are not co-located
-
-But the token tracker should not normally read a 335MB Redis state snapshot for
-metadata lookups.
+The old plan allowed Redis as a fallback/output boundary for external
+consumers, restart recovery, and diagnostics. The current implementation does
+not use Redis in live block processing; token tracking should use direct live
+state or defer optional metadata.
 
 Suggested in-process interface:
 
@@ -260,8 +260,8 @@ branches for individual view calls.
 4. Introduce block-scoped metadata provider using the existing
    `BlockStateSession` pattern.
 5. Add deferred discovery for live-tail state-unavailable cases.
-6. Build the co-located live runtime and make Redis a fallback/output path, not
-   the normal in-process hot path.
+6. Build the co-located live runtime and keep live block processing on direct
+   in-process state.
 
 ## Logging To Keep
 
@@ -275,7 +275,7 @@ Do not add another log file for this unless needed. Use existing files:
 Useful new fields:
 
 ```text
-metadata_lookup_source = historical_state | redis_live_snapshot | in_process_live_state | deferred
+metadata_lookup_source = historical_state | in_process_live_state | deferred
 metadata_context_load_ms
 metadata_view_call_ms
 metadata_snapshot_bytes

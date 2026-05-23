@@ -19,7 +19,7 @@ tradeability analysis.
 
 - `sell_swap/router_protocols.rs`: generic V2/V3 router paths, covering
   non-Uniswap protocols represented by `PoolType` such as SushiSwap,
-  PancakeSwap V2, ShibaSwap V2, Fraxswap V2, and SushiSwap V3.
+  PancakeSwap V2, PancakeSwap V3, ShibaSwap V2, Fraxswap V2, and SushiSwap V3.
 - `sell_swap/uniswap_v3_universal_router.rs`: Uniswap V3 Universal Router sell
   flow with ERC20 approval, Permit2 approval, and exact-input swap.
 - `sell_swap/uniswap_v4_universal_router.rs`: Uniswap V4 Universal Router sell
@@ -35,4 +35,3 @@ tradeability analysis.
 - Raw EVM execution and DB-backed simulation live in `tx_simulator`.
 - Processed tx and block decoding live in `tx_processor/` and
   `block_processor/`.
-- Python bindings call this module through `pyreth/src/simulator/`.

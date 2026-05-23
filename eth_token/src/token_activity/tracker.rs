@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +7,8 @@ use super::{TokenBlockActivity, TokenTransactionActivity};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenActivityTracker {
     pub transactions_by_hash: BTreeMap<String, TokenTransactionActivity>,
+    #[serde(default)]
+    pub transactions_by_block: BTreeMap<u64, BTreeSet<String>>,
     pub blocks: BTreeMap<u64, TokenBlockActivity>,
     pub latest_block_number: Option<u64>,
     pub latest_block_timestamp: Option<u64>,
@@ -28,14 +30,31 @@ impl TokenActivityTracker {
             .entry(tx_hash.clone())
             .and_modify(|activity| activity.refresh_context(timestamp, maker.clone()))
             .or_insert_with(|| {
-                TokenTransactionActivity::new(tx_hash, block_number, timestamp, maker)
+                TokenTransactionActivity::new(tx_hash.clone(), block_number, timestamp, maker)
             });
+        self.transactions_by_block
+            .entry(block_number)
+            .or_default()
+            .insert(tx_hash.clone());
 
         let block = self.block_mut(block_number, timestamp);
         if inserted {
             block.num_tx = block.num_tx.saturating_add(1);
         }
         self.record_latest(block_number, timestamp);
+    }
+
+    pub fn transactions_in_block(&self, block_number: u64) -> Vec<&TokenTransactionActivity> {
+        if let Some(tx_hashes) = self.transactions_by_block.get(&block_number) {
+            return tx_hashes
+                .iter()
+                .filter_map(|tx_hash| self.transactions_by_hash.get(tx_hash))
+                .collect();
+        }
+        self.transactions_by_hash
+            .values()
+            .filter(|transaction| transaction.block_number == block_number)
+            .collect()
     }
 
     pub fn record_buy(

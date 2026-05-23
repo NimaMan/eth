@@ -9,6 +9,7 @@ use eth_alpha_core::{
 use crate::{AlphaEngine, EngineExecutionAdapter};
 
 use super::{risk_kind_key, strategy_decision_record};
+use serde_json::{json, Map, Value};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where
@@ -91,21 +92,83 @@ where
         decision: &StrategyDecision,
     ) -> Result<()> {
         let event_source = event.source.as_deref().unwrap_or("risk");
-        self.store
-            .record_strategy_decision(&strategy_decision_record(
-                strategy_name,
-                event_source,
-                format!(
-                    "risk:{}:{}:{}",
-                    risk_kind_key(&event.kind),
-                    event.token_address,
-                    event.observed_block.unwrap_or_default()
-                ),
-                event.observed_block,
-                Some(event.token_address.to_string()),
-                event.pool_address.as_ref().map(ToString::to_string),
-                decision,
-            ))
-            .await
+        let mut record = strategy_decision_record(
+            strategy_name,
+            event_source,
+            format!(
+                "risk:{}:{}:{}",
+                risk_kind_key(&event.kind),
+                event.token_address,
+                event.observed_block.unwrap_or_default()
+            ),
+            event.observed_block,
+            Some(event.token_address.to_string()),
+            event.pool_address.as_ref().map(ToString::to_string),
+            decision,
+        );
+        attach_risk_event_evidence(&mut record.reason_details, &mut record.payload, event);
+        self.store.record_strategy_decision(&record).await
+    }
+}
+
+fn attach_risk_event_evidence(
+    reason_details: &mut Option<Value>,
+    payload: &mut Value,
+    event: &RiskEvent,
+) {
+    let Some(evidence) = event.evidence.as_ref() else {
+        return;
+    };
+    let details = reason_details.get_or_insert_with(|| json!({}));
+    if !details.is_object() {
+        *details = json!({});
+    }
+    if let Some(map) = details.as_object_mut() {
+        map.insert("risk_event_evidence".to_string(), evidence.clone());
+        copy_evidence_field(map, evidence, "lp_approval_age_basis", "age_basis");
+        copy_evidence_field(
+            map,
+            evidence,
+            "trading_enabled_age_blocks_at_signal",
+            "trading_enabled_age_blocks",
+        );
+        copy_evidence_field(
+            map,
+            evidence,
+            "pool_age_blocks_at_signal",
+            "pool_age_blocks",
+        );
+        copy_evidence_field(
+            map,
+            evidence,
+            "trading_enabled_block",
+            "trading_enabled_block",
+        );
+        copy_evidence_field(map, evidence, "pool_creation_block", "pool_creation_block");
+        copy_evidence_field(map, evidence, "observed_block", "risk_observed_block");
+        copy_evidence_field(map, evidence, "signal_id", "signal_id");
+        copy_evidence_field(
+            map,
+            evidence,
+            "mempool_first_seen_at",
+            "mempool_first_seen_at",
+        );
+    }
+    if !payload.is_object() {
+        *payload = json!({});
+    }
+    if let Some(map) = payload.as_object_mut() {
+        map.insert("risk_event_evidence".to_string(), evidence.clone());
+    }
+}
+
+fn copy_evidence_field(
+    target: &mut Map<String, Value>,
+    evidence: &Value,
+    source_key: &str,
+    target_key: &str,
+) {
+    if let Some(value) = evidence.get(source_key) {
+        target.insert(target_key.to_string(), value.clone());
     }
 }

@@ -68,6 +68,7 @@ retries.
 | `questions.md` | Strategy-neutral and policy-specific questions to answer before trusting a policy. |
 | `loss_review.md` | What the losing pools show, and which signals might prevent losses. |
 | `profit_review.md` | What the profitable pools show, and which signals might improve upside capture. |
+| `pnl_validation_50_pool_sample.md` | 50-pool event chronology, no-leakage, fill, gas, and PnL audit for the leading 50K strategy. |
 | `iterations/` | Ten concrete policy iterations with questions, changes, and review gates. |
 | `backtest_50k_checklist.md` | Exact commands and validation checklist for the later 50K review. |
 

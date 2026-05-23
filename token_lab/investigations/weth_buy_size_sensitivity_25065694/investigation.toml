@@ -1,11 +1,12 @@
 title = "WETH-denominated buy size sensitivity in 15k historical baseline"
-status = "confirmed"
+status = "explained"
 run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
 source_run_id = "snipe-all-v1-chain-sim-live-v4"
 range_start_block = 25065694
 range_end_block = 25080693
 area = "strategy sizing"
 classification = "fixed_size_entry_fails_but_smaller_size_executes"
+policy_resolution = "current baseline remains fixed-size; adaptive sizing or pre-entry size guards are separate strategy work"
 
 [[tokens]]
 token = "0x87AEA3C04Ef80b1A4AbF8f8199817a0A510e8754"

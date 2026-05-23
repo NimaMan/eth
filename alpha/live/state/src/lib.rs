@@ -1,13 +1,12 @@
-//! Shared live-state protocol for Ethereum alpha components.
+//! Shared live-state contracts for Ethereum alpha components.
 //!
-//! This crate owns keys, snapshot schemas, retention policy, and reader/writer
+//! This crate owns snapshot schemas, retention policy, and reader/writer
 //! traits. It intentionally does not own block processing, token mutation,
-//! mempool processing, Redis connections, or trading runtime orchestration.
+//! mempool processing, cache clients, or trading runtime orchestration.
 
 pub mod block;
 pub mod chain_state;
 pub mod error;
-pub mod keys;
 pub mod retention;
 pub mod store;
 pub mod token;

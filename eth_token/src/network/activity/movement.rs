@@ -36,10 +36,7 @@ pub enum MovementAssetKind {
 
 impl MovementAssetKind {
     pub fn is_denom(&self) -> bool {
-        matches!(
-            self,
-            Self::Native | Self::WrappedNative | Self::Stable | Self::KnownDenom
-        )
+        matches!(self, Self::Native | Self::WrappedNative | Self::Stable)
     }
 }
 
@@ -250,5 +247,21 @@ mod tests {
         assert_eq!(totals.denom_balance(), -1.25);
         assert_eq!(totals.buy_count(), 1);
         assert_eq!(totals.sell_count(), 1);
+    }
+
+    #[test]
+    fn known_denom_is_not_pool_denom_for_network_pnl() {
+        let mut totals = AddressMovementTotals::default();
+        totals.record(&AddressMovement::new(
+            MovementDirection::In,
+            MovementAssetKind::KnownDenom,
+            42.0,
+            obs(1),
+        ));
+
+        assert_eq!(totals.denom_in, 0.0);
+        assert_eq!(totals.other_in, 42.0);
+        assert_eq!(totals.buy_count(), 0);
+        assert_eq!(totals.sell_count(), 0);
     }
 }

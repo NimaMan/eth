@@ -38,39 +38,83 @@ pub fn evaluate(
         return RuleDecision::hold(RULE_NAME, "approved_pct_unknown_or_not_gt_min");
     }
 
-    if should_defer_immediate_approval(ctx, event, defer_max_trading_enabled_age_blocks) {
-        return RuleDecision::hold(RULE_NAME, "early_approval_deferred_to_max_hold");
+    if let Some(defer) =
+        immediate_approval_deferral(ctx, event, defer_max_trading_enabled_age_blocks)
+    {
+        return RuleDecision::hold(
+            RULE_NAME,
+            format!(
+                "early_approval_deferred_to_max_hold:age_blocks={} max_age_blocks={} age_basis={} reference_block={} observed_block={}",
+                defer.age_blocks,
+                defer.max_age_blocks,
+                defer.basis,
+                optional_block(defer.reference_block),
+                optional_block(defer.observed_block),
+            ),
+        );
     }
 
     RuleDecision::Exit { rule: RULE_NAME }
 }
 
-fn should_defer_immediate_approval(
+struct ApprovalDeferral {
+    age_blocks: i64,
+    max_age_blocks: u64,
+    basis: &'static str,
+    reference_block: Option<u64>,
+    observed_block: Option<u64>,
+}
+
+fn immediate_approval_deferral(
     ctx: &StrategyContext<'_>,
     event: &RiskEvent,
     max_age_blocks: Option<u64>,
-) -> bool {
+) -> Option<ApprovalDeferral> {
     let Some(max_age_blocks) = max_age_blocks else {
-        return false;
+        return None;
     };
-    let Some(age_blocks) = approval_trading_enabled_age_blocks(ctx, event) else {
-        return false;
+    let Some(evidence) = approval_age_evidence(ctx, event) else {
+        return None;
     };
-    age_blocks >= 0 && age_blocks <= max_age_blocks as i64
+    if evidence.age_blocks >= 0 && evidence.age_blocks <= max_age_blocks as i64 {
+        Some(ApprovalDeferral {
+            age_blocks: evidence.age_blocks,
+            max_age_blocks,
+            basis: evidence.basis,
+            reference_block: evidence.reference_block,
+            observed_block: evidence.observed_block,
+        })
+    } else {
+        None
+    }
 }
 
-fn approval_trading_enabled_age_blocks(
+fn approval_age_evidence(
     ctx: &StrategyContext<'_>,
     event: &RiskEvent,
-) -> Option<i64> {
-    crate::shared_rules::lp_approval::approval_trading_enabled_age_blocks(event)
+) -> Option<crate::shared_rules::lp_approval::ApprovalAgeEvidence> {
+    crate::shared_rules::lp_approval::approval_age_evidence(event)
         .or_else(|| approval_age_from_pool_creation(ctx, event))
 }
 
-fn approval_age_from_pool_creation(ctx: &StrategyContext<'_>, event: &RiskEvent) -> Option<i64> {
+fn approval_age_from_pool_creation(
+    ctx: &StrategyContext<'_>,
+    event: &RiskEvent,
+) -> Option<crate::shared_rules::lp_approval::ApprovalAgeEvidence> {
     let observed_block = event.observed_block?;
     let creation_block = ctx.market.pool.as_ref()?.creation_block?;
-    Some(observed_block as i64 - creation_block as i64)
+    Some(crate::shared_rules::lp_approval::ApprovalAgeEvidence {
+        age_blocks: observed_block as i64 - creation_block as i64,
+        basis: "pool_creation_block",
+        reference_block: Some(creation_block),
+        observed_block: Some(observed_block),
+    })
+}
+
+fn optional_block(block: Option<u64>) -> String {
+    block
+        .map(|block| block.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn has_open_matching_position(

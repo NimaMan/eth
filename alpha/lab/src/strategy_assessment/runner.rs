@@ -2,7 +2,7 @@ use eyre::Result;
 use serde_json::json;
 use sqlx::PgPool;
 
-use crate::backtest_validation::db::{load_result_set, load_strategy_summaries};
+use crate::strategy_validation::db::{load_result_set, load_strategy_summaries};
 
 use super::db::{load_assessment_metrics, AssessmentMetrics};
 use super::report::{

@@ -26,6 +26,13 @@ pub(super) fn lp_control_features(
         let regular_share = lp_holder_share_sum(&holder_split.regular);
         let burned_share = lp_holder_share_sum(&holder_split.burned);
         let router_approved = lp_router_approved_amount(&holder_split.regular);
+        let removable_amount = lp_removable_amount(&holder_split.regular);
+        let router_removable_amount = lp_router_removable_amount(&holder_split.regular);
+        let creator_control = creator_lp_control_features(
+            &holder_split.regular,
+            token.creator_address.as_deref(),
+            total_supply,
+        );
         let burn_transfer_stats = lp_burn_transfer_stats(&pool.lp_tracker.transfers, as_of_block);
         let last_approval = pool
             .lp_tracker
@@ -41,6 +48,8 @@ pub(super) fn lp_control_features(
             .filter(|block| *block <= as_of_block)
             .min();
         let max_approval_amount = max_lp_approval_amount(holder_split.regular.iter().copied());
+        let max_approval_pct = lp_approved_pct_from_max(total_supply, max_approval_amount);
+        let last_approval_amount = last_approval.and_then(event_amount);
         return LpControlFeatures {
             lp_total_supply: Some(total_supply),
             lp_holder_count: Some(holders.len() as u32),
@@ -66,19 +75,43 @@ pub(super) fn lp_control_features(
                     .filter(|block| *block <= as_of_block)
                     .count() as u32,
             ),
+            lp_approval_seen_as_of: Some(first_approval_block.is_some()),
             lp_first_approval_block_as_of: first_approval_block,
             lp_holders_with_approvals_count: Some(lp_holders_with_approvals_count(
                 &holder_split.regular,
             )),
             lp_approved_spender_count_as_of: Some(lp_approval_spender_count(&holder_split.regular)),
-            lp_approved_pct_as_of: lp_approved_pct_from_max(total_supply, max_approval_amount),
+            lp_approved_pct_as_of: max_approval_pct,
+            lp_max_approval_pct_as_of: max_approval_pct,
             lp_approved_to_router: Some(router_approved),
             lp_approved_to_router_pct: Some(lp_pct_of_total(total_supply, router_approved)),
             lp_router_approved_pct_as_of: Some(lp_pct_of_total(total_supply, router_approved)),
+            lp_removable_amount_as_of: Some(removable_amount),
+            lp_removable_pct_as_of: Some(lp_pct_of_total(total_supply, removable_amount)),
+            lp_router_removable_amount_as_of: Some(router_removable_amount),
+            lp_router_removable_pct_as_of: Some(lp_pct_of_total(
+                total_supply,
+                router_removable_amount,
+            )),
             lp_router_approval_seen_as_of: Some(router_approved > 0.0),
             lp_max_approval_amount_as_of: max_approval_amount,
+            creator_lp_balance_as_of: creator_control.balance,
+            creator_lp_balance_pct_as_of: creator_control.balance_pct,
+            creator_lp_approved_amount_as_of: creator_control.approved_amount,
+            creator_lp_approved_pct_as_of: creator_control.approved_pct,
+            creator_lp_router_approved_amount_as_of: creator_control.router_approved_amount,
+            creator_lp_router_approved_pct_as_of: creator_control.router_approved_pct,
+            creator_lp_removable_amount_as_of: creator_control.removable_amount,
+            creator_lp_removable_pct_as_of: creator_control.removable_pct,
+            creator_lp_router_removable_amount_as_of: creator_control.router_removable_amount,
+            creator_lp_router_removable_pct_as_of: creator_control.router_removable_pct,
+            creator_lp_approved_gt_90_pct_as_of: creator_control.approved_gt_90_pct,
+            creator_lp_router_removable_gt_90_pct_as_of: creator_control.router_removable_gt_90_pct,
             last_lp_approval_block: last_approval.and_then(event_block_number),
             last_lp_approval_timestamp: last_approval.and_then(event_timestamp),
+            last_lp_approval_amount: last_approval_amount,
+            last_lp_approval_amount_pct_of_total_supply: last_approval_amount
+                .map(|amount| lp_pct_of_total(total_supply, amount)),
             last_lp_approval_owner: last_approval.and_then(|event| event_string(event, "owner")),
             last_lp_approval_spender: last_approval
                 .and_then(|event| event_string(event, "spender")),
@@ -167,6 +200,15 @@ pub(super) fn lp_control_features(
         let lp_total_supply = pool.lp_total_supply();
         let max_approval_amount = max_lp_approval_amount(holder_split.regular.iter().copied());
         let router_approved = lp_router_approved_amount(&holder_split.regular);
+        let removable_amount = lp_removable_amount(&holder_split.regular);
+        let router_removable_amount = lp_router_removable_amount(&holder_split.regular);
+        let creator_control = creator_lp_control_features(
+            &holder_split.regular,
+            token.creator_address.as_deref(),
+            lp_total_supply,
+        );
+        let max_approval_pct = lp_approved_pct_from_max(lp_total_supply, max_approval_amount);
+        let last_approval_amount = last_approval.and_then(event_amount);
         return LpControlFeatures {
             lp_total_supply: Some(lp_total_supply),
             lp_holder_count: Some(holders.len() as u32),
@@ -191,19 +233,43 @@ pub(super) fn lp_control_features(
                     .filter(|block| *block <= as_of_block)
                     .count() as u32,
             ),
+            lp_approval_seen_as_of: Some(first_approval_block.is_some()),
             lp_first_approval_block_as_of: first_approval_block,
             lp_holders_with_approvals_count: Some(lp_holders_with_approvals_count(
                 &holder_split.regular,
             )),
             lp_approved_spender_count_as_of: Some(lp_approval_spender_count(&holder_split.regular)),
-            lp_approved_pct_as_of: lp_approved_pct_from_max(lp_total_supply, max_approval_amount),
+            lp_approved_pct_as_of: max_approval_pct,
+            lp_max_approval_pct_as_of: max_approval_pct,
             lp_approved_to_router: Some(router_approved),
             lp_approved_to_router_pct: Some(lp_pct_of_total(lp_total_supply, router_approved)),
             lp_router_approved_pct_as_of: Some(lp_pct_of_total(lp_total_supply, router_approved)),
+            lp_removable_amount_as_of: Some(removable_amount),
+            lp_removable_pct_as_of: Some(lp_pct_of_total(lp_total_supply, removable_amount)),
+            lp_router_removable_amount_as_of: Some(router_removable_amount),
+            lp_router_removable_pct_as_of: Some(lp_pct_of_total(
+                lp_total_supply,
+                router_removable_amount,
+            )),
             lp_router_approval_seen_as_of: Some(router_approved > 0.0),
             lp_max_approval_amount_as_of: max_approval_amount,
+            creator_lp_balance_as_of: creator_control.balance,
+            creator_lp_balance_pct_as_of: creator_control.balance_pct,
+            creator_lp_approved_amount_as_of: creator_control.approved_amount,
+            creator_lp_approved_pct_as_of: creator_control.approved_pct,
+            creator_lp_router_approved_amount_as_of: creator_control.router_approved_amount,
+            creator_lp_router_approved_pct_as_of: creator_control.router_approved_pct,
+            creator_lp_removable_amount_as_of: creator_control.removable_amount,
+            creator_lp_removable_pct_as_of: creator_control.removable_pct,
+            creator_lp_router_removable_amount_as_of: creator_control.router_removable_amount,
+            creator_lp_router_removable_pct_as_of: creator_control.router_removable_pct,
+            creator_lp_approved_gt_90_pct_as_of: creator_control.approved_gt_90_pct,
+            creator_lp_router_removable_gt_90_pct_as_of: creator_control.router_removable_gt_90_pct,
             last_lp_approval_block: last_approval.and_then(event_block_number),
             last_lp_approval_timestamp: last_approval.and_then(event_timestamp),
+            last_lp_approval_amount: last_approval_amount,
+            last_lp_approval_amount_pct_of_total_supply: last_approval_amount
+                .map(|amount| lp_pct_of_total(lp_total_supply, amount)),
             last_lp_approval_owner: last_approval.and_then(|event| event_string(event, "owner")),
             last_lp_approval_spender: last_approval
                 .and_then(|event| event_string(event, "spender")),
@@ -294,20 +360,102 @@ fn lp_approval_spender_count(holders: &[&LPHolderSnapshot]) -> u32 {
         .sum::<usize>() as u32
 }
 
+#[derive(Default)]
+struct CreatorLpControlFeatures {
+    balance: Option<f64>,
+    balance_pct: Option<f64>,
+    approved_amount: Option<f64>,
+    approved_pct: Option<f64>,
+    router_approved_amount: Option<f64>,
+    router_approved_pct: Option<f64>,
+    removable_amount: Option<f64>,
+    removable_pct: Option<f64>,
+    router_removable_amount: Option<f64>,
+    router_removable_pct: Option<f64>,
+    approved_gt_90_pct: Option<bool>,
+    router_removable_gt_90_pct: Option<bool>,
+}
+
+fn creator_lp_control_features(
+    holders: &[&LPHolderSnapshot],
+    creator_address: Option<&str>,
+    total_supply: f64,
+) -> CreatorLpControlFeatures {
+    let Some(creator_address) = creator_address else {
+        return CreatorLpControlFeatures::default();
+    };
+    let Some(holder) = holders.iter().find(|holder| {
+        same_optional_address(Some(&holder.address), Some(creator_address)).unwrap_or(false)
+    }) else {
+        return CreatorLpControlFeatures::default();
+    };
+
+    let approved_amount = lp_holder_approved_amount(holder);
+    let router_approved_amount = lp_holder_router_approved_amount(holder);
+    let removable_amount = holder.balance.min(approved_amount);
+    let router_removable_amount = holder.balance.min(router_approved_amount);
+    let approved_pct = lp_pct_of_total(total_supply, approved_amount);
+    let router_removable_pct = lp_pct_of_total(total_supply, router_removable_amount);
+
+    CreatorLpControlFeatures {
+        balance: Some(holder.balance),
+        balance_pct: Some(lp_pct_of_total(total_supply, holder.balance)),
+        approved_amount: Some(approved_amount),
+        approved_pct: Some(approved_pct),
+        router_approved_amount: Some(router_approved_amount),
+        router_approved_pct: Some(lp_pct_of_total(total_supply, router_approved_amount)),
+        removable_amount: Some(removable_amount),
+        removable_pct: Some(lp_pct_of_total(total_supply, removable_amount)),
+        router_removable_amount: Some(router_removable_amount),
+        router_removable_pct: Some(router_removable_pct),
+        approved_gt_90_pct: Some(approved_pct > 90.0),
+        router_removable_gt_90_pct: Some(router_removable_pct > 90.0),
+    }
+}
+
 fn lp_router_approved_amount(holders: &[&LPHolderSnapshot]) -> f64 {
     let sum = holders
         .iter()
-        .map(|holder| {
-            holder
-                .approvals
-                .values()
-                .filter(|approval| approval.is_router)
-                .map(|approval| approval.amount.min(holder.balance))
-                .filter(|amount| amount.is_finite() && *amount > 0.0)
-                .sum::<f64>()
-        })
+        .map(|holder| holder.balance.min(lp_holder_router_approved_amount(holder)))
         .sum::<f64>();
     positive_or_zero(sum)
+}
+
+fn lp_removable_amount(holders: &[&LPHolderSnapshot]) -> f64 {
+    let sum = holders
+        .iter()
+        .map(|holder| holder.balance.min(lp_holder_approved_amount(holder)))
+        .sum::<f64>();
+    positive_or_zero(sum)
+}
+
+fn lp_router_removable_amount(holders: &[&LPHolderSnapshot]) -> f64 {
+    let sum = holders
+        .iter()
+        .map(|holder| holder.balance.min(lp_holder_router_approved_amount(holder)))
+        .sum::<f64>();
+    positive_or_zero(sum)
+}
+
+fn lp_holder_approved_amount(holder: &LPHolderSnapshot) -> f64 {
+    holder
+        .approvals
+        .values()
+        .map(|approval| approval.amount)
+        .filter(|amount| amount.is_finite() && *amount > 0.0)
+        .max_by(|left, right| left.total_cmp(right))
+        .unwrap_or(0.0)
+}
+
+fn lp_holder_router_approved_amount(holder: &LPHolderSnapshot) -> f64 {
+    holder
+        .approvals
+        .values()
+        .filter(|approval| approval.is_router)
+        .map(|approval| approval.amount)
+        .filter(|amount| amount.is_finite() && *amount > 0.0)
+        .max_by(|left, right| left.total_cmp(right))
+        .unwrap_or(0.0)
 }
 
 fn positive_or_zero(value: f64) -> f64 {

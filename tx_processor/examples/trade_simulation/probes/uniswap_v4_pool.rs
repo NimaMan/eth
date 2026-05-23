@@ -35,6 +35,10 @@ struct Args {
     amount_wei: Vec<String>,
     #[arg(long)]
     reth_datadir: Option<String>,
+    #[arg(long)]
+    buyer: Option<Address>,
+    #[arg(long)]
+    verbose: bool,
 }
 
 #[tokio::main]
@@ -75,6 +79,11 @@ async fn main() -> Result<()> {
                         hooks: args.hooks,
                         hook_data: Vec::new(),
                     });
+            let params = if let Some(buyer) = args.buyer {
+                params.with_buyer(buyer)
+            } else {
+                params
+            };
 
             match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), params).await {
                 Ok(result) => {
@@ -88,6 +97,44 @@ async fn main() -> Result<()> {
                         result.denom_received,
                         result.failure_reason.as_deref().unwrap_or("-")
                     );
+                    if args.verbose {
+                        for (idx, tx) in result.prior_transactions.iter().enumerate() {
+                            println!(
+                                "  prior[{idx}] status={} type={} from={:#x} to={:?} actions={:?} erc20_transfers={:?} permit2_events={:?}",
+                                tx.status,
+                                tx.tx_type,
+                                tx.from_address,
+                                tx.to_address,
+                                tx.actions,
+                                tx.erc20_transfers,
+                                tx.permit2_events
+                            );
+                        }
+                        println!(
+                            "  buy status={} type={} actions={:?} erc20_transfers={:?} permit2_events={:?}",
+                            result.buy_transaction.status,
+                            result.buy_transaction.tx_type,
+                            result.buy_transaction.actions,
+                            result.buy_transaction.erc20_transfers,
+                            result.buy_transaction.permit2_events
+                        );
+                        println!(
+                            "  approve status={} type={} actions={:?} erc20_transfers={:?} permit2_events={:?}",
+                            result.approve_transaction.status,
+                            result.approve_transaction.tx_type,
+                            result.approve_transaction.actions,
+                            result.approve_transaction.erc20_transfers,
+                            result.approve_transaction.permit2_events
+                        );
+                        println!(
+                            "  sell status={} type={} actions={:?} erc20_transfers={:?} permit2_events={:?}",
+                            result.sell_transaction.status,
+                            result.sell_transaction.tx_type,
+                            result.sell_transaction.actions,
+                            result.sell_transaction.erc20_transfers,
+                            result.sell_transaction.permit2_events
+                        );
+                    }
                 }
                 Err(error) => {
                     println!("block={block} amount={amount} error={error:?}");

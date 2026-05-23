@@ -1,12 +1,11 @@
-# Transaction Data Models (Rust)
+# Transaction Data Models
 
 This module tree defines the canonical Rust representation of processed
-Ethereum transactions. It mirrors the Python schema (see
-`py/eth_data/eth_data/tx_processor/data_models/README.md`) so payloads can flow losslessly between runtimes.
+Ethereum transactions.
 
 ## Layout
 
-```
+```text
 src/tx_processor/data_models/
 ├── balance_changes.rs   // Address-level deltas (ETH + tokens)
 ├── fees.rs              // Gas accounting
@@ -18,48 +17,40 @@ src/tx_processor/data_models/
 ```
 
 `ProcessedTransaction` is the top-level struct exported via
-`tx_processor::ProcessedTransaction`. All helpers (`ProcessedBlockTransactions`,`ProcessedBlock`, etc.) ultimately compose these data types.
+`tx_processor::ProcessedTransaction`. Block-level payloads compose these data
+types through `ProcessedBlockTransactions` and `ProcessedBlock`.
 
 ## Core Principles
 
-- **Machine-scale integers**: All value fields use `U256`, `I256`, `u128`, or `i128` to keep parity with on-chain magnitudes. When JSON transports enforce 64-bit limits (e.g. RabbitMQ payloads), publishers stringify large integers and deserialisers rely on the helpers in `serde_helpers.rs` to accept either numeric or string forms.
-- **Checksum addresses**: All addresses are stored as `alloy_primitives::Address` and serialised/deserialised with checksum casing via the utilities in `reth_chain_query::utils::checksum`.
-- **Deterministic schema**: Field names and container shapes match the Python
-  models 1:1. Any change here must be reflected in the Python README and data
-  classes to keep cross-runtime compatibility.
-- **No implicit coercion**: Deserialisers reject floats and malformed hex. The
-  bridge (`pyreth/src/tx_processor/processed_tx_bridge.rs`) enforces the
-  same rules when accepting Python dictionaries.
+- **Machine-scale integers**: Value fields use `U256`, `I256`, `u128`, or
+  `i128` so on-chain magnitudes do not lose precision. JSON transports may
+  stringify large integers; deserializers accept numeric or string forms through
+  `serde_helpers.rs`.
+- **Checksum addresses**: Address fields use `alloy_primitives::Address` and
+  serialize with checksum casing through `reth_chain_query::utils::checksum`.
+- **Deterministic schema**: Field names and container shapes are part of the
+  processed transaction contract. Update serde compatibility tests when changing
+  them.
+- **No implicit coercion**: Deserializers reject floats and malformed hex.
 
 ## Key Structs
 
-- `ProcessedTransaction` (`tx_models.rs`)
-  - Core transaction metadata (`hash`, `block_number`, `from_address`, …)
-  - Nested `TransactionFees`
-  - Collections of transfers (`eth_transfers`, `erc20_transfers`, …)
-  - Event vectors for Uniswap V2/V3/V4, approvals, ownership changes
-  - `address_balance_changes` / `latest_states` maps for downstream analytics
-- `TransactionFees` (`fees.rs`)
-  - `gas_price`, `gas_used`, `tx_fee`, `protocol_type`,
-    `max_fee_per_gas`, `max_priority_fee`
-- `ERC20TransferEvent`, `UniswapV3SwapEvent`, etc. (`receipt_models.rs`)
-  - Each struct is a direct representation of decoded log data
-  - Large numeric fields use the shared serde helpers for robust deserialisation
-- `InternalTransaction` and related call-trace entities (`trace_models.rs`)
-  - Captures miner bundles, internal value transfers, and call depth information
-- `AddressBalanceChange` (`balance_changes.rs`)
-  - Summarises net movement per address in ETH and token units
+- `ProcessedTransaction` (`tx_models.rs`): transaction metadata, fees, decoded
+  events, internal calls, balance changes, raw trace artifacts, and auxiliary
+  protocol arrays.
+- `TransactionFees` (`fees.rs`): gas accounting and fee protocol fields.
+- Receipt event structs (`receipt_models.rs`): decoded log data for ERC tokens,
+  Uniswap, approvals, ownership changes, and related events.
+- `InternalTransaction` and related call-trace structs (`trace_models.rs`):
+  internal value transfers and call depth information.
+- `AddressBalanceChange` (`balance_changes.rs`): net ETH/token movement per
+  address.
 
 ## Adding New Models
 
-1. Define the struct with machine-scale types inside the appropriate module.
-2. Derive `Serialize`/`Deserialize` and import checksum helpers if addresses
-   are present.
-3. If any numeric field may exceed 64 bits, annotate it with the functions from
-   `serde_helpers.rs`.
-4. Export the new struct via `data_models::mod.rs` and document it here (and in
-   the Python README) so both runtimes stay aligned.
-
-Keeping this directory in sync with the Python data models guarantees that the
-live pipeline (simulators, block processors, alert systems) can exchange
-processed transactions without precision loss or ad-hoc conversions.
+1. Define the struct in the appropriate module.
+2. Derive `Serialize` and `Deserialize`; import checksum helpers for addresses.
+3. Annotate large numeric fields with helpers from `serde_helpers.rs`.
+4. Export the new struct via `data_models::mod.rs`.
+5. Extend serde compatibility coverage when changing persisted or externally
+   consumed payloads.

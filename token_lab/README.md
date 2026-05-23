@@ -38,6 +38,25 @@ token range/server output + simulator logs
   -> fix in owner crate or promote detector/guardrail
 ```
 
+## Persistence Boundary
+
+Most token-lab outputs are local artifacts under investigation folders. The
+exception is Risk Atlas: `token_lab/risk_atlas/scam_analytics/risk_atlas/` owns the
+PostgreSQL `risk_atlas_*` read-model tables used by the `/risk-atlas` pages.
+Do not make frontend pages parse token-lab flat files when a Rust DB/API read
+model exists.
+
+## Restructuring Note
+
+Risk Atlas currently lives under `scam_analytics/` because its first durable
+read model is scam/risk-oriented. If it keeps expanding into the broader launch
+surface, strategy denominators, and model-readiness views, the target structure
+should move it to a top-level `risk_atlas/` area that includes scam analytics
+as one domain rather than making Risk Atlas a child of scam analytics. Do that
+as a focused move after the investigation ledger is clean, because the Rust
+workspace, `eth_chain_server` dependency, CLI docs, and API docs all reference
+the current crate path.
+
 ## Folder Structure
 
 | Folder | Purpose |

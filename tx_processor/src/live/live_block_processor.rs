@@ -54,7 +54,7 @@ impl LiveBlockProcessorConfig {
     }
 }
 
-/// Real-time block processor that mirrors the Python live block processor.
+/// Real-time block processor used by the in-process live chain runtime.
 pub struct LiveBlockProcessor {
     block_processor: BlockProcessor,
     include_traces: bool,

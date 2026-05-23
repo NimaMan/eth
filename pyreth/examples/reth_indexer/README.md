@@ -47,6 +47,6 @@ small.
 
 The live block processor now hosts
 `LiveAddressBlockParticipationIndexWorker`, which writes this same
-`address_to_blocks` table asynchronously after Redis publication succeeds. Use
-the benchmark here for temporary-index measurements and historical backfill
-timing before writing large ranges into the production sidecar DB.
+`address_to_blocks` table through the processed-block replay-store path. Use the
+benchmark here for temporary-index measurements and historical backfill timing
+before writing large ranges into the production sidecar DB.

@@ -69,6 +69,20 @@ Live simulation uses local historical context when it is caught up. Live
 pipelines that already hold block headers and `prestateTracer` diffMode output
 can open direct block state sessions from those inputs.
 
+## Persistent Store Usage
+
+`tx_simulator` opens the Reth node datadir read-only. It does not own a separate
+application database.
+
+| Path under `RETH_DATADIR` | Access | Purpose |
+| --- | --- | --- |
+| `db/` | read-only MDBX | Canonical state and Reth database tables used to build simulation state providers. |
+| `static_files/` | read-only static-file provider | Canonical headers, receipts, and other append-only Reth data used for block context. |
+| `rocksdb/` | read-only Reth provider component | Reth provider data opened by the current `ProviderFactory` setup. |
+
+Simulation writes are fork-local/in-memory only. A transaction chain, bundle, or
+view call must never mutate the Reth datadir.
+
 ## Where To Look First
 
 | Need | Start here |

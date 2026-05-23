@@ -121,12 +121,9 @@ pub(super) fn observed_sell_flow(
     let denom = pool.identity.denom_address.to_ascii_lowercase();
     let sell_txs: HashSet<String> = token
         .activity
-        .transactions_by_hash
-        .values()
-        .filter(|transaction| {
-            transaction.block_number == block_number
-                && volume_for_denom(&transaction.sell_volume_by_denom, &denom) > 0.0
-        })
+        .transactions_in_block(block_number)
+        .into_iter()
+        .filter(|transaction| volume_for_denom(&transaction.sell_volume_by_denom, &denom) > 0.0)
         .map(|transaction| transaction.tx_hash.to_ascii_lowercase())
         .collect();
     let mut flow = ObservationSellFlow {

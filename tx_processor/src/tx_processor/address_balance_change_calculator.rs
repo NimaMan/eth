@@ -167,7 +167,7 @@ impl AddressBalanceChangeCalculator {
                         MovementType::Currency,
                         internal_tx.from_address,
                         to_addr,
-                        amount_wei, // Keep in wei like Python
+                        amount_wei,
                         transfer_id,
                         None,
                         Some("ETH".to_string()),
@@ -185,7 +185,6 @@ impl AddressBalanceChangeCalculator {
             let token_addr = transfer.token_address;
 
             if let Some(mut currency_symbol) = DENOM_ADDRESSES.get(&token_addr).cloned() {
-                // EXACT Python logic: Convert WETH to ETH for ERC20
                 if currency_symbol == "WETH" {
                     currency_symbol = "ETH";
                 }

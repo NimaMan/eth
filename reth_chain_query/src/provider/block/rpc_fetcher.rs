@@ -411,6 +411,7 @@ fn parse_call_frame(value: &Value, depth: u32) -> Result<CallFrame> {
         .to_ascii_uppercase();
     let call_type = match call_type.as_str() {
         "CALL" => CallType::Call,
+        "CALLCODE" => CallType::Call,
         "DELEGATECALL" => CallType::DelegateCall,
         "STATICCALL" => CallType::StaticCall,
         "CREATE" => CallType::Create,
@@ -586,5 +587,29 @@ fn parse_bytes(value: Option<&Value>) -> Result<Bytes> {
         }
         Some(Value::Null) | None => Ok(Bytes::new()),
         Some(other) => Err(eyre::eyre!("invalid bytes field {:?}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_callcode_frames_as_call_frames() {
+        let value = json!({
+            "type": "CALLCODE",
+            "from": "0x0000000000000000000000000000000000000001",
+            "to": "0x0000000000000000000000000000000000000002",
+            "gas": "0x5208",
+            "gasUsed": "0x5208",
+            "input": "0x",
+            "output": "0x",
+            "value": "0x0"
+        });
+
+        let frame = parse_call_frame(&value, 0).unwrap();
+
+        assert_eq!(frame.call_type, CallType::Call);
     }
 }

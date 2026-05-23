@@ -32,7 +32,7 @@ impl RethMetadataMode {
     fn token_metadata_block(self, lookup: &TokenMetadataLookup) -> u64 {
         match self {
             // Regular indexing reads the post-block state for same-block
-            // deployments, avoiding live Redis pending replay entirely.
+            // deployments.
             Self::Regular => lookup.block_number,
             // Live token tracking is co-located with live block processing. The
             // authoritative live view is the current post-block session; if we

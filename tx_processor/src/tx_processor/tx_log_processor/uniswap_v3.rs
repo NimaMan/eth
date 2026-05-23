@@ -314,8 +314,7 @@ impl LogDecoder {
         log: &AlloyLog,
         log_index: u64,
     ) -> Result<Option<DecodedEvent>> {
-        // This handles position events that have extended topics for owner/tick information
-        // Based on Python's parse_uniswap_v3_position logic
+        // This handles position events that have extended topics for owner/tick information.
         if log.topics().len() < 2 || log.data.data.len() < 96 {
             return Ok(None);
         }

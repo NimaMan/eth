@@ -27,7 +27,7 @@ This module should define observations and features known as of an observation:
 
 Future labels do not belong here. A target such as
 `rug within the next 10 active observations` requires future observations, so it
-belongs in `token_lab/scam_analytics` or a historical export layer that joins
+belongs in `token_lab/risk_atlas/scam_analytics` or a historical export layer that joins
 labels onto these source features.
 
 ## Active Observation

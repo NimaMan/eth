@@ -1,4 +1,5 @@
-use eth_ops_events::{PipelineBottleneckSample, PipelineIssue, emit_issue};
+use eth_ops_events::{emit_issue, PipelineBottleneckSample, PipelineIssue};
+use eth_token::token_analytics::collect_current_observations;
 use eth_token::tracking::{LiveTokenRetentionReport, TokenBlockUpdateReport};
 use tx_processor::LoadedProcessedBlock as LiveBlockLoad;
 
@@ -46,6 +47,13 @@ pub(super) fn apply_report(
         state.progress.processed_block_disk_cache_misses += 1;
     }
     state.progress.updated_at_unix_secs = now_unix_secs();
+
+    let observations = collect_current_observations(
+        state.processor.registry(),
+        &report,
+        &mut state.active_observation_counts_by_pool,
+    );
+    state.observations.extend(observations);
 
     state.created_tokens.extend(created_tokens);
     state.updated_tokens.extend(updated_tokens.clone());

@@ -19,9 +19,9 @@ all addresses across that block, and writes each address once for the block. MDB
 
 In the live system this writer is hosted inside
 `tx_processor::ProcessedBlockReplayStoreWriter`. The live block processor
-enqueues processed blocks after Redis publication succeeds; the replay-store
-sink writes both the `.pblock.zst` file and this index on a background task so
-these writes cannot delay live block publication.
+hands processed blocks to the replay-store writer after the confirmed block is
+processed; that writer persists both the `.pblock.zst` file and this index so
+disk-cache and address-index coverage stay aligned.
 
 For historical ranges, `tx_processor`'s
 `refresh_processed_block_disk_cache` example writes this index only when it

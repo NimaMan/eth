@@ -1,9 +1,9 @@
 use alloy_primitives::U256;
 use eth_block_tx_rank::{
-    BlockTxRankEstimate, CandidateTxGas, MinedBlockFeeSample, effective_priority_fee,
-    estimate_from_samples,
+    effective_priority_fee, estimate_from_samples, BlockTxRankEstimate, CandidateTxGas,
+    MinedBlockFeeSample,
 };
-use eyre::{Result, eyre};
+use eyre::{eyre, Result};
 use reth_chain_query::provider::RpcBlockDataFetcher;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,8 @@ const DEFAULT_LOOKBACK_BLOCKS: u64 = 100;
 const MAX_LOOKBACK_BLOCKS: u64 = 100;
 const DEFAULT_GAS_LIMIT: u64 = 300_000;
 const DEFAULT_PRIORITY_FEE_GWEI: f64 = 2.0;
+const DEFAULT_PRIORITY_TIE_BREAKER_GWEI: f64 = 0.1456;
+const PRIORITY_TIE_BREAKER_GWEI_CONFIG: &str = "ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI";
 const ETH_USD_PAIR: &str = "ETH/USDC";
 const ETH_USD_SPOT_SOURCE: &str = "GET /api/v1/eth/prices/spot?pair=ETH/USDC&venue=uniswap_v2";
 const ETH_USD_MULTI_SOURCE: &str = "GET /api/v1/eth/prices/multi?pair=ETH/USDC";
@@ -44,6 +46,7 @@ pub struct GasRankEstimateRequest {
 pub struct GasRankEstimateResponse {
     pub eth_usd_price: f64,
     pub eth_usd_price_source: String,
+    pub priority_tie_breaker_gwei: f64,
     pub blocks: RecentBlockWindow,
     pub candidate: CandidateGasRankView,
     pub recommendations: Vec<GasRankRecommendation>,
@@ -87,8 +90,11 @@ pub struct CandidateGasRankView {
 #[derive(Debug, Clone, Serialize)]
 pub struct GasRankRecommendation {
     pub label: &'static str,
-    pub target_position: u64,
-    pub sample_quantile: f64,
+    pub target_position: Option<u64>,
+    pub sample_quantile: Option<f64>,
+    pub priority_percentile: Option<f64>,
+    pub raw_priority_fee_gwei: f64,
+    pub priority_tie_breaker_gwei: f64,
     pub priority_fee_gwei: f64,
     pub max_fee_per_gas_gwei: f64,
     pub effective_priority_fee_gwei: f64,
@@ -118,10 +124,7 @@ pub struct GasRankHistoryRow {
     pub priority_p75_gwei: f64,
     pub priority_p90_gwei: f64,
     pub priority_p95_gwei: f64,
-    pub minimum_priority_gwei: f64,
-    pub balanced_priority_gwei: f64,
-    pub aggressive_priority_gwei: f64,
-    pub urgent_priority_gwei: f64,
+    pub normal_priority_gwei: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -142,8 +145,20 @@ struct RecentBlockEvent {
 #[derive(Debug, Clone, Copy)]
 struct RecommendationProfile {
     label: &'static str,
-    target_position: u64,
-    sample_quantile: f64,
+    priority: RecommendationPriority,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RecommendationPriority {
+    /// Sample the fee needed to beat a transaction position in each block, then
+    /// take a quantile across sampled blocks.
+    TargetPosition {
+        target_position: u64,
+        sample_quantile: f64,
+    },
+    /// Pool mined transaction priority fees across the sampled window and take
+    /// a fee percentile. This is what P50/P75/P90/P95 labels mean.
+    PriorityPercentile { percentile: f64 },
 }
 
 #[derive(Debug, Clone)]
@@ -152,26 +167,98 @@ struct EthUsdPrice {
     source: String,
 }
 
-const RECOMMENDATION_PROFILES: [RecommendationProfile; 4] = [
+const RECOMMENDATION_PROFILES: [RecommendationProfile; 20] = [
     RecommendationProfile {
-        label: "Minimum",
-        target_position: 50,
-        sample_quantile: 0.50,
+        label: "Normal",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 50,
+            sample_quantile: 0.50,
+        },
     },
     RecommendationProfile {
-        label: "Balanced",
-        target_position: 25,
-        sample_quantile: 0.75,
+        label: "Rank25",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 25,
+            sample_quantile: 0.50,
+        },
     },
     RecommendationProfile {
-        label: "Aggressive",
-        target_position: 10,
-        sample_quantile: 0.90,
+        label: "Rank10",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 10,
+            sample_quantile: 0.50,
+        },
     },
     RecommendationProfile {
-        label: "Urgent",
-        target_position: 5,
-        sample_quantile: 0.95,
+        label: "Rank5",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 5,
+            sample_quantile: 0.50,
+        },
+    },
+    RecommendationProfile {
+        label: "P50",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.50 },
+    },
+    RecommendationProfile {
+        label: "P55",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.55 },
+    },
+    RecommendationProfile {
+        label: "P60",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.60 },
+    },
+    RecommendationProfile {
+        label: "P65",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.65 },
+    },
+    RecommendationProfile {
+        label: "P70",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.70 },
+    },
+    RecommendationProfile {
+        label: "P75",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.75 },
+    },
+    RecommendationProfile {
+        label: "P77",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.77 },
+    },
+    RecommendationProfile {
+        label: "P85",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.85 },
+    },
+    RecommendationProfile {
+        label: "P88",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.88 },
+    },
+    RecommendationProfile {
+        label: "P90",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.90 },
+    },
+    RecommendationProfile {
+        label: "P92",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.92 },
+    },
+    RecommendationProfile {
+        label: "P94",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.94 },
+    },
+    RecommendationProfile {
+        label: "P95",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.95 },
+    },
+    RecommendationProfile {
+        label: "P96",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.96 },
+    },
+    RecommendationProfile {
+        label: "P97",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.97 },
+    },
+    RecommendationProfile {
+        label: "P99",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.99 },
     },
 ];
 
@@ -248,6 +335,7 @@ pub async fn estimate(
         max_fee_per_gas: max_fee,
         max_priority_fee_per_gas: priority_fee,
     };
+    let priority_tie_breaker = priority_tie_breaker_wei();
     let candidate_rank = estimate_from_samples(candidate, predicted_base_fee, &samples)?;
     let eth_usd = resolve_eth_usd_price(state).await?;
     let candidate_effective_priority_fee = effective_priority_fee(candidate, predicted_base_fee);
@@ -265,6 +353,7 @@ pub async fn estimate(
                 gas_limit,
                 estimated_gas_used,
                 predicted_base_fee,
+                priority_tie_breaker,
                 eth_usd.price,
                 &samples,
             )
@@ -278,6 +367,7 @@ pub async fn estimate(
     Ok(GasRankEstimateResponse {
         eth_usd_price: eth_usd.price,
         eth_usd_price_source: eth_usd.source.clone(),
+        priority_tie_breaker_gwei: wei_to_gwei(priority_tie_breaker),
         blocks: RecentBlockWindow {
             source: "eth_chain_server_recent_live_blocks",
             requested_blocks: lookback_blocks,
@@ -429,11 +519,20 @@ fn recommendation(
     gas_limit: u64,
     estimated_gas_used: u64,
     predicted_base_fee: U256,
+    priority_tie_breaker: U256,
     eth_usd_price: f64,
     samples: &[MinedBlockFeeSample],
 ) -> Result<GasRankRecommendation> {
-    let priority_fee =
-        recommended_priority(samples, profile.target_position, profile.sample_quantile);
+    let raw_priority_fee = match profile.priority {
+        RecommendationPriority::TargetPosition {
+            target_position,
+            sample_quantile,
+        } => recommended_priority(samples, target_position, sample_quantile),
+        RecommendationPriority::PriorityPercentile { percentile } => {
+            recommended_priority_percentile(samples, percentile)
+        }
+    };
+    let priority_fee = raw_priority_fee.saturating_add(priority_tie_breaker);
     let max_fee = suggested_max_fee(predicted_base_fee, priority_fee);
     let candidate = CandidateTxGas {
         gas_limit,
@@ -448,8 +547,24 @@ fn recommendation(
     let max_cost_eth_value = max_cost_eth(max_fee, gas_limit);
     Ok(GasRankRecommendation {
         label: profile.label,
-        target_position: profile.target_position,
-        sample_quantile: profile.sample_quantile,
+        target_position: match profile.priority {
+            RecommendationPriority::TargetPosition {
+                target_position, ..
+            } => Some(target_position),
+            RecommendationPriority::PriorityPercentile { .. } => None,
+        },
+        sample_quantile: match profile.priority {
+            RecommendationPriority::TargetPosition {
+                sample_quantile, ..
+            } => Some(sample_quantile),
+            RecommendationPriority::PriorityPercentile { .. } => None,
+        },
+        priority_percentile: match profile.priority {
+            RecommendationPriority::TargetPosition { .. } => None,
+            RecommendationPriority::PriorityPercentile { percentile } => Some(percentile),
+        },
+        raw_priority_fee_gwei: wei_to_gwei(raw_priority_fee),
+        priority_tie_breaker_gwei: wei_to_gwei(priority_tie_breaker),
         priority_fee_gwei: wei_to_gwei(priority_fee),
         max_fee_per_gas_gwei: wei_to_gwei(max_fee),
         effective_priority_fee_gwei: wei_to_gwei(effective_priority),
@@ -491,10 +606,7 @@ fn history_row(event: &RecentBlockEvent, sample: &MinedBlockFeeSample) -> GasRan
         priority_p75_gwei: wei_to_gwei(quantile_u256(priorities.clone(), 0.75)),
         priority_p90_gwei: wei_to_gwei(quantile_u256(priorities.clone(), 0.90)),
         priority_p95_gwei: wei_to_gwei(quantile_u256(priorities, 0.95)),
-        minimum_priority_gwei: wei_to_gwei(priority_for_target_position(sample, 50)),
-        balanced_priority_gwei: wei_to_gwei(priority_for_target_position(sample, 25)),
-        aggressive_priority_gwei: wei_to_gwei(priority_for_target_position(sample, 10)),
-        urgent_priority_gwei: wei_to_gwei(priority_for_target_position(sample, 5)),
+        normal_priority_gwei: wei_to_gwei(priority_for_target_position(sample, 50)),
     }
 }
 
@@ -508,6 +620,19 @@ fn recommended_priority(
         .map(|sample| priority_for_target_position(sample, target_position))
         .collect::<Vec<_>>();
     quantile_u256(values, sample_quantile)
+}
+
+fn recommended_priority_percentile(samples: &[MinedBlockFeeSample], percentile: f64) -> U256 {
+    let values = samples
+        .iter()
+        .flat_map(|sample| {
+            sample
+                .transactions
+                .iter()
+                .map(|tx| tx.effective_priority_fee)
+        })
+        .collect::<Vec<_>>();
+    quantile_u256(values, percentile)
 }
 
 fn priority_for_target_position(sample: &MinedBlockFeeSample, target_position: u64) -> U256 {
@@ -581,6 +706,19 @@ fn gwei_to_wei(value: f64) -> Result<U256> {
         return Err(eyre!("gwei value must be a finite non-negative number"));
     }
     Ok(U256::from((value * WEI_PER_GWEI).round() as u128))
+}
+
+fn priority_tie_breaker_wei() -> U256 {
+    shared_config_value(PRIORITY_TIE_BREAKER_GWEI_CONFIG)
+        .ok()
+        .flatten()
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .and_then(|value| gwei_to_wei(value).ok())
+        .unwrap_or_else(|| {
+            gwei_to_wei(DEFAULT_PRIORITY_TIE_BREAKER_GWEI)
+                .expect("default priority tie-breaker is finite")
+        })
 }
 
 fn wei_to_gwei(value: U256) -> f64 {

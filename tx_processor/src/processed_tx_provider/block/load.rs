@@ -205,7 +205,7 @@ pub(super) async fn process_uncached_block_with_options(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProcessedBlockReplayErrorKind {
-    LiveHistoricalContextLag,
+    HistoricalContextLag,
     HistoricalTraceReplayMismatch,
     Other,
 }
@@ -213,7 +213,7 @@ enum ProcessedBlockReplayErrorKind {
 impl ProcessedBlockReplayErrorKind {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::LiveHistoricalContextLag => "live_historical_context_lag",
+            Self::HistoricalContextLag => "historical_context_lag",
             Self::HistoricalTraceReplayMismatch => "historical_trace_replay_mismatch",
             Self::Other => "other",
         }
@@ -229,8 +229,8 @@ fn latest_reth_block_number(tx_processor: &BlockProcessor) -> Option<u64> {
 fn classify_processed_block_replay_error(error: &eyre::Report) -> ProcessedBlockReplayErrorKind {
     let error_chain = error_chain(error);
 
-    if is_live_historical_context_lag(&error_chain) {
-        return ProcessedBlockReplayErrorKind::LiveHistoricalContextLag;
+    if is_historical_context_lag(&error_chain) {
+        return ProcessedBlockReplayErrorKind::HistoricalContextLag;
     }
 
     if is_historical_trace_replay_mismatch(&error_chain) {
@@ -273,13 +273,11 @@ fn error_chain(error: &eyre::Report) -> String {
         .join(": ")
 }
 
-fn is_live_historical_context_lag(error_chain: &str) -> bool {
+fn is_historical_context_lag(error_chain: &str) -> bool {
     [
-        "cannot restore live state snapshot",
         "not yet available as local historical context",
-        "missing live block header",
-        "Redis live state snapshot is missing",
-        "unavailable from both Reth historical state and Redis live state",
+        "unavailable from local Reth historical state",
+        "missing local Reth block header",
         "failed to fetch historical state",
         "Reth historical state",
     ]
@@ -344,30 +342,24 @@ mod tests {
     }
 
     #[test]
-    fn classifies_live_snapshot_context_lag_as_transient() {
-        let error = report(
-            "cannot restore live state snapshot for block 25067028: \
-             state for block 25067027 is unavailable from both Reth historical state \
-             and Redis live state",
-        )
-        .wrap_err("failed to process uncached block 25067028");
+    fn classifies_local_historical_context_lag_as_transient() {
+        let error =
+            report("state for block 25067028 is unavailable from local Reth historical state")
+                .wrap_err("failed to process uncached block 25067028");
 
         assert_eq!(
             classify_processed_block_replay_error(&error),
-            ProcessedBlockReplayErrorKind::LiveHistoricalContextLag
+            ProcessedBlockReplayErrorKind::HistoricalContextLag
         );
     }
 
     #[test]
-    fn classifies_missing_live_header_as_transient() {
-        let error = report(
-            "missing live block header for 25067028 \
-             (latest live Some(25067030), available [25067030, 25067029])",
-        );
+    fn classifies_missing_local_header_as_transient() {
+        let error = report("missing local Reth block header for 25067028");
 
         assert_eq!(
             classify_processed_block_replay_error(&error),
-            ProcessedBlockReplayErrorKind::LiveHistoricalContextLag
+            ProcessedBlockReplayErrorKind::HistoricalContextLag
         );
     }
 }

@@ -107,6 +107,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Did configured critical risks receive the strategy response they require?",
             "Compares in-position critical risk events against the strategy config and fails if an enabled exit risk has no sell submission or explicit same-block deferral.",
         ),
+        "lp_approval_deferral_has_age_evidence" => (
+            "Do LP-approval deferrals carry explicit active-block evidence?",
+            "Requires deferred LP-approval decisions to store signal id, age basis, and the active-block age used to defer instead of sell.",
+        ),
         "liquidity_removal_risk_kind_matches_source" => (
             "Does liquidity-removal risk kind match its evidence source?",
             "Requires pending mempool liquidity-removal rows to use `mempool_liquidity_removal` and mined-chain rows to use `liquidity_removal`.",

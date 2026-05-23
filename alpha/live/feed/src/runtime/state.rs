@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
 use eth_token::live::LiveBlockTokenProcessor;
+use eth_token::token_analytics::TokenPoolCurrentObservation;
 use eth_token::tracking::LiveTokenRetentionReport;
 
 use super::progress::{LiveTokenError, LiveTokenProgress};
@@ -22,6 +23,8 @@ pub struct LiveTokenState {
     pub updated_v3_pools: BTreeSet<String>,
     pub discovered_v4_pools: BTreeSet<String>,
     pub updated_v4_pools: BTreeSet<String>,
+    pub observations: Vec<TokenPoolCurrentObservation>,
+    pub active_observation_counts_by_pool: BTreeMap<String, u64>,
     pub last_retention_report: Option<LiveTokenRetentionReport>,
 }
 
@@ -41,6 +44,8 @@ impl LiveTokenState {
             updated_v3_pools: BTreeSet::new(),
             discovered_v4_pools: BTreeSet::new(),
             updated_v4_pools: BTreeSet::new(),
+            observations: Vec::new(),
+            active_observation_counts_by_pool: BTreeMap::new(),
             last_retention_report: None,
         }
     }
@@ -61,6 +66,8 @@ impl LiveTokenState {
             updated_v3_pools: BTreeSet::new(),
             discovered_v4_pools: BTreeSet::new(),
             updated_v4_pools: BTreeSet::new(),
+            observations: Vec::new(),
+            active_observation_counts_by_pool: BTreeMap::new(),
             last_retention_report: None,
         }
     }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use eth_token::contract_analysis::{
     analyze_erc20_token, BehaviorFlagKind, ContractAnalysisReport, ContractEvidence,
@@ -6,6 +6,9 @@ use eth_token::contract_analysis::{
 };
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::pnl::{AddressPoolPnlSummary, PoolPnlConservationSummary};
+use eth_token::token_analytics::{
+    build_historical_observations_for_token, TokenPoolCurrentObservation,
+};
 use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
@@ -66,6 +69,7 @@ pub struct TokenDetailResponse {
     pub summary: TokenSummary,
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
+    pub observations: Vec<TokenPoolCurrentObservation>,
     pub network: TokenNetworkView,
     pub pnl: TokenPnlView,
     pub contract_analysis: ContractAnalysisReport,
@@ -90,6 +94,8 @@ pub struct TokenPoolPnlView {
     pub denom_address: String,
     pub denom_symbol: Option<String>,
     pub currency: String,
+    pub token_decimals: u8,
+    pub denom_decimals: u8,
     pub price: Option<f64>,
     pub tx_count: u64,
     pub position_count: usize,
@@ -112,6 +118,11 @@ pub struct TokenPoolPnlAddressView {
     pub denom_cashflow: f64,
     pub native_fee: f64,
     pub native_bribe: f64,
+    pub token_in: f64,
+    pub token_out: f64,
+    pub denom_in: f64,
+    pub denom_out: f64,
+    pub realized_pnl_denom: Option<f64>,
     pub marked_token_value_denom: Option<f64>,
     pub pnl_proxy_denom: Option<f64>,
     pub token_in_raw: String,
@@ -312,7 +323,13 @@ impl TokenPnlView {
                 let top_positions = pool
                     .top_positions_by_denom_volume(TOKEN_PNL_TOP_POSITION_LIMIT, false, mark_price)
                     .into_iter()
-                    .map(TokenPoolPnlAddressView::from_summary)
+                    .map(|summary| {
+                        TokenPoolPnlAddressView::from_summary(
+                            summary,
+                            pool.token_decimals,
+                            pool.denom_decimals,
+                        )
+                    })
                     .collect::<Vec<_>>();
 
                 TokenPoolPnlView {
@@ -321,6 +338,8 @@ impl TokenPnlView {
                     denom_address: pool.denom_address.clone(),
                     denom_symbol,
                     currency,
+                    token_decimals: pool.token_decimals,
+                    denom_decimals: pool.denom_decimals,
                     price: mark_price,
                     tx_count: pool.tx_count,
                     position_count: pool.positions.len(),
@@ -372,9 +391,20 @@ impl TokenPnlView {
 }
 
 impl TokenPoolPnlAddressView {
-    fn from_summary(summary: AddressPoolPnlSummary) -> Self {
+    fn from_summary(
+        summary: AddressPoolPnlSummary,
+        token_decimals: u8,
+        denom_decimals: u8,
+    ) -> Self {
+        let realized_pnl_denom = summary
+            .pnl_proxy_denom
+            .map(|pnl| pnl - summary.marked_token_value_denom.unwrap_or(0.0));
         Self {
             address: summary.address,
+            token_in: scale_raw_decimal(&summary.token_in_raw, token_decimals),
+            token_out: scale_raw_decimal(&summary.token_out_raw, token_decimals),
+            denom_in: scale_raw_decimal(&summary.denom_in_raw, denom_decimals),
+            denom_out: scale_raw_decimal(&summary.denom_out_raw, denom_decimals),
             token_balance_raw: summary.token_balance_raw,
             denom_cashflow_raw: summary.denom_cashflow_raw,
             native_fee_raw: summary.native_fee_raw,
@@ -383,6 +413,7 @@ impl TokenPoolPnlAddressView {
             denom_cashflow: summary.denom_cashflow,
             native_fee: summary.native_fee,
             native_bribe: summary.native_bribe,
+            realized_pnl_denom,
             marked_token_value_denom: summary.marked_token_value_denom,
             pnl_proxy_denom: summary.pnl_proxy_denom,
             token_in_raw: summary.token_in_raw,
@@ -394,6 +425,10 @@ impl TokenPoolPnlAddressView {
             movement_count: summary.movement_count,
         }
     }
+}
+
+fn scale_raw_decimal(raw: &str, decimals: u8) -> f64 {
+    raw.parse::<f64>().unwrap_or(0.0) / 10_f64.powi(i32::from(decimals))
 }
 
 pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<TokenDetailResponse> {
@@ -408,6 +443,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let contract_analysis = contract_analysis_with_pool_views(token, &pools);
     let denom_symbols = build_denom_symbols(token);
     let pnl = TokenPnlView::from_token(token);
+    let observations = token_observations_with_backfill(&state.observations, &address, token);
 
     Some(TokenDetailResponse {
         run_id: run.id.clone(),
@@ -415,11 +451,59 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
         summary,
         index_status,
         pools,
+        observations,
         network,
         pnl,
         contract_analysis,
         denom_symbols,
     })
+}
+
+pub fn token_observations(
+    observations: &[TokenPoolCurrentObservation],
+    token_address: &str,
+) -> Vec<TokenPoolCurrentObservation> {
+    observations
+        .iter()
+        .filter(|observation| {
+            observation
+                .key
+                .token_address
+                .eq_ignore_ascii_case(token_address)
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn token_observations_with_backfill(
+    observations: &[TokenPoolCurrentObservation],
+    token_address: &str,
+    token: &ERC20Token,
+) -> Vec<TokenPoolCurrentObservation> {
+    let mut rows = token_observations(observations, token_address);
+    let covered_pools: HashSet<String> = rows
+        .iter()
+        .map(|observation| observation.key.pool_address.to_ascii_lowercase())
+        .collect();
+    rows.extend(
+        build_historical_observations_for_token(token)
+            .into_iter()
+            .filter(|observation| {
+                !covered_pools.contains(&observation.key.pool_address.to_ascii_lowercase())
+            }),
+    );
+    rows.sort_by(|left, right| {
+        left.key
+            .pool_address
+            .cmp(&right.key.pool_address)
+            .then(left.context.block_number.cmp(&right.context.block_number))
+            .then(
+                left.context
+                    .active_observation_index
+                    .cmp(&right.context.active_observation_index),
+            )
+    });
+    rows
 }
 
 fn index_status(state: &RangeIndexState, token_address: &str) -> Option<TrackedTokenStatus> {

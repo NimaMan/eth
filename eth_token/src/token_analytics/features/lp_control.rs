@@ -17,17 +17,37 @@ pub struct LpControlFeatures {
     pub lp_top_holder_is_creator: Option<bool>,
     pub lp_top_holder_is_owner: Option<bool>,
     pub lp_approval_count_as_of: Option<u32>,
+    pub lp_approval_seen_as_of: Option<bool>,
     pub lp_first_approval_block_as_of: Option<u64>,
     pub lp_holders_with_approvals_count: Option<u32>,
     pub lp_approved_spender_count_as_of: Option<u32>,
     pub lp_approved_pct_as_of: Option<f64>,
+    pub lp_max_approval_pct_as_of: Option<f64>,
     pub lp_approved_to_router: Option<f64>,
     pub lp_approved_to_router_pct: Option<f64>,
     pub lp_router_approved_pct_as_of: Option<f64>,
+    pub lp_removable_amount_as_of: Option<f64>,
+    pub lp_removable_pct_as_of: Option<f64>,
+    pub lp_router_removable_amount_as_of: Option<f64>,
+    pub lp_router_removable_pct_as_of: Option<f64>,
     pub lp_router_approval_seen_as_of: Option<bool>,
     pub lp_max_approval_amount_as_of: Option<f64>,
+    pub creator_lp_balance_as_of: Option<f64>,
+    pub creator_lp_balance_pct_as_of: Option<f64>,
+    pub creator_lp_approved_amount_as_of: Option<f64>,
+    pub creator_lp_approved_pct_as_of: Option<f64>,
+    pub creator_lp_router_approved_amount_as_of: Option<f64>,
+    pub creator_lp_router_approved_pct_as_of: Option<f64>,
+    pub creator_lp_removable_amount_as_of: Option<f64>,
+    pub creator_lp_removable_pct_as_of: Option<f64>,
+    pub creator_lp_router_removable_amount_as_of: Option<f64>,
+    pub creator_lp_router_removable_pct_as_of: Option<f64>,
+    pub creator_lp_approved_gt_90_pct_as_of: Option<bool>,
+    pub creator_lp_router_removable_gt_90_pct_as_of: Option<bool>,
     pub last_lp_approval_block: Option<u64>,
     pub last_lp_approval_timestamp: Option<u64>,
+    pub last_lp_approval_amount: Option<f64>,
+    pub last_lp_approval_amount_pct_of_total_supply: Option<f64>,
     pub last_lp_approval_owner: Option<String>,
     pub last_lp_approval_spender: Option<String>,
     pub last_lp_approval_is_router: Option<bool>,
@@ -46,6 +66,12 @@ pub struct LpControlFeatures {
     pub blocks_from_last_lp_approval_to_as_of: Option<u64>,
     pub blocks_from_pool_creation_to_last_lp_approval: Option<i64>,
     pub blocks_from_trading_enabled_to_last_lp_approval: Option<i64>,
+    pub first_lp_approval_to_as_of_chain_block_delta: Option<u64>,
+    pub last_lp_approval_to_as_of_chain_block_delta: Option<u64>,
+    pub pool_creation_to_first_lp_approval_chain_block_delta: Option<i64>,
+    pub pool_creation_to_last_lp_approval_chain_block_delta: Option<i64>,
+    pub trading_enabled_to_first_lp_approval_chain_block_delta: Option<i64>,
+    pub trading_enabled_to_last_lp_approval_chain_block_delta: Option<i64>,
     pub feature_scope: Option<String>,
 }
 
@@ -57,6 +83,10 @@ impl LpControlFeatures {
         self.blocks_from_last_lp_approval_to_as_of = self
             .last_lp_approval_block
             .map(|block| as_of_block.saturating_sub(block));
+        self.first_lp_approval_to_as_of_chain_block_delta =
+            self.blocks_from_first_lp_approval_to_as_of;
+        self.last_lp_approval_to_as_of_chain_block_delta =
+            self.blocks_from_last_lp_approval_to_as_of;
         self
     }
 
@@ -69,6 +99,14 @@ impl LpControlFeatures {
             signed_block_delta(pool_creation_block, self.last_lp_approval_block);
         self.blocks_from_trading_enabled_to_last_lp_approval =
             signed_block_delta(trading_enabled_block, self.last_lp_approval_block);
+        self.pool_creation_to_first_lp_approval_chain_block_delta =
+            signed_block_delta(pool_creation_block, self.lp_first_approval_block_as_of);
+        self.pool_creation_to_last_lp_approval_chain_block_delta =
+            self.blocks_from_pool_creation_to_last_lp_approval;
+        self.trading_enabled_to_first_lp_approval_chain_block_delta =
+            signed_block_delta(trading_enabled_block, self.lp_first_approval_block_as_of);
+        self.trading_enabled_to_last_lp_approval_chain_block_delta =
+            self.blocks_from_trading_enabled_to_last_lp_approval;
         self
     }
 }

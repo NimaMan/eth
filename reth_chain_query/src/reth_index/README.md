@@ -100,6 +100,11 @@ For our analytics database, we'll frequently need to query:
 
 ## Conceptual Framework: How Tables Relate
 
+This section explains the broader indexing design. The current active
+implementation is smaller: `RethIndexDB` opens `address_to_blocks` and
+`mempool_tx_arrival_times`. References below to `trades`, `address_metrics`,
+`tokens`, or `pools` are design examples, not currently active RethIndex DBIs.
+
 ### Reth's Data Organization Layers
 
 Reth organizes blockchain data in distinct layers, each optimized for node operation but not analytics:
@@ -303,177 +308,68 @@ Single MDBX environment with multiple named databases (tables), each serving a s
 
 ## Tables and Their Purposes
 
+`RethIndexDB` currently opens two named MDBX databases. Other model/table files
+exist in `src/reth_index/tables/` as older or planned contracts, but they are
+not active until `RethIndexDB` creates a DBI for them and a writer/reader path
+uses them.
+
 ### 1. Address Block Index (`address_to_blocks`)
 
-**Purpose**: Enable fast lookup of all processed blocks involving a specific address
+**Purpose**: enable fast lookup of candidate processed blocks involving a
+specific address.
 
 **Schema**:
 - **Key**: `Address` (20 bytes)
-- **Value**: duplicate `block_number` values (u64, big-endian, sorted by MDBX dupsort)
+- **Value**: duplicate `block_number` values (u64, big-endian, sorted by MDBX
+  dupsort)
+- **Flags**: `DUP_SORT | DUP_FIXED`
 
-**Queries Enabled**:
-- "Get all candidate processed blocks for address X" → O(1) lookup
-- "Get indexed block count for address X" → O(1) lookup
-- "Get candidate blocks in range for address X" → O(1) lookup + filter
+**Write path**:
+- `tx_processor::ProcessedBlockReplayStoreWriter` receives a full
+  `ProcessedBlock`.
+- `AddressBlockParticipationWriter` unions all transaction-level address
+  participations for that block.
+- It writes one `(address, block_number)` duplicate value per address.
 
-**Size Estimate**: ~70GB
-- 87M addresses × average candidate blocks × 8 bytes per block number
+**Read contract**:
+- The table returns candidate blocks only.
+- Callers must load/replay those blocks and filter exact transactions in block
+  order.
+- Replays are idempotent; duplicate `(address, block_number)` writes are skipped.
 
-**Update Pattern**: Append-only (new block numbers always added to end)
+### 2. Mempool Transaction Arrival Times (`mempool_tx_arrival_times`)
 
-### 2. Trades Table (`trades`)
-
-**Purpose**: Track aggregated trading activity per address-token pair
-
-**Schema**:
-- **Key**: `(Address, TokenAddress, Currency)` (20 + 20 + 1 = 41 bytes)
-- **Value**: `TradeData` struct
-  ```rust
-  struct TradeData {
-      entry_block: u64,        // First trade block
-      latest_block: u64,       // Most recent trade block
-      total_spent: U256,       // Total currency spent
-      total_received: U256,    // Total tokens received
-      realized_profit: i128,   // Realized PnL
-      unrealized_profit: i128, // Unrealized PnL
-      num_buys: u32,          // Buy transaction count
-      num_sells: u32,         // Sell transaction count
-      token_balance: U256,    // Current token balance
-      gas_spent: U256,        // Total gas spent
-  }
-  ```
-
-**Queries Enabled**:
-- "Get trading history for address X in token Y"
-- "Get PnL for address X across all tokens"
-- "Get top traders for token Y"
-
-**Size Estimate**: ~15GB
-
-**Update Pattern**: Read-modify-write (aggregate on each trade)
-
-### 3. Address Metrics Table (`address_metrics`)
-
-**Purpose**: Store pre-computed metrics for fast address analysis
+**Purpose**: store first-seen local mempool arrival time for mined transactions.
 
 **Schema**:
-- **Key**: `Address` (20 bytes)
-- **Value**: `AddressMetrics` struct
-  ```rust
-  struct AddressMetrics {
-      first_seen_block: u64,
-      last_seen_block: u64,
-      total_transactions: u64,
-      total_volume_usd: f64,
-      total_gas_spent: U256,
-      total_profit: f64,
-      scam_interactions: u32,
-      is_contract: bool,
-      entity_type: Option<String>,  // "DEX", "CEX", "MEV", etc.
-  }
-  ```
+- **Key**: `tx_number` / Reth txumber (u64, big-endian)
+- **Value**: `first_seen_ms` epoch milliseconds (u64, big-endian)
+- **Flags**: `INTEGER_KEY`
 
-**Queries Enabled**:
-- "Get address overview"
-- "Find addresses by activity level"
-- "Identify high-value addresses"
+**Write path**:
+- `mempool_processor` keeps an in-memory `tx_hash -> first_seen_ms` map.
+- After inclusion, `MempoolArrivalWriter` resolves `tx_hash -> tx_number` using
+  Reth `TransactionHashNumbers`.
+- Resolved rows are batch-written to this MDBX table.
 
-**Size Estimate**: ~10GB
+**Read contract**:
+- To query by hash, resolve the tx hash through Reth first, then look up the
+  txumber in `mempool_tx_arrival_times`.
+- Pre-inclusion hashes are not durably stored; a process restart before mining
+  can lose in-flight arrival observations by design.
 
-**Update Pattern**: Read-modify-write (update on each transaction)
+### Planned / Dormant Table Model Files
 
-### 4. Tokens Table (`tokens`)
+These table model modules still exist but are not currently opened by
+`RethIndexDB`:
 
-**Purpose**: Cache token metadata to avoid repeated RPC calls
+- `tokens`
+- `pools`
+- `trades`
+- `address_metrics`
 
-**Schema**:
-- **Key**: `TokenAddress` (20 bytes)
-- **Value**: `TokenMetadata` struct
-  ```rust
-  struct TokenMetadata {
-      name: String,
-      symbol: String,
-      decimals: u8,
-      total_supply: U256,
-      creator_address: Address,
-      creation_block: u64,
-      creation_tx: TxHash,
-      is_scam: bool,
-      scam_reason: Option<String>,
-  }
-  ```
-
-**Queries Enabled**:
-- "Get token information"
-- "Find tokens by creator"
-- "List all scam tokens"
-
-**Size Estimate**: ~1GB
-
-**Update Pattern**: Write-once (immutable after creation)
-
-### 5. Pools Table (`pools`)
-
-**Purpose**: Track DEX liquidity pools for trading analysis
-
-**Schema**:
-- **Key**: `PoolAddress` (20 bytes)
-- **Value**: `PoolData` struct
-  ```rust
-  struct PoolData {
-      token0: Address,
-      token1: Address,
-      pool_type: PoolType,      // V2, V3, V4
-      fee_tier: u32,            // 100, 500, 3000, 10000
-      creation_block: u64,
-      creation_tx: TxHash,
-      is_active: bool,
-      total_volume: U256,
-      last_activity_block: u64,
-  }
-  ```
-
-**Queries Enabled**:
-- "Get pool configuration"
-- "Find pools for token X"
-- "Get active pools by volume"
-
-**Size Estimate**: ~1GB
-
-**Update Pattern**: Write-once + activity updates
-
-### 6. Mempool Arrivals Table (`mempool_arrivals`)
-
-**Purpose**: Track when transactions first appear in mempool for timing analytics
-
-**Schema**:
-- **Key**: `TxHash` (32 bytes)
-- **Value**: `u64` (Unix timestamp when first observed)
-
-**Queries Enabled**:
-- "How long did transaction X wait in mempool?"
-- "Average mempool wait time for address X"
-- "MEV bot detection via timing patterns"
-
-**Size Estimate**: ~320KB (assuming ~10K pending txs on average)
-- 10,000 txs × (32 bytes key + 8 bytes timestamp) = 400KB
-
-**Update Pattern**: 
-- Write on first mempool observation
-- Delete after transaction inclusion (or after timeout)
-
-**Integration with mempool_processor**:
-```rust
-// When mempool_processor sees a new transaction
-mempool_processor.on_new_tx(tx_hash) -> mempool_arrivals[tx_hash] = timestamp
-
-// When block arrives with the transaction
-reth_index.on_tx_included(tx_hash, block_timestamp) -> {
-    wait_time = block_timestamp - mempool_arrivals[tx_hash]
-    update address_metrics with wait_time
-    delete mempool_arrivals[tx_hash]
-}
-```
+Treat them as design scaffolding until there is an active DBI, writer, reader,
+and owner README entry.
 
 ## Key Design Decisions
 
@@ -487,11 +383,12 @@ reth_index.on_tx_included(tx_hash, block_timestamp) -> {
 
 ### Why These Specific Tables?
 
-1. **address_to_blocks**: Candidate-block reverse index that Reth cannot provide for processed transaction participation
-2. **trades**: Aggregated data that would require scanning all transactions otherwise
-3. **address_metrics**: Pre-computed values for instant dashboard queries
-4. **tokens**: Frequently accessed metadata, avoid repeated RPC calls
-5. **pools**: Critical for DEX analysis and trade routing
+1. **address_to_blocks**: Candidate-block reverse index that Reth cannot provide for processed transaction participation.
+2. **mempool_tx_arrival_times**: Compact timing index keyed by Reth txumber, so arrival observations compose with Reth's native transaction numbering.
+
+The older `trades`, `address_metrics`, `tokens`, and `pools` table-model files
+are dormant design scaffolding. Do not describe them as active storage until
+`RethIndexDB` opens those DBIs and a writer keeps them populated.
 
 ### Why No Address IDs?
 
@@ -525,32 +422,36 @@ Considered using sequential IDs (u32/u64) instead of addresses (20 bytes):
    ↓
 2. Block processor extracts ProcessedTransactions
    ↓
-3. AnalyticsWriter opens write transaction
+3. ProcessedBlockReplayStoreWriter writes the replay store
    ↓
 4. For each processed block:
    a. Extract unique_addresses from every transaction
    b. Deduplicate by address for the block
    c. Update address_to_blocks for each address once
-   d. If swap: update trades table
-   e. Update address_metrics
-   f. Add new tokens/pools if discovered
    ↓
-5. Commit transaction atomically
+5. Commit the MDBX write transaction
 ```
+
+The mempool arrival path is separate: `mempool_processor` records first-seen
+hashes in memory, resolves mined hashes to txumbers through Reth, then batch
+writes `mempool_tx_arrival_times`.
 
 ### Read Path
 
 ```
-1. Query request (e.g., "get txs for address X")
+1. Query request (e.g., "get candidate blocks for address X")
    ↓
 2. Open read transaction
    ↓
-3. Direct lookup in appropriate table
+3. Direct lookup in address_to_blocks
    ↓
-4. Return data (may join with reth for details)
+4. Load/replay candidate processed blocks and filter exact transactions
 ```
 
 ## Performance Characteristics
+
+The figures below are sizing targets/design estimates. Re-measure against the
+active table set before using them for capacity planning.
 
 ### Write Performance
 - **Target**: 1000 blocks/second during initial sync
@@ -559,7 +460,6 @@ Considered using sequential IDs (u32/u64) instead of addresses (20 bytes):
 
 ### Read Performance
 - **Address lookup**: <1ms (single key lookup)
-- **Trade query**: <1ms (single key lookup)
 - **Range queries**: Linear in result size
 - **Concurrent reads**: Unlimited (MVCC)
 
@@ -583,41 +483,31 @@ Considered using sequential IDs (u32/u64) instead of addresses (20 bytes):
 
 ### Output Consumers
 
-1. **API Services**: REST/GraphQL endpoints
-2. **Analytics Scripts**: Python/Rust analysis tools
-3. **Real-time Monitors**: Alert systems
-4. **Research Queries**: Ad-hoc analysis
+1. **eth_chain_server activity APIs**: token/address activity-block lookup.
+2. **Token/network analytics**: seed candidate processed blocks before exact filtering.
+3. **Mempool timing examples**: arrival coverage/list/delete/write smoke tools.
+4. **Research queries**: ad-hoc block-candidate lookup and replay workflows.
 
 ## Operations and Maintenance
 
-### Initial Build
+### Initial Build / Incremental Updates
+
+Build or refresh the active address index through the processed-block replay
+store:
 
 ```bash
-# Build from genesis
-cargo run --example build_analytics_db -- \
-  --start-block 0 \
-  --end-block latest \
-  --batch-size 1000
+cargo run -p tx_processor --release --example refresh_processed_block_disk_cache -- \
+  --blocks 100000
 ```
 
-### Incremental Updates
-
-```bash
-# Run continuously, processing new blocks
-cargo run --bin analytics_indexer -- \
-  --follow-head \
-  --reth-db /path/to/reth/db \
-  --analytics-db /path/to/analytics
-```
+This fills missing `.pblock.zst` files and writes `address_to_blocks` unless
+`--skip-address-block-index` is set. Existing cache hits are not rewritten.
 
 ### Verification
 
 ```bash
-# Verify consistency with reth
-cargo run --example verify_analytics_db -- \
-  --sample-size 1000 \
-  --check-addresses \
-  --check-trades
+cargo run -p reth_chain_query --example tx_arrival_index_smoke
+cargo run -p reth_chain_query --example list_tx_arrivals -- <reth_index_dir>
 ```
 
 ### Backup Strategy
@@ -649,7 +539,7 @@ Key metrics to track:
 1. **Bloom filters**: For existence checks before lookups
 2. **Compression**: Custom compression for transaction lists
 3. **Sharding**: Split by address range for parallel processing
-4. **Caching layer**: Redis/memory cache for hot addresses
+4. **Caching layer**: in-memory cache for hot addresses
 
 ## Migration from PostgreSQL
 

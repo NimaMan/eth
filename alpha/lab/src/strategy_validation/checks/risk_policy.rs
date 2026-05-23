@@ -137,7 +137,8 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                    COALESCE((spec->>'exit_lp_approval')::boolean, false) AS exit_lp_approval,
                    COALESCE((spec->>'exit_tax')::boolean, false) AS exit_tax,
                    COALESCE((spec->>'exit_scam')::boolean, false) AS exit_scam,
-                   COALESCE((spec->>'defer_buy_confirm_block_lp_approval_to_max_hold')::boolean, false) AS defer_buy_confirm_block_lp_approval_to_max_hold
+                   COALESCE((spec->>'defer_buy_confirm_block_lp_approval_to_max_hold')::boolean, false) AS defer_buy_confirm_block_lp_approval_to_max_hold,
+                   NULLIF(spec->>'lp_approval_exit_defer_max_trading_enabled_age_blocks', '')::bigint AS lp_approval_exit_defer_max_trading_enabled_age_blocks
             FROM alpha_trading.backtest_result_sets rs
             CROSS JOIN LATERAL jsonb_array_elements(
                 CASE
@@ -153,7 +154,8 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                    COALESCE((rs.config->>'exit_lp_approval')::boolean, false) AS exit_lp_approval,
                    COALESCE((rs.config->>'exit_tax')::boolean, false) AS exit_tax,
                    COALESCE((rs.config->>'exit_scam')::boolean, false) AS exit_scam,
-                   COALESCE((rs.config->>'defer_buy_confirm_block_lp_approval_to_max_hold')::boolean, false) AS defer_buy_confirm_block_lp_approval_to_max_hold
+                   COALESCE((rs.config->>'defer_buy_confirm_block_lp_approval_to_max_hold')::boolean, false) AS defer_buy_confirm_block_lp_approval_to_max_hold,
+                   NULLIF(rs.config->>'lp_approval_exit_defer_max_trading_enabled_age_blocks', '')::bigint AS lp_approval_exit_defer_max_trading_enabled_age_blocks
             FROM alpha_trading.backtest_result_sets rs
             WHERE rs.result_set_id = $1
               AND rs.config ? 'strategy_name'
@@ -170,7 +172,8 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                    cfg.exit_lp_approval,
                    cfg.exit_tax,
                    cfg.exit_scam,
-                   cfg.defer_buy_confirm_block_lp_approval_to_max_hold
+                   cfg.defer_buy_confirm_block_lp_approval_to_max_hold,
+                   cfg.lp_approval_exit_defer_max_trading_enabled_age_blocks
             FROM alpha_trading.trades t
             JOIN strategy_cfg cfg ON cfg.strategy_name = t.strategy_name
             WHERE t.result_set_id = $1
@@ -221,6 +224,78 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                     AND sd.block_number = risk.observed_block
                     AND sd.reason = 'exit.lp_approval_buy_confirm_block_deferred_to_max_hold'
               )
+          )
+          AND NOT (
+              risk.kind = 'lp_approval'
+              AND risk.lp_approval_exit_defer_max_trading_enabled_age_blocks IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.strategy_decisions sd
+                  WHERE sd.run_id = risk.run_id
+                    AND sd.strategy_name = risk.strategy_name
+                    AND lower(sd.token_address) = lower(risk.token_address)
+                    AND lower(sd.pool_address) = lower(risk.pool_address)
+                    AND sd.block_number = risk.observed_block
+                    AND (
+                        sd.reason_code = 'exit.lp_approval.early_approval_deferred_to_max_hold'
+                        OR sd.reason = 'exit.lp_approval:early_approval_deferred_to_max_hold'
+                        OR sd.reason LIKE 'exit.lp_approval:early_approval_deferred_to_max_hold:%'
+                    )
+                    AND COALESCE(
+                        NULLIF(sd.reason_details->>'trading_enabled_age_blocks', '')::numeric,
+                        NULLIF(sd.reason_details->>'pool_age_blocks', '')::numeric,
+                        NULLIF(sd.reason_details->>'age_blocks', '')::numeric,
+                        NULLIF(sd.reason_details#>>'{risk_event_evidence,trading_enabled_age_blocks_at_signal}', '')::numeric,
+                        NULLIF(sd.reason_details#>>'{risk_event_evidence,pool_age_blocks_at_signal}', '')::numeric
+                    ) <= risk.lp_approval_exit_defer_max_trading_enabled_age_blocks
+              )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn lp_approval_deferrals_have_age_evidence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "risk_policy",
+        "lp_approval_deferral_has_age_evidence",
+        Verdict::Fail,
+        "LP-approval deferrals persist their age basis and active-block age",
+        "LP-approval deferral decisions missing structured age evidence",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_decisions sd
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = sd.run_id
+        WHERE rsr.result_set_id = $1
+          AND ($2::text IS NULL OR sd.strategy_name = $2)
+          AND (
+              sd.reason_code = 'exit.lp_approval.early_approval_deferred_to_max_hold'
+              OR sd.reason = 'exit.lp_approval:early_approval_deferred_to_max_hold'
+              OR sd.reason LIKE 'exit.lp_approval:early_approval_deferred_to_max_hold:%'
+          )
+          AND (
+              COALESCE(
+                  sd.reason_details->>'age_basis',
+                  sd.reason_details#>>'{risk_event_evidence,lp_approval_age_basis}'
+              ) IS NULL
+              OR COALESCE(
+                  sd.reason_details->>'trading_enabled_age_blocks',
+                  sd.reason_details->>'pool_age_blocks',
+                  sd.reason_details->>'age_blocks',
+                  sd.reason_details#>>'{risk_event_evidence,trading_enabled_age_blocks_at_signal}',
+                  sd.reason_details#>>'{risk_event_evidence,pool_age_blocks_at_signal}'
+              ) IS NULL
+              OR COALESCE(
+                  sd.reason_details->>'signal_id',
+                  sd.reason_details#>>'{risk_event_evidence,signal_id}'
+              ) IS NULL
           )
         "#,
         result_set_id,

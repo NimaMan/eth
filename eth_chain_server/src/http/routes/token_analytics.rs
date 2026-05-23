@@ -3,8 +3,8 @@ use std::convert::Infallible;
 use serde_json::json;
 use warp::http::StatusCode;
 
-use crate::http::ServerState;
 use crate::http::reply::{error_response, json_response};
+use crate::http::ServerState;
 use crate::read_models as views;
 use crate::token_analytics::network::{
     StartTokenNetworkAnalysisError, TokenNetworkAnalysisRequest,

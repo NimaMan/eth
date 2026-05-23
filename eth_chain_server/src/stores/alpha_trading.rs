@@ -3,11 +3,11 @@ pub use eth_alpha_store::strategy_run_results::{
     ResultSetDetailQuery, ResultSetListQuery, ResultSetPerformanceQuery,
 };
 
-use eth_alpha_lab::backtest_validation::{
-    self, db::StrategySummary, BacktestValidationReport, ValidationOptions,
-};
 use eth_alpha_lab::strategy_assessment::{
     self, StrategyAssessmentOptions, StrategyAssessmentReport,
+};
+use eth_alpha_lab::strategy_validation::{
+    self, db::StrategySummary, StrategyValidationReport, ValidationOptions,
 };
 use eth_alpha_store::performance::{load_strategy_performance, StrategyPerformanceReport};
 use eth_alpha_store::strategy_run_results::{
@@ -607,7 +607,7 @@ impl AlphaTradingStore {
         &self,
         result_set_id: &str,
     ) -> Result<Vec<StrategySummary>> {
-        backtest_validation::db::load_strategy_summaries(&self.pool, result_set_id, None)
+        strategy_validation::db::load_strategy_summaries(&self.pool, result_set_id, None)
             .await
             .map_err(|error| eyre!(error.to_string()))
     }
@@ -616,8 +616,8 @@ impl AlphaTradingStore {
         &self,
         result_set_id: &str,
         strategy_name: Option<String>,
-    ) -> Result<BacktestValidationReport> {
-        backtest_validation::validate_backtest(
+    ) -> Result<StrategyValidationReport> {
+        strategy_validation::validate_strategy(
             &self.pool,
             ValidationOptions {
                 result_set_id: result_set_id.to_string(),

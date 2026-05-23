@@ -1,5 +1,9 @@
 # WETH Buy Size Sensitivity
 
+Status: explained policy case. The current fixed-size baseline correctly keeps
+these as failed entries; adaptive sizing or pre-entry size guards are separate
+strategy work.
+
 ## Scope
 
 Historical run: `hist-snipe-all-poolonly-15k-recipient-net-20260513-145954`

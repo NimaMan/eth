@@ -5,7 +5,10 @@
 //! to an `Address` without duplicating per-category maps.
 
 use crate::common_addresses::{
-    cex::CEX_ADDRESSES, denom_tokens::SYMBOL_TO_ADDRESS, etf::ETF_ADDRESSES,
+    burn_addresses::{DEAD_ADDRESS, ZERO_ADDRESS},
+    cex::CEX_ADDRESSES,
+    denom_tokens::SYMBOL_TO_ADDRESS,
+    etf::ETF_ADDRESSES,
     wallets::WALLET_ADDRESSES,
 };
 use alloy_primitives::{address, Address};
@@ -14,14 +17,8 @@ use std::collections::HashMap;
 
 /// Static list of well-known routers/contracts that are not part of another dataset.
 const BASE_ADDRESSES: &[(&str, Address)] = &[
-    (
-        "zero_address",
-        address!("0000000000000000000000000000000000000000"),
-    ),
-    (
-        "dead_address",
-        address!("000000000000000000000000000000000000dEaD"),
-    ),
+    ("zero_address", ZERO_ADDRESS),
+    ("dead_address", DEAD_ADDRESS),
     ("WETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")),
     ("ETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")),
     ("WBTC", address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599")),

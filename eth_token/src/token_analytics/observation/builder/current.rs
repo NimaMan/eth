@@ -146,19 +146,19 @@ fn token_state_activity_reason(
 }
 
 fn block_has_control_address_activity(token: &ERC20Token, block_number: u64) -> bool {
+    let control_addresses = token
+        .token_control_addresses
+        .iter()
+        .map(|address| normalize_address(address))
+        .collect::<Vec<_>>();
     token
         .activity
-        .transactions_by_hash
-        .values()
-        .filter(|transaction| transaction.block_number == block_number)
+        .transactions_in_block(block_number)
+        .into_iter()
         .filter_map(|transaction| transaction.maker.as_deref())
         .any(|maker| {
             let maker = normalize_address(maker);
-            token
-                .token_control_addresses
-                .iter()
-                .map(|address| normalize_address(address))
-                .any(|control| control == maker)
+            control_addresses.iter().any(|control| control == &maker)
         })
 }
 
@@ -338,9 +338,8 @@ pub fn build_current_observation(
 
     let transactions = token
         .activity
-        .transactions_by_hash
-        .values()
-        .filter(|transaction| transaction.block_number == block_number)
+        .transactions_in_block(block_number)
+        .into_iter()
         .map(|transaction| {
             let mut summary = ObservationTransactionSummary::from(transaction);
             if transaction

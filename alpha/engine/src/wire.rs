@@ -15,7 +15,7 @@ use eth_alpha_core::{
 use eyre::{eyre, Result};
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LiveStatusResponse {
@@ -74,6 +74,8 @@ pub struct PoolWire {
     pub initial_price: Option<f64>,
     pub price_ratio_to_initial: Option<f64>,
     pub creation_block: Option<u64>,
+    #[serde(default)]
+    pub can_buy_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub runtime_state: Option<PoolRuntimeStateWire>,
     pub can_buy: bool,
@@ -115,6 +117,12 @@ pub struct MempoolSignalWire {
     pub detection_tx_hash: Option<String>,
     pub token_address: Option<String>,
     pub pool_address: Option<String>,
+    #[serde(default)]
+    pub pool_type: Option<String>,
+    #[serde(default)]
+    pub creator_address: Option<String>,
+    #[serde(default)]
+    pub subject_address: Option<String>,
     pub headline: Option<String>,
     #[serde(default)]
     pub value_1: Option<String>,
@@ -295,7 +303,48 @@ impl MempoolSignalWire {
             pending_tx_hash,
             observed_block: None,
             message: self.message(),
+            evidence: Some(self.risk_evidence()),
         }))
+    }
+
+    pub fn risk_evidence(&self) -> Value {
+        let mut evidence = Map::new();
+        evidence.insert("signal_id".to_string(), json!(self.signal_id));
+        evidence.insert("signal_type".to_string(), json!(self.signal_type));
+        if let Some(value) = self.signal_source.as_ref() {
+            evidence.insert("signal_source".to_string(), json!(value));
+        }
+        if let Some(value) = self.signal_created_at.as_ref() {
+            evidence.insert("signal_created_at".to_string(), json!(value));
+        }
+        if let Some(value) = self.mempool_first_seen_at.as_ref() {
+            evidence.insert("mempool_first_seen_at".to_string(), json!(value));
+        }
+        if let Some(value) = self.mempool_first_seen_ms {
+            evidence.insert("mempool_first_seen_ms".to_string(), json!(value));
+        }
+        if let Some(value) = self.detection_timestamp.as_ref() {
+            evidence.insert("detection_timestamp".to_string(), json!(value));
+        }
+        if let Some(value) = self.detection_tx_hash.as_ref() {
+            evidence.insert("detection_tx_hash".to_string(), json!(value));
+        }
+        if let Some(value) = self.pool_type.as_ref() {
+            evidence.insert("pool_type".to_string(), json!(value));
+        }
+        if let Some(value) = self.creator_address.as_ref() {
+            evidence.insert("creator_address".to_string(), json!(value));
+        }
+        if let Some(value) = self.subject_address.as_ref() {
+            evidence.insert("subject_address".to_string(), json!(value));
+        }
+        if let Some(value) = self.lp_approval_pct_value() {
+            evidence.insert("approved_share_pct".to_string(), value);
+        }
+        if !self.payload.is_null() {
+            evidence.insert("signal_payload".to_string(), self.payload.clone());
+        }
+        Value::Object(evidence)
     }
 
     pub fn message(&self) -> String {
@@ -323,31 +372,31 @@ impl MempoolSignalWire {
     }
 
     fn lp_approval_pct(&self) -> Option<String> {
-        [
-            "approved_share_pct",
-            "approval_percentage",
-            "position_share_pct",
-        ]
-        .into_iter()
-        .find_map(|key| Self::pct_from_json(self.payload.get(key)))
-        .or_else(|| {
-            self.value_1
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-        })
-    }
-
-    fn pct_from_json(value: Option<&Value>) -> Option<String> {
-        match value? {
+        self.lp_approval_pct_value().and_then(|value| match value {
             Value::Number(number) => Some(number.to_string()),
             Value::String(text) => {
                 let trimmed = text.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             }
             _ => None,
-        }
+        })
+    }
+
+    fn lp_approval_pct_value(&self) -> Option<Value> {
+        [
+            "approved_share_pct",
+            "approval_percentage",
+            "position_share_pct",
+        ]
+        .into_iter()
+        .find_map(|key| self.payload.get(key).cloned())
+        .or_else(|| {
+            self.value_1
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| json!(value))
+        })
     }
 }
 
@@ -458,6 +507,7 @@ mod tests {
             initial_price: Some(0.005),
             price_ratio_to_initial: Some(2.0),
             creation_block: Some(10),
+            can_buy_block: Some(10),
             latest_block_number: Some(12),
             runtime_state: None,
             can_buy: top_level_can_buy,
@@ -564,6 +614,9 @@ mod tests {
             detection_tx_hash: None,
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
             pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            pool_type: None,
+            creator_address: None,
+            subject_address: None,
             headline: None,
             value_1: None,
             value_2: None,
@@ -596,6 +649,9 @@ mod tests {
             ),
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
             pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            pool_type: None,
+            creator_address: None,
+            subject_address: None,
             headline: None,
             value_1: None,
             value_2: None,
@@ -627,6 +683,9 @@ mod tests {
             detection_tx_hash: None,
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
             pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            pool_type: None,
+            creator_address: None,
+            subject_address: None,
             headline: Some("LP position approval".to_string()),
             value_1: None,
             value_2: None,

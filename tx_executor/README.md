@@ -211,22 +211,22 @@ Required for alpha priority exits:
   "reason": "exit.mempool_liquidity_removal_signal",
   "budget": {
     "avoidable_loss_eth": "0.0084",
-    "max_total_fee_eth": "0.0084",
-    "predicted_base_fee_gwei": "10",
-    "estimated_base_fee_cost_eth": "0.0015",
-    "max_priority_spend_eth": "0.0069",
-    "max_priority_fee_gwei": "46",
-    "max_fee_per_gas_gwei": "56",
-    "estimated_gas_used": 150000
+    "max_total_fee_eth": "0.002",
+    "predicted_base_fee_gwei": "0.6",
+    "estimated_base_fee_cost_eth": "0.00015",
+    "max_priority_spend_eth": "0.00185",
+    "max_priority_fee_gwei": "3.5",
+    "max_fee_per_gas_gwei": "4.1",
+    "estimated_gas_used": 250000
   },
   "gas_plan": {
-    "label": "aggressive",
-    "priority_fee_gwei": "40",
-    "max_fee_per_gas_gwei": "50",
-    "rank_position_p50": 10,
-    "gas_before_p50": 450000,
+    "label": "balanced",
+    "priority_fee_gwei": "2",
+    "max_fee_per_gas_gwei": "2.6",
+    "rank_position_p50": 25,
+    "gas_before_p50": 900000,
     "likely_fits_at_p50": true,
-    "source": "gas_rank"
+    "source": "eth_chain_server_gas_rank"
   }
 }
 ```

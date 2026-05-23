@@ -24,6 +24,7 @@ use eth_alpha_core::{
     market::{MarketEvent, PoolSnapshot},
     portfolio::PortfolioState,
     position::{Position, PositionState},
+    risk::{RiskEvent, RiskKind},
     store::TradingStore,
     Strategy,
 };
@@ -46,7 +47,7 @@ use eth_strategies::{
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::time;
 use tracing::{info, warn};
 
@@ -847,6 +848,20 @@ async fn run(
         };
         let live_ready = status.progress.status == "live";
         let suppress_events = !args.replay_current && !live_ready;
+        let pool_response_count = pools.count;
+        let mut polled_pools = Vec::with_capacity(pools.pools.len());
+        let mut polled_pool_wires = HashMap::with_capacity(pools.pools.len());
+        for pool_wire in pools.pools {
+            match pool_wire.to_pool_snapshot() {
+                Ok(pool) => {
+                    polled_pool_wires.insert(pool.address.clone(), pool_wire.clone());
+                    polled_pools.push((pool_wire, pool));
+                }
+                Err(error) => {
+                    warn!(error = %error, "skipping pool snapshot");
+                }
+            }
+        }
 
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
@@ -932,6 +947,11 @@ async fn run(
                 }
                 adapter_current_block.store(signal_block, Ordering::Relaxed);
             }
+            let pool_context = event
+                .pool_address
+                .as_ref()
+                .and_then(|pool_address| polled_pool_wires.get(pool_address));
+            annotate_signal_risk_event(&mut event, &signal, pool_context);
             let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
             let report_count = event_reports.len();
             let decision = if report_count > 0 {
@@ -965,14 +985,7 @@ async fn run(
             }
         }
 
-        for pool_wire in pools.pools {
-            let pool = match pool_wire.to_pool_snapshot() {
-                Ok(pool) => pool,
-                Err(error) => {
-                    warn!(error = %error, "skipping pool snapshot");
-                    continue;
-                }
-            };
+        for (pool_wire, pool) in polled_pools {
             let previous_block = seen_pool_blocks.get(&pool.address).copied();
             pool_updates
                 .lock()
@@ -1173,7 +1186,7 @@ async fn run(
             live_last_error = ?status.progress.last_error,
             trading_enabled = !suppress_events,
             pools_seen = seen_pool_blocks.len(),
-            token_server_pool_count = pools.count,
+            token_server_pool_count = pool_response_count,
             signal_count = signals.count,
             market_events,
             risk_events,
@@ -1204,7 +1217,7 @@ async fn run(
             "live_last_error": status.progress.last_error,
             "trading_enabled": !suppress_events,
             "pools_seen": seen_pool_blocks.len(),
-            "token_server_pool_count": pools.count,
+            "token_server_pool_count": pool_response_count,
             "signal_count": signals.count,
             "market_events": market_events,
             "risk_events": risk_events,
@@ -1241,9 +1254,10 @@ async fn run(
             "live_blocks_processed".to_string(),
             json!(status.progress.blocks_processed),
         );
-        health
-            .metrics
-            .insert("token_server_pool_count".to_string(), json!(pools.count));
+        health.metrics.insert(
+            "token_server_pool_count".to_string(),
+            json!(pool_response_count),
+        );
         health
             .metrics
             .insert("signal_count".to_string(), json!(signals.count));
@@ -1306,4 +1320,73 @@ async fn run(
     }
 
     Ok(())
+}
+
+fn annotate_signal_risk_event(
+    event: &mut RiskEvent,
+    signal: &MempoolSignalWire,
+    pool: Option<&PoolWire>,
+) {
+    let mut evidence = event
+        .evidence
+        .take()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    evidence.insert("signal_id".to_string(), json!(signal.signal_id));
+    evidence.insert("signal_type".to_string(), json!(signal.signal_type));
+    if let Some(value) = signal.signal_source.as_ref() {
+        evidence.insert("signal_source".to_string(), json!(value));
+    }
+    if let Some(value) = event.observed_block {
+        evidence.insert("observed_block".to_string(), json!(value));
+    }
+    if event.kind == RiskKind::LpApproval {
+        annotate_lp_approval_age_evidence(&mut evidence, event, pool);
+    }
+    event.evidence = Some(Value::Object(evidence));
+}
+
+fn annotate_lp_approval_age_evidence(
+    evidence: &mut Map<String, Value>,
+    event: &RiskEvent,
+    pool: Option<&PoolWire>,
+) {
+    let Some(observed_block) = event.observed_block else {
+        evidence.insert("lp_approval_age_basis".to_string(), json!("unknown"));
+        return;
+    };
+    let Some(pool) = pool else {
+        evidence.insert(
+            "lp_approval_age_basis".to_string(),
+            json!("missing_pool_context"),
+        );
+        return;
+    };
+    if let Some(can_buy_block) = pool.can_buy_block {
+        evidence.insert("trading_enabled_block".to_string(), json!(can_buy_block));
+        evidence.insert(
+            "trading_enabled_age_blocks_at_signal".to_string(),
+            json!(observed_block as i64 - can_buy_block as i64),
+        );
+        evidence.insert(
+            "lp_approval_age_basis".to_string(),
+            json!("trading_enabled_block"),
+        );
+    }
+    if let Some(creation_block) = pool.creation_block {
+        evidence.insert("pool_creation_block".to_string(), json!(creation_block));
+        evidence.insert(
+            "pool_age_blocks_at_signal".to_string(),
+            json!(observed_block as i64 - creation_block as i64),
+        );
+        if !evidence.contains_key("lp_approval_age_basis") {
+            evidence.insert(
+                "lp_approval_age_basis".to_string(),
+                json!("pool_creation_block"),
+            );
+        }
+    }
+    if !evidence.contains_key("lp_approval_age_basis") {
+        evidence.insert("lp_approval_age_basis".to_string(), json!("unknown"));
+    }
 }

@@ -1,4 +1,8 @@
 name = "mothman_live_retention_liquidity_removal_25063339"
+title = "MOTH live retention liquidity-removal pool retention"
+status = "fixed"
+area = "live token retention"
+classification = "evidence_bearing_depleted_pool_pruned_too_early"
 token = "0xec402ba62e9d67650359ba859ddc1ae22a84840f"
 pool = "0x43cc493e758bfb50ff0f84ca188e2555145bef2d"
 denom = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"

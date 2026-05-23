@@ -71,7 +71,7 @@ pub struct ProcessedBlockDiskCacheBlockRange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProcessedBlockDiskCacheEntry {
+pub struct ProcessedBlockDiskCacheEntry {
     key: ProcessedBlockDiskCacheKey,
     header: BlockHeader,
     transactions: Vec<ProcessedBlockDiskCacheTransaction>,
@@ -494,7 +494,7 @@ impl ProcessedBlockDiskCacheEntry {
         })
     }
 
-    fn into_processed_block(self) -> Result<ProcessedBlock> {
+    pub fn into_processed_block(self) -> Result<ProcessedBlock> {
         Ok(ProcessedBlock {
             header: self.header,
             transactions: self

@@ -1,6 +1,5 @@
 pub mod compact;
 pub mod disk_cache;
-mod live;
 mod load;
 mod range;
 mod replay_store;
@@ -12,7 +11,6 @@ pub use disk_cache::{
     ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
     ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter,
 };
-pub use live::LiveProcessedBlockProvider;
 pub use load::{
     load_cached_processed_block, load_processed_block, LoadedProcessedBlock, ProcessedBlockProvider,
 };

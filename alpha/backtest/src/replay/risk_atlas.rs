@@ -71,6 +71,7 @@ pub async fn load_events_from_risk_atlas(
                 pending_tx_hash: None,
                 observed_block: Some(block),
                 message: risk_atlas_lp_approval_message(&row),
+                evidence: None,
             }));
             lp_approval_risks += 1;
         }
@@ -92,6 +93,7 @@ pub async fn load_events_from_risk_atlas(
                 pending_tx_hash: None,
                 observed_block: Some(block),
                 message: "risk atlas mined-chain direct LP liquidity removal".to_string(),
+                evidence: None,
             }));
             direct_lp_removal_risks += 1;
         }

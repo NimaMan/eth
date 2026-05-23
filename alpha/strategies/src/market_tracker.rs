@@ -303,6 +303,7 @@ mod tests {
             pending_tx_hash: None,
             observed_block: Some(1),
             message: "liquidity removal".to_string(),
+            evidence: None,
         };
         let market = MarketSnapshotRef {
             block_number: 1,

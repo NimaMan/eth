@@ -31,9 +31,7 @@ pub struct EncodedChainStateSnapshot {
     /// Codec-specific snapshot bytes.
     ///
     /// This is intentionally opaque to keep `eth_live_state` independent from
-    /// `tx_simulator` and REVM internals. Redis backends can store these bytes
-    /// directly under the canonical snapshot key when preserving the current
-    /// simulator format.
+    /// `tx_simulator` and REVM internals.
     pub payload: Vec<u8>,
     pub stats: Option<ChainStateSnapshotStats>,
 }

@@ -1,14 +1,5 @@
-/// Clean TX Processor - Rust alternative to Python eth_block_processor
-///
-/// This is a simplified, clean transaction processor that replaces the complex
-/// Python eth_block_processor.tx module with direct Reth database access.
-///
-/// Key improvements over Python version:
-/// - 10-40x faster (direct DB vs RPC)
-/// - Much simpler codebase
-/// - No complex RPC handling
-/// - Consistent performance
-// Re-export the NEW TX Simulator types (NO CallRequest - uses UnsignedTransaction)
+/// Ethereum transaction and block processing on top of local Reth data and
+/// tx_simulator execution traces.
 pub use tx_simulator::{
     BlockStateSession, BlockTxStateSession, ChainStateInfo, FullSimulationResult,
     SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,
@@ -32,16 +23,15 @@ pub use block_processor::{
     ProcessedBlockTransactions,
 };
 pub use live::{
-    LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
-    LiveProcessedBlockReplayStoreSink, LiveStateDiffFrame,
+    LiveBlockProcessor, LiveBlockProcessorConfig, LiveProcessedBlock, LiveStateDiffFrame,
 };
 pub use processed_tx_provider::{
     load_cached_processed_block, load_processed_block, load_processed_block_range,
     load_processed_block_range_with_options, processed_block_trace_config_hash,
     prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
-    AddressProcessedTxProvider, CompactProcessedTransaction, LiveProcessedBlockProvider,
-    LoadedProcessedBlock, LoadedProcessedBlockWithMetrics, ProcessedBlockAddressIndexWrite,
-    ProcessedBlockCacheKey, ProcessedBlockCacheStore, ProcessedBlockDiskCacheBlockRange,
+    AddressProcessedTxProvider, CompactProcessedTransaction, LoadedProcessedBlock,
+    LoadedProcessedBlockWithMetrics, ProcessedBlockAddressIndexWrite, ProcessedBlockCacheKey,
+    ProcessedBlockCacheStore, ProcessedBlockDiskCacheBlockRange,
     ProcessedBlockDiskCacheChainCoverage, ProcessedBlockDiskCacheCoverage,
     ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan, ProcessedBlockDiskCacheRead,
     ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWrite,

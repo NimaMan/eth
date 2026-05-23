@@ -4,6 +4,7 @@
 //! All files are auto-generated from Python address files.
 
 pub mod address_book;
+pub mod burn_addresses;
 pub mod cex;
 pub mod denom_tokens;
 pub mod dex_token_denom_pairs;
@@ -17,6 +18,10 @@ pub mod wallets;
 // Re-export commonly used items
 pub use crate::dex::pool_types::{DEFAULT_POOL_TYPE, DEX_POOL_TYPES};
 pub use address_book::{get_address_by_name, ADDRESSES_BY_NAME};
+pub use burn_addresses::{
+    get_burn_address_name, is_burn_address, is_burn_address_str, BURN_ADDRESSES, DEAD_ADDRESS,
+    ZERO_ADDRESS,
+};
 pub use cex::{
     get_cex_by_address, is_cex_address, CexAddress, ADDRESSES_BY_EXCHANGE, CEX_ADDRESSES,
     CEX_ADDRESS_SET,

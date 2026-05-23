@@ -1,13 +1,19 @@
 # SSS SpaceX Space Services
 
+Status: active detector/display investigation. A fresh token-builder range
+replay on 2026-05-20 reproduces the reserve collapse, same-block WETH drain,
+post-drain dust-token reserve state, and `cannot_sell` read model. The remaining
+question is how to promote this into reserve-quality detectors and Asena/Risk
+Atlas display rules.
+
 This investigation tracks the SSS pool whose displayed price ratio became
 extremely high while the pool was also marked `cannot_sell`.
 
-The first objective is parity, not classification:
+The first objective was parity, not classification:
 
 1. Extract the chain truth for the pool and key transactions.
-2. Replay the same transactions with our simulator.
-3. Confirm whether the simulator can reproduce the chain behavior.
+2. Replay the same range with the token builder.
+3. Confirm whether the token builder can reproduce the chain behavior.
 4. Decide which odd behavior detectors this investigation should produce.
 
 ## Addresses
@@ -64,21 +70,52 @@ The high price ratio is mathematically consistent with pool reserves. It is not
 evidence of healthy price appreciation. It is a reserve-quality problem: WETH is
 present while token reserve is dust relative to total supply.
 
-## Simulator Parity
+## Token-Builder Replay
 
-### Checks To Run
+### Checks Run
 
-- Replay `initial_liquidity` and verify pair creation, LP state, and reserves.
-- Replay `first_tracked_buy` and verify buy output and post-reserves.
-- Replay `creator_sync_after_reserve_collapse` and verify whether token
-  `balanceOf(pool)` collapses before `sync()`.
-- Replay `weth_drain_sell` and verify the observed sell-like tx succeeds and
+- Replayed `initial_liquidity` and verified pair creation, LP state, and
+  reserves through the range read model.
+- Replayed `first_tracked_buy` and verified buy activity.
+- Replayed `creator_sync_after_reserve_collapse` and verified that the token
+  builder records the direct creator `sync` with zero token or denom transfers;
+  chain truth shows `balanceOf(pool)` collapsed before `sync()`.
+- Replayed `weth_drain_sell` and verified the observed sell-like tx succeeds and
   drains WETH.
-- Replay `later_buy` and verify the post-buy reserve state.
+- Replayed `later_buy` and verified the post-buy reserve state.
 
-### Failure Classification
+### 2026-05-20 Token-Builder Result
 
-If simulator output differs from chain truth, classify the mismatch as one of:
+Server-backed token builder run `run-1` over `25,041,048..25,041,137`
+completed from disk cache with `0` transaction failures and `0` pool simulation
+failures. It produced the SSS range-end pool snapshot at block `25,041,137`.
+This is not the current/latest market state shown by Dexscreener:
+
+| Field | Value |
+| --- | --- |
+| `token_reserve` | `697.712149384` |
+| `denom_reserve` | `1.4850086199025743 WETH` |
+| `raw_price_ratio_to_initial` | `2128397.249802325` |
+| `pooled_token_supply_percent` | `0.0000697712149384` |
+| `can_buy` / `can_sell` | `true` / `false` |
+| `has_observed_buy` / `has_observed_sell` | `true` / `true` |
+| `stage` | `CANNOT_SELL` |
+| `risk_level` / `risk_label` | `honeypot` / `cannot_sell` |
+
+The key transactions were present in token-builder activity rows:
+
+- `creator_sync_after_reserve_collapse`: zero token transfers and zero denom
+  transfers in the creator tx.
+- `weth_drain_sell`: `8.594034272473914 WETH` sell volume in the same block.
+- `later_buy`: `1.485 WETH` buy volume, ending in the dust-token reserve state.
+
+Artifact:
+`artifacts/token_builder_replay_20260520.md`.
+
+### Same-Prestate Simulator Classification
+
+If we run a narrower synthetic same-prestate sell and simulator output differs
+from chain truth, classify the mismatch as one of:
 
 - missing prior tx setup;
 - missing token control or balance mutation;
@@ -90,8 +127,11 @@ If simulator output differs from chain truth, classify the mismatch as one of:
 
 ### Current Status
 
-Pending. The investigation has chain observations, but transaction-level
-simulator parity still needs to be run.
+Token-builder reproduction is complete. The remaining parity question is narrower:
+only run a same-prestate synthetic sell if we need to prove whether
+`observed_sell_simulator_fail` is real. The current range replay itself does not
+prove that detector, because the run had zero pool simulation failures and the
+WETH drain sell is observed from executed chain data.
 
 ## Findings
 
@@ -100,6 +140,8 @@ simulator parity still needs to be run.
 - The final pool reserves match chain replay.
 - The extreme price ratio comes from a tiny token reserve against non-zero WETH.
 - The pool has at least one observed sell-like transaction on chain.
+- The token builder reproduces the observed sell-like WETH drain and final
+  range-end `can_buy=true`, `can_sell=false` state.
 - The creator-triggered `sync()` after token reserve collapse is a critical
   suspicious event.
 
@@ -109,16 +151,16 @@ simulator parity still needs to be run.
 - `reserve_discontinuity`
 - `token_reserve_dust`
 - `price_ratio_extreme_low_supply`
-- `observed_sell_simulator_fail`
+- `privileged_seller_reserve_drain`
+- `observed_sell_simulator_fail` only if a same-prestate synthetic sell fails
 
 ### Open Work
 
-- Confirm simulator replay parity for the key transactions.
-- Determine whether the observed sell can be reproduced by the simulator at the
-  same pre-state.
 - Decide whether the range builder should flag this pool before the WETH drain,
   at the direct `sync()`, or both.
 - Decide how Asena should display price ratio when reserve quality is unsafe.
+- Decide whether to run a same-prestate synthetic sell to distinguish privileged
+  seller behavior from simulator route/account gaps.
 
 ## Artifacts
 

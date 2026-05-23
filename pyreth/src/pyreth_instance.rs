@@ -82,7 +82,7 @@ impl PyRethInstance {
         PySimulator::from_shared(self.simulator.clone())
     }
 
-    /// Get a live-first simulator that targets the latest tracked Redis state.
+    /// Get a live-first simulator that targets the latest tracked live state.
     pub fn live_simulator(&self) -> PyLiveTxSimulator {
         PyLiveTxSimulator::from_shared(self.simulator.clone())
     }

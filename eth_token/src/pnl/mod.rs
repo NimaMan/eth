@@ -4,6 +4,15 @@ use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use tx_processor::ProcessedTransaction;
 
+pub mod conservation;
+pub mod export;
+pub mod model;
+
+pub use conservation::PoolPnlConservationCheck;
+pub use model::{
+    PnlAddressPositionExport, PnlConservationExport, PnlMovementExport, PnlPoolExport,
+};
+
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
@@ -582,7 +591,13 @@ impl PoolPnlTracker {
         let native_bribe = scaled_units(position.native_bribe_raw, 18);
         let marked_token_value_denom =
             mark_price_denom_per_token.map(|price| token_balance * price);
-        let pnl_proxy_denom = marked_token_value_denom.map(|marked| denom_cashflow + marked);
+        let native_costs = if self.denom_tracks_native_eth() {
+            native_fee + native_bribe
+        } else {
+            0.0
+        };
+        let pnl_proxy_denom =
+            marked_token_value_denom.map(|marked| denom_cashflow + marked - native_costs);
 
         AddressPoolPnlSummary {
             address: position.address.clone(),
@@ -792,6 +807,21 @@ pub enum PoolPnlEntryKind {
     NativeDenomOut,
     NativeFee,
     NativeBribe,
+}
+
+impl PoolPnlEntryKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TokenIn => "token_in",
+            Self::TokenOut => "token_out",
+            Self::DenomIn => "denom_in",
+            Self::DenomOut => "denom_out",
+            Self::NativeDenomIn => "native_denom_in",
+            Self::NativeDenomOut => "native_denom_out",
+            Self::NativeFee => "native_fee",
+            Self::NativeBribe => "native_bribe",
+        }
+    }
 }
 
 fn signed_raw_string(incoming: U256, outgoing: U256) -> String {
@@ -1030,6 +1060,43 @@ mod tests {
             U256::from(1_000)
         );
         assert!(pool.conservation_summary().denom_is_conserved);
+    }
+
+    #[test]
+    fn weth_pool_pnl_proxy_subtracts_native_fees_and_bribes() {
+        let mut tracker = TokenPnlTracker::default();
+        let mut tx = tx();
+        tx.fees = TransactionFees::new(U256::from(10), 21_000, 21_000);
+        tx.bribe_amount = U256::from(7);
+        tx.erc20_transfers.push(ERC20TransferEvent {
+            token_address: WETH,
+            from_address: FEE_PAYER,
+            to_address: POOL,
+            amount: U256::from(1_000_000_000_000_000_000_u64),
+            log_index: 1,
+        });
+
+        tracker.record_v2_pool_transaction(
+            address_string(&POOL),
+            address_string(&TOKEN),
+            address_string(&WETH),
+            9,
+            18,
+            100,
+            &tx,
+        );
+
+        let pool = tracker.pool(address_string(&POOL)).expect("pool pnl");
+        let summary = pool
+            .address_summaries(Some(0.0))
+            .into_iter()
+            .find(|summary| summary.address == address_string(&FEE_PAYER))
+            .expect("fee payer summary");
+
+        assert_eq!(summary.denom_cashflow, -1.0);
+        assert!((summary.native_fee - 0.00000000000021).abs() < 1e-18);
+        assert!((summary.native_bribe - 0.000000000000000007).abs() < 1e-21);
+        assert!((summary.pnl_proxy_denom.expect("pnl proxy") - -1.00000000000021).abs() < 1e-15);
     }
 
     fn tx() -> ProcessedTransaction {

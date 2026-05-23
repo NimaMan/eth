@@ -1,5 +1,6 @@
 use crate::ids::{BlockNumber, PoolAddress, TokenAddress, TxHash};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub const RISK_SOURCE_MEMPOOL_SIGNAL: &str = "mempool_signal";
 pub const RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL: &str = "historical_mempool_signal";
@@ -36,4 +37,6 @@ pub struct RiskEvent {
     pub pending_tx_hash: Option<TxHash>,
     pub observed_block: Option<BlockNumber>,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Value>,
 }

@@ -220,9 +220,10 @@ context, but still an inference unless the path and timing are compelling.
 
 ### Index Infrastructure (`reth_chain_query/src/reth_index/`)
 - **Address block participation index**: MDBX database mapping address → blocks
-- **Trade data table**: Per-address-token trading history and PnL
-- **Address metrics table**: Aggregated address metrics
-- **Token/pool tables**: Token metadata and pool data caching
+- **Mempool arrival table**: txumber → first-seen timestamp for mined txs
+- **Dormant table model files**: trade/address-metric/token/pool table structs
+  exist, but they are not active until `RethIndexDB` opens them and a writer
+  owns them
 
 ### Processed Block Cache (`tx_processor/src/tx_processor/cache.rs`)
 - Flat binary `.pblock.zst` files

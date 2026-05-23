@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use super::{
     address_book::ADDRESSES_BY_NAME,
+    burn_addresses::get_burn_address_name,
     cex::get_cex_by_address,
     denom_tokens::DENOM_ADDRESSES,
     etf::get_etf_by_address,
@@ -16,6 +17,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KnownAddressKind {
+    Burn,
     Stablecoin,
     DenomToken,
     Cex,
@@ -36,6 +38,15 @@ pub struct KnownAddress {
 }
 
 pub fn identify_known_address(address: Address) -> Option<KnownAddress> {
+    if let Some(name) = get_burn_address_name(address) {
+        return Some(KnownAddress {
+            address,
+            kind: KnownAddressKind::Burn,
+            name,
+            group: None,
+        });
+    }
+
     if let Some(info) = get_stablecoin_by_address(address) {
         return Some(KnownAddress {
             address,
@@ -141,6 +152,20 @@ mod tests {
         assert_eq!(known.kind, KnownAddressKind::Stablecoin);
         assert_eq!(known.name, "USDC");
         assert_eq!(known.group, Some("US Dollar"));
+    }
+
+    #[test]
+    fn identifies_burn_addresses_before_generic_named_addresses() {
+        let zero = address!("0000000000000000000000000000000000000000");
+        let dead = address!("000000000000000000000000000000000000dEaD");
+
+        let zero_known = identify_known_address(zero).unwrap();
+        assert_eq!(zero_known.kind, KnownAddressKind::Burn);
+        assert_eq!(zero_known.name, "zero_address");
+
+        let dead_known = identify_known_address(dead).unwrap();
+        assert_eq!(dead_known.kind, KnownAddressKind::Burn);
+        assert_eq!(dead_known.name, "dead_address");
     }
 
     #[test]

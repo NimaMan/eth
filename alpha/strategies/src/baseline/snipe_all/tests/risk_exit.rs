@@ -25,6 +25,7 @@ fn sells_restored_open_position_on_liquidity_removal() {
         pending_tx_hash: None,
         observed_block: Some(2),
         message: "liquidity removal".to_string(),
+        evidence: None,
     };
 
     let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
@@ -68,6 +69,7 @@ fn mempool_liquidity_removal_signal_uses_explicit_exit_reason() {
         pending_tx_hash: Some(B256::repeat_byte(0x33)),
         observed_block: Some(2),
         message: "liquidity removal signal".to_string(),
+        evidence: None,
     };
 
     let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
@@ -108,6 +110,7 @@ fn skips_liquidity_removal_exit_when_pool_is_already_dust() {
         pending_tx_hash: None,
         observed_block: Some(2),
         message: "liquidity removal".to_string(),
+        evidence: None,
     };
 
     let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
@@ -144,6 +147,7 @@ fn sells_open_position_on_lp_approval() {
         pending_tx_hash: None,
         observed_block: Some(2),
         message: "lp approval".to_string(),
+        evidence: None,
     };
 
     let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
@@ -271,7 +275,9 @@ fn early_launch_lp_approval_can_defer_to_max_hold() {
     assert!(decision.is_hold());
     assert_eq!(
         decision.reason(),
-        Some("exit.lp_approval:early_approval_deferred_to_max_hold")
+        Some(
+            "exit.lp_approval:early_approval_deferred_to_max_hold:age_blocks=2 max_age_blocks=2 age_basis=trading_enabled_block reference_block=unknown observed_block=2"
+        )
     );
 }
 

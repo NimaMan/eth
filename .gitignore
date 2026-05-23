@@ -23,6 +23,14 @@ logs/
 token_safety_lab/cases/*/artifacts/*
 !token_safety_lab/cases/*/artifacts/README.md
 
+# Risk Atlas generated modeling outputs
+token_lab/risk_atlas/modeling/artifacts/
+token_lab/risk_atlas/scam_analytics/artifacts/**/*.csv
+
+# Lab report generated data exports
+alpha/lab/reports/**/artifacts/*.csv
+alpha/lab/reports/**/artifacts/*.json
+
 # Environment
 .env
 *.local

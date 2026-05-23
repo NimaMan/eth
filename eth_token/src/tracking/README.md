@@ -15,7 +15,7 @@ decisions, and live retention.
 - Pool state machines and trading-status outcome application stay in
   `eth_token::pools`.
 - Actual buy/sell simulation execution stays in `tx_processor::simulator`.
-- Live warmup/tail orchestration, Redis, and publication stay in
+- Live warmup/tail orchestration and publication stay in
   `alpha/live/feed` and `eth_chain_server`.
 
 ## Layout

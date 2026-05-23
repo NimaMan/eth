@@ -81,8 +81,12 @@ for deploy review are:
 
 For `alpha11-univ2-lp30-pool-update-block-hold16`, a sell reason of
 `exit.lp_approval` means the strategy exited on LP-token approval evidence. A
-hold reason of `exit.lp_approval:early_approval_deferred_to_max_hold` means the
-approval was in the launch window and the position remains governed by max hold.
+hold reason with code
+`exit.lp_approval.early_approval_deferred_to_max_hold` means the approval was
+inside the `<=2` active-block launch window and the position remains governed by
+max hold. Those deferrals must carry the signal id, approval percentage, age
+basis, active-block age, and matching risk-event evidence in the persisted
+strategy decision details.
 A sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
 pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`
 means confirmed-chain liquidity removal was already visible.

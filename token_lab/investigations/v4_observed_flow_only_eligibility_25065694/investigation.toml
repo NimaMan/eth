@@ -6,6 +6,7 @@ range_start_block = 25065694
 range_end_block = 25080693
 area = "source eligibility parity"
 classification = "source_observed_flow_not_same_route_tradeable"
+resolution_required = "rebuild source observations with runtime can_buy/can_sell, rerun baseline, and confirm these become skipped eligibility decisions"
 
 [[tokens]]
 token = "0xA27a750fAB2Fd9D5794b5B756E5a35fe0792cD5D"

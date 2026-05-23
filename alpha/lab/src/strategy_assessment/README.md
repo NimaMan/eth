@@ -1,7 +1,7 @@
 # Strategy Assessment
 
 This module answers strategy-quality questions after a result set has passed
-backtest validation. Assessment is not validation: it does not decide whether
+strategy validation. Assessment is not validation: it does not decide whether
 the lifecycle, accounting, event sequence, or snapshots are correct. It assumes
 the backend persisted rows are usable and asks whether the strategy conclusion
 is robust enough to trust.

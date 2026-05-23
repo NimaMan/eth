@@ -1,5 +1,5 @@
 mod reader;
-mod store;
+pub mod store;
 mod writer;
 
 pub use reader::{

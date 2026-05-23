@@ -6,20 +6,20 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use eth_ops_events::{
-    PipelineBottleneckSample, PipelineImpact, PipelineIssue, PipelineSeverity, emit_bottleneck,
-    emit_issue,
+    emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
+    PipelineSeverity,
 };
 use eth_token::chain_metadata::{
     LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
 };
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::json;
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard, broadcast, watch};
+use tokio::sync::{broadcast, watch, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
-    BlockProcessor, BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock,
-    LiveStateDiffFrame, LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter,
-    ProcessedBlockSource, load_processed_block, sealed_header_from_processed_block_header,
+    load_processed_block, sealed_header_from_processed_block_header, BlockProcessor,
+    BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock, LiveStateDiffFrame,
+    LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
 };
 
 use super::apply_report::{apply_report, push_bottleneck, push_issue};

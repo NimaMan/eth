@@ -164,6 +164,15 @@ fn historical_observation_seeds(
         }
     }
 
+    for call in &token.transfer_tracker.transfer_from_calls {
+        touch_historical_seed(
+            &mut seeds,
+            call.block_number,
+            Some(call.block_timestamp),
+            Some(ActiveObservationReason::ControlAddressActivity),
+        );
+    }
+
     touch_lp_event_seeds(token, &pool.identity.pool_address, &mut seeds);
     seeds
 }

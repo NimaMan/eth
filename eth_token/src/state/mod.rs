@@ -7,5 +7,6 @@ pub mod transfer;
 pub use authority::{OwnerEventRecord, RenouncementState, TokenAuthorityTracker};
 pub use status::TokenStatusManager;
 pub use transfer::{
-    ApprovalRecord, InternalEthTransferRecord, TokenTransferRecord, TokenTransferTracker,
+    ApprovalRecord, InternalEthTransferRecord, TokenTransferFromCallRecord, TokenTransferRecord,
+    TokenTransferTracker,
 };

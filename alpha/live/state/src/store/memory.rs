@@ -7,7 +7,7 @@ use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 
 use crate::{
-    keys, BlockNumber, BlockReadyNotification, EncodedChainStateSnapshot, LiveStateError, Result,
+    BlockNumber, BlockReadyNotification, EncodedChainStateSnapshot, LiveStateError, Result,
     SnapshotWriteOptions, TokenSnapshot,
 };
 
@@ -50,6 +50,10 @@ impl InMemoryLiveStateStore {
     }
 }
 
+fn normalized_address_string(address: Address) -> String {
+    address.to_string().to_ascii_lowercase()
+}
+
 #[async_trait]
 impl LiveStateReader for InMemoryLiveStateStore {
     async fn latest_block_number(&self) -> Result<Option<BlockNumber>> {
@@ -75,7 +79,7 @@ impl LiveStateReader for InMemoryLiveStateStore {
         Ok(self
             .read_inner()?
             .tokens
-            .get(&keys::normalized_address_string(token_address))
+            .get(&normalized_address_string(token_address))
             .cloned())
     }
 
@@ -116,7 +120,7 @@ impl LiveStateWriter for InMemoryLiveStateStore {
         _options: SnapshotWriteOptions,
     ) -> Result<()> {
         self.write_inner()?.tokens.insert(
-            keys::normalized_address_string(snapshot.contract_address),
+            normalized_address_string(snapshot.contract_address),
             snapshot,
         );
         Ok(())
@@ -125,7 +129,7 @@ impl LiveStateWriter for InMemoryLiveStateStore {
     async fn delete_token(&self, token_address: Address) -> Result<()> {
         self.write_inner()?
             .tokens
-            .remove(&keys::normalized_address_string(token_address));
+            .remove(&normalized_address_string(token_address));
         Ok(())
     }
 }

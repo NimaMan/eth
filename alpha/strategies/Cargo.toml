@@ -10,3 +10,4 @@ alloy-primitives = "1.5.7"
 eth_alpha_core = { path = "../core" }
 eth_pool_classification = { path = "../pool_classification" }
 rust_decimal = "1.36"
+serde_json = "1.0"

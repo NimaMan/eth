@@ -1,4 +1,4 @@
-/// Transaction Trace Processor - Rust equivalent of Python's tx_trace_processor.py
+/// Transaction trace processor.
 ///
 /// OBJECTIVE: Extract internal transactions from call traces
 ///
@@ -8,8 +8,7 @@
 /// 3. Failed transactions and their children
 /// 4. Initial transaction (depth == 0)
 ///
-/// Just like Python's tx_trace_processor.py, this converts raw simulation traces
-/// into structured InternalTransaction objects.
+/// Converts raw simulation traces into structured `InternalTransaction` objects.
 use super::data_models::InternalTransaction;
 use alloy_primitives::U256;
 use tx_simulator::types::CallFrame;
@@ -26,7 +25,6 @@ impl TransactionTraceProcessor {
     /// Extract internal transactions from CallFrame (moved from tx_simulator)
     ///
     /// This recursively walks the call trace tree and extracts all internal transactions.
-    /// Matches Python's process_trace() method behavior.
     pub fn extract_internal_transactions_from_call_trace(
         &self,
         call_trace: &CallFrame,
@@ -76,9 +74,8 @@ impl TransactionTraceProcessor {
 
     /// Process trace data from simulation to extract internal transactions
     ///
-    /// This is the Rust equivalent of Python's process_trace() method.
-    /// It takes the internal transactions from tx_simulator and converts them
-    /// to our ProcessedTransaction's InternalTransaction format.
+    /// Takes internal transactions from tx_simulator and converts them to this
+    /// crate's `InternalTransaction` format.
     pub fn process_internal_transactions(
         &self,
         internal_txs: &[InternalTransaction],
@@ -106,7 +103,6 @@ impl TransactionTraceProcessor {
 
     /// Filter internal transactions to only include significant ones
     ///
-    /// Similar to Python's filtering logic:
     /// - Include if it's the initial transaction (depth == 0)
     /// - Include if it's a contract creation
     /// - Include if it has non-zero value

@@ -1,5 +1,9 @@
 # V4 Observed-Flow Eligibility Classification
 
+Status: confirmed source-data gap. This remains in the active investigation
+queue only until the source observation range is rebuilt with runtime
+`can_buy/can_sell` and the 15k baseline is rerun.
+
 ## Scope
 
 Historical run:

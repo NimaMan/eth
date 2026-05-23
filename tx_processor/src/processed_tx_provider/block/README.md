@@ -5,9 +5,6 @@ processed-block loading and persistence boundaries for the ETH Rust pipeline.
 
 - `load.rs` provides `ProcessedBlockProvider`: disk cache first, then direct
   Reth block processing once. This regular historical path has no retry loop.
-- `live.rs` provides `LiveProcessedBlockProvider`, which hydrates live
-  processed blocks from Redis first, retries live Redis hydration when
-  configured, and then falls back explicitly to `ProcessedBlockProvider`.
 - `range.rs` loads historical block ranges and fills missing disk-cache entries.
 - `replay_store.rs` owns the canonical write path for the replay store:
   processed-block disk cache plus derived block-level indexes.
@@ -17,7 +14,7 @@ processed-block loading and persistence boundaries for the ETH Rust pipeline.
   carried through persistent payloads.
 
 Higher-level crates should request `ProcessedBlock` data through this module
-instead of implementing Redis, disk, or direct-processing fallback logic locally.
+instead of implementing disk or direct-processing fallback logic locally.
 
 `ProcessedBlockDiskCacheStore` is intentionally a raw storage primitive.
 Callers that persist processed blocks should use
@@ -29,6 +26,14 @@ such as `reth_index/address_to_blocks` stay in sync.
 The disk cache is a hot local replay store for the latest ~1M Ethereum mainnet
 processed blocks. Its job is to let token tracking, live warmup, range builds,
 and later analysis tools load block ranges quickly without re-running EVM replay.
+
+Config is supplied by callers:
+
+| Config | Meaning |
+| --- | --- |
+| `PROCESSED_BLOCK_DISK_CACHE_DIR` | Root directory for the cache. |
+| `PROCESSED_BLOCK_DISK_CACHE_BLOCKS` | Retention target used by pruning helpers. |
+| `RETH_INDEX_DIR` | Optional sidecar MDBX directory for derived `address_to_blocks` writes through `ProcessedBlockReplayStoreWriter`. |
 
 Primary access is by block number, so the on-disk layout is intentionally
 block-number based:

@@ -778,6 +778,7 @@ async fn liquidity_removal_snapshot_does_not_copy_stale_pool_metrics() {
             pending_tx_hash: None,
             observed_block: Some(10),
             message: "liquidity removal".to_string(),
+            evidence: None,
         }))
         .await
         .unwrap();
@@ -1056,6 +1057,7 @@ async fn pending_reports_apply_before_same_block_risk_updates() {
             pending_tx_hash: None,
             observed_block: Some(2),
             message: "lp approval".to_string(),
+            evidence: None,
         }))
         .await
         .unwrap();
@@ -1216,6 +1218,7 @@ async fn default_risk_event_strategy_hook_holds() {
             pending_tx_hash: None,
             observed_block: None,
             message: "lp approval".to_string(),
+            evidence: None,
         }))
         .await
         .unwrap();
@@ -1252,6 +1255,7 @@ async fn critical_risk_policy_rejects_matching_order() {
             pending_tx_hash: None,
             observed_block: Some(1),
             message: "liquidity removal".to_string(),
+            evidence: None,
         }))
         .await
         .unwrap();

@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
 use eth_pool_classification::PoolCohort;
 use eth_token::erc20::{ERC20Token, TokenSummary};
+use eth_token::token_analytics::TokenPoolCurrentObservation;
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};
 use serde::Serialize;
 
@@ -38,6 +39,7 @@ pub struct LiveTokenDetailResponse {
     pub summary: TokenSummary,
     pub index_status: Option<TrackedTokenStatus>,
     pub pools: Vec<PoolView>,
+    pub observations: Vec<TokenPoolCurrentObservation>,
     pub network: TokenNetworkView,
     pub pnl: TokenPnlView,
     pub denom_symbols: BTreeMap<String, String>,
@@ -171,6 +173,11 @@ pub async fn token_detail(
     let summary = crate::read_models::token::token_summary_with_pool_views(token, &pools);
     let denom_symbols = crate::read_models::token::build_denom_symbols(token);
     let pnl = TokenPnlView::from_token(token);
+    let observations = crate::read_models::token::token_observations_with_backfill(
+        &state.observations,
+        &address,
+        token,
+    );
 
     let progress = state.progress.clone();
     Some(LiveTokenDetailResponse {
@@ -180,6 +187,7 @@ pub async fn token_detail(
         summary,
         index_status,
         pools,
+        observations,
         network,
         pnl,
         denom_symbols,

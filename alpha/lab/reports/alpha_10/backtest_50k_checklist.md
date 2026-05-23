@@ -214,7 +214,7 @@ cargo run -p eth_alpha_lab --bin eth_alpha_lab -- \
 
 ```bash
 cargo run -p eth_alpha_lab --bin eth_alpha_lab -- \
-  backtest-validation \
+  strategy-validation \
   --result-set "${RESULT_SET_ID}" \
   --strategy "<strategy-name>"
 ```

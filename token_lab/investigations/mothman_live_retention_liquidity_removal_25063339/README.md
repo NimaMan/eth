@@ -1,5 +1,8 @@
 # MOTH Mothman Live Retention Liquidity Removal
 
+Status: fixed. Keep this as the regression case for retaining evidence-bearing
+depleted pools after confirmed liquidity-removal signals.
+
 This investigation tracks a live token retention policy mismatch where Asena
 showed a token as `PAIR_CREATION`, `risk=clear`, and `pools=0` while the
 mempool signal page showed a confirmed high-drain liquidity-removal signal for

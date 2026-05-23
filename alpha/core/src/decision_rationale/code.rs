@@ -142,6 +142,9 @@ fn label_for(code: &str, raw: &str) -> String {
         "exit.lp_approval_buy_confirm_block_deferred_to_max_hold" => {
             "Exit hold: buy-confirm block LP approval deferred".to_string()
         }
+        "exit.lp_approval.early_approval_deferred_to_max_hold" => {
+            "Exit hold: early LP approval deferred to max hold".to_string()
+        }
         "exit.lp_approval.approved_pct_unknown_or_not_gt_min" => {
             "Exit hold: LP approval below threshold or unknown".to_string()
         }
@@ -189,6 +192,18 @@ fn details_for(raw: &str, base: &str, detail: Option<&str>, value: Option<&str>)
                     "min_sell_pool_denom_reserve".to_string(),
                     Value::String(threshold.trim().to_string()),
                 );
+            }
+        }
+    }
+    if base == "exit.lp_approval" && detail == Some("early_approval_deferred_to_max_hold") {
+        if let Some(value) = value {
+            for part in value.split_whitespace() {
+                let Some((key, raw_value)) = part.split_once('=') else {
+                    continue;
+                };
+                if key.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_') {
+                    details.insert(key.to_string(), Value::String(raw_value.to_string()));
+                }
             }
         }
     }

@@ -1,9 +1,11 @@
 title = "15k historical failed sell classification"
-status = "confirmed"
+status = "explained"
 run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
 range_start_block = 25065694
 range_end_block = 25080693
 area = "sell restriction classification"
+classification = "root_cause_bucketed_policy_backlog"
+policy_resolution = "current baseline keeps failed exits open and zero-valued until a confirmed sell; retry cadence, chunked exits, and address-specific treatment are strategy work"
 
 [[tokens]]
 symbol = "unknown"

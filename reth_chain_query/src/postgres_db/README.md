@@ -27,12 +27,20 @@ postgres_db/
 The module expects the following PostgreSQL tables in the `eth_db` schema:
 
 ### Core Tables
-- **addresses** - Wallet/contract addresses with aggregated metrics
-- **transactions** - Transaction records with block numbers and status
-- **tx_participants** - Many-to-many relationship between transactions and addresses
-- **trades** - Aggregated trades between addresses and tokens
-- **tokens** - ERC20 token metadata with scam detection
-- **pools** - DEX pools across protocols (V2, V3, V4)
+
+| Table | Purpose |
+| --- | --- |
+| `eth_db.addresses` | Wallet/contract addresses plus aggregate metrics such as profit, realized profit, volume, scam ratio, trade frequency, tx fees, first/last seen, and optional entity labels. |
+| `eth_db.transactions` | Mined transaction records keyed by hash with block number, status, value, from/to address ids, and optional `mempool_first_seen` when the legacy timestamp updater is used. |
+| `eth_db.tx_participants` | Many-to-many transaction/address participation table used for graph discovery and neighborhood queries. |
+| `eth_db.related_addresses` | Curated or derived address relationship edges, including optional trade linkage and denom-flow value. |
+| `eth_db.trades` | Aggregated address/token/currency trade rows with entry/latest block, denom spent/received, fees, realized/unrealized profit, and buy/sell counts. |
+| `eth_db.tokens` | ERC-20 token metadata and lab labels such as creator, creation tx, trading-enabled tx, scam flag, and scam label. |
+| `eth_db.pools` | DEX pool metadata across protocols, including pool address or composite id, token pair, pool type, and fee tier. |
+
+This module reads and updates existing `eth_db` tables; it does not own a
+complete migration set. Schema creation/backfills must be documented wherever
+the indexing job that populates `eth_db` lives.
 
 ## Query Modules
 
@@ -133,7 +141,7 @@ let stats = get_population_statistics(db).await?;
 ```rust
 use reth_chain_query::postgres_db::{PostgresQuery, queries};
 
-let database_url = "postgresql://postgres:postgres@localhost:5432/eth_db";
+let database_url = "postgresql://<user>:<password>@<host>:<port>/<database>";
 let pg_query = PostgresQuery::new(&database_url).await?;
 ```
 

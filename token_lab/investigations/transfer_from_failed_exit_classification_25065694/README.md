@@ -1,5 +1,9 @@
 # Transfer From Failed Exit Classification
 
+Status: explained policy backlog. The root causes are bucketed; remaining work
+is strategy policy for retries, chunked exits, and address-specific/no-observed
+sell exposure.
+
 ## Scope
 
 Historical run:

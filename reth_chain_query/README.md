@@ -57,6 +57,20 @@ addresses, fee recipients, DEX factories/routers, wallets, and other named
 addresses. Entity modules consume those catalogs for analysis; they should not
 own duplicate address lists.
 
+## Persistent Store Ownership
+
+`reth_chain_query` is the typed read layer for the Reth datadir and the owner of
+optional query indexes.
+
+| Store | Access | Purpose |
+| --- | --- | --- |
+| Reth datadir (`RETH_DATADIR`) | read-only provider factory over Reth `db/`, `static_files/`, and `rocksdb/` | Canonical chain reads for accounts, storage, headers, transactions, receipts, timestamps, and DEX state helpers. |
+| RethIndex (`RETH_INDEX_DIR`) | optional sidecar MDBX | Custom indexes not supplied by canonical Reth. Current active tables are `address_to_blocks` and `mempool_tx_arrival_times`. |
+| Postgres `eth_db` | optional `DATABASE_URL` helper module | Legacy/curated relational analytics for addresses, transactions, participants, tokens, pools, and trade aggregates. |
+
+Core direct chain reads must not depend on RethIndex or Postgres unless the API
+explicitly states that it is an indexed/analytics query.
+
 ## Where To Look First
 
 | Need | Start here |

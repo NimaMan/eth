@@ -49,6 +49,21 @@ pub struct ApprovalRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenTransferFromCallRecord {
+    pub tx_hash: String,
+    pub block_number: u64,
+    pub block_timestamp: u64,
+    pub tx_index: u64,
+    pub caller: String,
+    pub from_address: String,
+    pub to_address: String,
+    pub amount: f64,
+    pub token_address: String,
+    pub emitted_transfer_count: u32,
+    pub emitted_approval_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TokenTransferTracker {
     pub contract_address: String,
     pub decimals: u8,
@@ -58,6 +73,8 @@ pub struct TokenTransferTracker {
     pub weth_transfers: IndexMap<String, Vec<TokenTransferRecord>>,
     pub other_denom_transfers: IndexMap<String, Vec<TokenTransferRecord>>,
     pub approvals: Vec<ApprovalRecord>,
+    #[serde(default)]
+    pub transfer_from_calls: Vec<TokenTransferFromCallRecord>,
     pub approved_addresses: HashSet<String>,
     pub other_currencies: HashMap<String, u64>,
     pub address_tx_counter: HashMap<String, u64>,
@@ -77,6 +94,7 @@ impl TokenTransferTracker {
             weth_transfers: IndexMap::new(),
             other_denom_transfers: IndexMap::new(),
             approvals: Vec::new(),
+            transfer_from_calls: Vec::new(),
             approved_addresses: HashSet::new(),
             other_currencies: HashMap::new(),
             address_tx_counter: HashMap::new(),
@@ -90,6 +108,7 @@ impl TokenTransferTracker {
         self.add_transfers(tx)?;
         self.add_internal_eth_transfers(tx)?;
         self.add_approvals(tx);
+        self.add_transfer_from_call(tx)?;
         self.update_address_tx_counter(tx.unique_addresses.iter().copied());
         self.update_bribe_amount(tx)?;
         Ok(())
@@ -205,6 +224,45 @@ impl TokenTransferTracker {
         }
     }
 
+    pub fn add_transfer_from_call(&mut self, tx: &ProcessedTransaction) -> Result<()> {
+        let Some(to_address) = tx.to_address else {
+            return Ok(());
+        };
+        if !same_address_str(to_address, &self.contract_address) {
+            return Ok(());
+        }
+        let Some((from_address, to_address, amount)) = decode_transfer_from_call(&tx.input) else {
+            return Ok(());
+        };
+
+        let emitted_transfer_count = tx
+            .erc20_transfers
+            .iter()
+            .filter(|transfer| same_address_str(transfer.token_address, &self.contract_address))
+            .count() as u32;
+        let emitted_approval_count = tx
+            .erc20_approval_events
+            .iter()
+            .filter(|approval| same_address_str(approval.token_address, &self.contract_address))
+            .count() as u32;
+
+        let record = TokenTransferFromCallRecord {
+            tx_hash: hash_string(&tx.hash),
+            block_number: tx.block_number,
+            block_timestamp: tx.block_timestamp,
+            tx_index: tx.tx_index,
+            caller: address_string(&tx.from_address),
+            from_address: address_string(&from_address),
+            to_address: address_string(&to_address),
+            amount: scale_amount(amount, self.decimals)?,
+            token_address: self.contract_address.clone(),
+            emitted_transfer_count,
+            emitted_approval_count,
+        };
+        append_with_history_limit(&mut self.transfer_from_calls, record, self.history_limit);
+        Ok(())
+    }
+
     pub fn update_address_tx_counter(&mut self, addresses: impl IntoIterator<Item = Address>) {
         for address in addresses {
             *self
@@ -229,6 +287,27 @@ impl TokenTransferTracker {
 fn scale_amount(value: U256, decimals: u8) -> Result<f64> {
     let raw = value.to_string().parse::<f64>()?;
     Ok(raw / 10_f64.powi(i32::from(decimals)))
+}
+
+fn decode_transfer_from_call(input: &[u8]) -> Option<(Address, Address, U256)> {
+    const TRANSFER_FROM_SELECTOR: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
+
+    if input.len() < 4 + (3 * 32) || input.get(..4)? != TRANSFER_FROM_SELECTOR {
+        return None;
+    }
+    let from_word = read_abi_word(input, 0)?;
+    let to_word = read_abi_word(input, 1)?;
+    let amount_word = read_abi_word(input, 2)?;
+    Some((
+        Address::from_slice(&from_word[12..32]),
+        Address::from_slice(&to_word[12..32]),
+        U256::from_be_slice(amount_word),
+    ))
+}
+
+fn read_abi_word(input: &[u8], index: usize) -> Option<&[u8]> {
+    let start = 4 + (index * 32);
+    input.get(start..start + 32)
 }
 
 fn same_address_str(address: Address, value: &str) -> bool {
@@ -341,5 +420,42 @@ mod tests {
             1
         );
         assert_eq!(tracker.total_bribe_amount, 4.0);
+    }
+
+    #[test]
+    fn tracks_transfer_from_calldata_for_token_contract_calls() {
+        let mut tx = tx();
+        tx.input = transfer_from_input(
+            address!("2222222222222222222222222222222222222222"),
+            address!("000000000000000000000000000000000000dEaD"),
+            U256::from(2_500_000_000_000_000_000_u128),
+        );
+        tx.to_address = Some(address!("3333333333333333333333333333333333333333"));
+
+        let mut tracker =
+            TokenTransferTracker::new("0x3333333333333333333333333333333333333333", 18, 10);
+
+        tracker.update_from_processed_transaction(&tx).unwrap();
+
+        let call = tracker.transfer_from_calls.first().unwrap();
+        assert_eq!(
+            call.from_address,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert_eq!(
+            call.to_address,
+            "0x000000000000000000000000000000000000dead"
+        );
+        assert_eq!(call.amount, 2.5);
+        assert_eq!(call.emitted_transfer_count, 1);
+        assert_eq!(call.emitted_approval_count, 1);
+    }
+
+    fn transfer_from_input(from: Address, to: Address, amount: U256) -> Vec<u8> {
+        let mut input = vec![0x23, 0xb8, 0x72, 0xdd];
+        input.extend_from_slice(from.into_word().as_slice());
+        input.extend_from_slice(to.into_word().as_slice());
+        input.extend_from_slice(amount.to_be_bytes::<32>().as_slice());
+        input
     }
 }

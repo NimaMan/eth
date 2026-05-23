@@ -71,6 +71,10 @@ pub async fn run_checks(
         .await?,
     );
     checks.push(
+        risk_policy::lp_approval_deferrals_have_age_evidence_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
         risk_policy::liquidity_removal_risk_kind_source_check(pool, result_set_id, strategy)
             .await?,
     );

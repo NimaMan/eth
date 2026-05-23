@@ -5,6 +5,7 @@ use eth_pool_classification::{
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{BasePool, PoolLifecycle, UniswapV2Pool};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveTokenSnapshot {
@@ -24,6 +25,8 @@ pub struct LiveTokenSnapshot {
     pub latest_activity_timestamp: Option<u64>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
     pub hidden_mint_detected: bool,
     pub hidden_mint_block: Option<u64>,
     pub hidden_mint_tx: Option<String>,
@@ -57,6 +60,9 @@ pub struct LiveTokenPoolSnapshot {
     pub sell_tax: Option<f64>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
+    pub scam_mechanism_label: Option<String>,
+    pub scam_mechanism_evidence: Option<Value>,
     pub liquidity_removal: bool,
     pub liquidity_removal_label: Option<String>,
     pub liquidity_removal_block: Option<u64>,
@@ -99,6 +105,14 @@ impl LiveTokenSnapshot {
         let scam_label = token.scam_label().or_else(|| {
             (liquidity_removal_pool_count > 0).then(|| "liquidity_removal".to_string())
         });
+        let scam_mechanism = token
+            .scam_mechanism()
+            .or_else(|| pools.iter().find_map(|pool| pool.scam_mechanism.clone()));
+        let scam_mechanism_label = token.scam_mechanism_label().or_else(|| {
+            pools
+                .iter()
+                .find_map(|pool| pool.scam_mechanism_label.clone())
+        });
 
         Self {
             contract_address: token.contract_address.clone(),
@@ -117,6 +131,8 @@ impl LiveTokenSnapshot {
             latest_activity_timestamp: token.latest_block_timestamp,
             is_scam,
             scam_label,
+            scam_mechanism,
+            scam_mechanism_label,
             hidden_mint_detected: token.hidden_mint_detected(),
             hidden_mint_block: token.hidden_mint_block(),
             hidden_mint_tx: token.hidden_mint_tx(),
@@ -168,15 +184,32 @@ impl LiveTokenPoolSnapshot {
             classification.eligible_outcome,
             Some(EligiblePoolOutcome::LiquidityRemoval)
         );
-        let liquidity_removal = explicit_liquidity_removal || derived_liquidity_removal;
+        let inferred_mechanism = pool.inferred_scam_mechanism();
+        let scam_mechanism = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.mechanism.clone());
+        let scam_mechanism_label = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.label.clone());
+        let scam_mechanism_evidence = inferred_mechanism
+            .as_ref()
+            .map(|mechanism| mechanism.evidence.clone());
+        let liquidity_removal =
+            explicit_liquidity_removal || derived_liquidity_removal || inferred_mechanism.is_some();
         let liquidity_removal_label = if explicit_liquidity_removal {
-            pool.scam_label.clone()
+            pool.scam_label
+                .clone()
+                .or_else(|| scam_mechanism_label.clone())
         } else if derived_liquidity_removal {
-            Some("liquidity_removal (derived from reserve drop)".to_string())
+            scam_mechanism_label
+                .clone()
+                .or_else(|| Some("liquidity_removal (derived from reserve drop)".to_string()))
+        } else if inferred_mechanism.is_some() {
+            scam_mechanism_label.clone()
         } else {
             None
         };
-        let lifecycle = if derived_liquidity_removal && !explicit_liquidity_removal {
+        let lifecycle = if liquidity_removal && !explicit_liquidity_removal {
             PoolLifecycle::LiquidityRemoved
         } else {
             pool.state.lifecycle
@@ -203,10 +236,21 @@ impl LiveTokenPoolSnapshot {
             sell_tax: pool.sell_tax,
             is_scam: liquidity_removal,
             scam_label: liquidity_removal_label.clone(),
+            scam_mechanism,
+            scam_mechanism_label,
+            scam_mechanism_evidence,
             liquidity_removal,
             liquidity_removal_label,
-            liquidity_removal_block: pool.scam_block,
-            liquidity_removal_tx_hash: pool.scam_tx_hash.clone(),
+            liquidity_removal_block: pool.scam_block.or_else(|| {
+                inferred_mechanism
+                    .as_ref()
+                    .and_then(|mechanism| mechanism.block_number)
+            }),
+            liquidity_removal_tx_hash: pool.scam_tx_hash.clone().or_else(|| {
+                inferred_mechanism
+                    .as_ref()
+                    .and_then(|mechanism| mechanism.tx_hash.clone())
+            }),
             creation_block: pool.creation_block,
             latest_block_number: pool.latest_block_number,
             lifecycle: lifecycle_label(lifecycle),
@@ -314,6 +358,13 @@ mod tests {
         assert_eq!(pool.lifecycle, "LIQUIDITY_REMOVED");
         assert_eq!(snapshot.liquidity_removal_pool_count, 1);
         assert!(snapshot.is_scam);
-        assert_eq!(snapshot.scam_label.as_deref(), Some("liquidity_removal"));
+        assert_eq!(
+            snapshot.scam_label.as_deref(),
+            Some("Unknown Reserve Drain")
+        );
+        assert_eq!(
+            snapshot.scam_mechanism.as_deref(),
+            Some("unknown_reserve_drain")
+        );
     }
 }

@@ -380,9 +380,8 @@ fn add_token_control_transaction_actions(
 ) {
     for transaction in token
         .activity
-        .transactions_by_hash
-        .values()
-        .filter(|transaction| transaction.block_number == block_number)
+        .transactions_in_block(block_number)
+        .into_iter()
     {
         let Some(maker) = transaction.maker.as_deref() else {
             continue;

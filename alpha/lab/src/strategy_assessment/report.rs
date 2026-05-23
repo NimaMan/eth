@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::backtest_validation::db::{ResultSetRecord, StrategySummary};
 use crate::render;
+use crate::strategy_validation::db::{ResultSetRecord, StrategySummary};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrategyAssessmentReport {

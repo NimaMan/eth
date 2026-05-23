@@ -100,6 +100,7 @@ pub(super) fn lp_approval_risk(pool: &PoolSnapshot, message: impl Into<String>) 
         pending_tx_hash: None,
         observed_block: Some(2),
         message: message.into(),
+        evidence: None,
     }
 }
 
