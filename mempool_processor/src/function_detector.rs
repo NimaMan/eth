@@ -11,8 +11,8 @@ use crate::position_approval_call::{
     decode_position_approval_call, is_position_approval_selector, position_approval_function_name,
 };
 use crate::token_tracking::TokenTrackingCache;
+use crate::tx_router::protocol::is_known_position_manager_candidate;
 use alloy_primitives::{address, Address as AlloyAddress};
-use reth_chain_query::to_checksum_address;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,7 +43,6 @@ pub struct FunctionDetector {
     liquidity_removal: LiquidityRemovalDetector,
     trading_enabled: TradingEnabledDetector,
     swap: SwapDetector,
-    token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl FunctionDetector {
@@ -51,12 +50,11 @@ impl FunctionDetector {
         Self::new_with_cache(None)
     }
 
-    pub fn new_with_cache(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
+    pub fn new_with_cache(_token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
         Self {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
             swap: SwapDetector::new(),
-            token_cache,
         }
     }
 
@@ -273,14 +271,9 @@ impl FunctionDetector {
             return CreatorFunctionType::Other("approve".to_string());
         }
 
-        let ownership_token = to_checksum_address(&approval.ownership_token);
-
-        if let Some(ref cache) = self.token_cache {
-            if futures::executor::block_on(cache.is_liquidity_ownership_token(&ownership_token)) {
-                return CreatorFunctionType::LiquidityPoolApproval;
-            }
-        }
-
+        // Ownership-token membership is cache-backed and async. Keep function
+        // detection synchronous; the async transaction router performs the
+        // tracked LP-token lookup before routing or preserving critical work.
         CreatorFunctionType::Other("approve".to_string())
     }
 
@@ -291,12 +284,8 @@ impl FunctionDetector {
         let Some(approval) = decode_position_approval_call(tx) else {
             return CreatorFunctionType::Other("approve".to_string());
         };
-        let position_manager = to_checksum_address(&approval.position_manager());
-
-        if let Some(ref cache) = self.token_cache {
-            if futures::executor::block_on(cache.is_position_manager(&position_manager)) {
-                return CreatorFunctionType::LiquidityPoolApproval;
-            }
+        if is_known_position_manager_candidate(&approval.position_manager()) {
+            return CreatorFunctionType::LiquidityPoolApproval;
         }
 
         CreatorFunctionType::Other("approve".to_string())

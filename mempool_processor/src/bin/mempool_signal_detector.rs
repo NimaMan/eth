@@ -4,6 +4,7 @@ mod mempool_signal_detector_runtime;
 use clap::Parser;
 use eyre::{bail, Result};
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -43,7 +44,7 @@ use mempool_processor::{
     config::MempoolProcessorConfig,
     function_detector::CreatorFunctionType,
     function_detector::FunctionDetector,
-    mempool_fetcher::MempoolFetcherIPCClient,
+    mempool_fetcher::{MempoolFetcherIPCClient, MempoolTransaction},
     signal_detector::SignalManagerConfig,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     simulator::{
@@ -296,7 +297,7 @@ async fn main() -> Result<()> {
 
     // 4. Transaction router
     info!("🚦 Initializing transaction router...");
-    let tx_router = TransactionRouter::new(Some(token_cache.clone()));
+    let tx_router = Arc::new(TransactionRouter::new(Some(token_cache.clone())));
     info!("✅ Transaction router ready");
 
     // 5. Mempool Simulator (single database connection)
@@ -459,6 +460,22 @@ async fn main() -> Result<()> {
         UNRESOLVED_INTENT_RETRY_INTERVAL,
         run_dir.join("unresolved_intents.log"),
     );
+    let critical_detector_timing = DetectorLoopTiming::new();
+    spawn_detector_timing_watchdog(
+        "critical",
+        critical_detector_timing.clone(),
+        shutdown.clone(),
+    );
+    let critical_consumer_handle = spawn_critical_signal_consumer(
+        ipc_client.clone(),
+        tx_router.clone(),
+        simulation_manager.clone(),
+        metrics.clone(),
+        unresolved_intent_store.clone(),
+        critical_detector_timing.clone(),
+        shutdown.clone(),
+        args.batch_size,
+    );
 
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
@@ -466,7 +483,7 @@ async fn main() -> Result<()> {
     let start_time = Instant::now();
     let simulation_status_probe_in_flight = Arc::new(AtomicBool::new(false));
     let detector_timing = DetectorLoopTiming::new();
-    spawn_detector_timing_watchdog(detector_timing.clone(), shutdown.clone());
+    spawn_detector_timing_watchdog("normal", detector_timing.clone(), shutdown.clone());
 
     // Main processing loop
     loop {
@@ -477,29 +494,45 @@ async fn main() -> Result<()> {
 
         {
             let _stage = detector_timing.stage("drain_completed_simulation_outcomes_pre");
-            drain_completed_simulation_outcomes(
-                &mut simulation_result_rx,
-                metrics.as_ref(),
-                mempool_simulator.as_ref(),
-                simulation_error_log_path.as_ref(),
-                &unresolved_intent_store,
+            if time::timeout(
+                Duration::from_secs(2),
+                drain_completed_simulation_outcomes(
+                    &mut simulation_result_rx,
+                    metrics.as_ref(),
+                    mempool_simulator.as_ref(),
+                    simulation_error_log_path.as_ref(),
+                    &unresolved_intent_store,
+                ),
             )
-            .await;
+            .await
+            .is_err()
+            {
+                warn!("detector stage timed out lane=normal stage=drain_completed_simulation_outcomes_pre timeout_ms=2000");
+            }
         }
         {
             let _stage = detector_timing.stage("retry_cache_waiting_unresolved_intents");
-            retry_cache_waiting_unresolved_intents(
-                &unresolved_intent_store,
-                &tx_router,
-                &simulation_manager,
-                metrics.as_ref(),
+            if time::timeout(
+                Duration::from_secs(2),
+                retry_cache_waiting_unresolved_intents(
+                    &unresolved_intent_store,
+                    tx_router.as_ref(),
+                    &simulation_manager,
+                    metrics.as_ref(),
+                ),
             )
-            .await;
+            .await
+            .is_err()
+            {
+                warn!("detector stage timed out lane=normal stage=retry_cache_waiting_unresolved_intents timeout_ms=2000");
+            }
         }
 
         let new_txs = {
-            let _stage = detector_timing.stage("ipc_get_transactions_instant");
-            ipc_client.get_transactions_instant(args.batch_size).await
+            let _stage = detector_timing.stage("ipc_get_normal_transactions_instant");
+            ipc_client
+                .get_normal_transactions_instant(args.batch_size)
+                .await
         };
         let mut idle_sleep = None;
 
@@ -512,124 +545,36 @@ async fn main() -> Result<()> {
             });
         } else {
             consecutive_empty = 0;
-            let transactions_with_functions = {
-                let _stage = detector_timing.stage("function_detect_batch");
-                function_detector.detect_batch(new_txs)
-            };
-
-            for tx in transactions_with_functions {
-                metrics.total_processed.fetch_add(1, Ordering::Relaxed);
-                {
-                    let _stage = detector_timing.stage("metrics_add_detection_latency");
-                    metrics
-                        .add_detection_latency(Duration::from_nanos(tx.detection_ns))
-                        .await;
-                }
-                {
-                    let _stage = detector_timing.stage("record_pending_nonce_dependency");
-                    simulation_manager
-                        .record_pending_nonce_dependency(&tx)
-                        .await;
-                }
-                {
-                    let _stage = detector_timing.stage("record_pending_funding_dependency");
-                    simulation_manager
-                        .record_pending_funding_dependency(&tx)
-                        .await;
-                }
-
-                let classification = {
-                    let _stage = detector_timing.stage("tx_router_classify");
-                    tx_router.classify(&tx).await
-                };
-                tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
-                match &classification.category {
-                    TransactionCategory::ContractCreation { .. }
-                    | TransactionCategory::CreatorTransaction { .. } => {}
-                    _ => {
-                        if let Some((kind, reason)) =
-                            tx_router.unresolved_intent_for(&tx, &classification)
-                        {
-                            let _stage = detector_timing.stage("unresolved_intent_record");
-                            unresolved_intent_store
-                                .record(tx.clone(), kind, reason)
-                                .await;
-                        }
-                        continue;
-                    }
-                }
-
-                if !classification.requires_simulation {
-                    if let TransactionCategory::CreatorTransaction {
-                        function_type: CreatorFunctionType::LiquidityPoolApproval,
-                        ..
-                    } = &classification.category
-                    {
-                        let published = {
-                            let _stage = detector_timing.stage("detect_lp_approval");
-                            simulation_manager
-                                .detect_lp_approval(&tx, &classification.category)
-                                .await
-                        };
-                        if published {
-                            let _stage = detector_timing.stage("unresolved_intent_resolve_lp");
-                            unresolved_intent_store.resolve(&tx.hash).await;
-                        } else {
-                            let _stage = detector_timing.stage("unresolved_intent_record_lp");
-                            unresolved_intent_store
-                                .record(
-                                    tx.clone(),
-                                    UnresolvedIntentKind::LpApproval,
-                                    "LP approval enrichment failed after routing",
-                                )
-                                .await;
-                        }
-                    }
-                    continue;
-                }
-
-                let sim_request = TxSimulationJob {
-                    tx: tx.clone(),
-                    category: classification.category.clone(),
-                    priority: classification.priority,
-                    simulation_type: match &classification.category {
-                        TransactionCategory::ContractCreation { .. }
-                        | TransactionCategory::CreatorTransaction { .. } => {
-                            SimulationType::TransactionWithBuySell
-                        }
-                        _ => SimulationType::TransactionOnly,
-                    },
-                    tx_hash: parse_mempool_transaction_hash_or_zero(&tx.hash),
-                };
-
-                let submit_result = {
-                    let _stage = detector_timing.stage("simulation_submit");
-                    simulation_manager.submit(sim_request).await
-                };
-                match submit_result {
-                    Ok(()) => {
-                        metrics
-                            .simulations_submitted
-                            .fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err(e) => {
-                        metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                        warn!("Simulation submission error for {}: {}", tx.hash, e);
-                    }
-                }
-            }
+            process_signal_path_transactions(
+                new_txs,
+                &function_detector,
+                tx_router.as_ref(),
+                &simulation_manager,
+                metrics.as_ref(),
+                &unresolved_intent_store,
+                &detector_timing,
+                DetectorLane::Normal,
+            )
+            .await;
         }
 
         {
             let _stage = detector_timing.stage("drain_completed_simulation_outcomes_post");
-            drain_completed_simulation_outcomes(
-                &mut simulation_result_rx,
-                metrics.as_ref(),
-                mempool_simulator.as_ref(),
-                simulation_error_log_path.as_ref(),
-                &unresolved_intent_store,
+            if time::timeout(
+                Duration::from_secs(2),
+                drain_completed_simulation_outcomes(
+                    &mut simulation_result_rx,
+                    metrics.as_ref(),
+                    mempool_simulator.as_ref(),
+                    simulation_error_log_path.as_ref(),
+                    &unresolved_intent_store,
+                ),
             )
-            .await;
+            .await
+            .is_err()
+            {
+                warn!("detector stage timed out lane=normal stage=drain_completed_simulation_outcomes_post timeout_ms=2000");
+            }
         }
 
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
@@ -693,6 +638,17 @@ async fn main() -> Result<()> {
                 timing_snapshot.max_stage,
                 timing_snapshot.max_stage_ms,
                 timing_snapshot.slow_stage_count
+            );
+            let critical_timing_snapshot = critical_detector_timing.snapshot();
+            info!(
+                "📊 Critical detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                critical_timing_snapshot.completed_loops,
+                critical_timing_snapshot.current_stage,
+                critical_timing_snapshot.current_stage_ms,
+                critical_timing_snapshot.last_loop_ms_ago,
+                critical_timing_snapshot.max_stage,
+                critical_timing_snapshot.max_stage_ms,
+                critical_timing_snapshot.slow_stage_count
             );
             if let Some(ref recorder) = arrival_recorder {
                 let arrival_stats = recorder.stats();
@@ -792,6 +748,7 @@ async fn main() -> Result<()> {
 
     let total_runtime = start_time.elapsed();
     info!("\n🛑 Shutting down Mempool Signal Detection Service...");
+    critical_consumer_handle.abort();
     for handle in simulation_worker_handles {
         handle.abort();
     }
@@ -834,6 +791,345 @@ async fn main() -> Result<()> {
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DetectorLane {
+    Normal,
+    Critical,
+}
+
+#[derive(Clone, Copy)]
+enum DetectorStage {
+    FunctionDetectBatch,
+    MetricsAddDetectionLatency,
+    RecordPendingNonceDependency,
+    RecordPendingFundingDependency,
+    TxRouterClassify,
+    UnresolvedIntentRecord,
+    DetectLpApproval,
+    UnresolvedIntentResolveLp,
+    UnresolvedIntentRecordLp,
+    SimulationSubmit,
+}
+
+impl DetectorLane {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Critical => "critical",
+        }
+    }
+
+    fn stage(self, stage: DetectorStage) -> &'static str {
+        match (self, stage) {
+            (Self::Normal, DetectorStage::FunctionDetectBatch) => "function_detect_batch",
+            (Self::Critical, DetectorStage::FunctionDetectBatch) => {
+                "critical_function_detect_batch"
+            }
+            (Self::Normal, DetectorStage::MetricsAddDetectionLatency) => {
+                "metrics_add_detection_latency"
+            }
+            (Self::Critical, DetectorStage::MetricsAddDetectionLatency) => {
+                "critical_metrics_add_detection_latency"
+            }
+            (Self::Normal, DetectorStage::RecordPendingNonceDependency) => {
+                "record_pending_nonce_dependency"
+            }
+            (Self::Critical, DetectorStage::RecordPendingNonceDependency) => {
+                "critical_record_pending_nonce_dependency"
+            }
+            (Self::Normal, DetectorStage::RecordPendingFundingDependency) => {
+                "record_pending_funding_dependency"
+            }
+            (Self::Critical, DetectorStage::RecordPendingFundingDependency) => {
+                "critical_record_pending_funding_dependency"
+            }
+            (Self::Normal, DetectorStage::TxRouterClassify) => "tx_router_classify",
+            (Self::Critical, DetectorStage::TxRouterClassify) => "critical_tx_router_classify",
+            (Self::Normal, DetectorStage::UnresolvedIntentRecord) => "unresolved_intent_record",
+            (Self::Critical, DetectorStage::UnresolvedIntentRecord) => {
+                "critical_unresolved_intent_record"
+            }
+            (Self::Normal, DetectorStage::DetectLpApproval) => "detect_lp_approval",
+            (Self::Critical, DetectorStage::DetectLpApproval) => "critical_detect_lp_approval",
+            (Self::Normal, DetectorStage::UnresolvedIntentResolveLp) => {
+                "unresolved_intent_resolve_lp"
+            }
+            (Self::Critical, DetectorStage::UnresolvedIntentResolveLp) => {
+                "critical_unresolved_intent_resolve_lp"
+            }
+            (Self::Normal, DetectorStage::UnresolvedIntentRecordLp) => {
+                "unresolved_intent_record_lp"
+            }
+            (Self::Critical, DetectorStage::UnresolvedIntentRecordLp) => {
+                "critical_unresolved_intent_record_lp"
+            }
+            (Self::Normal, DetectorStage::SimulationSubmit) => "simulation_submit",
+            (Self::Critical, DetectorStage::SimulationSubmit) => "critical_simulation_submit",
+        }
+    }
+}
+
+fn spawn_critical_signal_consumer(
+    ipc_client: MempoolFetcherIPCClient,
+    tx_router: Arc<TransactionRouter>,
+    simulation_manager: SimulationManager,
+    metrics: Arc<ServiceMetrics>,
+    unresolved_intent_store: UnresolvedIntentStore,
+    detector_timing: DetectorLoopTiming,
+    shutdown: Arc<AtomicBool>,
+    batch_size: usize,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let function_detector = FunctionDetector::new();
+        let mut consecutive_empty = 0u64;
+
+        loop {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let new_txs = {
+                let _stage = detector_timing.stage("critical_ipc_get_transactions_instant");
+                ipc_client
+                    .get_critical_transactions_instant(batch_size)
+                    .await
+            };
+
+            let mut idle_sleep = None;
+            if new_txs.is_empty() {
+                consecutive_empty += 1;
+                idle_sleep = Some(match consecutive_empty {
+                    1..=10 => Duration::from_micros(100),
+                    11..=100 => Duration::from_millis(1),
+                    _ => Duration::from_millis(10),
+                });
+            } else {
+                consecutive_empty = 0;
+                process_signal_path_transactions(
+                    new_txs,
+                    &function_detector,
+                    tx_router.as_ref(),
+                    &simulation_manager,
+                    metrics.as_ref(),
+                    &unresolved_intent_store,
+                    &detector_timing,
+                    DetectorLane::Critical,
+                )
+                .await;
+            }
+
+            if let Some(sleep_time) = idle_sleep {
+                time::sleep(sleep_time).await;
+            }
+            detector_timing.mark_loop_completed();
+        }
+
+        info!("Critical mempool signal consumer stopped");
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_signal_path_transactions(
+    new_txs: Vec<MempoolTransaction>,
+    function_detector: &FunctionDetector,
+    tx_router: &TransactionRouter,
+    simulation_manager: &SimulationManager,
+    metrics: &ServiceMetrics,
+    unresolved_intent_store: &UnresolvedIntentStore,
+    detector_timing: &DetectorLoopTiming,
+    lane: DetectorLane,
+) {
+    let transactions_with_functions = {
+        let _stage = detector_timing.stage(lane.stage(DetectorStage::FunctionDetectBatch));
+        function_detector.detect_batch(new_txs)
+    };
+
+    for tx in transactions_with_functions {
+        metrics.total_processed.fetch_add(1, Ordering::Relaxed);
+        let _ = run_detector_stage(
+            detector_timing,
+            lane,
+            DetectorStage::MetricsAddDetectionLatency,
+            Duration::from_millis(500),
+            &tx.hash,
+            metrics.add_detection_latency(Duration::from_nanos(tx.detection_ns)),
+        )
+        .await;
+        let _ = run_detector_stage(
+            detector_timing,
+            lane,
+            DetectorStage::RecordPendingNonceDependency,
+            Duration::from_millis(500),
+            &tx.hash,
+            simulation_manager.record_pending_nonce_dependency(&tx),
+        )
+        .await;
+        let _ = run_detector_stage(
+            detector_timing,
+            lane,
+            DetectorStage::RecordPendingFundingDependency,
+            Duration::from_millis(500),
+            &tx.hash,
+            simulation_manager.record_pending_funding_dependency(&tx),
+        )
+        .await;
+
+        let Some(classification) = run_detector_stage(
+            detector_timing,
+            lane,
+            DetectorStage::TxRouterClassify,
+            Duration::from_secs(2),
+            &tx.hash,
+            tx_router.classify(&tx),
+        )
+        .await
+        else {
+            continue;
+        };
+        tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
+        match &classification.category {
+            TransactionCategory::ContractCreation { .. }
+            | TransactionCategory::CreatorTransaction { .. } => {}
+            _ => {
+                if let Some((kind, reason)) = tx_router.unresolved_intent_for(&tx, &classification)
+                {
+                    let _ = run_detector_stage(
+                        detector_timing,
+                        lane,
+                        DetectorStage::UnresolvedIntentRecord,
+                        Duration::from_millis(500),
+                        &tx.hash,
+                        unresolved_intent_store.record(tx.clone(), kind, reason),
+                    )
+                    .await;
+                } else if lane == DetectorLane::Critical {
+                    warn!(
+                        "critical lane tx classified as non-actionable hash={} category={:?}",
+                        tx.hash, classification.category
+                    );
+                }
+                continue;
+            }
+        }
+
+        if !classification.requires_simulation {
+            if let TransactionCategory::CreatorTransaction {
+                function_type: CreatorFunctionType::LiquidityPoolApproval,
+                ..
+            } = &classification.category
+            {
+                let published = run_detector_stage(
+                    detector_timing,
+                    lane,
+                    DetectorStage::DetectLpApproval,
+                    Duration::from_secs(2),
+                    &tx.hash,
+                    simulation_manager.detect_lp_approval(&tx, &classification.category),
+                )
+                .await
+                .unwrap_or(false);
+                if published {
+                    let _ = run_detector_stage(
+                        detector_timing,
+                        lane,
+                        DetectorStage::UnresolvedIntentResolveLp,
+                        Duration::from_millis(500),
+                        &tx.hash,
+                        unresolved_intent_store.resolve(&tx.hash),
+                    )
+                    .await;
+                } else {
+                    let _ = run_detector_stage(
+                        detector_timing,
+                        lane,
+                        DetectorStage::UnresolvedIntentRecordLp,
+                        Duration::from_millis(500),
+                        &tx.hash,
+                        unresolved_intent_store.record(
+                            tx.clone(),
+                            UnresolvedIntentKind::LpApproval,
+                            "LP approval enrichment failed after routing",
+                        ),
+                    )
+                    .await;
+                }
+            }
+            continue;
+        }
+
+        let sim_request = TxSimulationJob {
+            tx: tx.clone(),
+            category: classification.category.clone(),
+            priority: classification.priority,
+            simulation_type: match &classification.category {
+                TransactionCategory::ContractCreation { .. }
+                | TransactionCategory::CreatorTransaction { .. } => {
+                    SimulationType::TransactionWithBuySell
+                }
+                _ => SimulationType::TransactionOnly,
+            },
+            tx_hash: parse_mempool_transaction_hash_or_zero(&tx.hash),
+        };
+
+        let submit_result = run_detector_stage(
+            detector_timing,
+            lane,
+            DetectorStage::SimulationSubmit,
+            Duration::from_secs(1),
+            &tx.hash,
+            simulation_manager.submit(sim_request),
+        )
+        .await;
+        match submit_result {
+            Some(Ok(())) => {
+                metrics
+                    .simulations_submitted
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            Some(Err(e)) => {
+                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+                warn!(
+                    "{} simulation submission error for {}: {}",
+                    lane.label(),
+                    tx.hash,
+                    e
+                );
+            }
+            None => {
+                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+async fn run_detector_stage<T, F>(
+    detector_timing: &DetectorLoopTiming,
+    lane: DetectorLane,
+    stage: DetectorStage,
+    timeout: Duration,
+    tx_hash: &str,
+    future: F,
+) -> Option<T>
+where
+    F: Future<Output = T>,
+{
+    let stage_name = lane.stage(stage);
+    let _stage = detector_timing.stage(stage_name);
+    match time::timeout(timeout, future).await {
+        Ok(value) => Some(value),
+        Err(_) => {
+            warn!(
+                "detector stage timed out lane={} stage={} tx={} timeout_ms={}",
+                lane.label(),
+                stage_name,
+                tx_hash,
+                timeout.as_millis()
+            );
+            None
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -944,14 +1240,19 @@ impl Drop for DetectorStageGuard {
     }
 }
 
-fn spawn_detector_timing_watchdog(timing: DetectorLoopTiming, shutdown: Arc<AtomicBool>) {
+fn spawn_detector_timing_watchdog(
+    lane: &'static str,
+    timing: DetectorLoopTiming,
+    shutdown: Arc<AtomicBool>,
+) {
     tokio::spawn(async move {
         while !shutdown.load(Ordering::Relaxed) {
             time::sleep(Duration::from_secs(5)).await;
             let snapshot = timing.snapshot();
             if snapshot.current_stage != "idle" && snapshot.current_stage_ms >= 5_000 {
                 warn!(
-                    "detector consumer stage appears stuck stage={} elapsed_ms={} loops={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                    "detector consumer stage appears stuck lane={} stage={} elapsed_ms={} loops={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                    lane,
                     snapshot.current_stage,
                     snapshot.current_stage_ms,
                     snapshot.completed_loops,

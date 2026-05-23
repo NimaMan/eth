@@ -300,18 +300,21 @@ Changes now in the detector:
   still sending every tx to the arrival observer
 - the critical lane now only admits tracked LP approvals, tracked position
   approvals, and tracked liquidity removals
-- the main detector loop records the current stage and logs a watchdog warning
-  if it remains in one stage for more than five seconds
+- critical transactions are drained by an independent urgent consumer instead
+  of sharing the normal detector loop
+- normal and critical detector loops record their current stage and log a
+  watchdog warning if either remains in one stage for more than five seconds
+- signal-path awaits for routing, dependency recording, LP approval publishing,
+  unresolved-intent writes, and simulation submission are bounded by short
+  stage timeouts
+- synchronous function detection no longer performs blocking async cache reads
 
 The next failure should identify the stuck stage directly in
 `signal_detector.log`. Proper fixes should then target that stage with a hard
 timeout or isolation. The likely architectural fixes are:
 
-- make critical signals an independent consumer path, not only a higher
-  priority input queue behind the same detector loop
 - put hard timeouts around publisher, routing, unresolved-intent retry,
   simulation-result drain, dependency recording, and interval-report awaits
-- remove blocking `block_on` cache reads from function detection
 - keep ZMQ/log publishing non-blocking or time bounded
 - fail the process or mark it unhealthy when the watchdog sees a stuck stage,
   so the supervisor restarts instead of letting the queue silently fill

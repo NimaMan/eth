@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use super::MempoolTransaction;
 
+#[derive(Clone)]
 pub struct MempoolFetcherIPCClient {
     socket_path: String,
     tx_sender: mpsc::Sender<MempoolTransaction>,
@@ -553,21 +554,37 @@ impl MempoolFetcherIPCClient {
 
     /// Get transactions instantly without any waiting - for ultra-low latency
     pub async fn get_transactions_instant(&self, max: usize) -> Vec<MempoolTransaction> {
-        let mut txs = Vec::with_capacity(max);
+        let mut txs = self.get_critical_transactions_instant(max).await;
+        if txs.len() < max {
+            txs.extend(self.get_normal_transactions_instant(max - txs.len()).await);
+        }
+        txs
+    }
 
-        {
-            let mut receiver = self.critical_tx_receiver.lock().await;
-            while txs.len() < max {
-                match receiver.try_recv() {
-                    Ok(tx) => {
-                        txs.push(tx);
-                        self.critical_queue_size.fetch_sub(1, Ordering::Relaxed);
-                    }
-                    Err(_) => break,
+    /// Drain only critical-lane transactions without waiting. The live detector
+    /// uses this from an independent urgent consumer so LP approvals/removals
+    /// are not blocked behind the normal signal loop.
+    pub async fn get_critical_transactions_instant(&self, max: usize) -> Vec<MempoolTransaction> {
+        let mut txs = Vec::with_capacity(max);
+        let mut receiver = self.critical_tx_receiver.lock().await;
+        while txs.len() < max {
+            match receiver.try_recv() {
+                Ok(tx) => {
+                    txs.push(tx);
+                    self.critical_queue_size.fetch_sub(1, Ordering::Relaxed);
                 }
+                Err(_) => break,
             }
         }
+        drop(receiver);
+        self.refresh_queue_stats().await;
+        txs
+    }
 
+    /// Drain only normal-lane transactions without waiting. This deliberately
+    /// leaves the critical lane for the dedicated urgent consumer.
+    pub async fn get_normal_transactions_instant(&self, max: usize) -> Vec<MempoolTransaction> {
+        let mut txs = Vec::with_capacity(max);
         let mut receiver = self.tx_receiver.lock().await;
 
         // No waiting - just drain what's available immediately
@@ -580,15 +597,18 @@ impl MempoolFetcherIPCClient {
                 Err(_) => break,
             }
         }
+        drop(receiver);
+        self.refresh_queue_stats().await;
+        txs
+    }
 
+    async fn refresh_queue_stats(&self) {
         // Update stats with current queue size
         let normal_queue_size = self.queue_size.load(Ordering::Relaxed);
         let critical_queue_size = self.critical_queue_size.load(Ordering::Relaxed);
         let mut stats = self.stats.write().await;
         stats.queue_size = normal_queue_size + critical_queue_size;
         stats.critical_queue_size = critical_queue_size;
-
-        txs
     }
 
     pub async fn get_stats(&self) -> Stats {
@@ -1040,6 +1060,42 @@ mod tests {
         assert_eq!(txs.len(), 2);
         assert_eq!(txs[0].hash, "critical");
         assert_eq!(txs[1].hash, "normal");
+
+        let stats = client.get_stats().await;
+        assert_eq!(stats.queue_size, 0);
+        assert_eq!(stats.critical_queue_size, 0);
+    }
+
+    #[tokio::test]
+    async fn split_instant_drains_keep_lanes_isolated() {
+        let client = MempoolFetcherIPCClient::new(Some("/tmp/not-used.sock")).unwrap();
+        let mut normal = tx(
+            Some(address!("1111111111111111111111111111111111111111")),
+            Vec::new(),
+        );
+        normal.hash = "normal".to_string();
+        let mut critical = tx(
+            Some(address!("7a250d5630B4cF539739dF2C5dAcb4c659F2488D")),
+            remove_liquidity_eth_calldata(address!("2222222222222222222222222222222222222222")),
+        );
+        critical.hash = "critical".to_string();
+
+        client.tx_sender.try_send(normal).unwrap();
+        client.queue_size.fetch_add(1, Ordering::Relaxed);
+        client.critical_tx_sender.try_send(critical).unwrap();
+        client.critical_queue_size.fetch_add(1, Ordering::Relaxed);
+
+        let critical_txs = client.get_critical_transactions_instant(10).await;
+        assert_eq!(critical_txs.len(), 1);
+        assert_eq!(critical_txs[0].hash, "critical");
+
+        let stats = client.get_stats().await;
+        assert_eq!(stats.queue_size, 1);
+        assert_eq!(stats.critical_queue_size, 0);
+
+        let normal_txs = client.get_normal_transactions_instant(10).await;
+        assert_eq!(normal_txs.len(), 1);
+        assert_eq!(normal_txs[0].hash, "normal");
 
         let stats = client.get_stats().await;
         assert_eq!(stats.queue_size, 0);
