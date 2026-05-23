@@ -188,6 +188,7 @@ impl PoolWire {
             price_denom_per_token: self.price.map(decimal_from_f64),
             initial_price_denom_per_token: self.initial_price.map(decimal_from_f64),
             price_ratio_to_initial: self.price_ratio_to_initial.map(decimal_from_f64),
+            creation_block: self.creation_block.filter(|block| *block > 0),
             token_decimals: None,
             fee_tier: self.fee_tier,
             uniswap_v4: self.uniswap_v4_pool_key()?,

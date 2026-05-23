@@ -6,6 +6,25 @@ pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-strategy-set";
 #[derive(Clone, Debug, Default)]
 pub struct LiveStrategySpecOptions;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveEntryInitPolicySpec {
+    pub max_age_blocks: Option<u64>,
+    pub require_creation_block: bool,
+    pub max_price_ratio_to_initial: Option<String>,
+    pub allow_missing_price_ratio: bool,
+}
+
+impl Default for LiveEntryInitPolicySpec {
+    fn default() -> Self {
+        Self {
+            max_age_blocks: None,
+            require_creation_block: false,
+            max_price_ratio_to_initial: None,
+            allow_missing_price_ratio: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LiveStrategySpec {
     pub strategy_name: String,
@@ -19,7 +38,7 @@ pub struct LiveStrategySpec {
     pub allowed_protocols: Vec<String>,
     pub block_entry_on_lp_approval: bool,
     pub lp_approval_gate_min_pct: Option<String>,
-    pub max_entry_price_ratio_to_initial: Option<String>,
+    pub entry_init_policy: LiveEntryInitPolicySpec,
     pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
     pub min_sell_pool_denom_reserve: Option<String>,
     pub buy_wei: String,
@@ -45,7 +64,7 @@ pub fn default_strategy_spec(_options: &LiveStrategySpecOptions) -> LiveStrategy
         allowed_protocols: Vec::new(),
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
-        max_entry_price_ratio_to_initial: None,
+        entry_init_policy: LiveEntryInitPolicySpec::default(),
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
         min_sell_pool_denom_reserve: None,
         buy_wei: "10000000000000000".to_string(),

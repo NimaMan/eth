@@ -154,10 +154,23 @@ fn parse_gas_rank_profile(value: &str) -> Result<GasRankProfile> {
         .replace(['-', ' '], "_")
         .as_str()
     {
-        "minimum" => Ok(GasRankProfile::Minimum),
-        "balanced" => Ok(GasRankProfile::Balanced),
-        "aggressive" => Ok(GasRankProfile::Aggressive),
-        "urgent" => Ok(GasRankProfile::Urgent),
+        "normal" => Ok(GasRankProfile::Normal),
+        "p50" => Ok(GasRankProfile::P50),
+        "p55" => Ok(GasRankProfile::P55),
+        "p60" => Ok(GasRankProfile::P60),
+        "p65" => Ok(GasRankProfile::P65),
+        "p70" => Ok(GasRankProfile::P70),
+        "p75" => Ok(GasRankProfile::P75),
+        "p77" => Ok(GasRankProfile::P77),
+        "p85" => Ok(GasRankProfile::P85),
+        "p88" => Ok(GasRankProfile::P88),
+        "p90" => Ok(GasRankProfile::P90),
+        "p92" => Ok(GasRankProfile::P92),
+        "p94" => Ok(GasRankProfile::P94),
+        "p95" => Ok(GasRankProfile::P95),
+        "p96" => Ok(GasRankProfile::P96),
+        "p97" => Ok(GasRankProfile::P97),
+        "p99" => Ok(GasRankProfile::P99),
         other => Err(eyre!("unknown gas-rank profile {other:?}")),
     }
 }

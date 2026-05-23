@@ -482,8 +482,8 @@ mod tests {
                         "action": "entry_buy",
                         "signal": "entry.buy_eligible_pool_once",
                         "status": "selected",
-                        "profiles": ["balanced", "minimum"],
-                        "selected_profile": "balanced",
+                        "profiles": ["p50", "normal"],
+                        "selected_profile": "p50",
                         "gas_rank_source": "chain_server_gas_rank",
                         "guard": "entry_estimated_gas_fee_cap",
                         "estimated_max_cost_eth": "0.0021",
@@ -545,6 +545,7 @@ mod tests {
                 price_denom_per_token: Some(DecimalAmount::new(1, 2)),
                 initial_price_denom_per_token: Some(DecimalAmount::new(1, 2)),
                 price_ratio_to_initial: Some(DecimalAmount::from(1)),
+                creation_block: Some(25_128_246),
                 token_decimals: Some(18),
                 fee_tier: None,
                 uniswap_v4: None,
@@ -615,10 +616,10 @@ mod tests {
         assert_eq!(report.block_number, Some(25_128_246));
         let evidence = report.mined_evidence.expect("submitted evidence");
         assert_eq!(evidence.gas_policy_action.as_deref(), Some("entry_buy"));
-        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("balanced"));
+        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("p50"));
         assert_eq!(
             evidence.gas_policy_profiles.as_deref(),
-            Some(["balanced".to_string(), "minimum".to_string()].as_slice())
+            Some(["p50".to_string(), "normal".to_string()].as_slice())
         );
     }
 

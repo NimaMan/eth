@@ -32,9 +32,12 @@ use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
 };
-use eth_strategies::shared_rules::live::{
-    default_strategy_spec, observation_strategy_name, strategy_set_specs, LiveStrategySpec,
-    LiveStrategySpecOptions, STRATEGY_RUNTIME,
+use eth_strategies::shared_rules::{
+    entry::init_policy::EntryInitPolicyConfig,
+    live::{
+        default_strategy_spec, observation_strategy_name, strategy_set_specs, LiveStrategySpec,
+        LiveStrategySpecOptions, STRATEGY_RUNTIME,
+    },
 };
 use eth_strategies::{
     Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
@@ -553,10 +556,17 @@ async fn run(
             .lp_approval_gate_min_pct
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
-        let max_entry_price_ratio_to_initial = spec
-            .max_entry_price_ratio_to_initial
+        let entry_init_max_price_ratio_to_initial = spec
+            .entry_init_policy
+            .max_price_ratio_to_initial
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok());
+        let entry_init_policy = EntryInitPolicyConfig {
+            max_age_blocks: spec.entry_init_policy.max_age_blocks,
+            require_creation_block: spec.entry_init_policy.require_creation_block,
+            max_price_ratio_to_initial: entry_init_max_price_ratio_to_initial,
+            allow_missing_price_ratio: spec.entry_init_policy.allow_missing_price_ratio,
+        };
         let min_sell_pool_denom_reserve = spec
             .min_sell_pool_denom_reserve
             .as_deref()
@@ -586,7 +596,7 @@ async fn run(
             allowed_protocols: spec.allowed_protocols.clone(),
             block_entry_on_lp_approval: spec.block_entry_on_lp_approval,
             lp_approval_gate_min_pct,
-            max_entry_price_ratio_to_initial,
+            entry_init_policy,
             defer_buy_confirm_block_lp_approval_to_max_hold: spec
                 .defer_buy_confirm_block_lp_approval_to_max_hold,
             ..SnipeAllConfig::default()

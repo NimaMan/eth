@@ -445,6 +445,20 @@ impl Strategy for SnipeAllStrategy {
             _ => {}
         }
 
+        let init_evidence = shared_rules::entry::init_policy::EntryInitEvidence::from_pool_at_block(
+            pool,
+            ctx.market.block_number,
+        );
+        match shared_rules::entry::init_policy::evaluate(
+            &init_evidence,
+            &self.config.entry_init_policy,
+        ) {
+            RuleDecision::Hold { rule, reason } => {
+                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+            }
+            _ => {}
+        }
+
         if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
             return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
         }
@@ -475,16 +489,6 @@ impl Strategy for SnipeAllStrategy {
                     return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
                 }
                 _ => {}
-            }
-        }
-        if let (Some(max_ratio), Some(price_ratio)) = (
-            self.config.max_entry_price_ratio_to_initial,
-            pool.price_ratio_to_initial,
-        ) {
-            if price_ratio > max_ratio {
-                return Ok(StrategyDecision::hold(
-                    "entry.price_to_initial_ratio_gt_max",
-                ));
             }
         }
         if !self.config.allowed_protocols.is_empty() {

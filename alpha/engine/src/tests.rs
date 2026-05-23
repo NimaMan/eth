@@ -1,6 +1,5 @@
 use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
-    Result, Strategy,
     amount::{Amount, DecimalAmount},
     execution::{ExecutionReport, ExecutionStatus},
     ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
@@ -9,10 +8,11 @@ use eth_alpha_core::{
     position::{Position, PositionKey, PositionState},
     risk::{RiskKind, RiskSeverity},
     strategy::{StrategyContext, StrategyDecision},
+    Result, Strategy,
 };
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 use super::*;
@@ -458,6 +458,7 @@ fn pool_snapshot(token: Address, pool_address: Address, block_number: u64) -> Po
         price_denom_per_token: None,
         initial_price_denom_per_token: None,
         price_ratio_to_initial: None,
+        creation_block: Some(block_number),
         token_decimals: None,
         fee_tier: None,
         uniswap_v4: None,
@@ -732,6 +733,7 @@ async fn engine_executes_approved_strategy_order() {
                 price_denom_per_token: None,
                 initial_price_denom_per_token: None,
                 price_ratio_to_initial: None,
+                creation_block: Some(1),
                 token_decimals: None,
                 fee_tier: None,
                 uniswap_v4: None,
@@ -1183,6 +1185,7 @@ async fn critical_risk_policy_rejects_matching_order() {
                 price_denom_per_token: None,
                 initial_price_denom_per_token: None,
                 price_ratio_to_initial: None,
+                creation_block: Some(1),
                 token_decimals: None,
                 fee_tier: None,
                 uniswap_v4: None,

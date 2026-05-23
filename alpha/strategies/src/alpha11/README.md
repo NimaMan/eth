@@ -28,11 +28,9 @@ Kartal or signer policy rejection is still useful gate evidence when it records
 the exact rejected request and journal reason; it does not count as a passed
 mined-validation trade.
 
-The live-real deploy path adds an entry-only `price / initial price <= 1.5` cap
-as runtime config. We intentionally do not encode that cap in the visible
-strategy name; the cap must instead be visible in README/front-end readiness
-copy and in the persisted strategy config field
-`max_entry_price_ratio_to_initial`.
+The live-real deploy path carries the shared entry init policy explicitly in
+strategy config. The first concrete Gate 2 setting rejects entries when pool age
+is above `5` blocks or `price / initial price` is above `2`.
 
 Shared Alpha11 defaults:
 
@@ -51,6 +49,8 @@ Shared Alpha11 defaults:
   quote pools.
 - `pool-update-block-hold15`: force exit after 15 distinct pool-update blocks
   while the position is open.
+- `entry_init_policy`: only enter pools with age `<= 5` blocks and
+  `price / initial price <= 2` when that evidence is available.
 - Initial entry bankroll is `0.225 ETH`; buys consume bankroll, confirmed sells
   replenish it, and realized profit can be redeployed.
 
@@ -59,16 +59,10 @@ Shared Alpha11 defaults:
 Alpha11 entries use all reusable `SnipeAllStrategy` entry checks plus the
 Alpha11-owned launch defaults above.
 
-The price-to-initial gate is not part of the live-backtest reference. It is a
-live-real deployment default for the candidate we are trying to deploy:
-
-- `price_ratio_to_initial > 1.5`: do not buy.
-- `price_ratio_to_initial == 1.5`: buy is still allowed if all other gates pass.
-- missing `price_ratio_to_initial`: buy is still allowed if all other gates pass.
-
-This gate uses the pool snapshot's current price divided by the first valid
-tracked pool price. It is an entry-only filter; it does not force sells for
-already-open positions.
+Gate 2 is the shared init policy for already-active pools. The initial Alpha11
+deployment threshold is deliberately tight while Risk Atlas continues to
+compare pool age at entry, current price/initial, liquidity, and realized
+outcomes.
 
 ## Risk Signal Sources
 

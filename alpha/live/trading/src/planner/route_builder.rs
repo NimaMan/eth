@@ -8,33 +8,26 @@ use serde::{Deserialize, Serialize};
 use tx_simulator::tx_builders::{
     build_sell_swap_with_min_out, build_uniswap_v2_trading_vault_buy_v2_exact_eth_for_tokens,
     build_uniswap_v2_trading_vault_emergency_sell_v2_exact_tokens_for_eth, AmmSwapRoute,
-    DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
 };
 
 use crate::PreparedSellRoute;
 
 use super::{LivePrioritySellPlannerError, LivePrioritySellPlannerInput};
 
-const DEFAULT_UNISWAP_V2_SELL_GAS_LIMIT: u64 = 500_000;
-const DEFAULT_UNISWAP_V2_ESTIMATED_SELL_GAS_USED: u64 = 180_000;
-const DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED: u64 = 155_000;
-const DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT: u64 = 300_000;
-const DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED: u64 = 130_000;
+pub const UNISWAP_V2_DIRECT_SELL_GAS_LIMIT: u64 = 500_000;
+pub const UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT: u64 = 300_000;
+pub const UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT: u64 = 300_000;
 const WETH_ADDRESS: Address =
     alloy_primitives::address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RouteBuildRequest {
     pub gas_limit: u64,
-    pub estimated_gas_used: u64,
 }
 
-impl Default for RouteBuildRequest {
-    fn default() -> Self {
-        Self {
-            gas_limit: DEFAULT_UNISWAP_V2_SELL_GAS_LIMIT,
-            estimated_gas_used: DEFAULT_UNISWAP_V2_ESTIMATED_SELL_GAS_USED,
-        }
+impl RouteBuildRequest {
+    pub fn new(gas_limit: u64) -> Self {
+        Self { gas_limit }
     }
 }
 
@@ -60,13 +53,10 @@ impl UniswapV2TradingVaultBuyRouteBuilder {
         }
     }
 
-    pub fn with_default_gas(vault_address: Address) -> Self {
+    pub fn with_gas_limit(vault_address: Address, gas_limit: u64) -> Self {
         Self {
             vault_address,
-            request: RouteBuildRequest {
-                gas_limit: DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
-                estimated_gas_used: DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED,
-            },
+            request: RouteBuildRequest::new(gas_limit),
         }
     }
 
@@ -91,21 +81,24 @@ impl UniswapV2TradingVaultBuyRouteBuilder {
         let data = unsigned.data.ok_or_else(|| {
             LivePrioritySellPlannerError::Route("tx builder returned no calldata".to_string())
         })?;
-        let gas_limit = self.request.gas_limit.max(unsigned.gas.unwrap_or(0));
+        let gas_limit = require_explicit_gas_limit(&self.request)?;
+        let value_wei = unsigned.value.ok_or_else(|| {
+            LivePrioritySellPlannerError::Route("tx builder returned no buy value".to_string())
+        })?;
 
         Ok(PreparedSellRoute {
             protocol: "uniswap_v2_trading_vault".to_string(),
             router_address: to.to_string(),
             calldata: format!("0x{}", hex::encode(data.as_ref())),
-            value_wei: unsigned.value.unwrap_or(U256::ZERO).to_string(),
+            value_wei: value_wei.to_string(),
             gas_limit,
-            estimated_gas_used: self.request.estimated_gas_used.min(gas_limit),
+            estimated_gas_used: None,
             max_slippage_bps: Some(input.intent.max_slippage_bps),
         })
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct UniswapV2SellRouteBuilder {
     request: RouteBuildRequest,
 }
@@ -142,15 +135,16 @@ impl SellRouteBuilder for UniswapV2SellRouteBuilder {
         let data = unsigned.data.ok_or_else(|| {
             LivePrioritySellPlannerError::Route("tx builder returned no calldata".to_string())
         })?;
-        let gas_limit = unsigned.gas.unwrap_or(self.request.gas_limit);
+        let gas_limit = require_explicit_gas_limit(&self.request)?;
+        let value_wei = require_sell_zero_value(unsigned.value, "direct Uniswap V2 sell")?;
 
         Ok(PreparedSellRoute {
             protocol: input.pool.protocol.label().to_string(),
             router_address: to.to_string(),
             calldata: format!("0x{}", hex::encode(data.as_ref())),
-            value_wei: unsigned.value.unwrap_or(U256::ZERO).to_string(),
+            value_wei: value_wei.to_string(),
             gas_limit,
-            estimated_gas_used: self.request.estimated_gas_used.min(gas_limit),
+            estimated_gas_used: None,
             max_slippage_bps: Some(input.intent.max_slippage_bps),
         })
     }
@@ -170,13 +164,10 @@ impl UniswapV2TradingVaultSellRouteBuilder {
         }
     }
 
-    pub fn with_default_gas(vault_address: Address) -> Self {
+    pub fn with_gas_limit(vault_address: Address, gas_limit: u64) -> Self {
         Self {
             vault_address,
-            request: RouteBuildRequest {
-                gas_limit: DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
-                estimated_gas_used: DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED,
-            },
+            request: RouteBuildRequest::new(gas_limit),
         }
     }
 }
@@ -204,17 +195,42 @@ impl SellRouteBuilder for UniswapV2TradingVaultSellRouteBuilder {
         let data = unsigned.data.ok_or_else(|| {
             LivePrioritySellPlannerError::Route("tx builder returned no calldata".to_string())
         })?;
-        let gas_limit = self.request.gas_limit.max(unsigned.gas.unwrap_or(0));
+        let gas_limit = require_explicit_gas_limit(&self.request)?;
+        let value_wei = require_sell_zero_value(unsigned.value, "V2 trading vault sell")?;
 
         Ok(PreparedSellRoute {
             protocol: "uniswap_v2_trading_vault".to_string(),
             router_address: to.to_string(),
             calldata: format!("0x{}", hex::encode(data.as_ref())),
-            value_wei: unsigned.value.unwrap_or(U256::ZERO).to_string(),
+            value_wei: value_wei.to_string(),
             gas_limit,
-            estimated_gas_used: self.request.estimated_gas_used.min(gas_limit),
+            estimated_gas_used: None,
             max_slippage_bps: Some(input.intent.max_slippage_bps),
         })
+    }
+}
+
+fn require_explicit_gas_limit(
+    request: &RouteBuildRequest,
+) -> Result<u64, LivePrioritySellPlannerError> {
+    if request.gas_limit == 0 {
+        return Err(LivePrioritySellPlannerError::Route(
+            "route gas_limit must be explicit and greater than zero".to_string(),
+        ));
+    }
+    Ok(request.gas_limit)
+}
+
+fn require_sell_zero_value(
+    value: Option<U256>,
+    route_name: &str,
+) -> Result<U256, LivePrioritySellPlannerError> {
+    match value {
+        None => Ok(U256::ZERO),
+        Some(value) if value == U256::ZERO => Ok(value),
+        Some(value) => Err(LivePrioritySellPlannerError::Route(format!(
+            "{route_name} tx unexpectedly includes ETH value {value}"
+        ))),
     }
 }
 
@@ -456,6 +472,7 @@ mod tests {
                 price_denom_per_token: Some(DecimalAmount::new(1, 1)),
                 initial_price_denom_per_token: Some(DecimalAmount::new(1, 1)),
                 price_ratio_to_initial: Some(DecimalAmount::from(1)),
+                creation_block: Some(25_128_246),
                 token_decimals: Some(18),
                 fee_tier: None,
                 uniswap_v4: None,
@@ -476,9 +493,12 @@ mod tests {
         input.intent.side = OrderSide::Buy;
         input.intent.amount.raw = U256::from(10_000_000_000_000_000u128);
 
-        let route = UniswapV2TradingVaultBuyRouteBuilder::with_default_gas(vault)
-            .build_route(&input, U256::from(123u64))
-            .unwrap();
+        let route = UniswapV2TradingVaultBuyRouteBuilder::with_gas_limit(
+            vault,
+            UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
+        )
+        .build_route(&input, U256::from(123u64))
+        .unwrap();
 
         assert_eq!(route.protocol, "uniswap_v2_trading_vault");
         assert!(route
@@ -486,23 +506,20 @@ mod tests {
             .eq_ignore_ascii_case(&vault.to_string()));
         assert!(route.calldata.starts_with("0x8a62666c"));
         assert_eq!(route.value_wei, "10000000000000000");
-        assert_eq!(
-            route.gas_limit,
-            DEFAULT_UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT
-        );
-        assert_eq!(
-            route.estimated_gas_used,
-            DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_BUY_GAS_USED
-        );
+        assert_eq!(route.gas_limit, UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT);
+        assert_eq!(route.estimated_gas_used, None);
     }
 
     #[tokio::test]
     async fn uniswap_v2_trading_vault_route_targets_vault_and_internal_sell_selector() {
         let vault = Address::with_last_byte(0xaa);
-        let route = UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault)
-            .build_route(&input())
-            .await
-            .unwrap();
+        let route = UniswapV2TradingVaultSellRouteBuilder::with_gas_limit(
+            vault,
+            UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
+        )
+        .build_route(&input())
+        .await
+        .unwrap();
 
         assert_eq!(route.protocol, "uniswap_v2_trading_vault");
         assert!(route
@@ -510,13 +527,7 @@ mod tests {
             .eq_ignore_ascii_case(&vault.to_string()));
         assert!(route.calldata.starts_with("0x5f413d10"));
         assert_eq!(route.value_wei, "0");
-        assert_eq!(
-            route.gas_limit,
-            DEFAULT_UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT
-        );
-        assert_eq!(
-            route.estimated_gas_used,
-            DEFAULT_UNISWAP_V2_TRADING_VAULT_ESTIMATED_SELL_GAS_USED
-        );
+        assert_eq!(route.gas_limit, UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT);
+        assert_eq!(route.estimated_gas_used, None);
     }
 }

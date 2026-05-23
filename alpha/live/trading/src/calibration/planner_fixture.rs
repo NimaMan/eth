@@ -13,9 +13,10 @@ use crate::{
     FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan, LiveDirectRawTransactionRequest,
     LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
     LivePrioritySellPlannerInput, PlannerTxContext, PreSubmitSimulation, PrioritySellPlanner,
-    PrioritySellPlannerOutcome, RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
-    UniswapV2SellRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
-    VaultInternalAllowanceChecker,
+    PrioritySellPlannerOutcome, RankedFeeCandidate, RouteBuildRequest, StaticAllowanceChecker,
+    TxPrepRequestContext, UniswapV2SellRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
+    VaultInternalAllowanceChecker, UNISWAP_V2_DIRECT_SELL_GAS_LIMIT,
+    UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
 };
 
 const DEFAULT_BLOCK: u64 = 25_128_246;
@@ -67,7 +68,9 @@ pub async fn build_planner_calibration_request(
         PlannerCalibrationRoute::DirectUniswapV2 => {
             let planner = LivePrioritySellPlanner::new(
                 planner_config(),
-                UniswapV2SellRouteBuilder::default(),
+                UniswapV2SellRouteBuilder::new(RouteBuildRequest::new(
+                    UNISWAP_V2_DIRECT_SELL_GAS_LIMIT,
+                )),
                 simulator(),
                 gas_rank(),
                 StaticAllowanceChecker::pre_approved(),
@@ -77,7 +80,10 @@ pub async fn build_planner_calibration_request(
         PlannerCalibrationRoute::TradingVaultUniswapV2 => {
             let planner = LivePrioritySellPlanner::new(
                 planner_config(),
-                UniswapV2TradingVaultSellRouteBuilder::with_default_gas(config.vault_address),
+                UniswapV2TradingVaultSellRouteBuilder::with_gas_limit(
+                    config.vault_address,
+                    UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
+                ),
                 simulator(),
                 gas_rank(),
                 VaultInternalAllowanceChecker,
@@ -192,6 +198,7 @@ fn pool(token: Address, pool_address: PoolAddress) -> PoolSnapshot {
         price_denom_per_token: Some(DecimalAmount::new(1, 1)),
         initial_price_denom_per_token: Some(DecimalAmount::new(1, 1)),
         price_ratio_to_initial: Some(DecimalAmount::from(1)),
+        creation_block: Some(DEFAULT_BLOCK),
         token_decimals: Some(18),
         fee_tier: None,
         uniswap_v4: None,
@@ -220,15 +227,26 @@ fn simulator() -> FixedPreSubmitSimulator {
 fn gas_rank() -> FixedGasRankProvider {
     FixedGasRankProvider::new(GasRankPlan {
         predicted_base_fee_gwei: DecimalAmount::from(10),
-        candidates: vec![RankedFeeCandidate {
-            label: "aggressive".to_string(),
-            priority_fee_gwei: DecimalAmount::from(40),
-            max_fee_per_gas_gwei: DecimalAmount::from(50),
-            rank_position_p50: Some(10),
-            gas_before_p50: Some(450_000),
-            likely_fits_at_p50: Some(true),
-            source: Some("calibration_fixed_gas_rank".to_string()),
-        }],
+        candidates: vec![
+            RankedFeeCandidate {
+                label: "p50".to_string(),
+                priority_fee_gwei: DecimalAmount::from(2),
+                max_fee_per_gas_gwei: DecimalAmount::from(12),
+                rank_position_p50: Some(25),
+                gas_before_p50: Some(900_000),
+                likely_fits_at_p50: Some(true),
+                source: Some("calibration_fixed_gas_rank".to_string()),
+            },
+            RankedFeeCandidate {
+                label: "p90".to_string(),
+                priority_fee_gwei: DecimalAmount::from(30),
+                max_fee_per_gas_gwei: DecimalAmount::from(40),
+                rank_position_p50: Some(10),
+                gas_before_p50: Some(450_000),
+                likely_fits_at_p50: Some(true),
+                source: Some("calibration_fixed_gas_rank".to_string()),
+            },
+        ],
     })
 }
 

@@ -11,6 +11,6 @@ pub mod strategy_sets;
 pub use registry::strategy_set_specs;
 
 pub use spec::{
-    default_strategy_spec, observation_strategy_name, LiveStrategySpec, LiveStrategySpecOptions,
-    STRATEGY_RUNTIME,
+    default_strategy_spec, observation_strategy_name, LiveEntryInitPolicySpec, LiveStrategySpec,
+    LiveStrategySpecOptions, STRATEGY_RUNTIME,
 };

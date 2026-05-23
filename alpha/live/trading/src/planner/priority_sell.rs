@@ -7,9 +7,9 @@ use eth_alpha_core::{
 use serde_json::{json, Value};
 
 use crate::{
-    derive_min_output_from_expected_output, prepare_priority_sell, LpSignalSource,
-    PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep,
-    StrategyGasRankDefaults, TxPrepOutcome,
+    derive_min_output_from_expected_output, prepare_priority_sell, GasEstimateConfig,
+    LpSignalSource, PreSubmitSimulation, PreparedSellRoute, PrioritySellPlan, PrioritySellTxPrep,
+    SellUrgency, TxPrepOutcome,
 };
 
 use super::{
@@ -89,10 +89,10 @@ where
         }
         let mut route = allowance.route;
         let simulation = self.simulator.simulate(&input, &route).await?;
-        apply_simulated_gas_used(&mut route, &simulation)?;
+        apply_simulated_gas_used(&mut route, &simulation, &self.config.gas_estimate)?;
         let gas_rank = self.gas_rank.ranked_fee_candidates(&input, &route).await?;
         let plan = priority_sell_plan(&self.config, &input);
-        let gas_rank_policy = StrategyGasRankDefaults::priority_sell_policy(&plan);
+        let gas_rank_policy = priority_sell_gas_rank_policy(&self.config, &plan);
 
         let tx_prep = PrioritySellTxPrep {
             context: input.context.tx.clone(),
@@ -117,12 +117,16 @@ where
 fn apply_simulated_gas_used(
     route: &mut PreparedSellRoute,
     simulation: &PreSubmitSimulation,
+    gas_estimate: &GasEstimateConfig,
 ) -> Result<(), LivePrioritySellPlannerError> {
-    let Some(gas_used) = simulation.gas_used else {
-        return Ok(());
-    };
+    let gas_used = simulation.gas_used.ok_or_else(|| {
+        LivePrioritySellPlannerError::Simulation(
+            "exact pre-submit simulation did not report gas_used; fallback gas estimates are not allowed"
+                .to_string(),
+        )
+    })?;
     route
-        .apply_simulated_gas_used(gas_used)
+        .apply_simulated_gas_used(gas_used, gas_estimate)
         .map_err(|error| LivePrioritySellPlannerError::Route(error.to_string()))
 }
 
@@ -252,18 +256,51 @@ fn priority_sell_plan(
         .as_ref()
         .map(|reason| reason.code.clone())
         .unwrap_or_else(|| "exit.live_priority_sell".to_string());
+    let (signal_source, urgency) = priority_sell_classification(&reason);
 
     PrioritySellPlan {
         trade_id: input.position.trade_id.clone(),
         token_address: input.intent.token_address,
         pool_address: input.intent.pool_address.clone(),
         observed_block: input.context.current_block,
-        signal_source: LpSignalSource::MempoolLpApproval,
-        urgency: crate::SellUrgency::MempoolPreMine,
+        signal_source,
+        urgency,
         route: config.priority_route.clone(),
         max_priority_fee_per_gas_gwei: config.max_priority_fee_per_gas_gwei,
         max_total_fee_eth: config.max_total_fee_eth,
         reason,
+    }
+}
+
+fn priority_sell_classification(reason: &str) -> (LpSignalSource, SellUrgency) {
+    match reason {
+        "exit.mempool_liquidity_removal_signal" => (
+            LpSignalSource::MempoolLpApproval,
+            SellUrgency::MempoolPreMine,
+        ),
+        "exit.lp_approval_mined_race" => (
+            LpSignalSource::MinedLpApproval,
+            SellUrgency::MinedApprovalRace,
+        ),
+        "exit.lp_approval_buy_confirm_block" => (
+            LpSignalSource::MinedLpApproval,
+            SellUrgency::BuyConfirmBlockApproval,
+        ),
+        _ => (LpSignalSource::StrategyExit, SellUrgency::NormalExit),
+    }
+}
+
+fn priority_sell_gas_rank_policy(
+    config: &LivePrioritySellPlannerConfig,
+    plan: &PrioritySellPlan,
+) -> crate::StrategyGasRankPolicy {
+    match plan.urgency {
+        SellUrgency::NormalExit => config.normal_exit_gas_rank_policy.clone(),
+        SellUrgency::MempoolPreMine => config.mempool_pre_mine_gas_rank_policy.clone(),
+        SellUrgency::MinedApprovalRace => config.mined_approval_race_gas_rank_policy.clone(),
+        SellUrgency::BuyConfirmBlockApproval => {
+            config.buy_confirm_block_approval_gas_rank_policy.clone()
+        }
     }
 }
 
@@ -283,9 +320,10 @@ mod tests {
     use super::*;
     use crate::{
         FixedGasRankProvider, FixedPreSubmitSimulator, GasRankPlan, PlannerTxContext,
-        RankedFeeCandidate, StaticAllowanceChecker, TxPrepRequestContext,
+        RankedFeeCandidate, RouteBuildRequest, StaticAllowanceChecker, TxPrepRequestContext,
         UniswapV2SellRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
-        VaultInternalAllowanceChecker,
+        VaultInternalAllowanceChecker, UNISWAP_V2_DIRECT_SELL_GAS_LIMIT,
+        UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
     };
 
     fn token() -> Address {
@@ -305,9 +343,7 @@ mod tests {
             trade_id: Some(TradeId("trd_test".to_string())),
             portfolio_id: PortfolioId("portfolio".to_string()),
             wallet_id: WalletId("wallet".to_string()),
-            strategy_name: StrategyName(
-                "alpha11-univ2-lp30-pool-update-block-hold20".to_string(),
-            ),
+            strategy_name: StrategyName("alpha11-univ2-lp30-pool-update-block-hold20".to_string()),
             side: OrderSide::Sell,
             token_address: token(),
             pool_address: pool_address(),
@@ -356,6 +392,7 @@ mod tests {
             price_denom_per_token: Some(DecimalAmount::new(1, 1)),
             initial_price_denom_per_token: Some(DecimalAmount::new(1, 1)),
             price_ratio_to_initial: Some(DecimalAmount::from(1)),
+            creation_block: Some(25_128_246),
             token_decimals: Some(18),
             fee_tier: None,
             uniswap_v4: None,
@@ -398,7 +435,9 @@ mod tests {
     > {
         LivePrioritySellPlanner::new(
             LivePrioritySellPlannerConfig::default(),
-            UniswapV2SellRouteBuilder::default(),
+            UniswapV2SellRouteBuilder::new(RouteBuildRequest::new(
+                UNISWAP_V2_DIRECT_SELL_GAS_LIMIT,
+            )),
             FixedPreSubmitSimulator::new(crate::PreSubmitSimulation {
                 block_number: 25_128_246,
                 block_hash: Some("0xabc".to_string()),
@@ -413,15 +452,26 @@ mod tests {
             }),
             FixedGasRankProvider::new(GasRankPlan {
                 predicted_base_fee_gwei: DecimalAmount::from(10),
-                candidates: vec![RankedFeeCandidate {
-                    label: "aggressive".to_string(),
-                    priority_fee_gwei: DecimalAmount::from(40),
-                    max_fee_per_gas_gwei: DecimalAmount::from(50),
-                    rank_position_p50: Some(10),
-                    gas_before_p50: Some(450_000),
-                    likely_fits_at_p50: Some(true),
-                    source: Some("test".to_string()),
-                }],
+                candidates: vec![
+                    RankedFeeCandidate {
+                        label: "p50".to_string(),
+                        priority_fee_gwei: DecimalAmount::from(2),
+                        max_fee_per_gas_gwei: DecimalAmount::from(12),
+                        rank_position_p50: Some(25),
+                        gas_before_p50: Some(900_000),
+                        likely_fits_at_p50: Some(true),
+                        source: Some("test".to_string()),
+                    },
+                    RankedFeeCandidate {
+                        label: "p90".to_string(),
+                        priority_fee_gwei: DecimalAmount::from(30),
+                        max_fee_per_gas_gwei: DecimalAmount::from(40),
+                        rank_position_p50: Some(10),
+                        gas_before_p50: Some(450_000),
+                        likely_fits_at_p50: Some(true),
+                        source: Some("test".to_string()),
+                    },
+                ],
             }),
             allowance,
         )
@@ -445,16 +495,44 @@ mod tests {
     fn gas_rank() -> FixedGasRankProvider {
         FixedGasRankProvider::new(GasRankPlan {
             predicted_base_fee_gwei: DecimalAmount::from(10),
-            candidates: vec![RankedFeeCandidate {
-                label: "aggressive".to_string(),
-                priority_fee_gwei: DecimalAmount::from(40),
-                max_fee_per_gas_gwei: DecimalAmount::from(50),
-                rank_position_p50: Some(10),
-                gas_before_p50: Some(450_000),
-                likely_fits_at_p50: Some(true),
-                source: Some("test".to_string()),
-            }],
+            candidates: vec![
+                RankedFeeCandidate {
+                    label: "p50".to_string(),
+                    priority_fee_gwei: DecimalAmount::from(2),
+                    max_fee_per_gas_gwei: DecimalAmount::from(12),
+                    rank_position_p50: Some(25),
+                    gas_before_p50: Some(900_000),
+                    likely_fits_at_p50: Some(true),
+                    source: Some("test".to_string()),
+                },
+                RankedFeeCandidate {
+                    label: "p90".to_string(),
+                    priority_fee_gwei: DecimalAmount::from(30),
+                    max_fee_per_gas_gwei: DecimalAmount::from(40),
+                    rank_position_p50: Some(10),
+                    gas_before_p50: Some(450_000),
+                    likely_fits_at_p50: Some(true),
+                    source: Some("test".to_string()),
+                },
+            ],
         })
+    }
+
+    #[test]
+    fn max_hold_exit_is_normal_strategy_exit_not_mempool_race() {
+        let (signal_source, urgency) = priority_sell_classification("exit.max_hold_active_blocks");
+
+        assert_eq!(signal_source, LpSignalSource::StrategyExit);
+        assert_eq!(urgency, SellUrgency::NormalExit);
+    }
+
+    #[test]
+    fn lp_approval_exit_keeps_race_urgency() {
+        let (signal_source, urgency) =
+            priority_sell_classification("exit.mempool_liquidity_removal_signal");
+
+        assert_eq!(signal_source, LpSignalSource::MempoolLpApproval);
+        assert_eq!(urgency, SellUrgency::MempoolPreMine);
     }
 
     #[derive(Clone, Default)]
@@ -502,7 +580,7 @@ mod tests {
                     .to
                     .eq_ignore_ascii_case("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"));
                 assert!(signal.request.data.starts_with("0x791ac947"));
-                assert_eq!(signal.request.max_priority_fee_per_gas, "40000000000");
+                assert_eq!(signal.request.max_priority_fee_per_gas, "2000000000");
                 assert_eq!(
                     signal.request.metadata["wire_protocol"],
                     json!("eth_direct_raw_v1")
@@ -527,7 +605,10 @@ mod tests {
         let vault = Address::with_last_byte(0xaa);
         let planner = LivePrioritySellPlanner::new(
             LivePrioritySellPlannerConfig::default(),
-            UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
+            UniswapV2TradingVaultSellRouteBuilder::with_gas_limit(
+                vault,
+                UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
+            ),
             simulator(),
             gas_rank(),
             VaultInternalAllowanceChecker,
@@ -540,11 +621,11 @@ mod tests {
                 assert!(signal.request.data.starts_with("0x5f413d10"));
                 assert_eq!(
                     signal.request.metadata["route"]["estimated_gas_used"],
-                    json!(157_500)
+                    json!(225_000)
                 );
                 assert_eq!(
                     signal.request.metadata["budget"]["estimated_gas_used"],
-                    json!(157_500)
+                    json!(225_000)
                 );
                 assert_eq!(
                     signal.request.metadata["simulation"]["gas_used"],
@@ -562,7 +643,10 @@ mod tests {
         let calls = Arc::clone(&simulator.min_output_calls);
         let planner = LivePrioritySellPlanner::new(
             LivePrioritySellPlannerConfig::default(),
-            UniswapV2TradingVaultSellRouteBuilder::with_default_gas(vault),
+            UniswapV2TradingVaultSellRouteBuilder::with_gas_limit(
+                vault,
+                UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
+            ),
             simulator,
             gas_rank(),
             VaultInternalAllowanceChecker,

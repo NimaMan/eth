@@ -136,6 +136,9 @@ fn risk_atlas_pool_snapshot(
         price_denom_per_token: row.price_denom_per_token.map(decimal_from_f64),
         initial_price_denom_per_token: row.initial_price_denom_per_token.map(decimal_from_f64),
         price_ratio_to_initial: row.price_ratio_to_initial.map(decimal_from_f64),
+        creation_block: row
+            .creation_block
+            .and_then(|block| u64::try_from(block).ok()),
         token_decimals,
         fee_tier: None,
         uniswap_v4: None,

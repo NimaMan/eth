@@ -19,6 +19,7 @@ pub struct RiskAtlasObservation {
     pub price_denom_per_token: Option<f64>,
     pub initial_price_denom_per_token: Option<f64>,
     pub price_ratio_to_initial: Option<f64>,
+    pub creation_block: Option<i64>,
     pub lp_approval_count_in_block: i32,
     pub lp_total_supply: Option<f64>,
     pub lp_max_approval_amount_as_of: Option<f64>,
@@ -52,6 +53,7 @@ pub async fn query_risk_atlas_observations(
             COALESCE(o.price_denom_per_token, NULLIF(o.features->'liquidity'->>'price_denom_per_token', '')::DOUBLE PRECISION) AS price_denom_per_token,
             COALESCE(o.initial_price_denom_per_token, NULLIF(o.features->'liquidity'->>'initial_price_denom_per_token', '')::DOUBLE PRECISION) AS initial_price_denom_per_token,
             COALESCE(o.price_to_initial_ratio, NULLIF(o.features->'liquidity'->>'price_to_initial_ratio', '')::DOUBLE PRECISION) AS price_ratio_to_initial,
+            pe.first_observed_block AS creation_block,
             GREATEST(
                 COALESCE(o.lp_approval_count_in_block, 0),
                 COALESCE(NULLIF(o.observation->'event_flags'->>'lp_approval_count_in_block', '')::INT, 0)
@@ -114,6 +116,7 @@ pub async fn query_risk_atlas_observations(
                 price_denom_per_token: row.try_get("price_denom_per_token")?,
                 initial_price_denom_per_token: row.try_get("initial_price_denom_per_token")?,
                 price_ratio_to_initial: row.try_get("price_ratio_to_initial")?,
+                creation_block: row.try_get("creation_block")?,
                 lp_approval_count_in_block: row.try_get("lp_approval_count_in_block")?,
                 lp_total_supply: row.try_get("lp_total_supply")?,
                 lp_max_approval_amount_as_of: row.try_get("lp_max_approval_amount_as_of")?,

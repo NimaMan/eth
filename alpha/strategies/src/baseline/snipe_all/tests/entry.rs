@@ -1,4 +1,5 @@
 use super::*;
+use crate::shared_rules::entry::init_policy::EntryInitPolicyConfig;
 use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
     amount::Amount,
@@ -157,7 +158,10 @@ fn price_to_initial_entry_gate_blocks_above_threshold() {
     let risks = Vec::new();
     let ctx = ctx(&market, &portfolio, &risks);
     let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-        max_entry_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+        entry_init_policy: EntryInitPolicyConfig {
+            max_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+            ..EntryInitPolicyConfig::default()
+        },
         ..SnipeAllConfig::default()
     });
 
@@ -174,7 +178,7 @@ fn price_to_initial_entry_gate_blocks_above_threshold() {
     assert!(decision.is_hold());
     assert_eq!(
         decision.reason(),
-        Some("entry.price_to_initial_ratio_gt_max")
+        Some("entry.init_policy:price_to_initial_ratio_gt_max")
     );
 }
 
@@ -194,7 +198,10 @@ fn price_to_initial_entry_gate_allows_at_threshold_and_missing_ratio() {
         let risks = Vec::new();
         let ctx = ctx(&market, &portfolio, &risks);
         let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
-            max_entry_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+            entry_init_policy: EntryInitPolicyConfig {
+                max_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+                ..EntryInitPolicyConfig::default()
+            },
             ..SnipeAllConfig::default()
         });
 
@@ -210,6 +217,43 @@ fn price_to_initial_entry_gate_allows_at_threshold_and_missing_ratio() {
 
         assert!(decision.order_intent().is_some());
     }
+}
+
+#[test]
+fn entry_init_policy_blocks_pool_age_above_threshold() {
+    let mut pool = pool();
+    pool.creation_block = Some(1);
+    pool.latest_block = 30;
+    let market = MarketSnapshotRef {
+        block_number: 30,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        entry_init_policy: EntryInitPolicyConfig {
+            max_age_blocks: Some(20),
+            ..EntryInitPolicyConfig::default()
+        },
+        ..SnipeAllConfig::default()
+    });
+
+    let decision = strategy
+        .on_market_event(
+            &ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 30,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(decision.reason(), Some("entry.init_policy:pool_age_gt_max"));
 }
 
 #[test]

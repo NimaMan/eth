@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256, address};
+use alloy_primitives::{address, Address, U256};
 use eth_alpha_core::market::PoolSnapshot;
 
 const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
@@ -62,6 +62,7 @@ mod tests {
             price_denom_per_token: None,
             initial_price_denom_per_token: None,
             price_ratio_to_initial: None,
+            creation_block: Some(1),
             token_decimals: Some(18),
             fee_tier: None,
             uniswap_v4: None,

@@ -62,7 +62,7 @@ mod tests {
             strategy_set_specs(alpha11_specs::SET_NAME, &options)
                 .unwrap()
                 .len(),
-            3
+            6
         );
         let hold15 = strategy_set_specs(crate::alpha11::HOLD15_STRATEGY_NAME, &options).unwrap();
         assert_eq!(hold15.len(), 1);
@@ -70,7 +70,17 @@ mod tests {
             hold15[0].strategy_name,
             crate::alpha11::HOLD15_STRATEGY_NAME
         );
-        assert!(hold15[0].max_entry_price_ratio_to_initial.is_none());
+        assert_eq!(
+            hold15[0].entry_init_policy.max_age_blocks,
+            Some(crate::alpha11::ENTRY_INIT_MAX_AGE_BLOCKS)
+        );
+        assert_eq!(
+            hold15[0]
+                .entry_init_policy
+                .max_price_ratio_to_initial
+                .as_deref(),
+            Some(crate::alpha11::ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL)
+        );
 
         let hold3_validation =
             strategy_set_specs(crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME, &options).unwrap();

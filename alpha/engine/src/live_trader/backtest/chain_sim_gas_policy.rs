@@ -391,6 +391,7 @@ fn shadow_input() -> eth_live_trading::LivePrioritySellPlannerInput {
             price_denom_per_token: None,
             initial_price_denom_per_token: None,
             price_ratio_to_initial: None,
+            creation_block: Some(0),
             token_decimals: Some(18),
             fee_tier: None,
             uniswap_v4: None,
@@ -689,8 +690,8 @@ mod tests {
 
     fn selected(priority_gwei: i64, max_fee_gwei: i64) -> ShadowGasSelection {
         ShadowGasSelection::selected_plan(
-            &StrategyGasRankPolicy::balanced_first(),
-            "balanced".to_string(),
+            &StrategyGasRankPolicy::p50_first(),
+            "p50".to_string(),
             DecimalAmount::from(priority_gwei),
             DecimalAmount::from(max_fee_gwei),
             DecimalAmount::ZERO,
@@ -751,7 +752,7 @@ mod tests {
     #[test]
     fn rejected_policy_cancels_the_shadow_execution_without_fill_or_gas() {
         let selection = ShadowGasSelection::rejected(
-            &StrategyGasRankPolicy::balanced_first(),
+            &StrategyGasRankPolicy::p50_first(),
             "normal_exit",
             "exit.max_hold_active_blocks",
             "exit_value_capped_gas_rank",

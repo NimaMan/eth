@@ -54,6 +54,9 @@ fn canonical_code(base: &str, detail: Option<&str>, value: Option<&str>) -> Stri
         ("entry.lp_approval_gate", Some(detail)) => {
             format!("entry.lp_approval_gate.{}", sanitize_code_part(detail))
         }
+        ("entry.init_policy", Some(detail)) => {
+            format!("entry.init_policy.{}", sanitize_code_part(detail))
+        }
         ("exit.lp_approval", Some(detail)) => {
             format!("exit.lp_approval.{}", sanitize_code_part(detail))
         }
@@ -104,6 +107,21 @@ fn label_for(code: &str, raw: &str) -> String {
         }
         "entry.lp_approval_gate.approved_pct_gt_min" => {
             "Entry hold: LP approval above threshold".to_string()
+        }
+        "entry.init_policy.missing_creation_block" => {
+            "Entry hold: missing pool creation block".to_string()
+        }
+        "entry.init_policy.creation_block_after_entry" => {
+            "Entry hold: pool creation block after entry".to_string()
+        }
+        "entry.init_policy.pool_age_gt_max" => {
+            "Entry hold: pool age above init-policy threshold".to_string()
+        }
+        "entry.init_policy.price_to_initial_ratio_missing" => {
+            "Entry hold: missing price/initial ratio".to_string()
+        }
+        "entry.init_policy.price_to_initial_ratio_gt_max" => {
+            "Entry hold: price/initial above init-policy threshold".to_string()
         }
         "exit.lp_approval" => "Exit: LP approval".to_string(),
         "exit.lp_approval_buy_confirm_block" => "Exit: buy-confirm block LP approval".to_string(),

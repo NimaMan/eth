@@ -545,11 +545,11 @@ mod tests {
             gas_policy_action: Some("mempool_race_exit".to_string()),
             gas_policy_signal: Some("MempoolLpApproval".to_string()),
             gas_policy_status: Some("selected".to_string()),
-            gas_policy_profile: Some("aggressive".to_string()),
+            gas_policy_profile: Some("p90".to_string()),
             gas_policy_profiles: Some(vec![
-                "aggressive".to_string(),
-                "balanced".to_string(),
-                "minimum".to_string(),
+                "p90".to_string(),
+                "p50".to_string(),
+                "normal".to_string(),
             ]),
             gas_rank_source: Some("chain_server_gas_rank".to_string()),
             gas_estimated_max_cost_eth: Some("0.01".to_string()),
@@ -704,17 +704,10 @@ mod tests {
             evidence.gas_policy_action.as_deref(),
             Some("mempool_race_exit")
         );
-        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("aggressive"));
+        assert_eq!(evidence.gas_policy_profile.as_deref(), Some("p90"));
         assert_eq!(
             evidence.gas_policy_profiles.as_deref(),
-            Some(
-                [
-                    "aggressive".to_string(),
-                    "balanced".to_string(),
-                    "minimum".to_string()
-                ]
-                .as_slice()
-            )
+            Some(["p90".to_string(), "p50".to_string(), "normal".to_string()].as_slice())
         );
         assert_eq!(
             evidence.gas_policy_guard.as_deref(),

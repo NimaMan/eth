@@ -95,6 +95,7 @@ mod tests {
             price_denom_per_token: None,
             initial_price_denom_per_token: None,
             price_ratio_to_initial: None,
+            creation_block: Some(1),
             token_decimals: Some(18),
             fee_tier: None,
             uniswap_v4: None,
