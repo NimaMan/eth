@@ -19,6 +19,8 @@ pub struct LiveTokenRetentionPolicy {
     pub min_other_denom_reserve: f64,
     pub weth_denoms: BTreeSet<String>,
     pub stablecoin_denoms: BTreeSet<String>,
+    #[serde(default)]
+    pub drop_scam_tokens_immediately: bool,
     pub drop_tokens_without_pools_after_blocks: Option<u64>,
     pub drop_tokens_without_retained_pools_after_blocks: Option<u64>,
     #[serde(default = "default_liquidity_removal_retention_blocks")]
@@ -33,6 +35,7 @@ impl Default for LiveTokenRetentionPolicy {
             min_other_denom_reserve: 0.0,
             weth_denoms: address_set([WETH_ADDRESS]),
             stablecoin_denoms: address_set([USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS]),
+            drop_scam_tokens_immediately: false,
             drop_tokens_without_pools_after_blocks: None,
             drop_tokens_without_retained_pools_after_blocks: None,
             retain_liquidity_removal_pools_for_blocks: default_liquidity_removal_retention_blocks(),
@@ -116,7 +119,14 @@ impl LiveTokenRetentionPolicy {
             .filter(|decision| !decision.retain)
             .collect::<Vec<_>>();
 
-        let reason = if !retained_v2_pools.is_empty() {
+        let terminal_scam_reason = self
+            .drop_scam_tokens_immediately
+            .then(|| terminal_scam_drop_reason(token, current_block))
+            .flatten();
+
+        let reason = if let Some(reason) = terminal_scam_reason {
+            Some(reason)
+        } else if !retained_v2_pools.is_empty() {
             None
         } else if let Some(reason) = self.liquidity_removal_token_expiry_reason(&dropped_v2_pools) {
             Some(reason)
@@ -382,6 +392,11 @@ pub enum TokenDropReason {
         current_block: u64,
         retention_blocks: u64,
     },
+    TerminalScam {
+        scam_block: Option<u64>,
+        current_block: u64,
+        label: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -427,6 +442,30 @@ fn pool_reference_block(pool: &BasePool) -> Option<u64> {
 
 fn pool_has_observed_liquidity_state(pool: &BasePool) -> bool {
     pool.latest_block_number.is_some() || pool.reserve_tracker.latest_snapshot.is_some()
+}
+
+fn terminal_scam_drop_reason(token: &ERC20Token, current_block: u64) -> Option<TokenDropReason> {
+    if !token.is_scam() {
+        return None;
+    }
+    Some(TokenDropReason::TerminalScam {
+        scam_block: terminal_scam_block(token),
+        current_block,
+        label: token.scam_mechanism().or_else(|| token.scam_label()),
+    })
+}
+
+fn terminal_scam_block(token: &ERC20Token) -> Option<u64> {
+    token
+        .hidden_mint_block()
+        .into_iter()
+        .chain(
+            token
+                .all_pool_bases()
+                .into_iter()
+                .filter_map(|pool| pool.scam_block),
+        )
+        .min()
 }
 
 fn address_set<const N: usize>(addresses: [&str; N]) -> BTreeSet<String> {
@@ -613,6 +652,29 @@ mod tests {
         ));
         assert!(token.uniswap_v2_pool(POOL_ADDRESS).is_none());
         assert_eq!(token.liquidity_removal_pool_count(), 0);
+    }
+
+    #[test]
+    fn terminal_scam_token_can_be_dropped_immediately_for_run_only_retention() {
+        let policy = LiveTokenRetentionPolicy {
+            drop_scam_tokens_immediately: true,
+            retain_liquidity_removal_pools_for_blocks: Some(0),
+            ..LiveTokenRetentionPolicy::default()
+        };
+        let mut token = token();
+        token.add_uniswap_v2_pool(drained_v2_pool(POOL_ADDRESS, WETH_ADDRESS));
+
+        let decision = policy.apply_to_token(&mut token, 101);
+
+        assert!(!decision.retain);
+        assert!(matches!(
+            decision.reason,
+            Some(TokenDropReason::TerminalScam {
+                scam_block: Some(101),
+                current_block: 101,
+                ..
+            })
+        ));
     }
 
     #[test]

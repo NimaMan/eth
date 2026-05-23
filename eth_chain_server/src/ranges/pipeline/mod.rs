@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use reth_chain_query::RethQueryProvider;
-use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlockReplayStoreWriter};
+use tx_processor::{
+    BlockProcessor, PoolBuySellSimulator, ProcessedBlockRangeLoadOptions,
+    ProcessedBlockReplayStoreWriter,
+};
 
 use crate::memory;
 use crate::ranges::{RangeIndexError, RangeIndexErrorKind, RangeIndexJob};
@@ -19,6 +22,25 @@ pub async fn run_range_index(
     provider: Arc<RethQueryProvider>,
     processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     processed_block_disk_cache_blocks: u64,
+) {
+    run_range_index_with_load_options(
+        run,
+        provider,
+        processed_block_replay_store,
+        processed_block_disk_cache_blocks,
+        server_processed_block_load_options(),
+        TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH,
+    )
+    .await;
+}
+
+pub async fn run_range_index_with_load_options(
+    run: Arc<RangeIndexJob>,
+    provider: Arc<RethQueryProvider>,
+    processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
+    processed_block_disk_cache_blocks: u64,
+    processed_block_load_options: ProcessedBlockRangeLoadOptions,
+    processed_block_chunk_blocks: u64,
 ) {
     tracing::info!(
         run_id = %run.id,
@@ -34,10 +56,6 @@ pub async fn run_range_index(
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
-    let processed_block_load_options = cache::ProcessedBlockRangeLoadOptions::default()
-        .with_fill_batch_blocks(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH as usize)
-        .with_fill_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
-        .with_read_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY);
     if let Some(replay_store) = processed_block_replay_store.as_deref() {
         cache::prune_processed_block_disk_cache(
             replay_store.disk_cache_store(),
@@ -56,7 +74,7 @@ pub async fn run_range_index(
 
         let chunk_end = if processed_block_replay_store.is_some() {
             next_block
-                .saturating_add(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH - 1)
+                .saturating_add(processed_block_chunk_blocks.max(1) - 1)
                 .min(run.request.end_block)
         } else {
             next_block
@@ -151,4 +169,11 @@ pub async fn run_range_index(
     if memory::trim_allocator() {
         tracing::debug!(run_id = %run.id, "trimmed allocator after token range completion");
     }
+}
+
+fn server_processed_block_load_options() -> ProcessedBlockRangeLoadOptions {
+    ProcessedBlockRangeLoadOptions::default()
+        .with_fill_batch_blocks(TOKEN_RANGE_PROCESSED_BLOCK_READ_BATCH as usize)
+        .with_fill_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
+        .with_read_concurrency(TOKEN_RANGE_PROCESSED_BLOCK_READ_CONCURRENCY)
 }

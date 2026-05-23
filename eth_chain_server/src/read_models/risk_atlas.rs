@@ -1,19 +1,29 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 
+use alloy_primitives::B256;
 use chrono::Utc;
 use eth_token::pools::SCAM_DIRECT_LP_LIQUIDITY_REMOVAL;
 use eth_token::token_analytics::{TokenPoolCurrentObservation, ACTIVE_OBSERVATION_TARGET_HORIZONS};
+use reth_chain_query::RethQueryProvider;
 use serde_json::{json, to_value, Value};
 use token_lab_scam_risk_atlas::ingest::report::RiskAtlasReportImport;
 use token_lab_scam_risk_atlas::{
-    ActiveTargetSummary, DecisionQuestion, DistributionBucket, ModelReadinessItem, NumericStat,
-    ObservationRow, PoolEligibilityRow, RiskAtlasRun,
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, EventEvidenceRow,
+    ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow, RiskAtlasRun,
 };
 
 use crate::ranges::RangeIndexJob;
 use crate::read_models::pool::PoolView;
 
 const RISK_ATLAS_SOURCE_KIND: &str = "range_token_analytics";
+
+#[derive(Clone, Debug)]
+struct ScamEventMeta {
+    mechanism: Option<String>,
+    block_number: Option<u64>,
+    tx_hash: Option<String>,
+}
 
 pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportImport> {
     let state = run.state.read().await;
@@ -26,16 +36,20 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
     let mut eligible_count = 0_i64;
     let mut ineligible_count = 0_i64;
     let mut pool_count = 0_i64;
+    let mut seen_pool_keys = BTreeSet::<(String, String)>::new();
     let mut eligible_pools = BTreeSet::<(String, String)>::new();
     let mut direct_lp_removal_blocks = BTreeMap::<(String, String), u64>::new();
+    let mut scam_events = BTreeMap::<(String, String), ScamEventMeta>::new();
 
     for token in state.processor.registry.tokens.values() {
         for pool in PoolView::from_token_pool_summaries(token) {
+            let key = pool_key(&pool.token_address, &pool.pool_address);
+            seen_pool_keys.insert(key.clone());
             pool_count += 1;
             let eligible = pool.pool_classification.eligible;
             if eligible {
                 eligible_count += 1;
-                eligible_pools.insert(pool_key(&pool.token_address, &pool.pool_address));
+                eligible_pools.insert(key.clone());
             } else {
                 ineligible_count += 1;
             }
@@ -83,13 +97,23 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
                         1,
                     );
                 }
+                scam_events.insert(
+                    key.clone(),
+                    ScamEventMeta {
+                        mechanism: pool
+                            .scam_mechanism
+                            .clone()
+                            .or_else(|| pool.scam_label.clone()),
+                        block_number: pool.liquidity_removal_block,
+                        tx_hash: pool.liquidity_removal_tx_hash.clone(),
+                    },
+                );
             }
 
             if pool.scam_mechanism.as_deref() == Some(SCAM_DIRECT_LP_LIQUIDITY_REMOVAL) {
                 direct_lp_rows += 1;
                 if let Some(block) = pool.liquidity_removal_block {
-                    direct_lp_removal_blocks
-                        .insert(pool_key(&pool.token_address, &pool.pool_address), block);
+                    direct_lp_removal_blocks.insert(key.clone(), block);
                 }
                 let pre_approval = pool
                     .lp_last_approval_block
@@ -122,9 +146,30 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
             });
         }
     }
+    append_observation_only_pool_summaries(
+        &state.observations,
+        &seen_pool_keys,
+        &mut distributions,
+        &mut pool_eligibility,
+        &mut eligible_pools,
+        &mut direct_lp_removal_blocks,
+        &mut scam_events,
+        &mut scam_ages,
+        &mut direct_lp_approval_leads,
+        &mut pool_count,
+        &mut eligible_count,
+        &mut ineligible_count,
+        &mut scam_count,
+        &mut direct_lp_rows,
+    );
 
-    let observation_rows =
-        observation_rows(&state.observations, &eligible_pools, &direct_lp_removal_blocks)?;
+    let observation_rows = observation_rows(
+        &state.observations,
+        &eligible_pools,
+        &direct_lp_removal_blocks,
+        &scam_events,
+    )?;
+    let (observation_rows, event_evidence) = observation_rows;
     append_observation_distributions(&mut distributions, &observation_rows);
     let active_targets = active_target_summaries(&observation_rows);
     let numeric_stats = numeric_stats(scam_ages, direct_lp_approval_leads);
@@ -159,7 +204,7 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
             "row_source": "eth_token::token_analytics::TokenPoolCurrentObservation",
             "eligible_pools": eligible_count,
             "ineligible_pools": ineligible_count,
-            "target_horizons_active_observations": ACTIVE_OBSERVATION_TARGET_HORIZONS,
+            "target_active_observation_delta": ACTIVE_OBSERVATION_TARGET_HORIZONS,
         }),
     };
 
@@ -167,6 +212,7 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
         run: run_row,
         distributions: distributions.finish(),
         pool_eligibility,
+        event_evidence,
         observations: observation_rows,
         numeric_stats,
         active_targets,
@@ -176,11 +222,201 @@ pub async fn range_import(run: &RangeIndexJob) -> eyre::Result<RiskAtlasReportIm
     })
 }
 
+pub fn attach_mempool_arrivals(
+    import: &mut RiskAtlasReportImport,
+    provider: &RethQueryProvider,
+) -> eyre::Result<()> {
+    for event in &mut import.event_evidence {
+        let Some(tx_hash) = event.tx_hash.as_deref() else {
+            continue;
+        };
+        let Ok(hash) = B256::from_str(tx_hash) else {
+            continue;
+        };
+        if let Ok(arrival_ms) = provider.get_tx_arrival_ms(hash) {
+            event.mempool_first_seen_ms = arrival_ms.and_then(i64_from_u64_opt);
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_observation_only_pool_summaries(
+    observations: &[TokenPoolCurrentObservation],
+    seen_pool_keys: &BTreeSet<(String, String)>,
+    distributions: &mut DistributionAccumulator,
+    pool_eligibility: &mut Vec<PoolEligibilityRow>,
+    eligible_pools: &mut BTreeSet<(String, String)>,
+    direct_lp_removal_blocks: &mut BTreeMap<(String, String), u64>,
+    scam_events: &mut BTreeMap<(String, String), ScamEventMeta>,
+    scam_ages: &mut Vec<f64>,
+    direct_lp_approval_leads: &mut Vec<f64>,
+    pool_count: &mut i64,
+    eligible_count: &mut i64,
+    ineligible_count: &mut i64,
+    scam_count: &mut i64,
+    direct_lp_rows: &mut i64,
+) {
+    let mut groups = BTreeMap::<(String, String), Vec<&TokenPoolCurrentObservation>>::new();
+    for observation in observations {
+        let key = pool_key(
+            &observation.key.token_address,
+            &observation.key.pool_address,
+        );
+        if seen_pool_keys.contains(&key) {
+            continue;
+        }
+        groups.entry(key).or_default().push(observation);
+    }
+
+    for (key, mut group) in groups {
+        group.sort_by_key(|observation| observation.context.block_number);
+        let Some(latest) = group.last().copied() else {
+            continue;
+        };
+        let first = group.first().copied().unwrap_or(latest);
+        let eligible = group.iter().any(|observation| {
+            observation.trading.can_buy
+                || observation.trading.effective_can_buy
+                || observation.event_flags.trading_enabled_in_block
+                || observation.features.market.trading_enabled_block.is_some()
+        });
+        let scam_observation = group.iter().rev().copied().find(|observation| {
+            observation.event_flags.liquidity_removal_in_block
+                || observation.trading.liquidity_removed_as_of
+                || observation.features.market.liquidity_removed_as_of
+        });
+        let scam_mechanism = scam_observation.and_then(observation_scam_mechanism);
+        let scam_block = scam_observation
+            .and_then(|observation| observation.trading.liquidity_removal_block_as_of)
+            .or_else(|| {
+                scam_observation
+                    .filter(|observation| observation.event_flags.liquidity_removal_in_block)
+                    .map(|observation| observation.context.block_number)
+            });
+
+        *pool_count += 1;
+        if eligible {
+            *eligible_count += 1;
+            eligible_pools.insert(key.clone());
+        } else {
+            *ineligible_count += 1;
+        }
+        distributions.add("pool_eligibility", eligible_bucket(eligible), 1);
+        distributions.add("all_pool_protocols", latest.key.protocol.clone(), 1);
+        distributions.add("all_pool_quotes", latest.key.denom_address.clone(), 1);
+        distributions.add(
+            "pool_ineligible_reasons",
+            if eligible {
+                "eligible"
+            } else {
+                "observation_only_unknown_eligibility"
+            },
+            if eligible { 0 } else { 1 },
+        );
+        if eligible {
+            distributions.add("eligible_protocols", latest.key.protocol.clone(), 1);
+            distributions.add("eligible_quotes", latest.key.denom_address.clone(), 1);
+            distributions.add("eligible_liquidity_levels", "observation_only", 1);
+            distributions.add("eligible_tax_buckets", "observation_only", 1);
+        }
+
+        if let Some(scam_block) = scam_block {
+            *scam_count += 1;
+            let mechanism = scam_mechanism.unwrap_or_else(|| "unknown".to_string());
+            distributions.add("scam_protocols", latest.key.protocol.clone(), 1);
+            distributions.add("scam_mechanisms", mechanism.clone(), 1);
+            distributions.add("scam_liquidity_at_label", "observation_only", 1);
+            if let Some(trading_block) = latest.features.market.trading_enabled_block {
+                let age = scam_block.saturating_sub(trading_block) as f64;
+                let bucket = time_bucket(age);
+                scam_ages.push(age);
+                distributions.add("time_to_scam_buckets", bucket, 1);
+                distributions.add(
+                    "time_to_scam_by_protocol",
+                    format!("{}|{}", latest.key.protocol, bucket),
+                    1,
+                );
+            }
+            scam_events.insert(
+                key.clone(),
+                ScamEventMeta {
+                    mechanism: Some(mechanism.clone()),
+                    block_number: Some(scam_block),
+                    tx_hash: None,
+                },
+            );
+
+            if mechanism == SCAM_DIRECT_LP_LIQUIDITY_REMOVAL {
+                *direct_lp_rows += 1;
+                direct_lp_removal_blocks.insert(key.clone(), scam_block);
+                let pre_approval = latest
+                    .features
+                    .lp_control
+                    .last_lp_approval_block
+                    .is_some_and(|approval| approval < scam_block);
+                distributions.add(
+                    "direct_lp_approval_pre_removal",
+                    pre_approval.to_string(),
+                    1,
+                );
+                if pre_approval {
+                    if let Some(lead) = latest
+                        .features
+                        .lp_control
+                        .last_lp_approval_to_as_of_chain_block_delta
+                    {
+                        direct_lp_approval_leads.push(lead as f64);
+                    }
+                }
+            }
+        }
+
+        pool_eligibility.push(PoolEligibilityRow {
+            token_address: latest.key.token_address.clone(),
+            pool_address: latest.key.pool_address.clone(),
+            protocol: Some(latest.key.protocol.clone()),
+            quote_symbol: Some(latest.key.denom_address.clone()),
+            eligible,
+            eligibility_block: group
+                .iter()
+                .filter(|observation| {
+                    observation.trading.can_buy
+                        || observation.trading.effective_can_buy
+                        || observation.event_flags.trading_enabled_in_block
+                })
+                .map(|observation| observation.context.block_number)
+                .min()
+                .map(i64_from_u64),
+            eligibility_liquidity: finite_opt(latest.features.liquidity.total_liquidity_denom),
+            first_observed_block: first
+                .features
+                .market
+                .pool_creation_block
+                .or(Some(first.context.block_number))
+                .map(i64_from_u64),
+            last_observed_block: Some(i64_from_u64(latest.context.block_number)),
+        });
+    }
+}
+
+fn observation_scam_mechanism(observation: &TokenPoolCurrentObservation) -> Option<String> {
+    observation
+        .features
+        .market
+        .scam_mechanism_as_of
+        .clone()
+        .or_else(|| observation.features.market.scam_label_as_of.clone())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
 fn observation_rows(
     observations: &[TokenPoolCurrentObservation],
     eligible_pools: &BTreeSet<(String, String)>,
     direct_lp_removal_blocks: &BTreeMap<(String, String), u64>,
-) -> eyre::Result<Vec<ObservationRow>> {
+    scam_events: &BTreeMap<(String, String), ScamEventMeta>,
+) -> eyre::Result<(Vec<ObservationRow>, Vec<EventEvidenceRow>)> {
     let mut groups = BTreeMap::<(String, String), Vec<&TokenPoolCurrentObservation>>::new();
     for observation in observations {
         groups
@@ -193,10 +429,12 @@ fn observation_rows(
     }
 
     let mut rows = Vec::with_capacity(observations.len());
+    let mut event_evidence = Vec::new();
     for (pool_key, mut group) in groups {
         group.sort_by_key(|observation| observation.context.active_observation_index);
         let eligible = eligible_pools.contains(&pool_key);
         let direct_lp_removal_block = direct_lp_removal_blocks.get(&pool_key).copied();
+        let scam_event = scam_events.get(&pool_key);
         let direct_lp_removal_index = direct_lp_removal_block.and_then(|removal_block| {
             group
                 .iter()
@@ -222,6 +460,7 @@ fn observation_rows(
                 .is_some_and(|removal_block| observation.context.block_number >= removal_block);
             let direct_lp_in_block = direct_lp_removal_block
                 .is_some_and(|removal_block| observation.context.block_number == removal_block);
+            append_event_evidence_rows(&mut event_evidence, observation, scam_event);
             rows.push(ObservationRow {
                 token_address: observation.key.token_address.clone(),
                 pool_address: observation.key.pool_address.clone(),
@@ -234,12 +473,16 @@ fn observation_rows(
                 tx_count: observation.activity.tx_count as i32,
                 token_transfer_count: observation.activity.token_transfer_count as i32,
                 denom_transfer_count: observation.activity.denom_transfer_count as i32,
-                buy_volume_denom: finite_opt(observation.activity.buy_volume_for_denom(
-                    &observation.key.denom_address,
-                )),
-                sell_volume_denom: finite_opt(observation.activity.sell_volume_for_denom(
-                    &observation.key.denom_address,
-                )),
+                buy_volume_denom: finite_opt(
+                    observation
+                        .activity
+                        .buy_volume_for_denom(&observation.key.denom_address),
+                ),
+                sell_volume_denom: finite_opt(
+                    observation
+                        .activity
+                        .sell_volume_for_denom(&observation.key.denom_address),
+                ),
                 total_bribe_eth: finite_opt(observation.activity.total_bribe_eth),
                 can_buy: observation.trading.can_buy,
                 can_sell: observation.trading.can_sell,
@@ -271,6 +514,156 @@ fn observation_rows(
                 lp_approved_pct_as_of: finite_opt_option(
                     observation.features.lp_control.lp_approved_pct_as_of,
                 ),
+                token_decimals: observation.features.token.decimals.map(i32::from),
+                price_denom_per_token: finite_opt(
+                    observation.features.liquidity.price_denom_per_token,
+                ),
+                initial_price_denom_per_token: finite_opt_option(
+                    observation.features.liquidity.initial_price_denom_per_token,
+                ),
+                lp_approval_count_in_block: observation.event_flags.lp_approval_count_in_block
+                    as i32,
+                lp_approval_seen_as_of: observation.features.lp_control.lp_approval_seen_as_of,
+                lp_total_supply: finite_opt_option(observation.features.lp_control.lp_total_supply),
+                lp_max_approval_amount_as_of: finite_opt_option(
+                    observation.features.lp_control.lp_max_approval_amount_as_of,
+                ),
+                lp_max_approval_pct_as_of: finite_opt_option(
+                    observation.features.lp_control.lp_max_approval_pct_as_of,
+                ),
+                lp_removable_pct_as_of: finite_opt_option(
+                    observation.features.lp_control.lp_removable_pct_as_of,
+                ),
+                lp_router_removable_pct_as_of: finite_opt_option(
+                    observation
+                        .features
+                        .lp_control
+                        .lp_router_removable_pct_as_of,
+                ),
+                lp_approval_owner_is_creator: observation
+                    .features
+                    .lp_control
+                    .last_lp_approval_owner_is_creator,
+                creator_lp_balance_pct_as_of: finite_opt_option(
+                    observation.features.lp_control.creator_lp_balance_pct_as_of,
+                ),
+                creator_lp_approved_pct_as_of: finite_opt_option(
+                    observation
+                        .features
+                        .lp_control
+                        .creator_lp_approved_pct_as_of,
+                ),
+                creator_lp_removable_pct_as_of: finite_opt_option(
+                    observation
+                        .features
+                        .lp_control
+                        .creator_lp_removable_pct_as_of,
+                ),
+                creator_lp_router_removable_pct_as_of: finite_opt_option(
+                    observation
+                        .features
+                        .lp_control
+                        .creator_lp_router_removable_pct_as_of,
+                ),
+                creator_lp_approved_gt_90_pct_as_of: observation
+                    .features
+                    .lp_control
+                    .creator_lp_approved_gt_90_pct_as_of,
+                creator_lp_router_removable_gt_90_pct_as_of: observation
+                    .features
+                    .lp_control
+                    .creator_lp_router_removable_gt_90_pct_as_of,
+                last_lp_approval_amount_pct_of_total_supply: finite_opt_option(
+                    observation
+                        .features
+                        .lp_control
+                        .last_lp_approval_amount_pct_of_total_supply,
+                ),
+                first_lp_approval_to_as_of_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .first_lp_approval_to_as_of_chain_block_delta
+                    .map(i64_from_u64),
+                last_lp_approval_to_as_of_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .last_lp_approval_to_as_of_chain_block_delta
+                    .map(i64_from_u64),
+                pool_creation_to_first_lp_approval_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .pool_creation_to_first_lp_approval_chain_block_delta,
+                pool_creation_to_last_lp_approval_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .pool_creation_to_last_lp_approval_chain_block_delta,
+                trading_enabled_to_first_lp_approval_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .trading_enabled_to_first_lp_approval_chain_block_delta,
+                trading_enabled_to_last_lp_approval_chain_block_delta: observation
+                    .features
+                    .lp_control
+                    .trading_enabled_to_last_lp_approval_chain_block_delta,
+                control_transfer_from_after_renounce_seen_as_of: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_after_renounce_seen_as_of,
+                control_transfer_from_after_renounce_in_block: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_after_renounce_in_block,
+                control_transfer_from_holder_to_burn_seen_as_of: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_holder_to_burn_seen_as_of,
+                control_transfer_from_holder_to_burn_in_block: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_holder_to_burn_in_block,
+                control_transfer_from_pair_seen_as_of: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_pair_seen_as_of,
+                control_transfer_from_pair_in_block: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_pair_in_block,
+                control_transfer_from_without_transfer_log_seen_as_of: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_without_transfer_log_seen_as_of,
+                control_transfer_from_without_transfer_log_in_block: observation
+                    .features
+                    .token_control
+                    .control_transfer_from_without_transfer_log_in_block,
+                pair_token_to_control_seen_as_of: observation
+                    .features
+                    .token_control
+                    .pair_token_to_control_seen_as_of,
+                pair_token_to_control_in_block: observation
+                    .features
+                    .token_control
+                    .pair_token_to_control_in_block,
+                pair_token_to_control_to_pool_reserve_ratio: finite_opt_option(
+                    observation
+                        .features
+                        .token_control
+                        .pair_token_to_control_to_pool_reserve_ratio,
+                ),
+                pair_balance_backdoor_signal_seen_as_of: observation
+                    .features
+                    .token_control
+                    .pair_balance_backdoor_signal_seen_as_of,
+                pair_balance_backdoor_signal_in_block: observation
+                    .features
+                    .token_control
+                    .pair_balance_backdoor_signal_in_block,
+                last_pair_balance_backdoor_signal_to_as_of_chain_block_delta: observation
+                    .features
+                    .token_control
+                    .last_pair_balance_backdoor_signal_to_as_of_chain_block_delta
+                    .map(i64_from_u64),
                 token_transfer_to_total_supply_ratio: finite_opt_option(
                     observation
                         .features
@@ -283,13 +676,117 @@ fn observation_rows(
                         .activity
                         .block_token_transfer_to_pool_token_reserve_ratio,
                 ),
-                observation: to_value(observation)?,
-                features: to_value(&observation.features)?,
+                observation: compact_observation_json(observation),
+                features: compact_features_json(),
             });
         }
     }
 
-    Ok(rows)
+    for (index, row) in event_evidence.iter_mut().enumerate() {
+        row.sort_order = index as i32;
+    }
+
+    Ok((rows, event_evidence))
+}
+
+fn compact_observation_json(observation: &TokenPoolCurrentObservation) -> Value {
+    json!({
+        "compact": true,
+        "block_number": observation.context.block_number,
+        "active_observation_index": observation.context.active_observation_index,
+        "active_reasons": &observation.context.active_reasons,
+        "protocol": &observation.key.protocol,
+    })
+}
+
+fn compact_features_json() -> Value {
+    json!({ "compact": true })
+}
+
+fn append_event_evidence_rows(
+    rows: &mut Vec<EventEvidenceRow>,
+    observation: &TokenPoolCurrentObservation,
+    scam_event: Option<&ScamEventMeta>,
+) {
+    let block_number = Some(i64_from_u64(observation.context.block_number));
+    let block_timestamp = observation.context.timestamp.map(i64_from_u64);
+
+    for action in &observation.block_actions {
+        let event_kind = match action.key.as_str() {
+            "lp_approval" => "lp_approval",
+            "token_control_transfer_from_pair"
+            | "token_control_transfer_from_holder_to_burn"
+            | "token_control_transfer_from_without_transfer"
+            | "token_control_transfer_from_after_renounce"
+            | "token_control_transfer_from" => "token_control_signal",
+            _ => continue,
+        };
+        if action.tx_hashes.is_empty() {
+            rows.push(event_evidence_row(
+                observation,
+                event_kind,
+                None,
+                block_number,
+                block_timestamp,
+                None,
+                &action.key,
+            ));
+            continue;
+        }
+        for tx_hash in &action.tx_hashes {
+            rows.push(event_evidence_row(
+                observation,
+                event_kind,
+                None,
+                block_number,
+                block_timestamp,
+                Some(tx_hash),
+                &action.key,
+            ));
+        }
+    }
+
+    if let Some(scam) = scam_event {
+        if scam.block_number == Some(observation.context.block_number) {
+            rows.push(event_evidence_row(
+                observation,
+                "scam",
+                scam.mechanism.as_deref(),
+                block_number,
+                block_timestamp,
+                scam.tx_hash.as_deref(),
+                "pool_scam_label",
+            ));
+        }
+    }
+}
+
+fn event_evidence_row(
+    observation: &TokenPoolCurrentObservation,
+    event_kind: &str,
+    mechanism: Option<&str>,
+    block_number: Option<i64>,
+    block_timestamp: Option<i64>,
+    tx_hash: Option<&str>,
+    source: &str,
+) -> EventEvidenceRow {
+    EventEvidenceRow {
+        token_address: observation.key.token_address.clone(),
+        pool_address: observation.key.pool_address.clone(),
+        protocol: observation.key.protocol.clone(),
+        event_kind: event_kind.to_string(),
+        mechanism: mechanism
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty()),
+        block_number,
+        block_timestamp,
+        tx_hash: tx_hash
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty()),
+        mempool_first_seen_ms: None,
+        source: Some(source.to_string()),
+        sort_order: 0,
+    }
 }
 
 fn active_target_summaries(rows: &[ObservationRow]) -> Vec<ActiveTargetSummary> {
@@ -301,7 +798,7 @@ fn active_target_summaries(rows: &[ObservationRow]) -> Vec<ActiveTargetSummary> 
         .len() as i64;
     summaries.push(ActiveTargetSummary {
         row_kind: "active_pool_observation".to_string(),
-        horizon_active_observations: None,
+        active_observation_delta: None,
         rows: rows.len() as i64,
         unique_pools: Some(unique_pools),
         positives: None,
@@ -323,8 +820,8 @@ fn active_target_summaries(rows: &[ObservationRow]) -> Vec<ActiveTargetSummary> 
             .collect::<BTreeSet<_>>()
             .len() as i64;
         summaries.push(ActiveTargetSummary {
-            row_kind: "direct_lp_removal_within_active_observations".to_string(),
-            horizon_active_observations: Some(horizon),
+            row_kind: "direct_lp_removal_within_active_observation_delta".to_string(),
+            active_observation_delta: Some(horizon),
             rows: values.len() as i64,
             unique_pools: Some(target_pools),
             positives: Some(positives),
@@ -360,7 +857,7 @@ fn append_observation_distributions(
         for horizon in [1, 2, 3, 5, 10] {
             if let Some(value) = target_for_horizon(row, horizon) {
                 distributions.add(
-                    format!("direct_lp_target_{horizon}_active_observations"),
+                    format!("direct_lp_target_{horizon}_active_observation_delta"),
                     value.to_string(),
                     1,
                 );
@@ -373,7 +870,7 @@ fn numeric_stats(scam_ages: Vec<f64>, direct_lp_approval_leads: Vec<f64>) -> Vec
     let mut stats = Vec::new();
     if let Some(stat) = numeric_stat(
         "scam_age",
-        "Trading Enabled To Label Blocks",
+        "Trading Enabled To Label Chain Block Delta",
         scam_ages,
         0,
     ) {
@@ -381,7 +878,7 @@ fn numeric_stats(scam_ages: Vec<f64>, direct_lp_approval_leads: Vec<f64>) -> Vec
     }
     if let Some(stat) = numeric_stat(
         "direct_lp_age_approval",
-        "Last Pre-Removal LP Approval To Removal Blocks",
+        "Last Pre-Removal LP Approval To Removal Chain Block Delta",
         direct_lp_approval_leads,
         0,
     ) {
@@ -428,21 +925,38 @@ fn decision_questions(
 ) -> Vec<DecisionQuestion> {
     let target_1 = active_targets
         .iter()
-        .find(|row| row.horizon_active_observations == Some(1));
+        .find(|row| row.active_observation_delta == Some(1));
     let target_10 = active_targets
         .iter()
-        .find(|row| row.horizon_active_observations == Some(10));
-    let scam_age = numeric_stats
+        .find(|row| row.active_observation_delta == Some(10));
+    let target_horizons = active_targets
         .iter()
-        .find(|row| row.section == "scam_age");
+        .filter(|row| row.active_observation_delta.is_some())
+        .collect::<Vec<_>>();
+    let scam_age = numeric_stats.iter().find(|row| row.section == "scam_age");
+    let direct_lp_approval_lead = numeric_stats
+        .iter()
+        .find(|row| row.section == "direct_lp_age_approval");
+    let pre_removal_approval_count =
+        distributions.count_for_section("direct_lp_approval_pre_removal", "true");
+    let direct_lp_approval_rows = distributions
+        .section_total("direct_lp_approval_pre_removal")
+        .max(direct_lp_count);
+    let economic_buy_sell =
+        distributions.count_for_section("observation_trading_state", "economic_buy_sell");
+    let active_observation_rows = active_targets
+        .iter()
+        .find(|row| row.active_observation_delta.is_none())
+        .map(|row| row.rows)
+        .unwrap_or_default();
     vec![
         question(
             "eligible_pool_filter",
             "Launch filter",
-            "How much of the observed pool universe is eligible for analytics and training?",
+            "Which pools enter the eligible cohort?",
             format!("{} eligible", fmt_count(eligible_count)),
             format!(
-                "{} of {} pools are eligible. {} are filtered before scam analytics.",
+                "{} of {} pools became eligible. {} are filtered before scam analytics, model rows, and trading-candidate analysis.",
                 fmt_count(eligible_count),
                 fmt_count(pool_count),
                 fmt_count(ineligible_count)
@@ -452,23 +966,70 @@ fn decision_questions(
             json!({
                 "rows": distributions.rows_for_section("pool_eligibility"),
                 "buckets": distributions.rows_for_section("pool_ineligible_reasons"),
+                "use": usage(
+                    "This is the first denominator for every downstream scam-rate and target question.",
+                    "We exclude ineligible pools from model targets and from strategy research because these are pools we would not consider trading."
+                ),
             }),
             0,
         ),
         question(
+            "ineligible_reason_mix",
+            "Launch filter",
+            "Why were pools excluded before modeling?",
+            format!("{} ineligible", fmt_count(ineligible_count)),
+            format!(
+                "{} pools were excluded. The reason mix tells us whether the filter is mostly low-liquidity noise, unsupported quotes, or pools that were not economically buyable/sellable.",
+                fmt_count(ineligible_count)
+            ),
+            Some("ineligible pools"),
+            Some(ineligible_count),
+            json!({
+                "rows": distributions.rows_for_section("pool_ineligible_reasons"),
+                "use": usage(
+                    "This shows whether the launch filter is removing expected junk or hiding pools we may want to support later.",
+                    "We use it to decide whether to improve pool classification before trusting scam-rate or model statistics."
+                ),
+            }),
+            1,
+        ),
+        question(
+            "eligible_protocol_mix",
+            "Launch surface",
+            "Which protocols dominate the eligible cohort?",
+            format!("{} eligible pools", fmt_count(eligible_count)),
+            "Protocol mix matters because the available execution path, scam mechanism mix, and LP-approval semantics differ by AMM family.".to_string(),
+            Some("eligible pools"),
+            Some(eligible_count),
+            json!({
+                "rows": distributions.rows_for_section("eligible_protocols"),
+                "use": usage(
+                    "This tells us which protocol families need model coverage and simulator coverage first.",
+                    "We currently backtest the Risk Atlas chain-sim strategy on V2 only because V3/V4 route metadata is not persisted yet."
+                ),
+            }),
+            2,
+        ),
+        question(
             "scam_mechanism_mix",
             "Scam labels",
-            "Which scam mechanisms dominate the eligible scam labels?",
+            "Which scam mechanisms dominate eligible scam labels?",
             format!("{} scam labels", fmt_count(scam_count)),
             format!(
-                "{} pools are currently scam-labeled; {} are direct LP removals.",
+                "{} pools are scam-labeled; {} are direct LP removals in the feature export.",
                 fmt_count(scam_count),
                 fmt_count(direct_lp_count)
             ),
             Some("scam labels"),
             Some(scam_count),
-            json!({ "rows": distributions.rows_for_section("scam_mechanisms") }),
-            1,
+            json!({
+                "rows": distributions.rows_for_section("scam_mechanisms"),
+                "use": usage(
+                    "This tells us which failure mechanisms need separate labels and separate predictors.",
+                    "We start with direct LP removal because it has a concrete mined-chain warning family, then separate pair-balance and reserve-drain models."
+                ),
+            }),
+            3,
         ),
         question(
             "scam_time_from_trading_enabled",
@@ -476,12 +1037,12 @@ fn decision_questions(
             "How fast do scam pools fail after trading becomes enabled?",
             scam_age
                 .and_then(|stat| stat.median)
-                .map(|median| format!("{median:.0} blocks median"))
+                .map(|median| format!("{median:.0} chain_block_delta median"))
                 .unwrap_or_else(|| "no timing rows".to_string()),
             scam_age
                 .map(|stat| {
                     format!(
-                        "Median label age is {}; P90 is {}.",
+                        "Median label age is {}; P90 is {}. The target model should therefore be near-future and active_observation_delta based, not a lifetime scam/no-scam label.",
                         fmt_optional(stat.median),
                         fmt_optional(stat.p90)
                     )
@@ -492,30 +1053,139 @@ fn decision_questions(
             json!({
                 "stats": scam_age,
                 "buckets": distributions.rows_for_section("time_to_scam_buckets"),
+                "use": usage(
+                    "This helps choose hold windows and target horizons around when scams actually happen.",
+                    "We use active_observation_delta values of 1, 2, 3, 5, and 10 so similar launches can diverge as their state evolves."
+                ),
             }),
-            2,
+            4,
         ),
         question(
-            "direct_lp_next_observation_target",
-            "Near-future target",
-            "How often does direct LP removal happen in the next active observation?",
-            target_headline(target_1),
-            target_answer(target_1, 1),
-            Some("target rows"),
-            target_1.map(|row| row.rows),
-            json!({ "active_target": target_1 }),
-            3,
+            "direct_lp_approval_coverage",
+            "Direct LP warning",
+            "How often is LP approval visible before direct LP liquidity removal?",
+            format!(
+                "{} pre-approved",
+                fmt_count(pre_removal_approval_count)
+            ),
+            format!(
+                "{} of {} direct LP approval-timing rows had pre-removal LP approval ({}).",
+                fmt_count(pre_removal_approval_count),
+                fmt_count(direct_lp_approval_rows),
+                fmt_ratio_percent(pre_removal_approval_count, direct_lp_approval_rows)
+            ),
+            Some("direct LP rows"),
+            Some(direct_lp_approval_rows),
+            json!({
+                "rows": distributions.rows_for_section("direct_lp_approval_pre_removal"),
+                "use": usage(
+                    "A mined LP approval can be an exit warning or a no-entry condition before liquidity is removed.",
+                    "We use it as a risk gate and exit cap, not as the profit source. The latest backtest showed the PnL came mostly from active-hold launch momentum."
+                ),
+            }),
+            5,
         ),
         question(
-            "direct_lp_next_10_observations_target",
+            "direct_lp_approval_lead",
+            "Direct LP warning",
+            "How much confirmed-chain warning does LP approval give before removal?",
+            direct_lp_approval_lead
+                .and_then(|stat| stat.median)
+                .map(|median| format!("{median:.0} chain_block_delta median"))
+                .unwrap_or_else(|| "no lead rows".to_string()),
+            direct_lp_approval_lead
+                .map(|stat| {
+                    format!(
+                        "Pre-removal LP approval appears a median {} chain_block_delta before direct removal; P25 is {}, P90 is {}.",
+                        fmt_optional(stat.median),
+                        fmt_optional(stat.p25),
+                        fmt_optional(stat.p90)
+                    )
+                })
+                .unwrap_or_else(|| "No LP approval lead rows were present in this range.".to_string()),
+            Some("pre-approved removals"),
+            direct_lp_approval_lead.map(|stat| stat.count),
+            json!({
+                "stats": direct_lp_approval_lead,
+                "use": usage(
+                    "Lead time tells us whether a mined approval can realistically trigger a sell before removal.",
+                    "We use this to separate approvals with enough confirmed-block warning from same-block or ordering-dependent cases."
+                ),
+            }),
+            6,
+        ),
+        question(
+            "direct_lp_active_horizons",
             "Near-future target",
-            "How often does direct LP removal happen within the next 10 active observations?",
+            "What is the direct LP removal base rate across active_observation_delta horizons?",
             target_headline(target_10),
-            target_answer(target_10, 10),
+            target_answer(target_1, 1) + " " + &target_answer(target_10, 10),
             Some("target rows"),
             target_10.map(|row| row.rows),
-            json!({ "active_target": target_10 }),
-            4,
+            json!({
+                "horizons": target_horizons,
+                "use": usage(
+                    "These base rates are the baseline any risk model must beat.",
+                    "We use active_observation_delta values of 1, 2, 3, 5, and 10 as the first supervised labels for direct LP removal risk."
+                ),
+            }),
+            7,
+        ),
+        question(
+            "observation_sellability_state",
+            "Execution state",
+            "How often are active observations economically buyable and sellable?",
+            format!("{} economic", fmt_count(economic_buy_sell)),
+            format!(
+                "{} active rows are economically buyable and sellable out of {} active observation rows.",
+                fmt_count(economic_buy_sell),
+                fmt_count(active_observation_rows)
+            ),
+            Some("active rows"),
+            Some(active_observation_rows),
+            json!({
+                "rows": distributions.rows_for_section("observation_trading_state"),
+                "use": usage(
+                    "Sellability state controls whether a warning can actually be acted on.",
+                    "We use effective buy/sell state in the simulator and should split high-tax sells from impossible sells."
+                ),
+            }),
+            8,
+        ),
+        question(
+            "row_level_model_rows",
+            "Model rows",
+            "How much row-level data is available for training?",
+            format!("{} active rows", fmt_count(active_observation_rows)),
+            format!(
+                "Risk Atlas stores one row per active token/pool observation with as-of features and lab-owned near-future target columns."
+            ),
+            Some("active rows"),
+            Some(active_observation_rows),
+            json!({
+                "row_kinds": active_targets.iter().filter(|row| row.active_observation_delta.is_none()).collect::<Vec<_>>(),
+                "use": usage(
+                    "This is the training surface for probabilistic risk models.",
+                    "We use only as-of observation features for model inputs; future labels are added only as target columns."
+                ),
+            }),
+            9,
+        ),
+        question(
+            "current_trading_use",
+            "Trading use",
+            "How are we using these answers right now?",
+            "risk gate first".to_string(),
+            "The current use is to replay eligible V2 pools, block entries after mined LP approval, exit on LP approval or removal, and sweep active-hold windows. Strategy PnL attribution stays separate from this strategy-neutral atlas.".to_string(),
+            None,
+            None,
+            json!({
+                "use": usage(
+                    "The page should explain which signals are warnings, which are labels, and which are model targets.",
+                    "We are using LP approval as a risk gate/exit cap and active_observation_delta timing to choose hold windows; we are not treating LP approval as the standalone profit driver."
+                ),
+            }),
+            10,
         ),
     ]
 }
@@ -534,7 +1204,9 @@ fn model_readiness() -> Vec<ModelReadinessItem> {
         ModelReadinessItem {
             name: "direct_lp_active_targets".to_string(),
             status: "ready".to_string(),
-            detail: Some("Targets are active-observation based for 1, 2, 3, 5, and 10.".to_string()),
+            detail: Some(
+                "Targets are active_observation_delta based for 1, 2, 3, 5, and 10.".to_string(),
+            ),
             sort_order: 1,
         },
     ]
@@ -580,10 +1252,18 @@ fn target_answer(target: Option<&ActiveTargetSummary>, horizon: i32) -> String {
     let positives = target.positives.unwrap_or_default();
     let rows = target.rows.max(0);
     format!(
-        "{} of {} eligible pre-removal observations are positive within {horizon} active observations.",
+        "{} of {} eligible pre-removal observations are positive within {horizon} active_observation_delta ({}).",
         fmt_count(positives),
-        fmt_count(rows)
+        fmt_count(rows),
+        fmt_ratio_percent(positives, rows)
     )
+}
+
+fn usage(can_be_used_for: &str, current_use: &str) -> Value {
+    json!({
+        "can_be_used_for": can_be_used_for,
+        "current_use": current_use,
+    })
 }
 
 #[derive(Default)]
@@ -592,16 +1272,14 @@ struct DistributionAccumulator {
 }
 
 impl DistributionAccumulator {
-    fn add(
-        &mut self,
-        section: impl Into<String>,
-        bucket: impl Into<String>,
-        count: i64,
-    ) {
+    fn add(&mut self, section: impl Into<String>, bucket: impl Into<String>, count: i64) {
         if count == 0 {
             return;
         }
-        *self.counts.entry((section.into(), bucket.into())).or_default() += count;
+        *self
+            .counts
+            .entry((section.into(), bucket.into()))
+            .or_default() += count;
     }
 
     fn finish(self) -> Vec<DistributionBucket> {
@@ -661,6 +1339,21 @@ impl DistributionAccumulator {
                 .cmp(&left.get("count").and_then(Value::as_i64))
         });
         rows
+    }
+
+    fn count_for_section(&self, section: &str, bucket: &str) -> i64 {
+        self.counts
+            .get(&(section.to_string(), bucket.to_string()))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn section_total(&self, section: &str) -> i64 {
+        self.counts
+            .iter()
+            .filter(|((candidate, _), _)| candidate == section)
+            .map(|(_, count)| *count)
+            .sum()
     }
 
     fn section_totals(&self) -> BTreeMap<String, i64> {
@@ -757,6 +1450,10 @@ fn i64_from_u64(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
 }
 
+fn i64_from_u64_opt(value: u64) -> Option<i64> {
+    i64::try_from(value).ok()
+}
+
 fn fmt_count(value: i64) -> String {
     value.to_string()
 }
@@ -765,4 +1462,11 @@ fn fmt_optional(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.0}"))
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_ratio_percent(part: i64, whole: i64) -> String {
+    if whole <= 0 {
+        return "-".to_string();
+    }
+    format!("{:.2}%", part as f64 / whole as f64 * 100.0)
 }

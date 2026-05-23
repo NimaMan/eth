@@ -13,8 +13,9 @@ use crate::chain_metadata::{
 use crate::network::graph::RawTokenNetworkGraph;
 use crate::tracking::token_update_router::{PoolTradingSimulationMode, V2PoolCandidateCache};
 use crate::tracking::{
-    LiveTokenRetentionPolicy, ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
-    TokenTransactionUpdateError, TrackedTokenIndex, hash_string,
+    ephemeral_terminal_scam_retention_policy, hash_string, LiveTokenRetentionPolicy,
+    ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry, TokenTransactionUpdateError,
+    TrackedTokenIndex,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
@@ -50,6 +51,14 @@ impl BlockTokenProcessor {
 
     pub fn new_unbounded_token_index(history_limit: usize) -> Self {
         Self::new_with_token_index_limit(history_limit, None)
+    }
+
+    pub fn new_with_ephemeral_terminal_scam_retention(history_limit: usize) -> Self {
+        let mut processor = Self::new_unbounded_token_index(history_limit);
+        processor
+            .token_index
+            .set_live_retention_policy(Some(ephemeral_terminal_scam_retention_policy()));
+        processor
     }
 
     pub fn new_with_token_index_limit(

@@ -43,6 +43,9 @@ impl ResolvedRangeIndexRequest {
                 BlockTokenProcessor::new_unbounded_token_index(self.history_limit)
             }
             RangeIndexRetentionMode::BoundedIndex => BlockTokenProcessor::new(self.history_limit),
+            RangeIndexRetentionMode::EphemeralTerminalScam => {
+                BlockTokenProcessor::new_with_ephemeral_terminal_scam_retention(self.history_limit)
+            }
         };
         processor.disable_network_graphs();
         processor
@@ -55,6 +58,13 @@ pub enum RangeIndexRetentionMode {
     #[default]
     KeepAll,
     BoundedIndex,
+    EphemeralTerminalScam,
+}
+
+impl RangeIndexRetentionMode {
+    pub fn applies_after_observations(self) -> bool {
+        matches!(self, Self::EphemeralTerminalScam)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -202,6 +212,22 @@ mod tests {
         let processor = request.block_token_processor();
 
         assert!(processor.token_index.max_size.is_some());
+    }
+
+    #[test]
+    fn ephemeral_terminal_scam_retention_uses_unbounded_index_with_policy() {
+        let request = ResolvedRangeIndexRequest {
+            start_block: 100,
+            end_block: 101,
+            history_limit: 10,
+            retention_mode: RangeIndexRetentionMode::EphemeralTerminalScam,
+        };
+
+        let processor = request.block_token_processor();
+
+        assert_eq!(processor.token_index.max_size, None);
+        assert!(processor.token_index.live_retention_policy().is_some());
+        assert!(request.retention_mode.applies_after_observations());
     }
 
     #[test]

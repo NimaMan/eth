@@ -101,6 +101,7 @@ pub(super) async fn apply_processed_block(
     run_state.processor = processor;
     state::apply_report(
         &run.id,
+        run.request.retention_mode,
         &mut run_state,
         report,
         processed.upstream_ms,

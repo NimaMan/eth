@@ -2,7 +2,9 @@ use eth_token::tracking::{BlockTokenProcessor, TokenBlockUpdateReport};
 
 use crate::ranges::observations;
 use crate::ranges::progress::{now_unix_secs, RangeIndexStatus};
-use crate::ranges::{RangeIndexError, RangeIndexErrorKind, RangeIndexJob, RangeIndexState};
+use crate::ranges::{
+    RangeIndexError, RangeIndexErrorKind, RangeIndexJob, RangeIndexRetentionMode, RangeIndexState,
+};
 
 use super::cache::ProcessedBlockDiskCacheMetrics;
 
@@ -61,6 +63,7 @@ pub(super) async fn mark_failed(run: &RangeIndexJob, error: RangeIndexError) {
 
 pub(super) fn apply_report(
     run_id: &str,
+    retention_mode: RangeIndexRetentionMode,
     state: &mut RangeIndexState,
     report: TokenBlockUpdateReport,
     upstream_ms: u128,
@@ -99,6 +102,23 @@ pub(super) fn apply_report(
     state.progress.updated_at_unix_secs = now_unix_secs();
 
     observations::collect_observations(state, &report);
+
+    if retention_mode.applies_after_observations() {
+        if let Some(retention_report) = state
+            .processor
+            .apply_index_retention_policy(report.block_number)
+        {
+            tracing::info!(
+                run_id = %run_id,
+                block_number = report.block_number,
+                evaluated_tokens = retention_report.evaluated_tokens,
+                retained_tokens = retention_report.retained_tokens,
+                dropped_tokens = retention_report.dropped_tokens,
+                dropped_v2_pool_count = retention_report.dropped_v2_pool_count,
+                "applied token retention after observation collection"
+            );
+        }
+    }
 
     state.created_tokens.extend(report.created_token_addresses);
     state.updated_tokens.extend(report.updated_token_addresses);

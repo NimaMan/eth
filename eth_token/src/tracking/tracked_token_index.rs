@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
 
-use super::live_token_retention::{
+use super::retention::{
     LiveTokenRetentionDecision, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
 };
 use super::TokenRegistry;
@@ -371,7 +371,7 @@ mod tests {
 
     use crate::erc20::ERC20TokenMetadata;
     use crate::pools::{BasePoolConfig, UniswapV2Pool};
-    use crate::tracking::live_token_retention::WETH_ADDRESS;
+    use crate::tracking::retention::{ephemeral_terminal_scam_retention_policy, WETH_ADDRESS};
 
     const TOKEN_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
     const SECOND_TOKEN_ADDRESS: &str = "0x2222222222222222222222222222222222222222";
@@ -458,6 +458,37 @@ mod tests {
         assert!(!update.removed_by_retention);
         assert!(registry.token(TOKEN_ADDRESS).is_some());
         assert!(index.contains_token(TOKEN_ADDRESS));
+
+        let report = index
+            .apply_live_retention_policy(&mut registry, 110)
+            .unwrap();
+
+        assert_eq!(report.dropped_tokens, 1);
+        assert!(registry.token(TOKEN_ADDRESS).is_none());
+        assert!(!index.contains_token(TOKEN_ADDRESS));
+    }
+
+    #[test]
+    fn ephemeral_terminal_scam_policy_removes_scam_token_from_registry() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token_with_live_mode(metadata(TOKEN_ADDRESS), true);
+        let token = registry.token_mut(TOKEN_ADDRESS).unwrap();
+        let mut pool = v2_pool(LOW_POOL_ADDRESS, TOKEN_ADDRESS, 0.5);
+        pool.base.mark_liquidity_removal(
+            "liquidity_removal",
+            Some(110),
+            Some("0xSCAM".to_string()),
+        );
+        token.add_uniswap_v2_pool(pool);
+
+        let mut index = TrackedTokenIndex::with_live_retention_policy(
+            10,
+            ephemeral_terminal_scam_retention_policy(),
+        );
+        index.index_token(
+            registry.token(TOKEN_ADDRESS).unwrap(),
+            TrackedTokenStatus::Active,
+        );
 
         let report = index
             .apply_live_retention_policy(&mut registry, 110)
