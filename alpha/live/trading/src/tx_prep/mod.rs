@@ -6,6 +6,7 @@
 //! broadcast.
 
 mod budget;
+mod config;
 mod gas_plan;
 mod metadata;
 mod policy;
@@ -15,6 +16,7 @@ mod simulation;
 mod strategy_gas_policy;
 
 pub use budget::{estimate_eth_cost_from_gwei, PriorityFeeBudget, PriorityFeeBudgetInput};
+pub use config::{GasEstimateConfig, DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS};
 pub use gas_plan::{choose_ranked_fee, GasPlan, GasPlanDecision, RankedFeeCandidate};
 pub use policy::{
     prepare_priority_sell, PrioritySellTxPrep, TxPrepConfig, TxPrepOutcome, TxPrepReject,

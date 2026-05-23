@@ -21,14 +21,13 @@ Current live-runner integration:
 `eth_alpha_live_trader` now instantiates `TxExecutorAdapter` and the
 `LiveTradingPlannerBridge` for deployed Uniswap V2 trading-vault buys and
 emergency sells. That runner refuses non-dry-run Kartal status by default. The
-only public broadcast exception is the explicit one-pool Alpha11 hold3 mined
-validation run, enabled with `--allow-public-mempool-live-validation` and
-`--strategy-set alpha11-univ2-lp30-pool-update-block-hold3-validation`.
-That strategy spec owns `max_entry_pools = 1`, no `--replay-current`, no
-`--once`, and `0.01 ETH` buy/bankroll caps so it can buy once, reconcile the
-mined receipt, sell after 3 pool-update blocks, and record the mined evidence.
+only public broadcast exception is the explicit Alpha11 hold16 deploy strategy,
+enabled with `--allow-public-mempool-live-validation` and
+`--strategy-set alpha11-univ2-lp30-pool-update-block-hold16`.
+That strategy spec has no `max_entry_pools`, no `--replay-current`, no `--once`,
+`0.01 ETH` buy size, and a `0.555 ETH` bankroll cap.
 While entry is otherwise in validation mode, live-real startup also requires a
-resolved strategy bankroll of at most `0.225 ETH`; buys consume that starting
+resolved strategy bankroll of at most `0.555 ETH`; buys consume that starting
 bankroll, confirmed sells replenish it, and profits can be redeployed. The
 no-capital live chain-sim runner is `eth_alpha_live_backtest_trader`; historical
 replay is `eth_alpha_backtest_trader`. Strategy economics and gates belong to
@@ -88,8 +87,8 @@ capital:
 
 - Review one complete hold3 public validation trade with mined buy, mined sell,
   actual fees, tx indexes, and 3-confirmation rechecks persisted in alpha.
-- Keep hold15 entry bounded to a small validation bankroll, currently
-  `0.225 ETH`, until mined validation evidence and receipt operations are
+- Keep hold16 entry bounded to a validation bankroll, currently
+  `0.555 ETH`, until mined validation evidence and receipt operations are
   reviewed.
 
 ## Pre-Live Mined Validation Gate
@@ -172,13 +171,11 @@ Planner-fixture calibration appends a UTC timestamp to the generated
 in Kartal's policy journal and spend ledger.
 
 Current bottleneck: the real-runner boundary exists, and public broadcast is
-limited to the one-pool Alpha11 hold3 validation path. The deployed V2 vault buy
-and sell paths simulate the exact prepared calldata against local Reth state,
-reject stale simulation state, use simulated gas with a buffer for fee
-economics, and fetch route-specific gas-rank recommendations from
-`eth_chain_server` before building the Kartal request. Main-strategy public
-broadcast must remain disabled until the new gas-rank wiring, hold3 mined
-evidence, and receipt operations are reviewed.
+limited to `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit
+public-mempool flag. The deployed V2 vault buy and sell paths simulate the exact
+prepared calldata against local Reth state, reject stale simulation state, use
+simulated gas with a buffer for fee economics, and fetch route-specific gas-rank
+recommendations from `eth_chain_server` before building the Kartal request.
 
 ## Tx Submission Data Flow
 

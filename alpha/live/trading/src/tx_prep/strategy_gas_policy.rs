@@ -6,19 +6,45 @@ use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GasRankProfile {
-    Minimum,
-    Balanced,
-    Aggressive,
-    Urgent,
+    Normal,
+    P50,
+    P55,
+    P60,
+    P65,
+    P70,
+    P75,
+    P77,
+    P85,
+    P88,
+    P90,
+    P92,
+    P94,
+    P95,
+    P96,
+    P97,
+    P99,
 }
 
 impl GasRankProfile {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Minimum => "minimum",
-            Self::Balanced => "balanced",
-            Self::Aggressive => "aggressive",
-            Self::Urgent => "urgent",
+            Self::Normal => "normal",
+            Self::P50 => "p50",
+            Self::P55 => "p55",
+            Self::P60 => "p60",
+            Self::P65 => "p65",
+            Self::P70 => "p70",
+            Self::P75 => "p75",
+            Self::P77 => "p77",
+            Self::P85 => "p85",
+            Self::P88 => "p88",
+            Self::P90 => "p90",
+            Self::P92 => "p92",
+            Self::P94 => "p94",
+            Self::P95 => "p95",
+            Self::P96 => "p96",
+            Self::P97 => "p97",
+            Self::P99 => "p99",
         }
     }
 
@@ -30,7 +56,8 @@ impl GasRankProfile {
 /// Orders named gas-rank profiles for one strategy decision.
 ///
 /// Candidate labels must normalize to one of the explicit profile names:
-/// `minimum`, `balanced`, `aggressive`, or `urgent`. Unprofiled candidates are
+/// `normal` or an explicit fee-percentile profile such as `p50`, `p85`, or
+/// `p95`. Unprofiled candidates are
 /// intentionally ignored so live execution cannot silently fall back to an
 /// old fixed/shadow gas value.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -41,33 +68,52 @@ pub struct StrategyGasRankPolicy {
 
 impl Default for StrategyGasRankPolicy {
     fn default() -> Self {
-        Self::urgent_first()
+        Self::p95_first()
     }
 }
 
 impl StrategyGasRankPolicy {
-    pub fn minimum_first() -> Self {
-        Self::with_preference_order(vec![GasRankProfile::Minimum])
+    pub fn normal_first() -> Self {
+        Self::with_preference_order(vec![GasRankProfile::Normal])
     }
 
-    pub fn balanced_first() -> Self {
-        Self::with_preference_order(vec![GasRankProfile::Balanced, GasRankProfile::Minimum])
+    pub fn p50_first() -> Self {
+        Self::with_preference_order(vec![GasRankProfile::P50, GasRankProfile::Normal])
     }
 
-    pub fn aggressive_first() -> Self {
+    pub fn p75_first() -> Self {
         Self::with_preference_order(vec![
-            GasRankProfile::Aggressive,
-            GasRankProfile::Balanced,
-            GasRankProfile::Minimum,
+            GasRankProfile::P75,
+            GasRankProfile::P50,
+            GasRankProfile::Normal,
         ])
     }
 
-    pub fn urgent_first() -> Self {
+    pub fn p85_first() -> Self {
         Self::with_preference_order(vec![
-            GasRankProfile::Urgent,
-            GasRankProfile::Aggressive,
-            GasRankProfile::Balanced,
-            GasRankProfile::Minimum,
+            GasRankProfile::P85,
+            GasRankProfile::P75,
+            GasRankProfile::P50,
+            GasRankProfile::Normal,
+        ])
+    }
+
+    pub fn p90_first() -> Self {
+        Self::with_preference_order(vec![
+            GasRankProfile::P90,
+            GasRankProfile::P75,
+            GasRankProfile::P50,
+            GasRankProfile::Normal,
+        ])
+    }
+
+    pub fn p95_first() -> Self {
+        Self::with_preference_order(vec![
+            GasRankProfile::P95,
+            GasRankProfile::P90,
+            GasRankProfile::P75,
+            GasRankProfile::P50,
+            GasRankProfile::Normal,
         ])
     }
 
@@ -168,14 +214,14 @@ pub enum StrategyTxKind {
 
 /// Default gas-rank ladders for live strategy transactions.
 ///
-/// The low-level route/tx builders only create calldata, value, gas limit, and
-/// estimated gas-used. The live planning/tx-prep layer applies these defaults
-/// before selecting a fee candidate:
+/// The low-level route/tx builders only create calldata, value, and gas limit.
+/// Exact simulation supplies gas-used evidence before fee candidate selection:
 ///
-/// - Entry buy: `aggressive -> balanced -> minimum`.
-/// - Mempool LP approval / liquidity-removal exit: `urgent -> aggressive -> balanced -> minimum`.
-/// - Mined approval race: `urgent -> aggressive -> balanced -> minimum`.
-/// - Buy-confirm-block approval: `aggressive -> balanced -> minimum`.
+/// - Entry buy: `p85 -> p75 -> p50 -> normal`.
+/// - Routine strategy exits: `p85 -> p75 -> p50 -> normal`.
+/// - Mempool LP approval / liquidity-removal exit: `p95 -> p90 -> p75 -> p50 -> normal`.
+/// - LP approval exit, including mined approval and buy-confirm-block approval:
+///   `p90 -> p75 -> p50 -> normal`.
 ///
 /// The selected ladder is still value-capped by `PriorityFeeBudget`; if a
 /// higher-rank profile is too expensive, the policy falls back to the next
@@ -185,7 +231,7 @@ pub struct StrategyGasRankDefaults;
 impl StrategyGasRankDefaults {
     /// Default for live entry buys.
     pub fn entry_buy_policy() -> StrategyGasRankPolicy {
-        StrategyGasRankPolicy::aggressive_first()
+        StrategyGasRankPolicy::p85_first()
     }
 
     /// Default for live priority sells, derived from sell urgency/source.
@@ -199,23 +245,27 @@ impl StrategyGasRankDefaults {
     /// Resolve the strategy transaction kind into its default gas-rank ladder.
     pub fn policy_for(kind: StrategyTxKind) -> StrategyGasRankPolicy {
         match kind {
-            StrategyTxKind::EntryBuy => StrategyGasRankPolicy::aggressive_first(),
+            StrategyTxKind::EntryBuy => StrategyGasRankPolicy::p85_first(),
+            StrategyTxKind::PrioritySell {
+                urgency: SellUrgency::NormalExit,
+                ..
+            } => StrategyGasRankPolicy::p85_first(),
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MempoolPreMine,
                 signal_source: LpSignalSource::MempoolLpApproval,
-            } => StrategyGasRankPolicy::urgent_first(),
+            } => StrategyGasRankPolicy::p95_first(),
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MempoolPreMine,
                 ..
-            } => StrategyGasRankPolicy::urgent_first(),
+            } => StrategyGasRankPolicy::p95_first(),
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MinedApprovalRace,
                 ..
-            } => StrategyGasRankPolicy::urgent_first(),
-            StrategyTxKind::PrioritySell {
+            }
+            | StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::BuyConfirmBlockApproval,
                 ..
-            } => StrategyGasRankPolicy::aggressive_first(),
+            } => StrategyGasRankPolicy::p90_first(),
         }
     }
 }
@@ -255,51 +305,51 @@ mod tests {
     }
 
     #[test]
-    fn chooses_urgent_when_affordable() {
-        let decision = StrategyGasRankPolicy::urgent_first().choose_ranked_fee(
+    fn chooses_p95_when_affordable() {
+        let decision = StrategyGasRankPolicy::p95_first().choose_ranked_fee(
             &budget(100),
             &[
-                candidate("balanced", 2, 25),
-                candidate("urgent", 9, 5),
-                candidate("aggressive", 4, 10),
+                candidate("p50", 2, 25),
+                candidate("p95", 9, 5),
+                candidate("p90", 4, 10),
             ],
         );
 
         match decision {
-            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "urgent"),
-            other => panic!("expected urgent, got {other:?}"),
+            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "p95"),
+            other => panic!("expected p95, got {other:?}"),
         }
     }
 
     #[test]
     fn falls_back_to_best_affordable_profile() {
-        let decision = StrategyGasRankPolicy::urgent_first().choose_ranked_fee(
+        let decision = StrategyGasRankPolicy::p95_first().choose_ranked_fee(
             &budget(4),
             &[
-                candidate("balanced", 2, 25),
-                candidate("urgent", 9, 5),
-                candidate("aggressive", 4, 10),
+                candidate("p50", 2, 25),
+                candidate("p95", 9, 5),
+                candidate("p90", 4, 10),
             ],
         );
 
         match decision {
-            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "aggressive"),
-            other => panic!("expected aggressive, got {other:?}"),
+            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "p90"),
+            other => panic!("expected p90, got {other:?}"),
         }
     }
 
     #[test]
     fn rejects_when_no_allowed_profile_fits_budget() {
         let policy = StrategyGasRankPolicy {
-            allowed_profiles: vec![GasRankProfile::Urgent, GasRankProfile::Aggressive],
-            preference_order: vec![GasRankProfile::Urgent, GasRankProfile::Aggressive],
+            allowed_profiles: vec![GasRankProfile::P95, GasRankProfile::P90],
+            preference_order: vec![GasRankProfile::P95, GasRankProfile::P90],
         };
         let decision = policy.choose_ranked_fee(
             &budget(3),
             &[
-                candidate("balanced", 2, 25),
-                candidate("urgent", 9, 5),
-                candidate("aggressive", 4, 10),
+                candidate("p50", 2, 25),
+                candidate("p95", 9, 5),
+                candidate("p90", 4, 10),
             ],
         );
 
@@ -308,30 +358,58 @@ mod tests {
 
     #[test]
     fn rejects_unprofiled_candidates() {
-        let decision = StrategyGasRankPolicy::urgent_first()
+        let decision = StrategyGasRankPolicy::p95_first()
             .choose_ranked_fee(&budget(40), &[candidate("legacy_fixed", 40, 100)]);
 
         assert!(matches!(decision, GasPlanDecision::Reject { .. }));
     }
 
     #[test]
-    fn entry_buy_default_is_aggressive_first() {
+    fn entry_buy_default_is_p85_first() {
         let selected = StrategyGasRankDefaults::entry_buy_policy()
-            .choose_candidate(&[candidate("urgent", 9, 5), candidate("aggressive", 4, 10)])
+            .choose_candidate(&[
+                candidate("p90", 4, 10),
+                candidate("p85", 3, 15),
+                candidate("p50", 2, 25),
+            ])
             .expect("candidate");
 
-        assert_eq!(selected.label, "aggressive");
+        assert_eq!(selected.label, "p85");
     }
 
     #[test]
-    fn mempool_priority_sell_default_is_urgent_first() {
+    fn normal_exit_default_is_p85_first() {
+        let selected = StrategyGasRankDefaults::policy_for(StrategyTxKind::PrioritySell {
+            urgency: SellUrgency::NormalExit,
+            signal_source: LpSignalSource::StrategyExit,
+        })
+        .choose_candidate(&[candidate("p90", 4, 10), candidate("p85", 3, 15)])
+        .expect("candidate");
+
+        assert_eq!(selected.label, "p85");
+    }
+
+    #[test]
+    fn lp_approval_priority_sell_default_is_p90_first() {
+        let selected = StrategyGasRankDefaults::policy_for(StrategyTxKind::PrioritySell {
+            urgency: SellUrgency::MinedApprovalRace,
+            signal_source: LpSignalSource::MinedLpApproval,
+        })
+        .choose_candidate(&[candidate("p85", 3, 15), candidate("p90", 4, 10)])
+        .expect("candidate");
+
+        assert_eq!(selected.label, "p90");
+    }
+
+    #[test]
+    fn mempool_priority_sell_default_is_p95_first() {
         let selected = StrategyGasRankDefaults::policy_for(StrategyTxKind::PrioritySell {
             urgency: SellUrgency::MempoolPreMine,
             signal_source: LpSignalSource::MempoolLpApproval,
         })
-        .choose_candidate(&[candidate("balanced", 2, 25), candidate("urgent", 9, 5)])
+        .choose_candidate(&[candidate("p50", 2, 25), candidate("p95", 9, 5)])
         .expect("candidate");
 
-        assert_eq!(selected.label, "urgent");
+        assert_eq!(selected.label, "p95");
     }
 }

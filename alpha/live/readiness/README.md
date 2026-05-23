@@ -25,8 +25,8 @@ public real capital unless it has:
 | Path | Purpose |
 | --- | --- |
 | `gates/pre_live_mined_validation/` | Reusable one-position mined-validation gate. |
+| `gates/production_gas_rank/` | Gas-rank, fee-cap, and production transaction-cost gate. |
 | `strategies/alpha11/` | Alpha11-specific application of the readiness gates. |
 
 Gate definitions describe what must be proven for any strategy. Strategy files
 bind those gates to concrete strategy names, caps, vaults, and current evidence.
-

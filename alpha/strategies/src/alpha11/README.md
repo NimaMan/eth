@@ -4,9 +4,13 @@ Alpha11 is the deployable live strategy layer for the current ETH validation
 run. It composes the reusable `baseline/snipe_all` engine and owns the product
 defaults that should be explicit in the strategy name.
 
-The visible live-backtest and live-real hold15 strategy name remains:
+The current live-real promotion target is:
 
-`alpha11-univ2-lp30-pool-update-block-hold15`
+`alpha11-univ2-lp30-pool-update-block-hold16`
+
+The live-backtest comparison sweep also includes hold12, hold14, hold15,
+hold18, and hold20 so the selected hold window can be compared against nearby
+variants before promotion.
 
 The controlled public validation variant is:
 
@@ -15,7 +19,7 @@ The controlled public validation variant is:
 That variant has the same Uniswap V2, LP30, pool-update-block, and deployed V2
 vault assumptions, but it uses hold3 and a `0.01 ETH` entry bankroll so we can
 prove one mined buy, one mined sell, receipt reconciliation, tx index, actual
-gas cost, and finality recheck before enabling the main hold15 strategy.
+gas cost, and finality recheck before enabling the main hold16 strategy.
 It also carries `max_entry_pools = 1` in the strategy spec. Live runs must not
 pass separate strategy parameters such as buy size, liquidity floors, bankroll,
 entry-pool cap, or hold blocks for Alpha11.
@@ -48,11 +52,11 @@ Shared Alpha11 defaults:
 - Buy size is `0.01 ETH` per entry.
 - Liquidity floors are `0.5 ETH` for ETH/WETH pools and `1000` for USD-stable
   quote pools.
-- `pool-update-block-hold15`: force exit after 15 distinct pool-update blocks
+- `pool-update-block-hold16`: force exit after 16 distinct pool-update blocks
   while the position is open.
 - `entry_init_policy`: only enter pools with age `<= 5` blocks and
   `price / initial price <= 2` when that evidence is available.
-- Initial entry bankroll is `0.225 ETH`; buys consume bankroll, confirmed sells
+- Initial entry bankroll is `0.555 ETH`; buys consume bankroll, confirmed sells
   replenish it, and realized profit can be redeployed.
 
 ## Entry Gates
@@ -75,7 +79,7 @@ for deploy review are:
 - `risk_atlas_mined_chain`: confirmed-chain evidence derived from mined blocks.
 - `market`: pool-update or max-hold decisions, not a risk-signal source.
 
-For `alpha11-univ2-lp30-pool-update-block-hold15`, a sell reason of
+For `alpha11-univ2-lp30-pool-update-block-hold16`, a sell reason of
 `exit.lp_approval` means the strategy exited on LP-token approval evidence. A
 hold reason of `exit.lp_approval:early_approval_deferred_to_max_hold` means the
 approval was in the launch window and the position remains governed by max hold.

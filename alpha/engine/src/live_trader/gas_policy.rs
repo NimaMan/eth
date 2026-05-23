@@ -16,10 +16,7 @@ const LIVE_V2_VAULT_SELL_GAS_LIMIT_CONFIG: &str = "ALPHA_LIVE_UNISWAP_V2_VAULT_S
 const LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_ENTRY_BUY_GAS_PROFILES";
 const LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_NORMAL_EXIT_GAS_PROFILES";
 const LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_RACE_EXIT_GAS_PROFILES";
-const LIVE_MINED_APPROVAL_RACE_GAS_PROFILES_CONFIG: &str =
-    "ALPHA_LIVE_MINED_APPROVAL_RACE_GAS_PROFILES";
-const LIVE_BUY_CONFIRM_APPROVAL_GAS_PROFILES_CONFIG: &str =
-    "ALPHA_LIVE_BUY_CONFIRM_APPROVAL_GAS_PROFILES";
+const LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES";
 
 #[derive(Clone, Debug)]
 pub(super) struct LiveRealGasPolicy {
@@ -35,8 +32,7 @@ pub(super) struct LiveRealGasPolicy {
     pub(super) entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) normal_exit_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy,
-    pub(super) mined_approval_race_gas_rank_policy: StrategyGasRankPolicy,
-    pub(super) buy_confirm_block_approval_gas_rank_policy: StrategyGasRankPolicy,
+    pub(super) lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy,
 }
 
 pub(super) fn load_live_real_gas_policy(
@@ -88,13 +84,9 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG,
         )?,
-        mined_approval_race_gas_rank_policy: required_config_gas_policy(
+        lp_approval_exit_gas_rank_policy: required_config_gas_policy(
             config,
-            LIVE_MINED_APPROVAL_RACE_GAS_PROFILES_CONFIG,
-        )?,
-        buy_confirm_block_approval_gas_rank_policy: required_config_gas_policy(
-            config,
-            LIVE_BUY_CONFIRM_APPROVAL_GAS_PROFILES_CONFIG,
+            LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG,
         )?,
     })
 }

@@ -125,7 +125,7 @@ The guarded live-real runner swaps in `TxExecutorAdapter`, but the systemd
 service keeps that path in Kartal dry-run until gas-rank, dry-run evidence, and
 receipt-operation gates are complete. The deployed V2 vault buy and emergency
 sell paths now run exact-calldata pre-submit simulation. Live-real entries
-must resolve to a bankroll of at most `0.225 ETH` during validation. Alpha11
+must resolve to a bankroll of at most `0.555 ETH` during validation. Alpha11
 sets that bankroll in its strategy spec; live runs do not override it from the
 CLI.
 Public real execution must consult `eth_block_tx_rank` before submission and
@@ -182,7 +182,7 @@ Alpha has separate trader entrypoints for each runtime boundary:
 | Binary | Adapter | Broadcast capability |
 | --- | --- | --- |
 | `eth_alpha_live_backtest_trader` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
-| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run by default. `public_mempool` is only accepted for the explicit one-pool Alpha11 hold3 validation strategy. |
+| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run by default. `public_mempool` is only accepted for `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit public-mempool flag. |
 | `eth_alpha_backtest_trader` | `ChainSimExecutionAdapter` | None; historical replay only. |
 
 The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
@@ -196,19 +196,19 @@ The real live binary targets the deployed `UniswapV2TradingVault`, derives a
 non-zero min-output from provisional exact-calldata simulation, and simulates
 the final exact vault buy or sell calldata against local Reth state before
 Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
-at most `0.225 ETH`. Public broadcast is rejected unless all of these are true:
+at most `0.555 ETH`. Public broadcast is rejected unless all of these are true:
 Kartal reports `public_mempool`, the CLI includes
 `--allow-public-mempool-live-validation`, the strategy set is
-`alpha11-univ2-lp30-pool-update-block-hold3-validation`,
+`alpha11-univ2-lp30-pool-update-block-hold16`,
 `--replay-current` is absent, `--once` is absent, and the resolved strategy spec
-has `max_entry_pools = 1` plus buy value and entry bankroll both capped at
-`0.01 ETH`. The visible
+has no `max_entry_pools`, buy value capped at `0.01 ETH`, and entry bankroll
+capped at `0.555 ETH`. The visible
 Alpha11 hold15 strategy name remains
 `alpha11-univ2-lp30-pool-update-block-hold15` for both live-backtest and
 live-real. Hold duration is part of the named strategy spec rather than a
-live-run CLI override. The live-real path applies the deploy-only entry cap
-`price / initial price <= 1.5` through the recorded strategy config instead of
-encoding that cap in the strategy name.
+live-run CLI override. Price / initial thresholding is now a shared init-policy
+research item; the live-real path should not add a hidden Alpha11-only cap
+unless the init policy explicitly owns that calibrated rule.
 The live-real gas-rank provider calls `eth_chain_server` for route-specific
 ranked fee candidates before building each Kartal request.
 A receipt reconciliation worker now exists for real submitted tx hashes: it
@@ -218,8 +218,9 @@ vault fills only from `BoughtV2` or `EmergencySoldV2` events. The final
 actual gas/effective price/paid cost, selected max-fee/priority/bribe metadata,
 and the comparison to the live-backtest `submitted block + 1` assumption. The
 first validation policy accepts a receipt at `1` confirmation and records a
-`3` confirmation recheck depth. The hold3 validation run is the first
-public-broadcast proof point. The main hold15 public deployment still needs:
+`3` confirmation recheck depth. The hold3 validation run is archived mined
+evidence; public broadcast is now guarded to the hold16 deploy strategy. The
+main hold16 public deployment still needs:
 
 - production `GasRankProvider` backed by recent block-rank evidence;
 - validation evidence for the capped deployed-vault buy route and position

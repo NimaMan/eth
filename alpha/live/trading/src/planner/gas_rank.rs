@@ -80,9 +80,14 @@ impl GasRankProvider for ChainServerGasRankProvider {
         _input: &LivePrioritySellPlannerInput,
         route: &PreparedSellRoute,
     ) -> Result<GasRankPlan, LivePrioritySellPlannerError> {
+        let estimated_gas_used = route.require_estimated_gas_used().map_err(|error| {
+            LivePrioritySellPlannerError::GasRank(format!(
+                "cannot request gas rank without simulation gas evidence: {error}"
+            ))
+        })?;
         let request = json!({
             "gas_limit": route.gas_limit,
-            "estimated_gas_used": route.estimated_gas_used,
+            "estimated_gas_used": estimated_gas_used,
             "lookback_blocks": self.lookback_blocks,
         });
         let response = self
@@ -221,7 +226,7 @@ mod chain_server_tests {
             },
             "recommendations": [
                 {
-                    "label": "Minimum",
+                    "label": "Normal",
                     "priority_fee_gwei": 0.5,
                     "max_fee_per_gas_gwei": 0.626388888,
                     "rank": {
@@ -231,7 +236,7 @@ mod chain_server_tests {
                     }
                 },
                 {
-                    "label": "Aggressive",
+                    "label": "P90",
                     "priority_fee_gwei": 2,
                     "max_fee_per_gas_gwei": 2.126388888,
                     "rank": {
@@ -247,14 +252,14 @@ mod chain_server_tests {
 
         assert_eq!(plan.predicted_base_fee_gwei.to_string(), "0.112345678");
         assert_eq!(plan.candidates.len(), 2);
-        assert_eq!(plan.candidates[0].label, "minimum");
+        assert_eq!(plan.candidates[0].label, "normal");
         assert_eq!(plan.candidates[0].priority_fee_gwei.to_string(), "0.5");
         assert_eq!(plan.candidates[0].rank_position_p50, Some(50));
         assert_eq!(
             plan.candidates[0].source.as_deref(),
             Some("eth_chain_server_gas_rank")
         );
-        assert_eq!(plan.candidates[1].label, "aggressive");
+        assert_eq!(plan.candidates[1].label, "p90");
         assert_eq!(plan.candidates[1].priority_fee_gwei.to_string(), "2");
     }
 }

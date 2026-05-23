@@ -108,8 +108,7 @@ fn sell_gas_policy_action(plan: &PrioritySellPlan) -> &'static str {
     match &plan.urgency {
         SellUrgency::NormalExit => "normal_exit",
         SellUrgency::MempoolPreMine => "mempool_race_exit",
-        SellUrgency::MinedApprovalRace => "mined_approval_race_exit",
-        SellUrgency::BuyConfirmBlockApproval => "buy_confirm_approval_exit",
+        SellUrgency::MinedApprovalRace | SellUrgency::BuyConfirmBlockApproval => "lp_approval_exit",
     }
 }
 

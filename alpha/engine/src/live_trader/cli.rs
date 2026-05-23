@@ -83,8 +83,8 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value = DEFAULT_UNISWAP_V2_TRADING_VAULT)]
     live_real_vault_address: String,
 
-    /// Allow Kartal public_mempool only for the explicit Alpha11 hold3
-    /// one-pool validation strategy. Without this flag the live trader refuses
+    /// Allow Kartal public_mempool only for the explicit Alpha11 hold16
+    /// deploy strategy. Without this flag the live trader refuses
     /// any non-dry-run Kartal status.
     #[arg(long, default_value_t = false)]
     allow_public_mempool_live_validation: bool,

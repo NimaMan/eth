@@ -25,6 +25,9 @@ impl PreSubmitSimulation {
         if self.expected_recovery_eth <= eth_alpha_core::amount::DecimalAmount::ZERO {
             return Err(TxPrepSimulationError::NoExpectedRecovery);
         }
+        if self.gas_used.is_none() {
+            return Err(TxPrepSimulationError::MissingGasUsed);
+        }
         Ok(())
     }
 
@@ -44,4 +47,6 @@ pub enum TxPrepSimulationError {
     WouldRevert,
     #[error("pre-submit simulation has no expected recovery")]
     NoExpectedRecovery,
+    #[error("pre-submit simulation has no gas_used; fallback gas estimates are not allowed")]
+    MissingGasUsed,
 }

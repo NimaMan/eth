@@ -25,10 +25,9 @@ and sell. It does not prove the full production envelope.
 - Revert after a previously passing simulation.
 - Stale local Reth simulation state under high lag.
 - Multiple concurrent open positions.
-- Sell retry policy under urgent risk events.
+- Sell retry policy under P95/P90 risk events.
 - RPC outage during receipt polling.
 - Receipt finality beyond the configured recheck depth.
 
 After this gate passes, the next readiness step is a capped multi-position
 validation run before increasing bankroll or deploying the main strategy.
-

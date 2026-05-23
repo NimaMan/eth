@@ -24,6 +24,10 @@ pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     spec(15, options)
 }
 
+pub fn hold16_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+    spec(16, options)
+}
+
 pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     let mut spec = spec(3, options);
     spec.strategy_name = HOLD3_VALIDATION_STRATEGY_NAME.to_string();
@@ -73,7 +77,7 @@ fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrateg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alpha11::HOLD15_STRATEGY_NAME;
+    use crate::alpha11::{HOLD15_STRATEGY_NAME, HOLD16_STRATEGY_NAME};
 
     #[test]
     fn set_matches_hold_sweep() {
@@ -89,7 +93,7 @@ mod tests {
                 "alpha11-univ2-lp30-pool-update-block-hold12",
                 "alpha11-univ2-lp30-pool-update-block-hold14",
                 HOLD15_STRATEGY_NAME,
-                "alpha11-univ2-lp30-pool-update-block-hold16",
+                HOLD16_STRATEGY_NAME,
                 "alpha11-univ2-lp30-pool-update-block-hold18",
                 "alpha11-univ2-lp30-pool-update-block-hold20",
             ]
@@ -144,6 +148,26 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
+    }
+
+    #[test]
+    fn hold16_single_spec_matches_deploy_target() {
+        let spec = hold16_spec(&LiveStrategySpecOptions::default());
+
+        assert_eq!(spec.strategy_name, HOLD16_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, STRATEGY_IMPL);
+        assert_eq!(spec.max_hold_blocks, Some(16));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(INITIAL_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.max_entry_pools, None);
+        assert_eq!(spec.buy_wei, BUY_WEI);
+        assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
+        assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_lp_approval);
+        assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
     }
 
     #[test]

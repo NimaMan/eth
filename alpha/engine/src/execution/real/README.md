@@ -77,7 +77,7 @@ wallet tx context, observation metadata, and deadline/min-out inputs.
 The deployed V2 vault buy and sell paths now derive min-out from provisional
 exact-calldata simulation and run a second exact-calldata simulation before
 Kartal submission. The live-real binary permits entries only when the resolved
-strategy bankroll is at most `0.225 ETH`; buys consume that bankroll, confirmed
+strategy bankroll is at most `0.555 ETH`; buys consume that bankroll, confirmed
 sells replenish it, and profits can be redeployed. The
 remaining production pieces are live gas-rank providers and final
 broadcast/finality operations around the receipt worker. Route discovery,

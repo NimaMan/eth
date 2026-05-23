@@ -137,18 +137,18 @@ mod tests {
     fn picks_best_rank_within_value_cap() {
         let decision = choose_ranked_fee(
             &budget(60),
-            &[candidate("urgent", 100, 5), candidate("aggressive", 50, 10)],
+            &[candidate("p95", 100, 5), candidate("p90", 50, 10)],
         );
 
         match decision {
-            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "aggressive"),
+            GasPlanDecision::UseRanked(plan) => assert_eq!(plan.label, "p90"),
             other => panic!("expected eligible ranked plan, got {other:?}"),
         }
     }
 
     #[test]
     fn rejects_when_all_ranked_candidates_exceed_cap() {
-        let decision = choose_ranked_fee(&budget(40), &[candidate("aggressive", 50, 10)]);
+        let decision = choose_ranked_fee(&budget(40), &[candidate("p90", 50, 10)]);
 
         assert!(matches!(decision, GasPlanDecision::Reject { .. }));
     }

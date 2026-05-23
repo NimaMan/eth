@@ -16,6 +16,8 @@ pub struct TxPrepConfig {
     pub max_priority_fee_gwei: DecimalAmount,
     pub safety_buffer_eth: DecimalAmount,
     pub gas_rank_policy: StrategyGasRankPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_gas_rank_source: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,13 +55,17 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
     if let Err(error) = input.simulation.validate() {
         return reject_simulation(error);
     }
+    let estimated_gas_used = match input.route.require_estimated_gas_used() {
+        Ok(estimated_gas_used) => estimated_gas_used,
+        Err(error) => return reject_route(error),
+    };
 
     let budget = PriorityFeeBudget::from_input(&PriorityFeeBudgetInput {
         protected_exit_value_eth: input.simulation.expected_recovery_eth,
         expected_late_recovery_eth: input.expected_late_recovery_eth,
         safety_buffer_eth: config.safety_buffer_eth,
         predicted_base_fee_gwei: input.predicted_base_fee_gwei,
-        estimated_gas_used: input.route.estimated_gas_used,
+        estimated_gas_used,
         max_total_fee_eth: config.max_total_fee_eth.min(input.plan.max_total_fee_eth),
         configured_max_priority_fee_gwei: config
             .max_priority_fee_gwei
@@ -71,7 +77,23 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
         .clone()
         .unwrap_or_else(|| config.gas_rank_policy.clone());
 
-    match gas_rank_policy.choose_ranked_fee(&budget, &input.ranked_fee_candidates) {
+    let ranked_fee_candidates = filter_ranked_fee_candidates(
+        &input.ranked_fee_candidates,
+        &config.required_gas_rank_source,
+    );
+    if ranked_fee_candidates.is_empty() && config.required_gas_rank_source.is_some() {
+        return TxPrepOutcome::Reject(TxPrepReject {
+            reason: "gas_rank_source_not_allowed".to_string(),
+            metadata: json!({
+                "required_gas_rank_source": config.required_gas_rank_source,
+                "ranked_fee_candidates": input.ranked_fee_candidates,
+                "strategy_gas_rank_policy": gas_rank_policy,
+                "budget": budget,
+            }),
+        });
+    }
+
+    match gas_rank_policy.choose_ranked_fee(&budget, &ranked_fee_candidates) {
         GasPlanDecision::UseRanked(gas_plan) => {
             let signal = build_priority_sell_request(
                 &input.context,
@@ -95,12 +117,31 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
                 "required_priority_fee_gwei": required_priority_fee_gwei,
                 "max_priority_fee_gwei": max_priority_fee_gwei,
                 "max_priority_spend_eth": max_priority_spend_eth,
-                "ranked_fee_candidates": input.ranked_fee_candidates,
+                "required_gas_rank_source": config.required_gas_rank_source,
+                "ranked_fee_candidates": ranked_fee_candidates,
                 "strategy_gas_rank_policy": gas_rank_policy,
                 "budget": budget,
             }),
         }),
     }
+}
+
+fn filter_ranked_fee_candidates(
+    candidates: &[RankedFeeCandidate],
+    required_source: &Option<String>,
+) -> Vec<RankedFeeCandidate> {
+    let Some(required_source) = required_source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return candidates.to_vec();
+    };
+    candidates
+        .iter()
+        .filter(|candidate| candidate.source.as_deref() == Some(required_source))
+        .cloned()
+        .collect()
 }
 
 fn reject_route(error: TxPrepRouteError) -> TxPrepOutcome {
@@ -158,7 +199,7 @@ mod tests {
                 calldata: "0x1234".to_string(),
                 value_wei: "0".to_string(),
                 gas_limit: 180_000,
-                estimated_gas_used: 150_000,
+                estimated_gas_used: Some(150_000),
                 max_slippage_bps: Some(500),
             },
             simulation: PreSubmitSimulation {
@@ -176,7 +217,7 @@ mod tests {
             predicted_base_fee_gwei: DecimalAmount::from(10),
             expected_late_recovery_eth: DecimalAmount::new(6, 4),
             ranked_fee_candidates: vec![RankedFeeCandidate {
-                label: "aggressive".to_string(),
+                label: "p90".to_string(),
                 priority_fee_gwei: DecimalAmount::from(candidate_priority_gwei),
                 max_fee_per_gas_gwei: DecimalAmount::from(candidate_priority_gwei + 10),
                 rank_position_p50: Some(10),
@@ -193,7 +234,8 @@ mod tests {
             max_total_fee_eth: DecimalAmount::new(2, 2),
             max_priority_fee_gwei: DecimalAmount::from(max_priority_gwei),
             safety_buffer_eth: DecimalAmount::new(1, 3),
-            gas_rank_policy: StrategyGasRankPolicy::urgent_first(),
+            gas_rank_policy: StrategyGasRankPolicy::p90_first(),
+            required_gas_rank_source: None,
         }
     }
 
@@ -260,6 +302,21 @@ mod tests {
         match outcome {
             TxPrepOutcome::Reject(reject) => {
                 assert_eq!(reject.reason, "invalid_pre_submit_simulation");
+            }
+            other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_when_required_gas_rank_source_is_absent() {
+        let mut config = config(100);
+        config.required_gas_rank_source = Some("eth_chain_server_gas_rank".to_string());
+
+        let outcome = prepare_priority_sell(&config, input(2));
+
+        match outcome {
+            TxPrepOutcome::Reject(reject) => {
+                assert_eq!(reject.reason, "gas_rank_source_not_allowed");
             }
             other => panic!("expected reject, got {other:?}"),
         }

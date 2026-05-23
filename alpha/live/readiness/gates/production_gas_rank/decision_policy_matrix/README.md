@@ -26,7 +26,7 @@ tests.
 | Entry buy | `entry.buy_eligible_pool_once` | `entry_buy` | `ALPHA_LIVE_ENTRY_BUY_GAS_PROFILES` | `p85 -> p75 -> p50 -> normal` | V2 vault buy | Used before we hold inventory. |
 | Normal exit | `exit.max_hold_active_blocks`, restored max-hold exits, take-profit/stop-loss style strategy exits | `normal_exit` | `ALPHA_LIVE_NORMAL_EXIT_GAS_PROFILES` | `p85 -> p75 -> p50 -> normal` | V2 vault sell | Not a mempool race, but starts at `p85` so routine exits do not sit too far back. |
 | Mempool LP/removal race | Mempool source or reason containing `mempool`, including `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `ALPHA_LIVE_MEMPOOL_RACE_EXIT_GAS_PROFILES` | `p95 -> p90 -> p75 -> p50 -> normal` | Priority V2 vault sell | Highest urgency public-mempool exit. |
-| LP approval exit | Mined LP approval or buy-confirm-block LP approval, including `exit.lp_approval_mined_race` and `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES` | `p90 -> p75 -> p50 -> normal` | Priority V2 vault sell | One shared ladder for all mined/same-block LP approval exits. |
+| LP approval exit | Mined LP approval or buy-confirm-block LP approval, including Alpha11 `exit.lp_approval`, `exit.lp_approval_mined_race`, and `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES` | `p90 -> p75 -> p50 -> normal` | Priority V2 vault sell | One shared ladder for all mined/same-block LP approval exits. |
 
 ## Profile Labels
 

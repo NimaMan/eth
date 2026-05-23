@@ -12,7 +12,7 @@ No real Alpha live transaction may be submitted unless all of these are true:
 - The route gas estimate is derived from the simulation result, not a fallback.
 - Gas candidates come from `eth_chain_server_gas_rank`.
 - Entry buys use the `p85 -> p75 -> p50 -> normal` profile ladder.
-- Routine strategy exits such as max-hold use `p50 -> normal`.
+- Routine strategy exits such as max-hold use `p85 -> p75 -> p50 -> normal`.
 - LP/risk race exits may request the `p95 -> p90 -> p75 -> p50 -> normal`
   ladder, but still must fit the
   production caps below.

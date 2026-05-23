@@ -15,7 +15,7 @@ pub struct BribeExitConfig {
     /// Strict lower bound: approval must be greater than this percent of LP
     /// supply to trigger the rule.
     pub min_lp_approved_pct: DecimalAmount,
-    /// Maximum priority fee the real adapter may use for the urgent sell.
+    /// Maximum priority fee the real adapter may use for the priority sell.
     pub max_priority_fee_per_gas_gwei: DecimalAmount,
     /// Maximum total ETH cost allowed for the priority exit attempt.
     pub max_total_fee_eth: DecimalAmount,
@@ -42,6 +42,8 @@ pub enum LpSignalSource {
     MinedLpApproval,
     /// Direct liquidity removal is already observed in confirmed chain state.
     MinedLiquidityRemoval,
+    /// Strategy-owned exit such as max-hold, take-profit, or stop-loss.
+    StrategyExit,
 }
 
 impl Default for LpSignalSource {
@@ -79,6 +81,8 @@ pub enum PriorityRoute {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SellUrgency {
+    /// Routine strategy exit with no observed LP/risk race.
+    NormalExit,
     /// Pre-mine signal. This is the cleanest live edge.
     MempoolPreMine,
     /// Approval is mined and removal has not yet been observed; race the next block.
@@ -109,6 +113,7 @@ impl PrioritySellPlan {
             LpSignalSource::MinedLpApproval | LpSignalSource::MinedLiquidityRemoval => {
                 source::EVENT_SOURCE_RISK_ATLAS_MINED_CHAIN
             }
+            LpSignalSource::StrategyExit => source::EVENT_SOURCE_POSITION_MONITOR,
         }
     }
 
@@ -125,7 +130,7 @@ impl PrioritySellPlan {
 pub enum TradeAction {
     /// No buy should be submitted for this pool.
     BlockEntry { reason: String },
-    /// Submit an urgent sell through the real execution adapter.
+    /// Submit a priority sell through the real execution adapter.
     SubmitPrioritySell(PrioritySellPlan),
     /// No action should be taken now.
     Hold { reason: String },
@@ -170,6 +175,11 @@ pub fn plan_lp_approval_response(
             reason: "liquidity_removal_already_mined".to_string(),
         };
     }
+    if signal.source == LpSignalSource::StrategyExit {
+        return TradeAction::Hold {
+            reason: "strategy_exit_is_not_lp_approval_signal".to_string(),
+        };
+    }
 
     if let Some(removal_block) = signal.liquidity_removal_block {
         if removal_block <= signal.observed_block {
@@ -186,6 +196,7 @@ pub fn plan_lp_approval_response(
         }
         LpSignalSource::MinedLpApproval => SellUrgency::MinedApprovalRace,
         LpSignalSource::MinedLiquidityRemoval => unreachable!("handled above"),
+        LpSignalSource::StrategyExit => unreachable!("handled above"),
     };
     let reason = priority_sell_reason(&urgency).to_string();
 
@@ -219,6 +230,7 @@ fn priority_route(config: &BribeExitConfig) -> PriorityRoute {
 
 fn priority_sell_reason(urgency: &SellUrgency) -> &'static str {
     match urgency {
+        SellUrgency::NormalExit => "exit.strategy_normal",
         SellUrgency::MempoolPreMine => "exit.mempool_liquidity_removal_signal",
         SellUrgency::MinedApprovalRace => "exit.lp_approval_mined_race",
         SellUrgency::BuyConfirmBlockApproval => "exit.lp_approval_buy_confirm_block",

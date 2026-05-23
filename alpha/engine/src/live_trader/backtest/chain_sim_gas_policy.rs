@@ -271,8 +271,8 @@ fn sell_policy_context<'a>(
 
     if reason.contains("buy_confirm") {
         return SellPolicyContext {
-            policy: &gas_policy.buy_confirm_block_approval_gas_rank_policy,
-            action: "buy_confirm_block_approval_exit",
+            policy: &gas_policy.lp_approval_exit_gas_rank_policy,
+            action: "lp_approval_exit",
             signal: reason.to_string(),
         };
     }
@@ -285,8 +285,8 @@ fn sell_policy_context<'a>(
     }
     if reason.contains("lp_approval") || reason.contains("liquidity_removal") {
         return SellPolicyContext {
-            policy: &gas_policy.mined_approval_race_gas_rank_policy,
-            action: "mined_approval_race_exit",
+            policy: &gas_policy.lp_approval_exit_gas_rank_policy,
+            action: "lp_approval_exit",
             signal: reason.to_string(),
         };
     }

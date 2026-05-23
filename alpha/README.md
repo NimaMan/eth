@@ -55,12 +55,13 @@ simulation and has no Kartal execution path.
 `eth_alpha_live_trader` is the separate real-executor runner. It instantiates
 `TxExecutorAdapter`, uses the deployed Uniswap V2 trading vault route, and
 refuses to start unless Kartal reports `broadcast_mode = dry_run`, except for
-the explicit one-pool Alpha11 hold3 mined-validation run. That exception requires
+the explicit Alpha11 hold16 deploy strategy. That exception requires
 `--allow-public-mempool-live-validation`, strategy
-`alpha11-univ2-lp30-pool-update-block-hold3-validation`,
-no `--replay-current`, and strategy-spec buy/bankroll caps of `0.01 ETH`.
+`alpha11-univ2-lp30-pool-update-block-hold16`, no `--replay-current`, no
+`--once`, strategy-spec buy size `0.01 ETH`, and strategy-spec bankroll capped
+at `0.555 ETH`.
 While real entries are otherwise in validation mode, each strategy must resolve
-to a bankroll of at most `0.225 ETH`; Alpha11 carries that default in its
+to a bankroll of at most `0.555 ETH`; Alpha11 carries that default in its
 strategy spec. Buys consume that bankroll, confirmed sells replenish it, and
 profits can be redeployed. Strategy economics and gates, including buy size,
 liquidity floors, entry-pool caps, bankroll, and hold window, are not live-run
@@ -131,7 +132,7 @@ cargo test -p eth_strategies
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
 cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
 cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold3-validation --allow-public-mempool-live-validation
+cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold16 --allow-public-mempool-live-validation
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```
 
@@ -139,9 +140,10 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 
 - Backtests must never load Kartal config, signer state, hot-wallet balance, or
   deployed vault addresses.
-- `kartal-real` public broadcast is only allowed for the one-pool Alpha11 hold3
-  mined-validation run. The main hold15 strategy remains blocked from public
-  broadcast until mined validation evidence is reviewed.
+- `kartal-real` public broadcast is only allowed for
+  `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit public-mempool
+  flag. Other strategy names, including hold3 validation and hold15, are blocked
+  from public broadcast by the real-trader guard.
 - Real public execution must include rank evidence through `eth_block_tx_rank`
   before the adapter submits the final prepared transaction.
 - `strategy_observations` is the durable input log. In-memory watermarks are

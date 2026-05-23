@@ -86,7 +86,7 @@ const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
-const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.225";
+const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
 
 fn resolve_entry_bankroll_wei(spec: &LiveStrategySpec) -> Result<Option<U256>> {
@@ -200,8 +200,7 @@ fn live_gas_policy_run_metadata_json(
         "entry_buy_profiles": &policy.entry_buy_gas_rank_policy,
         "normal_exit_profiles": &policy.normal_exit_gas_rank_policy,
         "mempool_race_exit_profiles": &policy.mempool_pre_mine_gas_rank_policy,
-        "mined_approval_race_profiles": &policy.mined_approval_race_gas_rank_policy,
-        "buy_confirm_approval_profiles": &policy.buy_confirm_block_approval_gas_rank_policy,
+        "lp_approval_exit_profiles": &policy.lp_approval_exit_gas_rank_policy,
     })
 }
 
@@ -406,7 +405,7 @@ async fn run(
                         "from": &real_args.live_real_from,
                         "vault_address": &real_args.live_real_vault_address,
                         "broadcast_requirement": if real_args.allow_public_mempool_live_validation {
-                            "dry_run_or_explicit_hold3_validation_public_mempool"
+                            "dry_run_or_explicit_hold16_deploy_public_mempool"
                         } else {
                             "dry_run"
                         },
@@ -668,6 +667,8 @@ async fn run(
             entry_init_policy,
             defer_buy_confirm_block_lp_approval_to_max_hold: spec
                 .defer_buy_confirm_block_lp_approval_to_max_hold,
+            lp_approval_exit_defer_max_trading_enabled_age_blocks: spec
+                .lp_approval_exit_defer_max_trading_enabled_age_blocks,
             ..SnipeAllConfig::default()
         };
         let seen_pools = seen_pools_by_strategy

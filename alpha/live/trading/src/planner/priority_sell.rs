@@ -278,7 +278,7 @@ fn priority_sell_classification(reason: &str) -> (LpSignalSource, SellUrgency) {
             LpSignalSource::MempoolLpApproval,
             SellUrgency::MempoolPreMine,
         ),
-        "exit.lp_approval_mined_race" => (
+        "exit.lp_approval" | "exit.lp_approval_mined_race" => (
             LpSignalSource::MinedLpApproval,
             SellUrgency::MinedApprovalRace,
         ),
@@ -297,9 +297,8 @@ fn priority_sell_gas_rank_policy(
     match plan.urgency {
         SellUrgency::NormalExit => config.normal_exit_gas_rank_policy.clone(),
         SellUrgency::MempoolPreMine => config.mempool_pre_mine_gas_rank_policy.clone(),
-        SellUrgency::MinedApprovalRace => config.mined_approval_race_gas_rank_policy.clone(),
-        SellUrgency::BuyConfirmBlockApproval => {
-            config.buy_confirm_block_approval_gas_rank_policy.clone()
+        SellUrgency::MinedApprovalRace | SellUrgency::BuyConfirmBlockApproval => {
+            config.lp_approval_exit_gas_rank_policy.clone()
         }
     }
 }
@@ -528,6 +527,25 @@ mod tests {
 
     #[test]
     fn lp_approval_exit_keeps_race_urgency() {
+        for reason in ["exit.lp_approval", "exit.lp_approval_mined_race"] {
+            let (signal_source, urgency) = priority_sell_classification(reason);
+
+            assert_eq!(signal_source, LpSignalSource::MinedLpApproval);
+            assert_eq!(urgency, SellUrgency::MinedApprovalRace);
+        }
+    }
+
+    #[test]
+    fn buy_confirm_lp_approval_exit_uses_shared_lp_approval_bucket() {
+        let (signal_source, urgency) =
+            priority_sell_classification("exit.lp_approval_buy_confirm_block");
+
+        assert_eq!(signal_source, LpSignalSource::MinedLpApproval);
+        assert_eq!(urgency, SellUrgency::BuyConfirmBlockApproval);
+    }
+
+    #[test]
+    fn mempool_exit_keeps_race_urgency() {
         let (signal_source, urgency) =
             priority_sell_classification("exit.mempool_liquidity_removal_signal");
 
@@ -621,11 +639,11 @@ mod tests {
                 assert!(signal.request.data.starts_with("0x5f413d10"));
                 assert_eq!(
                     signal.request.metadata["route"]["estimated_gas_used"],
-                    json!(225_000)
+                    json!(187_500)
                 );
                 assert_eq!(
                     signal.request.metadata["budget"]["estimated_gas_used"],
-                    json!(225_000)
+                    json!(187_500)
                 );
                 assert_eq!(
                     signal.request.metadata["simulation"]["gas_used"],

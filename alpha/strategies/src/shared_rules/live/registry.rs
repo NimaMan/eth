@@ -19,6 +19,7 @@ pub fn strategy_set_specs(
         ]),
         alpha11_specs::SET_NAME => Ok(alpha11_specs::specs(options)),
         crate::alpha11::HOLD15_STRATEGY_NAME => Ok(vec![alpha11_specs::hold15_spec(options)]),
+        crate::alpha11::HOLD16_STRATEGY_NAME => Ok(vec![alpha11_specs::hold16_spec(options)]),
         crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME => {
             Ok(vec![alpha11_specs::hold3_validation_spec(options)])
         }
@@ -80,6 +81,18 @@ mod tests {
                 .max_price_ratio_to_initial
                 .as_deref(),
             Some(crate::alpha11::ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL)
+        );
+
+        let hold16 = strategy_set_specs(crate::alpha11::HOLD16_STRATEGY_NAME, &options).unwrap();
+        assert_eq!(hold16.len(), 1);
+        assert_eq!(
+            hold16[0].strategy_name,
+            crate::alpha11::HOLD16_STRATEGY_NAME
+        );
+        assert_eq!(hold16[0].max_hold_blocks, Some(16));
+        assert_eq!(
+            hold16[0].entry_bankroll_eth.as_deref(),
+            Some(crate::alpha11::INITIAL_ENTRY_BANKROLL_ETH)
         );
 
         let hold3_validation =

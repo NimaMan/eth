@@ -66,8 +66,8 @@ number. Useful candidate labels are operational bands such as:
 
 - `p50_top_10`: priority fee that would have ranked around the first 10 txs in
   the recent sample.
-- `p50_top_25`: less aggressive but still early.
-- `p75_top_10`: aggressive band for pre-mine liquidity-removal races.
+- `p50_top_25`: less expensive but still early.
+- `p75_top_10`: higher-percentile band for pre-mine liquidity-removal races.
 
 `alpha/live/trading::tx_prep` remains the final decider. It filters candidates
 against protected value:

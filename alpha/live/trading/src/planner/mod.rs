@@ -32,6 +32,8 @@ pub use priority_sell::{LivePrioritySellPlanner, PrioritySellPlanner};
 pub use route_builder::{
     RouteBuildRequest, SellRouteBuilder, UniswapV2SellRouteBuilder,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
+    UNISWAP_V2_DIRECT_SELL_GAS_LIMIT, UNISWAP_V2_TRADING_VAULT_BUY_GAS_LIMIT,
+    UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
 };
 pub use simulation::{
     FixedPreSubmitSimulator, PreSubmitSimulator, UniswapV2TradingVaultPreSubmitSimulator,

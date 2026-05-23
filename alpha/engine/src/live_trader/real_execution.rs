@@ -27,10 +27,7 @@ use eth_live_trading::{
     VaultInternalAllowanceChecker,
 };
 use eth_strategies::{
-    alpha11::{
-        HOLD3_VALIDATION_STRATEGY_NAME, LIVE_VALIDATION_ENTRY_BANKROLL_ETH,
-        LIVE_VALIDATION_MAX_ENTRY_POOLS,
-    },
+    alpha11::{HOLD16_STRATEGY_NAME, INITIAL_ENTRY_BANKROLL_ETH},
     shared_rules::live::LiveStrategySpec,
 };
 use eyre::{eyre, Result, WrapErr};
@@ -45,7 +42,7 @@ use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueS
 use super::cli::{Args, RealExecutionArgs};
 use super::gas_policy::LiveRealGasPolicy;
 
-const LIVE_VALIDATION_BUY_WEI: &str = "10000000000000000";
+const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
 
 struct RealExecutionWithValuation<E, V> {
     execution: E,
@@ -624,11 +621,8 @@ pub(super) async fn build_kartal_real_adapter(
     planner_config.normal_exit_gas_rank_policy = gas_policy.normal_exit_gas_rank_policy.clone();
     planner_config.mempool_pre_mine_gas_rank_policy =
         gas_policy.mempool_pre_mine_gas_rank_policy.clone();
-    planner_config.mined_approval_race_gas_rank_policy =
-        gas_policy.mined_approval_race_gas_rank_policy.clone();
-    planner_config.buy_confirm_block_approval_gas_rank_policy = gas_policy
-        .buy_confirm_block_approval_gas_rank_policy
-        .clone();
+    planner_config.lp_approval_exit_gas_rank_policy =
+        gas_policy.lp_approval_exit_gas_rank_policy.clone();
     let gas_estimate = planner_config.gas_estimate.clone();
 
     let planner = LivePrioritySellPlanner::new(
@@ -696,10 +690,10 @@ fn validate_kartal_real_status(
     match status.broadcast_mode {
         KartalStatusBroadcastMode::DryRun => Ok(()),
         KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
-            validate_public_mempool_live_validation(status, live_args, strategy_specs)
+            validate_public_mempool_hold16_deploy(status, live_args, strategy_specs)
         }
         KartalStatusBroadcastMode::PublicMempool => Err(eyre!(
-            "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold3 validation strategy"
+            "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold16 deploy strategy"
         )),
         KartalStatusBroadcastMode::Unknown => Err(eyre!(
             "kartal-real trader cannot run with unknown Kartal broadcast_mode"
@@ -707,72 +701,73 @@ fn validate_kartal_real_status(
     }
 }
 
-fn validate_public_mempool_live_validation(
+fn validate_public_mempool_hold16_deploy(
     status: &KartalEthTxExecutorStatus,
     args: &Args,
     strategy_specs: &[LiveStrategySpec],
 ) -> Result<()> {
-    if args.strategy_set.as_deref() != Some(HOLD3_VALIDATION_STRATEGY_NAME) {
+    if args.strategy_set.as_deref() != Some(HOLD16_STRATEGY_NAME) {
         return Err(eyre!(
-            "public mempool validation requires --strategy-set {HOLD3_VALIDATION_STRATEGY_NAME}"
+            "public mempool hold16 deploy requires --strategy-set {HOLD16_STRATEGY_NAME}"
         ));
     }
-    if strategy_specs.len() != 1
-        || strategy_specs[0].strategy_name != HOLD3_VALIDATION_STRATEGY_NAME
-    {
+    if strategy_specs.len() != 1 || strategy_specs[0].strategy_name != HOLD16_STRATEGY_NAME {
         return Err(eyre!(
-            "public mempool validation requires exactly one resolved strategy spec named {HOLD3_VALIDATION_STRATEGY_NAME}"
+            "public mempool hold16 deploy requires exactly one resolved strategy spec named {HOLD16_STRATEGY_NAME}"
         ));
     }
     let spec = &strategy_specs[0];
-    if spec.max_entry_pools != Some(LIVE_VALIDATION_MAX_ENTRY_POOLS) {
+    if spec.max_entry_pools.is_some() {
         return Err(eyre!(
-            "public mempool validation requires strategy spec max_entry_pools={LIVE_VALIDATION_MAX_ENTRY_POOLS}"
+            "public mempool hold16 deploy requires strategy spec max_entry_pools unset; bankroll governs entry capacity"
         ));
     }
     if args.disable_entry {
         return Err(eyre!(
-            "public mempool validation requires entries enabled for the single validation buy"
+            "public mempool hold16 deploy requires entries enabled"
         ));
     }
     if args.once {
         return Err(eyre!(
-            "public mempool validation must keep running after the buy so receipt reconciliation and hold3 sell can complete"
+            "public mempool hold16 deploy must keep running so receipt reconciliation and hold16 exits can complete"
         ));
     }
     if args.replay_current {
         return Err(eyre!(
-            "public mempool validation must not use --replay-current; start from fresh live observations only"
+            "public mempool hold16 deploy must not use --replay-current; start from fresh live observations only"
         ));
     }
 
     let buy_wei = parse_policy_wei(&spec.buy_wei, "strategy buy_wei")?;
-    let max_buy_wei = parse_policy_wei(LIVE_VALIDATION_BUY_WEI, "validation buy cap")?;
+    let max_buy_wei = parse_policy_wei(HOLD16_DEPLOY_BUY_WEI, "hold16 deploy buy cap")?;
     if buy_wei.is_zero() || buy_wei > max_buy_wei {
         return Err(eyre!(
-            "public mempool validation requires 0 < strategy buy_wei <= {LIVE_VALIDATION_BUY_WEI}; got {}",
+            "public mempool hold16 deploy requires 0 < strategy buy_wei <= {HOLD16_DEPLOY_BUY_WEI}; got {}",
             spec.buy_wei
         ));
     }
 
-    let entry_bankroll_eth = spec
-        .entry_bankroll_eth
-        .as_deref()
-        .ok_or_else(|| eyre!("public mempool validation requires strategy entry_bankroll_eth"))?;
+    let entry_bankroll_eth = spec.entry_bankroll_eth.as_deref().ok_or_else(|| {
+        eyre!("public mempool hold16 deploy requires strategy entry_bankroll_eth")
+    })?;
     let entry_bankroll_wei = super::support::parse_eth_decimal_to_wei(
         entry_bankroll_eth,
         "strategy entry_bankroll_eth",
     )?;
-    if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_buy_wei {
+    let max_entry_bankroll_wei = super::support::parse_eth_decimal_to_wei(
+        INITIAL_ENTRY_BANKROLL_ETH,
+        "hold16 deploy entry bankroll cap",
+    )?;
+    if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_entry_bankroll_wei {
         return Err(eyre!(
-            "public mempool validation requires entry bankroll in (0, {LIVE_VALIDATION_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
+            "public mempool hold16 deploy requires entry bankroll in (0, {INITIAL_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
         ));
     }
 
     let max_value_wei = parse_policy_wei(&status.policy.max_value_wei, "policy max_value_wei")?;
     if max_value_wei < buy_wei {
         return Err(eyre!(
-            "Kartal max_value_wei {} is below validation buy value {buy_wei}",
+            "Kartal max_value_wei {} is below hold16 deploy buy value {buy_wei}",
             status.policy.max_value_wei
         ));
     }
@@ -782,7 +777,7 @@ fn validate_public_mempool_live_validation(
     )?;
     if max_transaction_cost_wei.is_zero() {
         return Err(eyre!(
-            "Kartal max_transaction_cost_wei must be nonzero for public mempool validation"
+            "Kartal max_transaction_cost_wei must be nonzero for public mempool hold16 deploy"
         ));
     }
     let max_daily_cost_wei = parse_policy_wei(
@@ -798,7 +793,7 @@ fn validate_public_mempool_live_validation(
     }
     if !status.policy.require_simulation || status.policy.max_simulation_age_blocks > 2 {
         return Err(eyre!(
-            "public mempool validation requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
+            "public mempool hold16 deploy requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
         ));
     }
     Ok(())
@@ -841,7 +836,7 @@ mod tests {
             disable_entry: false,
             replay_current: false,
             once: false,
-            strategy_set: Some(HOLD3_VALIDATION_STRATEGY_NAME.to_string()),
+            strategy_set: Some(HOLD16_STRATEGY_NAME.to_string()),
         }
     }
 
@@ -880,7 +875,7 @@ mod tests {
                 allowed_from_count: 1,
                 allowed_target_count: 1,
                 allowed_selector_count: 2,
-                max_value_wei: LIVE_VALIDATION_BUY_WEI.to_string(),
+                max_value_wei: HOLD16_DEPLOY_BUY_WEI.to_string(),
                 max_gas_limit: 500_000,
                 max_fee_per_gas_wei: "1000000000000".to_string(),
                 max_priority_fee_per_gas_wei: "500000000000".to_string(),
@@ -933,23 +928,27 @@ mod tests {
     }
 
     #[test]
-    fn public_mempool_validation_requires_hold3_single_pool_scope() {
-        let mut args = live_args();
-        args.strategy_set = Some("alpha11-univ2-lp30-pool-update-block-hold15".to_string());
+    fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
+        use eth_strategies::alpha11::{HOLD15_STRATEGY_NAME, HOLD3_VALIDATION_STRATEGY_NAME};
 
-        let error = validate_kartal_real_status(
-            &status(KartalStatusBroadcastMode::PublicMempool),
-            &real_args(true),
-            &args,
-            &specs(&args),
-        )
-        .unwrap_err();
+        for disallowed_strategy_set in [HOLD3_VALIDATION_STRATEGY_NAME, HOLD15_STRATEGY_NAME] {
+            let mut args = live_args();
+            args.strategy_set = Some(disallowed_strategy_set.to_string());
 
-        assert!(error.to_string().contains(HOLD3_VALIDATION_STRATEGY_NAME));
+            let error = validate_kartal_real_status(
+                &status(KartalStatusBroadcastMode::PublicMempool),
+                &real_args(true),
+                &args,
+                &specs(&args),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains(HOLD16_STRATEGY_NAME));
+        }
     }
 
     #[test]
-    fn public_mempool_validation_accepts_hold3_single_pool_scope() {
+    fn public_mempool_hold16_deploy_accepts_hold16_scope() {
         validate_kartal_real_status(
             &status(KartalStatusBroadcastMode::PublicMempool),
             &real_args(true),
@@ -960,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn public_mempool_validation_requires_value_cap_for_buy() {
+    fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
         let mut status = status(KartalStatusBroadcastMode::PublicMempool);
         status.policy.max_value_wei = "0".to_string();
 

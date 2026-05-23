@@ -15,12 +15,13 @@ to public real capital.
 - Gate 3 chain-facing assumptions reviewed.
 - `alpha11-live-univ2-lp30-pool-update-block-hold3-validation` passes the
   pre-live mined-validation gate.
-- Live gas-rank/base-fee inputs from `eth_chain_server` are reviewed against
-  mined validation evidence.
+- Production gas-rank readiness passes:
+  `../../gates/production_gas_rank/README.md`.
 - Receipt worker alerting and operator review are in place.
-- Initial bankroll remains capped at `0.225 ETH`.
-- Entry-only `price / initial price <= 1.5` live-real cap is visible in
-  readiness docs and persisted config.
+- Initial bankroll remains capped at `0.555 ETH`.
+- Risk Atlas has calibrated any shared Gate 2 init-policy threshold for pool
+  age, price / initial, and liquidity. Hold15 must not rely on a hidden
+  Alpha11-only price / initial cap.
 
 ## Promotion Rule
 

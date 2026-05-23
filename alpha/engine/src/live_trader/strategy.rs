@@ -36,6 +36,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
             "allow_missing_price_ratio": spec.entry_init_policy.allow_missing_price_ratio,
         },
         "defer_buy_confirm_block_lp_approval_to_max_hold": spec.defer_buy_confirm_block_lp_approval_to_max_hold,
+        "lp_approval_exit_defer_max_trading_enabled_age_blocks": spec.lp_approval_exit_defer_max_trading_enabled_age_blocks,
         "min_sell_pool_denom_reserve": spec.min_sell_pool_denom_reserve,
         "buy_wei": spec.buy_wei,
         "min_liquidity_eth": spec.min_liquidity_eth,
@@ -53,9 +54,9 @@ mod tests {
     use eth_strategies::{
         alpha11::{
             ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
-            INITIAL_ENTRY_BANKROLL_ETH,
+            INITIAL_ENTRY_BANKROLL_ETH, LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
         },
-        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
+        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_HOLD16_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
     };
     use serde_json::json;
 
@@ -138,6 +139,10 @@ mod tests {
             Some(ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL)
         );
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert_eq!(
+            spec.lp_approval_exit_defer_max_trading_enabled_age_blocks,
+            Some(LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
+        );
         assert_eq!(spec.min_sell_pool_denom_reserve.as_deref(), Some("0"));
         assert_eq!(spec.buy_wei, "10000000000000000");
         assert_eq!(spec.min_liquidity_eth, "0.5");
@@ -173,6 +178,7 @@ mod tests {
                     "allow_missing_price_ratio": true,
                 },
                 "defer_buy_confirm_block_lp_approval_to_max_hold": true,
+                "lp_approval_exit_defer_max_trading_enabled_age_blocks": LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
                 "min_sell_pool_denom_reserve": "0",
                 "buy_wei": "10000000000000000",
                 "min_liquidity_eth": "0.5",
@@ -206,5 +212,27 @@ mod tests {
         );
         assert!(!spec.strategy_name.contains("price-to-initial"));
         assert!(!spec.strategy_label.contains("price-to-initial"));
+    }
+
+    #[test]
+    fn alpha11_hold16_strategy_set_resolves_single_deploy_spec() {
+        let mut args = alpha11_hold15_args();
+        args.strategy_set = Some(ALPHA11_HOLD16_STRATEGY_NAME.to_string());
+
+        let specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
+            .expect("alpha11 live-real hold16 specs");
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(spec.strategy_name, ALPHA11_HOLD16_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, ALPHA11_STRATEGY_IMPL);
+        assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
+        assert_eq!(spec.max_hold_blocks, Some(16));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(INITIAL_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.max_entry_pools, None);
     }
 }
