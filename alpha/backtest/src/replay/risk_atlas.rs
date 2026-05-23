@@ -5,6 +5,7 @@ use eth_alpha_core::risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_RISK_A
 use eth_alpha_engine::wire::{decimal_from_f64, parse_address, parse_protocol};
 use eth_alpha_store::observations::{query_risk_atlas_observations, RiskAtlasObservation};
 use eyre::{Result, WrapErr};
+use serde_json::{json, Map, Value};
 
 use super::blocks::add_block_completed_events;
 
@@ -71,7 +72,7 @@ pub async fn load_events_from_risk_atlas(
                 pending_tx_hash: None,
                 observed_block: Some(block),
                 message: risk_atlas_lp_approval_message(&row),
-                evidence: None,
+                evidence: Some(risk_atlas_lp_approval_evidence(&row, block)),
             }));
             lp_approval_risks += 1;
         }
@@ -153,16 +154,7 @@ fn risk_atlas_pool_snapshot(
 
 fn risk_atlas_lp_approval_message(row: &RiskAtlasObservation) -> String {
     let owner_is_creator = row.lp_approval_owner_is_creator.unwrap_or(false);
-    let approval_pct = row
-        .lp_total_supply
-        .zip(row.lp_max_approval_amount_as_of)
-        .and_then(|(supply, approval)| {
-            if supply > 0.0 {
-                Some((approval / supply * 100.0).min(100.0))
-            } else {
-                None
-            }
-        });
+    let approval_pct = risk_atlas_lp_approval_pct(row);
     let approval_age = row
         .trading_enabled_to_last_lp_approval_chain_block_delta
         .map(|value| value.to_string())
@@ -178,4 +170,80 @@ fn risk_atlas_lp_approval_message(row: &RiskAtlasObservation) -> String {
             .map(|pct| format!("{pct:.2}%"))
             .unwrap_or_else(|| "unknown".to_string())
     )
+}
+
+fn risk_atlas_lp_approval_evidence(row: &RiskAtlasObservation, observed_block: u64) -> Value {
+    let mut evidence = Map::new();
+    let source_event_id = format!(
+        "risk_atlas_mined_lp_approval:{}:{}:{}",
+        row.block_number, row.token_address, row.pool_address
+    );
+
+    evidence.insert("signal_id".to_string(), json!(source_event_id.clone()));
+    evidence.insert("source_event_id".to_string(), json!(source_event_id));
+    evidence.insert("signal_type".to_string(), json!("lp_approval_mined_chain"));
+    evidence.insert(
+        "signal_source".to_string(),
+        json!(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN),
+    );
+    evidence.insert("observed_block".to_string(), json!(observed_block));
+    evidence.insert(
+        "lp_approval_count_in_block".to_string(),
+        json!(row.lp_approval_count_in_block),
+    );
+    if let Some(approved_pct) = risk_atlas_lp_approval_pct(row) {
+        evidence.insert("approved_share_pct".to_string(), json!(approved_pct));
+    }
+    if let Some(owner_is_creator) = row.lp_approval_owner_is_creator {
+        evidence.insert("owner_is_creator".to_string(), json!(owner_is_creator));
+    }
+    if let Some(age_blocks) = row.trading_enabled_to_last_lp_approval_chain_block_delta {
+        evidence.insert(
+            "trading_enabled_age_blocks_at_signal".to_string(),
+            json!(age_blocks),
+        );
+        evidence.insert(
+            "lp_approval_age_basis".to_string(),
+            json!("trading_enabled_block"),
+        );
+    }
+    if let Some(creation_block) = row
+        .creation_block
+        .and_then(|block| u64::try_from(block).ok())
+    {
+        evidence.insert("pool_creation_block".to_string(), json!(creation_block));
+        evidence.insert(
+            "pool_age_blocks_at_signal".to_string(),
+            json!(observed_block as i64 - creation_block as i64),
+        );
+        if !evidence.contains_key("lp_approval_age_basis") {
+            evidence.insert(
+                "lp_approval_age_basis".to_string(),
+                json!("pool_creation_block"),
+            );
+        }
+    }
+    if let Some(freshness) = row.last_lp_approval_to_as_of_chain_block_delta {
+        evidence.insert(
+            "last_lp_approval_to_as_of_chain_block_delta".to_string(),
+            json!(freshness),
+        );
+    }
+    if !evidence.contains_key("lp_approval_age_basis") {
+        evidence.insert("lp_approval_age_basis".to_string(), json!("unknown"));
+    }
+
+    Value::Object(evidence)
+}
+
+fn risk_atlas_lp_approval_pct(row: &RiskAtlasObservation) -> Option<f64> {
+    row.lp_total_supply
+        .zip(row.lp_max_approval_amount_as_of)
+        .and_then(|(supply, approval)| {
+            if supply > 0.0 {
+                Some((approval / supply * 100.0).min(100.0))
+            } else {
+                None
+            }
+        })
 }

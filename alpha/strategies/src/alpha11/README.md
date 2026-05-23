@@ -86,7 +86,10 @@ hold reason with code
 inside the `<=2` active-block launch window and the position remains governed by
 max hold. Those deferrals must carry the signal id, approval percentage, age
 basis, active-block age, and matching risk-event evidence in the persisted
-strategy decision details.
+strategy decision details. Mined-chain replay records a deterministic
+`risk_atlas_mined_lp_approval:<block>:<token>:<pool>` source event id in the
+same evidence fields so it can be audited with the same checks as mempool
+signals.
 A sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
 pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`
 means confirmed-chain liquidity removal was already visible.

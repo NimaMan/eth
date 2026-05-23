@@ -24,6 +24,7 @@ active age 0, 1, or 2 is deferred to max-hold; active age greater than 2 exits.
 Every deferred LP approval must be auditable from persisted rows:
 
 - `risk_events.payload.evidence.signal_id`
+- `risk_events.payload.evidence.signal_source`
 - `risk_events.payload.evidence.mempool_first_seen_at` for mempool signals when
   available
 - `risk_events.payload.evidence.approved_share_pct`
@@ -31,6 +32,11 @@ Every deferred LP approval must be auditable from persisted rows:
 - `risk_events.payload.evidence.trading_enabled_age_blocks_at_signal`
 - `risk_events.payload.evidence.lp_approval_age_basis`
 - matching `strategy_decisions.reason_details.risk_event_evidence`
+
+Mempool LP approvals use the live token-tracker signal id. Mined-chain Risk
+Atlas replay uses a deterministic `risk_atlas_mined_lp_approval:<block>:<token>:<pool>`
+source event id and records it as `signal_id`/`source_event_id`, so historical
+and live-backtest deferrals are still queryable by a stable source id.
 
 If `trading_enabled_block` is missing, the live trader falls back to
 `pool_creation_block` and records `lp_approval_age_basis=pool_creation_block`.
