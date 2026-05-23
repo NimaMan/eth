@@ -179,6 +179,13 @@ impl TokenTrackingCache {
         pools.contains(&address)
     }
 
+    /// Check if an address is a tracked token without updating LRU state.
+    pub async fn is_token(&self, address: &Address) -> bool {
+        let address = normalize_address(address);
+        let tokens = self.tokens.read().await;
+        tokens.contains(&address)
+    }
+
     pub async fn is_liquidity_ownership_token(&self, address: &Address) -> bool {
         let address = normalize_address(address);
         let ownership_tokens = self.ownership_token_to_pool.read().await;

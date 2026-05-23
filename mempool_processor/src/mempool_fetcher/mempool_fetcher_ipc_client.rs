@@ -1,7 +1,11 @@
-use crate::liquidity_approval_call::decode_liquidity_approval_call;
+use crate::liquidity_approval_call::{
+    decode_liquidity_approval_call, is_liquidity_approval_selector,
+};
 use crate::position_approval_call::decode_position_approval_call;
+use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::protocol::{
     is_known_position_manager_candidate, is_protocol_liquidity_removal_candidate,
+    is_v4_modify_liquidity_candidate, liquidity_removal_token_candidates,
 };
 use alloy_primitives::U256;
 use chrono::Utc;
@@ -28,12 +32,14 @@ pub struct MempoolFetcherIPCClient {
     queue_size: Arc<AtomicUsize>,
     critical_queue_size: Arc<AtomicUsize>,
     observer: Option<Arc<dyn MempoolIngressObserver>>,
+    signal_filter_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 #[derive(Default, Clone)]
 pub struct Stats {
     pub total: u64,
     pub total_dropped: u64,
+    pub total_filtered_irrelevant: u64,
     pub critical_received: u64,
     pub critical_dropped: u64,
     pub sub_1ms: u64,
@@ -67,6 +73,14 @@ impl MempoolFetcherIPCClient {
         socket_path: Option<&str>,
         observer: Option<Arc<dyn MempoolIngressObserver>>,
     ) -> Result<Self> {
+        Self::new_with_observer_and_signal_filter(socket_path, observer, None)
+    }
+
+    pub fn new_with_observer_and_signal_filter(
+        socket_path: Option<&str>,
+        observer: Option<Arc<dyn MempoolIngressObserver>>,
+        signal_filter_cache: Option<Arc<TokenTrackingCache>>,
+    ) -> Result<Self> {
         let socket_path = socket_path
             .map(str::to_string)
             .unwrap_or_else(crate::config::reth_ipc_path_from_env);
@@ -83,6 +97,7 @@ impl MempoolFetcherIPCClient {
             queue_size: Arc::new(AtomicUsize::new(0)),
             critical_queue_size: Arc::new(AtomicUsize::new(0)),
             observer,
+            signal_filter_cache,
         })
     }
 
@@ -153,6 +168,7 @@ impl MempoolFetcherIPCClient {
         let queue_size = self.queue_size.clone();
         let critical_queue_size = self.critical_queue_size.clone();
         let observer = self.observer.clone();
+        let signal_filter_cache = self.signal_filter_cache.clone();
 
         tokio::spawn(async move {
             if let Err(e) = Self::monitor_nonblocking(
@@ -163,6 +179,7 @@ impl MempoolFetcherIPCClient {
                 queue_size,
                 critical_queue_size,
                 observer,
+                signal_filter_cache,
             )
             .await
             {
@@ -181,6 +198,7 @@ impl MempoolFetcherIPCClient {
         queue_size: Arc<AtomicUsize>,
         critical_queue_size: Arc<AtomicUsize>,
         observer: Option<Arc<dyn MempoolIngressObserver>>,
+        signal_filter_cache: Option<Arc<TokenTrackingCache>>,
     ) -> Result<()> {
         let mut buffer = vec![0u8; 65536]; // 64KB
         let mut pending = Vec::with_capacity(1024 * 1024); // 1MB
@@ -323,9 +341,24 @@ impl MempoolFetcherIPCClient {
                                                 function_category: None, // Will be populated by function detector
                                             };
 
-                                            if let Some(preserve_kind) =
-                                                critical_lane_candidate(&tx)
+                                            let preserve_kind = critical_lane_candidate(
+                                                &tx,
+                                                signal_filter_cache.as_ref(),
+                                            )
+                                            .await;
+                                            if preserve_kind.is_none()
+                                                && !should_enqueue_for_signal_path(
+                                                    &tx,
+                                                    signal_filter_cache.as_ref(),
+                                                )
+                                                .await
                                             {
+                                                let mut stats = stats.write().await;
+                                                stats.total_filtered_irrelevant += 1;
+                                                continue;
+                                            }
+
+                                            if let Some(preserve_kind) = preserve_kind {
                                                 route_critical_tx(
                                                     tx,
                                                     preserve_kind,
@@ -361,8 +394,11 @@ impl MempoolFetcherIPCClient {
                                                     }
                                                 }
                                                 Err(mpsc::error::TrySendError::Full(tx)) => {
-                                                    let preserve_kind =
-                                                        critical_lane_candidate(&tx);
+                                                    let preserve_kind = critical_lane_candidate(
+                                                        &tx,
+                                                        signal_filter_cache.as_ref(),
+                                                    )
+                                                    .await;
                                                     if let Some(preserve_kind) = preserve_kind {
                                                         route_critical_tx(
                                                             tx,
@@ -676,25 +712,158 @@ impl PreserveCandidate {
     }
 }
 
-fn critical_lane_candidate(tx: &MempoolTransaction) -> Option<PreserveCandidate> {
+async fn critical_lane_candidate(
+    tx: &MempoolTransaction,
+    signal_filter_cache: Option<&Arc<TokenTrackingCache>>,
+) -> Option<PreserveCandidate> {
     if let Some(approval) = decode_liquidity_approval_call(tx) {
-        if approval.amount != U256::ZERO {
+        if approval.amount != U256::ZERO
+            && is_tracked_liquidity_ownership_token(&approval.ownership_token, signal_filter_cache)
+                .await
+        {
             return Some(PreserveCandidate::LiquidityApproval);
         }
     }
 
-    if decode_position_approval_call(tx)
-        .map(|approval| is_known_position_manager_candidate(&approval.position_manager()))
-        .unwrap_or(false)
-    {
+    if is_tracked_position_approval(tx, signal_filter_cache).await {
         return Some(PreserveCandidate::PositionApproval);
     }
 
-    if is_protocol_liquidity_removal_candidate(tx) {
+    if is_tracked_liquidity_removal(tx, signal_filter_cache).await {
         return Some(PreserveCandidate::LiquidityRemoval);
     }
 
     None
+}
+
+async fn should_enqueue_for_signal_path(
+    tx: &MempoolTransaction,
+    signal_filter_cache: Option<&Arc<TokenTrackingCache>>,
+) -> bool {
+    let Some(cache) = signal_filter_cache else {
+        return true;
+    };
+
+    // Contract creation is sparse and may define a token/pool before the cache
+    // can know the addresses, so keep it on the signal path.
+    if tx.to.is_none() {
+        return true;
+    }
+
+    if let Some(from) = address_string_from_bytes(&tx.from) {
+        if cache.is_creator(&from).await {
+            return true;
+        }
+    }
+
+    if let Some(to) = tx.to.as_ref().and_then(|to| address_string_from_bytes(to)) {
+        if cache.is_creator(&to).await || cache.is_pool(&to).await {
+            return true;
+        }
+
+        if cache.is_token(&to).await {
+            return !is_plain_token_noise(tx);
+        }
+    }
+
+    if is_tracked_liquidity_removal(tx, signal_filter_cache).await {
+        return true;
+    }
+
+    false
+}
+
+async fn is_tracked_liquidity_ownership_token(
+    ownership_token: &alloy_primitives::Address,
+    signal_filter_cache: Option<&Arc<TokenTrackingCache>>,
+) -> bool {
+    let Some(cache) = signal_filter_cache else {
+        return true;
+    };
+    let ownership_token = address_string(ownership_token);
+    cache.is_liquidity_ownership_token(&ownership_token).await
+        || cache.is_pool(&ownership_token).await
+}
+
+async fn is_tracked_position_approval(
+    tx: &MempoolTransaction,
+    signal_filter_cache: Option<&Arc<TokenTrackingCache>>,
+) -> bool {
+    let Some(approval) = decode_position_approval_call(tx) else {
+        return false;
+    };
+
+    let manager = approval.position_manager();
+    let Some(cache) = signal_filter_cache else {
+        return is_known_position_manager_candidate(&manager);
+    };
+    cache.is_position_manager(&address_string(&manager)).await
+}
+
+async fn is_tracked_liquidity_removal(
+    tx: &MempoolTransaction,
+    signal_filter_cache: Option<&Arc<TokenTrackingCache>>,
+) -> bool {
+    if !is_protocol_liquidity_removal_candidate(tx) {
+        return false;
+    }
+
+    let Some(cache) = signal_filter_cache else {
+        return true;
+    };
+
+    for candidate in liquidity_removal_token_candidates(&tx.input) {
+        if cache.is_token(&candidate).await || cache.is_pool(&candidate).await {
+            return true;
+        }
+    }
+
+    if let Some(to) = tx.to.as_ref().and_then(|to| address_string_from_bytes(to)) {
+        if cache.is_pool(&to).await {
+            return true;
+        }
+
+        if is_v4_modify_liquidity_candidate(tx) && cache.is_position_manager(&to).await {
+            return true;
+        }
+
+        if tx.input.get(0..4) == Some([0x0c, 0x49, 0xcc, 0xbe].as_slice())
+            && cache.is_position_manager(&to).await
+            && tx.input.len() >= 36
+        {
+            let token_id = U256::from_be_slice(&tx.input[4..36]);
+            if cache
+                .position_context_by_token_id(&to, token_id)
+                .await
+                .is_some()
+            {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn address_string(address: &alloy_primitives::Address) -> String {
+    format!("0x{}", hex::encode(address.as_slice()))
+}
+
+fn address_string_from_bytes(bytes: &[u8]) -> Option<String> {
+    if bytes.len() != 20 {
+        return None;
+    }
+    Some(format!("0x{}", hex::encode(bytes)))
+}
+
+fn is_plain_token_noise(tx: &MempoolTransaction) -> bool {
+    let Some(selector) = tx.input.get(0..4) else {
+        return false;
+    };
+    matches!(
+        selector,
+        [0xa9, 0x05, 0x9c, 0xbb] | [0x23, 0xb8, 0x72, 0xdd]
+    ) || is_liquidity_approval_selector(selector)
 }
 
 use std::io::Read;
@@ -712,9 +881,15 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, Address};
     use serde_json::json;
+    use std::collections::HashMap;
 
-    #[test]
-    fn preserves_nonzero_erc20_approval_when_ingress_is_full() {
+    use crate::token_tracking::{
+        types::PoolLifecycle, CacheConfig, Pool, PoolType, Token, TokenTrackingCache, TokenUpdate,
+        TokenWithPools,
+    };
+
+    #[tokio::test]
+    async fn preserves_nonzero_erc20_approval_without_signal_filter() {
         let tx = tx(
             Some(address!("1111111111111111111111111111111111111111")),
             erc20_approve_calldata(
@@ -724,13 +899,13 @@ mod tests {
         );
 
         assert!(matches!(
-            critical_lane_candidate(&tx),
+            critical_lane_candidate(&tx, None).await,
             Some(PreserveCandidate::LiquidityApproval)
         ));
     }
 
-    #[test]
-    fn does_not_preserve_zero_erc20_approval_when_ingress_is_full() {
+    #[tokio::test]
+    async fn does_not_preserve_zero_erc20_approval_when_ingress_is_full() {
         let tx = tx(
             Some(address!("1111111111111111111111111111111111111111")),
             erc20_approve_calldata(
@@ -739,11 +914,11 @@ mod tests {
             ),
         );
 
-        assert!(critical_lane_candidate(&tx).is_none());
+        assert!(critical_lane_candidate(&tx, None).await.is_none());
     }
 
-    #[test]
-    fn preserves_position_approval_when_ingress_is_full() {
+    #[tokio::test]
+    async fn preserves_position_approval_without_signal_filter() {
         let tx = tx(
             Some(address!("C36442b4a4522E871399CD717aBDD847Ab11FE88")),
             set_approval_for_all_calldata(
@@ -753,13 +928,13 @@ mod tests {
         );
 
         assert!(matches!(
-            critical_lane_candidate(&tx),
+            critical_lane_candidate(&tx, None).await,
             Some(PreserveCandidate::PositionApproval)
         ));
     }
 
-    #[test]
-    fn preserves_liquidity_removal_when_ingress_is_full() {
+    #[tokio::test]
+    async fn preserves_liquidity_removal_without_signal_filter() {
         let token = address!("1111111111111111111111111111111111111111");
         let tx = tx(
             Some(address!("7a250d5630B4cF539739dF2C5dAcb4c659F2488D")),
@@ -767,9 +942,79 @@ mod tests {
         );
 
         assert!(matches!(
-            critical_lane_candidate(&tx),
+            critical_lane_candidate(&tx, None).await,
             Some(PreserveCandidate::LiquidityRemoval)
         ));
+    }
+
+    #[tokio::test]
+    async fn filters_unrelated_regular_transfer_from_signal_queue() {
+        let cache = Arc::new(test_cache().await);
+        let mut tx = tx(
+            Some(address!("1111111111111111111111111111111111111111")),
+            erc20_transfer_calldata(address!("2222222222222222222222222222222222222222")),
+        );
+        tx.from = address!("dddddddddddddddddddddddddddddddddddddddd").to_vec();
+
+        assert!(!should_enqueue_for_signal_path(&tx, Some(&cache)).await);
+        assert!(critical_lane_candidate(&tx, Some(&cache)).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn filters_plain_transfer_to_tracked_token_from_unrelated_sender() {
+        let cache = Arc::new(test_cache().await);
+        let mut tx = tx(
+            Some(address!("9999999999999999999999999999999999999999")),
+            erc20_transfer_calldata(address!("2222222222222222222222222222222222222222")),
+        );
+        tx.from = address!("dddddddddddddddddddddddddddddddddddddddd").to_vec();
+
+        assert!(!should_enqueue_for_signal_path(&tx, Some(&cache)).await);
+    }
+
+    #[tokio::test]
+    async fn keeps_tracked_creator_tx_on_signal_queue() {
+        let cache = Arc::new(test_cache().await);
+        let mut tx = tx(
+            Some(address!("1111111111111111111111111111111111111111")),
+            Vec::new(),
+        );
+        tx.from = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").to_vec();
+
+        assert!(should_enqueue_for_signal_path(&tx, Some(&cache)).await);
+    }
+
+    #[tokio::test]
+    async fn routes_tracked_lp_approval_to_critical_queue() {
+        let cache = Arc::new(test_cache().await);
+        let tx = tx(
+            Some(address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")),
+            erc20_approve_calldata(
+                address!("7a250d5630B4cF539739dF2C5dAcb4c659F2488D"),
+                U256::from(1000u64),
+            ),
+        );
+
+        assert!(matches!(
+            critical_lane_candidate(&tx, Some(&cache)).await,
+            Some(PreserveCandidate::LiquidityApproval)
+        ));
+    }
+
+    #[tokio::test]
+    async fn does_not_route_untracked_lp_approval_to_signal_queue() {
+        let cache = Arc::new(test_cache().await);
+        let mut tx = tx(
+            Some(address!("1111111111111111111111111111111111111111")),
+            erc20_approve_calldata(
+                address!("7a250d5630B4cF539739dF2C5dAcb4c659F2488D"),
+                U256::from(1000u64),
+            ),
+        );
+        tx.from = address!("dddddddddddddddddddddddddddddddddddddddd").to_vec();
+
+        assert!(critical_lane_candidate(&tx, Some(&cache)).await.is_none());
+        assert!(!should_enqueue_for_signal_path(&tx, Some(&cache)).await);
     }
 
     #[tokio::test]
@@ -825,6 +1070,13 @@ mod tests {
         input
     }
 
+    fn erc20_transfer_calldata(to: Address) -> Vec<u8> {
+        let mut input = vec![0xa9, 0x05, 0x9c, 0xbb];
+        input.extend_from_slice(&pad_address(to));
+        input.extend_from_slice(&U256::from(1u64).to_be_bytes::<32>());
+        input
+    }
+
     fn set_approval_for_all_calldata(operator: Address, approved: bool) -> Vec<u8> {
         let mut input = vec![0xa2, 0x2c, 0xb4, 0x65];
         input.extend_from_slice(&pad_address(operator));
@@ -842,5 +1094,81 @@ mod tests {
         let mut padded = [0u8; 32];
         padded[12..].copy_from_slice(address.as_slice());
         padded
+    }
+
+    async fn test_cache() -> TokenTrackingCache {
+        let cache = TokenTrackingCache::new(CacheConfig::default());
+        let token_address = "0x9999999999999999999999999999999999999999".to_string();
+        let creator_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+        let pool_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+
+        let token = Token {
+            address: token_address.clone(),
+            symbol: "TEST".to_string(),
+            name: "Test Token".to_string(),
+            decimals: 18,
+            total_supply: Some("1000000".to_string()),
+            creator_address,
+            current_owner: "0xcccccccccccccccccccccccccccccccccccccccc".to_string(),
+            tax_setter_addresses: Vec::new(),
+            ownership_renounced: false,
+            renouncement_block: None,
+            buy_tax: Some(0.0),
+            sell_tax: Some(0.0),
+            last_tax_change_block: None,
+            tax_history: Vec::new(),
+            creation_block: 1,
+            creation_tx: "0xcreate".to_string(),
+            creation_timestamp: None,
+            latest_activity_block: 1,
+            is_scam: false,
+            scam_label: None,
+            total_liquidity: 0.0,
+        };
+
+        let pool = Pool {
+            address: pool_address.clone(),
+            token_address: token_address.clone(),
+            pool_type: PoolType::UniswapV2,
+            token_reserve: 1_000_000.0,
+            eth_reserve: 10.0,
+            denom_currency: "WETH".to_string(),
+            denom_address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".to_string(),
+            trading_enabled: true,
+            trading_enabled_block: Some(1),
+            trading_enabled_tx: None,
+            fee_tier: None,
+            pool_id: None,
+            lp_token_address: Some(pool_address.clone()),
+            position_manager_address: None,
+            lp_total_supply: Some(1.0),
+            liquidity_positions: Vec::new(),
+            last_updated_block: 1,
+            last_updated_time: 1.0,
+            is_scam: false,
+            scam_label: None,
+            lp_tokens_approved_percentage: None,
+            lifecycle: PoolLifecycle::Active,
+            control_addresses: Vec::new(),
+            can_buy: true,
+            can_sell: true,
+            received_at: Instant::now(),
+        };
+
+        let mut pools = HashMap::new();
+        pools.insert(pool_address, pool);
+        let mut data = HashMap::new();
+        data.insert(token_address, TokenWithPools { token, pools });
+
+        cache
+            .batch_update(TokenUpdate {
+                message_type: "test".to_string(),
+                token_count: 1,
+                block_number: 1,
+                timestamp: 1.0,
+                data,
+            })
+            .await;
+        cache
     }
 }

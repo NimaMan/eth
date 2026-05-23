@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 /// Mempool Signal Detector Service
 ///
 /// Production service that implements the complete signal detection pipeline:
@@ -434,8 +435,11 @@ async fn main() -> Result<()> {
     // detector can drain immediately.
     info!("\n🔌 Connecting to Reth IPC...");
     let ingress_observer = create_arrival_recording_ingress_observer(arrival_recorder.clone());
-    let ipc_client =
-        MempoolFetcherIPCClient::new_with_observer(Some(&cfg_ipc_path), Some(ingress_observer))?;
+    let ipc_client = MempoolFetcherIPCClient::new_with_observer_and_signal_filter(
+        Some(&cfg_ipc_path),
+        Some(ingress_observer),
+        Some(token_cache.clone()),
+    )?;
     ipc_client.start().await?;
     info!("✅ IPC client connected");
 
@@ -461,6 +465,8 @@ async fn main() -> Result<()> {
     let mut last_report_total = 0u64;
     let start_time = Instant::now();
     let simulation_status_probe_in_flight = Arc::new(AtomicBool::new(false));
+    let detector_timing = DetectorLoopTiming::new();
+    spawn_detector_timing_watchdog(detector_timing.clone(), shutdown.clone());
 
     // Main processing loop
     loop {
@@ -469,23 +475,32 @@ async fn main() -> Result<()> {
             break;
         }
 
-        drain_completed_simulation_outcomes(
-            &mut simulation_result_rx,
-            metrics.as_ref(),
-            mempool_simulator.as_ref(),
-            simulation_error_log_path.as_ref(),
-            &unresolved_intent_store,
-        )
-        .await;
-        retry_cache_waiting_unresolved_intents(
-            &unresolved_intent_store,
-            &tx_router,
-            &simulation_manager,
-            metrics.as_ref(),
-        )
-        .await;
+        {
+            let _stage = detector_timing.stage("drain_completed_simulation_outcomes_pre");
+            drain_completed_simulation_outcomes(
+                &mut simulation_result_rx,
+                metrics.as_ref(),
+                mempool_simulator.as_ref(),
+                simulation_error_log_path.as_ref(),
+                &unresolved_intent_store,
+            )
+            .await;
+        }
+        {
+            let _stage = detector_timing.stage("retry_cache_waiting_unresolved_intents");
+            retry_cache_waiting_unresolved_intents(
+                &unresolved_intent_store,
+                &tx_router,
+                &simulation_manager,
+                metrics.as_ref(),
+            )
+            .await;
+        }
 
-        let new_txs = ipc_client.get_transactions_instant(args.batch_size).await;
+        let new_txs = {
+            let _stage = detector_timing.stage("ipc_get_transactions_instant");
+            ipc_client.get_transactions_instant(args.batch_size).await
+        };
         let mut idle_sleep = None;
 
         if new_txs.is_empty() {
@@ -497,21 +512,36 @@ async fn main() -> Result<()> {
             });
         } else {
             consecutive_empty = 0;
-            let transactions_with_functions = function_detector.detect_batch(new_txs);
+            let transactions_with_functions = {
+                let _stage = detector_timing.stage("function_detect_batch");
+                function_detector.detect_batch(new_txs)
+            };
 
             for tx in transactions_with_functions {
                 metrics.total_processed.fetch_add(1, Ordering::Relaxed);
-                metrics
-                    .add_detection_latency(Duration::from_nanos(tx.detection_ns))
-                    .await;
-                simulation_manager
-                    .record_pending_nonce_dependency(&tx)
-                    .await;
-                simulation_manager
-                    .record_pending_funding_dependency(&tx)
-                    .await;
+                {
+                    let _stage = detector_timing.stage("metrics_add_detection_latency");
+                    metrics
+                        .add_detection_latency(Duration::from_nanos(tx.detection_ns))
+                        .await;
+                }
+                {
+                    let _stage = detector_timing.stage("record_pending_nonce_dependency");
+                    simulation_manager
+                        .record_pending_nonce_dependency(&tx)
+                        .await;
+                }
+                {
+                    let _stage = detector_timing.stage("record_pending_funding_dependency");
+                    simulation_manager
+                        .record_pending_funding_dependency(&tx)
+                        .await;
+                }
 
-                let classification = tx_router.classify(&tx).await;
+                let classification = {
+                    let _stage = detector_timing.stage("tx_router_classify");
+                    tx_router.classify(&tx).await
+                };
                 tx_router.observe_route(&tx, &classification, RouteOrigin::MempoolIngress);
                 match &classification.category {
                     TransactionCategory::ContractCreation { .. }
@@ -520,6 +550,7 @@ async fn main() -> Result<()> {
                         if let Some((kind, reason)) =
                             tx_router.unresolved_intent_for(&tx, &classification)
                         {
+                            let _stage = detector_timing.stage("unresolved_intent_record");
                             unresolved_intent_store
                                 .record(tx.clone(), kind, reason)
                                 .await;
@@ -534,12 +565,17 @@ async fn main() -> Result<()> {
                         ..
                     } = &classification.category
                     {
-                        let published = simulation_manager
-                            .detect_lp_approval(&tx, &classification.category)
-                            .await;
+                        let published = {
+                            let _stage = detector_timing.stage("detect_lp_approval");
+                            simulation_manager
+                                .detect_lp_approval(&tx, &classification.category)
+                                .await
+                        };
                         if published {
+                            let _stage = detector_timing.stage("unresolved_intent_resolve_lp");
                             unresolved_intent_store.resolve(&tx.hash).await;
                         } else {
+                            let _stage = detector_timing.stage("unresolved_intent_record_lp");
                             unresolved_intent_store
                                 .record(
                                     tx.clone(),
@@ -566,7 +602,11 @@ async fn main() -> Result<()> {
                     tx_hash: parse_mempool_transaction_hash_or_zero(&tx.hash),
                 };
 
-                match simulation_manager.submit(sim_request).await {
+                let submit_result = {
+                    let _stage = detector_timing.stage("simulation_submit");
+                    simulation_manager.submit(sim_request).await
+                };
+                match submit_result {
                     Ok(()) => {
                         metrics
                             .simulations_submitted
@@ -580,16 +620,20 @@ async fn main() -> Result<()> {
             }
         }
 
-        drain_completed_simulation_outcomes(
-            &mut simulation_result_rx,
-            metrics.as_ref(),
-            mempool_simulator.as_ref(),
-            simulation_error_log_path.as_ref(),
-            &unresolved_intent_store,
-        )
-        .await;
+        {
+            let _stage = detector_timing.stage("drain_completed_simulation_outcomes_post");
+            drain_completed_simulation_outcomes(
+                &mut simulation_result_rx,
+                metrics.as_ref(),
+                mempool_simulator.as_ref(),
+                simulation_error_log_path.as_ref(),
+                &unresolved_intent_store,
+            )
+            .await;
+        }
 
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
+            let _stage = detector_timing.stage("interval_report");
             let interval_secs = last_report.elapsed().as_secs_f64().max(0.001);
             let total = metrics.total_processed.load(Ordering::Relaxed);
             let delta = total.saturating_sub(last_report_total);
@@ -623,8 +667,9 @@ async fn main() -> Result<()> {
                 publisher_stats.errors
             );
             info!(
-                "📊 Mempool ingress: received={} dropped={} critical_received={} critical_dropped={} ipc_queue={} normal_queue={} critical_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
+                "📊 Mempool ingress: received={} filtered_irrelevant={} dropped={} critical_received={} critical_dropped={} ipc_queue={} normal_queue={} critical_queue={} | simulation_queue current={} enqueued={} processed={} dropped={}",
                 ipc_stats.total,
+                ipc_stats.total_filtered_irrelevant,
                 ipc_stats.total_dropped,
                 ipc_stats.critical_received,
                 ipc_stats.critical_dropped,
@@ -637,6 +682,17 @@ async fn main() -> Result<()> {
                 manager_stats.queue_total_enqueued,
                 manager_stats.queue_total_processed,
                 manager_stats.queue_total_dropped
+            );
+            let timing_snapshot = detector_timing.snapshot();
+            info!(
+                "📊 Detector loop timing: loops={} current_stage={} current_stage_ms={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                timing_snapshot.completed_loops,
+                timing_snapshot.current_stage,
+                timing_snapshot.current_stage_ms,
+                timing_snapshot.last_loop_ms_ago,
+                timing_snapshot.max_stage,
+                timing_snapshot.max_stage_ms,
+                timing_snapshot.slow_stage_count
             );
             if let Some(ref recorder) = arrival_recorder {
                 let arrival_stats = recorder.stats();
@@ -731,6 +787,7 @@ async fn main() -> Result<()> {
         if let Some(sleep_time) = idle_sleep {
             time::sleep(sleep_time).await;
         }
+        detector_timing.mark_loop_completed();
     }
 
     let total_runtime = start_time.elapsed();
@@ -777,6 +834,135 @@ async fn main() -> Result<()> {
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())
+}
+
+#[derive(Clone)]
+struct DetectorLoopTiming {
+    inner: Arc<StdMutex<DetectorLoopTimingState>>,
+}
+
+struct DetectorLoopTimingState {
+    current_stage: &'static str,
+    stage_started: Instant,
+    last_loop_completed: Instant,
+    completed_loops: u64,
+    max_stage: &'static str,
+    max_stage_ms: u128,
+    slow_stage_count: u64,
+}
+
+struct DetectorLoopTimingSnapshot {
+    current_stage: &'static str,
+    current_stage_ms: u128,
+    last_loop_ms_ago: u128,
+    completed_loops: u64,
+    max_stage: &'static str,
+    max_stage_ms: u128,
+    slow_stage_count: u64,
+}
+
+struct DetectorStageGuard {
+    timing: DetectorLoopTiming,
+    stage: &'static str,
+    started: Instant,
+}
+
+impl DetectorLoopTiming {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            inner: Arc::new(StdMutex::new(DetectorLoopTimingState {
+                current_stage: "idle",
+                stage_started: now,
+                last_loop_completed: now,
+                completed_loops: 0,
+                max_stage: "none",
+                max_stage_ms: 0,
+                slow_stage_count: 0,
+            })),
+        }
+    }
+
+    fn stage(&self, stage: &'static str) -> DetectorStageGuard {
+        let now = Instant::now();
+        {
+            let mut state = self.inner.lock().expect("detector timing mutex poisoned");
+            state.current_stage = stage;
+            state.stage_started = now;
+        }
+        DetectorStageGuard {
+            timing: self.clone(),
+            stage,
+            started: now,
+        }
+    }
+
+    fn mark_loop_completed(&self) {
+        let mut state = self.inner.lock().expect("detector timing mutex poisoned");
+        state.completed_loops += 1;
+        state.last_loop_completed = Instant::now();
+    }
+
+    fn snapshot(&self) -> DetectorLoopTimingSnapshot {
+        let now = Instant::now();
+        let state = self.inner.lock().expect("detector timing mutex poisoned");
+        DetectorLoopTimingSnapshot {
+            current_stage: state.current_stage,
+            current_stage_ms: now.duration_since(state.stage_started).as_millis(),
+            last_loop_ms_ago: now.duration_since(state.last_loop_completed).as_millis(),
+            completed_loops: state.completed_loops,
+            max_stage: state.max_stage,
+            max_stage_ms: state.max_stage_ms,
+            slow_stage_count: state.slow_stage_count,
+        }
+    }
+}
+
+impl Drop for DetectorStageGuard {
+    fn drop(&mut self) {
+        let elapsed_ms = self.started.elapsed().as_millis();
+        let mut state = self
+            .timing
+            .inner
+            .lock()
+            .expect("detector timing mutex poisoned");
+        if elapsed_ms > state.max_stage_ms {
+            state.max_stage_ms = elapsed_ms;
+            state.max_stage = self.stage;
+        }
+        if elapsed_ms >= 250 {
+            state.slow_stage_count += 1;
+            warn!(
+                "slow detector stage stage={} elapsed_ms={}",
+                self.stage, elapsed_ms
+            );
+        }
+        if state.current_stage == self.stage {
+            state.current_stage = "idle";
+            state.stage_started = Instant::now();
+        }
+    }
+}
+
+fn spawn_detector_timing_watchdog(timing: DetectorLoopTiming, shutdown: Arc<AtomicBool>) {
+    tokio::spawn(async move {
+        while !shutdown.load(Ordering::Relaxed) {
+            time::sleep(Duration::from_secs(5)).await;
+            let snapshot = timing.snapshot();
+            if snapshot.current_stage != "idle" && snapshot.current_stage_ms >= 5_000 {
+                warn!(
+                    "detector consumer stage appears stuck stage={} elapsed_ms={} loops={} last_loop_ms_ago={} max_stage={} max_stage_ms={} slow_stages={}",
+                    snapshot.current_stage,
+                    snapshot.current_stage_ms,
+                    snapshot.completed_loops,
+                    snapshot.last_loop_ms_ago,
+                    snapshot.max_stage,
+                    snapshot.max_stage_ms,
+                    snapshot.slow_stage_count
+                );
+            }
+        }
+    });
 }
 
 /// Sets up signal handlers for graceful shutdown
