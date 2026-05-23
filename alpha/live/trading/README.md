@@ -46,8 +46,8 @@ real live order.
 Exact pre-submit simulation is also the source of gas-used for live tx
 economics. Route builders carry gas limits, not fallback gas-used estimates.
 After the final exact simulation the planner raises `route.estimated_gas_used`
-to at least the simulated gas used plus the configured buffer, currently 5000
-bps / 50%, before gas-rank lookup, value-cap budgeting, and Kartal request
+to at least the simulated gas used plus the configured buffer, currently 2500
+bps / 25%, before gas-rank lookup, value-cap budgeting, and Kartal request
 metadata are built.
 
 Production gas-rank readiness is tracked in:
@@ -56,8 +56,8 @@ Production gas-rank readiness is tracked in:
 
 The real Alpha runner currently requires gas-rank candidates from
 `eth_chain_server_gas_rank`, uses `p85 -> p75 -> p50 -> normal` for entries,
-uses `p50 -> normal` for routine strategy exits, maps mempool risk exits to
-`p95 -> p90 -> p75 -> p50 -> normal`, maps mined approval races to
+uses `p85 -> p75 -> p50 -> normal` for routine strategy exits, maps mempool risk exits to
+`p95 -> p90 -> p75 -> p50 -> normal`, maps LP approval exits to
 `p90 -> p75 -> p50 -> normal`, caps selected priority fee at `3.5 gwei`, caps
 entry estimated gas fee at `0.0012 ETH`, and caps exit estimated gas fee at
 `0.002 ETH`.
@@ -67,11 +67,10 @@ The decision loop is:
 | Strategy signal | Decision reason | Execution category | Gas ladder | Execution route | Current usage |
 | --- | --- | --- | --- | --- | --- |
 | Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault buy | Active Alpha11 path |
-| Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
-| Mined LP approval after entry | `exit.lp_approval_mined_race` | `mined_approval_race_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available risk exit |
-| Mempool LP/removal risk | `exit.mempool_liquidity_removal_signal` | `mempool_lp_race_exit` | `p95 -> p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Only when live mempool evidence exists |
+| Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
+| LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available risk exit |
+| Mempool LP/removal risk | `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `p95 -> p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Only when live mempool evidence exists |
 | Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
-| Buy-confirm block LP approval | `exit.lp_approval_buy_confirm_block` | `buy_confirm_approval_exit` | `p90 -> p75 -> p50` | Reserved priority sell | Unused by registered active strategies; Alpha11 defers this to max-hold |
 | Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |
 
 `P50`, `P75`, `P85`, `P90`, and `P95` mean mined priority-fee percentiles.

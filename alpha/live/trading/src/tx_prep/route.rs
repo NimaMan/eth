@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS: u64 = 500;
+use super::GasEstimateConfig;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedSellRoute {
@@ -9,7 +9,8 @@ pub struct PreparedSellRoute {
     pub calldata: String,
     pub value_wei: String,
     pub gas_limit: u64,
-    pub estimated_gas_used: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_gas_used: Option<u64>,
     #[serde(default)]
     pub max_slippage_bps: Option<u32>,
 }
@@ -18,21 +19,50 @@ impl PreparedSellRoute {
     pub fn apply_simulated_gas_used(
         &mut self,
         simulated_gas_used: u64,
+        config: &GasEstimateConfig,
     ) -> Result<(), TxPrepRouteError> {
+        self.estimated_gas_used =
+            Some(self.simulation_buffered_gas_used(simulated_gas_used, config)?);
+        Ok(())
+    }
+
+    pub fn require_estimated_gas_used(&self) -> Result<u64, TxPrepRouteError> {
+        match self.estimated_gas_used {
+            Some(estimated_gas_used) if estimated_gas_used > 0 => {
+                if estimated_gas_used > self.gas_limit {
+                    return Err(TxPrepRouteError::EstimatedGasExceedsLimit);
+                }
+                Ok(estimated_gas_used)
+            }
+            _ => Err(TxPrepRouteError::MissingEstimatedGasUsed),
+        }
+    }
+
+    pub fn simulation_buffered_gas_used(
+        &self,
+        simulated_gas_used: u64,
+        config: &GasEstimateConfig,
+    ) -> Result<u64, TxPrepRouteError> {
         if simulated_gas_used == 0 {
             return Err(TxPrepRouteError::MissingEstimatedGasUsed);
         }
         if simulated_gas_used > self.gas_limit {
             return Err(TxPrepRouteError::EstimatedGasExceedsLimit);
         }
-
-        let buffered = add_bps_ceil(
-            simulated_gas_used,
-            DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS,
+        Ok(
+            add_bps_ceil(simulated_gas_used, config.simulated_gas_estimate_buffer_bps)
+                .min(self.gas_limit),
         )
-        .min(self.gas_limit);
-        self.estimated_gas_used = self.estimated_gas_used.max(buffered);
-        Ok(())
+    }
+
+    pub fn with_simulated_gas_used(
+        mut self,
+        simulated_gas_used: u64,
+        config: &GasEstimateConfig,
+    ) -> Result<Self, TxPrepRouteError> {
+        let estimated_gas_used = self.simulation_buffered_gas_used(simulated_gas_used, config)?;
+        self.estimated_gas_used = Some(estimated_gas_used);
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), TxPrepRouteError> {
@@ -45,12 +75,7 @@ impl PreparedSellRoute {
         if self.gas_limit == 0 {
             return Err(TxPrepRouteError::MissingGasLimit);
         }
-        if self.estimated_gas_used == 0 {
-            return Err(TxPrepRouteError::MissingEstimatedGasUsed);
-        }
-        if self.estimated_gas_used > self.gas_limit {
-            return Err(TxPrepRouteError::EstimatedGasExceedsLimit);
-        }
+        self.require_estimated_gas_used()?;
         Ok(())
     }
 }
@@ -79,7 +104,7 @@ pub enum TxPrepRouteError {
 mod tests {
     use super::*;
 
-    fn route(estimated_gas_used: u64, gas_limit: u64) -> PreparedSellRoute {
+    fn route(estimated_gas_used: Option<u64>, gas_limit: u64) -> PreparedSellRoute {
         PreparedSellRoute {
             protocol: "uniswap_v2_trading_vault".to_string(),
             router_address: "0x0000000000000000000000000000000000000001".to_string(),
@@ -92,20 +117,22 @@ mod tests {
     }
 
     #[test]
-    fn simulated_gas_used_raises_route_estimate_with_buffer() {
-        let mut route = route(130_000, 300_000);
+    fn simulated_gas_used_sets_route_estimate_with_buffer() {
+        let mut route = route(None, 300_000);
+        let config = GasEstimateConfig::default();
 
-        route.apply_simulated_gas_used(182_564).unwrap();
+        route.apply_simulated_gas_used(182_564, &config).unwrap();
 
-        assert_eq!(route.estimated_gas_used, 191_693);
+        assert_eq!(route.estimated_gas_used, Some(228_205));
     }
 
     #[test]
-    fn simulated_gas_used_does_not_lower_existing_estimate() {
-        let mut route = route(180_000, 300_000);
+    fn simulated_gas_used_replaces_existing_estimate() {
+        let mut route = route(Some(180_000), 300_000);
+        let config = GasEstimateConfig::default();
 
-        route.apply_simulated_gas_used(120_000).unwrap();
+        route.apply_simulated_gas_used(120_000, &config).unwrap();
 
-        assert_eq!(route.estimated_gas_used, 180_000);
+        assert_eq!(route.estimated_gas_used, Some(150_000));
     }
 }
