@@ -64,9 +64,9 @@ mod tests {
 
     fn alpha11_hold15_args() -> Args {
         Args {
-            poll_interval_ms: 2_000,
-            mempool_since_days: 14,
-            signal_limit: 200,
+            poll_interval_ms: Some(2_000),
+            mempool_since_days: Some(14),
+            signal_limit: Some(200),
             run_id: None,
             disable_entry: false,
             replay_current: false,

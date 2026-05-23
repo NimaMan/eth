@@ -2,9 +2,9 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) struct Args {
-    pub(super) poll_interval_ms: u64,
-    pub(super) mempool_since_days: i64,
-    pub(super) signal_limit: i64,
+    pub(super) poll_interval_ms: Option<u64>,
+    pub(super) mempool_since_days: Option<i64>,
+    pub(super) signal_limit: Option<i64>,
     pub(super) run_id: Option<String>,
     pub(super) disable_entry: bool,
     pub(super) replay_current: bool,
@@ -23,14 +23,17 @@ pub(super) struct RealExecutionArgs {
 
 #[derive(Debug, Parser)]
 struct LiveCommonCli {
-    #[arg(long, default_value_t = 2_000)]
-    poll_interval_ms: u64,
+    /// Optional override for ALPHA_LIVE_TRADER_POLL_INTERVAL_MS in config.env.
+    #[arg(long)]
+    poll_interval_ms: Option<u64>,
 
-    #[arg(long, default_value_t = 14)]
-    mempool_since_days: i64,
+    /// Optional override for ALPHA_LIVE_MEMPOOL_SINCE_DAYS in config.env.
+    #[arg(long)]
+    mempool_since_days: Option<i64>,
 
-    #[arg(long, default_value_t = 200)]
-    signal_limit: i64,
+    /// Optional override for ALPHA_LIVE_SIGNAL_LIMIT in config.env.
+    #[arg(long)]
+    signal_limit: Option<i64>,
 
     #[arg(long)]
     run_id: Option<String>,

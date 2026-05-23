@@ -75,6 +75,9 @@ const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
+const ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG: &str = "ALPHA_LIVE_TRADER_POLL_INTERVAL_MS";
+const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
+const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
 const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
@@ -84,6 +87,7 @@ const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.225";
+const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
 
 fn resolve_entry_bankroll_wei(spec: &LiveStrategySpec) -> Result<Option<U256>> {
     let Some(value) = spec.entry_bankroll_eth.as_deref() else {
@@ -201,6 +205,34 @@ fn live_gas_policy_run_metadata_json(
     })
 }
 
+fn resolve_cli_or_config_u64(
+    override_value: Option<u64>,
+    config: &HashMap<String, String>,
+    key: &str,
+) -> Result<u64> {
+    if let Some(value) = override_value {
+        return Ok(value);
+    }
+    let value = required_shared_config_value(config, key)?;
+    value
+        .parse::<u64>()
+        .wrap_err_with(|| format!("invalid {key} value {value:?}"))
+}
+
+fn resolve_cli_or_config_i64(
+    override_value: Option<i64>,
+    config: &HashMap<String, String>,
+    key: &str,
+) -> Result<i64> {
+    if let Some(value) = override_value {
+        return Ok(value);
+    }
+    let value = required_shared_config_value(config, key)?;
+    value
+        .parse::<i64>()
+        .wrap_err_with(|| format!("invalid {key} value {value:?}"))
+}
+
 pub async fn run_live_backtest() -> Result<()> {
     run(
         "eth_alpha_live_backtest_trader",
@@ -235,6 +267,43 @@ async fn run(
         .init();
 
     let shared_config = load_shared_config()?;
+    let poll_interval_ms = resolve_cli_or_config_u64(
+        args.poll_interval_ms,
+        &shared_config,
+        ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG,
+    )?;
+    if poll_interval_ms == 0 || poll_interval_ms > MAX_LIVE_TRADER_POLL_INTERVAL_MS {
+        return Err(eyre!(
+            "{} must be in the range 1..={}ms for live mempool signal handling; got {}",
+            ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG,
+            MAX_LIVE_TRADER_POLL_INTERVAL_MS,
+            poll_interval_ms
+        ));
+    }
+    let mempool_since_days = resolve_cli_or_config_i64(
+        args.mempool_since_days,
+        &shared_config,
+        ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG,
+    )?;
+    if mempool_since_days <= 0 {
+        return Err(eyre!(
+            "{} must be positive; got {}",
+            ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG,
+            mempool_since_days
+        ));
+    }
+    let signal_limit = resolve_cli_or_config_i64(
+        args.signal_limit,
+        &shared_config,
+        ALPHA_LIVE_SIGNAL_LIMIT_CONFIG,
+    )?;
+    if signal_limit <= 0 {
+        return Err(eyre!(
+            "{} must be positive; got {}",
+            ALPHA_LIVE_SIGNAL_LIMIT_CONFIG,
+            signal_limit
+        ));
+    }
     if execution_mode.uses_kartal() != real_args.is_some() {
         return Err(eyre!(
             "{} internal configuration mismatch: execution mode {} and real args presence disagree",
@@ -350,9 +419,9 @@ async fn run(
                 "process_started_at_unix_secs": process_started_at_unix_secs,
                 "token_server_url": &token_server_url,
                 "reth_datadir": &reth_datadir,
-                "poll_interval_ms": args.poll_interval_ms,
-                "mempool_since_days": args.mempool_since_days,
-                "signal_limit": args.signal_limit,
+                "poll_interval_ms": poll_interval_ms,
+                "mempool_since_days": mempool_since_days,
+                "signal_limit": signal_limit,
                 "buy_wei": &single_buy_wei,
                 "max_entry_pools": single_max_entry_pools,
                 "entry_bankroll_eth": &single_entry_bankroll_eth,
@@ -692,7 +761,7 @@ async fn run(
             let status = client.status().await?;
             let pools = client.pools().await?;
             let signals = client
-                .mempool_signals(args.signal_limit, args.mempool_since_days)
+                .mempool_signals(signal_limit, mempool_since_days)
                 .await?;
             Ok::<_, eyre::Report>((status, pools, signals))
         }
@@ -757,7 +826,7 @@ async fn run(
                     break;
                 }
                 tokio::select! {
-                    _ = time::sleep(Duration::from_millis(args.poll_interval_ms)) => {}
+                    _ = time::sleep(Duration::from_millis(poll_interval_ms)) => {}
                     _ = shutdown.recv() => {
                         store
                             .mark_stopped(
@@ -1218,7 +1287,7 @@ async fn run(
             break;
         }
         tokio::select! {
-            _ = time::sleep(Duration::from_millis(args.poll_interval_ms)) => {}
+            _ = time::sleep(Duration::from_millis(poll_interval_ms)) => {}
             _ = shutdown.recv() => {
                 store
                     .mark_stopped(

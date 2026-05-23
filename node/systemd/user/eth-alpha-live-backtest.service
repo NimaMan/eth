@@ -14,7 +14,7 @@ Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:
 Environment=RUST_LOG=info
 ExecStartPre=/usr/bin/test -n ${ALPHA_RUN_ID}
 ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SET}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_backtest_trader --run-id ${ALPHA_RUN_ID} --poll-interval-ms ${ALPHA_POLL_INTERVAL_MS} --mempool-since-days ${ALPHA_MEMPOOL_SINCE_DAYS} --signal-limit ${ALPHA_SIGNAL_LIMIT} --strategy-set ${ALPHA_STRATEGY_SET}
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_backtest_trader --run-id ${ALPHA_RUN_ID} --strategy-set ${ALPHA_STRATEGY_SET}
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

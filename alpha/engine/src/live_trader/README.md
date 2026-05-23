@@ -13,6 +13,22 @@ Live trader owns the live polling process.
 Real tx wiring belongs in `real_execution.rs`; common live polling and
 observation persistence stays in `mod.rs` and `support.rs`.
 
+## Runtime Config
+
+The normal live trader service path reads polling settings from the shared root
+`config.env`:
+
+- `ALPHA_LIVE_TRADER_POLL_INTERVAL_MS`: full trader loop sleep. Keep this below
+  one second for mempool signal handling; startup rejects values above
+  `1000`.
+- `ALPHA_LIVE_MEMPOOL_SINCE_DAYS`: lookback window used when fetching stored
+  mempool signals from the chain server.
+- `ALPHA_LIVE_SIGNAL_LIMIT`: max signal rows fetched per trader loop.
+
+The CLI flags `--poll-interval-ms`, `--mempool-since-days`, and
+`--signal-limit` are explicit operator overrides only. The checked-in systemd
+services do not set separate copies of these values.
+
 ## Real Receipt Reconciliation
 
 `receipt_reconciliation.rs` owns the first real-live settlement worker. On each
