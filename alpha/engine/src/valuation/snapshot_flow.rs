@@ -84,9 +84,15 @@ where
                 .map(|block| block.to_string())
                 .unwrap_or_else(|| "-".to_string())
         );
-        if !self.written_snapshot_keys.insert(key) {
-            return Ok(());
+        if let Some(previous_observed_block) =
+            self.written_snapshot_observed_blocks.get(&key).copied()
+        {
+            if !observed_block_improves(previous_observed_block, snapshot.observed_block_number) {
+                return Ok(());
+            }
         }
+        self.written_snapshot_observed_blocks
+            .insert(key, snapshot.observed_block_number);
         self.store.append_position_snapshot(&snapshot).await
     }
 
@@ -120,5 +126,13 @@ where
         }
 
         Ok(())
+    }
+}
+
+fn observed_block_improves(previous: Option<u64>, next: Option<u64>) -> bool {
+    match (previous, next) {
+        (None, Some(_)) => true,
+        (Some(previous), Some(next)) => next > previous,
+        _ => false,
     }
 }

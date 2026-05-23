@@ -62,10 +62,18 @@ impl TradingStore for MemoryTradingStore {
     }
 
     async fn append_position_snapshot(&self, snapshot: &PositionSnapshot) -> Result<()> {
-        self.snapshots
-            .lock()
-            .expect("store lock")
-            .push(snapshot.clone());
+        let mut snapshots = self.snapshots.lock().expect("store lock");
+        if let Some(existing) = snapshots.iter_mut().find(|existing| {
+            existing.position_id == snapshot.position_id
+                && existing.trade_id == snapshot.trade_id
+                && existing.state == snapshot.state
+                && existing.block_number == snapshot.block_number
+                && existing.valuation_block_number == snapshot.valuation_block_number
+        }) {
+            *existing = snapshot.clone();
+        } else {
+            snapshots.push(snapshot.clone());
+        }
         Ok(())
     }
 

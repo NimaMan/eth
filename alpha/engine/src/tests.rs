@@ -5,7 +5,7 @@ use eth_alpha_core::{
     ids::{OrderId, PortfolioId, StrategyName, TokenPoolId, WalletId},
     market::{PoolProtocol, PoolSnapshot},
     order::{OrderIntent, OrderSide},
-    position::{Position, PositionKey, PositionState},
+    position::{Position, PositionKey, PositionSnapshot, PositionState},
     risk::{RiskKind, RiskSeverity},
     strategy::{StrategyContext, StrategyDecision},
     Result, Strategy,
@@ -540,6 +540,91 @@ fn zero_current_value_snapshot_does_not_copy_pool_metrics() {
     assert_eq!(snapshot.pool_liquidity_denom, None);
     assert_eq!(snapshot.pool_price_to_initial_price_ratio, None);
     assert_eq!(snapshot.pool_price_denom_per_token, None);
+}
+
+#[test]
+fn display_zero_current_value_snapshot_does_not_copy_pool_metrics() {
+    let mut position = test_position(PositionState::BuyConfirmed);
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.01").unwrap());
+    let token = position.key.token_address;
+    let pool_address = Address::repeat_byte(0x22);
+    let mut pool = pool_snapshot(token, pool_address, 10);
+    pool.denom_reserve = DecimalAmount::from_str_exact("1.5").unwrap();
+    pool.token_reserve = DecimalAmount::from_str_exact("1000000").unwrap();
+    pool.price_ratio_to_initial = Some(DecimalAmount::from_str_exact("2").unwrap());
+    pool.price_denom_per_token = Some(DecimalAmount::from_str_exact("0.000000002").unwrap());
+    pool.initial_price_denom_per_token =
+        Some(DecimalAmount::from_str_exact("0.000000001").unwrap());
+
+    let snapshot = simulated_value_snapshot(
+        &position,
+        PositionValueSimulation {
+            block_number: 10,
+            current_value: Amount {
+                raw: U256::from(61_874_621_213u64),
+                decimals: 18,
+            },
+            gas_used: None,
+            error: None,
+        },
+        Some(&pool),
+    );
+
+    assert_eq!(
+        snapshot.current_value_eth.to_string(),
+        "0.000000061874621213"
+    );
+    assert_eq!(snapshot.pool_liquidity_denom, None);
+    assert_eq!(snapshot.pool_price_to_initial_price_ratio, None);
+    assert_eq!(snapshot.pool_price_denom_per_token, None);
+}
+
+#[tokio::test]
+async fn newer_observed_snapshot_refines_same_valuation_coordinate() {
+    let store = MemoryTradingStore::default();
+    let mut engine = AlphaEngine::new(AllowAllRiskPolicy, store.clone(), NoopTestExecutionAdapter);
+    let position = test_position(PositionState::BuyConfirmed);
+    let mut snapshot = PositionSnapshot {
+        position_id: position.id.clone(),
+        trade_id: position.trade_id.clone(),
+        state: PositionState::BuyConfirmed,
+        block_number: 12,
+        observed_block_number: Some(10),
+        valuation_block_number: Some(12),
+        current_value_eth: DecimalAmount::from_str_exact("0.01").unwrap(),
+        realized_profit_eth: DecimalAmount::ZERO,
+        unrealized_profit_eth: DecimalAmount::ZERO,
+        roi: DecimalAmount::ZERO,
+        pool_price_to_initial_price_ratio: Some(DecimalAmount::from_str_exact("1").unwrap()),
+        pool_initial_price_denom_per_token: Some(
+            DecimalAmount::from_str_exact("0.000000001").unwrap(),
+        ),
+        pool_price_denom_per_token: Some(DecimalAmount::from_str_exact("0.000000001").unwrap()),
+        pool_liquidity_denom: Some(DecimalAmount::from_str_exact("1.2").unwrap()),
+        pool_token_reserve: Some(DecimalAmount::from_str_exact("1000000").unwrap()),
+        pool_denom_symbol: Some("WETH".to_string()),
+    };
+    engine
+        .append_position_snapshot_once(snapshot.clone())
+        .await
+        .unwrap();
+
+    snapshot.observed_block_number = Some(12);
+    snapshot.pool_price_to_initial_price_ratio = Some(DecimalAmount::ZERO);
+    snapshot.pool_price_denom_per_token = Some(DecimalAmount::ZERO);
+    snapshot.pool_liquidity_denom = Some(DecimalAmount::from_str_exact("0.000000061875").unwrap());
+    engine
+        .append_position_snapshot_once(snapshot)
+        .await
+        .unwrap();
+
+    let snapshots = store.snapshots();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].observed_block_number, Some(12));
+    assert_eq!(
+        snapshots[0].pool_liquidity_denom.unwrap().to_string(),
+        "0.000000061875"
+    );
 }
 
 #[tokio::test]

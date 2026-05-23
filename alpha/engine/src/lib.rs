@@ -17,7 +17,7 @@ mod runtime;
 mod store;
 mod valuation;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use eth_alpha_core::{
@@ -109,7 +109,7 @@ where
     current_event_block: Option<u64>,
     pending_execution_reports: Vec<PendingExecutionReport>,
     pool_snapshots: HashMap<TokenPoolId, PoolSnapshot>,
-    written_snapshot_keys: HashSet<String>,
+    written_snapshot_observed_blocks: HashMap<String, Option<u64>>,
 }
 
 impl<E, R, S> AlphaEngine<E, R, S>
@@ -130,7 +130,7 @@ where
             current_event_block: None,
             pending_execution_reports: Vec::new(),
             pool_snapshots: HashMap::new(),
-            written_snapshot_keys: HashSet::new(),
+            written_snapshot_observed_blocks: HashMap::new(),
         }
     }
 

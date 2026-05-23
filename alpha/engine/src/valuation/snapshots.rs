@@ -6,6 +6,8 @@ use eth_alpha_core::{
 
 use crate::PositionValueSimulation;
 
+const DISPLAY_ZERO_VALUE_SCALE: u32 = 6;
+
 pub(crate) fn should_snapshot_position_for_pool(position: &Position) -> bool {
     if position.drained {
         return position.has_exposure();
@@ -108,7 +110,7 @@ pub(crate) fn snapshot_with_pool_metrics(
     if pool.latest_block > valuation_block {
         return snapshot;
     }
-    if snapshot.current_value_eth.is_zero() {
+    if is_display_zero_value(snapshot.current_value_eth) {
         return snapshot;
     }
 
@@ -127,4 +129,8 @@ pub(crate) fn valuation_safe_pool(
     valuation_block: u64,
 ) -> Option<&PoolSnapshot> {
     pool.filter(|pool| pool.latest_block <= valuation_block)
+}
+
+fn is_display_zero_value(value: DecimalAmount) -> bool {
+    value.abs() <= DecimalAmount::new(1, DISPLAY_ZERO_VALUE_SCALE)
 }
