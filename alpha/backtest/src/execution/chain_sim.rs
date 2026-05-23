@@ -151,6 +151,8 @@ where
                     lp_approval_gate_min_pct,
                     defer_buy_confirm_block_lp_approval_to_max_hold: spec
                         .defer_buy_confirm_block_lp_approval_to_max_hold,
+                    lp_approval_exit_defer_max_trading_enabled_age_blocks: spec
+                        .lp_approval_exit_defer_max_trading_enabled_age_blocks,
                     stop_loss_ratio,
                     take_profit_ratio,
                     max_hold_blocks: spec.max_hold_blocks,

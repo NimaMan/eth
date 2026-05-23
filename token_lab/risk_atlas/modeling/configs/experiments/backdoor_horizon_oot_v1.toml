@@ -1,0 +1,52 @@
+experiment_id = "backdoor_horizon_oot_v1"
+protocol = "UNISWAP-V2"
+modeling_focus = "out_of_time_short_horizon_backdoor_and_scam_probability"
+
+[paths]
+artifact_root = "artifacts/backdoor_horizon_oot_v1"
+experiment_root = "experiments/backdoor_horizon_oot_v1"
+
+[atlas_runs]
+train_run_id = "risk-atlas-backdoor-horizon-oot-v1-train-50k-20260521"
+test_run_id = "risk-atlas-backdoor-horizon-oot-v1-test-20k-20260521"
+
+[ranges.train]
+start_block = 24974082
+end_block = 25024081
+block_count = 50000
+
+[ranges.gap]
+start_block = 25024082
+end_block = 25124081
+block_count = 100000
+
+[ranges.test]
+start_block = 25124082
+end_block = 25144081
+block_count = 20000
+holdout_token_address = "0x0ca72b24abf950be8bb145f5c68f7004485192b2"
+holdout_pool_address = "0x57ca70b663ead85122589f345835d8f8209608dc"
+holdout_scam_block = 25144063
+
+[targets]
+chain_block_delta_horizons = [1, 2, 3, 4, 10]
+active_observation_delta_horizons = []
+train_time_to_event = false
+
+[split]
+train_end_fraction = 0.80
+validation_end_fraction = 1.00
+test_overlap_policy = "drop_test_pool_if_seen_in_train"
+
+[models]
+baseline_models = [
+  "logistic_regression",
+  "decision_tree",
+  "random_forest",
+  "hist_gradient_boosting",
+]
+
+[iterations]
+planned_count = 5
+current_iteration = 1
+review_sets = ["true_positive", "false_positive", "false_negative", "uliq_holdout"]

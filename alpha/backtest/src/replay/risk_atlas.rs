@@ -161,8 +161,16 @@ fn risk_atlas_lp_approval_message(row: &RiskAtlasObservation) -> String {
                 None
             }
         });
+    let approval_age = row
+        .trading_enabled_to_last_lp_approval_chain_block_delta
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let approval_freshness = row
+        .last_lp_approval_to_as_of_chain_block_delta
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
     format!(
-        "risk atlas mined-chain LP approval: count={}, generic_approved_pct={}, owner_is_creator={owner_is_creator}",
+        "risk atlas mined-chain LP approval: count={}, generic_approved_pct={}, owner_is_creator={owner_is_creator}, trading_enabled_to_last_lp_approval_chain_block_delta={approval_age}, last_lp_approval_to_as_of_chain_block_delta={approval_freshness}",
         row.lp_approval_count_in_block,
         approval_pct
             .map(|pct| format!("{pct:.2}%"))

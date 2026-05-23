@@ -39,11 +39,12 @@ Shared Alpha11 defaults:
 - Exit an open position on liquidity-removal risk events. Both confirmed-chain
   `liquidity_removal` and pending `mempool_liquidity_removal` events are
   treated as sell signals.
-- Exit an open position on LP approval risk events after entry. In live runs
-  this can come from `mempool_signal` before the approval is mined; in
-  mined-chain/risk-atlas replay it comes from confirmed-chain evidence. Reports
-  should preserve the source so `mempool lp_approval` is not confused with
-  `mined-chain lp_approval`.
+- Exit an open position on LP approval risk events after entry, except for
+  launch-window approvals within `<=2` chain blocks of trading enabled, which
+  are deferred to max-hold. In live runs this can come from `mempool_signal`
+  before the approval is mined; in mined-chain/risk-atlas replay it comes from
+  confirmed-chain evidence. Reports should preserve the source so `mempool
+  lp_approval` is not confused with `mined-chain lp_approval`.
 - Buy size is `0.01 ETH` per entry.
 - Liquidity floors are `0.5 ETH` for ETH/WETH pools and `1000` for USD-stable
   quote pools.
@@ -76,7 +77,9 @@ for deploy review are:
 
 For `alpha11-univ2-lp30-pool-update-block-hold15`, a sell reason of
 `exit.lp_approval` means the strategy exited on LP-token approval evidence. A
-sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
+hold reason of `exit.lp_approval:early_approval_deferred_to_max_hold` means the
+approval was in the launch window and the position remains governed by max hold.
+A sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
 pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`
 means confirmed-chain liquidity removal was already visible.
 

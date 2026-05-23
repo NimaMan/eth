@@ -2,7 +2,8 @@ use crate::{
     alpha11::{
         BUY_WEI, ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
         HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
-        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, LIVE_VALIDATION_MAX_ENTRY_POOLS, MIN_LIQUIDITY_ETH,
+        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, LIVE_VALIDATION_MAX_ENTRY_POOLS,
+        LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS, MIN_LIQUIDITY_ETH,
         MIN_LIQUIDITY_USD, STRATEGY_IMPL,
     },
     shared_rules::live::{LiveEntryInitPolicySpec, LiveStrategySpec, LiveStrategySpecOptions},
@@ -54,6 +55,9 @@ fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrateg
             allow_missing_price_ratio: true,
         },
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: Some(
+            LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
+        ),
         min_sell_pool_denom_reserve: Some(MIN_SELL_POOL_DENOM_RESERVE.to_string()),
         buy_wei: BUY_WEI.to_string(),
         min_liquidity_eth: MIN_LIQUIDITY_ETH.to_string(),
@@ -119,6 +123,10 @@ mod tests {
         assert!(specs
             .iter()
             .all(|spec| spec.defer_buy_confirm_block_lp_approval_to_max_hold));
+        assert!(specs.iter().all(|spec| {
+            spec.lp_approval_exit_defer_max_trading_enabled_age_blocks
+                == Some(LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
+        }));
         assert!(specs
             .iter()
             .all(|spec| spec.min_sell_pool_denom_reserve.as_deref() == Some("0")));
@@ -155,6 +163,10 @@ mod tests {
         assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert_eq!(
+            spec.lp_approval_exit_defer_max_trading_enabled_age_blocks,
+            Some(LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
+        );
         assert!(spec.strategy_label.contains("validation"));
         assert!(!spec.strategy_name.contains("price-to-initial"));
     }

@@ -49,6 +49,21 @@ pub fn approval_pct(event: &RiskEvent) -> Option<Decimal> {
     approval_pct_from_message(&event.message)
 }
 
+pub fn approval_trading_enabled_age_blocks(event: &RiskEvent) -> Option<i64> {
+    approval_trading_enabled_age_blocks_from_message(&event.message)
+}
+
+pub fn approval_trading_enabled_age_blocks_from_message(message: &str) -> Option<i64> {
+    [
+        "trading_enabled_to_last_lp_approval_chain_block_delta=",
+        "trading_enabled_to_lp_approval_chain_block_delta=",
+        "pool_age_at_lp_approval_chain_block_delta=",
+        "approval_age_chain_block_delta=",
+    ]
+    .into_iter()
+    .find_map(|key| parse_i64_after_key(message, key))
+}
+
 pub fn approval_pct_from_message(message: &str) -> Option<Decimal> {
     [
         "generic_approved_pct=",
@@ -86,6 +101,23 @@ fn parse_decimal_prefix(value: &str) -> Option<Decimal> {
     Decimal::from_str(&trimmed[..end]).ok()
 }
 
+fn parse_i64_after_key(message: &str, key: &str) -> Option<i64> {
+    let (_, suffix) = message.split_once(key)?;
+    parse_i64_prefix(suffix)
+}
+
+fn parse_i64_prefix(value: &str) -> Option<i64> {
+    let trimmed = value.trim_start();
+    let end = trimmed
+        .find(|ch: char| !(ch.is_ascii_digit() || ch == '-' || ch == '+'))
+        .unwrap_or(trimmed.len());
+    if end == 0 {
+        return None;
+    }
+
+    i64::from_str(&trimmed[..end]).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +145,14 @@ mod tests {
         );
 
         assert_eq!(pct, None);
+    }
+
+    #[test]
+    fn parses_trading_enabled_to_last_lp_approval_delta() {
+        let age = approval_trading_enabled_age_blocks_from_message(
+            "risk atlas mined-chain LP approval: count=1, generic_approved_pct=100.00%, trading_enabled_to_last_lp_approval_chain_block_delta=2",
+        );
+
+        assert_eq!(age, Some(2));
     }
 }

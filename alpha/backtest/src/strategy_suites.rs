@@ -25,6 +25,7 @@ pub struct BacktestStrategySpec {
     pub(crate) block_entry_on_lp_approval: bool,
     pub(crate) lp_approval_gate_min_pct: Option<String>,
     pub(crate) defer_buy_confirm_block_lp_approval_to_max_hold: bool,
+    pub(crate) lp_approval_exit_defer_max_trading_enabled_age_blocks: Option<u64>,
     pub(crate) min_sell_pool_denom_reserve: Option<String>,
     pub(crate) stop_loss_ratio: Option<String>,
     pub(crate) take_profit_ratio: Option<String>,
@@ -45,6 +46,7 @@ impl BacktestStrategySpec {
             "block_entry_on_lp_approval": self.block_entry_on_lp_approval,
             "lp_approval_gate_min_pct": self.lp_approval_gate_min_pct,
             "defer_buy_confirm_block_lp_approval_to_max_hold": self.defer_buy_confirm_block_lp_approval_to_max_hold,
+            "lp_approval_exit_defer_max_trading_enabled_age_blocks": self.lp_approval_exit_defer_max_trading_enabled_age_blocks,
             "min_sell_pool_denom_reserve": self.min_sell_pool_denom_reserve,
             "stop_loss_ratio": self.stop_loss_ratio,
             "take_profit_ratio": self.take_profit_ratio,
@@ -109,6 +111,7 @@ pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestS
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
         min_sell_pool_denom_reserve: None,
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
@@ -133,6 +136,7 @@ fn historical_pool_update_hold_suite_specs(
             block_entry_on_lp_approval: false,
             lp_approval_gate_min_pct: None,
             defer_buy_confirm_block_lp_approval_to_max_hold: false,
+            lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
             min_sell_pool_denom_reserve: None,
             stop_loss_ratio: args.stop_loss_ratio.clone(),
             take_profit_ratio: args.take_profit_ratio.clone(),
@@ -394,6 +398,9 @@ fn alpha_11_v2_buy_confirm_spec(
     let mut spec =
         risk_atlas_uniswap_v2_only_spec(strategy_name, true, true, Some(max_hold_blocks), args);
     spec.defer_buy_confirm_block_lp_approval_to_max_hold = true;
+    spec.lp_approval_exit_defer_max_trading_enabled_age_blocks = Some(
+        eth_strategies::shared_rules::exit::lp_approval::DEFAULT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
+    );
     spec.min_sell_pool_denom_reserve = Some("0".to_string());
     spec.exit_on_tax = true;
     spec.exit_on_scam = true;
@@ -493,6 +500,7 @@ fn risk_atlas_spec(
             eth_strategies::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
         min_sell_pool_denom_reserve: None,
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),
@@ -568,6 +576,7 @@ fn historical_mempool_aware_lp_approval_warning_exit_spec(
         block_entry_on_lp_approval: false,
         lp_approval_gate_min_pct: None,
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
         min_sell_pool_denom_reserve: None,
         stop_loss_ratio: args.stop_loss_ratio.clone(),
         take_profit_ratio: args.take_profit_ratio.clone(),

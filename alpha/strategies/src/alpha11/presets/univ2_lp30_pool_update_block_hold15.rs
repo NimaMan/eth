@@ -6,6 +6,7 @@ use crate::{
     alpha11::{
         initial_entry_bankroll_wei, Alpha11Config, ENTRY_INIT_MAX_AGE_BLOCKS,
         ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL, HOLD15_STRATEGY_NAME,
+        LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
     },
     baseline::snipe_all::SnipeAllConfig,
     shared_rules::entry::init_policy::EntryInitPolicyConfig,
@@ -48,6 +49,9 @@ pub fn snipe_all_config() -> SnipeAllConfig {
             allow_missing_price_ratio: true,
         },
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: Some(
+            LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
+        ),
         max_hold_blocks: Some(HOLD_BLOCKS),
         ..SnipeAllConfig::default()
     }

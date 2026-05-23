@@ -1,0 +1,18 @@
+run_id = "risk-atlas-uniswap-v2-20k-20260520"
+protocol = "UNISWAP-V2"
+
+[paths]
+artifact_root = "artifacts/risk-atlas-uniswap-v2-20k-20260520"
+
+[targets]
+chain_block_delta_horizons = [1, 3, 5, 10]
+active_observation_delta_horizons = [1, 3, 5, 10]
+time_to_event_target = "time_to_scam_chain_block_delta"
+
+[split]
+method = "block_time"
+train_end_fraction = 0.70
+validation_end_fraction = 0.85
+
+[models]
+baseline_models = ["logistic_regression", "decision_tree", "gradient_boosting"]

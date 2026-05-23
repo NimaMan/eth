@@ -24,6 +24,8 @@ pub struct RiskAtlasObservation {
     pub lp_total_supply: Option<f64>,
     pub lp_max_approval_amount_as_of: Option<f64>,
     pub lp_approval_owner_is_creator: Option<bool>,
+    pub trading_enabled_to_last_lp_approval_chain_block_delta: Option<i64>,
+    pub last_lp_approval_to_as_of_chain_block_delta: Option<i64>,
 }
 
 pub async fn query_risk_atlas_observations(
@@ -60,7 +62,15 @@ pub async fn query_risk_atlas_observations(
             ) AS lp_approval_count_in_block,
             COALESCE(o.lp_total_supply, NULLIF(o.features->'lp_control'->>'lp_total_supply', '')::DOUBLE PRECISION) AS lp_total_supply,
             COALESCE(o.lp_max_approval_amount_as_of, NULLIF(o.features->'lp_control'->>'lp_max_approval_amount_as_of', '')::DOUBLE PRECISION) AS lp_max_approval_amount_as_of,
-            COALESCE(o.lp_approval_owner_is_creator, NULLIF(o.features->'lp_control'->>'last_lp_approval_owner_is_creator', '')::BOOLEAN) AS lp_approval_owner_is_creator
+            COALESCE(o.lp_approval_owner_is_creator, NULLIF(o.features->'lp_control'->>'last_lp_approval_owner_is_creator', '')::BOOLEAN) AS lp_approval_owner_is_creator,
+            COALESCE(
+                o.trading_enabled_to_last_lp_approval_chain_block_delta,
+                NULLIF(o.features->'lp_control'->>'trading_enabled_to_last_lp_approval_chain_block_delta', '')::BIGINT
+            ) AS trading_enabled_to_last_lp_approval_chain_block_delta,
+            COALESCE(
+                o.last_lp_approval_to_as_of_chain_block_delta,
+                NULLIF(o.features->'lp_control'->>'last_lp_approval_to_as_of_chain_block_delta', '')::BIGINT
+            ) AS last_lp_approval_to_as_of_chain_block_delta
         FROM risk_atlas_observations o
         JOIN risk_atlas_pool_eligibility pe
           ON pe.run_id = o.run_id
@@ -121,6 +131,10 @@ pub async fn query_risk_atlas_observations(
                 lp_total_supply: row.try_get("lp_total_supply")?,
                 lp_max_approval_amount_as_of: row.try_get("lp_max_approval_amount_as_of")?,
                 lp_approval_owner_is_creator: row.try_get("lp_approval_owner_is_creator")?,
+                trading_enabled_to_last_lp_approval_chain_block_delta: row
+                    .try_get("trading_enabled_to_last_lp_approval_chain_block_delta")?,
+                last_lp_approval_to_as_of_chain_block_delta: row
+                    .try_get("last_lp_approval_to_as_of_chain_block_delta")?,
             })
         })
         .collect()

@@ -1,0 +1,13 @@
+dataset_id = "backdoor_horizon_oot_v1"
+experiment_config = "../experiments/backdoor_horizon_oot_v1.toml"
+
+[splits]
+train_run_id = "risk-atlas-backdoor-horizon-oot-v1-train-50k-20260521"
+test_run_id = "risk-atlas-backdoor-horizon-oot-v1-test-20k-20260521"
+overlap_guard = "drop_test_pool_if_seen_in_train"
+
+[holdouts.uliq]
+token_address = "0x0ca72b24abf950be8bb145f5c68f7004485192b2"
+pool_address = "0x57ca70b663ead85122589f345835d8f8209608dc"
+scam_block = 25144063
+pre_scam_probe_block = 25144057

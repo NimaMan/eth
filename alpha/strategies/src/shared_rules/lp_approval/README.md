@@ -1,7 +1,7 @@
 # LP Approval Shared Rule
 
-This module owns LP approval handling that is shared by strategy entry and exit
-rules.
+This module owns LP approval parsing and entry-gate handling shared by strategy
+rules. Exit-specific policy lives in `shared_rules::exit::lp_approval`.
 
 ## Question
 
@@ -28,8 +28,8 @@ already made enough LP transferable to remove liquidity.
 
 ## Exit Gate
 
-If LP approval evidence appears after entry, the strategy should sell the
-matching open position at the first valid next decision point.
+If LP approval evidence appears after entry, the exit rule decides whether to
+sell the matching open position at the first valid next decision point.
 
 This includes the important timing case where the approval appears in the same
 mined block that confirms our buy. In historical replay the buy was submitted
@@ -37,12 +37,10 @@ before that approval was visible, so the entry is not an information leak, but
 the newly visible approval must become an immediate de-risk signal once that
 block has been processed.
 
-One research variant makes this behavior explicit instead of accidental:
-`snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold` ignores only LP
-approvals whose block equals the buy-confirmation block and lets max active-hold
-close the position. Later LP approvals still trigger the normal LP-approval
-exit. This variant exists to measure whether the same-confirmation-block edge is
-realistic enough to keep, not as the default conservative rule.
+The current Alpha11 policy separates launch-window approvals from later fresh
+approvals. LP approvals within `<=2` chain blocks of trading enabled are treated
+as no-entry/max-hold caution. Later LP approvals still trigger the normal
+LP-approval exit.
 
 ## Timing Contract
 

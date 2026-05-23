@@ -568,11 +568,13 @@ impl Strategy for SnipeAllStrategy {
                     "exit.lp_approval_buy_confirm_block_deferred_to_max_hold",
                 ));
             }
-            match shared_rules::lp_approval::exit_gate::evaluate(
+            match shared_rules::exit::lp_approval::evaluate(
                 ctx,
                 &strategy_name,
                 event,
                 self.config.lp_approval_gate_min_pct,
+                self.config
+                    .lp_approval_exit_defer_max_trading_enabled_age_blocks,
             ) {
                 RuleDecision::Exit { .. } => {
                     if let Some(pool_address) = event

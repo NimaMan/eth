@@ -22,6 +22,9 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         ),
         entry_init_policy: Default::default(),
         defer_buy_confirm_block_lp_approval_to_max_hold: true,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: Some(
+            crate::shared_rules::exit::lp_approval::DEFAULT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
+        ),
         min_sell_pool_denom_reserve: None,
         buy_wei: "10000000000000000".to_string(),
         min_liquidity_eth: "0.5".to_string(),
@@ -50,6 +53,10 @@ mod tests {
         assert!(spec.block_entry_on_lp_approval);
         assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+        assert_eq!(
+            spec.lp_approval_exit_defer_max_trading_enabled_age_blocks,
+            Some(crate::shared_rules::exit::lp_approval::DEFAULT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
+        );
         assert_eq!(spec.max_hold_blocks, Some(15));
         assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);

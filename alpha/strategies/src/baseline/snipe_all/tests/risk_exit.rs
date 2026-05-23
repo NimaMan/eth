@@ -241,6 +241,83 @@ fn buy_confirm_block_defer_does_not_hide_later_lp_approval() {
 }
 
 #[test]
+fn early_launch_lp_approval_can_defer_to_max_hold() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 3,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        lp_approval_gate_min_pct: Some(Decimal::from(30)),
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: Some(2),
+        max_hold_blocks: Some(15),
+        ..SnipeAllConfig::default()
+    });
+    let position = confirmed_position(&strategy, &pool);
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let risk = lp_approval_risk(
+        &pool,
+        "risk atlas mined-chain LP approval: count=1, generic_approved_pct=100.00%, trading_enabled_to_last_lp_approval_chain_block_delta=2",
+    );
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(
+        decision.reason(),
+        Some("exit.lp_approval:early_approval_deferred_to_max_hold")
+    );
+}
+
+#[test]
+fn late_lp_approval_exits_under_launch_window_policy() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 4,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        lp_approval_gate_min_pct: Some(Decimal::from(30)),
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: Some(2),
+        max_hold_blocks: Some(15),
+        ..SnipeAllConfig::default()
+    });
+    let position = confirmed_position(&strategy, &pool);
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let risk = lp_approval_risk(
+        &pool,
+        "risk atlas mined-chain LP approval: count=1, generic_approved_pct=100.00%, trading_enabled_to_last_lp_approval_chain_block_delta=3",
+    );
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    match decision {
+        StrategyDecision::SubmitOrder(intent)
+        | StrategyDecision::SubmitOrderWithReason { intent, .. } => {
+            assert_eq!(intent.side, OrderSide::Sell);
+            assert_eq!(intent.pool_address, pool.address);
+        }
+        StrategyDecision::Hold
+        | StrategyDecision::HoldWithReason { .. }
+        | StrategyDecision::CancelOrders { .. } => {
+            panic!("expected sell order")
+        }
+    }
+}
+
+#[test]
 fn lp_approval_exit_gate_holds_below_threshold() {
     let pool = pool();
     let market = MarketSnapshotRef {

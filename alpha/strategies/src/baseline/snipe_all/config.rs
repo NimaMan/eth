@@ -62,6 +62,11 @@ pub struct SnipeAllConfig {
     /// is not an immediate LP-approval exit. The position remains governed by
     /// proactive exits such as max active-hold blocks.
     pub defer_buy_confirm_block_lp_approval_to_max_hold: bool,
+    /// When set, an LP approval observed within this many chain blocks from
+    /// trading-enabled/pool-start age is treated as launch-window approval and
+    /// is deferred to the normal hold policy instead of forcing an immediate
+    /// LP-approval exit.
+    pub lp_approval_exit_defer_max_trading_enabled_age_blocks: Option<u64>,
     /// Asymmetric price-ratio exits.
     /// Sell if price drops to this ratio of entry price (e.g., 0.7 = -30% stop-loss).
     /// None = disabled.
@@ -108,6 +113,7 @@ impl Default for SnipeAllConfig {
             lp_approval_gate_min_pct: None,
             entry_init_policy: EntryInitPolicyConfig::default(),
             defer_buy_confirm_block_lp_approval_to_max_hold: false,
+            lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
             stop_loss_ratio: None,
             take_profit_ratio: None,
             max_hold_blocks: None,

@@ -17,6 +17,7 @@ pub fn spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
         lp_approval_gate_min_pct: None,
         entry_init_policy: Default::default(),
         defer_buy_confirm_block_lp_approval_to_max_hold: false,
+        lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
         min_sell_pool_denom_reserve: None,
         buy_wei: "10000000000000000".to_string(),
         min_liquidity_eth: "0.5".to_string(),

@@ -1,0 +1,22 @@
+run_id = "risk-atlas-uniswap-v2-20k-short-horizon-20260521"
+protocol = "UNISWAP-V2"
+
+[paths]
+artifact_root = "artifacts/risk-atlas-uniswap-v2-20k-short-horizon-20260521"
+
+[targets]
+chain_block_delta_horizons = [1, 2, 3, 4]
+active_observation_delta_horizons = []
+train_time_to_event = false
+
+[split]
+train_end_fraction = 0.70
+validation_end_fraction = 0.85
+
+[models]
+baseline_models = [
+  "logistic_regression",
+  "decision_tree",
+  "random_forest",
+  "hist_gradient_boosting",
+]
