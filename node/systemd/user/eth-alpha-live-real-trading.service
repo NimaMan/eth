@@ -1,5 +1,5 @@
 [Unit]
-Description=Ethereum alpha live real trading (Kartal real-executor dry-run guarded)
+Description=Ethereum alpha live real trading (Kartal public-mempool guarded)
 Wants=network-online.target eth-chain-server.service eth-mempool-signal-detector.service kartal-eth-signer.service
 After=network-online.target eth-chain-server.service eth-mempool-signal-detector.service kartal-eth-signer.service
 StartLimitIntervalSec=0
@@ -17,7 +17,7 @@ ExecStartPre=/usr/bin/test -n ${ALPHA_RUN_ID}
 ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SET}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_FROM}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --strategy-set ${ALPHA_STRATEGY_SET} --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --run-id ${ALPHA_RUN_ID} --strategy-set ${ALPHA_STRATEGY_SET} --kartal-token-env KARTAL_API_TOKEN --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS} --allow-public-mempool-live-validation
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

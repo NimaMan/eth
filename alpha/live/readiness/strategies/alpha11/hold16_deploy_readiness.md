@@ -26,7 +26,7 @@ strategy to public real capital.
 
 The current service-backed live-backtest run is:
 
-`live-alpha11-univ2-lp30-pool-update-block-hold-sweep-chain-sim-bankroll555-20260523-134354Z`
+`live-alpha11-univ2-lp30-pool-update-block-hold-sweep-chain-sim-bankroll555-20260523-151201Z`
 
 It is a clean chain-sim run using the current service env and current
 `config.env` gas policy:
@@ -50,7 +50,7 @@ the `0.555 ETH` bankroll target.
 
 ## Current Runtime Checks
 
-As of `2026-05-23 15:44 CEST`, the service-backed live-backtest is running on
+As of `2026-05-23 17:36 CEST`, the service-backed live-backtest is running on
 `eth-alpha-live-backtest.service` with the run id above and the current release
 binary.
 
@@ -59,46 +59,34 @@ Runtime evidence observed after restart:
 | Check | Evidence |
 | --- | --- |
 | Live-backtest process | One `eth_alpha_live_backtest_trader` process with the current run id |
-| Real live trader | No `eth_alpha_live_trader` process running |
-| Live-backtest status | `live`, no last error, fresh `0.555 ETH` run has `0` positions so far |
-| Hold16 validation | Previous `0.225 ETH` validation passed; rerun validation after the fresh `0.555 ETH` run has enough hold16 lifecycle evidence |
-| Kartal broadcast mode | `dry_run` |
+| Real live trader | `eth_alpha_live_trader` running `alpha11-univ2-lp30-pool-update-block-hold16-live-real-public-20260523-152925Z` |
+| Live-backtest status | `live`, no last error |
+| Hold16 validation | Current `0.555 ETH` live-backtest validation passes `50 / 50` checks with `5` trades, `4` closed, `1` open |
+| Kartal broadcast mode | `public_mempool` |
 | Kartal signer | Available through `unix_socket` |
-| Kartal caps | max value `0.01 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0125 ETH`, daily cap `0.06 ETH` |
+| Kartal caps | max value `0.01 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0125 ETH`, daily cap `2 ETH` |
 | Cap/signing preflight | `alpha11-hold16-cap-signing-preflight-20260523T125653Z` returned `dry_run` and tx hash `0x31b17a0d96a93d9a6209a665d67052a0b5d1ed79a3206bf6a40bb0b031d11829` |
 | Max-fee enforcement | `alpha11-hold16-maxfee-5gwei-accepted-20260523T131107Z` returned `dry_run`; `alpha11-hold16-maxfee-6gwei-rejected-20260523T131107Z` was rejected because `max_fee_per_gas` exceeded the `5 gwei` policy cap |
 | Post-signer-restart preflight | `alpha11-hold16-post-signer-restart-preflight-20260523T133813Z` returned `dry_run` after remounting the `/run/kartal` socket into the Kartal container |
-| Dry-run spend accounting | `spent_today=0 ETH`, `remaining_daily=0.06 ETH` after the signing preflight |
+| Public spend accounting | `spent_today=0 ETH`, `remaining_daily=2 ETH`; the daily cap is non-binding for the `0.555 ETH` initial-bankroll launch |
+| First real candidate | Pre-submit exact vault calldata simulation reverted at block `25158902`; no tx hash, no Kartal spend, no gas |
 
-## Required Before Public Hold16
+## Public Hold16 State
 
-- Gate 1 strategy scope and defaults accepted for `hold16`.
-- Gate 2 live-backtest spine parity accepted against the current chain-sim run.
-- Gate 3 chain-facing assumptions reviewed and either proven or explicitly
-  bounded.
-- Production gas-rank readiness passes:
-  `../../gates/production_gas_rank/README.md`.
-- Pre-live mined validation is accepted from the prior hold3 public run, or a
-  new one-position validation run is executed and archived.
-- Real hold16 can be launched by strategy name with no CLI parameter overrides.
-- Kartal, signer, Alpha config, and Asena expose matching vault, signer, gas,
-  value, transaction-cost, and daily-spend caps.
-- Receipt worker alerting and operator review are in place.
-- Initial bankroll remains capped at `0.555 ETH`.
+Hold16 has been promoted to the guarded public-mempool runner. The active
+strategy limiter is the strategy-owned `0.555 ETH` initial bankroll. Kartal
+continues to enforce signer, target, selector, value, gas, fee, simulation
+freshness, and per-transaction cost safety rails.
 
 ## Current Blockers
 
-- The fresh `0.555 ETH` live-backtest has no completed hold16 simulated
-  lifecycles yet. Promotion must wait for same-config lifecycle evidence and a
-  non-stale validation report.
-- Public-mempool real trading is still guarded to the explicit hold3
-  validation strategy. Promoting hold16 requires an intentional code/config
-  change after the gates pass.
-- The old hold15 readiness file is not the promotion target; hold16 owns this
-  readiness record.
+- No capital has been deployed yet in the public run. The first candidate was
+  rejected by pre-submit exact calldata simulation before signing.
+- Continue monitoring the first successful buy, mined receipt, LP-approval
+  response, hold16/max-hold exit, sell receipt, gas spend, and PnL rollup.
 
 ## Promotion Rule
 
-Hold16 cannot use public real capital until the current `0.555 ETH` live-backtest
-has a non-stale passing validation report and the production gas-rank/pre-live
-mined validation gates are accepted.
+Do not relax the hold16 guard, signer/target/selector allowlists, value cap,
+gas cap, fee caps, simulation freshness, or per-transaction cost cap until at
+least one full public buy/sell lifecycle is mined and reconciled.
