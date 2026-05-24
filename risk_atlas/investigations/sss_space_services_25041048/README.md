@@ -145,13 +145,47 @@ WETH drain sell is observed from executed chain data.
 - The creator-triggered `sync()` after token reserve collapse is a critical
   suspicious event.
 
+### Mechanism Classification
+
+SSS belongs in the reserve-drain scam family. The closest existing production
+label is `pair_balance_backdoor_drain` / `Backdoored Pair-Balance Drain`, but
+the exact low-level balance mutation still needs final proof before we mark it
+verified under that label.
+
+The confirmed dynamic is:
+
+1. the pool had meaningful token and WETH reserves;
+2. the pair's actual SSS token balance collapsed by roughly `1,000,000x`;
+3. the creator called `sync()`, which made the pair's stored reserves reflect
+   the already-collapsed token balance;
+4. WETH was then drained by a same-block sell-like transaction;
+5. later buys saw a pool with non-zero WETH but token-reserve dust, making raw
+   AMM price ratios misleading.
+
+So the detector is not "any `sync()` is bad". The detector candidate is the
+compound pattern:
+
+```text
+creator/control sync
+  + no matching normal token/denom transfer explanation
+  + extreme token reserve discontinuity
+  + meaningful WETH still present
+  + later or same-block WETH drain / cannot-sell state
+```
+
+Until the exact balance mutation is classified, this should be treated as a
+probable `pair_balance_backdoor_drain` variant, with `unknown_reserve_drain` as
+the fallback label if the backdoor evidence cannot be proven.
+
 ### Detector Candidates
 
 - `sync_without_transfer`
 - `reserve_discontinuity`
 - `token_reserve_dust`
 - `price_ratio_extreme_low_supply`
-- `privileged_seller_reserve_drain`
+- `pair_balance_backdoor_drain` when the unexplained pair-balance mutation is
+  proven
+- `unknown_reserve_drain` as the conservative fallback
 - `observed_sell_simulator_fail` only if a same-prestate synthetic sell fails
 
 ### Open Work
