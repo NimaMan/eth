@@ -11,7 +11,7 @@ mod schema;
 mod trading_store;
 
 pub use postgres::{
-    ActiveHoldCounterRecord, PostgresTradingStore, StrategyObservationCursor,
+    ActiveHoldCounterRecord, ManualCloseRequest, PostgresTradingStore, StrategyObservationCursor,
     StrategyObservationRecord, SubmittedExecutionRecord,
 };
 
@@ -704,10 +704,12 @@ impl PostgresTradingStore {
             SET state = CASE
                     WHEN $2 = 'buy' AND $3 = 'submitted' THEN 'buy_submitted'
                     WHEN $2 = 'buy' AND $3 = 'confirmed' THEN 'buy_confirmed'
+                    WHEN $2 = 'buy' AND $3 = 'deferred' THEN 'buy_deferred'
                     WHEN $2 = 'buy' AND $3 = 'failed' THEN 'buy_failed'
                     WHEN $2 = 'buy' AND $3 = 'cancelled' THEN 'buy_cancelled'
                     WHEN $2 = 'sell' AND $3 = 'submitted' THEN 'sell_submitted'
                     WHEN $2 = 'sell' AND $3 = 'confirmed' THEN 'sell_confirmed'
+                    WHEN $2 = 'sell' AND $3 = 'deferred' THEN 'buy_confirmed'
                     WHEN $2 = 'sell' AND $3 = 'failed' THEN 'sell_failed'
                     WHEN $2 = 'sell' AND $3 = 'cancelled' THEN 'sell_cancelled'
                     ELSE state

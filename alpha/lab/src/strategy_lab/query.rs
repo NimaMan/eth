@@ -449,7 +449,7 @@ pub(super) async fn load_protocols(
             WHERE run_id = $1
               AND payload ? 'entry_block'
               AND payload->>'entry_block' IS NOT NULL
-              AND state <> 'buy_failed'
+              AND state NOT IN ('buy_deferred', 'buy_failed')
         )
         SELECT
             coalesce(pos.protocol, so.payload->'pool'->>'protocol', '<no observation>') AS protocol,

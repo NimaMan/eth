@@ -115,6 +115,7 @@ impl LiveTxPlanningInputResolver for LiveRealInputResolver {
             0 => pool.latest_block,
             block => block,
         };
+        let required_state_block = required_state_block(current_block, &pool);
         let now = Utc::now().timestamp().max(0) as u64;
 
         Ok(LivePrioritySellPlannerInput {
@@ -125,13 +126,18 @@ impl LiveTxPlanningInputResolver for LiveRealInputResolver {
                     strategy_name: intent.strategy_name.0.clone(),
                     strategy_run_id: Some(self.run_id.clone()),
                     observed_block: Some(current_block),
+                    required_state_block,
                     source_metadata: json!({
                         "resolver": "eth_alpha_live_trader_real_execution",
                         "execution_mode": "kartal-real",
                         "route": "uniswap_v2_trading_vault",
                         "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
                         "gas_rank_provider": "eth_chain_server_gas_rank",
-                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps"
+                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps",
+                        "decision_block": current_block,
+                        "required_state_block": required_state_block,
+                        "pool_creation_block": pool.creation_block,
+                        "pool_latest_block": pool.latest_block
                     }),
                 },
                 current_block,
@@ -159,6 +165,7 @@ impl LiveRealInputResolver {
             0 => pool.latest_block,
             block => block,
         };
+        let required_state_block = required_state_block(current_block, &pool);
         let now = Utc::now().timestamp().max(0) as u64;
         let trade_id = intent.trade_id.clone().ok_or_else(|| {
             AlphaCoreError::Execution(
@@ -186,13 +193,18 @@ impl LiveRealInputResolver {
                     strategy_name: intent.strategy_name.0.clone(),
                     strategy_run_id: Some(self.run_id.clone()),
                     observed_block: Some(current_block),
+                    required_state_block,
                     source_metadata: json!({
                         "resolver": "eth_alpha_live_trader_real_execution",
                         "execution_mode": "kartal-real",
                         "route": "uniswap_v2_trading_vault",
                         "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
                         "gas_rank_provider": "eth_chain_server_gas_rank",
-                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps"
+                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps",
+                        "decision_block": current_block,
+                        "required_state_block": required_state_block,
+                        "pool_creation_block": pool.creation_block,
+                        "pool_latest_block": pool.latest_block
                     }),
                 },
                 current_block,
@@ -258,6 +270,14 @@ impl LiveRealInputResolver {
                 ))
             })
     }
+}
+
+fn required_state_block(current_block: u64, pool: &PoolSnapshot) -> u64 {
+    let mut required = current_block.max(pool.latest_block);
+    if let Some(creation_block) = pool.creation_block {
+        required = required.max(creation_block);
+    }
+    required
 }
 
 struct KartalRealPlanner<P, G> {
@@ -337,7 +357,13 @@ where
             .await
             .map_err(planner_error)?;
         let gas_rank_policy = self.gas_policy.entry_buy_gas_rank_policy.clone();
-        let fee = select_entry_gas_fee(&gas_rank, &gas_rank_policy, &route, &self.gas_policy)?;
+        let fee = select_entry_gas_fee(
+            &gas_rank,
+            &gas_rank_policy,
+            &route,
+            &self.gas_policy,
+            input.context.current_block,
+        )?;
         let estimated_gas_used = route
             .require_estimated_gas_used()
             .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
@@ -417,6 +443,14 @@ where
                         "max_estimated_gas_fee_eth": self.gas_policy.entry_max_estimated_gas_fee_eth,
                     },
                     "strategy_gas_rank_policy": gas_rank_policy,
+                    "state_dependency": {
+                        "decision_block": input.context.current_block,
+                        "signal_observed_block": input.context.tx.observed_block,
+                        "required_state_block": input.context.tx.required_state_block,
+                        "pool_creation_block": input.pool.creation_block,
+                        "pool_latest_block": input.pool.latest_block,
+                        "simulation_block": simulation.block_number,
+                    },
                     "simulation": simulation.metadata(),
                     "source": input.context.tx.source_metadata,
                 }),
@@ -426,6 +460,12 @@ where
 }
 
 fn planner_error(error: LivePrioritySellPlannerError) -> AlphaCoreError {
+    if error.is_deferrable() {
+        return AlphaCoreError::ExecutionDeferred {
+            reason: error.to_string(),
+            block_number: error.deferral_block_number(),
+        };
+    }
     AlphaCoreError::Execution(error.to_string())
 }
 
@@ -444,15 +484,17 @@ fn min_output_from_simulation(
         })?;
     let expected_output = parse_u256_quantity(expected_output, "simulation expected output")?;
     if expected_output.is_zero() {
-        return Err(AlphaCoreError::Execution(
-            "exact live buy simulation returned zero output".to_string(),
+        return Err(cancelled_execution_at(
+            "exact live buy simulation returned zero output",
+            simulation.block_number,
         ));
     }
     let min_output = derive_min_output_from_expected_output(expected_output, max_slippage_bps)
         .map_err(planner_error)?;
     if min_output.is_zero() {
-        return Err(AlphaCoreError::Execution(
-            "derived live buy min-output is zero".to_string(),
+        return Err(cancelled_execution_at(
+            "derived live buy min-output is zero",
+            simulation.block_number,
         ));
     }
     Ok(min_output)
@@ -460,12 +502,22 @@ fn min_output_from_simulation(
 
 fn ensure_simulation_ok(simulation: &PreSubmitSimulation) -> eth_alpha_core::error::Result<()> {
     if simulation.would_revert {
-        return Err(AlphaCoreError::Execution(format!(
-            "exact live transaction simulation would revert at block {}",
-            simulation.block_number
-        )));
+        return Err(cancelled_execution_at(
+            format!(
+                "exact live transaction simulation would revert at block {}",
+                simulation.block_number
+            ),
+            simulation.block_number,
+        ));
     }
     Ok(())
+}
+
+fn cancelled_execution_at(reason: impl Into<String>, block_number: u64) -> AlphaCoreError {
+    AlphaCoreError::ExecutionCancelled {
+        reason: reason.into(),
+        block_number: Some(block_number),
+    }
 }
 
 fn apply_simulated_gas_used(
@@ -489,6 +541,7 @@ fn select_entry_gas_fee(
     policy: &StrategyGasRankPolicy,
     route: &PreparedSellRoute,
     gas_policy: &LiveRealGasPolicy,
+    current_block: u64,
 ) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
     let estimated_gas_used = route
         .require_estimated_gas_used()
@@ -506,15 +559,17 @@ fn select_entry_gas_fee(
         .collect::<Vec<_>>();
 
     policy.choose_candidate(&candidates).ok_or_else(|| {
-        AlphaCoreError::Execution(
-            format!(
-                "live real buy planner has no gas fee candidate matching production gas guard: required_source={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
-                gas_policy.required_gas_rank_source,
-                gas_policy.max_priority_fee_gwei,
-                gas_policy.entry_max_estimated_gas_fee_eth,
-                serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
-            ),
-        )
+        let reason = format!(
+            "live real buy planner has no gas fee candidate matching production gas guard: required_source={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
+            gas_policy.required_gas_rank_source,
+            gas_policy.max_priority_fee_gwei,
+            gas_policy.entry_max_estimated_gas_fee_eth,
+            serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
+        );
+        AlphaCoreError::ExecutionCancelled {
+            reason,
+            block_number: Some(current_block),
+        }
     })
 }
 

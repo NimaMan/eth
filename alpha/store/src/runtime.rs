@@ -312,6 +312,112 @@ impl PostgresTradingStore {
         Ok(())
     }
 
+    pub async fn claim_pending_manual_close_requests(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ManualCloseRequest>> {
+        let rows = sqlx::query(
+            r#"
+            WITH claim AS (
+                SELECT request_id
+                FROM alpha_trading.manual_close_requests
+                WHERE run_id = $1
+                  AND status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE alpha_trading.manual_close_requests requests
+            SET status = 'processing',
+                updated_at = NOW()
+            FROM claim
+            WHERE requests.request_id = claim.request_id
+            RETURNING
+                requests.request_id,
+                requests.run_id,
+                requests.strategy_name,
+                requests.trade_id,
+                requests.position_id,
+                requests.token_address,
+                requests.pool_address,
+                requests.requested_percent,
+                requests.requested_raw_amount,
+                requests.reason_code,
+                requests.payload
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(usize_to_i32(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ManualCloseRequest {
+                    request_id: row.try_get("request_id").map_err(store_error)?,
+                    run_id: row.try_get("run_id").map_err(store_error)?,
+                    strategy_name: row.try_get("strategy_name").map_err(store_error)?,
+                    trade_id: row.try_get("trade_id").map_err(store_error)?,
+                    position_id: row.try_get("position_id").map_err(store_error)?,
+                    token_address: row.try_get("token_address").map_err(store_error)?,
+                    pool_address: row.try_get("pool_address").map_err(store_error)?,
+                    requested_percent: row.try_get("requested_percent").map_err(store_error)?,
+                    requested_raw_amount: row
+                        .try_get("requested_raw_amount")
+                        .map_err(store_error)?,
+                    reason_code: row.try_get("reason_code").map_err(store_error)?,
+                    payload: row.try_get("payload").map_err(store_error)?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn mark_manual_close_request_processed(&self, request_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.manual_close_requests
+            SET status = 'processed',
+                processed_at = NOW(),
+                updated_at = NOW(),
+                error = NULL
+            WHERE run_id = $1
+              AND request_id = $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(request_id)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_manual_close_request_failed(
+        &self,
+        request_id: &str,
+        error: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE alpha_trading.manual_close_requests
+            SET status = 'failed',
+                processed_at = NOW(),
+                updated_at = NOW(),
+                error = $3
+            WHERE run_id = $1
+              AND request_id = $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(request_id)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
     pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
         let rows = sqlx::query(
             r#"
@@ -319,7 +425,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+              AND state NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
             ORDER BY updated_at DESC
             "#,
         )
@@ -354,7 +460,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
+              AND state IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
             ORDER BY updated_at DESC
             "#,
         )
@@ -428,7 +534,7 @@ impl PostgresTradingStore {
                   FROM alpha_trading.execution_reports final
                   WHERE final.run_id = er.run_id
                     AND final.order_id = er.order_id
-                    AND final.status IN ('confirmed', 'failed', 'cancelled')
+                    AND final.status IN ('confirmed', 'deferred', 'failed', 'cancelled')
               )
             ORDER BY er.order_id, er.created_at DESC, er.id DESC
             LIMIT $2
@@ -608,6 +714,7 @@ impl PostgresTradingStore {
             WHERE run_id = $1
               AND strategy_name = $2
               AND pool_address IS NOT NULL
+              AND state <> 'buy_deferred'
             ORDER BY pool_address
             "#,
         )

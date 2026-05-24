@@ -11,7 +11,6 @@ use crate::{PreSubmitSimulation, PreparedSellRoute};
 
 use super::{LivePrioritySellPlannerError, LivePrioritySellPlannerInput};
 
-const DEFAULT_MAX_SIMULATION_STATE_LAG_BLOCKS: u64 = 2;
 const BOUGHT_V2_SIGNATURE: &str = "BoughtV2(address,uint256,uint256,uint256)";
 const EMERGENCY_SOLD_V2_SIGNATURE: &str = "EmergencySoldV2(address,uint256,uint256,uint256)";
 
@@ -50,7 +49,6 @@ impl PreSubmitSimulator for FixedPreSubmitSimulator {
 pub struct UniswapV2TradingVaultPreSubmitSimulator {
     simulator: LiveTxSimulator,
     vault_address: Address,
-    max_state_lag_blocks: u64,
 }
 
 impl UniswapV2TradingVaultPreSubmitSimulator {
@@ -58,13 +56,7 @@ impl UniswapV2TradingVaultPreSubmitSimulator {
         Self {
             simulator,
             vault_address,
-            max_state_lag_blocks: DEFAULT_MAX_SIMULATION_STATE_LAG_BLOCKS,
         }
-    }
-
-    pub fn with_max_state_lag_blocks(mut self, max_state_lag_blocks: u64) -> Self {
-        self.max_state_lag_blocks = max_state_lag_blocks;
-        self
     }
 }
 
@@ -106,17 +98,16 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
             .latest_state_status()
             .await
             .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
-        if status
-            .selected_block_number
-            .saturating_add(self.max_state_lag_blocks)
-            < input.context.current_block
-        {
-            return Err(LivePrioritySellPlannerError::Simulation(format!(
-                "exact V2 vault simulation state is stale: selected_block={} current_block={} max_state_lag_blocks={}",
-                status.selected_block_number,
-                input.context.current_block,
-                self.max_state_lag_blocks
-            )));
+        let required_state_block = input.context.required_state_block(&input.pool);
+        if !status.is_ready_for_block(required_state_block) {
+            return Err(LivePrioritySellPlannerError::SimulationStateNotReady {
+                selected_block: status.selected_block_number,
+                required_block: required_state_block,
+                current_block: input.context.current_block,
+                latest_reth_finished_block: status.latest_reth_finished_block_number,
+                latest_historical_context_block: status.latest_historical_context_block_number,
+                state_source: format!("{:?}", status.source),
+            });
         }
 
         let mut chain = self
@@ -152,11 +143,14 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
             "from": from.to_string(),
             "to": to.to_string(),
             "observed_block": input.context.current_block,
+            "required_state_block": required_state_block,
+            "pool_creation_block": input.pool.creation_block,
+            "pool_latest_block": input.pool.latest_block,
+            "tx_observed_block": input.context.tx.observed_block,
             "simulation_block": status.selected_block_number,
             "latest_reth_finished_block": status.latest_reth_finished_block_number,
             "latest_historical_context_block": status.latest_historical_context_block_number,
             "state_source": format!("{:?}", status.source),
-            "max_state_lag_blocks": self.max_state_lag_blocks,
             "gas_limit": route.gas_limit,
             "gas_used": result.gas_used,
             "log_count": result.logs.len(),

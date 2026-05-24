@@ -197,7 +197,7 @@ pub async fn load_result_sets(
                    COUNT(*) AS trades,
                    COUNT(DISTINCT strategy_name) AS strategies,
                    COUNT(*) FILTER (
-                       WHERE lower(state) NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+                       WHERE lower(state) NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
                    ) AS open_trades,
                    COUNT(*) FILTER (WHERE lower(state) = 'sell_confirmed') AS closed_trades,
                    COUNT(*) FILTER (WHERE lower(state) IN ('buy_failed', 'sell_failed', 'failed')) AS failed_trades,
@@ -387,7 +387,7 @@ pub async fn load_result_set(
             SELECT COUNT(*) AS trades,
                    COUNT(DISTINCT strategy_name) AS strategies,
                    COUNT(*) FILTER (
-                       WHERE lower(state) NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+                       WHERE lower(state) NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
                    ) AS open_trades,
                    COUNT(*) FILTER (WHERE lower(state) = 'sell_confirmed') AS closed_trades,
                    COUNT(*) FILTER (WHERE lower(state) IN ('buy_failed', 'sell_failed', 'failed')) AS failed_trades,

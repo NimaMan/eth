@@ -25,10 +25,17 @@ pub(crate) fn submitted_report_for(
     }
 }
 
+pub(crate) fn should_record_submitted_report(report: &ExecutionReport) -> bool {
+    !matches!(
+        report.status,
+        ExecutionStatus::Submitted | ExecutionStatus::Deferred | ExecutionStatus::Cancelled
+    )
+}
+
 pub(crate) fn should_defer_report(submission_block: Option<u64>, report: &ExecutionReport) -> bool {
     if matches!(
         report.status,
-        ExecutionStatus::Submitted | ExecutionStatus::Pending
+        ExecutionStatus::Submitted | ExecutionStatus::Pending | ExecutionStatus::Deferred
     ) {
         return false;
     }

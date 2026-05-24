@@ -819,7 +819,10 @@ fn position_value_from_report(
                 error: Some(error),
             })
         }
-        ExecutionStatus::Submitted | ExecutionStatus::Pending | ExecutionStatus::Cancelled => None,
+        ExecutionStatus::Submitted
+        | ExecutionStatus::Pending
+        | ExecutionStatus::Deferred
+        | ExecutionStatus::Cancelled => None,
     }
 }
 

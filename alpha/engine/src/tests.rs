@@ -373,6 +373,27 @@ impl EngineExecutionAdapter for ConfirmingTestExecutionAdapter {
 }
 
 #[derive(Clone, Default)]
+struct DeferredTestExecutionAdapter;
+
+#[async_trait::async_trait]
+impl EngineExecutionAdapter for DeferredTestExecutionAdapter {
+    async fn execute(&self, _intent: OrderIntent) -> Result<ExecutionReport> {
+        Ok(ExecutionReport {
+            order_id: OrderId("deferred-order".to_string()),
+            status: ExecutionStatus::Deferred,
+            tx_hash: None,
+            block_number: Some(1),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("simulation state not ready".to_string()),
+        })
+    }
+}
+
+#[derive(Clone, Default)]
 struct CountingNextBlockValuationAdapter {
     valuation_calls: Arc<AtomicU64>,
 }
@@ -668,8 +689,8 @@ async fn cancelled_sell_does_not_write_zero_value_snapshot() {
         .await
         .unwrap();
 
-    assert_eq!(reports.len(), 2);
-    assert_eq!(reports[1].status, ExecutionStatus::Cancelled);
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].status, ExecutionStatus::Cancelled);
     assert_eq!(store.positions()[0].state, PositionState::SellCancelled);
     assert!(store.snapshots().is_empty());
 }
@@ -790,6 +811,34 @@ async fn liquidity_removal_snapshot_does_not_copy_stale_pool_metrics() {
     assert_eq!(snapshots[0].current_value_eth, DecimalAmount::ZERO);
     assert_eq!(snapshots[0].pool_liquidity_denom, None);
     assert_eq!(snapshots[0].pool_price_to_initial_price_ratio, None);
+}
+
+#[tokio::test]
+async fn deferred_execution_does_not_record_synthetic_submitted_report() {
+    let store = MemoryTradingStore::default();
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        DeferredTestExecutionAdapter,
+    );
+    engine.add_strategy(Box::new(BuyOnMarketStrategy));
+
+    let token = Address::repeat_byte(0x11);
+    let pool = pool_snapshot(token, Address::repeat_byte(0x22), 1);
+    let reports = engine
+        .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+            block_number: 1,
+            pool,
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].status, ExecutionStatus::Deferred);
+    let execution_reports = store.execution_reports();
+    assert_eq!(execution_reports.len(), 1);
+    assert_eq!(execution_reports[0].status, ExecutionStatus::Deferred);
+    assert_eq!(store.positions()[0].state, PositionState::BuyDeferred);
 }
 
 #[tokio::test]

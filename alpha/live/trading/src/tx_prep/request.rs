@@ -18,6 +18,7 @@ pub struct TxPrepRequestContext {
     pub strategy_name: String,
     pub strategy_run_id: Option<String>,
     pub observed_block: Option<BlockNumber>,
+    pub required_state_block: BlockNumber,
     #[serde(default)]
     pub source_metadata: Value,
 }
@@ -31,6 +32,27 @@ pub fn build_priority_sell_request(
     gas_plan: &GasPlan,
     gas_rank_policy: &StrategyGasRankPolicy,
 ) -> LiveTraderTxSignal {
+    let mut metadata = tx_prep_metadata(
+        plan,
+        route,
+        simulation,
+        budget,
+        gas_plan,
+        gas_rank_policy,
+        context.source_metadata.clone(),
+    );
+    if let Some(map) = metadata.as_object_mut() {
+        map.insert(
+            "state_dependency".to_string(),
+            serde_json::json!({
+                "decision_block": context.observed_block.or(Some(plan.observed_block)),
+                "signal_observed_block": context.observed_block,
+                "required_state_block": context.required_state_block,
+                "simulation_block": simulation.block_number,
+            }),
+        );
+    }
+
     let request = LiveDirectRawTransactionRequest {
         attempt_id: Some(format!(
             "{}-priority-exit-{}",
@@ -58,15 +80,7 @@ pub fn build_priority_sell_request(
             min_output_amount: simulation.min_output_amount.clone(),
             metadata: simulation.metadata(),
         }),
-        metadata: tx_prep_metadata(
-            plan,
-            route,
-            simulation,
-            budget,
-            gas_plan,
-            gas_rank_policy,
-            context.source_metadata.clone(),
-        ),
+        metadata,
     };
 
     LiveTraderTxSignal {

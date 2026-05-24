@@ -75,7 +75,7 @@ pub async fn load_assessment_metrics(
             SELECT count(*) AS trade_count,
                    count(*) FILTER (WHERE state = 'sell_confirmed') AS closed_trades,
                    count(*) FILTER (
-                       WHERE state NOT IN ('sell_confirmed', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+                       WHERE state NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
                    ) AS open_trades,
                    count(*) FILTER (WHERE state IN ('buy_failed', 'sell_failed', 'failed', 'cancelled')) AS failed_trades,
                    count(*) FILTER (

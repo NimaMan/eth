@@ -33,6 +33,10 @@ impl LiveStateStatus {
     pub const fn local_context_lags_selected_state(&self) -> bool {
         self.uses_tracked_live_state()
     }
+
+    pub const fn is_ready_for_block(&self, required_block_number: u64) -> bool {
+        self.selected_block_number >= required_block_number
+    }
 }
 
 /// Live-first transaction simulator for latency-sensitive trading paths.
@@ -69,6 +73,26 @@ impl LiveTxSimulator {
     /// Full state-selection diagnostics for live simulation.
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
         self.latest_state_status_blocking()
+    }
+
+    /// Full state-selection diagnostics, requiring state at or after the
+    /// caller's exact signal dependency block.
+    pub async fn latest_state_status_at_or_after(
+        &self,
+        required_block_number: u64,
+    ) -> Result<LiveStateStatus> {
+        let status = self.latest_state_status().await?;
+        if !status.is_ready_for_block(required_block_number) {
+            return Err(eyre!(
+                "live simulation state is not ready: selected_block={} required_block={} latest_reth_finished_block={} latest_historical_context_block={} source={:?}",
+                status.selected_block_number,
+                required_block_number,
+                status.latest_reth_finished_block_number,
+                status.latest_historical_context_block_number,
+                status.source
+            ));
+        }
+        Ok(status)
     }
 
     /// Blocking variant for callers that already run this work outside an async

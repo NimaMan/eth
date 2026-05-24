@@ -33,6 +33,7 @@ fn migrations_cover_runtime_tables() {
         "order_intents",
         "execution_reports",
         "positions",
+        "manual_close_requests",
         "position_snapshots",
         "risk_events",
         "strategy_decisions",

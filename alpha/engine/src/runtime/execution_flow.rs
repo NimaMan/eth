@@ -20,7 +20,10 @@ use crate::{
     AlphaEngine, EngineExecutionAdapter, PendingExecutionReport,
 };
 
-use super::event_flow::{fill_price_for_report, should_defer_report, submitted_report_for};
+use super::event_flow::{
+    fill_price_for_report, should_defer_report, should_record_submitted_report,
+    submitted_report_for,
+};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where
@@ -120,7 +123,7 @@ where
             .current_event_block
             .or_else(|| self.market.as_ref().map(|m| m.block_number));
         let mut reports = Vec::new();
-        if report.status != ExecutionStatus::Submitted {
+        if should_record_submitted_report(&report) {
             let submitted_report =
                 submitted_report_for(&report, submission_block.or(report.block_number));
             self.store
@@ -205,7 +208,10 @@ where
     ) -> Result<ExecutionReport> {
         if !matches!(
             report.status,
-            ExecutionStatus::Confirmed | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+            ExecutionStatus::Confirmed
+                | ExecutionStatus::Deferred
+                | ExecutionStatus::Failed
+                | ExecutionStatus::Cancelled
         ) {
             self.store.record_execution_report(&report).await?;
             return Ok(report);

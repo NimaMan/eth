@@ -128,6 +128,7 @@ fn planner_input(config: &PlannerCalibrationFixtureConfig) -> LivePrioritySellPl
                 strategy_name: config.strategy_name.clone(),
                 strategy_run_id: config.strategy_run_id.clone(),
                 observed_block: Some(config.current_block),
+                required_state_block: config.current_block,
                 source_metadata: json!({
                     "calibration": true,
                     "fixture": "planner_produced_priority_sell",

@@ -137,7 +137,7 @@ async fn gate3_a2_executor_acceptance_statuses_never_confirm_without_receipt() {
         ("signed", None, ExecutionStatus::Pending),
         ("dry_run", None, ExecutionStatus::Cancelled),
         ("broadcast_error", None, ExecutionStatus::Failed),
-        ("rejected", None, ExecutionStatus::Failed),
+        ("rejected", None, ExecutionStatus::Cancelled),
         ("unexpected", None, ExecutionStatus::Failed),
     ];
 

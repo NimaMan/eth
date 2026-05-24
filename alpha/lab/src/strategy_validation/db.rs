@@ -81,7 +81,7 @@ pub async fn load_strategy_summaries(
         SELECT strategy_name,
                count(*) AS trades,
                count(*) FILTER (WHERE state = 'sell_confirmed') AS closed,
-               count(*) FILTER (WHERE state NOT IN ('sell_confirmed', 'sell_failed', 'buy_failed', 'failed', 'cancelled')) AS open,
+               count(*) FILTER (WHERE state NOT IN ('sell_confirmed', 'sell_failed', 'buy_deferred', 'buy_failed', 'failed', 'cancelled')) AS open,
                count(*) FILTER (WHERE state IN ('sell_failed', 'buy_failed', 'failed', 'cancelled')) AS failed,
                coalesce(sum(coalesce(nullif(realized_pnl_eth, '')::numeric, 0)), 0)::text AS realized_pnl_eth,
                coalesce(sum(coalesce(nullif(unrealized_pnl_eth, '')::numeric, 0)), 0)::text AS unrealized_pnl_eth,

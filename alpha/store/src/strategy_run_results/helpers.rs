@@ -480,7 +480,13 @@ pub(super) fn some_if_any(count: i64, value: f64) -> Option<f64> {
 pub(super) fn is_open_trade_state(state: &str) -> bool {
     !matches!(
         state.to_ascii_lowercase().as_str(),
-        "sell_confirmed" | "buy_failed" | "buy_cancelled" | "cancelled" | "scammed" | "failed"
+        "sell_confirmed"
+            | "buy_deferred"
+            | "buy_failed"
+            | "buy_cancelled"
+            | "cancelled"
+            | "scammed"
+            | "failed"
     )
 }
 

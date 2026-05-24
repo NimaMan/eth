@@ -133,6 +133,43 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     WHERE trade_id IS NOT NULL
     "#,
     r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.manual_close_requests (
+        request_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        strategy_name TEXT NOT NULL,
+        trade_id TEXT NOT NULL,
+        position_id TEXT,
+        token_address TEXT NOT NULL,
+        pool_address TEXT NOT NULL,
+        requested_percent TEXT,
+        requested_raw_amount TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        reason_code TEXT NOT NULL DEFAULT 'manual.close_position',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        processed_at TIMESTAMPTZ,
+        error TEXT,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+    "#,
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS position_id TEXT",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS requested_percent TEXT",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS requested_raw_amount TEXT",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS reason_code TEXT",
+    "ALTER TABLE alpha_trading.manual_close_requests ALTER COLUMN reason_code SET DEFAULT 'manual.close_position'",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS error TEXT",
+    "ALTER TABLE alpha_trading.manual_close_requests ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb",
+    r#"
+    CREATE INDEX IF NOT EXISTS manual_close_requests_run_status_idx
+    ON alpha_trading.manual_close_requests (run_id, status, created_at)
+    "#,
+    r#"
+    CREATE UNIQUE INDEX IF NOT EXISTS manual_close_requests_pending_trade_idx
+    ON alpha_trading.manual_close_requests (run_id, strategy_name, trade_id)
+    WHERE status IN ('pending', 'processing')
+    "#,
+    r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.position_snapshots (
         id BIGSERIAL PRIMARY KEY,
         run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,

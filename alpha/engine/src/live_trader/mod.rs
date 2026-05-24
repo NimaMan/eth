@@ -165,6 +165,7 @@ fn restored_entry_bankroll_from_terminal_positions(
             PositionState::Init
             | PositionState::BuyIntentCreated
             | PositionState::BuySubmitted
+            | PositionState::BuyDeferred
             | PositionState::BuyConfirmed
             | PositionState::SellIntentCreated
             | PositionState::SellSubmitted

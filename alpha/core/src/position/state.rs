@@ -6,6 +6,7 @@ pub enum PositionState {
     BuyIntentCreated,
     BuySubmitted,
     BuyConfirmed,
+    BuyDeferred,
     BuyFailed,
     BuyCancelled,
     SellIntentCreated,
@@ -22,6 +23,7 @@ impl PositionState {
         matches!(
             self,
             PositionState::BuyFailed
+                | PositionState::BuyDeferred
                 | PositionState::BuyCancelled
                 | PositionState::SellConfirmed
                 | PositionState::Cancelled

@@ -67,3 +67,18 @@ pub struct SubmittedExecutionRecord {
     pub gas_estimated_priority_spend_eth: Option<String>,
     pub gas_policy_guard: Option<String>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManualCloseRequest {
+    pub request_id: String,
+    pub run_id: String,
+    pub strategy_name: String,
+    pub trade_id: String,
+    pub position_id: Option<String>,
+    pub token_address: String,
+    pub pool_address: String,
+    pub requested_percent: Option<String>,
+    pub requested_raw_amount: Option<String>,
+    pub reason_code: String,
+    pub payload: Value,
+}

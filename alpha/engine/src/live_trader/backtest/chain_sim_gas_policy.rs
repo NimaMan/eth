@@ -348,6 +348,7 @@ fn shadow_input() -> eth_live_trading::LivePrioritySellPlannerInput {
                 strategy_name: strategy_name.0.clone(),
                 strategy_run_id: None,
                 observed_block: None,
+                required_state_block: 0,
                 source_metadata: json!({"source": "live_backtest_chain_sim_gas_policy"}),
             },
             current_block: 0,

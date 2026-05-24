@@ -333,6 +333,32 @@ impl SnipeAllStrategy {
 
         Some(available)
     }
+
+    fn effective_bought_pool_count(&self, ctx: &StrategyContext<'_>) -> usize {
+        self.state
+            .bought_pools()
+            .iter()
+            .filter(|pool| !self.only_deferred_buy_attempts_for_pool(ctx, pool))
+            .count()
+    }
+
+    fn only_deferred_buy_attempts_for_pool(
+        &self,
+        ctx: &StrategyContext<'_>,
+        pool: &PoolAddress,
+    ) -> bool {
+        let mut saw_deferred = false;
+        for position in ctx.portfolio.positions.values().filter(|position| {
+            position.key.strategy_name == self.name() && &position.key.pool_address == pool
+        }) {
+            if position.state == PositionState::BuyDeferred {
+                saw_deferred = true;
+            } else {
+                return false;
+            }
+        }
+        saw_deferred
+    }
 }
 
 fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) -> Option<Amount> {
@@ -365,6 +391,7 @@ fn apply_position_to_entry_bankroll(
 ) -> U256 {
     match position.state {
         PositionState::Init
+        | PositionState::BuyDeferred
         | PositionState::BuyFailed
         | PositionState::BuyCancelled
         | PositionState::Cancelled => available,
@@ -468,7 +495,7 @@ impl Strategy for SnipeAllStrategy {
         if self
             .config
             .max_entry_pools
-            .map(|limit| self.state.bought_pool_count() >= limit)
+            .map(|limit| self.effective_bought_pool_count(ctx) >= limit)
             .unwrap_or(false)
         {
             return Ok(StrategyDecision::hold("entry.max_entry_pools_reached"));
@@ -503,6 +530,13 @@ impl Strategy for SnipeAllStrategy {
                     "entry.protocol_not_allowed:{protocol}"
                 )));
             }
+        }
+
+        if self.only_deferred_buy_attempts_for_pool(ctx, &pool.address) {
+            return Ok(self.buy_pool(
+                pool,
+                "entry.buy_eligible_pool_once:retry_after_deferred_execution",
+            ));
         }
 
         Ok(match entry::evaluate(&self.state, pool) {

@@ -449,7 +449,12 @@ pub(super) fn decimal_text(row: &sqlx::postgres::PgRow, name: &str) -> Result<Op
 pub(super) fn is_terminal_state(state: &str) -> bool {
     matches!(
         state,
-        "buy_failed" | "buy_cancelled" | "sell_confirmed" | "cancelled" | "scammed"
+        "buy_deferred"
+            | "buy_failed"
+            | "buy_cancelled"
+            | "sell_confirmed"
+            | "cancelled"
+            | "scammed"
     )
 }
 
@@ -507,6 +512,7 @@ mod tests {
     #[test]
     fn terminal_states_match_position_lifecycle() {
         assert!(is_terminal_state("sell_confirmed"));
+        assert!(is_terminal_state("buy_deferred"));
         assert!(is_terminal_state("buy_failed"));
         assert!(is_terminal_state("buy_cancelled"));
         assert!(is_terminal_state("cancelled"));
@@ -523,6 +529,7 @@ mod tests {
         assert!(is_exposure_state("sell_failed"));
         assert!(is_exposure_state("sell_cancelled"));
         assert!(!is_exposure_state("sell_confirmed"));
+        assert!(!is_exposure_state("buy_deferred"));
         assert!(!is_exposure_state("buy_failed"));
 
         assert!(is_failed_exit_exposure_state("sell_failed"));

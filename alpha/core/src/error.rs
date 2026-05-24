@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::ids::BlockNumber;
+
 pub type Result<T> = std::result::Result<T, AlphaCoreError>;
 
 #[derive(Debug, Error)]
@@ -15,6 +17,18 @@ pub enum AlphaCoreError {
 
     #[error("execution adapter error: {0}")]
     Execution(String),
+
+    #[error("execution cancelled: {reason}")]
+    ExecutionCancelled {
+        reason: String,
+        block_number: Option<BlockNumber>,
+    },
+
+    #[error("execution deferred: {reason}")]
+    ExecutionDeferred {
+        reason: String,
+        block_number: Option<BlockNumber>,
+    },
 
     #[error("invalid pool address: {0}")]
     InvalidPoolAddress(String),

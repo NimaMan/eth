@@ -437,6 +437,7 @@ mod tests {
                     strategy_name: strategy_name.0.clone(),
                     strategy_run_id: Some("run-1".to_string()),
                     observed_block: Some(25_128_246),
+                    required_state_block: 25_128_246,
                     source_metadata: json!({ "signal_id": 222 }),
                 },
                 current_block: 25_128_246,

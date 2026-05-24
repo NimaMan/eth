@@ -72,12 +72,17 @@ The suite currently locks these real-live assumptions:
 
 - Kartal `broadcast`, `received`, `signed`, `dry_run`, `broadcast_error`, and
   `rejected` responses never become confirmed without receipt evidence.
-- `dry_run` is evidence only and maps to a cancelled report because no
-  transaction was broadcast.
+- `dry_run`, executor `rejected`, planner policy rejects, and pre-submit
+  simulation rejects map to cancelled reports because no transaction was
+  broadcast.
 - Submitted reports carry the selected gas limit, max fee, priority fee, and
   bribe metadata that will later be merged into mined receipt evidence.
 - Exact-simulation min-output is non-zero and reverting/full-slippage cases
   reject before submission.
+- Simulator state lag is an infrastructure deferral. It must not write
+  `buy_failed`, must not consume bankroll, and must not synthesize a submitted
+  tx. Deferred buy attempts are excluded from restored seen-pool state so the
+  strategy can retry while the entry window remains valid.
 - Successful receipts confirm only when the expected deployed V2 vault event is
   present, and the resulting report uses actual vault event amounts plus receipt
   gas cost.

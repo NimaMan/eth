@@ -181,7 +181,7 @@ pub(super) async fn lifecycle_order_check(
             SELECT trade_id,
                    min(block_number) FILTER (WHERE event_type = 'buy_submitted') AS buy_submitted_block,
                    min(block_number) FILTER (WHERE event_type = 'buy_confirmed') AS buy_confirmed_block,
-                   min(block_number) FILTER (WHERE event_type IN ('buy_failed', 'buy_cancelled')) AS buy_failed_block,
+                   min(block_number) FILTER (WHERE event_type IN ('buy_deferred', 'buy_failed', 'buy_cancelled')) AS buy_failed_block,
                    min(block_number) FILTER (WHERE event_type = 'sell_submitted') AS sell_submitted_block,
                    min(block_number) FILTER (WHERE event_type = 'sell_confirmed') AS sell_confirmed_block
             FROM alpha_trading.trade_events

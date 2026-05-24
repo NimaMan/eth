@@ -9,6 +9,7 @@ pub enum ExecutionStatus {
     Submitted,
     Pending,
     Confirmed,
+    Deferred,
     Failed,
     Cancelled,
 }

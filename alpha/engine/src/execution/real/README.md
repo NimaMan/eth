@@ -55,9 +55,9 @@ The planner/resolver split is intentional:
   allowance, runs final simulation, chooses the gas-rank candidate under the
   value cap, and returns the direct-raw Kartal request.
 
-The bridge should return a planning failure when tx prep rejects. The engine
-then records a failed `ExecutionReport`, which keeps rejected real-capital orders
-visible in the same store path as simulator failures.
+The bridge returns a cancelled `ExecutionReport` when tx prep or pre-submit
+simulation rejects before broadcast. The exact reject reason remains on the
+report, while the high-level state stays distinct from a mined failed sell.
 
 ## Current Status
 
@@ -99,6 +99,11 @@ must stay outside the engine in `alpha/live/trading`.
 - The real adapter must be explicitly selected by runtime configuration.
 - The planner must include simulation evidence and value-cap metadata before a
   signal crosses the Kartal boundary.
+- Exact pre-submit simulation must run at or after the signal's
+  `required_state_block`. For launch buys this is the max of the decision block,
+  observed tx block, pool creation block, and latest pool snapshot block. If the
+  local simulator is behind that block, alpha records a deferred execution, not
+  a failed buy.
 - Gas-rank selection must happen before Kartal. Kartal should receive the chosen
   EIP-1559 fee caps and audit metadata, not a request to pick a bribe.
 - The resolver must prove the `OrderIntent`, open `Position`, and
@@ -108,8 +113,9 @@ must stay outside the engine in `alpha/live/trading`.
 - A Kartal `broadcast` response becomes a submitted order in alpha. Receipt
   tracking must later feed confirmed or failed `ExecutionReport`s back into the
   engine/store before a trade is considered settled.
-- A Kartal `dry_run` response is treated as cancelled, because no transaction
-  was broadcast and no on-chain fill can arrive.
+- Planner policy rejects, pre-submit simulation rejects, and Kartal
+  `dry_run`/`rejected` responses are treated as cancelled, because no
+  transaction was broadcast and no on-chain fill can arrive.
 - Backtest confirmation semantics must not leak into this adapter. Real live
   cannot mark a buy or sell as confirmed from planning, simulation, or Kartal
   request acceptance alone.

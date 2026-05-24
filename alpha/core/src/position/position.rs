@@ -165,10 +165,35 @@ impl Position {
         }
         match report.status {
             ExecutionStatus::Confirmed => self.apply_confirmed_report(report, fill_price),
+            ExecutionStatus::Deferred => self.apply_deferred_report(report),
             ExecutionStatus::Failed => self.apply_failed_report(report),
             ExecutionStatus::Cancelled => self.apply_cancelled_report(report),
             ExecutionStatus::Submitted | ExecutionStatus::Pending => Ok(()),
         }
+    }
+
+    fn apply_deferred_report(&mut self, report: &ExecutionReport) -> Result<()> {
+        if self.entry_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::BuySubmitted
+        {
+            self.state = PositionState::BuyDeferred;
+            return Ok(());
+        }
+
+        if self.exit_order_id.as_ref() == Some(&report.order_id)
+            && self.state == PositionState::SellSubmitted
+        {
+            self.state = PositionState::BuyConfirmed;
+            self.exit_order_id = None;
+            self.exit_failure_reason = report.error.clone();
+            self.exit_retryable = true;
+            return Ok(());
+        }
+
+        Err(AlphaCoreError::InvalidPositionTransition(format!(
+            "deferred report {:?} does not match position {:?}",
+            report.order_id, self.state
+        )))
     }
 
     fn apply_failed_report(&mut self, report: &ExecutionReport) -> Result<()> {
@@ -312,6 +337,7 @@ fn is_retryable_exit_failure(error: &str) -> bool {
     !(normalized.contains("unsupported balance storage layout")
         || normalized.contains("unable to inject synthetic erc20 balance"))
         && !normalized.contains("uneconomic sell")
+        && !normalized.contains("gas_rank_exceeds_value_cap")
 }
 
 /// Convert an Amount (U256 raw + decimals) to a DecimalAmount.

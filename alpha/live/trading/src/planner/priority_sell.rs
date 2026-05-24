@@ -411,6 +411,7 @@ mod tests {
                     strategy_name: "alpha11-univ2-lp30-pool-update-block-hold20".to_string(),
                     strategy_run_id: Some("run-1".to_string()),
                     observed_block: Some(25_128_246),
+                    required_state_block: 25_128_246,
                     source_metadata: json!({ "signal_id": 222 }),
                 },
                 current_block: 25_128_246,

@@ -79,13 +79,31 @@ where
 {
     async fn prepare_signal(&self, intent: &OrderIntent) -> Result<LiveTraderTxSignal> {
         let input = self.resolver.resolve_priority_sell_input(intent).await?;
+        let cancellation_block = input
+            .context
+            .tx
+            .observed_block
+            .or(Some(input.context.current_block));
         match self.planner.plan_priority_sell(input).await {
             Ok(PrioritySellPlannerOutcome::Submit { signal, .. }) => Ok(signal),
             Ok(PrioritySellPlannerOutcome::Reject(reject)) => {
-                Err(AlphaCoreError::Execution(format!(
-                    "priority sell tx prep rejected: {} {}",
-                    reject.reason, reject.metadata
-                )))
+                Err(AlphaCoreError::ExecutionCancelled {
+                    reason: format!(
+                        "priority sell tx prep rejected: {} {}",
+                        reject.reason, reject.metadata
+                    ),
+                    block_number: cancellation_block,
+                })
+            }
+            Err(error) if error.is_deferrable() => Err(AlphaCoreError::ExecutionDeferred {
+                reason: format!("priority sell planner deferred: {error}"),
+                block_number: error.deferral_block_number(),
+            }),
+            Err(error) if error.is_pre_broadcast_reject() => {
+                Err(AlphaCoreError::ExecutionCancelled {
+                    reason: format!("priority sell planner rejected before broadcast: {error}"),
+                    block_number: cancellation_block,
+                })
             }
             Err(error) => Err(AlphaCoreError::Execution(format!(
                 "priority sell planner failed: {error}"
@@ -143,6 +161,18 @@ where
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
         let mut signal = match self.planner.prepare_signal(&intent).await {
             Ok(signal) => signal,
+            Err(AlphaCoreError::ExecutionDeferred {
+                reason,
+                block_number,
+            }) => {
+                return Ok(deferred_report(self.next_order_id(), reason, block_number));
+            }
+            Err(AlphaCoreError::ExecutionCancelled {
+                reason,
+                block_number,
+            }) => {
+                return Ok(cancelled_report(self.next_order_id(), reason, block_number));
+            }
             Err(error) => {
                 return Ok(failed_report(
                     self.next_order_id(),
@@ -194,7 +224,8 @@ fn execution_report_from_kartal_result(
         "broadcast" => ExecutionStatus::Submitted,
         "received" | "signed" => ExecutionStatus::Pending,
         "dry_run" => ExecutionStatus::Cancelled,
-        "rejected" | "broadcast_error" => ExecutionStatus::Failed,
+        "rejected" => ExecutionStatus::Cancelled,
+        "broadcast_error" => ExecutionStatus::Failed,
         _ => ExecutionStatus::Failed,
     };
     let (tx_hash, tx_hash_error) = parse_tx_hash(result.tx_hash.as_deref());
@@ -321,8 +352,30 @@ fn report_error(
         ExecutionStatus::Cancelled if status_key == "dry_run" => {
             Some("tx executor dry-run; transaction was not broadcast".to_string())
         }
+        ExecutionStatus::Cancelled if status_key == "rejected" => {
+            Some("tx executor rejected before broadcast".to_string())
+        }
         ExecutionStatus::Failed => Some(format!("tx executor returned status {status_key}")),
         _ => None,
+    }
+}
+
+fn cancelled_report(
+    order_id: OrderId,
+    reason: impl Into<String>,
+    block_number: Option<BlockNumber>,
+) -> ExecutionReport {
+    ExecutionReport {
+        order_id,
+        status: ExecutionStatus::Cancelled,
+        tx_hash: None,
+        block_number,
+        filled_amount: None,
+        token_amount: None,
+        gas_used: None,
+        gas_cost: None,
+        mined_evidence: None,
+        error: Some(reason.into()),
     }
 }
 
@@ -334,6 +387,25 @@ fn failed_report(
     ExecutionReport {
         order_id,
         status: ExecutionStatus::Failed,
+        tx_hash: None,
+        block_number,
+        filled_amount: None,
+        token_amount: None,
+        gas_used: None,
+        gas_cost: None,
+        mined_evidence: None,
+        error: Some(reason.into()),
+    }
+}
+
+fn deferred_report(
+    order_id: OrderId,
+    reason: impl Into<String>,
+    block_number: Option<BlockNumber>,
+) -> ExecutionReport {
+    ExecutionReport {
+        order_id,
+        status: ExecutionStatus::Deferred,
         tx_hash: None,
         block_number,
         filled_amount: None,
@@ -388,6 +460,30 @@ mod tests {
         }
     }
 
+    struct CancellingPlanner;
+
+    #[async_trait]
+    impl LiveTxPlanner for CancellingPlanner {
+        async fn prepare_signal(&self, _intent: &OrderIntent) -> Result<LiveTraderTxSignal> {
+            Err(AlphaCoreError::ExecutionCancelled {
+                reason: "priority sell tx prep rejected: gas_rank_exceeds_value_cap {}".to_string(),
+                block_number: Some(25_159_022),
+            })
+        }
+    }
+
+    struct DeferredPlanner;
+
+    #[async_trait]
+    impl LiveTxPlanner for DeferredPlanner {
+        async fn prepare_signal(&self, _intent: &OrderIntent) -> Result<LiveTraderTxSignal> {
+            Err(AlphaCoreError::ExecutionDeferred {
+                reason: "simulation state not ready".to_string(),
+                block_number: Some(25_128_247),
+            })
+        }
+    }
+
     #[derive(Clone)]
     struct FixedPrioritySellPlanner {
         outcome: PrioritySellPlannerOutcome,
@@ -400,6 +496,20 @@ mod tests {
             _input: LivePrioritySellPlannerInput,
         ) -> std::result::Result<PrioritySellPlannerOutcome, LivePrioritySellPlannerError> {
             Ok(self.outcome.clone())
+        }
+    }
+
+    struct RevertingPrioritySellPlanner;
+
+    #[async_trait]
+    impl eth_live_trading::PrioritySellPlanner for RevertingPrioritySellPlanner {
+        async fn plan_priority_sell(
+            &self,
+            _input: LivePrioritySellPlannerInput,
+        ) -> std::result::Result<PrioritySellPlannerOutcome, LivePrioritySellPlannerError> {
+            Err(LivePrioritySellPlannerError::Simulation(
+                "cannot derive min-output from failed provisional simulation: pre-submit simulation indicates the sell would revert".to_string(),
+            ))
         }
     }
 
@@ -529,6 +639,7 @@ mod tests {
                     strategy_name: intent.strategy_name.0.clone(),
                     strategy_run_id: Some("run-1".to_string()),
                     observed_block: Some(25_128_246),
+                    required_state_block: 25_128_246,
                     source_metadata: json!({ "signal_id": 222 }),
                 },
                 current_block: 25_128_246,
@@ -598,6 +709,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bridge_turns_reverting_pre_submit_simulation_into_cancelled_error() {
+        let bridge = LiveTradingPlannerBridge::new(
+            RevertingPrioritySellPlanner,
+            FixedPlanningInputResolver {
+                input: planning_input(intent()),
+            },
+        );
+
+        let error = bridge.prepare_signal(&intent()).await.unwrap_err();
+
+        match error {
+            AlphaCoreError::ExecutionCancelled {
+                reason,
+                block_number,
+            } => {
+                assert_eq!(block_number, Some(25_128_246));
+                assert!(reason.contains("would revert"));
+                assert!(reason.contains("rejected before broadcast"));
+            }
+            other => panic!("expected cancelled execution, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn broadcast_result_becomes_submitted_report() {
         let adapter = TxExecutorAdapter::new(
             FixedPlanner {
@@ -661,5 +796,44 @@ mod tests {
             report.error.as_deref(),
             Some("live tx planning failed: execution adapter error: route not available")
         );
+    }
+
+    #[tokio::test]
+    async fn planner_rejection_is_recorded_as_cancelled_report() {
+        let adapter = TxExecutorAdapter::with_order_prefix(
+            CancellingPlanner,
+            FixedSubmitter {
+                result: Mutex::new(None),
+            },
+            "live-test",
+        );
+
+        let report = adapter.execute(intent()).await.unwrap();
+
+        assert_eq!(report.order_id, OrderId("live-test-1".to_string()));
+        assert_eq!(report.status, ExecutionStatus::Cancelled);
+        assert_eq!(report.block_number, Some(25_159_022));
+        assert_eq!(
+            report.error.as_deref(),
+            Some("priority sell tx prep rejected: gas_rank_exceeds_value_cap {}")
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_planning_error_is_recorded_as_deferred_report() {
+        let adapter = TxExecutorAdapter::with_order_prefix(
+            DeferredPlanner,
+            FixedSubmitter {
+                result: Mutex::new(None),
+            },
+            "live-test",
+        );
+
+        let report = adapter.execute(intent()).await.unwrap();
+
+        assert_eq!(report.order_id, OrderId("live-test-1".to_string()));
+        assert_eq!(report.status, ExecutionStatus::Deferred);
+        assert_eq!(report.block_number, Some(25_128_247));
+        assert_eq!(report.error.as_deref(), Some("simulation state not ready"));
     }
 }
