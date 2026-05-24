@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenRuntimeConfig};
+use eth_risk_atlas::RiskAtlasReader;
 use eyre::{eyre, Result};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
-use token_lab_scam_risk_atlas::RiskAtlasReader;
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};

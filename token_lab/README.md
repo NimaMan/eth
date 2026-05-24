@@ -41,21 +41,17 @@ token range/server output + simulator logs
 ## Persistence Boundary
 
 Most token-lab outputs are local artifacts under investigation folders. The
-exception is Risk Atlas: `token_lab/risk_atlas/scam_analytics/risk_atlas/` owns the
+exception is Risk Atlas: `risk_atlas/` owns the
 PostgreSQL `risk_atlas_*` read-model tables used by the `/risk-atlas` pages.
 Do not make frontend pages parse token-lab flat files when a Rust DB/API read
 model exists.
 
-## Restructuring Note
+## Risk Atlas Boundary
 
-Risk Atlas currently lives under `scam_analytics/` because its first durable
-read model is scam/risk-oriented. If it keeps expanding into the broader launch
-surface, strategy denominators, and model-readiness views, the target structure
-should move it to a top-level `risk_atlas/` area that includes scam analytics
-as one domain rather than making Risk Atlas a child of scam analytics. Do that
-as a focused move after the investigation ledger is clean, because the Rust
-workspace, `eth_chain_server` dependency, CLI docs, and API docs all reference
-the current crate path.
+Risk Atlas has been promoted to the ETH-level `risk_atlas/` module. Token-lab
+investigations may feed labels or review notes into Risk Atlas, but token lab no
+longer owns Risk Atlas schema, readers, writers, or page contracts. Put durable
+Risk Atlas work in `risk_atlas/`; keep ad hoc investigations here.
 
 ## Folder Structure
 
@@ -63,7 +59,7 @@ the current crate path.
 | --- | --- |
 | `investigations/` | Concrete token or pool investigations with narrative, metadata, and artifacts. |
 | `network_analytics/` | Token-network, pool-network, and second-order fund-flow case studies. |
-| `scam_analytics/` | Scammed-pool labels, active targets, model-row exports, and Risk Atlas read models for risk modeling. |
+| `scam_analytics/` | Scammed-pool labels, active targets, and model-row inputs for risk modeling. Durable Risk Atlas read models live in `../risk_atlas/`. |
 | `odd_behaviors/` | Shared catalog of behavior patterns that deserve review or detectors. |
 | `strategy/` | Launch, winner, scam/risk, and cohort analysis used to design trading strategies. |
 | `tools/chain_truth/` | Chain-fact extraction used as the baseline for trust. |

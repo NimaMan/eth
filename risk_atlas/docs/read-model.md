@@ -2,23 +2,24 @@
 
 Rust-owned read model for the `/eth/tokens/analytics/risk-atlas` page.
 
-Risk Atlas lives under `token_lab/risk_atlas/scam_analytics/` because it is a lab surface
-for scam labels, scam mechanisms, active-horizon targets, and model-readiness
-analysis. It does not own token or pool source-state feature construction.
+Risk Atlas is an ETH-level module. Scam analytics and modeling are subdomains
+inside it because labels, mechanisms, active-horizon targets, and
+model-readiness analysis feed the atlas. They do not own the durable atlas
+schema or page contract.
 
 ## Boundary
 
 ```text
 eth_token::token_analytics
   -> source active observations and as-of feature families
-token_lab/risk_atlas/scam_analytics
+risk_atlas/scam_analytics
   -> labels, target joins, review queues, model experiments
-token_lab/risk_atlas/scam_analytics/risk_atlas
+risk_atlas
   -> durable aggregate DB and page-ready story/read model
 eth_chain_server
   -> API endpoint that reads the Risk Atlas DB
-Asena
-  -> renders the page; no flat-file parsing or feature logic
+new_asena
+  -> renders the page through eth_chain_server; no flat-file parsing or feature logic
 ```
 
 The current 100K distribution report can still seed this DB for comparison, but
@@ -94,12 +95,11 @@ for frontend range-builder inspection.
 
 ## Current State
 
-The surrounding `scam_analytics/` folder currently contains:
+The `scam_analytics/` subdomain contains:
 
 - human-auditable scam label rules in `labels/`;
 - model-row contracts and leakage rules in `features/`;
 - generated distribution and validation reports in `artifacts/reports/`;
-- this Rust crate for DB migrations, imports, and page-ready views.
 
 Risk Atlas is the cleanup layer that turns those outputs into a compact DB read
 model for a high-level page: launch surface, scam type distribution, time to
@@ -256,19 +256,19 @@ which is ignored.
 Print the SQL schema:
 
 ```bash
-cargo run -p token_lab_scam_risk_atlas -- schema
+cargo run -p eth_risk_atlas -- schema
 ```
 
 Apply migrations to the code-default Postgres database:
 
 ```bash
-cargo run -p token_lab_scam_risk_atlas -- migrate
+cargo run -p eth_risk_atlas -- migrate
 ```
 
 Import the current 100K distribution report:
 
 ```bash
-cargo run -p token_lab_scam_risk_atlas -- import-report
+cargo run -p eth_risk_atlas -- import-report
 ```
 
 The API/server integration should use `RiskAtlasReader` from this crate rather

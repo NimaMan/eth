@@ -6,7 +6,7 @@ stores generated flat-file training rows.
 Source feature construction belongs in `eth_token::token_analytics`, where
 active token/pool observations and as-of feature families are defined in Rust.
 Rows built for modeling should join those source features with scam labels and
-targets owned by `token_lab/risk_atlas/scam_analytics`.
+targets owned by `risk_atlas/scam_analytics`.
 
 Each model row needs a declared `as_of_block`. Active-observation rows also need
 `as_of_active_observation_index`.

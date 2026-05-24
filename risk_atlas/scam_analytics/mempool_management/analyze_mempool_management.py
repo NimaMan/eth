@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("token_lab/risk_atlas/scam_analytics/artifacts/mempool_management"),
+        default=Path("risk_atlas/scam_analytics/artifacts/mempool_management"),
         help="Directory for generated CSV and markdown outputs.",
     )
     return parser.parse_args()

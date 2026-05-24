@@ -3,15 +3,15 @@ use std::str::FromStr;
 
 use alloy_primitives::B256;
 use chrono::Utc;
+use eth_risk_atlas::ingest::report::RiskAtlasReportImport;
+use eth_risk_atlas::{
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, EventEvidenceRow,
+    ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow, RiskAtlasRun,
+};
 use eth_token::pools::SCAM_DIRECT_LP_LIQUIDITY_REMOVAL;
 use eth_token::token_analytics::{TokenPoolCurrentObservation, ACTIVE_OBSERVATION_TARGET_HORIZONS};
 use reth_chain_query::RethQueryProvider;
 use serde_json::{json, to_value, Value};
-use token_lab_scam_risk_atlas::ingest::report::RiskAtlasReportImport;
-use token_lab_scam_risk_atlas::{
-    ActiveTargetSummary, DecisionQuestion, DistributionBucket, EventEvidenceRow,
-    ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow, RiskAtlasRun,
-};
 
 use crate::ranges::RangeIndexJob;
 use crate::read_models::pool::PoolView;

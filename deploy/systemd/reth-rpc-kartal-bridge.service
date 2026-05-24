@@ -1,0 +1,10 @@
+[Unit]
+Description=Forward Kartal Docker bridge Reth RPC to localhost
+Documentation=man:systemd-socket-proxyd(8)
+Requires=reth.service
+After=reth.service
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd 127.0.0.1:8545
+NoNewPrivileges=true
+PrivateTmp=true

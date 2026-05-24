@@ -8,9 +8,9 @@ This track is token-centric. Scam labels and model rows are based on token and
 pool behavior, not on how any external workflow interacted with the token.
 
 Source feature construction now belongs in `eth_token::token_analytics`.
-`token_lab/risk_atlas/scam_analytics` owns the historical joins around those features:
-labels, target construction, review artifacts, model experiments, and Risk Atlas
-read models.
+`risk_atlas/scam_analytics` owns the historical joins around those features:
+labels, target construction, review artifacts, and mechanism-specific research.
+The parent `risk_atlas` module owns the durable DB/read-model contract.
 
 ## Goal
 
@@ -125,16 +125,15 @@ Start with the near-future horizon set we can inspect and model first:
 | `features/` | Model-row contract and leakage rules. Source feature families live in `eth_token::token_analytics`. |
 | `clusters/` | Human-readable scam mechanism taxonomy and detector attributes. |
 | `artifacts/` | Generated extracts, raw API responses, and local notebooks. |
-| `risk_atlas/` | Rust-owned aggregate DB and page-ready story model for `/eth/tokens/analytics/risk-atlas`. |
 
 ## Data Ownership
 
 ```text
 eth_token::token_analytics
   -> active token/pool observations and as-of feature families
-token_lab/risk_atlas/scam_analytics
+risk_atlas/scam_analytics
   -> labels, active-horizon targets, review queues, model rows
-token_lab/risk_atlas/scam_analytics/risk_atlas
+risk_atlas
   -> compact DB/read model for high-level distribution and predictability pages
 ```
 
@@ -142,10 +141,8 @@ Persistent Risk Atlas data lives in PostgreSQL `risk_atlas_*` tables documented
 in `risk_atlas/README.md`. Flat reports under `artifacts/` are generated
 evidence, not the canonical page/read-model contract.
 
-Risk Atlas is nested here for historical reasons. If the atlas becomes the
-broader launch/risk/model-readiness surface, move it to top-level
-`token_lab/risk_atlas/` and let scam analytics feed one part of the atlas
-instead of owning the atlas structure.
+Scam analytics is one Risk Atlas input, not the atlas owner. Keep generic page
+contracts, DB schema, and reader/writer code in the parent `risk_atlas` crate.
 
 The old script-and-flat-file bootstrap path has been removed. Risk Atlas now
 owns the first DB-backed read model, and future training rows should be written
@@ -226,7 +223,7 @@ the labels are regenerated.
 The current 100K distribution report has been imported into the Risk Atlas DB:
 
 ```text
-cargo run -p token_lab_scam_risk_atlas -- import-report
+cargo run -p eth_risk_atlas -- import-report
 ```
 
 Next model-row generation should join `eth_token::token_analytics` source

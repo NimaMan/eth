@@ -40,6 +40,7 @@ Important adjacent code that is not currently a root workspace member:
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
 | `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
 | `node/` | Reth/Lighthouse node scripts and systemd service helpers. |
+| `deploy/` | ETH-owned deployment assets, including systemd units for the local Reth-backed stack. |
 | `solidity/` | Archived Solidity executor/contracts and experiments. Current v4 simulation uses deployed Uniswap periphery. |
 | `onchain-deployments/` | ETH mainnet contract deployment runbooks, configs, audit checklists, Kartal dry-runs, receipt evidence, and reproducible signoff records. |
 | `vendor/reth/` | Vendored upstream Reth reference tree. Use for source parity and examples, not as normal application code. |
@@ -196,7 +197,7 @@ Do not add a new DB or schema until this table and the owner README are updated.
 | Token PnL store | PostgreSQL schema `token_pnl`, configured by `databases.token_pnl.url`. | `eth_token_pnl_store/README.md` | Pool-scoped address PnL ledger and rollups: calculation runs, pool conservation totals, address-level PnL, and movement rows. |
 | Mempool signal store | PostgreSQL schema `live_trading`, configured by `databases.mempool.url`. | `mempool_processor/README.md`, `mempool_processor/src/db_writers/README.md` | Source of truth for public pending-transaction signals. Core row table is `live_trading.signal_events`; typed detail tables hang off `signal_id`. |
 | Alpha trading store | PostgreSQL schema `alpha_trading`, configured by `databases.alpha.url`. | `alpha/store/README.md`, `alpha/README.md` | Durable decision ledger for runs, observations, orders, execution reports, positions, position snapshots, trades, trade events/snapshots, risk events, decisions, result sets, performance views, and validation reports. |
-| Risk Atlas read model | PostgreSQL tables `risk_atlas_*` in the same database used by `databases.alpha.url` in `eth_chain_server`. | `token_lab/risk_atlas/scam_analytics/risk_atlas/README.md` | Durable scam/risk analytics read model for Risk Atlas pages: runs, eligibility, observations, distributions, active targets, decision questions, review examples, model readiness, and page snapshots. |
+| Risk Atlas read model | PostgreSQL tables `risk_atlas_*` in the same database used by `databases.alpha.url` in `eth_chain_server`. | `risk_atlas/README.md` | Durable scam/risk analytics read model for Risk Atlas pages: runs, eligibility, observations, distributions, active targets, decision questions, review examples, model readiness, and page snapshots. |
 
 The Postgres schemas may live in the same physical database during local
 development, but their ownership is separate. `databases.mempool.url` should not

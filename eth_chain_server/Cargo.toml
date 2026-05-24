@@ -15,7 +15,7 @@ eth_pool_classification = { path = "../alpha/pool_classification" }
 eth_price = { path = "../eth_price" }
 eth_token = { path = "../eth_token" }
 reth_chain_query = { path = "../reth_chain_query" }
-token_lab_scam_risk_atlas = { path = "../token_lab/risk_atlas/scam_analytics/risk_atlas" }
+eth_risk_atlas = { path = "../risk_atlas" }
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
 

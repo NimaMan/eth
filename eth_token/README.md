@@ -63,7 +63,7 @@ to rescan every tracked token to understand what changed in this block.
 
 Token analytics observations are source features only. Labels, active-horizon
 targets, training rows, and page story aggregates are owned by
-`token_lab/risk_atlas/scam_analytics/risk_atlas` and should be written/read through its DB.
+`risk_atlas` and should be written/read through its DB.
 
 For live trading, the important invariant is:
 

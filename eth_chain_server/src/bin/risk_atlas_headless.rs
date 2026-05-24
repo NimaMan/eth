@@ -9,10 +9,10 @@ use eth_chain_server::ranges::{
 };
 use eth_chain_server::read_models::risk_atlas;
 use eth_chain_server::ChainServerConfig;
+use eth_risk_atlas::db::migrate;
+use eth_risk_atlas::RiskAtlasWriter;
 use eyre::{bail, eyre, Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
-use token_lab_scam_risk_atlas::db::migrate;
-use token_lab_scam_risk_atlas::RiskAtlasWriter;
 use tokio::time::sleep;
 use tracing_subscriber::{fmt, EnvFilter};
 use tx_processor::{

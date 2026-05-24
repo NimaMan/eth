@@ -1,0 +1,40 @@
+[Unit]
+Description=Ethereum Token Server
+After=network-online.target reth.service
+Wants=network-online.target reth.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=nima
+Group=nima
+WorkingDirectory=/home/nima/code/crypto/blockchains/eth
+
+Environment="PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
+Environment="ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env"
+Environment="RUST_LOG=info"
+Environment="RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth"
+Environment="ETH_TOKEN_SERVER_BIND=127.0.0.1:8765"
+Environment="ETH_TOKEN_SERVER_HISTORY_LIMIT=1000"
+Environment="ETH_TOKEN_SERVER_DEFAULT_BLOCKS=7000"
+Environment="ETH_TOKEN_SERVER_REDIS_URL=redis://127.0.0.1:6379/0"
+Environment="ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM=eth/live/blocks"
+Environment="ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS=20"
+Environment="ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS=100"
+Environment="ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS=5000"
+Environment="ETH_TOKEN_SERVER_LIVE_STREAM_COUNT=100"
+
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_token_server
+
+StandardOutput=journal
+StandardError=journal
+
+MemoryMax=8G
+Nice=0
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target

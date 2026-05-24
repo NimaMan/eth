@@ -63,9 +63,9 @@ first-seen evidence.
 From `blockchains/eth`:
 
 ```bash
-token_lab/risk_atlas/scam_analytics/mempool_management/analyze_mempool_management.py \
+risk_atlas/scam_analytics/mempool_management/analyze_mempool_management.py \
   --database-url postgresql://postgres:postgres@localhost:5432/eth_db \
-  --output-dir token_lab/risk_atlas/scam_analytics/artifacts/mempool_management
+  --output-dir risk_atlas/scam_analytics/artifacts/mempool_management
 ```
 
 Outputs:

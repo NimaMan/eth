@@ -1,11 +1,11 @@
-use eyre::Result;
-use sqlx::PgPool;
-use token_lab_scam_risk_atlas::config::RiskAtlasConfig;
-use token_lab_scam_risk_atlas::db::migrate::{apply, RISK_ATLAS_SCHEMA_SQL};
-use token_lab_scam_risk_atlas::db::RiskAtlasWriter;
-use token_lab_scam_risk_atlas::ingest::report::{
+use eth_risk_atlas::config::RiskAtlasConfig;
+use eth_risk_atlas::db::migrate::{apply, RISK_ATLAS_SCHEMA_SQL};
+use eth_risk_atlas::db::RiskAtlasWriter;
+use eth_risk_atlas::ingest::report::{
     import_distribution_report, DEFAULT_100K_DISTRIBUTION_REPORT,
 };
+use eyre::Result;
+use sqlx::PgPool;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "usage: cargo run -p token_lab_scam_risk_atlas -- <schema|migrate|import-report [report.md]>"
+                "usage: cargo run -p eth_risk_atlas -- <schema|migrate|import-report [report.md]>"
             );
         }
     }

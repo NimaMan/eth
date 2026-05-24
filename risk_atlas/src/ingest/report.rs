@@ -13,7 +13,7 @@ use crate::db::schema::{
 };
 
 pub const DEFAULT_100K_DISTRIBUTION_REPORT: &str =
-    "token_lab/risk_atlas/scam_analytics/artifacts/reports/scam_100k_25007276_25107275_distribution.md";
+    "risk_atlas/scam_analytics/artifacts/reports/scam_100k_25007276_25107275_distribution.md";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RiskAtlasReportImport {
@@ -473,7 +473,7 @@ fn parse_run(lines: &[&str], path: &Path) -> Result<RiskAtlasRun> {
         status,
         generated_at: Utc::now(),
         metadata: json!({
-            "importer": "token_lab_scam_risk_atlas::ingest::report",
+            "importer": "eth_risk_atlas::ingest::report",
             "source_report": path.display().to_string(),
         }),
     })

@@ -8,8 +8,8 @@ use crate::http::sse;
 use crate::http::ServerState;
 use crate::ranges::{StartRangeIndexError, StartRangeIndexRequest};
 use crate::read_models as views;
-use token_lab_scam_risk_atlas::db::migrate;
-use token_lab_scam_risk_atlas::RiskAtlasWriter;
+use eth_risk_atlas::db::migrate;
+use eth_risk_atlas::RiskAtlasWriter;
 
 #[derive(Debug, serde::Deserialize)]
 pub(super) struct RangePoolsQuery {
