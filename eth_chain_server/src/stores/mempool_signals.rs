@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use alloy_primitives::B256;
 use chrono::{DateTime, Utc};
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use reth_chain_query::RethQueryProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -65,6 +65,8 @@ pub struct MempoolSignalView {
     pub value_2: Option<String>,
     pub flag: Option<String>,
     pub payload: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool_entry_evidence: Option<Value>,
 }
 
 impl MempoolSignalStore {
@@ -183,26 +185,29 @@ fn signal_sql(kind: MempoolSignalKind) -> String {
     format!(
         r#"
         SELECT
-            signal_id::text AS signal_id,
-            public_signal_type AS signal_type,
-            signal_source,
-            created_at::text AS signal_created_at,
-            detection_timestamp::text AS detection_timestamp,
-            pending_tx_hash AS detection_tx_hash,
-            token_address,
-            pool_identifier AS pool_address,
-            pool_protocol AS pool_type,
-            actor_address AS creator_address,
-            subject_address,
-            headline,
-            value_1,
-            value_2,
-            flag,
-            payload::text AS payload
-        FROM live_trading.signal_events
-        WHERE ($2::bigint IS NULL OR detection_timestamp >= (NOW() - ($2::bigint * INTERVAL '1 day')))
+            events.signal_id::text AS signal_id,
+            events.public_signal_type AS signal_type,
+            events.signal_source,
+            events.created_at::text AS signal_created_at,
+            events.detection_timestamp::text AS detection_timestamp,
+            events.pending_tx_hash AS detection_tx_hash,
+            events.token_address,
+            events.pool_identifier AS pool_address,
+            events.pool_protocol AS pool_type,
+            events.actor_address AS creator_address,
+            events.subject_address,
+            events.headline,
+            events.value_1,
+            events.value_2,
+            events.flag,
+            events.payload::text AS payload,
+            entry_evidence.evidence::text AS mempool_entry_evidence
+        FROM live_trading.signal_events events
+        LEFT JOIN live_trading.signal_entry_evidence entry_evidence
+            ON entry_evidence.signal_id = events.signal_id
+        WHERE ($2::bigint IS NULL OR events.detection_timestamp >= (NOW() - ($2::bigint * INTERVAL '1 day')))
         {event_filter}
-        ORDER BY detection_timestamp DESC
+        ORDER BY events.detection_timestamp DESC
         LIMIT $1
         "#
     )
@@ -238,6 +243,13 @@ async fn ensure_signal_events_table(pool: &PgPool) -> Result<()> {
         )
         "#,
         r#"
+        CREATE TABLE IF NOT EXISTS live_trading.signal_entry_evidence (
+            signal_id BIGINT PRIMARY KEY REFERENCES live_trading.signal_events(signal_id) ON DELETE CASCADE,
+            evidence JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+        r#"
         ALTER TABLE live_trading.signal_events
             ADD COLUMN IF NOT EXISTS signal_source TEXT NOT NULL DEFAULT 'mempool'
         "#,
@@ -262,6 +274,9 @@ fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
         .as_deref()
         .and_then(|value| serde_json::from_str(value).ok())
         .unwrap_or(Value::Null);
+    let mempool_entry_evidence = optional_text(row, "mempool_entry_evidence")?
+        .as_deref()
+        .and_then(|value| serde_json::from_str(value).ok());
 
     Ok(MempoolSignalView {
         signal_id: text(row, "signal_id")?,
@@ -282,6 +297,7 @@ fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
         value_2: optional_text(row, "value_2")?,
         flag: optional_text(row, "flag")?,
         payload,
+        mempool_entry_evidence,
     })
 }
 
@@ -326,7 +342,7 @@ fn optional_text(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<Str
 
 #[cfg(test)]
 mod tests {
-    use super::{signal_sql, MempoolSignalKind};
+    use super::{MempoolSignalKind, signal_sql};
 
     #[test]
     fn old_signal_filters_map_to_explicit_event_kinds() {
@@ -348,6 +364,7 @@ mod tests {
     fn signal_api_reads_canonical_event_table() {
         let sql = signal_sql(MempoolSignalKind::SellBlocked);
         assert!(sql.contains("FROM live_trading.signal_events"));
+        assert!(sql.contains("LEFT JOIN live_trading.signal_entry_evidence"));
         assert!(sql.contains("pool_identifier AS pool_address"));
         assert!(sql.contains("pool_protocol AS pool_type"));
         assert!(sql.contains("signal_source"));

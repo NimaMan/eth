@@ -10,12 +10,13 @@ use alloy_primitives::{Address, B256};
 use eth_alpha_core::{
     ids::TokenPoolId,
     market::{PoolProtocol, PoolSnapshot, UniswapV4PoolKeySnapshot},
-    risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_MEMPOOL_SIGNAL},
+    mempool_entry::MEMPOOL_ENTRY_EVIDENCE_KEY,
+    risk::{RISK_SOURCE_MEMPOOL_SIGNAL, RiskEvent, RiskKind, RiskSeverity},
 };
-use eyre::{eyre, Result};
-use rust_decimal::{prelude::FromPrimitive, Decimal};
+use eyre::{Result, eyre};
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LiveStatusResponse {
@@ -131,6 +132,8 @@ pub struct MempoolSignalWire {
     pub flag: Option<String>,
     #[serde(default)]
     pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mempool_entry_evidence: Option<Value>,
 }
 
 impl PoolWire {
@@ -343,6 +346,9 @@ impl MempoolSignalWire {
         }
         if !self.payload.is_null() {
             evidence.insert("signal_payload".to_string(), self.payload.clone());
+        }
+        if let Some(value) = self.mempool_entry_evidence.as_ref() {
+            evidence.insert(MEMPOOL_ENTRY_EVIDENCE_KEY.to_string(), value.clone());
         }
         Value::Object(evidence)
     }
@@ -622,6 +628,7 @@ mod tests {
             value_2: None,
             flag: Some("true".to_string()),
             payload: Value::Null,
+            mempool_entry_evidence: None,
         };
 
         let event = signal
@@ -657,6 +664,7 @@ mod tests {
             value_2: None,
             flag: Some("true".to_string()),
             payload: Value::Null,
+            mempool_entry_evidence: None,
         };
 
         let event = signal
@@ -691,6 +699,7 @@ mod tests {
             value_2: None,
             flag: Some("true".to_string()),
             payload: serde_json::json!({ "approved_share_pct": 100.0 }),
+            mempool_entry_evidence: None,
         };
 
         let event = signal

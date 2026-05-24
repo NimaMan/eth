@@ -72,6 +72,9 @@ The decision loop is:
 | Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
 | Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |
 
+The design for turning a pending `trading_enabled` signal into a same-block
+tail entry is documented in `docs/mempool_overlay_entry.md`.
+
 `P50`, `P75`, `P85`, `P90`, and `P95` mean mined priority-fee percentiles.
 They do not mean transaction positions. The separate `normal` profile is the
 low-cost rank-target fallback: sampled priority needed to beat roughly

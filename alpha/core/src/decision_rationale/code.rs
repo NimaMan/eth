@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::category::ReasonCategory;
 
@@ -57,6 +57,12 @@ fn canonical_code(base: &str, detail: Option<&str>, value: Option<&str>) -> Stri
         ("entry.init_policy", Some(detail)) => {
             format!("entry.init_policy.{}", sanitize_code_part(detail))
         }
+        ("entry.mempool_entry_evidence", Some(detail)) => {
+            format!(
+                "entry.mempool_entry_evidence.{}",
+                sanitize_code_part(detail)
+            )
+        }
         ("exit.lp_approval", Some(detail)) => {
             format!("exit.lp_approval.{}", sanitize_code_part(detail))
         }
@@ -90,6 +96,7 @@ fn label_for(code: &str, raw: &str) -> String {
         "entry.buy_eligible_pool_once.already_bought" => {
             "Entry hold: pool already bought".to_string()
         }
+        "entry.tail_after_enabling_tx" => "Entry: tail after enabling tx".to_string(),
         "entry.blocked_by_active_risk" => "Entry hold: blocked by active risk".to_string(),
         "entry.protocol_not_allowed" => "Entry hold: protocol not allowed".to_string(),
         "entry.eligibility.low_liquidity" => "Entry hold: low liquidity".to_string(),
@@ -122,6 +129,19 @@ fn label_for(code: &str, raw: &str) -> String {
         }
         "entry.init_policy.price_to_initial_ratio_gt_max" => {
             "Entry hold: price/initial above init-policy threshold".to_string()
+        }
+        "entry.mempool_entry_evidence.missing_pool_address" => {
+            "Entry hold: mempool evidence missing pool".to_string()
+        }
+        "entry.mempool_entry_evidence.missing_evidence"
+        | "entry.mempool_entry_evidence.missing_entry_evidence" => {
+            "Entry hold: missing mempool entry evidence".to_string()
+        }
+        "entry.mempool_entry_evidence.invalid_evidence" => {
+            "Entry hold: invalid mempool entry evidence".to_string()
+        }
+        "entry.mempool_entry_evidence.missing_successful_exact_vault_buy" => {
+            "Entry hold: missing successful exact vault buy evidence".to_string()
         }
         "exit.lp_approval" => "Exit: LP approval".to_string(),
         "exit.lp_approval_buy_confirm_block" => "Exit: buy-confirm block LP approval".to_string(),

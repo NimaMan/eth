@@ -7,6 +7,7 @@ use super::LpApprovalSignal;
 /// - A token with multiple pools generates multiple signals
 /// - Each signal contains pool-specific metrics
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Binary signal types emitted by detectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,8 @@ pub struct TradingEnabledSignal {
     pub creator_address: String,
     pub buy_tax: f64,
     pub sell_tax: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mempool_entry_evidence: Option<Value>,
     pub timestamp: u64,
 }
 

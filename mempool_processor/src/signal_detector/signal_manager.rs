@@ -13,9 +13,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use super::{
-    build_position_approval_signals, enrich_erc20_liquidity_approval,
-    trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
-    TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
+    LiquidityDetector, LpApprovalDetector, Signal, TaxDetector, TaxSignalType,
+    TokenSupplyRiskDetector, TradingStatusDetector, build_position_approval_signals,
+    enrich_erc20_liquidity_approval, trading_status_detector::TradingStatusChange,
 };
 
 /// Configuration for signal detection
@@ -520,6 +520,7 @@ impl SignalManager {
                             creator_address: trading_signal.executor.clone(),
                             buy_tax: calculated_buy_tax.unwrap_or(0.0),
                             sell_tax: calculated_sell_tax.unwrap_or(0.0),
+                            mempool_entry_evidence: None,
                             timestamp: chrono::Utc::now().timestamp() as u64,
                         },
                     ));

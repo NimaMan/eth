@@ -35,6 +35,35 @@ cargo run --example full_pipeline_signal_detection --release -- --target-count 1
 cargo run --example replay_trading_enabled_signal --release -- --help
 ```
 
+### Trading-Enabled Replay Fixtures
+
+These examples replay real recent mempool `trading_enabled` signals from local
+Reth data. Use the block immediately before the tx mined so the simulator
+replays the pending tx against the same parent-style state.
+
+```bash
+RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth \
+cargo run --example replay_trading_enabled_signal --release -- \
+  --datadir /home/nima/storage/samsung8tb/ethereum/reth \
+  --reth-index /home/nima/storage/samsung8tb/ethereum/reth/reth_index \
+  --block 25163949 \
+  --token 0x27a251c9a2669De495399764aD1e13c530405150 \
+  --pool 0x520a40B187BAa890fbdCF44091D530caAB4813F0 \
+  --hashes 0x6e771f8376501abca08f53120335ef3f798cb690e32ae9ccbfd42c3c47cbee2c
+
+RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth \
+cargo run --example replay_trading_enabled_signal --release -- \
+  --datadir /home/nima/storage/samsung8tb/ethereum/reth \
+  --reth-index /home/nima/storage/samsung8tb/ethereum/reth/reth_index \
+  --block 25163941 \
+  --token 0xb94aEa2e3729c03AcF7Af859d96A6b8487d49191 \
+  --pool 0x62B00495457A7FA8a19Fe058F409506371E04e99 \
+  --hashes 0xf813f4a3e419afd49df209c55907217d2c094625d7d3a84a90cfe9ca3841f8ab
+```
+
+Both commands should emit one `TradingEnabled` signal with `can_buy=true`,
+`can_sell=true`, and 0%/0% tax.
+
 ## Simulator Replays
 
 - `replay_contract_creation`: replay a contract-creation transaction from local Reth data.

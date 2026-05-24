@@ -101,6 +101,10 @@ impl UnifiedSignalWriter {
         .execute(&self.pool)
         .await?;
 
+        if let Some(evidence) = signal.mempool_entry_evidence.as_ref() {
+            write_signal_entry_evidence(&self.pool, signal_id, evidence).await?;
+        }
+
         debug!("wrote trading_enabled signal_id={signal_id}");
         Ok(())
     }
@@ -604,6 +608,25 @@ async fn insert_event(pool: &PgPool, event: SignalEventInsert) -> Result<i64> {
     Ok(row.try_get::<i64, _>("signal_id")?)
 }
 
+async fn write_signal_entry_evidence(pool: &PgPool, signal_id: i64, evidence: &Value) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO live_trading.signal_entry_evidence
+            (signal_id, evidence)
+        VALUES ($1, $2)
+        ON CONFLICT (signal_id) DO UPDATE SET
+            evidence = EXCLUDED.evidence,
+            created_at = NOW()
+        "#,
+    )
+    .bind(signal_id)
+    .bind(evidence)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 async fn ensure_schema(pool: &PgPool) -> Result<()> {
     for ddl in [
         r#"CREATE SCHEMA IF NOT EXISTS live_trading"#,
@@ -648,6 +671,13 @@ async fn ensure_schema(pool: &PgPool) -> Result<()> {
         r#"
         CREATE INDEX IF NOT EXISTS signal_events_pool_ts_idx
             ON live_trading.signal_events (pool_identifier, detection_timestamp DESC)
+        "#,
+        r#"
+        CREATE TABLE IF NOT EXISTS live_trading.signal_entry_evidence (
+            signal_id BIGINT PRIMARY KEY REFERENCES live_trading.signal_events(signal_id) ON DELETE CASCADE,
+            evidence JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
         "#,
         r#"
         CREATE TABLE IF NOT EXISTS live_trading.trading_enabled_details (

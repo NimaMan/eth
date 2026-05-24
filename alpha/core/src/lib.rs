@@ -10,6 +10,7 @@ pub mod error;
 pub mod execution;
 pub mod ids;
 pub mod market;
+pub mod mempool_entry;
 pub mod order;
 pub mod portfolio;
 pub mod position;
@@ -27,6 +28,10 @@ pub use ids::{
     TxHash, WalletId,
 };
 pub use market::{MarketEvent, PoolProtocol, PoolSnapshot, TokenSnapshot};
+pub use mempool_entry::{
+    MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION, MempoolEntryEvidence,
+    MempoolEntryViability, MempoolProjectedPool, MempoolVaultBuySimulation,
+};
 pub use order::{OrderIntent, OrderSide, OrderStatus};
 pub use portfolio::{PortfolioLimits, PortfolioState};
 pub use position::{Position, PositionKey, PositionSnapshot, PositionState};

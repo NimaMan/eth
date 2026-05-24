@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use alloy_primitives::U256;
 use eth_alpha_core::{
+    Result, Strategy, StrategyContext, StrategyDecision,
     amount::{Amount, DecimalAmount},
     ids::{BlockNumber, PoolAddress, PositionId, StrategyName, TokenAddress},
     market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
-    Result, Strategy, StrategyContext, StrategyDecision,
 };
 
 use crate::shared_rules;
@@ -334,6 +334,98 @@ impl SnipeAllStrategy {
         Some(available)
     }
 
+    fn evaluate_entry_for_pool(
+        &mut self,
+        ctx: &StrategyContext<'_>,
+        pool: &PoolSnapshot,
+        entry_block: BlockNumber,
+        submit_reason: Option<&'static str>,
+    ) -> Result<StrategyDecision> {
+        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
+        {
+            RuleDecision::Hold { rule, reason } => {
+                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+            }
+            _ => {}
+        }
+
+        let init_evidence = shared_rules::entry::init_policy::EntryInitEvidence::from_pool_at_block(
+            pool,
+            entry_block,
+        );
+        match shared_rules::entry::init_policy::evaluate(
+            &init_evidence,
+            &self.config.entry_init_policy,
+        ) {
+            RuleDecision::Hold { rule, reason } => {
+                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+            }
+            _ => {}
+        }
+
+        if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
+            return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
+        }
+        if !self.config.entry_enabled {
+            return Ok(StrategyDecision::hold("entry.disabled"));
+        }
+        if self
+            .config
+            .max_entry_pools
+            .map(|limit| self.effective_bought_pool_count(ctx) >= limit)
+            .unwrap_or(false)
+        {
+            return Ok(StrategyDecision::hold("entry.max_entry_pools_reached"));
+        }
+        if let Some(available) = self.entry_bankroll_available_wei(ctx) {
+            if available < self.config.buy_amount.raw {
+                return Ok(StrategyDecision::hold("entry.bankroll_insufficient"));
+            }
+        }
+        if self.config.block_entry_on_lp_approval {
+            match shared_rules::lp_approval::entry_gate::evaluate(
+                ctx,
+                pool.token_address,
+                &pool.address,
+                self.config.lp_approval_gate_min_pct,
+            ) {
+                RuleDecision::Hold { rule, reason } => {
+                    return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+                }
+                _ => {}
+            }
+        }
+        if !self.config.allowed_protocols.is_empty() {
+            let protocol = pool.protocol.label();
+            if !self
+                .config
+                .allowed_protocols
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(protocol.as_ref()))
+            {
+                return Ok(StrategyDecision::hold(format!(
+                    "entry.protocol_not_allowed:{protocol}"
+                )));
+            }
+        }
+
+        if self.only_deferred_buy_attempts_for_pool(ctx, &pool.address) {
+            return Ok(self.buy_pool(
+                pool,
+                submit_reason
+                    .unwrap_or("entry.buy_eligible_pool_once:retry_after_deferred_execution"),
+            ));
+        }
+
+        Ok(match entry::evaluate(&self.state, pool) {
+            RuleDecision::Enter { rule } => self.buy_pool(pool, submit_reason.unwrap_or(rule)),
+            RuleDecision::Hold { rule, reason } => {
+                StrategyDecision::hold(format!("{rule}:{reason}"))
+            }
+            RuleDecision::Exit { rule } => StrategyDecision::hold(format!("{rule}:exit_ignored")),
+        })
+    }
+
     fn effective_bought_pool_count(&self, ctx: &StrategyContext<'_>) -> usize {
         self.state
             .bought_pools()
@@ -463,89 +555,7 @@ impl Strategy for SnipeAllStrategy {
             return Ok(StrategyDecision::hold(reason));
         }
 
-        // 1. Shared eligibility gate: reject ineligible pools first.
-        match shared_rules::entry::eligibility::evaluate(pool, &self.config.classification_config())
-        {
-            RuleDecision::Hold { rule, reason } => {
-                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
-            }
-            _ => {}
-        }
-
-        let init_evidence = shared_rules::entry::init_policy::EntryInitEvidence::from_pool_at_block(
-            pool,
-            ctx.market.block_number,
-        );
-        match shared_rules::entry::init_policy::evaluate(
-            &init_evidence,
-            &self.config.entry_init_policy,
-        ) {
-            RuleDecision::Hold { rule, reason } => {
-                return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
-            }
-            _ => {}
-        }
-
-        if Self::has_blocking_entry_risk(ctx, pool.token_address, &pool.address) {
-            return Ok(StrategyDecision::hold("entry.blocked_by_active_risk"));
-        }
-        if !self.config.entry_enabled {
-            return Ok(StrategyDecision::hold("entry.disabled"));
-        }
-        if self
-            .config
-            .max_entry_pools
-            .map(|limit| self.effective_bought_pool_count(ctx) >= limit)
-            .unwrap_or(false)
-        {
-            return Ok(StrategyDecision::hold("entry.max_entry_pools_reached"));
-        }
-        if let Some(available) = self.entry_bankroll_available_wei(ctx) {
-            if available < self.config.buy_amount.raw {
-                return Ok(StrategyDecision::hold("entry.bankroll_insufficient"));
-            }
-        }
-        if self.config.block_entry_on_lp_approval {
-            match shared_rules::lp_approval::entry_gate::evaluate(
-                ctx,
-                pool.token_address,
-                &pool.address,
-                self.config.lp_approval_gate_min_pct,
-            ) {
-                RuleDecision::Hold { rule, reason } => {
-                    return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
-                }
-                _ => {}
-            }
-        }
-        if !self.config.allowed_protocols.is_empty() {
-            let protocol = pool.protocol.label();
-            if !self
-                .config
-                .allowed_protocols
-                .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(protocol.as_ref()))
-            {
-                return Ok(StrategyDecision::hold(format!(
-                    "entry.protocol_not_allowed:{protocol}"
-                )));
-            }
-        }
-
-        if self.only_deferred_buy_attempts_for_pool(ctx, &pool.address) {
-            return Ok(self.buy_pool(
-                pool,
-                "entry.buy_eligible_pool_once:retry_after_deferred_execution",
-            ));
-        }
-
-        Ok(match entry::evaluate(&self.state, pool) {
-            RuleDecision::Enter { rule } => self.buy_pool(pool, rule),
-            RuleDecision::Hold { rule, reason } => {
-                StrategyDecision::hold(format!("{rule}:{reason}"))
-            }
-            RuleDecision::Exit { rule } => StrategyDecision::hold(format!("{rule}:exit_ignored")),
-        })
+        self.evaluate_entry_for_pool(ctx, pool, ctx.market.block_number, None)
     }
 
     fn on_risk_event(
@@ -555,6 +565,28 @@ impl Strategy for SnipeAllStrategy {
     ) -> Result<StrategyDecision> {
         let _creator_label = creator_label::evaluate(&self.config, ctx, event);
         let strategy_name = self.name();
+
+        if event.kind == RiskKind::TradingEnabled {
+            match shared_rules::entry::mempool_entry::evaluate(event) {
+                shared_rules::entry::mempool_entry::MempoolEntryDecision::Accept { pool } => {
+                    let entry_block = pool.latest_block;
+                    return self.evaluate_entry_for_pool(
+                        ctx,
+                        &pool,
+                        entry_block,
+                        Some("entry.tail_after_enabling_tx"),
+                    );
+                }
+                decision @ shared_rules::entry::mempool_entry::MempoolEntryDecision::Reject {
+                    ..
+                } => match decision.rule_decision() {
+                    RuleDecision::Hold { rule, reason } => {
+                        return Ok(StrategyDecision::hold(format!("{rule}:{reason}")));
+                    }
+                    _ => {}
+                },
+            }
+        }
 
         // Shared exit rules: any strategy with an open position should exit on
         // these signals. The strategy config controls which ones are enabled.
