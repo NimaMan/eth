@@ -184,6 +184,18 @@ recommendations from `eth_chain_server` before building the Kartal request.
 
 ## Tx Submission Data Flow
 
+Canonical implemented live-capital flow:
+
+```text
+Alpha strategy/engine
+  -> LiveTradingPlannerBridge
+  -> exact deployed V2 vault simulation
+  -> gas-rank policy
+  -> Kartal direct-raw request
+  -> tx_executor validation/sign/dry-run-or-broadcast
+  -> alpha live_trader receipt reconciliation
+```
+
 The live-capital path has two separate decisions: the strategy decides whether an
 order is required, then the live planner decides whether an exact transaction is
 safe and valuable enough to submit.
@@ -230,41 +242,23 @@ inconsistent, unverifiable, or not worth the required gas/priority fee. Kartal
 and `tx_executor` should receive only a final direct-raw transaction request,
 never an abstract trading instruction.
 
-## Miner Bribe / Gas Rank Policy
+## Gas-Rank Integration
 
-For the first direct-raw version, "miner bribe" means the EIP-1559 priority fee
-paid through `max_priority_fee_per_gas`. The request also carries a `bribe`
-object with the same selected priority fee so Kartal and executor journals can
-audit the intent. Direct `block.coinbase` payments, bundles, and private relay
-payments are not part of `eth_direct_raw_v1`.
+The detailed bribe and gas-rank policy lives in `../../block_tx_rank/README.md`.
+This crate consumes that evidence after exact route simulation and before Kartal
+submission.
 
-The selection rule is:
+For `eth_direct_raw_v1`, the selected bribe is the EIP-1559 priority fee in
+`max_priority_fee_per_gas`; the same selected fee is mirrored into the Kartal
+request `bribe` object for auditability. `tx_prep` applies the live gas-rank
+ladder, required source gate, value cap, and request metadata. If no ranked
+candidate fits, the planner rejects instead of creating a synthetic fallback.
 
-1. Final simulation estimates the ETH value protected by landing before the
-   scam path.
-2. `PriorityFeeBudget` subtracts expected late recovery, safety buffer, and
-   mandatory base-fee cost. The remainder is the maximum priority spend.
-3. `eth_block_tx_rank` should produce named candidates such as `normal`, `p50`,
-   `p75`, `p85`, `p90`, and `p95`, each with priority fee, max fee, expected rank,
-   gas-before, and source window. For `mempool_race`, the planner instead reads
-   the triggering pending tx and synthesizes one dependency-relative candidate.
-4. `tx_prep` filters out candidates whose priority spend or total max fee
-   exceeds the protected-value cap.
-5. Among eligible candidates, `tx_prep` chooses the best ranked candidate. If no
-   candidate fits, the planner rejects. It must not synthesize an unranked
-   value-cap candidate.
-
-This deliberately prevents us from paying more to escape than the position can
-recover. The practical tuning question is not "highest bribe wins"; it is "what
-recent rank band or dependency-relative fee is fast enough for this signal, and
-does that fee fit inside the protected value?" Mempool LP approval and mempool
-liquidity-removal exits use dependency-relative `mempool_race`. Mined LP
-approval exits start at P90 unless the next-block removal probability pushes a
-future strategy to a different explicit ladder.
-
-Every submitted request should persist the chosen gas-rank label, priority fee,
-max fee, estimated ETH spend, rank position, gas-before estimate, predicted base
-fee, protected value, late recovery, and safety buffer in metadata.
+Mempool LP approval and mempool liquidity-removal exits use dependency-relative
+`mempool_race`; mined LP approval exits start from the configured P90 ladder.
+Selected requests persist the gas plan and budget in metadata, while reject
+outcomes include the candidate list, strategy gas policy, required source, and
+budget for later analysis.
 
 ## LP Approval Priority Exit
 
@@ -317,19 +311,6 @@ When block `N` lands and we hold the pool, the live trader should immediately
 prepare and submit a sell with protected/private routing and strict fee caps.
 This can only work when the removal is not already mined. It does not guarantee
 ordering against private or unseen liquidity-removal transactions.
-
-## Priority / Bribe Model
-
-For this crate, "bribe" means a priority execution plan:
-
-- choose a gas-rank candidate that is fast enough for the signal type;
-- use a capped priority fee for public routing;
-- enforce a max total ETH fee per trade;
-- record the observed block and reason on the sell order.
-
-Private/protected builder relay submission is the preferred future route for
-pre-mine scam exits, but the current direct-raw executor only supports dry-run
-and public mempool broadcast.
 
 ## Deployment Readiness Gates
 

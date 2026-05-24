@@ -34,25 +34,32 @@ Finished means:
 
 ## Current Limiting Factor
 
-As of 2026-05-24, the live-capital bottleneck is hardcoded runtime/policy
-control and final service-boundary cleanup, not basic transaction submission.
-Kartal and `tx_executor` can accept, validate, sign, journal, dry-run, and
-publicly broadcast a prepared direct transaction. `eth_alpha_live_trader` can
-instantiate the Kartal real adapter, target the deployed Uniswap V2 trading
-vault, run exact deployed-vault simulations, use the chain-server gas-rank
-endpoint, submit through Kartal, and reconcile mined V2 vault buy/sell receipts.
+As of 2026-05-24, the live-capital bottleneck is production-readiness evidence
+and policy/config ownership, not real transaction submission architecture. The
+implemented real flow is documented in `alpha/live/trading/README.md` and
+`alpha/engine/src/live_trader/real_execution/README.md`:
+
+```text
+Alpha strategy/engine
+  -> planner
+  -> exact deployed V2 vault simulation
+  -> gas-rank policy
+  -> Kartal direct-raw request
+  -> tx_executor
+  -> receipt reconciliation
+```
 
 The practical consequence is:
 
 - The one-pool `alpha11-live-univ2-lp30-pool-update-block-hold3-validation`
   public validation has mined buy and sell receipt evidence.
-- The main `alpha11-live-univ2-lp30-pool-update-block-hold15` strategy remains
-  blocked from broadcast until the hardcoded controls below are reviewed.
-- Fixed `40/50 gwei` live gas is removed from the production path, but fee caps,
-  gas-rank lookback, profile ladders, simulated-gas buffer, value caps, daily
-  caps, and duplicated signer/vault addresses still need explicit ownership.
-- Kartal, the signer, Alpha11 strategy specs, `config.env`, and Asena must agree
-  before another public run; conflicting caps or duplicated addresses are now the
+- The explicit Alpha11 hold16 validation service can public-broadcast through
+  Kartal only with `--allow-public-mempool-live-validation`.
+- Broader hold15 production remains blocked until mined validation evidence,
+  receipt finality behavior, spend caps, and public-mempool/private-relay policy
+  are reviewed.
+- Kartal, the signer, Alpha11 strategy specs, `config.env`, systemd env, and
+  Asena must agree; conflicting caps or duplicated addresses are now the
   highest-risk failure mode.
 
 ## Alpha Structure State 2026-05-24
@@ -112,103 +119,6 @@ capital:
 | 4 | Dependency-relative tail gas policy | `tail_entry_buy` gas selection must compare our selected fee against the enabling transaction and validate the intended behind-dependency ordering. |
 | 5 | Same-block overlay proof | Backtest/live-backtest must either simulate dependency transaction plus exact vault calldata in the same overlay state or explicitly mark the run as post-mine `N+1` only and block same-block readiness. |
 
-## Live Tx Submission Audit 2026-05-19
-
-Current intended path for real live execution:
-
-```text
-eth_chain_server live pools + mempool signal rows
-  -> eth_alpha_trader
-  -> LiveSnipeAllStrategy / strategy suite
-  -> StrategyDecision::SubmitOrder
-  -> OrderIntent
-  -> AlphaEngine risk policy + order recording
-  -> real TxExecutorAdapter
-  -> LiveTradingPlannerBridge
-  -> alpha/live/trading LivePrioritySellPlanner + tx_prep
-  -> LiveTraderTxSignal / LiveDirectRawTransactionRequest
-  -> Kartal POST /eth/tx/direct-raw
-  -> tx_executor validate -> reserve nonce -> sign -> dry-run/public broadcast
-  -> ExecutionReport back into alpha store
-  -> receipt tracker later confirms/rejects the on-chain fill
-```
-
-Current live-backtest/shadow path:
-
-```text
-eth_alpha_trader
-  -> LiveSnipeAllStrategy / strategy suite
-  -> StrategyDecision::SubmitOrder
-  -> OrderIntent
-  -> AlphaEngine risk policy + order recording
-  -> LiveChainSimExecutionAdapter
-  -> tx_simulator chain-state buy/sell simulation
-  -> ExecutionReport with no real tx hash
-  -> alpha store
-```
-
-The codebase now has the live path connected, but promotion to broader live
-capital is blocked by hardcoded controls and operator policy review:
-
-| Layer | Current state | Deployment gap |
-| --- | --- | --- |
-| Strategy decision | `LiveSnipeAllStrategy` / Alpha11 emits buy/sell `OrderIntent`s for entries, LP approval, liquidity removal, tax/scam, and max-hold when enabled. | Strategy constants and filters are compiled into Alpha11/baseline configs and must be reviewed as part of the hardcoded register. |
-| Engine | `AlphaEngine` records decisions and can route approved `OrderIntent`s to either chain-sim or Kartal real execution. | Broader broadcast is blocked by policy review, not by missing adapter plumbing. |
-| Real adapter | `TxExecutorAdapter` and `LiveTradingPlannerBridge` are instantiated by `eth_alpha_live_trader` for Kartal real execution. | The current hard blocker is making every real-capital knob explicit and config-owned. |
-| Live tx prep | `alpha/live/trading::tx_prep` enforces route validation, exact pre-submit simulation, value-capped bribe policy, gas-rank candidate selection, and protocol metadata. | Fee caps, profile ladders, gas buffer, and simulation freshness are still hardcoded defaults. |
-| Route/calldata | The real Alpha11 path uses the deployed Uniswap V2 trading vault for buy and emergency sell calldata. | Actual transaction gas limits remain in code and need benchmark/update ownership; route gas-used estimates now require exact simulation. |
-| Gas rank | The real planner calls the chain-server gas-rank endpoint and rejects unranked fixed gas in production. | Lookback and profile choice are hardcoded and must be reviewed against current mined fee distributions. |
-| Kartal | `/eth/tx/direct-raw` is mounted and policy-gated; status exposes signer, mode, allowlists, caps, and daily spend. | Kartal `config.toml`, `.env`, signer env, Alpha, and UI currently have duplicated/conflicting values. |
-| tx_executor | Direct raw validation, caps, nonce reservation, local signing, journal, dry-run, public mempool broadcast, and policy journal exist. | No private relay/builder route yet; public mempool remains acceptable only for controlled validation until reviewed. |
-
-## Bribe Selection Discussion
-
-For `eth_direct_raw_v1`, the bribe is the EIP-1559 priority fee selected before
-Kartal submission. We should not ask Kartal or `tx_executor` to discover the
-bribe. Alpha must choose it from current strategy context, recent block-rank
-evidence, and protected trade value.
-
-The live planner should use `eth_block_tx_rank` to generate a small set of
-ranked candidates from recent mined blocks:
-
-```text
-candidate label
-priority_fee_gwei
-max_fee_per_gas_gwei
-expected rank position
-expected gas before us
-sample/source window
-```
-
-Then `alpha/live/trading::tx_prep` applies the economic cap:
-
-```text
-avoidable_loss = simulated_recovery_if_fast
-               - expected_late_recovery_if_slow
-               - safety_buffer
-
-max_priority_spend = avoidable_loss - estimated_base_fee_cost
-max_priority_fee_gwei = max_priority_spend / estimated_gas_used
-```
-
-Only candidates inside both the priority-spend cap and total-fee cap are
-eligible. Public mempool routing should reject if no ranked candidate fits. That
-is safer than broadcasting a weak transaction that advertises our exit without a
-credible chance of landing early. The planner must not synthesize an unranked
-value-cap candidate when rank evidence is missing or too expensive.
-
-Open tuning questions before live capital:
-
-- Which recent-block window should rank against: last block only, rolling N
-  blocks, or signal-specific windows around prior scam transactions?
-- Which rank band is required by signal type: mempool LP approval likely needs a
-  top-of-block band, while mined LP approval may accept a lower band unless
-  removal probability is high.
-- How stale can gas-rank evidence be during a fast exit path before the planner
-  rejects and avoids sending a bad request?
-- Should candidate labels and rejected alternatives be persisted with the order
-  even when `tx_prep` rejects, so later analysis can tune the cap?
-
 ## Live Trading Hardcoded Value Register 2026-05-21
 
 Purpose: this is the review queue before relaxing dry-run or running more public
@@ -231,20 +141,20 @@ Review status key:
 | LT-02 | `alpha/engine/src/live_trader/mod.rs` | Default Kartal token env `ETH_TX_EXECUTOR_API_TOKEN`; no fallback token env is allowed | Auth source is now unambiguous. The live trader reads exactly the configured env var and fails closed when it is missing or empty. | needs decision |
 | LT-03 | `alpha/engine/src/live_trader/mod.rs`, `config.env`, Asena trade config | Live `from` / ops address `0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27` | This is a real signer address. Duplicating it across Rust, config, Kartal, signer, and UI creates drift risk. | needs decision |
 | LT-04 | `alpha/engine/src/live_trader/mod.rs`, `config.env`, Asena trade config | V2 vault `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` | This is the real execution target. Any wrong duplicate can route calldata/policy to the wrong contract. | needs decision |
-| LT-05 | `alpha/engine/src/live_trader/mod.rs` | Live-real validation bankroll ceiling `0.225 ETH` | This is an exposure guard. Decide whether this remains a compile-time validation cap or moves to strategy/deploy config. | needs decision |
-| LT-06 | `alpha/engine/src/live_trader/cli.rs` | Poll interval `2000ms`, mempool lookback `14d`, signal limit `200` | Poll cadence and signal window affect latency, duplicate handling, and DB/API load. | needs decision |
+| LT-05 | `alpha/engine/src/live_trader/mod.rs` | Live-real validation bankroll ceiling `0.555 ETH` | This is an exposure guard. Decide whether this remains a compile-time validation cap or moves to strategy/deploy config. | needs decision |
+| LT-06 | `config.env`, `alpha/engine/src/live_trader/cli.rs` | Service poll interval `250ms`, mempool lookback `14d`, signal limit `200`; CLI can explicitly override these values | Poll cadence and signal window affect latency, duplicate handling, and DB/API load. | needs decision |
 | LT-07 | `alpha/engine/src/live_trader/real_execution.rs` | Validation buy size `0.01 ETH` | This is real capital per entry for the validation strategy. It must match Alpha11 and Kartal value caps. | needs decision |
-| LT-08 | `alpha/engine/src/live_trader/real_execution.rs`, `alpha/live/trading/src/planner/config.rs` | Production live-real planner requires `eth_chain_server_gas_rank`, max priority `3.5 gwei`, entry gas fee cap `0.0012 ETH`, exit gas fee cap `0.002 ETH`, safety buffer `0.001 ETH` | These are now the first-line protection against repeating the 40 gwei validation spend. They still need one dry-run metadata check before public capital. | partially accepted |
+| LT-08 | `alpha/engine/src/live_trader/real_execution.rs`, `alpha/live/trading/src/planner/config.rs`, `config.env` | Production live-real planner requires `eth_chain_server_gas_rank`, max priority `3.5 gwei`, entry gas fee cap `0.0012 ETH`, exit gas fee cap `0.002 ETH`, safety buffer `0.001 ETH` | These are now the first-line protection against repeating the 40 gwei validation spend. They need mined validation evidence and Kartal/signer cap agreement before broader capital. | partially accepted |
 | LT-09 | `alpha/engine/src/live_trader/receipt_reconciliation.rs` | Confirmation depths: accepted `1`, recheck `3` | This controls when mined txs are treated as accepted and when we recheck. Reorg tolerance and stuck/replaced behavior need explicit policy. | needs decision |
 | LT-10 | `alpha/live/trading/src/planner/route_builder.rs` | Direct V2 route gas limit `500000`; route estimate is absent until exact simulation fills it | Direct route is not the Alpha11 vault path, but the actual gas limit still affects any future direct route. The old `180000` estimated-gas fallback is removed. | needs decision |
 | LT-11 | `alpha/live/trading/src/planner/route_builder.rs`, `tx_simulator::tx_builders` | V2 vault buy/sell gas limits `300000`; route estimate is absent until exact simulation fills it | The old `155000` buy and `130000` sell estimated-gas fallbacks are removed. The remaining question is whether `300000` is the right actual tx gas limit. | needs decision |
-| LT-12 | `alpha/live/trading/src/tx_prep/route.rs` | Simulated gas buffer `5000 bps` = 50% | This changes fee cap checks and worst-case cost. It is conservative for readiness because it blocks overpaying sooner, but it should be calibrated against more mined vault receipts. | needs decision |
+| LT-12 | `alpha/live/trading/src/tx_prep/route.rs`, `config.env` | Simulated gas buffer `2500 bps` = 25% | This changes fee cap checks and worst-case cost. It is conservative for readiness because it blocks overpaying sooner, but it should be calibrated against more mined vault receipts. | needs decision |
 | LT-13 | `alpha/live/trading/src/planner/gas_rank.rs` | Chain-server gas-rank lookback default `100`, clamped to `1..100` | This now replaces fixed `40 gwei`. We must decide whether `100` blocks is right for fast launch/scam exits. | needs decision |
 | LT-14 | `alpha/live/trading/src/tx_prep/strategy_gas_policy.rs`, `alpha/live/trading/src/planner/gas_rank.rs`, `config.env` | Entry buy ladder `p85 -> p75 -> p50 -> normal`; normal strategy exits `p85 -> p75 -> p50 -> normal`; mempool LP/removal races use `mempool_race`; mined approval races use `p90 -> p75 -> p50 -> normal` | `mempool_race` reads the triggering pending tx fee and bids above it with the configured deterministic `0.1..0.2 gwei` buffer. Production caps still apply, so over-value exits are rejected instead of paying blindly. | accepted for Alpha11 validation |
 | LT-15 | `alpha/live/trading/src/planner/simulation.rs` | Max simulation state lag `2` blocks | Kartal also enforces simulation freshness. This must match the chain-server/signer policy or we can accept evidence Kartal rejects. | needs decision |
 | LT-16 | `alpha/live/trading/src/planner/min_output.rs`, `baseline/snipe_all/config.rs` | Default slippage `500 bps` and production min-output rejects `>=10000 bps` | Min-output protects against bad fills. The Alpha11 value should be confirmed against live volatility and vault overhead. | needs decision |
 | LT-17 | `alpha/live/trading/src/lp_approval_exit.rs`, `shared_rules/lp_approval/mod.rs` | LP approval threshold `30%`, strict `approved_pct > 30` | Equal 30% is allowed. This should remain explicit in strategy docs/UI and not surprise us during validation. | needs decision |
-| LT-18 | `alpha/strategies/src/alpha11/config.rs`, `alpha11/live/specs.rs` | Alpha11: buy `0.01 ETH`, initial bankroll `0.225 ETH`, validation bankroll `0.01 ETH`, validation pools `1`, price/initial cap `1.5`, liquidity floors `0.5 ETH`/`1000`, holds `12/15/20`, validation hold `3`, min sell reserve `0` | These define the strategy. They are acceptable as named strategy constants only if the frontend/readme/backtest/live runner all display the same values. | needs decision |
+| LT-18 | `alpha/strategies/src/alpha11/config.rs`, `alpha11/live/specs.rs` | Alpha11: buy `0.01 ETH`, initial bankroll `0.555 ETH`, validation bankroll `0.01 ETH`, validation pools `1`, price/initial cap `1.5`, liquidity floors `0.5 ETH`/`1000`, holds `12/15/20`, validation hold `3`, min sell reserve `0` | These define the strategy. They are acceptable as named strategy constants only if the frontend/readme/backtest/live runner all display the same values. | needs decision |
 | LT-19 | `alpha/strategies/src/baseline/snipe_all/config.rs` | Baseline defaults: buy `0.01 ETH`, sell fraction `1.0`, min reserve `0.5 ETH`, stable reserve `1000`, min sell reserve `0.01`, denoms `ETH/WETH/USDC/USDT/DAI`, slippage `500 bps`, deadline `30s` | Alpha11 overrides some of these, but any future strategy using baseline directly inherits them. | needs decision |
 | LT-20 | `shared_rules/entry/eligibility/mod.rs`, `route_builder.rs`, `config.env` | WETH address `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`; ETH/WETH-only execution route | WETH is a chain constant, but the route restriction is an execution filter and must be reflected in strategy names/docs when active. | acceptable constant for WETH; needs decision for route filter |
 | LT-21 | `receipt_reconciliation.rs`, `planner/simulation.rs` | Vault ABI event signatures `BoughtV2(address,uint256,uint256,uint256)` and `EmergencySoldV2(address,uint256,uint256,uint256)` | ABI constants are okay, but changing the deployed vault ABI without updating these would break confirmation. | acceptable constant |
@@ -267,9 +177,9 @@ Immediate review order:
 
 ## Immediate Next Actions
 
-1. Run a Kartal dry-run through the production gas-rank path and confirm the
-   request metadata shows `source=eth_chain_server_gas_rank`, a capped profile,
-   and priority below `3.5 gwei`.
+1. Review real-public validation trades and produce a pass/fail gate with mined
+   buy/sell receipts, vault-event amounts, tx index, paid gas, selected gas-rank
+   profile, N+1 comparison, and 3-confirmation recheck evidence.
 2. Reconcile Kartal `config.toml`, Kartal `.env`, signer env, Alpha `config.env`,
    and Asena UI so value caps, daily caps, signer address, vault address, and
    selectors have one source of truth.
@@ -288,9 +198,9 @@ Immediate review order:
 
 | Order | Issue | Owner | Latest Evidence | Next Action |
 | --- | --- | --- | --- | --- |
-| 1 | **Real planner is dry-run only** | `alpha/engine`, `alpha/live/trading` | `eth_alpha_live_trader` instantiates `TxExecutorAdapter`, targets the deployed V2 vault, and requires Kartal `dry_run`. Entry-enabled runs require `--entry-bankroll-eth <= 0.225`. | Run the bankroll-limited hold15 validation dry run and keep public broadcast disabled until evidence is reviewed. |
-| 2 | **Gas-rank spend policy needs final dry-run evidence** | `alpha/engine`, `eth_chain_server`, `alpha/live/trading` | The real planner now rejects fixed/test gas sources in production sell prep, caps live-real priority at `3.5 gwei`, and uses `p50 -> normal` for entries and normal exits. Kartal/signer caps are still looser than Alpha. | Run the production gas-rank dry run, then tighten K-01/K-03 if the metadata matches the new policy. |
-| 3 | **Receipt/fill reconciliation needs operational evidence** | `alpha/engine`, `tx_executor`, `kartal` | A receipt reconciliation worker exists and confirms V2 vault `BoughtV2`/`EmergencySoldV2` events, but it still needs live run evidence, timeout handling, and finality policy. | Run the capped dry run with receipt monitoring enabled, then add stuck/replaced/reorg handling before broadcast. |
+| 1 | **Broader real-capital rollout needs validation signoff** | `alpha/engine`, `alpha/live/trading`, `kartal` | Real submission architecture is implemented. Public broadcast is limited to the explicit Alpha11 hold16 validation path with deployed V2 vault exact simulation, gas-rank policy, Kartal direct-raw, `tx_executor`, and receipt reconciliation. | Review mined validation trades, define the promotion gate, and keep main hold15 blocked until the gate passes. |
+| 2 | **Gas-rank spend policy needs mined evidence and cap agreement** | `alpha/engine`, `eth_chain_server`, `alpha/live/trading`, `kartal` | The real planner rejects fixed/test gas sources in production prep, caps live-real priority at `3.5 gwei`, and uses gas-rank ladders plus dependency-relative `mempool_race`. Kartal/signer caps can still be looser than Alpha. | Compare selected gas-rank candidates against mined validation tx indexes and paid gas, then tighten K-01/K-03 to match Alpha policy. |
+| 3 | **Receipt/fill reconciliation needs operational policy** | `alpha/engine`, `tx_executor`, `kartal` | A receipt reconciliation worker exists and confirms V2 vault `BoughtV2`/`EmergencySoldV2` events. The remaining blockers are finality policy, timeout handling, replacement/stuck tx behavior, and review of mined validation receipts. | Review mined validation receipts, then add stuck/replaced/reorg handling before broader broadcast. |
 | 4 | **Private relay/builder execution is not implemented** | `tx_executor`, `kartal` | `BroadcastMode` supports `dry_run` and `public_mempool`; direct coinbase/private bundle bribes are explicitly outside `eth_direct_raw_v1`. | Decide if public mempool is enough for first live test; otherwise add a new protocol/version for relay or bundle submission. |
 | 5 | **Config source of truth is split** | `alpha/engine`, `kartal`, `interface/asena` | Signer/from/vault addresses, fee caps, value caps, daily caps, and simulator defaults are duplicated across Rust constants, `config.env`, Kartal config/env, and Asena UI config. | Pick source-of-truth ownership for each live trading value and remove compiled/operator-facing duplicates where possible. |
 | 6 | **Direct EOA allowance policy is unresolved** | `alpha/live/trading`, `tx_simulator::tx_builders`, `solidity/baygus-executor` | Mode A now has vault emergency-sell calldata and internal approve+sell semantics. Direct EOA sells still need a live allowance reader or explicit pre-approval deployment policy. | Prefer Mode A for scam exits; only enable direct EOA sells after documenting pre-approval, permit/multicall, or two-transaction approval behavior. |
