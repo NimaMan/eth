@@ -9,8 +9,8 @@ The current live-real promotion target is:
 `alpha11-univ2-lp30-pool-update-block-hold16`
 
 The live-backtest comparison sweep also includes hold12, hold14, hold15,
-hold18, and hold20 so the selected hold window can be compared against nearby
-variants before promotion.
+hold18, hold20, hold25, hold50, and hold100 so the selected hold window can be
+compared against nearby and longer-tail variants before promotion.
 
 The controlled public validation variant is:
 

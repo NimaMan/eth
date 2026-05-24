@@ -29,7 +29,8 @@ pub use ids::{
 };
 pub use market::{MarketEvent, PoolProtocol, PoolSnapshot, TokenSnapshot};
 pub use mempool_entry::{
-    MempoolEntryEvidence, MempoolEntryViability, MempoolProjectedPool, MempoolVaultBuySimulation,
+    projected_pool_from_risk_event, MempoolEntryEvidence, MempoolEntryViability,
+    MempoolProjectedPool, MempoolVaultBuyEvidenceQuality, MempoolVaultBuySimulation,
     MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION,
 };
 pub use order::{OrderIntent, OrderSide, OrderStatus};

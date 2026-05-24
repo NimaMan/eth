@@ -20,8 +20,9 @@ use clap::Parser;
 use eth_alpha_core::{
     amount::Amount,
     execution::ExecutionReport,
-    ids::{StrategyName, TokenPoolId},
+    ids::{PoolAddress, StrategyName, TokenPoolId},
     market::{MarketEvent, PoolSnapshot},
+    mempool_entry::projected_pool_from_risk_event,
     portfolio::PortfolioState,
     position::{Position, PositionState},
     risk::{RiskEvent, RiskKind},
@@ -203,6 +204,7 @@ fn live_gas_policy_run_metadata_json(
         "v2_vault_buy_gas_limit": policy.v2_vault_buy_gas_limit,
         "v2_vault_sell_gas_limit": policy.v2_vault_sell_gas_limit,
         "entry_buy_profiles": &policy.entry_buy_gas_rank_policy,
+        "tail_entry_buy_profiles": &policy.tail_entry_buy_gas_rank_policy,
         "normal_exit_profiles": &policy.normal_exit_gas_rank_policy,
         "mempool_race_exit_profiles": &policy.mempool_pre_mine_gas_rank_policy,
         "lp_approval_exit_profiles": &policy.lp_approval_exit_gas_rank_policy,
@@ -970,6 +972,8 @@ async fn run(
                 .as_ref()
                 .and_then(|pool_address| polled_pool_wires.get(pool_address));
             annotate_signal_risk_event(&mut event, &signal, pool_context);
+            let projected_pool =
+                prime_projected_mempool_entry_pool(&event, &pool_updates, &adapter_current_block);
             let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
             let report_count = event_reports.len();
             let decision = if report_count > 0 {
@@ -986,7 +990,10 @@ async fn run(
                 first_poll,
                 suppress_events,
                 &status,
-                json!({ "reports": reports_payload(&event_reports) }),
+                json!({
+                    "reports": reports_payload(&event_reports),
+                    "projected_pool_primed": projected_pool,
+                }),
             )
             .await?;
             reports += report_count;
@@ -1381,6 +1388,35 @@ async fn run(
     }
 
     Ok(())
+}
+
+fn prime_projected_mempool_entry_pool(
+    event: &RiskEvent,
+    pool_updates: &Arc<std::sync::Mutex<HashMap<PoolAddress, PoolSnapshot>>>,
+    adapter_current_block: &Arc<std::sync::atomic::AtomicU64>,
+) -> Option<Value> {
+    let pool = projected_pool_from_risk_event(event)?;
+    let pool_address = pool.address.clone();
+    let token_address = pool.token_address;
+    let latest_block = pool.latest_block;
+    let can_buy = pool.can_buy;
+    let can_sell = pool.can_sell;
+    pool_updates
+        .lock()
+        .expect("pool lock")
+        .insert(pool_address.clone(), pool);
+    let current_block = adapter_current_block.load(Ordering::Relaxed);
+    if latest_block > current_block {
+        adapter_current_block.store(latest_block, Ordering::Relaxed);
+    }
+    Some(json!({
+        "source": "mempool_entry_evidence",
+        "pool_address": pool_address.0,
+        "token_address": token_address.to_string(),
+        "latest_block": latest_block,
+        "can_buy": can_buy,
+        "can_sell": can_sell,
+    }))
 }
 
 fn annotate_signal_risk_event(

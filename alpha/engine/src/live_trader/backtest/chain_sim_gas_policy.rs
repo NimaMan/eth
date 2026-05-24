@@ -109,7 +109,7 @@ where
             })
             .collect::<Vec<_>>();
         let selection = match intent.side {
-            OrderSide::Buy => self.select_buy_gas(&candidates, estimated_gas_used),
+            OrderSide::Buy => self.select_buy_gas(intent, &candidates, estimated_gas_used),
             OrderSide::Sell => self.select_sell_gas(
                 intent,
                 report,
@@ -129,10 +129,17 @@ where
 
     fn select_buy_gas(
         &self,
+        intent: &OrderIntent,
         candidates: &[RankedFeeCandidate],
         estimated_gas_used: u64,
     ) -> ShadowGasSelection {
-        let policy = &self.gas_policy.entry_buy_gas_rank_policy;
+        let policy_context = self.gas_policy.buy_policy_context(
+            intent
+                .decision_reason
+                .as_ref()
+                .map(|reason| reason.code.as_str()),
+        );
+        let policy = policy_context.policy;
         let capped = candidates
             .iter()
             .filter(|candidate| {
@@ -148,15 +155,15 @@ where
                 policy,
                 candidate,
                 estimated_gas_used,
-                "entry_buy",
-                "entry.buy_eligible_pool_once",
-                "entry_estimated_gas_fee_cap",
+                policy_context.action,
+                policy_context.signal,
+                policy_context.guard,
             ),
             None => ShadowGasSelection::rejected(
                 policy,
-                "entry_buy",
-                "entry.buy_eligible_pool_once",
-                "entry_estimated_gas_fee_cap",
+                policy_context.action,
+                policy_context.signal,
+                policy_context.guard,
                 "gas_rank_exceeds_entry_policy",
             ),
         }
@@ -220,13 +227,21 @@ where
             OrderSide::Sell => self.gas_policy.v2_vault_sell_gas_limit,
         };
         let selection = match intent.side {
-            OrderSide::Buy => ShadowGasSelection::rejected(
-                &self.gas_policy.entry_buy_gas_rank_policy,
-                "entry_buy",
-                "entry.buy_eligible_pool_once",
-                "live_backtest_chain_sim_gas_policy",
-                reason,
-            ),
+            OrderSide::Buy => {
+                let policy_context = self.gas_policy.buy_policy_context(
+                    intent
+                        .decision_reason
+                        .as_ref()
+                        .map(|reason| reason.code.as_str()),
+                );
+                ShadowGasSelection::rejected(
+                    policy_context.policy,
+                    policy_context.action,
+                    policy_context.signal,
+                    "live_backtest_chain_sim_gas_policy",
+                    reason,
+                )
+            }
             OrderSide::Sell => {
                 let policy_context = sell_policy_context(intent, &self.gas_policy);
                 ShadowGasSelection::rejected(
@@ -532,6 +547,8 @@ fn outcome_from_selection(
 ) -> ShadowGasOutcome {
     let (gas_cost, effective_gas_price_wei, paid_gas_cost_wei) =
         policy_paid_gas_cost(report, &selection);
+    let tail_entry_ordering = tail_entry_ordering_evidence(intent, &selection);
+    let gas_policy_guard = shadow_gas_policy_guard(&selection, intent.side, estimated_gas_used);
     let cancel_reason = (!selection.is_selected()).then(|| {
         format!(
             "gas policy shadow rejected {} {}: {}",
@@ -567,14 +584,16 @@ fn outcome_from_selection(
         gas_estimated_priority_spend_eth: selection
             .estimated_priority_spend_eth
             .map(decimal_string),
-        gas_policy_guard: Some(format!(
-            "{};chain_sim_estimated_gas_used={estimated_gas_used};side={}",
-            selection.guard,
-            match intent.side {
-                OrderSide::Buy => "buy",
-                OrderSide::Sell => "sell",
-            }
-        )),
+        gas_policy_guard: Some(gas_policy_guard),
+        gas_policy_tail_after_tx_hash: tail_entry_ordering
+            .as_ref()
+            .and_then(|evidence| evidence.tail_after_tx_hash.clone()),
+        gas_policy_dependency_priority_fee_wei: tail_entry_ordering
+            .as_ref()
+            .and_then(|evidence| evidence.dependency_priority_fee_wei.clone()),
+        gas_policy_dependency_gas_price_wei: tail_entry_ordering
+            .as_ref()
+            .and_then(|evidence| evidence.dependency_gas_price_wei.clone()),
         ..MinedExecutionEvidence::default()
     };
     ShadowGasOutcome {
@@ -582,6 +601,27 @@ fn outcome_from_selection(
         gas_cost,
         cancel_reason,
     }
+}
+
+fn shadow_gas_policy_guard(
+    selection: &ShadowGasSelection,
+    side: OrderSide,
+    estimated_gas_used: u64,
+) -> String {
+    let mut guard = format!(
+        "{};chain_sim_estimated_gas_used={estimated_gas_used};side={}",
+        selection.guard,
+        match side {
+            OrderSide::Buy => "buy",
+            OrderSide::Sell => "sell",
+        }
+    );
+    if selection.action == "tail_entry_buy" {
+        guard.push_str(
+            ";tail_entry_validation_mode=post_mine_n_plus_1;exact_overlay_simulation=false",
+        );
+    }
+    guard
 }
 
 fn policy_paid_gas_cost(
@@ -623,6 +663,49 @@ fn policy_paid_gas_cost(
     )
 }
 
+#[derive(Default)]
+struct TailEntryOrderingEvidence {
+    tail_after_tx_hash: Option<String>,
+    dependency_priority_fee_wei: Option<String>,
+    dependency_gas_price_wei: Option<String>,
+}
+
+fn tail_entry_ordering_evidence(
+    intent: &OrderIntent,
+    selection: &ShadowGasSelection,
+) -> Option<TailEntryOrderingEvidence> {
+    if intent.side != OrderSide::Buy || selection.action != "tail_entry_buy" {
+        return None;
+    }
+    let details = &intent.decision_reason.as_ref()?.details;
+    let dependency_fee_metadata = details
+        .get("risk_event_evidence")?
+        .get("mempool_entry_evidence")?
+        .get("dependency_fee_metadata")?;
+    Some(TailEntryOrderingEvidence {
+        tail_after_tx_hash: json_string_field(dependency_fee_metadata, "tail_after_tx_hash"),
+        dependency_priority_fee_wei: json_string_field(
+            dependency_fee_metadata,
+            "dependency_priority_fee_wei",
+        ),
+        dependency_gas_price_wei: json_string_field(
+            dependency_fee_metadata,
+            "dependency_gas_price_wei",
+        ),
+    })
+}
+
+fn json_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    let value = value.get(key)?;
+    if value.is_null() {
+        return None;
+    }
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| Some(value.to_string()))
+}
+
 fn gas_policy_profile_labels(policy: &StrategyGasRankPolicy) -> Vec<String> {
     policy
         .preference_order
@@ -659,6 +742,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use eth_alpha_core::{
         amount::Amount,
+        decision_rationale::{DecisionReason, ReasonCategory},
         execution::{ExecutionReport, ExecutionStatus},
         ids::{OrderId, PoolAddress, PortfolioId, StrategyName, WalletId},
         market::PoolProtocol,
@@ -704,6 +788,21 @@ mod tests {
         )
     }
 
+    fn selected_tail_entry(priority_gwei: i64, max_fee_gwei: i64) -> ShadowGasSelection {
+        ShadowGasSelection::selected_plan(
+            &StrategyGasRankPolicy::p85_first(),
+            "p85".to_string(),
+            DecimalAmount::from(priority_gwei),
+            DecimalAmount::from(max_fee_gwei),
+            DecimalAmount::ZERO,
+            DecimalAmount::ZERO,
+            Some("eth_chain_server_gas_rank".to_string()),
+            "tail_entry_buy",
+            "entry.tail_after_enabling_tx",
+            "tail_entry_estimated_gas_fee_cap",
+        )
+    }
+
     fn intent(side: OrderSide) -> OrderIntent {
         OrderIntent {
             trade_id: None,
@@ -720,6 +819,29 @@ mod tests {
             deadline_secs: 0,
             decision_reason: None,
         }
+    }
+
+    fn tail_entry_intent() -> OrderIntent {
+        let mut intent = intent(OrderSide::Buy);
+        intent.decision_reason = Some(DecisionReason {
+            code: "entry.tail_after_enabling_tx".to_string(),
+            category: ReasonCategory::Entry,
+            label: "Entry: tail after enabling tx".to_string(),
+            source: Some("mempool_signal".to_string()),
+            raw: Some("entry.tail_after_enabling_tx".to_string()),
+            details: serde_json::json!({
+                "risk_event_evidence": {
+                    "mempool_entry_evidence": {
+                        "dependency_fee_metadata": {
+                            "tail_after_tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                            "dependency_priority_fee_wei": "123",
+                            "dependency_gas_price_wei": "456"
+                        }
+                    }
+                }
+            }),
+        });
+        intent
     }
 
     #[test]
@@ -774,5 +896,48 @@ mod tests {
         assert!(report.filled_amount.is_none());
         assert!(report.gas_cost.is_none());
         assert!(report.error.as_deref().unwrap().contains("rejected"));
+    }
+
+    #[test]
+    fn tail_entry_shadow_records_ordering_evidence() {
+        let report = report(100_000, 10_000_000_000_000);
+        let outcome = outcome_from_selection(
+            &tail_entry_intent(),
+            &report,
+            300_000,
+            150_000,
+            selected_tail_entry(2, 20),
+        );
+
+        assert_eq!(
+            outcome.evidence.gas_policy_tail_after_tx_hash.as_deref(),
+            Some("0x3333333333333333333333333333333333333333333333333333333333333333")
+        );
+        assert_eq!(
+            outcome
+                .evidence
+                .gas_policy_dependency_priority_fee_wei
+                .as_deref(),
+            Some("123")
+        );
+        assert_eq!(
+            outcome
+                .evidence
+                .gas_policy_dependency_gas_price_wei
+                .as_deref(),
+            Some("456")
+        );
+        assert!(outcome
+            .evidence
+            .gas_policy_guard
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tail_entry_validation_mode=post_mine_n_plus_1"));
+        assert!(outcome
+            .evidence
+            .gas_policy_guard
+            .as_deref()
+            .unwrap_or_default()
+            .contains("exact_overlay_simulation=false"));
     }
 }

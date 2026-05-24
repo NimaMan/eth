@@ -356,7 +356,17 @@ where
             .ranked_fee_candidates(&input, &route)
             .await
             .map_err(planner_error)?;
-        let gas_rank_policy = self.gas_policy.entry_buy_gas_rank_policy.clone();
+        let buy_policy_context = self.gas_policy.buy_policy_context(
+            input
+                .intent
+                .decision_reason
+                .as_ref()
+                .map(|reason| reason.code.as_str()),
+        );
+        let gas_policy_action = buy_policy_context.action;
+        let gas_policy_signal = buy_policy_context.signal.clone();
+        let gas_policy_guard = buy_policy_context.guard;
+        let gas_rank_policy = buy_policy_context.policy.clone();
         let fee = select_entry_gas_fee(
             &gas_rank,
             &gas_rank_policy,
@@ -427,13 +437,13 @@ where
                         "source": fee.source,
                     },
                     "gas_policy": {
-                        "action": "entry_buy",
-                        "signal": "entry.buy_eligible_pool_once",
+                        "action": gas_policy_action,
+                        "signal": gas_policy_signal,
                         "status": "selected",
                         "profiles": gas_policy_profile_labels(&gas_rank_policy),
                         "selected_profile": fee.label,
                         "gas_rank_source": fee.source,
-                        "guard": "entry_estimated_gas_fee_cap",
+                        "guard": gas_policy_guard,
                         "estimated_max_cost_eth": fee.estimated_max_cost_eth(estimated_gas_used),
                         "estimated_priority_spend_eth": fee.estimated_priority_spend_eth(estimated_gas_used),
                     },

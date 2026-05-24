@@ -1,4 +1,5 @@
 use eth_alpha_core::market::MarketEvent;
+use eth_alpha_core::mempool_entry::projected_pool_from_risk_event;
 use eth_alpha_engine::{AlphaEngine, EngineEvent};
 use eyre::Result;
 use tracing::{info, warn};
@@ -99,7 +100,16 @@ fn update_adapter_state<A: BacktestAdapter>(adapter: &A, event: &EngineEvent) {
                 .store(*block_number, std::sync::atomic::Ordering::Relaxed);
         }
         EngineEvent::Risk(risk) => {
-            if let Some(block) = risk.observed_block {
+            let mut block = risk.observed_block;
+            if let Some(pool) = projected_pool_from_risk_event(risk) {
+                block = Some(block.unwrap_or(pool.latest_block).max(pool.latest_block));
+                adapter
+                    .pools()
+                    .lock()
+                    .expect("pool lock")
+                    .insert(pool.address.clone(), pool);
+            }
+            if let Some(block) = block {
                 adapter
                     .current_block()
                     .store(block, std::sync::atomic::Ordering::Relaxed);

@@ -128,7 +128,7 @@ fn historical_signal_risk_event(
 ) -> Result<Option<eth_alpha_core::risk::RiskEvent>> {
     if !matches!(
         signal.signal_type.as_str(),
-        "lp_approval" | "lp_position_approval" | "liquidity_removal"
+        "trading_enabled" | "lp_approval" | "lp_position_approval" | "liquidity_removal"
     ) {
         return Ok(None);
     }
@@ -140,4 +140,81 @@ fn historical_signal_risk_event(
     event.source = Some(RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL.to_string());
     event.message = format!("historical confirmed signal: {}", event.message);
     Ok(Some(event))
+}
+
+#[cfg(test)]
+mod tests {
+    use eth_alpha_core::{
+        mempool_entry::MEMPOOL_ENTRY_EVIDENCE_KEY,
+        risk::{RiskKind, RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL},
+    };
+    use eth_alpha_engine::wire::MempoolSignalWire;
+    use serde_json::{json, Value};
+
+    use super::historical_signal_risk_event;
+
+    #[test]
+    fn historical_replay_includes_trading_enabled_entry_evidence() {
+        let entry_evidence = json!({
+            "evidence_version": "mempool_entry_evidence_v1",
+            "base_block": 12,
+            "projected_pool": {
+                "protocol": "UNISWAP-V2",
+                "denom_reserve": "1",
+                "token_reserve": "100",
+                "latest_block": 12,
+                "can_buy": true,
+                "can_sell": true,
+                "is_scam": false
+            },
+            "viability": {
+                "can_buy": true,
+                "can_approve": true,
+                "can_sell": true
+            },
+            "vault_buy_simulation": {
+                "route": "pool_buy_sell_probe",
+                "would_revert": false,
+                "gas_used": 176000,
+                "eth_spent_wei": "10000000000000000",
+                "tokens_received_raw": "1000000"
+            }
+        });
+        let signal = MempoolSignalWire {
+            signal_id: "1".to_string(),
+            signal_type: "trading_enabled".to_string(),
+            signal_source: None,
+            signal_created_at: None,
+            mempool_first_seen_at: None,
+            mempool_first_seen_ms: None,
+            detection_timestamp: None,
+            detection_tx_hash: None,
+            token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            pool_type: None,
+            creator_address: None,
+            subject_address: None,
+            headline: None,
+            value_1: None,
+            value_2: None,
+            flag: None,
+            payload: Value::Null,
+            mempool_entry_evidence: Some(entry_evidence.clone()),
+        };
+
+        let event = historical_signal_risk_event(signal, 12)
+            .expect("risk conversion")
+            .expect("trading enabled risk event");
+
+        assert_eq!(event.kind, RiskKind::TradingEnabled);
+        assert_eq!(
+            event.source.as_deref(),
+            Some(RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL)
+        );
+        assert_eq!(event.observed_block, Some(12));
+        assert_eq!(
+            event.evidence.unwrap()[MEMPOOL_ENTRY_EVIDENCE_KEY],
+            entry_evidence
+        );
+    }
 }

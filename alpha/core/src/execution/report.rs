@@ -85,6 +85,12 @@ pub struct MinedExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_policy_guard: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_tail_after_tx_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_dependency_priority_fee_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_policy_dependency_gas_price_wei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted_confirmation_depth: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recheck_confirmation_depth: Option<u64>,

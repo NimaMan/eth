@@ -143,6 +143,18 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Are confirmed fills backed by persisted EVM simulation output?",
             "Requires filled amount, gas, gas cost, and buy token output on confirmed trade events.",
         ),
+        "tail_entry_intent_has_exact_vault_buy_evidence" => (
+            "Are tail-entry buys backed by exact deployed-vault evidence?",
+            "Requires tail-after-enabling buy intents to carry successful `uniswap_v2_trading_vault` calldata evidence, not the generic pool probe.",
+        ),
+        "tail_entry_buy_has_ordering_evidence" => (
+            "Do tail-entry buys retain dependency ordering evidence?",
+            "Requires tail-entry gas shadow events to include the dependency tx hash plus dependency fee evidence used to place behind the enabling tx.",
+        ),
+        "tail_entry_buy_uses_exact_overlay_validation" => (
+            "Did tail-entry buys prove same-block overlay execution?",
+            "Fails while tail-entry fills are only validated as post-mine N+1 chain-sim results instead of exact dependency-tx plus vault-calldata overlay simulations.",
+        ),
         "entry_block_matches_buy_confirmed" => (
             "Does entry_block mean the buy-confirmed block?",
             "Compares each trade entry_block with its buy_confirmed lifecycle event block.",

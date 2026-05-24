@@ -839,7 +839,10 @@ fn mempool_entry_evidence(pool: &PoolSnapshot, price_ratio_to_initial: Option<De
             "would_revert": false,
             "gas_used": 176000,
             "eth_spent_wei": "10000000000000000",
-            "tokens_received_raw": "1000000"
+            "tokens_received_raw": "1000000",
+            "metadata": {
+                "exact_vault_calldata": true
+            }
         },
         "strategy_neutral_flags": {},
         "audit": {

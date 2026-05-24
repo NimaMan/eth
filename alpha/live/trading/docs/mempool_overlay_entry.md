@@ -78,8 +78,9 @@ The evidence JSON uses the `mempool_entry_evidence_v1` schema. The first
 implemented writer persists the existing `pool_buy_sell_probe` result and marks
 `vault_buy_simulation.metadata.exact_vault_calldata=false`. Alpha consumes and
 records this evidence, but it does not treat it as a valid tail-entry buy until
-`vault_buy_simulation.route=uniswap_v2_trading_vault` with successful exact
-deployed-vault calldata simulation is present.
+`vault_buy_simulation.route=uniswap_v2_trading_vault`,
+`vault_buy_simulation.metadata.exact_vault_calldata=true`, and successful exact
+deployed-vault calldata simulation are all present.
 
 ### 2. Expose mempool entry evidence through chain-server
 
@@ -107,7 +108,10 @@ Extend the mempool signal API response with:
       "would_revert": false,
       "gas_used": 176000,
       "eth_spent_wei": "10000000000000000",
-      "tokens_received_raw": "..."
+      "tokens_received_raw": "...",
+      "metadata": {
+        "exact_vault_calldata": true
+      }
     },
     "dependency_fee_metadata": {
       "tail_after_tx_hash": "0x...",

@@ -127,6 +127,108 @@ pub(super) async fn confirmed_reports_have_simulated_outputs_check(
     .await
 }
 
+pub(super) async fn tail_entry_ordering_evidence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "tail_entry_buy_has_ordering_evidence",
+        Verdict::Fail,
+        "no tail-entry buy events are missing dependency transaction or fee evidence",
+        "tail-entry buy events missing dependency tx or fee evidence",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_events te
+        JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.run_id = te.run_id
+         AND rsr.result_set_id = $1
+        JOIN alpha_trading.trades t
+          ON t.trade_id = te.trade_id
+        WHERE ($2::text IS NULL OR t.strategy_name = $2)
+          AND te.gas_policy_action = 'tail_entry_buy'
+          AND (
+              NULLIF(te.payload#>>'{mined_evidence,gas_policy_tail_after_tx_hash}', '') IS NULL
+              OR (
+                  NULLIF(te.payload#>>'{mined_evidence,gas_policy_dependency_priority_fee_wei}', '') IS NULL
+                  AND NULLIF(te.payload#>>'{mined_evidence,gas_policy_dependency_gas_price_wei}', '') IS NULL
+              )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn tail_entry_overlay_validation_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "tail_entry_buy_uses_exact_overlay_validation",
+        Verdict::Fail,
+        "no tail-entry buy events are missing exact same-block overlay validation",
+        "tail-entry buy events confirmed without exact overlay validation",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_events te
+        JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.run_id = te.run_id
+         AND rsr.result_set_id = $1
+        JOIN alpha_trading.trades t
+          ON t.trade_id = te.trade_id
+        WHERE ($2::text IS NULL OR t.strategy_name = $2)
+          AND te.gas_policy_action = 'tail_entry_buy'
+          AND COALESCE(te.gas_policy_guard, '') NOT LIKE '%exact_overlay_simulation=true%'
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn tail_entry_intents_have_exact_vault_evidence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "tail_entry_intent_has_exact_vault_buy_evidence",
+        Verdict::Fail,
+        "no tail-entry buy intents are missing successful deployed-vault calldata evidence",
+        "tail-entry buy intents missing successful exact-vault evidence",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.order_intents oi
+        JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.run_id = oi.run_id
+         AND rsr.result_set_id = $1
+        WHERE ($2::text IS NULL OR oi.strategy_name = $2)
+          AND oi.side = 'buy'
+          AND oi.reason_code LIKE 'entry.tail_after_enabling_tx%'
+          AND (
+              COALESCE(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,route}', '') <> 'uniswap_v2_trading_vault'
+              OR COALESCE(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,metadata,exact_vault_calldata}', 'false') <> 'true'
+              OR COALESCE(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,would_revert}', 'true') <> 'false'
+              OR NULLIF(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,gas_used}', '') IS NULL
+              OR COALESCE(NULLIF(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,eth_spent_wei}', ''), '0') = '0'
+              OR COALESCE(NULLIF(oi.reason_details#>>'{risk_event_evidence,mempool_entry_evidence,vault_buy_simulation,tokens_received_raw}', ''), '0') = '0'
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn execution_replay_inputs_check(
     pool: &PgPool,
     result_set_id: &str,

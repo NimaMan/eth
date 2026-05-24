@@ -247,6 +247,9 @@ fn mined_evidence(
         gas_estimated_max_cost_eth: record.gas_estimated_max_cost_eth.clone(),
         gas_estimated_priority_spend_eth: record.gas_estimated_priority_spend_eth.clone(),
         gas_policy_guard: record.gas_policy_guard.clone(),
+        gas_policy_tail_after_tx_hash: None,
+        gas_policy_dependency_priority_fee_wei: None,
+        gas_policy_dependency_gas_price_wei: None,
         accepted_confirmation_depth: Some(ACCEPTED_CONFIRMATION_DEPTH),
         recheck_confirmation_depth: Some(RECHECK_CONFIRMATION_DEPTH),
     })

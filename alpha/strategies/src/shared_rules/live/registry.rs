@@ -63,7 +63,7 @@ mod tests {
             strategy_set_specs(alpha11_specs::SET_NAME, &options)
                 .unwrap()
                 .len(),
-            6
+            9
         );
         let hold15 = strategy_set_specs(crate::alpha11::HOLD15_STRATEGY_NAME, &options).unwrap();
         assert_eq!(hold15.len(), 1);

@@ -108,6 +108,21 @@ pub async fn run_checks(
         .await?,
     );
     checks.push(
+        execution_replay::tail_entry_intents_have_exact_vault_evidence_check(
+            pool,
+            result_set_id,
+            strategy,
+        )
+        .await?,
+    );
+    checks.push(
+        execution_replay::tail_entry_ordering_evidence_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        execution_replay::tail_entry_overlay_validation_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
         lifecycle::entry_block_matches_buy_confirmation_check(pool, result_set_id, strategy)
             .await?,
     );

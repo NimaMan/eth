@@ -14,6 +14,7 @@ const LIVE_GAS_SAFETY_BUFFER_ETH_CONFIG: &str = "ALPHA_LIVE_GAS_SAFETY_BUFFER_ET
 const LIVE_V2_VAULT_BUY_GAS_LIMIT_CONFIG: &str = "ALPHA_LIVE_UNISWAP_V2_VAULT_BUY_GAS_LIMIT";
 const LIVE_V2_VAULT_SELL_GAS_LIMIT_CONFIG: &str = "ALPHA_LIVE_UNISWAP_V2_VAULT_SELL_GAS_LIMIT";
 const LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_ENTRY_BUY_GAS_PROFILES";
+const LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_TAIL_ENTRY_BUY_GAS_PROFILES";
 const LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_NORMAL_EXIT_GAS_PROFILES";
 const LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_RACE_EXIT_GAS_PROFILES";
 const LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES";
@@ -30,6 +31,7 @@ pub(super) struct LiveRealGasPolicy {
     pub(super) v2_vault_buy_gas_limit: u64,
     pub(super) v2_vault_sell_gas_limit: u64,
     pub(super) entry_buy_gas_rank_policy: StrategyGasRankPolicy,
+    pub(super) tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) normal_exit_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy,
@@ -76,6 +78,10 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG,
         )?,
+        tail_entry_buy_gas_rank_policy: required_config_gas_policy(
+            config,
+            LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG,
+        )?,
         normal_exit_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG,
@@ -89,6 +95,36 @@ pub(super) fn load_live_real_gas_policy(
             LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG,
         )?,
     })
+}
+
+pub(in crate::live_trader) struct BuyGasPolicyContext<'a> {
+    pub(in crate::live_trader) policy: &'a StrategyGasRankPolicy,
+    pub(in crate::live_trader) action: &'static str,
+    pub(in crate::live_trader) signal: String,
+    pub(in crate::live_trader) guard: &'static str,
+}
+
+impl LiveRealGasPolicy {
+    pub(in crate::live_trader) fn buy_policy_context(
+        &self,
+        reason_code: Option<&str>,
+    ) -> BuyGasPolicyContext<'_> {
+        let signal = reason_code.unwrap_or("entry.buy_eligible_pool_once");
+        if signal.starts_with("entry.tail_after_enabling_tx") {
+            return BuyGasPolicyContext {
+                policy: &self.tail_entry_buy_gas_rank_policy,
+                action: "tail_entry_buy",
+                signal: signal.to_string(),
+                guard: "tail_entry_estimated_gas_fee_cap",
+            };
+        }
+        BuyGasPolicyContext {
+            policy: &self.entry_buy_gas_rank_policy,
+            action: "entry_buy",
+            signal: signal.to_string(),
+            guard: "entry_estimated_gas_fee_cap",
+        }
+    }
 }
 
 fn required_config_string(config: &HashMap<String, String>, key: &str) -> Result<String> {
@@ -165,5 +201,60 @@ fn parse_gas_rank_profile(value: &str) -> Result<GasRankProfile> {
         "p97" => Ok(GasRankProfile::P97),
         "p99" => Ok(GasRankProfile::P99),
         other => Err(eyre!("unknown gas-rank profile {other:?}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eth_live_trading::StrategyGasRankPolicy;
+    use rust_decimal::Decimal;
+
+    use super::LiveRealGasPolicy;
+
+    fn policy() -> LiveRealGasPolicy {
+        LiveRealGasPolicy {
+            required_gas_rank_source: "eth_chain_server_gas_rank".to_string(),
+            gas_rank_lookback_blocks: 100,
+            simulated_gas_buffer_bps: 2500,
+            max_priority_fee_gwei: Decimal::new(35, 1),
+            entry_max_estimated_gas_fee_eth: Decimal::new(12, 4),
+            exit_max_estimated_gas_fee_eth: Decimal::new(2, 3),
+            safety_buffer_eth: Decimal::new(1, 3),
+            v2_vault_buy_gas_limit: 300_000,
+            v2_vault_sell_gas_limit: 300_000,
+            entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
+            tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
+            normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
+            mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
+            lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
+        }
+    }
+
+    #[test]
+    fn tail_after_enabling_tx_uses_tail_entry_buy_context() {
+        let policy = policy();
+        let context = policy.buy_policy_context(Some("entry.tail_after_enabling_tx"));
+
+        assert_eq!(context.action, "tail_entry_buy");
+        assert_eq!(context.signal, "entry.tail_after_enabling_tx");
+        assert_eq!(context.guard, "tail_entry_estimated_gas_fee_cap");
+        assert_eq!(
+            context.policy.preference_order,
+            StrategyGasRankPolicy::p85_first().preference_order
+        );
+    }
+
+    #[test]
+    fn regular_entry_uses_entry_buy_context() {
+        let policy = policy();
+        let context = policy.buy_policy_context(Some("entry.buy_eligible_pool_once"));
+
+        assert_eq!(context.action, "entry_buy");
+        assert_eq!(context.signal, "entry.buy_eligible_pool_once");
+        assert_eq!(context.guard, "entry_estimated_gas_fee_cap");
+        assert_eq!(
+            context.policy.preference_order,
+            StrategyGasRankPolicy::p75_first().preference_order
+        );
     }
 }

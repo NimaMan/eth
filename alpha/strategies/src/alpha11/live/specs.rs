@@ -14,7 +14,7 @@ const MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 pub const SET_NAME: &str = HOLD_SWEEP_SET_NAME;
 
 pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
-    [12_u64, 14, 15, 16, 18, 20]
+    [12_u64, 14, 15, 16, 18, 20, 25, 50, 100]
         .into_iter()
         .map(|max_hold_blocks| spec(max_hold_blocks, options))
         .collect()
@@ -83,7 +83,7 @@ mod tests {
     fn set_matches_hold_sweep() {
         let specs = specs(&LiveStrategySpecOptions::default());
 
-        assert_eq!(specs.len(), 6);
+        assert_eq!(specs.len(), 9);
         assert_eq!(
             specs
                 .iter()
@@ -96,6 +96,9 @@ mod tests {
                 HOLD16_STRATEGY_NAME,
                 "alpha11-univ2-lp30-pool-update-block-hold18",
                 "alpha11-univ2-lp30-pool-update-block-hold20",
+                "alpha11-univ2-lp30-pool-update-block-hold25",
+                "alpha11-univ2-lp30-pool-update-block-hold50",
+                "alpha11-univ2-lp30-pool-update-block-hold100",
             ]
         );
         assert_eq!(
@@ -103,7 +106,17 @@ mod tests {
                 .iter()
                 .map(|spec| spec.max_hold_blocks)
                 .collect::<Vec<_>>(),
-            vec![Some(12), Some(14), Some(15), Some(16), Some(18), Some(20)]
+            vec![
+                Some(12),
+                Some(14),
+                Some(15),
+                Some(16),
+                Some(18),
+                Some(20),
+                Some(25),
+                Some(50),
+                Some(100),
+            ]
         );
         assert!(specs.iter().all(|spec| spec.strategy_impl == STRATEGY_IMPL));
         assert!(specs.iter().all(|spec| spec.exit_liquidity_removal));
