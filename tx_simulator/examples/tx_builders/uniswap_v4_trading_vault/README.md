@@ -2,7 +2,7 @@
 
 Examples for the V4 vault route rehearsal belong here. These examples are
 intended to produce JSON that can be saved under
-`onchain-deployments/uniswap-v4-trading-vault/simulations/reports/`.
+`deploy/onchain/uniswap-v4-trading-vault/simulations/reports/`.
 
 ## Direct Universal Router Baseline
 
@@ -12,13 +12,13 @@ Run the current direct-route baseline:
 cd /home/nima/code/crypto/blockchains/eth
 cargo run -q -p tx_simulator \
   --example uniswap_v4_trading_vault_direct_baseline \
-  | tee onchain-deployments/uniswap-v4-trading-vault/simulations/reports/eth-usdc-500-no-hook-direct-baseline.json \
+  | tee deploy/onchain/uniswap-v4-trading-vault/simulations/reports/eth-usdc-500-no-hook-direct-baseline.json \
   | jq '{fixture_id, block, buy: .buy.transaction.gas_used, sell: .sell.transaction.gas_used, totals}'
 ```
 
 The default fixture is:
 
-`onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json`
+`deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json`
 
 The direct baseline executes:
 
@@ -39,7 +39,7 @@ comparison:
 cd /home/nima/code/crypto/blockchains/eth
 cargo run -q -p tx_simulator \
   --example uniswap_v4_trading_vault_candidate_rehearsal \
-  | tee onchain-deployments/uniswap-v4-trading-vault/simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json \
+  | tee deploy/onchain/uniswap-v4-trading-vault/simulations/reports/eth-usdc-500-no-hook-candidate-vault-rehearsal.json \
   | jq '.comparison'
 ```
 

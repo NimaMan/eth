@@ -1,8 +1,15 @@
-# Ethereum
+# Systemd
 
-Ethereum execution, beacon, and chain-processing units.
+Ethereum execution, beacon, chain-processing, signer, and alpha runtime units.
 
-Current units:
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `*.service`, `*.socket` | System-level units copied to `/etc/systemd/system/`. |
+| `user/` | User-level node and alpha units linked into `$HOME/.config/systemd/user`. |
+
+Current system units:
 
 - `reth.service`
 - `reth-rpc-kartal-bridge.socket` / `reth-rpc-kartal-bridge.service` - exposes Reth HTTP RPC on the Kartal Docker bridge only.
@@ -12,6 +19,9 @@ Current units:
 - `eth-live-token-tracker.service` - Python live token tracker and Redis token snapshot publisher.
 - `eth-token-server.service` - Rust in-memory token tracking API/inspector server.
 - `eth-mempool-processor.service` - Rust mempool signal detector.
+
+Current user units are documented in `user/README.md` and are installed by
+`../node/scripts/install-user-services.sh`.
 
 Build the live processor before starting the service:
 

@@ -17,5 +17,5 @@ measured production transaction path requires a new on-chain contract.
 
 For contracts that are actually deployed on Ethereum, keep the operational
 deployment runbook, chain-specific config, audit checklist, Kartal dry-run
-evidence, and receipt records under `../onchain-deployments/`. This folder owns
+evidence, and receipt records under `../deploy/onchain/`. This folder owns
 source and tests, not the live deployment trail.

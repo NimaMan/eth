@@ -10,4 +10,6 @@ under the repository-level `deploy/` tree.
 
 | Folder | Purpose |
 | --- | --- |
-| `systemd/` | ETH execution, beacon, chain-processing, token tracking, mempool, and Kartal signer systemd units. |
+| `node/` | Reth/Lighthouse install, bootstrap, snapshot, health, and user-service install scripts. |
+| `onchain/` | Mainnet contract deployment runbooks, configs, audit evidence, dry-runs, receipts, and signoff records. |
+| `systemd/` | ETH execution, beacon, chain-processing, token tracking, mempool, Kartal signer, and alpha systemd units. |

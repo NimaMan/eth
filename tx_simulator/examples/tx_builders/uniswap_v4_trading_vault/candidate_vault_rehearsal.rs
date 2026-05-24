@@ -830,7 +830,7 @@ fn resolve_route(fixture: &RouteFixture, args: &Args) -> Result<ResolvedRoute> {
 
 fn default_fixture_path() -> PathBuf {
     eth_workspace_root().join(
-        "onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json",
+        "deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json",
     )
 }
 

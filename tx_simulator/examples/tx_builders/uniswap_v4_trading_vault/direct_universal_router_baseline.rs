@@ -356,7 +356,7 @@ fn default_fixture_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("tx_simulator manifest should live below ETH workspace root")
-        .join("onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json")
+        .join("deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json")
 }
 
 fn load_fixture(path: &Path) -> Result<RouteFixture> {

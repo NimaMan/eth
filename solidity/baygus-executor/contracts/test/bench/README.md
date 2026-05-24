@@ -10,7 +10,7 @@ Foundry gas tests for Mode A.
   easy to compare.
 - `v4/UniswapV4TradingVaultGas.t.sol` compares the candidate V4 vault against a
   direct Universal Router path with the same ETH/USDC 0.05% no-hook route shape
-  used by `onchain-deployments/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json`.
+  used by `deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json`.
 - `v4/UniswapV4TradingVaultForkGas.t.sol` runs the same comparison against the
   real mainnet Universal Router, Permit2, and USDC contracts when a fork URL is
   supplied.

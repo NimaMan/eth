@@ -39,10 +39,9 @@ Important adjacent code that is not currently a root workspace member:
 | `tx_executor/` | Direct transaction submission core. Receives prepared transactions; does not choose strategy, routes, or rank. |
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
 | `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
-| `node/` | Reth/Lighthouse node scripts and systemd service helpers. |
-| `deploy/` | ETH-owned deployment assets, including systemd units for the local Reth-backed stack. |
+| `deploy/` | ETH-owned deployment assets, including node scripts, systemd units, and on-chain deployment ledgers. |
 | `solidity/` | Archived Solidity executor/contracts and experiments. Current v4 simulation uses deployed Uniswap periphery. |
-| `onchain-deployments/` | ETH mainnet contract deployment runbooks, configs, audit checklists, Kartal dry-runs, receipt evidence, and reproducible signoff records. |
+| `deploy/onchain/` | ETH mainnet contract deployment runbooks, configs, audit checklists, Kartal dry-runs, receipt evidence, and reproducible signoff records. |
 | `vendor/reth/` | Vendored upstream Reth reference tree. Use for source parity and examples, not as normal application code. |
 
 ## Main Data Flow
@@ -117,9 +116,9 @@ Use this map before broad searching:
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
 | How does alpha prepare a live transaction? | `alpha/live/trading/README.md` | `alpha/live/trading/src/tx_prep/`, `alpha/engine/src/execution/real/README.md`, `alpha/block_tx_rank/README.md` |
 | How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
-| How do we deploy and audit an ETH on-chain contract? | `onchain-deployments/README.md` | contract-specific folders such as `onchain-deployments/uniswap-v2-trading-vault/` |
+| How do we deploy and audit an ETH on-chain contract? | `deploy/onchain/README.md` | contract-specific folders such as `deploy/onchain/uniswap-v2-trading-vault/` |
 | How do I investigate token behavior or launch strategy stats? | `token_lab/README.md` | `token_lab/cases/README.md`, `token_lab/strategy/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
-| How are node paths and services configured? | `node/README.md` | `config.env`, `node/scripts/`, `node/systemd/` |
+| How are node paths and services configured? | `deploy/node/README.md` | `config.env`, `deploy/node/scripts/`, `deploy/systemd/` |
 | How do archived Solidity executor experiments fit? | `solidity/README.md` | current production simulation paths live in `tx_simulator/` and `tx_processor/` |
 
 When navigating as an agent, the fastest useful sequence is:
@@ -217,7 +216,7 @@ cargo run -p mempool_processor --bin mempool_signal_detector
 ```
 
 For PyReth development, use the `pyreth/README.md` workflow. For node setup and
-service management, use `node/README.md`.
+service management, use `deploy/node/README.md`.
 
 ## Testing And Investigation
 
