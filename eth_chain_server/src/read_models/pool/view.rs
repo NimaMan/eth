@@ -56,6 +56,7 @@ struct CurrentTradingView {
 pub struct PoolView {
     pub token_address: String,
     pub token_symbol: String,
+    pub token_decimals: u8,
     pub pool_address: String,
     pub protocol: String,
     pub pool_id: Option<String>,
@@ -620,6 +621,7 @@ impl PoolView {
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
+            token_decimals: token.decimals,
             pool_address: base.identity.pool_address.clone(),
             protocol: base.identity.protocol.clone(),
             pool_id: concentrated.pool_id,

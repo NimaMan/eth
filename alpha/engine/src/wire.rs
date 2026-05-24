@@ -50,6 +50,8 @@ pub struct LiveProgressWire {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PoolWire {
     pub token_address: String,
+    #[serde(default)]
+    pub token_decimals: Option<u8>,
     pub pool_address: String,
     pub protocol: String,
     #[serde(default)]
@@ -216,7 +218,7 @@ impl PoolWire {
             initial_price_denom_per_token: self.initial_price.map(decimal_from_f64),
             price_ratio_to_initial: self.price_ratio_to_initial.map(decimal_from_f64),
             creation_block: self.creation_block.filter(|block| *block > 0),
-            token_decimals: None,
+            token_decimals: self.token_decimals,
             fee_tier: self.fee_tier,
             uniswap_v4: self.uniswap_v4_pool_key()?,
             latest_block,
@@ -511,6 +513,7 @@ mod tests {
     fn pool_wire_with_flags(top_level_can_buy: bool, top_level_can_sell: bool) -> PoolWire {
         PoolWire {
             token_address: "0x1111111111111111111111111111111111111111".to_string(),
+            token_decimals: Some(9),
             pool_address: "0x2222222222222222222222222222222222222222".to_string(),
             protocol: "UNISWAP-V2".to_string(),
             pool_id: None,
@@ -565,6 +568,7 @@ mod tests {
             Some(decimal_from_f64(0.005))
         );
         assert_eq!(snapshot.price_ratio_to_initial, Some(decimal_from_f64(2.0)));
+        assert_eq!(snapshot.token_decimals, Some(9));
     }
 
     #[test]
