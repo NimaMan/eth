@@ -79,7 +79,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `confirmed_reports_have_simulation_outputs` | Are confirmed fills backed by persisted EVM simulation output? | A confirmed fill must carry fill amount, gas, gas cost, and buy token output so PnL can be reconstructed. | `execution_replay.rs` |
 | `tail_entry_intent_has_exact_vault_buy_evidence` | Are tail-entry buys backed by exact deployed-vault evidence? | Tail-entry buys must prove the deployed vault route works, not only the generic pool buy/sell probe. | `execution_replay.rs` |
 | `tail_entry_buy_has_ordering_evidence` | Do tail-entry buys retain dependency ordering evidence? | Same-block tail entry only makes sense if the enabling tx hash and fee evidence used for behind-the-tx placement are persisted. | `execution_replay.rs` |
-| `tail_entry_buy_uses_exact_overlay_validation` | Did tail-entry buys prove same-block overlay execution? | Post-mine N+1 chain-sim validation must not be mistaken for exact dependency-tx plus vault-calldata overlay proof. | `execution_replay.rs` |
+| `tail_entry_buy_uses_live_backtest_n_plus_1_validation` | Do tail-entry buys use the live-backtest N+1 execution model? | Live backtest models mempool tail-entry as submit at signal block N, then simulate the fill against post-block N+1 state; same-block overlay proof belongs to real-live deployment gates. | `execution_replay.rs` |
 | `closed_trade_replay_inputs_present` | Can this closed trade be independently replayed? | Closed trades need buy token amount, sell order amount, and sell fill data for independent chain-sim replay. | `execution_replay.rs` |
 
 ### Lifecycle And Rollups

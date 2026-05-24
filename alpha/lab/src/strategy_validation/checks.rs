@@ -120,8 +120,12 @@ pub async fn run_checks(
         execution_replay::tail_entry_ordering_evidence_check(pool, result_set_id, strategy).await?,
     );
     checks.push(
-        execution_replay::tail_entry_overlay_validation_check(pool, result_set_id, strategy)
-            .await?,
+        execution_replay::tail_entry_live_backtest_n_plus_1_validation_check(
+            pool,
+            result_set_id,
+            strategy,
+        )
+        .await?,
     );
     checks.push(
         lifecycle::entry_block_matches_buy_confirmation_check(pool, result_set_id, strategy)

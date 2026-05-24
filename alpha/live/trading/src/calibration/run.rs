@@ -296,10 +296,11 @@ mod tests {
                 max_priority_fee_per_gas_wei: "1".to_string(),
                 max_transaction_cost_wei: "0".to_string(),
                 max_daily_cost_wei: "0".to_string(),
+                daily_spend_cap_enabled: Some(false),
                 daily_spend: KartalDailySpendStatus {
                     spend_day: "2026-05-19".to_string(),
                     spent_wei: "0".to_string(),
-                    remaining_daily_cost_wei: Some("0".to_string()),
+                    remaining_daily_cost_wei: None,
                 },
                 require_simulation: true,
                 max_simulation_age_blocks: 2,

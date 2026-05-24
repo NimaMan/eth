@@ -164,7 +164,7 @@ pub(super) async fn tail_entry_ordering_evidence_check(
     .await
 }
 
-pub(super) async fn tail_entry_overlay_validation_check(
+pub(super) async fn tail_entry_live_backtest_n_plus_1_validation_check(
     pool: &PgPool,
     result_set_id: &str,
     strategy: Option<&str>,
@@ -172,10 +172,10 @@ pub(super) async fn tail_entry_overlay_validation_check(
     count_check(
         pool,
         "execution_replay",
-        "tail_entry_buy_uses_exact_overlay_validation",
+        "tail_entry_buy_uses_live_backtest_n_plus_1_validation",
         Verdict::Fail,
-        "no tail-entry buy events are missing exact same-block overlay validation",
-        "tail-entry buy events confirmed without exact overlay validation",
+        "tail-entry buy events are marked as live-backtest N+1 chain-sim validation",
+        "tail-entry buy events missing live-backtest N+1 validation marker",
         r#"
         SELECT count(*)
         FROM alpha_trading.trade_events te
@@ -186,7 +186,10 @@ pub(super) async fn tail_entry_overlay_validation_check(
           ON t.trade_id = te.trade_id
         WHERE ($2::text IS NULL OR t.strategy_name = $2)
           AND te.gas_policy_action = 'tail_entry_buy'
-          AND COALESCE(te.gas_policy_guard, '') NOT LIKE '%exact_overlay_simulation=true%'
+          AND (
+              COALESCE(te.gas_policy_guard, '') NOT LIKE '%tail_entry_validation_mode=post_mine_n_plus_1%'
+              OR COALESCE(te.gas_policy_guard, '') NOT LIKE '%exact_overlay_simulation=false%'
+          )
         "#,
         result_set_id,
         strategy,

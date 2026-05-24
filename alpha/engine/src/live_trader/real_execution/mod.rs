@@ -855,7 +855,11 @@ fn validate_public_mempool_hold16_deploy(
         &status.policy.max_daily_cost_wei,
         "policy max_daily_cost_wei",
     )?;
-    if max_daily_cost_wei < max_transaction_cost_wei {
+    let daily_spend_cap_enabled = status
+        .policy
+        .daily_spend_cap_enabled
+        .unwrap_or_else(|| !max_daily_cost_wei.is_zero());
+    if daily_spend_cap_enabled && max_daily_cost_wei < max_transaction_cost_wei {
         return Err(eyre!(
             "Kartal max_daily_cost_wei {} is below max_transaction_cost_wei {}",
             status.policy.max_daily_cost_wei,

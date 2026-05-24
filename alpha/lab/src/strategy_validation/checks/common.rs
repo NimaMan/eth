@@ -155,9 +155,9 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do tail-entry buys retain dependency ordering evidence?",
             "Requires tail-entry gas shadow events to include the dependency tx hash plus dependency fee evidence used to place behind the enabling tx.",
         ),
-        "tail_entry_buy_uses_exact_overlay_validation" => (
-            "Did tail-entry buys prove same-block overlay execution?",
-            "Fails while tail-entry fills are only validated as post-mine N+1 chain-sim results instead of exact dependency-tx plus vault-calldata overlay simulations.",
+        "tail_entry_buy_uses_live_backtest_n_plus_1_validation" => (
+            "Do tail-entry buys use the live-backtest N+1 execution model?",
+            "Requires tail-entry fills to be explicitly marked as post-mine N+1 chain-sim validation, not same-block overlay proof.",
         ),
         "entry_block_matches_buy_confirmed" => (
             "Does entry_block mean the buy-confirmed block?",

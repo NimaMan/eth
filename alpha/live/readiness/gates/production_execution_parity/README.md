@@ -136,9 +136,11 @@ The first backtest/live-backtest parity fixes are now in place:
   dependency priority/gas-price metadata when present, and explicitly marks the
   validation mode as `post_mine_n_plus_1` with `exact_overlay_simulation=false`.
 
-This is still not same-block overlay proof. The remaining hard gate is exact
-dependency-tx plus deployed-vault calldata overlay simulation, or keeping the
-run classified as post-mine `N+1` validation only.
+This is intentionally not same-block overlay proof. Live backtest keeps the
+core backtest execution model: observe/submit at block `N`, then simulate the
+fill as the last relevant transaction against post-block `N+1` state. Exact
+dependency-tx plus deployed-vault calldata overlay simulation remains a
+real-live deployment gate, not a live-backtest validation failure.
 
 ## Implemented Validation Checks
 
@@ -148,7 +150,7 @@ These checks are wired into the comprehensive strategy validator:
 | --- | --- |
 | `tail_entry_intent_has_exact_vault_buy_evidence` | A tail-entry buy intent lacks successful deployed-vault calldata evidence. |
 | `tail_entry_buy_has_ordering_evidence` | A tail-entry gas-policy event lacks the dependency tx hash or dependency fee evidence. |
-| `tail_entry_buy_uses_exact_overlay_validation` | A tail-entry fill is only marked as post-mine N+1 validation instead of exact same-block overlay validation. |
+| `tail_entry_buy_uses_live_backtest_n_plus_1_validation` | A tail-entry event is not explicitly marked as post-mine N+1 chain-sim validation. |
 
 ## Remaining Validation Checks
 

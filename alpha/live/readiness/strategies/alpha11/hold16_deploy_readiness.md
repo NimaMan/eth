@@ -64,11 +64,11 @@ Runtime evidence observed after restart:
 | Hold16 validation | Current `0.555 ETH` live-backtest validation passes `50 / 50` checks with `5` trades, `4` closed, `1` open |
 | Kartal broadcast mode | `public_mempool` |
 | Kartal signer | Available through `unix_socket` |
-| Kartal caps | max value `0.01 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0125 ETH`, daily cap `2 ETH` |
+| Kartal caps | max value `0.01 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0125 ETH`; Kartal daily cap disabled |
 | Cap/signing preflight | `alpha11-hold16-cap-signing-preflight-20260523T125653Z` returned `dry_run` and tx hash `0x31b17a0d96a93d9a6209a665d67052a0b5d1ed79a3206bf6a40bb0b031d11829` |
 | Max-fee enforcement | `alpha11-hold16-maxfee-5gwei-accepted-20260523T131107Z` returned `dry_run`; `alpha11-hold16-maxfee-6gwei-rejected-20260523T131107Z` was rejected because `max_fee_per_gas` exceeded the `5 gwei` policy cap |
 | Post-signer-restart preflight | `alpha11-hold16-post-signer-restart-preflight-20260523T133813Z` returned `dry_run` after remounting the `/run/kartal` socket into the Kartal container |
-| Public spend accounting | `spent_today=0 ETH`, `remaining_daily=2 ETH`; the daily cap is non-binding for the `0.555 ETH` initial-bankroll launch |
+| Public spend accounting | Kartal daily spend budget disabled; Alpha's `0.555 ETH` initial bankroll is the active budget limiter |
 | First real candidate | Pre-submit exact vault calldata simulation reverted at block `25158902`; no tx hash, no Kartal spend, no gas |
 
 ## Public Hold16 State

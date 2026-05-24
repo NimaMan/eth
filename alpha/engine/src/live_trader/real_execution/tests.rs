@@ -59,6 +59,7 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
             max_priority_fee_per_gas_wei: "500000000000".to_string(),
             max_transaction_cost_wei: "30000000000000000".to_string(),
             max_daily_cost_wei: "50000000000000000".to_string(),
+            daily_spend_cap_enabled: Some(true),
             daily_spend: KartalDailySpendStatus {
                 spend_day: "2026-05-21".to_string(),
                 spent_wei: "0".to_string(),
@@ -129,6 +130,22 @@ fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
 fn public_mempool_hold16_deploy_accepts_hold16_scope() {
     validate_kartal_real_status(
         &status(KartalStatusBroadcastMode::PublicMempool),
+        &real_args(true),
+        &live_args(),
+        &specs(&live_args()),
+    )
+    .unwrap();
+}
+
+#[test]
+fn public_mempool_hold16_deploy_accepts_disabled_daily_budget() {
+    let mut status = status(KartalStatusBroadcastMode::PublicMempool);
+    status.policy.max_daily_cost_wei = "0".to_string();
+    status.policy.daily_spend_cap_enabled = Some(false);
+    status.policy.daily_spend.remaining_daily_cost_wei = None;
+
+    validate_kartal_real_status(
+        &status,
         &real_args(true),
         &live_args(),
         &specs(&live_args()),

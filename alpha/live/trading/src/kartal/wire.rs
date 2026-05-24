@@ -47,6 +47,8 @@ pub struct KartalEthTxPolicyStatus {
     pub max_priority_fee_per_gas_wei: String,
     pub max_transaction_cost_wei: String,
     pub max_daily_cost_wei: String,
+    #[serde(default)]
+    pub daily_spend_cap_enabled: Option<bool>,
     pub daily_spend: KartalDailySpendStatus,
     pub require_simulation: bool,
     pub max_simulation_age_blocks: u64,
@@ -90,10 +92,11 @@ mod tests {
                 "max_priority_fee_per_gas_wei": "500000000000",
                 "max_transaction_cost_wei": "0",
                 "max_daily_cost_wei": "0",
+                "daily_spend_cap_enabled": false,
                 "daily_spend": {
                     "spend_day": "2026-05-19",
                     "spent_wei": "0",
-                    "remaining_daily_cost_wei": "0"
+                    "remaining_daily_cost_wei": null
                 },
                 "require_simulation": true,
                 "max_simulation_age_blocks": 2,

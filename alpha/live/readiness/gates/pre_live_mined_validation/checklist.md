@@ -12,7 +12,8 @@ Use this checklist for every one-position mined-validation run.
   and `allowed_selectors`.
 - Signer policy has matching `allowed_targets` and `allowed_selectors`.
 - The signer address has enough ETH for the validation buy and sell.
-- Daily spend remaining is enough for one buy and one sell.
+- Alpha strategy bankroll has enough available balance for one buy and one sell;
+  Kartal daily spend cap is disabled for this launch.
 - Exact final calldata simulation targets the deployed vault route.
 - Simulation freshness is within the configured block limit.
 
@@ -65,4 +66,3 @@ Example for a `0.01 ETH` buy, `300000` gas limit, and `50 gwei` max fee:
 - Persisted evidence includes tx hash, block number/hash, transaction index,
   gas used, effective gas price, paid gas, vault event amounts, and the
   configured confirmation recheck.
-

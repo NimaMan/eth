@@ -9,8 +9,8 @@ Run this sequence for a one-position mined-validation attempt.
 4. Confirm the signer is healthy.
 5. Confirm executor and signer target/selector allowlists match the deployed
    vault route.
-6. Confirm value, gas, fee, transaction-cost, and daily caps cover the
-   validation buy and sell.
+6. Confirm value, gas, fee, and transaction-cost caps cover the validation buy
+   and sell; confirm Alpha's strategy bankroll is the active budget limiter.
 7. Run dry-run calibration and archive the report.
 8. Run one final dry-run signing check after cap changes.
 9. Switch only Kartal broadcast mode to `public_mempool`.
@@ -25,4 +25,3 @@ Run this sequence for a one-position mined-validation attempt.
 
 The runbook deliberately separates strategy selection from runtime parameters:
 live strategy parameters must come from the named strategy spec.
-
