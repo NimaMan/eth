@@ -17,7 +17,7 @@ use super::{
 };
 
 impl SimulationManager {
-    pub(super) async fn handle_contract_creation(
+    pub(in crate::simulator::simulation_manager) async fn handle_contract_creation(
         &self,
         request: &TxSimulationJob,
         now: Instant,

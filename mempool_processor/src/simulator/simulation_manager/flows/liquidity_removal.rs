@@ -7,7 +7,7 @@ use crate::tx_router::TransactionCategory;
 use super::{mempool_tx_to_unsigned_tx, SimulationManager, SimulationResult, TxSimulationJob};
 
 impl SimulationManager {
-    pub(super) async fn simulate_liquidity_removal(
+    pub(in crate::simulator::simulation_manager) async fn simulate_liquidity_removal(
         &self,
         request: &TxSimulationJob,
         processed: &ProcessedTransaction,

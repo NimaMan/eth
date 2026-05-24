@@ -36,7 +36,7 @@ struct BoughtV2Fill {
 }
 
 impl SimulationManager {
-    pub(super) async fn simulate_exact_vault_entry_buy(
+    pub(in crate::simulator::simulation_manager) async fn simulate_exact_vault_entry_buy(
         &self,
         request: &TxSimulationJob,
         config: &PoolBuySellParameters,

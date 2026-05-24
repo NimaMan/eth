@@ -1,11 +1,13 @@
-use super::block_pruner::spawn_block_pruner;
-use super::logging::log_simulation_start;
-use super::pending_funding_dependencies::{
+use super::dependencies::pending_funding_dependencies::{
     PendingFundingDependencies, PendingFundingDependencyStats,
 };
-use super::pending_nonce_dependencies::{PendingNonceDependencies, PendingNonceDependencyStats};
-use super::pending_sequences::{PendingSequences, SequenceKey};
-use super::request_queue::{ManagerStats, RequestQueue};
+use super::dependencies::pending_nonce_dependencies::{
+    PendingNonceDependencies, PendingNonceDependencyStats,
+};
+use super::dependencies::pending_sequences::{PendingSequences, SequenceKey};
+use super::runtime::block_pruner::spawn_block_pruner;
+use super::runtime::logging::log_simulation_start;
+use super::runtime::request_queue::{ManagerStats, RequestQueue};
 use super::types::{SimulationResult, TxSimulationJob};
 use super::{LiquidityRemovalSimulator, MempoolSimulator};
 use crate::signal_detector::{SignalManager, SignalManagerConfig};

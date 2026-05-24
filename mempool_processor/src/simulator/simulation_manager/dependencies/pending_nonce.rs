@@ -13,7 +13,7 @@ const PENDING_NONCE_DEPENDENCY_TTL: Duration = Duration::from_secs(120);
 const MAX_NONCES_PER_SENDER: usize = 64;
 
 #[derive(Clone, Debug)]
-pub(super) struct PendingNonceDependencyLookup {
+pub(in crate::simulator::simulation_manager) struct PendingNonceDependencyLookup {
     pub transactions: Vec<MempoolTransaction>,
     pub missing_nonce: Option<u64>,
 }
@@ -31,7 +31,7 @@ pub struct PendingNonceDependencyStats {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct PendingNonceDependencies {
+pub(in crate::simulator::simulation_manager) struct PendingNonceDependencies {
     inner: Arc<Mutex<HashMap<Address, BTreeMap<u64, PendingNonceDependency>>>>,
     counters: Arc<PendingNonceDependencyCounters>,
 }
@@ -186,7 +186,9 @@ fn prune_expired_sender_entries(
     }
 }
 
-pub(super) fn sender_nonce(tx: &MempoolTransaction) -> Option<(Address, u64)> {
+pub(in crate::simulator::simulation_manager) fn sender_nonce(
+    tx: &MempoolTransaction,
+) -> Option<(Address, u64)> {
     if tx.from.len() != 20 {
         return None;
     }
@@ -195,7 +197,9 @@ pub(super) fn sender_nonce(tx: &MempoolTransaction) -> Option<(Address, u64)> {
     Some((Address::from_slice(&tx.from), nonce))
 }
 
-pub(super) fn source_hash(tx: &MempoolTransaction) -> Option<B256> {
+pub(in crate::simulator::simulation_manager) fn source_hash(
+    tx: &MempoolTransaction,
+) -> Option<B256> {
     tx.hash.parse::<B256>().ok()
 }
 

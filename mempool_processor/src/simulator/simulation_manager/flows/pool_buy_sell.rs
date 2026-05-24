@@ -12,7 +12,7 @@ use super::replay_context::{derive_pools_from_replay, PoolCandidate};
 use super::{SimulationManager, SimulationResult, TxSimulationJob};
 
 impl SimulationManager {
-    pub(super) async fn simulate_tx_with_buy_sell_all_pools(
+    pub(in crate::simulator::simulation_manager) async fn simulate_tx_with_buy_sell_all_pools(
         &self,
         request: &TxSimulationJob,
         replay_sequence: &[ProcessedTransaction],

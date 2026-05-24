@@ -29,17 +29,26 @@ the result materially changes the token’s state.
 
 ```
 simulation_manager/
-├── block_pruner.rs          # Background task that evicts stale replay sequences
-├── contract_creation_flow.rs# Handles deployments + metadata lookups
-├── creator_buy_sell_flow.rs # Orchestrates creator tx replay, pool viability probes, signals
-├── liquidity_removal_flow.rs# Dedicated path for LP decrease/remove functions
-├── logging.rs               # Formatting helpers shared across flows
+├── dependencies/            # Pending tx context and replay helpers
+│   ├── nonce_replay.rs      # Same-sender nonce replay and mined dependency backfill
+│   ├── pending_funding.rs   # Visible fresh-wallet funding dependencies
+│   ├── pending_nonce.rs     # Raw pending txs keyed by sender/nonce
+│   ├── pending_sequences.rs # Helper chains keyed by (creator, token)
+│   └── replay_context.rs    # Pool candidates derived from replayed tx logs
+├── entry/                   # Entry-specific proof and simulation paths
+│   └── vault_entry.rs       # Exact deployed V2 vault buy simulation for tail entry
+├── flows/                   # Top-level transaction simulation flows
+│   ├── contract_creation.rs # Handles deployments + metadata lookups
+│   ├── creator_buy_sell.rs  # Orchestrates creator tx replay, pool probes, signals
+│   ├── liquidity_removal.rs # Dedicated path for LP decrease/remove functions
+│   └── pool_buy_sell.rs     # Token/pool resolution + buy/sell simulator glue
+├── runtime/                 # Queue, telemetry, and background runtime tasks
+│   ├── block_pruner.rs      # Background task that evicts stale replay sequences
+│   ├── logging.rs           # Formatting helpers shared across flows
+│   └── request_queue.rs     # Async queue + statistics
 ├── manager.rs               # Wiring: owns simulators, cache handles, queue, signal manager
 ├── mod.rs                   # Module exports
-├── pending_sequences.rs     # Stores helper chains keyed by (creator, token)
-├── pool_buy_sell_flow.rs    # Token/pool resolution + buy/sell simulator glue
-├── request_queue.rs         # Async queue + statistics
-├── types.rs                 # Simulation job/result types shared with the rest of the crate
+└── types.rs                 # Simulation job/result types shared with the rest of the crate
 ```
 
 ## Core Responsibilities
@@ -162,8 +171,11 @@ critical tx + cache miss
 ## Extending the Module
 
 - **Adding another flow** (e.g., anti-bot protection) should follow the same
-  pattern: create `xyz_flow.rs`, expose a method on `SimulationManager`, and
+  pattern: create `flows/xyz.rs`, expose a method on `SimulationManager`, and
   call it from `simulate_request`.
+- **Adding entry proof logic** should live under `entry/` unless it is a generic
+  simulator capability. Exact deployed-vault buy evidence belongs there because
+  it proves an alpha entry route, not a generic pool property.
 - **Token cache integration** lives entirely in the manager. If token-server
   starts publishing more metadata (DEX version, fee tiers, etc.), extend the
   cache and flow structs but keep simulators ignorant—they should continue to

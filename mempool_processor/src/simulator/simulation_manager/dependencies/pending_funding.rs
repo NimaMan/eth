@@ -13,7 +13,7 @@ const MAX_FUNDING_TXS_PER_RECIPIENT: usize = 32;
 const MAX_REPLAY_FUNDING_TXS: usize = 8;
 
 #[derive(Clone, Debug)]
-pub(super) struct PendingFundingDependencyLookup {
+pub(in crate::simulator::simulation_manager) struct PendingFundingDependencyLookup {
     pub transactions: Vec<MempoolTransaction>,
     pub total_value: U256,
     pub required_value: Option<U256>,
@@ -32,7 +32,7 @@ pub struct PendingFundingDependencyStats {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct PendingFundingDependencies {
+pub(in crate::simulator::simulation_manager) struct PendingFundingDependencies {
     inner: Arc<Mutex<HashMap<Address, VecDeque<PendingFundingDependency>>>>,
     counters: Arc<PendingFundingDependencyCounters>,
 }

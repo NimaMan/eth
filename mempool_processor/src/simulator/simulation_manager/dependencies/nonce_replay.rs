@@ -18,13 +18,13 @@ use super::{
 
 const MAX_MINED_DEPENDENCY_LOOKAHEAD_BLOCKS: u64 = 16;
 
-pub(super) struct ProcessedWithNonceDependencies {
+pub(in crate::simulator::simulation_manager) struct ProcessedWithNonceDependencies {
     pub transaction: ProcessedTransaction,
     pub dependencies: Vec<ProcessedTransaction>,
 }
 
 impl SimulationManager {
-    pub(super) async fn build_processed_transaction_with_nonce_dependencies(
+    pub(in crate::simulator::simulation_manager) async fn build_processed_transaction_with_nonce_dependencies(
         &self,
         request: &TxSimulationJob,
         retry_on_missing_header: bool,
@@ -675,7 +675,7 @@ pub fn is_funding_dependency_error(error: &str) -> bool {
     error.contains("funding_dependency_wait") || error.contains("funding_dependency_gap")
 }
 
-pub(super) fn merge_nonce_dependencies_with_replay_sequence(
+pub(in crate::simulator::simulation_manager) fn merge_nonce_dependencies_with_replay_sequence(
     mut dependencies: Vec<ProcessedTransaction>,
     replay_sequence: Vec<ProcessedTransaction>,
 ) -> Vec<ProcessedTransaction> {

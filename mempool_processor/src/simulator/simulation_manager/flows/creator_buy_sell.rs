@@ -10,7 +10,7 @@ use super::{
 };
 
 impl SimulationManager {
-    pub(super) async fn handle_creator_transaction(
+    pub(in crate::simulator::simulation_manager) async fn handle_creator_transaction(
         &self,
         request: &TxSimulationJob,
         now: Instant,
