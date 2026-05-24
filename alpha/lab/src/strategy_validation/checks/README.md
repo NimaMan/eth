@@ -65,7 +65,7 @@ strategy result and returns a backend-owned `CheckResult`.
 
 | Code | Question | Why We Ask | File |
 | --- | --- | --- | --- |
-| `configured_critical_risk_has_strategy_response` | Did configured critical risks receive the strategy response they require? | Enabled critical risk exits should submit a sell or record an explicit same-block deferral. | `risk_policy.rs` |
+| `configured_critical_risk_has_strategy_response` | Did configured critical risks receive the strategy response they require? | Enabled critical risk exits should submit a sell, record an explicit same-block deferral, or, in live backtests, show a same-signal mempool-removal sell cancelled by the gas/value cap. | `risk_policy.rs` |
 | `lp_approval_deferral_has_age_evidence` | Do LP-approval deferrals carry explicit active-block evidence? | Deferring instead of selling is only valid inside the configured launch window, so the signal id, age basis, and active-block age must be persisted. | `risk_policy.rs` |
 | `liquidity_removal_risk_kind_matches_source` | Does liquidity-removal risk kind match its evidence source? | Pending mempool removal signals and mined-chain removals have different accounting and valuation semantics. | `risk_policy.rs` |
 | `mempool_liquidity_removal_does_not_zero_exposure_snapshot` | Do mempool liquidity-removal signals avoid marking exposure as drained? | A pending mempool tx can justify an exit, but it should not zero confirmed exposure before mined evidence exists. | `risk_policy.rs` |

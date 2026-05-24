@@ -105,7 +105,7 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         ),
         "configured_critical_risk_has_strategy_response" => (
             "Did configured critical risks receive the strategy response they require?",
-            "Compares in-position critical risk events against the strategy config and fails if an enabled exit risk has no sell submission or explicit same-block deferral.",
+            "Compares in-position critical risk events against the strategy config and fails if an enabled exit risk has no sell submission, explicit same-block deferral, or live-backtest mempool-removal gas/value cancellation.",
         ),
         "lp_approval_deferral_has_age_evidence" => (
             "Do LP-approval deferrals carry explicit active-block evidence?",

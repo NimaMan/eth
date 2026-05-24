@@ -129,7 +129,7 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
         "configured_critical_risk_has_strategy_response",
         Verdict::Fail,
         "configured critical in-position risk events have an explicit strategy response",
-        "configured critical in-position risk events without sell or explicit deferral",
+        "configured critical in-position risk events without sell, explicit deferral, or accepted live-backtest gas/value cancellation",
         r#"
         WITH strategy_cfg AS (
             SELECT spec->>'strategy_name' AS strategy_name,
@@ -184,7 +184,8 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
             SELECT s.*,
                    re.kind,
                    re.observed_block,
-                   re.severity
+                   re.severity,
+                   re.payload->>'source' AS risk_source
             FROM scoped s
             JOIN alpha_trading.risk_events re
               ON re.run_id = s.run_id
@@ -210,6 +211,48 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
               AND te.event_type = 'sell_submitted'
               AND te.block_number >= risk.observed_block
         )
+          AND NOT (
+              risk.kind IN ('mempool_liquidity_removal', 'liquidity_removal')
+              AND (
+                  risk.kind = 'mempool_liquidity_removal'
+                  OR COALESCE(risk.risk_source, '') IN (
+                      'mempool_signal',
+                      'historical_mempool_signal'
+                  )
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.strategy_decisions sd
+                  WHERE sd.run_id = risk.run_id
+                    AND sd.strategy_name = risk.strategy_name
+                    AND lower(sd.token_address) = lower(risk.token_address)
+                    AND lower(sd.pool_address) = lower(risk.pool_address)
+                    AND sd.block_number = risk.observed_block
+                    AND sd.action = 'submit_sell'
+                    AND sd.order_side = 'sell'
+                    AND (
+                        sd.reason_code = 'exit.mempool_liquidity_removal_signal'
+                        OR sd.reason = 'exit.mempool_liquidity_removal_signal'
+                        OR sd.reason LIKE 'exit.mempool_liquidity_removal_signal:%'
+                    )
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trade_events te
+                  WHERE te.trade_id = risk.trade_id
+                    AND te.event_type = 'sell_cancelled'
+                    AND te.status = 'cancelled'
+                    AND te.block_number >= risk.observed_block
+                    AND (
+                        te.gas_policy_status = 'rejected:gas_rank_exceeds_value_cap'
+                        OR te.error LIKE '%gas_rank_exceeds_value_cap%'
+                        OR te.gas_policy_guard LIKE 'exit_value_capped_gas_rank%'
+                        OR te.payload->>'error' LIKE '%gas_rank_exceeds_value_cap%'
+                        OR te.payload#>>'{mined_evidence,gas_policy_status}' = 'rejected:gas_rank_exceeds_value_cap'
+                        OR te.payload#>>'{mined_evidence,gas_policy_guard}' LIKE 'exit_value_capped_gas_rank%'
+                    )
+              )
+          )
           AND NOT (
               risk.kind = 'lp_approval'
               AND risk.defer_buy_confirm_block_lp_approval_to_max_hold
