@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS risk_atlas_observations (
     direct_lp_target_10 BOOLEAN,
     denom_reserve DOUBLE PRECISION,
     token_reserve DOUBLE PRECISION,
+    pooled_token_supply_ratio DOUBLE PRECISION,
+    reserve_quality_status TEXT,
+    price_to_initial_ratio_trustworthy BOOLEAN,
     total_liquidity_denom DOUBLE PRECISION,
     price_to_initial_ratio DOUBLE PRECISION,
     lp_approved_pct_as_of DOUBLE PRECISION,
@@ -169,6 +172,9 @@ CREATE TABLE IF NOT EXISTS risk_atlas_observations (
 
 ALTER TABLE risk_atlas_observations
     ADD COLUMN IF NOT EXISTS token_decimals INTEGER,
+    ADD COLUMN IF NOT EXISTS pooled_token_supply_ratio DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS reserve_quality_status TEXT,
+    ADD COLUMN IF NOT EXISTS price_to_initial_ratio_trustworthy BOOLEAN,
     ADD COLUMN IF NOT EXISTS price_denom_per_token DOUBLE PRECISION,
     ADD COLUMN IF NOT EXISTS initial_price_denom_per_token DOUBLE PRECISION,
     ADD COLUMN IF NOT EXISTS lp_approval_count_in_block INTEGER NOT NULL DEFAULT 0,

@@ -89,6 +89,29 @@ mod tests {
     }
 
     #[test]
+    fn liquidity_features_mark_token_reserve_dust_price_ratio_untrusted() {
+        let features = PoolLiquidityFeatures::new(1.48, 697.7, 1.48, 0.002)
+            .with_token_supply_context(Some(1_000_000_000.0));
+
+        assert!((features.pooled_token_supply_ratio.unwrap() - 6.977e-7).abs() < f64::EPSILON);
+        assert_eq!(
+            features.reserve_quality_status.as_deref(),
+            Some("token_reserve_dust")
+        );
+        assert_eq!(features.price_to_initial_ratio_trustworthy, Some(false));
+    }
+
+    #[test]
+    fn liquidity_features_keep_meaningful_token_reserve_price_ratio_trusted() {
+        let features = PoolLiquidityFeatures::new(1.0, 20_000.0, 1.0, 0.00005)
+            .with_token_supply_context(Some(1_000_000.0));
+
+        assert_eq!(features.pooled_token_supply_ratio, Some(0.02));
+        assert_eq!(features.reserve_quality_status.as_deref(), Some("ok"));
+        assert_eq!(features.price_to_initial_ratio_trustworthy, Some(true));
+    }
+
+    #[test]
     fn lp_approval_offsets_are_signed() {
         let features = LpControlFeatures {
             last_lp_approval_block: Some(95),

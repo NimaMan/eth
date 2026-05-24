@@ -103,6 +103,8 @@ pub struct PoolView {
     pub liquidity_to_fdv_percent: Option<f64>,
     pub supply_ratio_status: String,
     pub supply_ratio_label: Option<String>,
+    pub reserve_quality_status: String,
+    pub reserve_quality_label: Option<String>,
     pub can_buy: bool,
     pub can_sell: bool,
     pub effective_can_buy: bool,
@@ -521,18 +523,23 @@ impl PoolView {
             total_supply.and_then(|supply| base.fully_diluted_value_denom(supply));
         let liquidity_history = liquidity_history(base);
         let liquidity_level = liquidity_assessment.level;
+        let raw_pooled_token_supply_ratio =
+            total_supply.and_then(|supply| base.pooled_token_supply_ratio(supply));
+        let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
+        let reserve_quality = display_reserve_quality(&supply_ratio, liquidity_level);
         let raw_price_ratio_to_initial = base.price_ratio_to_initial();
-        let price_ratio_to_initial =
-            display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
-        let price_ratio_history = display_price_ratio_history(&base.price_history, liquidity_level);
+        let price_ratio_to_initial = display_price_ratio(
+            raw_price_ratio_to_initial,
+            liquidity_level,
+            &reserve_quality,
+        );
+        let price_ratio_history =
+            display_price_ratio_history(&base.price_history, liquidity_level, &reserve_quality);
         let (liquidity_history, price_ratio_history) = truncate_history_at_liquidity_removal(
             &liquidity_history,
             &price_ratio_history,
             base.scam_block,
         );
-        let raw_pooled_token_supply_ratio =
-            total_supply.and_then(|supply| base.pooled_token_supply_ratio(supply));
-        let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
         let liquidity_to_fdv_ratio = supply_ratio
             .pooled_token_supply_ratio
             .and_then(|_| total_supply.and_then(|supply| base.liquidity_to_fdv_ratio(supply)));
@@ -668,6 +675,8 @@ impl PoolView {
             liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
             supply_ratio_status: supply_ratio.status.to_string(),
             supply_ratio_label: supply_ratio.label,
+            reserve_quality_status: reserve_quality.status.to_string(),
+            reserve_quality_label: reserve_quality.label,
             can_buy: base.state.can_buy,
             can_sell: base.state.can_sell,
             effective_can_buy: current_trading.can_buy,
@@ -837,6 +846,7 @@ fn filter_activity_by_denom(
 }
 
 const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
+const MIN_TRUSTWORTHY_POOLED_TOKEN_SUPPLY_RATIO: f64 = 1e-6;
 
 fn max_denom_reserve(history: &[LiquidityPoint], current: f64) -> f64 {
     history
@@ -863,6 +873,13 @@ struct DisplaySupplyRatio {
     pooled_token_supply_ratio: Option<f64>,
     status: &'static str,
     label: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct DisplayReserveQuality {
+    status: &'static str,
+    label: Option<String>,
+    price_ratio_trustworthy: bool,
 }
 
 fn current_trading_view(
@@ -948,11 +965,16 @@ fn economic_sellable_from_tax(can_sell: bool, sell_tax: Option<f64>) -> Option<b
     display_tax(sell_tax).map(|tax| tax <= 40.0)
 }
 
-fn display_price_ratio(value: Option<f64>, liquidity_level: PoolLiquidityLevel) -> Option<f64> {
+fn display_price_ratio(
+    value: Option<f64>,
+    liquidity_level: PoolLiquidityLevel,
+    reserve_quality: &DisplayReserveQuality,
+) -> Option<f64> {
     if matches!(
         liquidity_level,
         PoolLiquidityLevel::Dust | PoolLiquidityLevel::Drained
-    ) {
+    ) || !reserve_quality.price_ratio_trustworthy
+    {
         return Some(0.0);
     }
 
@@ -961,8 +983,16 @@ fn display_price_ratio(value: Option<f64>, liquidity_level: PoolLiquidityLevel) 
 
 fn display_price_ratio_history(
     history: &[(u64, f64)],
-    _liquidity_level: PoolLiquidityLevel,
+    liquidity_level: PoolLiquidityLevel,
+    reserve_quality: &DisplayReserveQuality,
 ) -> Vec<PriceRatioPoint> {
+    if matches!(
+        liquidity_level,
+        PoolLiquidityLevel::Dust | PoolLiquidityLevel::Drained
+    ) || !reserve_quality.price_ratio_trustworthy
+    {
+        return Vec::new();
+    }
     price_ratio_history(history)
 }
 
@@ -987,6 +1017,46 @@ fn display_supply_ratio(value: Option<f64>) -> DisplaySupplyRatio {
         pooled_token_supply_ratio: Some(value),
         status: "ok",
         label: None,
+    }
+}
+
+fn display_reserve_quality(
+    supply_ratio: &DisplaySupplyRatio,
+    liquidity_level: PoolLiquidityLevel,
+) -> DisplayReserveQuality {
+    if matches!(
+        liquidity_level,
+        PoolLiquidityLevel::Dust | PoolLiquidityLevel::Drained
+    ) {
+        return DisplayReserveQuality {
+            status: "denom_liquidity_unsafe",
+            label: Some("denom liquidity is dust or drained".to_string()),
+            price_ratio_trustworthy: false,
+        };
+    }
+
+    if supply_ratio.status == "inconsistent" {
+        return DisplayReserveQuality {
+            status: "inconsistent_supply",
+            label: supply_ratio.label.clone(),
+            price_ratio_trustworthy: false,
+        };
+    }
+
+    if let Some(ratio) = supply_ratio.pooled_token_supply_ratio {
+        if ratio < MIN_TRUSTWORTHY_POOLED_TOKEN_SUPPLY_RATIO {
+            return DisplayReserveQuality {
+                status: "token_reserve_dust",
+                label: Some("pooled token reserve is dust relative to supply".to_string()),
+                price_ratio_trustworthy: false,
+            };
+        }
+    }
+
+    DisplayReserveQuality {
+        status: "ok",
+        label: None,
+        price_ratio_trustworthy: true,
     }
 }
 
@@ -1140,26 +1210,77 @@ mod tests {
 
     #[test]
     fn display_price_ratio_zeroes_dust_or_drained_liquidity() {
+        let ok_reserve_quality = DisplayReserveQuality {
+            status: "ok",
+            label: None,
+            price_ratio_trustworthy: true,
+        };
         assert_eq!(
-            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Dust),
+            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Dust, &ok_reserve_quality),
             Some(0.0)
         );
         assert_eq!(
-            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Drained),
+            display_price_ratio(
+                Some(1000.0),
+                PoolLiquidityLevel::Drained,
+                &ok_reserve_quality
+            ),
             Some(0.0)
         );
         assert_eq!(
-            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Unknown),
+            display_price_ratio(
+                Some(1000.0),
+                PoolLiquidityLevel::Unknown,
+                &ok_reserve_quality
+            ),
             Some(1000.0)
         );
         assert_eq!(
-            display_price_ratio(Some(10.0), PoolLiquidityLevel::Liquid),
+            display_price_ratio(Some(10.0), PoolLiquidityLevel::Liquid, &ok_reserve_quality),
             Some(10.0)
         );
-        assert_eq!(display_price_ratio(None, PoolLiquidityLevel::Liquid), None);
         assert_eq!(
-            display_price_ratio(Some(-5.0), PoolLiquidityLevel::Liquid),
+            display_price_ratio(None, PoolLiquidityLevel::Liquid, &ok_reserve_quality),
             None
+        );
+        assert_eq!(
+            display_price_ratio(Some(-5.0), PoolLiquidityLevel::Liquid, &ok_reserve_quality),
+            None
+        );
+    }
+
+    #[test]
+    fn display_price_ratio_zeroes_token_reserve_dust_even_with_liquid_denom() {
+        let supply_ratio = display_supply_ratio(Some(6.9e-7));
+        let reserve_quality = display_reserve_quality(&supply_ratio, PoolLiquidityLevel::Liquid);
+
+        assert_eq!(reserve_quality.status, "token_reserve_dust");
+        assert_eq!(
+            display_price_ratio(
+                Some(2_128_397.0),
+                PoolLiquidityLevel::Liquid,
+                &reserve_quality
+            ),
+            Some(0.0)
+        );
+        assert!(display_price_ratio_history(
+            &[(1, 1.0), (2, 2_128_397.0)],
+            PoolLiquidityLevel::Liquid,
+            &reserve_quality,
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn display_reserve_quality_accepts_meaningful_token_reserve() {
+        let supply_ratio = display_supply_ratio(Some(0.01));
+        let reserve_quality = display_reserve_quality(&supply_ratio, PoolLiquidityLevel::Liquid);
+
+        assert_eq!(reserve_quality.status, "ok");
+        assert!(reserve_quality.price_ratio_trustworthy);
+        assert_eq!(
+            display_price_ratio(Some(3.0), PoolLiquidityLevel::Liquid, &reserve_quality),
+            Some(3.0)
         );
     }
 

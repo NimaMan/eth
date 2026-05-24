@@ -505,6 +505,18 @@ fn observation_rows(
                 direct_lp_target_10: target(10),
                 denom_reserve: finite_opt(observation.features.liquidity.denom_reserve),
                 token_reserve: finite_opt(observation.features.liquidity.token_reserve),
+                pooled_token_supply_ratio: finite_opt_option(
+                    observation.features.liquidity.pooled_token_supply_ratio,
+                ),
+                reserve_quality_status: observation
+                    .features
+                    .liquidity
+                    .reserve_quality_status
+                    .clone(),
+                price_to_initial_ratio_trustworthy: observation
+                    .features
+                    .liquidity
+                    .price_to_initial_ratio_trustworthy,
                 total_liquidity_denom: finite_opt(
                     observation.features.liquidity.total_liquidity_denom,
                 ),
@@ -1158,7 +1170,7 @@ fn decision_questions(
             "How much row-level data is available for training?",
             format!("{} active rows", fmt_count(active_observation_rows)),
             format!(
-                "Risk Atlas stores one row per active token/pool observation with as-of features and lab-owned near-future target columns."
+                "Risk Atlas stores one row per active token/pool observation with as-of features and Risk Atlas near-future target columns."
             ),
             Some("active rows"),
             Some(active_observation_rows),

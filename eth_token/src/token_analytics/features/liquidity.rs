@@ -10,6 +10,10 @@ pub struct PoolLiquidityFeatures {
     pub price_denom_per_token: f64,
     pub initial_price_denom_per_token: Option<f64>,
     pub price_to_initial_ratio: Option<f64>,
+    pub pooled_token_supply_ratio: Option<f64>,
+    pub reserve_quality_status: Option<String>,
+    pub reserve_quality_label: Option<String>,
+    pub price_to_initial_ratio_trustworthy: Option<bool>,
     pub initial_denom_reserve: Option<f64>,
     pub denom_reserve_to_initial_ratio: Option<f64>,
     pub initial_token_reserve: Option<f64>,
@@ -52,6 +56,39 @@ impl PoolLiquidityFeatures {
             self.price_denom_per_token,
             self.initial_price_denom_per_token,
         );
+        self
+    }
+
+    pub fn with_token_supply_context(mut self, total_supply_scaled: Option<f64>) -> Self {
+        const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
+        const MIN_TRUSTWORTHY_POOLED_TOKEN_SUPPLY_RATIO: f64 = 1e-6;
+
+        let supply_ratio = total_supply_scaled
+            .filter(|supply| supply.is_finite() && *supply > 0.0)
+            .and_then(|supply| {
+                (self.token_reserve.is_finite() && self.token_reserve >= 0.0)
+                    .then_some(self.token_reserve / supply)
+            });
+        self.pooled_token_supply_ratio = supply_ratio;
+
+        let (status, label, trustworthy) = match supply_ratio {
+            Some(ratio) if ratio > MAX_VALID_SUPPLY_RATIO => (
+                "inconsistent_supply",
+                Some("pool reserve exceeds token supply"),
+                false,
+            ),
+            Some(ratio) if ratio < MIN_TRUSTWORTHY_POOLED_TOKEN_SUPPLY_RATIO => (
+                "token_reserve_dust",
+                Some("pooled token reserve is dust relative to supply"),
+                false,
+            ),
+            Some(_) => ("ok", None, true),
+            None => ("unknown_supply", None, true),
+        };
+
+        self.reserve_quality_status = Some(status.to_string());
+        self.reserve_quality_label = label.map(str::to_string);
+        self.price_to_initial_ratio_trustworthy = Some(trustworthy);
         self
     }
 

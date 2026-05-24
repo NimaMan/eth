@@ -25,9 +25,9 @@ new_asena
 The current 100K distribution report can still seed this DB for comparison, but
 new range runs should write row-level observations from
 `eth_token::token_analytics::TokenPoolCurrentObservation`. The target join stays
-in this lab layer: source features are as-of the active observation, while scam
-labels and near-future target columns are added when the range is exported into
-Risk Atlas.
+in the Risk Atlas research layer: source features are as-of the active
+observation, while scam labels and near-future target columns are added when the
+range is exported into Risk Atlas.
 
 ## Generation And Read Flow
 
@@ -154,9 +154,10 @@ The range exporter writes `risk_atlas_observations` with one row per active
 - as-of trading state: can buy, can sell, effective sellability, taxes, and
   liquidity-removal state known at that observation;
 - as-of feature columns from `eth_token::token_analytics`, including reserves,
-  price-to-initial, LP approval percentage, token-transfer ratios, and full
-  observation/features JSON;
-- lab-owned target labels for direct LP removal within the next `1, 2, 3, 5,
+  raw price-to-initial, pooled-token-supply ratio, reserve-quality status,
+  price-ratio trustworthiness, LP approval percentage, token-transfer ratios,
+  and full observation/features JSON;
+- Risk Atlas target labels for direct LP removal within the next `1, 2, 3, 5,
   10` active observations.
 
 Ineligible pools can be stored for audit, but their target columns should be

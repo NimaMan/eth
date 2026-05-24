@@ -301,7 +301,7 @@ pub fn build_current_observation(
         })
         .filter(|_| pool.has_liquidity_removal());
 
-    let liquidity_features = liquidity_features(pool);
+    let liquidity_features = liquidity_features(token, pool);
     let lp_control = lp_control_features(token, &pool.identity.pool_address, block_number)
         .with_last_approval_offsets(pool.creation_block, pool.can_buy_block);
 

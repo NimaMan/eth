@@ -347,8 +347,9 @@ async fn insert_observation_row(
             buy_tax, sell_tax, liquidity_removed_as_of, liquidity_removal_in_block,
             liquidity_removal_block_as_of, direct_lp_removal_as_of, direct_lp_removal_in_block,
             direct_lp_target_1, direct_lp_target_2, direct_lp_target_3, direct_lp_target_5,
-            direct_lp_target_10, denom_reserve, token_reserve, total_liquidity_denom,
-            price_to_initial_ratio, lp_approved_pct_as_of,
+            direct_lp_target_10, denom_reserve, token_reserve, pooled_token_supply_ratio,
+            reserve_quality_status, price_to_initial_ratio_trustworthy,
+            total_liquidity_denom, price_to_initial_ratio, lp_approved_pct_as_of,
             token_decimals, price_denom_per_token, initial_price_denom_per_token,
             lp_approval_count_in_block, lp_approval_seen_as_of,
             lp_total_supply, lp_max_approval_amount_as_of, lp_max_approval_pct_as_of,
@@ -390,17 +391,15 @@ async fn insert_observation_row(
             $24, $25, $26,
             $27, $28, $29, $30,
             $31, $32, $33, $34,
-            $35, $36,
-            $37, $38, $39,
-            $40, $41,
-            $42, $43, $44,
+            $35, $36, $37,
+            $38, $39,
+            $40, $41, $42,
+            $43, $44,
             $45, $46, $47,
-            $48, $49,
-            $50, $51,
-            $52, $53,
-            $54,
-            $55,
-            $56,
+            $48, $49, $50,
+            $51, $52,
+            $53, $54,
+            $55, $56,
             $57,
             $58,
             $59,
@@ -419,8 +418,12 @@ async fn insert_observation_row(
             $72,
             $73,
             $74,
-            $75, $76,
-            $77, $78
+            $75,
+            $76,
+            $77,
+            $78,
+            $79, $80,
+            $81
         )
         "#,
     )
@@ -457,6 +460,9 @@ async fn insert_observation_row(
     .bind(item.direct_lp_target_10)
     .bind(item.denom_reserve)
     .bind(item.token_reserve)
+    .bind(item.pooled_token_supply_ratio)
+    .bind(&item.reserve_quality_status)
+    .bind(item.price_to_initial_ratio_trustworthy)
     .bind(item.total_liquidity_denom)
     .bind(item.price_to_initial_ratio)
     .bind(item.lp_approved_pct_as_of)

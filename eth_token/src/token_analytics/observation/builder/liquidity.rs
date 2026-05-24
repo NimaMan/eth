@@ -1,7 +1,8 @@
+use crate::erc20::ERC20Token;
 use crate::pools::BasePool;
 use crate::token_analytics::PoolLiquidityFeatures;
 
-pub(super) fn liquidity_features(pool: &BasePool) -> PoolLiquidityFeatures {
+pub(super) fn liquidity_features(token: &ERC20Token, pool: &BasePool) -> PoolLiquidityFeatures {
     let initial = pool.initial_meaningful_reserve_snapshot();
     let max_denom_reserve = pool
         .reserve_tracker
@@ -24,6 +25,7 @@ pub(super) fn liquidity_features(pool: &BasePool) -> PoolLiquidityFeatures {
         initial.map(|snapshot| snapshot.token_reserve),
         initial.map(|snapshot| snapshot.price),
     )
+    .with_token_supply_context(token.total_supply_scaled())
     .with_max_denom_reserve(max_denom_reserve);
     features.reserve_observation_count = pool.reserve_tracker.reserve_history.len() as u32;
     features

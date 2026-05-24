@@ -68,12 +68,10 @@ each leg records full call traces. `TxProcessor` processes the trace into a
   semantics even for ETH denominated pairs.
 
 ### Buy leg
-- **Current implementation gap:** `entry.rs` still calls `build_buy_swap(...)`,
-  which is ETH/WETH-oriented and passes `test_amount` as the buy input. That is
-  acceptable only for canonical ETH/WETH-denominated routes.
-- **Target behavior for arbitrary denoms:**
-  - **V2/Sushi:** `build_token_to_token_swap_v2`, input path `denom -> token`
-  - **V3:** `build_token_to_token_swap_v3`
+- **Builder:** `tx_simulator::tx_builders::build_denom_to_token_swap`
+- **V2/Sushi behavior:** uses the fee-on-transfer supporting token-to-token
+  selector with path `denom -> token`.
+- **V3 behavior:** uses `exactInputSingle` with `denom` as `tokenIn`.
 - **Rationale:** We buy using an ERC‑20 to ERC‑20 swap so that the amount of
   denomination tokens deducted from the buyer is observable in `ProcessedTransaction`.
 
@@ -88,9 +86,7 @@ each leg records full call traces. `TxProcessor` processes the trace into a
   we ask the router to compute exact `amountOut` before the transfer tax is
   applied. That is why we **must use builders that support fee-on-transfer
   semantics**.
-  - **Current implementation gap:** `entry.rs` still calls `build_sell_swap(...)`.
-    That is correct for ETH/WETH-style sells, but must be replaced or routed
-    through a denom-aware token-to-token builder when `denom_address != WETH`.
+  - **Builder:** `tx_simulator::tx_builders::build_token_to_denom_swap`.
   - **Uniswap V2 / SushiSwap:** `build_sell_swap_v2`, which encodes
     `swapExactTokensForETHSupportingFeeOnTransferTokens`.
   - **Token-to-token route:** When selling `token -> denom` where denom is
@@ -176,10 +172,10 @@ Important concrete errors:
     the live fork/cache path.
   - Fix direction: chain-query pool reads must use simulation/view APIs for live
     blocks instead of direct DB state.
-  - Current live entrypoint: `LivePoolBuySellSimulator` selects
-    `LiveTxSimulator::latest_state_status()`, so the default live check uses the
-    live block processor's tracked state whenever it is ahead of local
-    historical context.
+  - Current latest-Reth entrypoint: `LivePoolBuySellSimulator` selects
+    `LatestHistoricalTxSimulator::latest_state_status()`. Real live
+    pre-submit simulation must use `LiveTxSimulator` with an in-memory live
+    block session instead.
 
 - `Invalid block ... while reading UniswapV3 state`
   - Seen while loading V3 pool state.
@@ -213,21 +209,22 @@ Important concrete errors:
   `TransferHelper: TRANSFER_FROM_FAILED`, and buy-side
   `INSUFFICIENT_LIQUIDITY`
   - Seen in `TradingStatus` failures.
-  - Cause: some entries are likely real token/pool behavior, but the biggest
-    simulator-side suspect is denomination routing. The setup code understands
-    `denom_address`, while the main buy/sell path still calls ETH/WETH-oriented
-    builders.
-  - Fix direction: make buy and sell fully denom-aware, then only treat remaining
-    reverts as token behavior after confirming the constructed route and calldata.
+  - Current status: the old denomination-routing suspect is fixed for the pool
+    buy/sell path. `entry.rs` now builds buy and sell transactions through the
+    denom-aware route dispatchers, and V2/Sushi token-to-token swaps use the
+    fee-on-transfer supporting selector.
+  - Remaining check: treat fresh `INSUFFICIENT_INPUT_AMOUNT` rows as
+    amount-quality evidence only after confirming the simulated buy produced a
+    non-zero token balance, the sell `amountIn` is non-zero, the pool is not
+    dust/drained, and the calldata path is `token -> denom`.
 
 Priority order:
 
-1. Make the pool buy/sell path denom-aware for V2, Sushi, and V3.
-2. Fix prior transaction replay semantics so successful on-chain setup txs do
+1. Fix prior transaction replay semantics so successful on-chain setup txs do
    not fail locally because of skipped sender nonces.
-3. Move V3 pool state/header reads onto live-aware simulation/view APIs.
-4. Retest the old fee failures against the current base-fee clamping.
-5. After the local Reth execution node is synced, turn representative log cases
+2. Move V3 pool state/header reads onto live-aware simulation/view APIs.
+3. Retest the old fee failures against the current base-fee clamping.
+4. After the local Reth execution node is synced, turn representative log cases
    into regression examples under `examples/trade_simulation/viability`.
 
 ---
