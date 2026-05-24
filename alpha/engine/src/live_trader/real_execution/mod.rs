@@ -670,6 +670,10 @@ pub(super) async fn build_kartal_real_adapter(
         ChainServerGasRankProvider::new(chain_server_url)
             .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
         preflight.status.rpc_url.clone(),
+    )
+    .with_priority_buffer_range_gwei(
+        gas_policy.mempool_race_priority_buffer_min_gwei,
+        gas_policy.mempool_race_priority_buffer_max_gwei,
     );
 
     let mut planner_config = LivePrioritySellPlannerConfig::default();

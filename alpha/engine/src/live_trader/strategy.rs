@@ -38,7 +38,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "lp_approval_gate_min_pct": spec.lp_approval_gate_min_pct,
         "entry_init_policy": {
             "max_age_blocks": spec.entry_init_policy.max_age_blocks,
-            "require_creation_block": spec.entry_init_policy.require_creation_block,
+            "require_pool_creation_block": spec.entry_init_policy.require_pool_creation_block,
             "max_price_ratio_to_initial": spec.entry_init_policy.max_price_ratio_to_initial,
             "allow_missing_price_ratio": spec.entry_init_policy.allow_missing_price_ratio,
         },
@@ -180,7 +180,7 @@ mod tests {
                 "lp_approval_gate_min_pct": "30",
                 "entry_init_policy": {
                     "max_age_blocks": ENTRY_INIT_MAX_AGE_BLOCKS,
-                    "require_creation_block": false,
+                    "require_pool_creation_block": false,
                     "max_price_ratio_to_initial": ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
                     "allow_missing_price_ratio": true,
                 },

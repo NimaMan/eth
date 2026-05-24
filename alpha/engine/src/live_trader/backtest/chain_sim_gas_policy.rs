@@ -9,7 +9,8 @@ use eth_alpha_core::{
     position::Position,
 };
 use eth_live_trading::{
-    tx_prep::GasPlanDecision, ChainServerGasRankProvider, GasEstimateConfig, GasRankProvider,
+    tx_prep::{GasPlanDecision, MEMPOOL_RACE_GAS_LABEL, MEMPOOL_RACE_GAS_SOURCE},
+    ChainServerGasRankProvider, GasEstimateConfig, GasRankProvider, MempoolRaceGasRankProvider,
     PreparedSellRoute, PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate,
     StrategyGasRankPolicy,
 };
@@ -21,7 +22,7 @@ use super::super::gas_policy::LiveRealGasPolicy;
 #[derive(Clone)]
 pub(in crate::live_trader) struct ChainSimGasPolicyBacktestAdapter<E> {
     inner: E,
-    gas_rank: ChainServerGasRankProvider,
+    gas_rank: MempoolRaceGasRankProvider<ChainServerGasRankProvider>,
     gas_policy: LiveRealGasPolicy,
     gas_estimate: GasEstimateConfig,
 }
@@ -30,14 +31,22 @@ impl<E> ChainSimGasPolicyBacktestAdapter<E> {
     pub(in crate::live_trader) fn new(
         inner: E,
         chain_server_url: String,
+        rpc_url: String,
         gas_policy: LiveRealGasPolicy,
     ) -> Self {
         let mut gas_estimate = GasEstimateConfig::default();
         gas_estimate.simulated_gas_estimate_buffer_bps = gas_policy.simulated_gas_buffer_bps;
         Self {
             inner,
-            gas_rank: ChainServerGasRankProvider::new(chain_server_url)
-                .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
+            gas_rank: MempoolRaceGasRankProvider::new(
+                ChainServerGasRankProvider::new(chain_server_url)
+                    .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
+                rpc_url,
+            )
+            .with_priority_buffer_range_gwei(
+                gas_policy.mempool_race_priority_buffer_min_gwei,
+                gas_policy.mempool_race_priority_buffer_max_gwei,
+            ),
             gas_policy,
             gas_estimate,
         }
@@ -97,24 +106,22 @@ where
         })?;
         let gas_rank = self
             .gas_rank
-            .ranked_fee_candidates(&shadow_input(), &route)
+            .ranked_fee_candidates(&shadow_input(intent), &route)
             .await
             .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
-        let candidates = gas_rank
-            .candidates
-            .into_iter()
-            .filter(|candidate| {
-                candidate.source.as_deref()
-                    == Some(self.gas_policy.required_gas_rank_source.as_str())
-            })
-            .collect::<Vec<_>>();
         let selection = match intent.side {
-            OrderSide::Buy => self.select_buy_gas(intent, &candidates, estimated_gas_used),
+            OrderSide::Buy => {
+                let candidates = self.allowed_gas_candidates(
+                    &gas_rank.candidates,
+                    &self.gas_policy.entry_buy_gas_rank_policy,
+                );
+                self.select_buy_gas(intent, &candidates, estimated_gas_used)
+            }
             OrderSide::Sell => self.select_sell_gas(
                 intent,
                 report,
                 gas_rank.predicted_base_fee_gwei,
-                &candidates,
+                &gas_rank.candidates,
                 estimated_gas_used,
             ),
         };
@@ -178,6 +185,7 @@ where
         estimated_gas_used: u64,
     ) -> ShadowGasSelection {
         let policy_context = sell_policy_context(intent, &self.gas_policy);
+        let candidates = self.allowed_gas_candidates(candidates, policy_context.policy);
         let protected_exit_value_eth = report
             .filled_amount
             .as_ref()
@@ -193,7 +201,10 @@ where
             configured_max_priority_fee_gwei: self.gas_policy.max_priority_fee_gwei,
         });
 
-        match policy_context.policy.choose_ranked_fee(&budget, candidates) {
+        match policy_context
+            .policy
+            .choose_ranked_fee(&budget, &candidates)
+        {
             GasPlanDecision::UseRanked(plan) => ShadowGasSelection::selected_plan(
                 policy_context.policy,
                 plan.label,
@@ -214,6 +225,22 @@ where
                 reason,
             ),
         }
+    }
+
+    fn allowed_gas_candidates(
+        &self,
+        candidates: &[RankedFeeCandidate],
+        policy: &StrategyGasRankPolicy,
+    ) -> Vec<RankedFeeCandidate> {
+        candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.source.as_deref()
+                    == Some(self.gas_policy.required_gas_rank_source.as_str())
+                    || policy_allows_mempool_race_candidate(policy, candidate)
+            })
+            .cloned()
+            .collect()
     }
 
     fn shadow_rejection_outcome(
@@ -312,6 +339,18 @@ fn sell_policy_context<'a>(
     }
 }
 
+fn policy_allows_mempool_race_candidate(
+    policy: &StrategyGasRankPolicy,
+    candidate: &RankedFeeCandidate,
+) -> bool {
+    candidate.label == MEMPOOL_RACE_GAS_LABEL
+        && candidate.source.as_deref() == Some(MEMPOOL_RACE_GAS_SOURCE)
+        && policy
+            .allowed_profiles
+            .iter()
+            .any(|profile| profile.label() == MEMPOOL_RACE_GAS_LABEL)
+}
+
 fn should_attach_shadow(report: &ExecutionReport) -> bool {
     matches!(
         report.status,
@@ -337,13 +376,13 @@ fn shadow_route(
     .map_err(|error| AlphaCoreError::Execution(format!("gas-policy shadow route failed: {error}")))
 }
 
-fn shadow_input() -> eth_live_trading::LivePrioritySellPlannerInput {
+fn shadow_input(intent: &OrderIntent) -> eth_live_trading::LivePrioritySellPlannerInput {
     use alloy_primitives::Address;
     use eth_alpha_core::{
         amount::Amount,
         ids::{PoolAddress, PortfolioId, PositionId, StrategyName, TradeId, WalletId},
         market::{PoolProtocol, PoolSnapshot},
-        order::{OrderIntent, OrderSide},
+        order::OrderIntent,
         position::{Position, PositionKey},
     };
     use eth_live_trading::{PlannerTxContext, TxPrepRequestContext};
@@ -374,7 +413,7 @@ fn shadow_input() -> eth_live_trading::LivePrioritySellPlannerInput {
             portfolio_id: PortfolioId("gas-policy-shadow".to_string()),
             wallet_id: WalletId("gas-policy-shadow".to_string()),
             strategy_name: strategy_name.clone(),
-            side: OrderSide::Sell,
+            side: intent.side,
             token_address,
             pool_address: pool_address.clone(),
             protocol: PoolProtocol::UniswapV2,
@@ -382,7 +421,7 @@ fn shadow_input() -> eth_live_trading::LivePrioritySellPlannerInput {
             route: None,
             max_slippage_bps: 0,
             deadline_secs: 0,
-            decision_reason: None,
+            decision_reason: intent.decision_reason.clone(),
         },
         position: Position::with_trade_id(
             PositionId(trade_id.0.clone()),

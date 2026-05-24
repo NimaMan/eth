@@ -250,13 +250,15 @@ fn priority_sell_plan(
     config: &LivePrioritySellPlannerConfig,
     input: &LivePrioritySellPlannerInput,
 ) -> PrioritySellPlan {
-    let reason = input
-        .intent
-        .decision_reason
-        .as_ref()
+    let decision_reason = input.intent.decision_reason.as_ref();
+    let reason = decision_reason
         .map(|reason| reason.code.clone())
         .unwrap_or_else(|| "exit.live_priority_sell".to_string());
-    let (signal_source, urgency) = priority_sell_classification(&reason);
+    let (signal_source, urgency) = priority_sell_classification(
+        &reason,
+        decision_reason.and_then(|reason| reason.source.as_deref()),
+        decision_reason.map(|reason| &reason.details),
+    );
 
     PrioritySellPlan {
         trade_id: input.position.trade_id.clone(),
@@ -272,9 +274,25 @@ fn priority_sell_plan(
     }
 }
 
-fn priority_sell_classification(reason: &str) -> (LpSignalSource, SellUrgency) {
+fn priority_sell_classification(
+    reason: &str,
+    source: Option<&str>,
+    details: Option<&Value>,
+) -> (LpSignalSource, SellUrgency) {
+    let source = source.unwrap_or_default().to_ascii_lowercase();
+    let evidence_source = details
+        .and_then(|details| details.pointer("/risk_event_evidence/signal_source"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let has_pending_tx = details.map(has_pending_dependency_tx_hash).unwrap_or(false);
+    let is_mempool = source.contains("mempool") || evidence_source.contains("mempool");
     match reason {
         "exit.mempool_liquidity_removal_signal" => (
+            LpSignalSource::MempoolLpApproval,
+            SellUrgency::MempoolPreMine,
+        ),
+        "exit.lp_approval" if is_mempool || has_pending_tx => (
             LpSignalSource::MempoolLpApproval,
             SellUrgency::MempoolPreMine,
         ),
@@ -288,6 +306,17 @@ fn priority_sell_classification(reason: &str) -> (LpSignalSource, SellUrgency) {
         ),
         _ => (LpSignalSource::StrategyExit, SellUrgency::NormalExit),
     }
+}
+
+fn has_pending_dependency_tx_hash(details: &Value) -> bool {
+    details
+        .pointer("/pending_tx_hash")
+        .or_else(|| details.pointer("/risk_event_evidence/detection_tx_hash"))
+        .or_else(|| details.pointer("/risk_event_evidence/pending_tx_hash"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
 }
 
 fn priority_sell_gas_rank_policy(
@@ -524,7 +553,8 @@ mod tests {
 
     #[test]
     fn max_hold_exit_is_normal_strategy_exit_not_mempool_race() {
-        let (signal_source, urgency) = priority_sell_classification("exit.max_hold_active_blocks");
+        let (signal_source, urgency) =
+            priority_sell_classification("exit.max_hold_active_blocks", None, None);
 
         assert_eq!(signal_source, LpSignalSource::StrategyExit);
         assert_eq!(urgency, SellUrgency::NormalExit);
@@ -533,7 +563,7 @@ mod tests {
     #[test]
     fn lp_approval_exit_keeps_race_urgency() {
         for reason in ["exit.lp_approval", "exit.lp_approval_mined_race"] {
-            let (signal_source, urgency) = priority_sell_classification(reason);
+            let (signal_source, urgency) = priority_sell_classification(reason, None, None);
 
             assert_eq!(signal_source, LpSignalSource::MinedLpApproval);
             assert_eq!(urgency, SellUrgency::MinedApprovalRace);
@@ -541,9 +571,28 @@ mod tests {
     }
 
     #[test]
+    fn mempool_lp_approval_exit_uses_pre_mine_race_bucket() {
+        let details = json!({
+            "pending_tx_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "risk_event_evidence": {
+                "signal_source": "mempool"
+            }
+        });
+
+        let (signal_source, urgency) = priority_sell_classification(
+            "exit.lp_approval",
+            Some("mempool_signal"),
+            Some(&details),
+        );
+
+        assert_eq!(signal_source, LpSignalSource::MempoolLpApproval);
+        assert_eq!(urgency, SellUrgency::MempoolPreMine);
+    }
+
+    #[test]
     fn buy_confirm_lp_approval_exit_uses_shared_lp_approval_bucket() {
         let (signal_source, urgency) =
-            priority_sell_classification("exit.lp_approval_buy_confirm_block");
+            priority_sell_classification("exit.lp_approval_buy_confirm_block", None, None);
 
         assert_eq!(signal_source, LpSignalSource::MinedLpApproval);
         assert_eq!(urgency, SellUrgency::BuyConfirmBlockApproval);
@@ -552,7 +601,7 @@ mod tests {
     #[test]
     fn mempool_exit_keeps_race_urgency() {
         let (signal_source, urgency) =
-            priority_sell_classification("exit.mempool_liquidity_removal_signal");
+            priority_sell_classification("exit.mempool_liquidity_removal_signal", None, None);
 
         assert_eq!(signal_source, LpSignalSource::MempoolLpApproval);
         assert_eq!(urgency, SellUrgency::MempoolPreMine);

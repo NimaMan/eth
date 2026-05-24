@@ -115,10 +115,12 @@ fn label_for(code: &str, raw: &str) -> String {
         "entry.lp_approval_gate.approved_pct_gt_min" => {
             "Entry hold: LP approval above threshold".to_string()
         }
-        "entry.init_policy.missing_creation_block" => {
+        "entry.init_policy.missing_pool_creation_block"
+        | "entry.init_policy.missing_creation_block" => {
             "Entry hold: missing pool creation block".to_string()
         }
-        "entry.init_policy.creation_block_after_entry" => {
+        "entry.init_policy.pool_creation_block_after_entry"
+        | "entry.init_policy.creation_block_after_entry" => {
             "Entry hold: pool creation block after entry".to_string()
         }
         "entry.init_policy.pool_age_gt_max" => {

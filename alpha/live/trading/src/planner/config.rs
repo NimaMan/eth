@@ -34,7 +34,7 @@ impl Default for LivePrioritySellPlannerConfig {
             require_existing_allowance: true,
             gas_estimate: GasEstimateConfig::default(),
             normal_exit_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
-            mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
+            mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::mempool_race_only(),
             lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
         }
     }

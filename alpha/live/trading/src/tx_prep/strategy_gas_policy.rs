@@ -225,7 +225,7 @@ pub enum StrategyTxKind {
 ///
 /// - Entry buy: `p85 -> p75 -> p50 -> normal`.
 /// - Routine strategy exits: `p85 -> p75 -> p50 -> normal`.
-/// - Mempool LP approval / liquidity-removal exit: `p95 -> p90 -> p75 -> p50 -> normal`.
+/// - Mempool LP approval / liquidity-removal exit: `mempool_race`.
 /// - LP approval exit, including mined approval and buy-confirm-block approval:
 ///   `p90 -> p75 -> p50 -> normal`.
 ///
@@ -259,11 +259,11 @@ impl StrategyGasRankDefaults {
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MempoolPreMine,
                 signal_source: LpSignalSource::MempoolLpApproval,
-            } => StrategyGasRankPolicy::p95_first(),
+            } => StrategyGasRankPolicy::mempool_race_only(),
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MempoolPreMine,
                 ..
-            } => StrategyGasRankPolicy::p95_first(),
+            } => StrategyGasRankPolicy::mempool_race_only(),
             StrategyTxKind::PrioritySell {
                 urgency: SellUrgency::MinedApprovalRace,
                 ..
@@ -409,14 +409,18 @@ mod tests {
     }
 
     #[test]
-    fn mempool_priority_sell_default_is_p95_first() {
+    fn mempool_priority_sell_default_is_mempool_race_only() {
         let selected = StrategyGasRankDefaults::policy_for(StrategyTxKind::PrioritySell {
             urgency: SellUrgency::MempoolPreMine,
             signal_source: LpSignalSource::MempoolLpApproval,
         })
-        .choose_candidate(&[candidate("p50", 2, 25), candidate("p95", 9, 5)])
+        .choose_candidate(&[
+            candidate("p50", 2, 25),
+            candidate("p95", 9, 5),
+            candidate("mempool_race", 3, 0),
+        ])
         .expect("candidate");
 
-        assert_eq!(selected.label, "p95");
+        assert_eq!(selected.label, "mempool_race");
     }
 }

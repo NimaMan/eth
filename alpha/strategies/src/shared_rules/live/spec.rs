@@ -9,7 +9,7 @@ pub struct LiveStrategySpecOptions;
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveEntryInitPolicySpec {
     pub max_age_blocks: Option<u64>,
-    pub require_creation_block: bool,
+    pub require_pool_creation_block: bool,
     pub max_price_ratio_to_initial: Option<String>,
     pub allow_missing_price_ratio: bool,
 }
@@ -18,7 +18,7 @@ impl Default for LiveEntryInitPolicySpec {
     fn default() -> Self {
         Self {
             max_age_blocks: None,
-            require_creation_block: false,
+            require_pool_creation_block: false,
             max_price_ratio_to_initial: None,
             allow_missing_price_ratio: true,
         }

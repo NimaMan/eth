@@ -48,8 +48,12 @@ pub struct MempoolProjectedPool {
     pub initial_price_denom_per_token: Option<DecimalAmount>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_ratio_to_initial: Option<DecimalAmount>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub creation_block: Option<BlockNumber>,
+    #[serde(
+        default,
+        alias = "creation_block",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pool_creation_block: Option<BlockNumber>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_decimals: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,7 +134,7 @@ impl MempoolEntryEvidence {
             price_denom_per_token: self.projected_pool.price_denom_per_token,
             initial_price_denom_per_token: self.projected_pool.initial_price_denom_per_token,
             price_ratio_to_initial: self.projected_pool.price_ratio_to_initial,
-            creation_block: self.projected_pool.creation_block,
+            creation_block: self.projected_pool.pool_creation_block,
             token_decimals: self.projected_pool.token_decimals,
             fee_tier: None,
             uniswap_v4: None,
@@ -236,7 +240,7 @@ mod tests {
                         "protocol": "UNISWAP-V2",
                         "denom_reserve": "1",
                         "token_reserve": "100",
-                        "creation_block": 11,
+                        "pool_creation_block": 11,
                         "latest_block": 12,
                         "can_buy": true,
                         "can_sell": true,

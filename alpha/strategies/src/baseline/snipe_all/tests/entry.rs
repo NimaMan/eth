@@ -821,7 +821,7 @@ fn mempool_entry_evidence(pool: &PoolSnapshot, price_ratio_to_initial: Option<De
             "denom_reserve": "1",
             "token_reserve": "100",
             "price_ratio_to_initial": price_ratio_to_initial,
-            "creation_block": 1,
+            "pool_creation_block": 1,
             "latest_block": 2,
             "can_buy": true,
             "can_sell": true,

@@ -18,6 +18,10 @@ const LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_TAIL_ENTRY_BUY
 const LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_NORMAL_EXIT_GAS_PROFILES";
 const LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_RACE_EXIT_GAS_PROFILES";
 const LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG: &str = "ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES";
+const LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG: &str =
+    "ALPHA_LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI";
+const LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG: &str =
+    "ALPHA_LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI";
 
 #[derive(Clone, Debug)]
 pub(super) struct LiveRealGasPolicy {
@@ -30,6 +34,8 @@ pub(super) struct LiveRealGasPolicy {
     pub(super) safety_buffer_eth: Decimal,
     pub(super) v2_vault_buy_gas_limit: u64,
     pub(super) v2_vault_sell_gas_limit: u64,
+    pub(super) mempool_race_priority_buffer_min_gwei: Decimal,
+    pub(super) mempool_race_priority_buffer_max_gwei: Decimal,
     pub(super) entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) normal_exit_gas_rank_policy: StrategyGasRankPolicy,
@@ -46,7 +52,7 @@ pub(super) fn load_live_real_gas_policy(
             "{LIVE_GAS_LOOKBACK_BLOCKS_CONFIG} must be between 1 and 100; got {gas_rank_lookback_blocks}"
         ));
     }
-    Ok(LiveRealGasPolicy {
+    LiveRealGasPolicy {
         required_gas_rank_source: required_config_string(config, LIVE_GAS_REQUIRED_SOURCE_CONFIG)?,
         gas_rank_lookback_blocks,
         simulated_gas_buffer_bps: required_config_u64(
@@ -74,6 +80,14 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_V2_VAULT_SELL_GAS_LIMIT_CONFIG,
         )?,
+        mempool_race_priority_buffer_min_gwei: required_config_decimal(
+            config,
+            LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG,
+        )?,
+        mempool_race_priority_buffer_max_gwei: required_config_decimal(
+            config,
+            LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG,
+        )?,
         entry_buy_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG,
@@ -94,7 +108,8 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG,
         )?,
-    })
+    }
+    .validated()
 }
 
 pub(in crate::live_trader) struct BuyGasPolicyContext<'a> {
@@ -105,6 +120,20 @@ pub(in crate::live_trader) struct BuyGasPolicyContext<'a> {
 }
 
 impl LiveRealGasPolicy {
+    fn validated(self) -> Result<Self> {
+        if self.mempool_race_priority_buffer_min_gwei < Decimal::ZERO {
+            return Err(eyre!(
+                "{LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG} must be non-negative"
+            ));
+        }
+        if self.mempool_race_priority_buffer_max_gwei < self.mempool_race_priority_buffer_min_gwei {
+            return Err(eyre!(
+                "{LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG} must be >= {LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG}"
+            ));
+        }
+        Ok(self)
+    }
+
     pub(in crate::live_trader) fn buy_policy_context(
         &self,
         reason_code: Option<&str>,
@@ -222,6 +251,8 @@ mod tests {
             safety_buffer_eth: Decimal::new(1, 3),
             v2_vault_buy_gas_limit: 300_000,
             v2_vault_sell_gas_limit: 300_000,
+            mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
+            mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
             entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
             tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
             normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),

@@ -55,11 +55,13 @@ Production gas-rank readiness is tracked in:
 
 The real Alpha runner currently requires gas-rank candidates from
 `eth_chain_server_gas_rank`, uses `p85 -> p75 -> p50 -> normal` for entries,
-uses `p85 -> p75 -> p50 -> normal` for routine strategy exits, maps mempool risk exits to
-`p95 -> p90 -> p75 -> p50 -> normal`, maps LP approval exits to
+uses `p85 -> p75 -> p50 -> normal` for routine strategy exits, maps mempool
+LP/removal race exits to `mempool_race`, maps mined LP approval exits to
 `p90 -> p75 -> p50 -> normal`, caps selected priority fee at `3.5 gwei`, caps
 entry estimated gas fee at `0.0012 ETH`, and caps exit estimated gas fee at
-`0.002 ETH`.
+`0.002 ETH`. `mempool_race` is dependency-relative: it reads the triggering
+pending tx priority fee and bids above it with a deterministic per-tx buffer in
+the configured `0.1` to `0.2 gwei` range.
 
 The decision loop is:
 
@@ -67,8 +69,8 @@ The decision loop is:
 | --- | --- | --- | --- | --- | --- |
 | Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault buy | Active Alpha11 path |
 | Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
-| LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available risk exit |
-| Mempool LP/removal risk | `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `p95 -> p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Only when live mempool evidence exists |
+| Mined LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available confirmed-chain risk exit |
+| Mempool LP/removal risk | `exit.lp_approval` from `mempool_signal` or `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `mempool_race` | Kartal priority V2 vault sell | Requires a pending dependency tx hash |
 | Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
 | Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |
 
@@ -244,7 +246,8 @@ The selection rule is:
    mandatory base-fee cost. The remainder is the maximum priority spend.
 3. `eth_block_tx_rank` should produce named candidates such as `normal`, `p50`,
    `p75`, `p85`, `p90`, and `p95`, each with priority fee, max fee, expected rank,
-   gas-before, and source window.
+   gas-before, and source window. For `mempool_race`, the planner instead reads
+   the triggering pending tx and synthesizes one dependency-relative candidate.
 4. `tx_prep` filters out candidates whose priority spend or total max fee
    exceeds the protected-value cap.
 5. Among eligible candidates, `tx_prep` chooses the best ranked candidate. If no
@@ -253,11 +256,11 @@ The selection rule is:
 
 This deliberately prevents us from paying more to escape than the position can
 recover. The practical tuning question is not "highest bribe wins"; it is "what
-recent rank band is fast enough for this signal, and does that band fit inside
-the protected value?" Mempool LP approval exits should start at the P95 ladder
-because the expected edge is pre-mine. Mined LP approval exits should start at
-P90 unless the next-block removal probability pushes a future strategy to a
-different explicit ladder.
+recent rank band or dependency-relative fee is fast enough for this signal, and
+does that fee fit inside the protected value?" Mempool LP approval and mempool
+liquidity-removal exits use dependency-relative `mempool_race`. Mined LP
+approval exits start at P90 unless the next-block removal probability pushes a
+future strategy to a different explicit ladder.
 
 Every submitted request should persist the chosen gas-rank label, priority fee,
 max fee, estimated ETH spend, rank position, gas-before estimate, predicted base
@@ -299,7 +302,7 @@ The policy separates three signal sources:
 
 | Source | Meaning | Action |
 | --- | --- | --- |
-| `MempoolLpApproval` | LP approval was seen before mining. | Submit a P95-ladder priority sell before the approval/removal path lands. |
+| `MempoolLpApproval` | LP approval was seen before mining. | Submit a dependency-relative `mempool_race` priority sell before the approval/removal path lands. |
 | `MinedLpApproval` | LP approval is confirmed, but removal is not confirmed yet. | Race the next block with a priority sell. |
 | `MinedLiquidityRemoval` | Direct removal is already confirmed. | Mark too late for the priority edge. |
 

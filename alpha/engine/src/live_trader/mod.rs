@@ -71,6 +71,7 @@ const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAY
 const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
 const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
+const RETH_HTTP_RPC_CONFIG: &str = "RETH_HTTP_RPC";
 const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/logs/alpha_trader";
 const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
@@ -139,10 +140,7 @@ async fn run(
     }
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
     let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
-    if execution_mode.uses_kartal() {
-        live_gas_policy.mempool_pre_mine_gas_rank_policy =
-            StrategyGasRankPolicy::mempool_race_only();
-    }
+    live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
     let live_real_gas_policy = if execution_mode.uses_kartal() {
         Some(live_gas_policy.clone())
     } else {
@@ -154,6 +152,7 @@ async fn run(
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
+    let reth_http_rpc = required_shared_config_value(&shared_config, RETH_HTTP_RPC_CONFIG)?;
     let entry_bankrolls_wei = strategy_specs
         .iter()
         .map(resolve_entry_bankroll_wei)
@@ -325,6 +324,7 @@ async fn run(
         TraderExecutionMode::ChainSim => Box::new(ChainSimGasPolicyBacktestAdapter::new(
             chain_sim_adapter,
             token_server_url.clone(),
+            reth_http_rpc.clone(),
             live_gas_policy.clone(),
         )),
         TraderExecutionMode::KartalReal => {

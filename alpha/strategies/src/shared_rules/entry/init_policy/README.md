@@ -6,7 +6,8 @@ eligibility, decide whether the pool is fresh enough and clean enough to enter.
 The first version is intentionally conservative and data-driven:
 
 - the rule is inert by default;
-- age checks only run when `max_age_blocks` or `require_creation_block` is set;
+- age checks only run when `max_age_blocks` or
+  `require_pool_creation_block` is set;
 - price/initial checks only run when `max_price_ratio_to_initial` is set;
 - missing price/initial data is allowed unless the policy explicitly forbids it.
 

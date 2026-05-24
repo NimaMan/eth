@@ -15,21 +15,21 @@ use crate::baseline::snipe_all::rule::RuleDecision;
 pub const RULE_NAME: &str = "entry.init_policy";
 
 pub fn evaluate(evidence: &EntryInitEvidence, config: &EntryInitPolicyConfig) -> RuleDecision {
-    if config.require_creation_block && evidence.creation_block.is_none() {
-        return RuleDecision::hold(RULE_NAME, "missing_creation_block");
+    if config.require_pool_creation_block && evidence.pool_creation_block.is_none() {
+        return RuleDecision::hold(RULE_NAME, "missing_pool_creation_block");
     }
 
     if evidence
-        .creation_block
-        .map(|creation_block| creation_block > evidence.entry_block)
+        .pool_creation_block
+        .map(|pool_creation_block| pool_creation_block > evidence.entry_block)
         .unwrap_or(false)
     {
-        return RuleDecision::hold(RULE_NAME, "creation_block_after_entry");
+        return RuleDecision::hold(RULE_NAME, "pool_creation_block_after_entry");
     }
 
     if let Some(max_age_blocks) = config.max_age_blocks {
         let Some(entry_age_blocks) = evidence.entry_age_blocks else {
-            return RuleDecision::hold(RULE_NAME, "missing_creation_block");
+            return RuleDecision::hold(RULE_NAME, "missing_pool_creation_block");
         };
         if entry_age_blocks > max_age_blocks {
             return RuleDecision::hold(RULE_NAME, "pool_age_gt_max");
@@ -60,7 +60,7 @@ mod tests {
     fn evidence() -> EntryInitEvidence {
         EntryInitEvidence {
             entry_block: 120,
-            creation_block: Some(100),
+            pool_creation_block: Some(100),
             entry_age_blocks: Some(20),
             price_ratio_to_initial: Some(Decimal::new(12, 1)),
             denom_reserve: Decimal::from(1),
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn blocks_missing_creation_when_required_or_needed_for_age() {
         let missing = EntryInitEvidence {
-            creation_block: None,
+            pool_creation_block: None,
             entry_age_blocks: None,
             ..evidence()
         };
@@ -101,11 +101,11 @@ mod tests {
             evaluate(
                 &missing,
                 &EntryInitPolicyConfig {
-                    require_creation_block: true,
+                    require_pool_creation_block: true,
                     ..EntryInitPolicyConfig::default()
                 },
             ),
-            RuleDecision::hold(RULE_NAME, "missing_creation_block")
+            RuleDecision::hold(RULE_NAME, "missing_pool_creation_block")
         );
         assert_eq!(
             evaluate(
@@ -115,7 +115,7 @@ mod tests {
                     ..EntryInitPolicyConfig::default()
                 },
             ),
-            RuleDecision::hold(RULE_NAME, "missing_creation_block")
+            RuleDecision::hold(RULE_NAME, "missing_pool_creation_block")
         );
     }
 

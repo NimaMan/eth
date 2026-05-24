@@ -66,7 +66,7 @@ pub(super) fn build_live_strategy(
         .and_then(|s| Decimal::from_str(s).ok());
     let entry_init_policy = EntryInitPolicyConfig {
         max_age_blocks: spec.entry_init_policy.max_age_blocks,
-        require_creation_block: spec.entry_init_policy.require_creation_block,
+        require_pool_creation_block: spec.entry_init_policy.require_pool_creation_block,
         max_price_ratio_to_initial: entry_init_max_price_ratio_to_initial,
         allow_missing_price_ratio: spec.entry_init_policy.allow_missing_price_ratio,
     };

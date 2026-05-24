@@ -102,11 +102,11 @@ fn approval_age_from_pool_creation(
     event: &RiskEvent,
 ) -> Option<crate::shared_rules::lp_approval::ApprovalAgeEvidence> {
     let observed_block = event.observed_block?;
-    let creation_block = ctx.market.pool.as_ref()?.creation_block?;
+    let pool_creation_block = ctx.market.pool.as_ref()?.creation_block?;
     Some(crate::shared_rules::lp_approval::ApprovalAgeEvidence {
-        age_blocks: observed_block as i64 - creation_block as i64,
+        age_blocks: observed_block as i64 - pool_creation_block as i64,
         basis: "pool_creation_block",
-        reference_block: Some(creation_block),
+        reference_block: Some(pool_creation_block),
         observed_block: Some(observed_block),
     })
 }

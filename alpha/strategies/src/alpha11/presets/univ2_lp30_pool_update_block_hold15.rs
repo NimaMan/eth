@@ -40,7 +40,7 @@ pub fn snipe_all_config() -> SnipeAllConfig {
         ),
         entry_init_policy: EntryInitPolicyConfig {
             max_age_blocks: Some(ENTRY_INIT_MAX_AGE_BLOCKS),
-            require_creation_block: false,
+            require_pool_creation_block: false,
             max_price_ratio_to_initial: Some(
                 ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL
                     .parse()

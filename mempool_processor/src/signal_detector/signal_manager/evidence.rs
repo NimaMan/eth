@@ -99,7 +99,12 @@ pub(super) fn build_mempool_entry_evidence(
             "denom_reserve": denom_reserve,
             "token_reserve": token_reserve,
             "price_ratio_to_initial": Value::Null,
-            "creation_block": pool_context.and_then(|context| context.creation_block),
+            "pool_creation_block": pool_context.and_then(|context| context.pool_creation_block),
+            "pool_creation_block_source": pool_context.and_then(|context| {
+                context
+                    .pool_creation_block
+                    .map(|_| "tracked_pool_trading_enabled_block")
+            }),
             "latest_block": latest_block,
             "can_buy": pool_result.can_buy && pool_context.map(|context| context.can_buy).unwrap_or(true),
             "can_sell": pool_result.can_sell && pool_context.map(|context| context.can_sell).unwrap_or(true),
