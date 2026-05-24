@@ -7,6 +7,7 @@ use alloy_primitives::U256;
 use chrono::Utc;
 use eth_alpha_core::{
     amount::Amount, execution::ExecutionReport, ids::TokenPoolId, market::PoolSnapshot,
+    risk::RiskEvent,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
 use eth_ops_events::{JsonlOpsEventSink, MultiOpsEventSink, TracingOpsEventSink};
@@ -19,8 +20,8 @@ use crate::wire::{parse_address, LiveStatusResponse, MempoolSignalWire, PoolWire
 
 use super::{
     ALPHA_DATABASE_CONFIG_KEY, ALPHA_TRADER_LOG_DIR_CONFIG, CHAIN_SERVER_BIND_CONFIG,
-    DEFAULT_ALPHA_TRADER_LOG_DIR, MEMPOOL_SIGNAL_SOURCE, POOL_UPDATE_SOURCE,
-    POSITION_MONITOR_SOURCE,
+    DEFAULT_ALPHA_TRADER_LOG_DIR, MEMPOOL_SIGNAL_SOURCE, MINED_POOL_RISK_SOURCE,
+    POOL_UPDATE_SOURCE, POSITION_MONITOR_SOURCE,
 };
 
 pub(super) fn init_alpha_trader_ops_events(
@@ -67,13 +68,14 @@ fn sanitize_path_segment(value: &str) -> String {
 pub(super) async fn load_persisted_watermarks(
     store: &PostgresTradingStore,
     strategy_name: &str,
-) -> Result<(HashMap<TokenPoolId, u64>, HashSet<String>)> {
+) -> Result<(HashMap<TokenPoolId, u64>, HashSet<String>, HashSet<String>)> {
     let cursors = store
         .load_strategy_observation_cursors(strategy_name)
         .await
         .wrap_err("failed to load alpha trader observation watermarks")?;
     let mut pool_blocks = HashMap::new();
     let mut signal_ids = HashSet::new();
+    let mut mined_pool_risk_keys = HashSet::new();
 
     for cursor in cursors {
         match cursor.event_source.as_str() {
@@ -92,12 +94,15 @@ pub(super) async fn load_persisted_watermarks(
             MEMPOOL_SIGNAL_SOURCE => {
                 signal_ids.insert(cursor.event_key);
             }
+            MINED_POOL_RISK_SOURCE => {
+                mined_pool_risk_keys.insert(cursor.event_key);
+            }
             POSITION_MONITOR_SOURCE => {}
             _ => {}
         }
     }
 
-    Ok((pool_blocks, signal_ids))
+    Ok((pool_blocks, signal_ids, mined_pool_risk_keys))
 }
 
 fn cursor_pool_id(
@@ -192,6 +197,44 @@ pub(super) async fn record_position_monitor_observation(
         })
         .await
         .wrap_err("failed to record position monitor strategy observation")
+}
+
+pub(super) async fn record_mined_pool_risk_observation(
+    store: &PostgresTradingStore,
+    strategy_name: &str,
+    event_key: &str,
+    risk: &RiskEvent,
+    decision: &str,
+    report_count: usize,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
+    store
+        .record_strategy_observation(StrategyObservationRecord {
+            strategy_name: strategy_name.to_string(),
+            event_source: MINED_POOL_RISK_SOURCE.to_string(),
+            event_key: event_key.to_string(),
+            token_address: Some(risk.token_address.to_string()),
+            pool_address: risk.pool_address.as_ref().map(ToString::to_string),
+            block_number: risk.observed_block,
+            event_timestamp: None,
+            decision: decision.to_string(),
+            report_count,
+            payload: json!({
+                "risk": risk,
+                "first_poll": first_poll,
+                "suppress_events": suppress_events,
+                "live_status": status.progress.status,
+                "live_current_block": status.progress.current_block,
+                "live_blocks_processed": status.progress.blocks_processed,
+                "live_warmup_total_blocks": status.progress.warmup_total_blocks,
+                "extra": extra,
+            }),
+        })
+        .await
+        .wrap_err("failed to record mined pool risk strategy observation")
 }
 
 pub(super) async fn record_signal_observation(

@@ -30,6 +30,7 @@ mod config_resolution;
 mod entrypoints;
 mod gas_policy;
 mod manual_close;
+mod mined_pool_risks;
 mod poll_error;
 mod position_state;
 mod real_execution;
@@ -48,6 +49,7 @@ use cli::{Args, RealExecutionArgs};
 use config_resolution::{resolve_cli_or_config_i64, resolve_cli_or_config_u64};
 use gas_policy::load_live_real_gas_policy;
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
+use mined_pool_risks::mined_pool_risks_from_update;
 use poll_error::handle_poll_error;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
 use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
@@ -63,6 +65,7 @@ pub use entrypoints::{run_live_backtest, run_live_real};
 
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
+const MINED_POOL_RISK_SOURCE: &str = "mined_pool_update";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
@@ -392,7 +395,7 @@ async fn run(
     }
 
     let client = TokenServerClient::new(token_server_url.clone());
-    let (mut seen_pool_blocks, mut seen_signal_ids) =
+    let (mut seen_pool_blocks, mut seen_signal_ids, mut seen_mined_pool_risk_keys) =
         load_persisted_watermarks(&store, &observation_strategy_name).await?;
     let mut primed = false;
     let mut last_position_monitor_block: Option<u64> = None;
@@ -413,6 +416,7 @@ async fn run(
         entry_bankroll_wei = ?single_entry_bankroll_wei.map(|value| value.to_string()),
         restored_pool_watermarks = seen_pool_blocks.len(),
         restored_signal_watermarks = seen_signal_ids.len(),
+        restored_mined_pool_risk_watermarks = seen_mined_pool_risk_keys.len(),
         restored_seen_pools = seen_pools_by_strategy
             .values()
             .map(Vec::len)
@@ -626,8 +630,29 @@ async fn run(
                 continue;
             }
             seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
+            let mined_risk_candidates = mined_pool_risks_from_update(&pool_wire, &pool);
+            let mined_risk_candidate_count = mined_risk_candidates.len();
 
             if suppress_events || (first_poll && !args.replay_current) {
+                let mut primed_mined_risks = 0usize;
+                for candidate in mined_risk_candidates {
+                    if seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
+                        record_mined_pool_risk_observation(
+                            &store,
+                            &observation_strategy_name,
+                            &candidate.key,
+                            &candidate.event,
+                            "primed",
+                            0,
+                            first_poll,
+                            suppress_events,
+                            &status,
+                            json!({ "phase": "primed_from_pool_update" }),
+                        )
+                        .await?;
+                        primed_mined_risks += 1;
+                    }
+                }
                 record_pool_observation(
                     &store,
                     &observation_strategy_name,
@@ -639,7 +664,10 @@ async fn run(
                     first_poll,
                     suppress_events,
                     &status,
-                    Value::Null,
+                    json!({
+                        "mined_pool_risk_candidates": mined_risk_candidate_count,
+                        "mined_pool_risks_primed": primed_mined_risks,
+                    }),
                 )
                 .await?;
                 continue;
@@ -668,7 +696,10 @@ async fn run(
                 first_poll,
                 suppress_events,
                 &status,
-                json!({ "reports": reports_payload(&event_reports) }),
+                json!({
+                    "reports": reports_payload(&event_reports),
+                    "mined_pool_risk_candidates": mined_risk_candidate_count,
+                }),
             )
             .await?;
             reports += report_count;
@@ -682,6 +713,50 @@ async fn run(
                     error = ?report.error,
                     "chain-sim execution report"
                 );
+            }
+
+            for candidate in mined_risk_candidates {
+                if !seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
+                    continue;
+                }
+                if let Some(block_number) = candidate.event.observed_block {
+                    adapter_current_block.store(block_number, Ordering::Relaxed);
+                }
+                let event_reports = engine
+                    .handle_event(EngineEvent::Risk(candidate.event.clone()))
+                    .await?;
+                let report_count = event_reports.len();
+                let decision = if report_count > 0 {
+                    "submitted"
+                } else {
+                    "hold"
+                };
+                record_mined_pool_risk_observation(
+                    &store,
+                    &observation_strategy_name,
+                    &candidate.key,
+                    &candidate.event,
+                    decision,
+                    report_count,
+                    first_poll,
+                    suppress_events,
+                    &status,
+                    json!({ "reports": reports_payload(&event_reports) }),
+                )
+                .await?;
+                reports += report_count;
+                risk_events += 1;
+                for report in event_reports {
+                    info!(
+                        order_id = %report.order_id.0,
+                        status = ?report.status,
+                        block_number = ?report.block_number,
+                        gas_used = ?report.gas_used,
+                        error = ?report.error,
+                        risk_key = %candidate.key,
+                        "chain-sim mined pool risk execution report"
+                    );
+                }
             }
         }
 

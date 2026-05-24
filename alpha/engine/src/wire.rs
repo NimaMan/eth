@@ -79,6 +79,22 @@ pub struct PoolWire {
     pub can_buy_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub runtime_state: Option<PoolRuntimeStateWire>,
+    #[serde(default)]
+    pub lp_last_approval_block: Option<u64>,
+    #[serde(default)]
+    pub lp_last_approval: Option<Value>,
+    #[serde(default)]
+    pub lp_approval_count: Option<u64>,
+    #[serde(default)]
+    pub lp_approved_percentage: Option<f64>,
+    #[serde(default)]
+    pub liquidity_removal: bool,
+    #[serde(default)]
+    pub liquidity_removal_block: Option<u64>,
+    #[serde(default)]
+    pub liquidity_removal_tx_hash: Option<String>,
+    #[serde(default)]
+    pub liquidity_removal_label: Option<String>,
     pub can_buy: bool,
     pub can_sell: bool,
     pub is_scam: bool,
@@ -516,6 +532,14 @@ mod tests {
             can_buy_block: Some(10),
             latest_block_number: Some(12),
             runtime_state: None,
+            lp_last_approval_block: None,
+            lp_last_approval: None,
+            lp_approval_count: None,
+            lp_approved_percentage: None,
+            liquidity_removal: false,
+            liquidity_removal_block: None,
+            liquidity_removal_tx_hash: None,
+            liquidity_removal_label: None,
             can_buy: top_level_can_buy,
             can_sell: top_level_can_sell,
             is_scam: false,
