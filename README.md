@@ -141,7 +141,7 @@ Keep new code inside the crate that owns the behavior:
 | `reth_chain_query` | Typed Reth DB reads, provider abstractions, entity views, time/block helpers, DEX state readers, stateless calldata builders, RethIndex tables/writers. | Simulation orchestration, processed transaction semantics, tax math, live strategy logic. |
 | `tx_processor` | `ProcessedTransaction`, `ProcessedBlock`, event/log decoding, internal calls, balance deltas, bribe/tax calculations, pool buy/approve/sell viability orchestration, disk cache. | Long-lived token registry state, HTTP serving, strategy decisions, transaction signing. |
 | `eth_token` | Token and pool state machines, token health, control-address/activity state, network views, block-level token update logic from processed blocks. | Direct tracing/RPC, duplicate transaction decoding, live service hosting. |
-| `eth_chain_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, token-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
+| `eth_chain_server` | Process lifetime, warmup/live tail, in-memory token registry hosting, HTTP/SSE views, chain-server logs, alpha-facing read endpoints. | Core token state logic, core tx processing, strategy decisions. |
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
 | `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, live tx-prep, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
@@ -229,7 +229,7 @@ Use focused tests/examples near the owner crate:
 | Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/processing/*`, `tx_processor/examples/blocks/*` |
 | Trade simulation examples | `tx_processor/examples/trade_simulation/*` |
 | Token/pool state | `eth_token/tests/`, `eth_token/examples/tracking/token_tracking_range.rs`, `eth_token/examples/validation/*` |
-| Live token server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
+| Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
 | Token lab cases and strategy cohorts | `token_lab/README.md`, `token_lab/strategy/README.md`, and one case folder under `token_lab/cases/` |

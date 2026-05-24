@@ -17,7 +17,7 @@ Current system units:
 - `lighthouse-beacon.service`
 - `eth-live-block-processor.service` - Rust `tx_processor` live block processor.
 - `eth-live-token-tracker.service` - Python live token tracker and Redis token snapshot publisher.
-- `eth-token-server.service` - Rust in-memory token tracking API/inspector server.
+- `eth-chain-server.service` - Rust in-memory chain/token tracking API and live runtime.
 - `eth-mempool-processor.service` - Rust mempool signal detector.
 
 Current user units are documented in `user/README.md` and are installed by
@@ -30,14 +30,16 @@ cd /home/nima/code/crypto/blockchains/eth
 cargo build --release -p tx_processor --bin live_block_processor
 ```
 
-Build the token server before starting its service:
+Build the chain server before starting its service:
 
 ```bash
 cd /home/nima/code/crypto/blockchains/eth
-cargo build --release -p eth_token_server
+cargo build --release -p eth_chain_server
 ```
 
-The service reads `/home/nima/code/crypto/blockchains/eth/config.env` and publishes processed block snapshots under the `eth/live/...` Redis namespace.
+The service reads `/home/nima/code/crypto/blockchains/eth/config.env`, applies
+confirmed blocks through `eth_token`, and serves the live chain/token API from
+the in-process `eth_chain_server` runtime.
 
 The token tracker service also reads the shared config, writes logs under
 `/home/nima/code/crypto/blockchains/eth/logs`, publishes live token update
