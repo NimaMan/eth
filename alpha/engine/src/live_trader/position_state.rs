@@ -1,4 +1,4 @@
-use super::*;
+use eth_alpha_core::position::{Position, PositionState};
 
 pub(super) fn release_stale_submitted_position(position: &mut Position) -> bool {
     match position.state {

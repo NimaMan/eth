@@ -34,13 +34,13 @@ Finished means:
 
 ## Current Limiting Factor
 
-As of 2026-05-21, the live-capital bottleneck is hardcoded runtime control, not
-basic transaction submission. Kartal and `tx_executor` can accept, validate,
-sign, journal, dry-run, and publicly broadcast a prepared direct transaction.
-`eth_alpha_live_trader` can instantiate the Kartal real adapter, target the
-deployed Uniswap V2 trading vault, run exact deployed-vault simulations, use the
-chain-server gas-rank endpoint, submit through Kartal, and reconcile mined V2
-vault buy/sell receipts.
+As of 2026-05-24, the live-capital bottleneck is hardcoded runtime/policy
+control and final service-boundary cleanup, not basic transaction submission.
+Kartal and `tx_executor` can accept, validate, sign, journal, dry-run, and
+publicly broadcast a prepared direct transaction. `eth_alpha_live_trader` can
+instantiate the Kartal real adapter, target the deployed Uniswap V2 trading
+vault, run exact deployed-vault simulations, use the chain-server gas-rank
+endpoint, submit through Kartal, and reconcile mined V2 vault buy/sell receipts.
 
 The practical consequence is:
 
@@ -54,6 +54,48 @@ The practical consequence is:
 - Kartal, the signer, Alpha11 strategy specs, `config.env`, and Asena must agree
   before another public run; conflicting caps or duplicated addresses are now the
   highest-risk failure mode.
+
+## Alpha Structure State 2026-05-24
+
+First cleanup pass is complete and was intentionally behavior-preserving:
+
+- `alpha/engine/src/live_trader/mod.rs` was reduced from `1489` lines to `993`
+  by extracting bankroll restoration, config resolution, entrypoints, poll-error
+  handling, restored runtime state, risk annotation, run metadata, and strategy
+  construction.
+- `alpha/engine/src/execution/real/mod.rs` now keeps production adapter code in
+  the module and moved tests to `execution/real/tests.rs`.
+- `alpha/engine/src/live_trader/real_execution.rs` is now folder-shaped:
+  `live_trader/real_execution/mod.rs`, `tests.rs`, and `README.md`.
+- `live_trader/`, `live_trader/backtest/`, and
+  `live_trader/real_execution/` each have a single README explaining the folder
+  boundary.
+- Stale empty alpha folders were removed.
+- No execution semantics changed. Core buy/sell EVM simulation remains in
+  `tx_processor/src/trade_simulation`; Alpha still owns strategy/runtime
+  orchestration, valuation snapshots, execution reports, and persistence.
+
+Verification run after the split:
+
+```bash
+cargo check -p eth_alpha_engine
+cargo check -p eth_alpha_engine --bins
+cargo check -p eth_alpha_backtest
+cargo test -p eth_alpha_engine gate3 --lib
+cargo test -p eth_alpha_engine execution::real --lib
+cargo test -p eth_alpha_engine live_trader::real_execution --lib
+```
+
+Remaining structure bottlenecks:
+
+| Area | Current state | Next action |
+| --- | --- | --- |
+| Live runner crate boundary | Live backtest and real-live service wiring still live under `eth_alpha_engine::live_trader`. | Create `alpha/live/runner` when we are ready to change package ownership of the live binaries. |
+| Live chain-sim gas policy | `live_trader/backtest/chain_sim_gas_policy.rs` is still `943` lines. | Split into policy classification, metadata extraction, and adapter wrapper. |
+| Real execution runtime wiring | `live_trader/real_execution/mod.rs` is still `889` lines. | Split resolver, planner, preflight, gas-selection, and adapter-builder modules. |
+| Simulated execution adapters | `execution/simulated/mod.rs` is still `881` lines. | Split historical adapter, live adapter, swap execution wrapper, params, and report helpers. |
+| Receipt reconciliation | `live_trader/receipt_reconciliation.rs` is still `873` lines. | Split receipt provider, vault event decoder, evidence builder, and batch reconciler. |
+| Engine tests | `engine/src/tests.rs` is still `1344` lines. | Split by runtime, valuation, lifecycle, and snapshot invariants. |
 
 ## Tail-Entry Production Parity Blockers 2026-05-24
 

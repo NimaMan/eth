@@ -10,8 +10,17 @@ Live trader owns the live polling process.
   buy size, liquidity floors, bankroll, entry-pool caps, and hold windows; live
   runs select those parameters by strategy name.
 
-Real tx wiring belongs in `real_execution.rs`; common live polling and
-observation persistence stays in `mod.rs` and `support.rs`.
+Real tx wiring belongs in `real_execution/`; common live polling stays in
+`mod.rs`. Supporting code is split by responsibility:
+
+- `entrypoints.rs`: public binary entrypoints.
+- `support.rs`: shared config, watermarks, observation persistence, and
+  heartbeat helpers.
+- `restored_state.rs`: persisted position, seen-pool, hold-counter, and
+  bankroll restoration.
+- `strategy_setup.rs`: strategy construction from live strategy specs.
+- `poll_error.rs`: token-server poll failure handling.
+- `risk_annotation.rs`: mempool-signal evidence enrichment.
 
 ## Runtime Config
 

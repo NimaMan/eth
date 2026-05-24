@@ -1,79 +1,65 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::wire::{
-    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalWire,
-    MempoolSignalsResponse, PoolWire,
+    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalsResponse,
 };
 use crate::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, EngineExecutionAdapter,
     LiveChainSimExecutionAdapter,
 };
-use alloy_primitives::U256;
 use chrono::Utc;
 use clap::Parser;
-use eth_alpha_core::{
-    amount::Amount,
-    execution::ExecutionReport,
-    ids::{PoolAddress, StrategyName, TokenPoolId},
-    market::{MarketEvent, PoolSnapshot},
-    mempool_entry::projected_pool_from_risk_event,
-    portfolio::PortfolioState,
-    position::{Position, PositionState},
-    risk::{RiskEvent, RiskKind},
-    store::TradingStore,
-    Strategy,
-};
-use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
+use eth_alpha_core::market::MarketEvent;
+use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::StrategyGasRankPolicy;
-use eth_ops_events::{
-    emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
-    PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
-};
-use eth_strategies::shared_rules::{
-    entry::init_policy::EntryInitPolicyConfig,
-    live::{
-        default_strategy_spec, observation_strategy_name, strategy_set_specs, LiveStrategySpec,
-        LiveStrategySpecOptions, STRATEGY_RUNTIME,
-    },
-};
-use eth_strategies::{
-    Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
-    LiveSnipeAllStrategy, RestoredEntryBankroll, SnipeAllConfig, ALPHA11_STRATEGY_IMPL,
-};
+use eth_ops_events::{emit_health, PipelineHealth, PipelineHealthStatus};
+use eth_strategies::shared_rules::live::{observation_strategy_name, STRATEGY_RUNTIME};
 use eyre::{eyre, Result, WrapErr};
-use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
 
 mod backtest;
+mod bankroll;
 mod cli;
+mod config_resolution;
+mod entrypoints;
 mod gas_policy;
 mod manual_close;
+mod poll_error;
 mod position_state;
 mod real_execution;
 mod receipt_reconciliation;
+mod restored_state;
+mod risk_annotation;
+mod run_metadata;
 mod strategy;
+mod strategy_setup;
 mod support;
 mod token_server;
 
 use backtest::ChainSimGasPolicyBacktestAdapter;
-use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
+use bankroll::{entry_bankroll_summary_json, resolve_entry_bankroll_wei, single_strategy_value};
+use cli::{Args, RealExecutionArgs};
+use config_resolution::{resolve_cli_or_config_i64, resolve_cli_or_config_u64};
 use gas_policy::load_live_real_gas_policy;
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
-use position_state::release_stale_submitted_position;
+use poll_error::handle_poll_error;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
 use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
+use restored_state::restore_runtime_state;
+use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
+use run_metadata::live_gas_policy_run_metadata_json;
 use strategy::{build_strategy_specs, live_strategy_spec_config_json};
+use strategy_setup::{build_live_strategy, LiveStrategyRestore};
 use support::*;
 use token_server::TokenServerClient;
+
+pub use entrypoints::{run_live_backtest, run_live_real};
 
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
@@ -93,172 +79,6 @@ const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
-
-fn resolve_entry_bankroll_wei(spec: &LiveStrategySpec) -> Result<Option<U256>> {
-    let Some(value) = spec.entry_bankroll_eth.as_deref() else {
-        return Ok(None);
-    };
-    let label = format!("strategy {} entry_bankroll_eth", spec.strategy_name);
-    parse_eth_decimal_to_wei(value, &label).map(Some)
-}
-
-fn entry_bankroll_summary_json(
-    specs: &[LiveStrategySpec],
-    bankrolls_wei: &[Option<U256>],
-) -> Vec<Value> {
-    specs
-        .iter()
-        .zip(bankrolls_wei.iter())
-        .map(|(spec, bankroll_wei)| {
-            let source = if spec.entry_bankroll_eth.is_some() {
-                "strategy_spec"
-            } else {
-                "none"
-            };
-            json!({
-                "strategy_name": &spec.strategy_name,
-                "entry_bankroll_eth": spec.entry_bankroll_eth.as_deref(),
-                "entry_bankroll_wei": bankroll_wei.as_ref().map(|value| value.to_string()),
-                "source": source,
-            })
-        })
-        .collect()
-}
-
-fn position_entry_spend_wei(position: &Position, fallback_buy_wei: U256) -> U256 {
-    position
-        .entry_cost_basis
-        .map(|cost| Amount::from_decimal(cost, 18).raw)
-        .unwrap_or(fallback_buy_wei)
-}
-
-fn position_exit_proceeds_wei(position: &Position) -> U256 {
-    position
-        .exit_proceeds
-        .map(|proceeds| Amount::from_decimal(proceeds, 18).raw)
-        .unwrap_or(U256::ZERO)
-}
-
-fn restored_entry_bankroll_from_terminal_positions(
-    positions: &[Position],
-    fallback_buy_wei: U256,
-) -> RestoredEntryBankroll {
-    let mut bankroll = RestoredEntryBankroll::default();
-    for position in positions {
-        match position.state {
-            PositionState::BuyFailed | PositionState::BuyCancelled | PositionState::Cancelled => {
-                bankroll.record_accounted_pool(position.key.pool_address.clone());
-            }
-            PositionState::SellConfirmed => {
-                bankroll.record_position_result(
-                    position.key.pool_address.clone(),
-                    position_entry_spend_wei(position, fallback_buy_wei),
-                    position_exit_proceeds_wei(position),
-                );
-            }
-            PositionState::Scammed => {
-                bankroll.record_position_result(
-                    position.key.pool_address.clone(),
-                    position_entry_spend_wei(position, fallback_buy_wei),
-                    U256::ZERO,
-                );
-            }
-            PositionState::Init
-            | PositionState::BuyIntentCreated
-            | PositionState::BuySubmitted
-            | PositionState::BuyDeferred
-            | PositionState::BuyConfirmed
-            | PositionState::SellIntentCreated
-            | PositionState::SellSubmitted
-            | PositionState::SellFailed
-            | PositionState::SellCancelled => {}
-        }
-    }
-    bankroll
-}
-
-fn single_strategy_value<T>(
-    specs: &[LiveStrategySpec],
-    value: impl FnOnce(&LiveStrategySpec) -> T,
-) -> Option<T> {
-    if specs.len() == 1 {
-        Some(value(&specs[0]))
-    } else {
-        None
-    }
-}
-
-fn live_gas_policy_run_metadata_json(
-    policy: &gas_policy::LiveRealGasPolicy,
-    execution_mode: TraderExecutionMode,
-) -> Value {
-    json!({
-        "mode": if execution_mode.uses_kartal() { "kartal-real" } else { "chain-sim-shadow" },
-        "required_gas_rank_source": &policy.required_gas_rank_source,
-        "gas_rank_lookback_blocks": policy.gas_rank_lookback_blocks,
-        "simulated_gas_buffer_bps": policy.simulated_gas_buffer_bps,
-        "max_priority_fee_gwei": policy.max_priority_fee_gwei.to_string(),
-        "entry_max_estimated_gas_fee_eth": policy.entry_max_estimated_gas_fee_eth.to_string(),
-        "exit_max_estimated_gas_fee_eth": policy.exit_max_estimated_gas_fee_eth.to_string(),
-        "safety_buffer_eth": policy.safety_buffer_eth.to_string(),
-        "v2_vault_buy_gas_limit": policy.v2_vault_buy_gas_limit,
-        "v2_vault_sell_gas_limit": policy.v2_vault_sell_gas_limit,
-        "entry_buy_profiles": &policy.entry_buy_gas_rank_policy,
-        "tail_entry_buy_profiles": &policy.tail_entry_buy_gas_rank_policy,
-        "normal_exit_profiles": &policy.normal_exit_gas_rank_policy,
-        "mempool_race_exit_profiles": &policy.mempool_pre_mine_gas_rank_policy,
-        "lp_approval_exit_profiles": &policy.lp_approval_exit_gas_rank_policy,
-    })
-}
-
-fn resolve_cli_or_config_u64(
-    override_value: Option<u64>,
-    config: &HashMap<String, String>,
-    key: &str,
-) -> Result<u64> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    let value = required_shared_config_value(config, key)?;
-    value
-        .parse::<u64>()
-        .wrap_err_with(|| format!("invalid {key} value {value:?}"))
-}
-
-fn resolve_cli_or_config_i64(
-    override_value: Option<i64>,
-    config: &HashMap<String, String>,
-    key: &str,
-) -> Result<i64> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    let value = required_shared_config_value(config, key)?;
-    value
-        .parse::<i64>()
-        .wrap_err_with(|| format!("invalid {key} value {value:?}"))
-}
-
-pub async fn run_live_backtest() -> Result<()> {
-    run(
-        "eth_alpha_live_backtest_trader",
-        parse_live_backtest_args(),
-        TraderExecutionMode::ChainSim,
-        None,
-    )
-    .await
-}
-
-pub async fn run_live_real() -> Result<()> {
-    let (args, real_args) = parse_live_real_args();
-    run(
-        "eth_alpha_live_trader",
-        args,
-        TraderExecutionMode::KartalReal,
-        Some(real_args),
-    )
-    .await
-}
 
 async fn run(
     runner_name: &'static str,
@@ -449,93 +269,18 @@ async fn run(
         .mark_stale_runs(60)
         .await
         .wrap_err("failed to mark stale alpha trader runs")?;
-    let mut portfolio = PortfolioState::default();
-    let mut seen_pools_by_strategy = HashMap::new();
-    let mut active_hold_counters_by_strategy = HashMap::new();
-    let mut restored_entry_bankrolls_by_strategy = HashMap::new();
-    let mut restored_entry_bankroll_position_count = 0usize;
-    let mut restored_stale_submitted_positions = 0usize;
-    for spec in &strategy_specs {
-        let buy_wei = parse_u256_decimal(&spec.buy_wei).wrap_err_with(|| {
-            format!(
-                "invalid buy_wei for live strategy {}: {}",
-                spec.strategy_name, spec.buy_wei
-            )
-        })?;
-        let seen_pools = store
-            .load_seen_pools(&spec.strategy_name)
-            .await
-            .wrap_err_with(|| {
-                format!(
-                    "failed to restore seen alpha pools for {}",
-                    spec.strategy_name
-                )
-            })?;
-        seen_pools_by_strategy.insert(spec.strategy_name.clone(), seen_pools);
-
-        let active_hold_counters = store
-            .load_active_hold_counters(&spec.strategy_name)
-            .await
-            .wrap_err_with(|| {
-                format!(
-                    "failed to restore active hold counters for {}",
-                    spec.strategy_name
-                )
-            })?;
-        active_hold_counters_by_strategy.insert(spec.strategy_name.clone(), active_hold_counters);
-
-        let terminal_positions = store
-            .load_terminal_positions(&spec.strategy_name)
-            .await
-            .wrap_err_with(|| {
-                format!(
-                    "failed to restore terminal alpha positions for {}",
-                    spec.strategy_name
-                )
-            })?;
-        restored_entry_bankroll_position_count += terminal_positions.len();
-        let restored_entry_bankroll =
-            restored_entry_bankroll_from_terminal_positions(&terminal_positions, buy_wei);
-        restored_entry_bankrolls_by_strategy
-            .insert(spec.strategy_name.clone(), restored_entry_bankroll);
-
-        let restored_positions = store
-            .load_active_positions(&spec.strategy_name)
-            .await
-            .wrap_err_with(|| {
-                format!(
-                    "failed to restore active alpha positions for {}",
-                    spec.strategy_name
-                )
-            })?;
-        for mut position in restored_positions {
-            if release_stale_submitted_position(&mut position) {
-                restored_stale_submitted_positions += 1;
-                store.upsert_position(&position).await.wrap_err_with(|| {
-                    format!(
-                        "failed to persist stale submitted position recovery for {}",
-                        position.id.0
-                    )
-                })?;
-            }
-            portfolio.positions.insert(position.id.clone(), position);
-        }
-    }
-    let restored_position_count = portfolio.active_position_count();
-    let restored_entry_bankroll_accounted_pool_count = restored_entry_bankrolls_by_strategy
-        .values()
-        .map(RestoredEntryBankroll::accounted_pool_count)
-        .sum::<usize>();
-    let restored_entry_bankroll_spent_wei = restored_entry_bankrolls_by_strategy
-        .values()
-        .fold(U256::ZERO, |acc, bankroll| {
-            acc.saturating_add(bankroll.spent_wei())
-        });
-    let restored_entry_bankroll_recovered_wei = restored_entry_bankrolls_by_strategy
-        .values()
-        .fold(U256::ZERO, |acc, bankroll| {
-            acc.saturating_add(bankroll.recovered_wei())
-        });
+    let restored_runtime = restore_runtime_state(&store, &strategy_specs).await?;
+    let portfolio = restored_runtime.portfolio;
+    let seen_pools_by_strategy = restored_runtime.seen_pools_by_strategy;
+    let active_hold_counters_by_strategy = restored_runtime.active_hold_counters_by_strategy;
+    let restored_entry_bankrolls_by_strategy = restored_runtime.entry_bankrolls_by_strategy;
+    let restored_entry_bankroll_position_count = restored_runtime.entry_bankroll_position_count;
+    let restored_entry_bankroll_accounted_pool_count =
+        restored_runtime.entry_bankroll_accounted_pool_count;
+    let restored_entry_bankroll_spent_wei = restored_runtime.entry_bankroll_spent_wei;
+    let restored_entry_bankroll_recovered_wei = restored_runtime.entry_bankroll_recovered_wei;
+    let restored_stale_submitted_positions = restored_runtime.stale_submitted_positions;
+    let restored_position_count = restored_runtime.active_position_count;
 
     let live_simulator = tx_simulator::LiveTxSimulator::new(&reth_datadir)
         .wrap_err("failed to initialize live chain simulator")?;
@@ -612,83 +357,6 @@ async fn run(
         .iter()
         .zip(entry_bankrolls_wei.iter().copied())
     {
-        let buy_wei = parse_u256_decimal(&spec.buy_wei).wrap_err_with(|| {
-            format!(
-                "invalid buy_wei for live strategy {}: {}",
-                spec.strategy_name, spec.buy_wei
-            )
-        })?;
-        let min_liquidity_eth = Decimal::from_str(&spec.min_liquidity_eth).wrap_err_with(|| {
-            format!(
-                "invalid min_liquidity_eth for live strategy {}: {}",
-                spec.strategy_name, spec.min_liquidity_eth
-            )
-        })?;
-        let min_liquidity_usd = Decimal::from_str(&spec.min_liquidity_usd).wrap_err_with(|| {
-            format!(
-                "invalid min_liquidity_usd for live strategy {}: {}",
-                spec.strategy_name, spec.min_liquidity_usd
-            )
-        })?;
-        let stop_loss_ratio = spec
-            .stop_loss_ratio
-            .as_deref()
-            .and_then(|s| Decimal::from_str(s).ok());
-        let take_profit_ratio = spec
-            .take_profit_ratio
-            .as_deref()
-            .and_then(|s| Decimal::from_str(s).ok());
-        let lp_approval_gate_min_pct = spec
-            .lp_approval_gate_min_pct
-            .as_deref()
-            .and_then(|s| Decimal::from_str(s).ok());
-        let entry_init_max_price_ratio_to_initial = spec
-            .entry_init_policy
-            .max_price_ratio_to_initial
-            .as_deref()
-            .and_then(|s| Decimal::from_str(s).ok());
-        let entry_init_policy = EntryInitPolicyConfig {
-            max_age_blocks: spec.entry_init_policy.max_age_blocks,
-            require_creation_block: spec.entry_init_policy.require_creation_block,
-            max_price_ratio_to_initial: entry_init_max_price_ratio_to_initial,
-            allow_missing_price_ratio: spec.entry_init_policy.allow_missing_price_ratio,
-        };
-        let min_sell_pool_denom_reserve = spec
-            .min_sell_pool_denom_reserve
-            .as_deref()
-            .and_then(|s| Decimal::from_str(s).ok())
-            .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
-        let snipe_all_config = SnipeAllConfig {
-            strategy_name: StrategyName(spec.strategy_name.clone()),
-            buy_amount: Amount {
-                raw: buy_wei,
-                decimals: 18,
-            },
-            sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
-            min_denom_reserve: min_liquidity_eth,
-            min_stable_denom_reserve: min_liquidity_usd,
-            min_sell_pool_denom_reserve,
-            entry_enabled: !args.disable_entry,
-            max_entry_pools: spec.max_entry_pools,
-            entry_bankroll_wei,
-            stop_loss_ratio,
-            take_profit_ratio,
-            max_hold_blocks: spec.max_hold_blocks,
-            exit_on_liquidity_removal: spec.exit_liquidity_removal,
-            exit_on_tax: spec.exit_tax,
-            exit_on_lp_approval: spec.exit_lp_approval,
-            exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
-            exit_on_scam: spec.exit_scam,
-            allowed_protocols: spec.allowed_protocols.clone(),
-            block_entry_on_lp_approval: spec.block_entry_on_lp_approval,
-            lp_approval_gate_min_pct,
-            entry_init_policy,
-            defer_buy_confirm_block_lp_approval_to_max_hold: spec
-                .defer_buy_confirm_block_lp_approval_to_max_hold,
-            lp_approval_exit_defer_max_trading_enabled_age_blocks: spec
-                .lp_approval_exit_defer_max_trading_enabled_age_blocks,
-            ..SnipeAllConfig::default()
-        };
         let seen_pools = seen_pools_by_strategy
             .get(&spec.strategy_name)
             .cloned()
@@ -709,28 +377,17 @@ async fn run(
             .get(&spec.strategy_name)
             .cloned()
             .unwrap_or_default();
-        let strategy: Box<dyn Strategy> = match spec.strategy_impl.as_str() {
-            ALPHA11_STRATEGY_IMPL => Box::new(LiveAlpha11Strategy::with_restored_runtime_state(
-                LiveAlpha11Config::new(Alpha11Config::new(snipe_all_config)),
+        let strategy = build_live_strategy(
+            runner_name,
+            spec,
+            entry_bankroll_wei,
+            !args.disable_entry,
+            LiveStrategyRestore {
                 seen_pools,
                 active_hold_counters,
-                restored_entry_bankroll,
-            )),
-            "snipe-all" => Box::new(LiveSnipeAllStrategy::with_restored_runtime_state(
-                LiveSnipeAllConfig::new(snipe_all_config),
-                seen_pools,
-                active_hold_counters,
-                restored_entry_bankroll,
-            )),
-            other => {
-                return Err(eyre!(
-                    "{} cannot instantiate unsupported live strategy_impl {} for {}",
-                    runner_name,
-                    other,
-                    spec.strategy_name
-                ));
-            }
-        };
+                entry_bankroll: restored_entry_bankroll,
+            },
+        )?;
         engine.add_strategy(strategy);
     }
 
@@ -788,77 +445,22 @@ async fn run(
         let (status, pools, signals) = match poll_result {
             Ok(result) => result,
             Err(error) => {
-                warn!(error = %error, "alpha trader poll failed");
-                let mut issue = PipelineIssue::new(
+                let should_stop = handle_poll_error(
                     runner_name,
-                    "alpha_trader",
-                    "token_server_poll",
-                    PipelineSeverity::Warn,
-                    PipelineImpact::ServiceDegraded,
-                    "alpha_trader_poll_failed",
-                    "Alpha trader token server poll failed",
-                );
-                issue.run_id = Some(run_id.clone());
-                issue.retryable = true;
-                issue.detail = Some(error.to_string());
-                issue
-                    .context
-                    .insert("token_server_url".to_string(), json!(token_server_url));
-                issue.context.insert(
-                    "positions".to_string(),
-                    json!(engine.portfolio().active_position_count()),
-                );
-                issue.refresh_ids();
-                emit_issue(&issue);
-                let mut health = PipelineHealth::new(
-                    runner_name,
-                    "alpha_trader",
-                    "main_loop",
-                    PipelineHealthStatus::Degraded,
-                );
-                health.run_id = Some(run_id.clone());
-                health.metrics.insert(
-                    "positions".to_string(),
-                    json!(engine.portfolio().active_position_count()),
-                );
-                health
-                    .metrics
-                    .insert("poll_error".to_string(), json!(error.to_string()));
-                emit_health(&health);
-                let metadata = json!({
-                    "token_server_url": &token_server_url,
-                    "poll_error": error.to_string(),
-                    "process_started_at": &process_started_at_text,
-                    "process_started_at_unix_secs": process_started_at_unix_secs,
-                    "trading_enabled": false,
-                    "positions": engine.portfolio().active_position_count(),
-                });
-                store
-                    .heartbeat(metadata.clone())
-                    .await
-                    .wrap_err("failed to write alpha trader error heartbeat")?;
-                if args.once {
-                    store
-                        .mark_stopped("failed", metadata)
-                        .await
-                        .wrap_err("failed to mark alpha trader run failed")?;
+                    error,
+                    &run_id,
+                    &token_server_url,
+                    &process_started_at_text,
+                    process_started_at_unix_secs,
+                    engine.portfolio().active_position_count(),
+                    &store,
+                    args.once,
+                    &mut shutdown,
+                    poll_interval_ms,
+                )
+                .await?;
+                if should_stop {
                     break;
-                }
-                tokio::select! {
-                    _ = time::sleep(Duration::from_millis(poll_interval_ms)) => {}
-                    _ = shutdown.recv() => {
-                        store
-                            .mark_stopped(
-                                "stopped",
-                                json!({
-                                    "reason": "shutdown_signal",
-                                    "positions": engine.portfolio().active_position_count(),
-                                }),
-                            )
-                            .await
-                            .wrap_err("failed to mark alpha trader run stopped")?;
-                        break;
-                    }
                 }
                 continue;
             }
@@ -1388,102 +990,4 @@ async fn run(
     }
 
     Ok(())
-}
-
-fn prime_projected_mempool_entry_pool(
-    event: &RiskEvent,
-    pool_updates: &Arc<std::sync::Mutex<HashMap<PoolAddress, PoolSnapshot>>>,
-    adapter_current_block: &Arc<std::sync::atomic::AtomicU64>,
-) -> Option<Value> {
-    let pool = projected_pool_from_risk_event(event)?;
-    let pool_address = pool.address.clone();
-    let token_address = pool.token_address;
-    let latest_block = pool.latest_block;
-    let can_buy = pool.can_buy;
-    let can_sell = pool.can_sell;
-    pool_updates
-        .lock()
-        .expect("pool lock")
-        .insert(pool_address.clone(), pool);
-    let current_block = adapter_current_block.load(Ordering::Relaxed);
-    if latest_block > current_block {
-        adapter_current_block.store(latest_block, Ordering::Relaxed);
-    }
-    Some(json!({
-        "source": "mempool_entry_evidence",
-        "pool_address": pool_address.0,
-        "token_address": token_address.to_string(),
-        "latest_block": latest_block,
-        "can_buy": can_buy,
-        "can_sell": can_sell,
-    }))
-}
-
-fn annotate_signal_risk_event(
-    event: &mut RiskEvent,
-    signal: &MempoolSignalWire,
-    pool: Option<&PoolWire>,
-) {
-    let mut evidence = event
-        .evidence
-        .take()
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default();
-    evidence.insert("signal_id".to_string(), json!(signal.signal_id));
-    evidence.insert("signal_type".to_string(), json!(signal.signal_type));
-    if let Some(value) = signal.signal_source.as_ref() {
-        evidence.insert("signal_source".to_string(), json!(value));
-    }
-    if let Some(value) = event.observed_block {
-        evidence.insert("observed_block".to_string(), json!(value));
-    }
-    if event.kind == RiskKind::LpApproval {
-        annotate_lp_approval_age_evidence(&mut evidence, event, pool);
-    }
-    event.evidence = Some(Value::Object(evidence));
-}
-
-fn annotate_lp_approval_age_evidence(
-    evidence: &mut Map<String, Value>,
-    event: &RiskEvent,
-    pool: Option<&PoolWire>,
-) {
-    let Some(observed_block) = event.observed_block else {
-        evidence.insert("lp_approval_age_basis".to_string(), json!("unknown"));
-        return;
-    };
-    let Some(pool) = pool else {
-        evidence.insert(
-            "lp_approval_age_basis".to_string(),
-            json!("missing_pool_context"),
-        );
-        return;
-    };
-    if let Some(can_buy_block) = pool.can_buy_block {
-        evidence.insert("trading_enabled_block".to_string(), json!(can_buy_block));
-        evidence.insert(
-            "trading_enabled_age_blocks_at_signal".to_string(),
-            json!(observed_block as i64 - can_buy_block as i64),
-        );
-        evidence.insert(
-            "lp_approval_age_basis".to_string(),
-            json!("trading_enabled_block"),
-        );
-    }
-    if let Some(creation_block) = pool.creation_block {
-        evidence.insert("pool_creation_block".to_string(), json!(creation_block));
-        evidence.insert(
-            "pool_age_blocks_at_signal".to_string(),
-            json!(observed_block as i64 - creation_block as i64),
-        );
-        if !evidence.contains_key("lp_approval_age_basis") {
-            evidence.insert(
-                "lp_approval_age_basis".to_string(),
-                json!("pool_creation_block"),
-            );
-        }
-    }
-    if !evidence.contains_key("lp_approval_age_basis") {
-        evidence.insert("lp_approval_age_basis".to_string(), json!("unknown"));
-    }
 }
