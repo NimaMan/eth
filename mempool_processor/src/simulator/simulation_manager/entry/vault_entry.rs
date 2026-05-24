@@ -27,6 +27,7 @@ struct ExactVaultEntryConfig {
     buy_amount_wei: U256,
     buy_gas_limit: u64,
     chain_id: u64,
+    token_decimals: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -71,7 +72,7 @@ impl SimulationManager {
         config: &PoolBuySellParameters,
         replay_sequence: &[ProcessedTransaction],
     ) -> Result<ExactVaultBuySimulationResult> {
-        let vault_config = exact_vault_entry_config()?;
+        let vault_config = exact_vault_entry_config(config.token_decimals)?;
         let block = config.block_number.ok_or_else(|| {
             eyre!("exact V2 vault entry simulation requires an explicit base block")
         })?;
@@ -212,6 +213,8 @@ impl SimulationManager {
                 "exact_vault_calldata": true,
                 "calldata_builder": "tx_simulator.uniswap_v2_trading_vault.buyV2ExactEthForTokens",
                 "quote_gas_used": quote_result.gas_used,
+                "token_decimals": config.token_decimals,
+                "denom_decimals": config.denom_decimals,
                 "quote_tokens_received_raw": quote_fill.tokens_received.to_string(),
                 "failure_reason": failure_reason,
                 "deadline_policy": "mempool_probe_max_deadline",
@@ -256,7 +259,7 @@ impl SimulationManager {
     }
 }
 
-fn exact_vault_entry_config() -> Result<ExactVaultEntryConfig> {
+fn exact_vault_entry_config(token_decimals: u8) -> Result<ExactVaultEntryConfig> {
     let vault_address = parse_address_config(
         "ETH_MAINNET_UNISWAP_V2_TRADING_VAULT",
         uniswap_v2_trading_vault_from_config(),
@@ -278,6 +281,7 @@ fn exact_vault_entry_config() -> Result<ExactVaultEntryConfig> {
         buy_amount_wei,
         buy_gas_limit,
         chain_id: CHAIN_ID_MAINNET,
+        token_decimals,
     })
 }
 
@@ -383,6 +387,7 @@ fn failed_exact_vault_result(
             "exact_vault_calldata": true,
             "calldata_builder": "tx_simulator.uniswap_v2_trading_vault.buyV2ExactEthForTokens",
             "event": serde_json::Value::Null,
+            "token_decimals": config.token_decimals,
             "failure_reason": failure_reason.or(revert_reason),
             "deadline_policy": "mempool_probe_max_deadline",
             "min_tokens_out": min_tokens_out.to_string(),
