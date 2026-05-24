@@ -58,6 +58,8 @@ pub(super) fn build_mempool_entry_evidence(
         .map(|context| context.latest_block.max(pool_result.block_number))
         .unwrap_or(pool_result.block_number);
     let dependency_hashes = dependency_tx_hashes(pool_result, &result.request.tx.hash);
+    let (pool_creation_block, pool_creation_block_source) =
+        projected_pool_creation_block(pool_context, pool_result);
 
     let (vault_buy_simulation, audit_exact_vault_calldata) =
         if let Some(exact) = result.exact_vault_buy_result.as_ref() {
@@ -99,12 +101,8 @@ pub(super) fn build_mempool_entry_evidence(
             "denom_reserve": denom_reserve,
             "token_reserve": token_reserve,
             "price_ratio_to_initial": Value::Null,
-            "pool_creation_block": pool_context.and_then(|context| context.pool_creation_block),
-            "pool_creation_block_source": pool_context.and_then(|context| {
-                context
-                    .pool_creation_block
-                    .map(|_| "tracked_pool_trading_enabled_block")
-            }),
+            "pool_creation_block": pool_creation_block,
+            "pool_creation_block_source": pool_creation_block_source,
             "latest_block": latest_block,
             "can_buy": pool_result.can_buy && pool_context.map(|context| context.can_buy).unwrap_or(true),
             "can_sell": pool_result.can_sell && pool_context.map(|context| context.can_sell).unwrap_or(true),
@@ -130,6 +128,34 @@ pub(super) fn build_mempool_entry_evidence(
             "prior_transaction_count": pool_result.prior_transactions.len()
         }
     }))
+}
+
+fn projected_pool_creation_block(
+    pool_context: Option<&SignalPoolContext>,
+    pool_result: &tx_processor::PoolBuySellSimulationResult,
+) -> (Option<u64>, Option<&'static str>) {
+    projected_pool_creation_block_from_parts(
+        pool_context.and_then(|context| context.pool_creation_block),
+        v2_pair_creation_block(pool_result),
+        trading_enabled_block(pool_result),
+    )
+}
+
+fn projected_pool_creation_block_from_parts(
+    tracked_block: Option<u64>,
+    pending_pair_created_block: Option<u64>,
+    pending_trading_enabled_block: Option<u64>,
+) -> (Option<u64>, Option<&'static str>) {
+    if let Some(block) = tracked_block {
+        return (Some(block), Some("tracked_pool_trading_enabled_block"));
+    }
+    if let Some(block) = pending_pair_created_block {
+        return (Some(block), Some("pending_uniswap_v2_pair_created_event"));
+    }
+    if let Some(block) = pending_trading_enabled_block {
+        return (Some(block), Some("pending_trading_enabled_event"));
+    }
+    (None, None)
 }
 
 fn exact_vault_buy_simulation_json(result: &ExactVaultBuySimulationResult) -> Value {
@@ -227,6 +253,28 @@ fn v2_pair_tokens(
     None
 }
 
+fn v2_pair_creation_block(pool_result: &tx_processor::PoolBuySellSimulationResult) -> Option<u64> {
+    for tx in &pool_result.prior_transactions {
+        for event in &tx.uniswap_v2_pair_created_events {
+            if event.pair_address == pool_result.pool_address {
+                return Some(tx.block_number);
+            }
+        }
+    }
+    None
+}
+
+fn trading_enabled_block(pool_result: &tx_processor::PoolBuySellSimulationResult) -> Option<u64> {
+    for tx in &pool_result.prior_transactions {
+        for event in &tx.trading_enabled_events {
+            if event.token_address == pool_result.token_address {
+                return Some(event.block_number);
+            }
+        }
+    }
+    None
+}
+
 fn latest_v2_sync(pool_result: &tx_processor::PoolBuySellSimulationResult) -> Option<(U256, U256)> {
     let mut latest = None;
     for tx in &pool_result.prior_transactions {
@@ -252,4 +300,33 @@ fn dependency_tx_hashes(
         hashes.push(fallback_hash.to_string());
     }
     hashes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::projected_pool_creation_block_from_parts;
+
+    #[test]
+    fn projected_pool_creation_block_prefers_tracked_context() {
+        assert_eq!(
+            projected_pool_creation_block_from_parts(Some(100), Some(101), Some(102)),
+            (Some(100), Some("tracked_pool_trading_enabled_block"))
+        );
+    }
+
+    #[test]
+    fn projected_pool_creation_block_uses_pending_pair_created_event() {
+        assert_eq!(
+            projected_pool_creation_block_from_parts(None, Some(101), Some(102)),
+            (Some(101), Some("pending_uniswap_v2_pair_created_event"))
+        );
+    }
+
+    #[test]
+    fn projected_pool_creation_block_uses_pending_trading_enabled_event_without_pair_created() {
+        assert_eq!(
+            projected_pool_creation_block_from_parts(None, None, Some(102)),
+            (Some(102), Some("pending_trading_enabled_event"))
+        );
+    }
 }
