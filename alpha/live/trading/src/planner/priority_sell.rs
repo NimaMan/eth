@@ -460,6 +460,7 @@ mod tests {
                         gas_before_p50: Some(900_000),
                         likely_fits_at_p50: Some(true),
                         source: Some("test".to_string()),
+                        metadata: None,
                     },
                     RankedFeeCandidate {
                         label: "p90".to_string(),
@@ -469,6 +470,7 @@ mod tests {
                         gas_before_p50: Some(450_000),
                         likely_fits_at_p50: Some(true),
                         source: Some("test".to_string()),
+                        metadata: None,
                     },
                 ],
             }),
@@ -503,6 +505,7 @@ mod tests {
                     gas_before_p50: Some(900_000),
                     likely_fits_at_p50: Some(true),
                     source: Some("test".to_string()),
+                    metadata: None,
                 },
                 RankedFeeCandidate {
                     label: "p90".to_string(),
@@ -512,6 +515,7 @@ mod tests {
                     gas_before_p50: Some(450_000),
                     likely_fits_at_p50: Some(true),
                     source: Some("test".to_string()),
+                    metadata: None,
                 },
             ],
         })

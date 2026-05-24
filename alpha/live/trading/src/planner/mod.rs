@@ -24,6 +24,7 @@ pub use config::LivePrioritySellPlannerConfig;
 pub use error::LivePrioritySellPlannerError;
 pub use gas_rank::{
     ChainServerGasRankProvider, FixedGasRankProvider, GasRankPlan, GasRankProvider,
+    MempoolRaceGasRankProvider,
 };
 pub use input::{LivePrioritySellPlannerInput, PlannerTxContext};
 pub use min_output::derive_min_output_from_expected_output;

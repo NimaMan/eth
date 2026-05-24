@@ -6,6 +6,7 @@ use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GasRankProfile {
+    MempoolRace,
     Normal,
     P50,
     P55,
@@ -28,6 +29,7 @@ pub enum GasRankProfile {
 impl GasRankProfile {
     pub fn label(self) -> &'static str {
         match self {
+            Self::MempoolRace => "mempool_race",
             Self::Normal => "normal",
             Self::P50 => "p50",
             Self::P55 => "p55",
@@ -115,6 +117,10 @@ impl StrategyGasRankPolicy {
             GasRankProfile::P50,
             GasRankProfile::Normal,
         ])
+    }
+
+    pub fn mempool_race_only() -> Self {
+        Self::with_preference_order(vec![GasRankProfile::MempoolRace])
     }
 
     pub fn with_preference_order(profiles: Vec<GasRankProfile>) -> Self {
@@ -301,6 +307,7 @@ mod tests {
             gas_before_p50: Some(rank * 21_000),
             likely_fits_at_p50: Some(true),
             source: Some("test".to_string()),
+            metadata: None,
         }
     }
 

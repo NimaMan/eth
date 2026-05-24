@@ -5,13 +5,13 @@ use eth_alpha_core::{
     ids::{PositionId, TokenPoolId},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionKey, PositionSnapshot},
-    risk::{RiskDecision, RiskPolicy},
+    risk::{RiskDecision, RiskEvent, RiskPolicy},
     store::TradingStore,
     strategy::StrategyDecision,
 };
 
 use crate::{
-    decision::strategy_decision_action,
+    decision::{enrich_decision_reason_with_risk_event, strategy_decision_action},
     ids::new_trade_id,
     valuation::{
         market_owns_open_valuation, snapshot_with_pool_metrics, valuation_safe_pool,
@@ -39,10 +39,35 @@ where
         event_source: &str,
         market_valuation_pool: Option<&TokenPoolId>,
     ) -> Result<Vec<ExecutionReport>> {
+        self.apply_decisions_with_risk_context(decisions, event_source, market_valuation_pool, None)
+            .await
+    }
+
+    pub(crate) async fn apply_risk_decisions(
+        &mut self,
+        decisions: Vec<StrategyDecision>,
+        event_source: &str,
+        risk_event: &RiskEvent,
+    ) -> Result<Vec<ExecutionReport>> {
+        self.apply_decisions_with_risk_context(decisions, event_source, None, Some(risk_event))
+            .await
+    }
+
+    async fn apply_decisions_with_risk_context(
+        &mut self,
+        decisions: Vec<StrategyDecision>,
+        event_source: &str,
+        market_valuation_pool: Option<&TokenPoolId>,
+        risk_event: Option<&RiskEvent>,
+    ) -> Result<Vec<ExecutionReport>> {
         let mut reports = Vec::new();
         for decision in decisions {
             let action = strategy_decision_action(&decision);
-            let structured_reason = decision.structured_reason(Some(event_source), Some(action));
+            let mut structured_reason =
+                decision.structured_reason(Some(event_source), Some(action));
+            if let (Some(reason), Some(event)) = (structured_reason.as_mut(), risk_event) {
+                enrich_decision_reason_with_risk_event(reason, event);
+            }
             match decision {
                 StrategyDecision::Hold
                 | StrategyDecision::HoldWithReason { .. }

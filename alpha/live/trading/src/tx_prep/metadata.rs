@@ -62,6 +62,7 @@ pub fn tx_prep_metadata(
             "gas_before_p50": gas_plan.gas_before_p50,
             "likely_fits_at_p50": gas_plan.likely_fits_at_p50,
             "source": gas_plan.source,
+            "metadata": gas_plan.metadata,
         }),
     );
     map.insert(

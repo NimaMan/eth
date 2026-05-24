@@ -1,9 +1,13 @@
+use alloy_primitives::U256;
 use async_trait::async_trait;
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{PreparedSellRoute, RankedFeeCandidate};
+use crate::{
+    tx_prep::{gwei_to_wei_string, MEMPOOL_RACE_GAS_LABEL, MEMPOOL_RACE_GAS_SOURCE},
+    PreparedSellRoute, RankedFeeCandidate,
+};
 
 use super::{LivePrioritySellPlannerError, LivePrioritySellPlannerInput};
 
@@ -123,6 +127,119 @@ impl GasRankProvider for ChainServerGasRankProvider {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MempoolRaceGasRankProvider<G> {
+    inner: G,
+    http: reqwest::Client,
+    rpc_url: String,
+    priority_buffer_gwei: DecimalAmount,
+}
+
+impl<G> MempoolRaceGasRankProvider<G> {
+    pub fn new(inner: G, rpc_url: impl Into<String>) -> Self {
+        Self {
+            inner,
+            http: reqwest::Client::new(),
+            rpc_url: rpc_url.into(),
+            priority_buffer_gwei: DecimalAmount::new(1, 1),
+        }
+    }
+
+    pub fn with_priority_buffer_gwei(mut self, priority_buffer_gwei: DecimalAmount) -> Self {
+        self.priority_buffer_gwei = priority_buffer_gwei.max(DecimalAmount::ZERO);
+        self
+    }
+}
+
+#[async_trait]
+impl<G> GasRankProvider for MempoolRaceGasRankProvider<G>
+where
+    G: GasRankProvider,
+{
+    async fn ranked_fee_candidates(
+        &self,
+        input: &LivePrioritySellPlannerInput,
+        route: &PreparedSellRoute,
+    ) -> Result<GasRankPlan, LivePrioritySellPlannerError> {
+        let mut plan = self.inner.ranked_fee_candidates(input, route).await?;
+        if !is_mempool_liquidity_removal_exit(input) {
+            return Ok(plan);
+        }
+
+        let tx_hash = mempool_removal_tx_hash(input).ok_or_else(|| {
+            LivePrioritySellPlannerError::GasRank(
+                "mempool liquidity-removal exit is missing pending removal tx hash".to_string(),
+            )
+        })?;
+        let tx = self.fetch_transaction_by_hash(&tx_hash).await?;
+        let candidate = mempool_race_candidate_from_tx_json(
+            &tx_hash,
+            &tx,
+            plan.predicted_base_fee_gwei,
+            self.priority_buffer_gwei,
+        )?;
+        plan.candidates.insert(0, candidate);
+        Ok(plan)
+    }
+}
+
+impl<G> MempoolRaceGasRankProvider<G> {
+    async fn fetch_transaction_by_hash(
+        &self,
+        tx_hash: &str,
+    ) -> Result<Value, LivePrioritySellPlannerError> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionByHash",
+            "params": [tx_hash],
+        });
+        let response = self
+            .http
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| {
+                LivePrioritySellPlannerError::GasRank(format!(
+                    "pending removal tx fee lookup failed: {error}"
+                ))
+            })?;
+        let status = response.status();
+        let body = response.text().await.map_err(|error| {
+            LivePrioritySellPlannerError::GasRank(format!(
+                "pending removal tx fee lookup body read failed: {error}"
+            ))
+        })?;
+        if !status.is_success() {
+            return Err(LivePrioritySellPlannerError::GasRank(format!(
+                "pending removal tx fee lookup returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            )));
+        }
+        let payload = serde_json::from_str::<Value>(&body).map_err(|error| {
+            LivePrioritySellPlannerError::GasRank(format!(
+                "pending removal tx fee lookup JSON decode failed: {error}; body={body}"
+            ))
+        })?;
+        if let Some(error) = payload.get("error").filter(|error| !error.is_null()) {
+            return Err(LivePrioritySellPlannerError::GasRank(format!(
+                "pending removal tx fee lookup RPC error: {error}"
+            )));
+        }
+        payload
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+            .ok_or_else(|| {
+                LivePrioritySellPlannerError::GasRank(format!(
+                    "pending removal tx {tx_hash} was not found by eth_getTransactionByHash"
+                ))
+            })
+    }
+}
+
 fn gas_rank_plan_from_chain_server_response(
     payload: &Value,
 ) -> Result<GasRankPlan, LivePrioritySellPlannerError> {
@@ -154,6 +271,7 @@ fn gas_rank_plan_from_chain_server_response(
             gas_before_p50: u64_field(rank, "gas_before_p50"),
             likely_fits_at_p50: bool_field(rank, "likely_fits_at_p50"),
             source: Some("eth_chain_server_gas_rank".to_string()),
+            metadata: None,
         });
     }
     if candidates.is_empty() {
@@ -165,6 +283,143 @@ fn gas_rank_plan_from_chain_server_response(
         predicted_base_fee_gwei,
         candidates,
     })
+}
+
+fn is_mempool_liquidity_removal_exit(input: &LivePrioritySellPlannerInput) -> bool {
+    input
+        .intent
+        .decision_reason
+        .as_ref()
+        .map(|reason| reason.code.as_str() == "exit.mempool_liquidity_removal_signal")
+        .unwrap_or(false)
+}
+
+fn mempool_removal_tx_hash(input: &LivePrioritySellPlannerInput) -> Option<String> {
+    input
+        .intent
+        .decision_reason
+        .as_ref()
+        .and_then(|reason| {
+            string_at(&reason.details, "/pending_tx_hash")
+                .or_else(|| string_at(&reason.details, "/risk_event_evidence/detection_tx_hash"))
+                .or_else(|| string_at(&reason.details, "/risk_event_evidence/pending_tx_hash"))
+        })
+        .or_else(|| {
+            string_at(
+                &input.source_metadata,
+                "/decision_reason/details/pending_tx_hash",
+            )
+            .or_else(|| {
+                string_at(
+                    &input.source_metadata,
+                    "/decision_reason/details/risk_event_evidence/detection_tx_hash",
+                )
+            })
+        })
+}
+
+fn string_at(value: &Value, pointer: &str) -> Option<String> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn mempool_race_candidate_from_tx_json(
+    tx_hash: &str,
+    tx: &Value,
+    predicted_base_fee_gwei: DecimalAmount,
+    priority_buffer_gwei: DecimalAmount,
+) -> Result<RankedFeeCandidate, LivePrioritySellPlannerError> {
+    let base_fee_wei = decimal_gwei_to_wei(predicted_base_fee_gwei, "predicted_base_fee_gwei")?;
+    let buffer_wei = decimal_gwei_to_wei(priority_buffer_gwei, "priority_buffer_gwei")?;
+    let gas_price = tx_quantity(tx, "gasPrice")?;
+    let max_fee_per_gas = tx_quantity(tx, "maxFeePerGas")?
+        .or(gas_price)
+        .ok_or_else(|| gas_rank_parse_error("pending removal tx missing maxFeePerGas/gasPrice"))?;
+    let max_priority_fee_per_gas = tx_quantity(tx, "maxPriorityFeePerGas")?
+        .or(gas_price)
+        .ok_or_else(|| {
+            gas_rank_parse_error("pending removal tx missing maxPriorityFeePerGas/gasPrice")
+        })?;
+    let removal_effective_priority =
+        effective_priority_fee(max_fee_per_gas, max_priority_fee_per_gas, base_fee_wei);
+    let required_priority_fee = removal_effective_priority + buffer_wei + U256::from(1u64);
+    let required_max_fee_per_gas = base_fee_wei + required_priority_fee;
+
+    Ok(RankedFeeCandidate {
+        label: MEMPOOL_RACE_GAS_LABEL.to_string(),
+        priority_fee_gwei: wei_to_decimal_gwei(required_priority_fee)?,
+        max_fee_per_gas_gwei: wei_to_decimal_gwei(required_max_fee_per_gas)?,
+        rank_position_p50: Some(0),
+        gas_before_p50: Some(0),
+        likely_fits_at_p50: Some(true),
+        source: Some(MEMPOOL_RACE_GAS_SOURCE.to_string()),
+        metadata: Some(json!({
+            "method": "eth_getTransactionByHash",
+            "removal_tx_hash": tx_hash,
+            "removal_tx_type": tx.get("type").and_then(Value::as_str),
+            "removal_gas_price_wei": gas_price.map(|value| value.to_string()),
+            "removal_max_fee_per_gas_wei": max_fee_per_gas.to_string(),
+            "removal_max_priority_fee_per_gas_wei": max_priority_fee_per_gas.to_string(),
+            "removal_effective_priority_fee_wei": removal_effective_priority.to_string(),
+            "removal_effective_priority_fee_gwei": wei_to_decimal_gwei(removal_effective_priority)?,
+            "priority_buffer_gwei": priority_buffer_gwei,
+            "selected_priority_fee_wei": required_priority_fee.to_string(),
+            "selected_max_fee_per_gas_wei": required_max_fee_per_gas.to_string(),
+            "predicted_base_fee_gwei": predicted_base_fee_gwei,
+            "predicted_base_fee_wei": base_fee_wei.to_string(),
+        })),
+    })
+}
+
+fn tx_quantity(tx: &Value, field: &str) -> Result<Option<U256>, LivePrioritySellPlannerError> {
+    tx.get(field)
+        .and_then(Value::as_str)
+        .map(parse_hex_quantity)
+        .transpose()
+}
+
+fn parse_hex_quantity(value: &str) -> Result<U256, LivePrioritySellPlannerError> {
+    let hex = value
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or_else(|| value.trim());
+    if hex.is_empty() {
+        return Ok(U256::ZERO);
+    }
+    U256::from_str_radix(hex, 16)
+        .map_err(|error| gas_rank_parse_error(format!("invalid hex quantity {value:?}: {error}")))
+}
+
+fn decimal_gwei_to_wei(
+    gwei: DecimalAmount,
+    label: &str,
+) -> Result<U256, LivePrioritySellPlannerError> {
+    U256::from_str_radix(&gwei_to_wei_string(gwei), 10)
+        .map_err(|error| gas_rank_parse_error(format!("invalid {label}: {error}")))
+}
+
+fn wei_to_decimal_gwei(wei: U256) -> Result<DecimalAmount, LivePrioritySellPlannerError> {
+    let wei_decimal = DecimalAmount::from_str_exact(&wei.to_string()).map_err(|error| {
+        gas_rank_parse_error(format!(
+            "cannot convert wei amount {wei} to decimal: {error}"
+        ))
+    })?;
+    Ok(wei_decimal / DecimalAmount::from(1_000_000_000u64))
+}
+
+fn effective_priority_fee(
+    max_fee_per_gas: U256,
+    max_priority_fee_per_gas: U256,
+    base_fee_per_gas: U256,
+) -> U256 {
+    if max_fee_per_gas <= base_fee_per_gas {
+        return U256::ZERO;
+    }
+    max_priority_fee_per_gas.min(max_fee_per_gas - base_fee_per_gas)
 }
 
 fn decimal_field(
@@ -261,5 +516,36 @@ mod chain_server_tests {
         );
         assert_eq!(plan.candidates[1].label, "p90");
         assert_eq!(plan.candidates[1].priority_fee_gwei.to_string(), "2");
+    }
+
+    #[test]
+    fn mempool_race_candidate_bids_above_pending_removal_effective_priority() {
+        let tx = json!({
+            "type": "0x2",
+            "gasPrice": "0xb77bfc5f",
+            "maxFeePerGas": "0xbef15bbe",
+            "maxPriorityFeePerGas": "0xb2d1b5c0"
+        });
+
+        let candidate = mempool_race_candidate_from_tx_json(
+            "0x0ea03ef6399afa65d1ebbd72580b079157f0e30dd0a16c8fee7e4ec9de2a8fbf",
+            &tx,
+            DecimalAmount::from_str_exact("0.105479164").unwrap(),
+            DecimalAmount::new(1, 1),
+        )
+        .unwrap();
+
+        assert_eq!(candidate.label, MEMPOOL_RACE_GAS_LABEL);
+        assert_eq!(candidate.source.as_deref(), Some(MEMPOOL_RACE_GAS_SOURCE));
+        assert_eq!(candidate.priority_fee_gwei.to_string(), "3.100088001");
+        assert_eq!(candidate.max_fee_per_gas_gwei.to_string(), "3.205567165");
+        assert_eq!(
+            candidate
+                .metadata
+                .as_ref()
+                .and_then(|value| value.get("removal_effective_priority_fee_wei"))
+                .and_then(Value::as_str),
+            Some("3000088000")
+        );
     }
 }

@@ -146,6 +146,7 @@ fn parse_gas_rank_profile(value: &str) -> Result<GasRankProfile> {
         .replace(['-', ' '], "_")
         .as_str()
     {
+        "mempool_race" => Ok(GasRankProfile::MempoolRace),
         "normal" => Ok(GasRankProfile::Normal),
         "p50" => Ok(GasRankProfile::P50),
         "p55" => Ok(GasRankProfile::P55),

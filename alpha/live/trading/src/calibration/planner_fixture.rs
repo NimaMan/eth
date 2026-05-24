@@ -236,6 +236,7 @@ fn gas_rank() -> FixedGasRankProvider {
                 gas_before_p50: Some(900_000),
                 likely_fits_at_p50: Some(true),
                 source: Some("calibration_fixed_gas_rank".to_string()),
+                metadata: None,
             },
             RankedFeeCandidate {
                 label: "p90".to_string(),
@@ -245,6 +246,7 @@ fn gas_rank() -> FixedGasRankProvider {
                 gas_before_p50: Some(450_000),
                 likely_fits_at_p50: Some(true),
                 source: Some("calibration_fixed_gas_rank".to_string()),
+                metadata: None,
             },
         ],
     })

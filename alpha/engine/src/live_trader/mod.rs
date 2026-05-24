@@ -29,6 +29,7 @@ use eth_alpha_core::{
     Strategy,
 };
 use eth_alpha_store::{PostgresTradingStore, StrategyObservationRecord};
+use eth_live_trading::StrategyGasRankPolicy;
 use eth_ops_events::{
     emit_health, emit_issue, JsonlOpsEventSink, MultiOpsEventSink, PipelineHealth,
     PipelineHealthStatus, PipelineImpact, PipelineIssue, PipelineSeverity, TracingOpsEventSink,
@@ -54,6 +55,7 @@ use tracing::{info, warn};
 mod backtest;
 mod cli;
 mod gas_policy;
+mod manual_close;
 mod position_state;
 mod real_execution;
 mod receipt_reconciliation;
@@ -64,6 +66,7 @@ mod token_server;
 use backtest::ChainSimGasPolicyBacktestAdapter;
 use cli::{parse_live_backtest_args, parse_live_real_args, Args, RealExecutionArgs};
 use gas_policy::load_live_real_gas_policy;
+use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use position_state::release_stale_submitted_position;
 use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
 use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
@@ -312,7 +315,11 @@ async fn run(
         ));
     }
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
-    let live_gas_policy = load_live_real_gas_policy(&shared_config)?;
+    let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
+    if execution_mode.uses_kartal() {
+        live_gas_policy.mempool_pre_mine_gas_rank_policy =
+            StrategyGasRankPolicy::mempool_race_only();
+    }
     let live_real_gas_policy = if execution_mode.uses_kartal() {
         Some(live_gas_policy.clone())
     } else {
@@ -544,7 +551,14 @@ async fn run(
     let adapter_current_block = chain_sim_adapter.current_block();
     let pool_updates = chain_sim_adapter.pools();
     let exact_pre_submit_live_simulator = chain_sim_adapter.live_simulator();
+    let manual_close_live_simulator = exact_pre_submit_live_simulator.clone();
     let state_status_adapter = chain_sim_adapter.clone();
+    let manual_close_vault_address = match (execution_mode, real_args.as_ref()) {
+        (TraderExecutionMode::KartalReal, Some(real_args)) => {
+            Some(parse_address(&real_args.live_real_vault_address)?)
+        }
+        _ => None,
+    };
     let receipt_reconciler = match (
         execution_mode,
         real_args.as_ref(),
@@ -866,6 +880,9 @@ async fn run(
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
         let mut position_monitor_events = 0usize;
+        let mut manual_close_requests = 0usize;
+        let mut manual_close_failed = 0usize;
+        let mut manual_close_reports = 0usize;
         let mut reports = 0usize;
         let mut receipt_reports = 0usize;
         let mut receipt_unresolved = 0usize;
@@ -1058,6 +1075,31 @@ async fn run(
             }
         }
 
+        if let Some(vault_address) = manual_close_vault_address {
+            if !suppress_events && (!first_poll || args.replay_current) {
+                match process_manual_close_requests(
+                    &store,
+                    &mut engine,
+                    &manual_close_live_simulator,
+                    vault_address,
+                    status.progress.current_block,
+                    default_manual_close_limit(),
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        manual_close_requests += summary.claimed;
+                        manual_close_failed += summary.failed;
+                        manual_close_reports += summary.reports;
+                        reports += summary.reports;
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "manual close request processing failed");
+                    }
+                }
+            }
+        }
+
         if !suppress_events && (!first_poll || args.replay_current) {
             if let Some(block_number) = status.progress.current_block {
                 let should_monitor = last_position_monitor_block
@@ -1191,6 +1233,9 @@ async fn run(
             market_events,
             risk_events,
             position_monitor_events,
+            manual_close_requests,
+            manual_close_failed,
+            manual_close_reports,
             receipt_reports,
             receipt_unresolved,
             reports,
@@ -1222,6 +1267,9 @@ async fn run(
             "market_events": market_events,
             "risk_events": risk_events,
             "position_monitor_events": position_monitor_events,
+            "manual_close_requests": manual_close_requests,
+            "manual_close_failed": manual_close_failed,
+            "manual_close_reports": manual_close_reports,
             "receipt_reports": receipt_reports,
             "receipt_unresolved": receipt_unresolved,
             "reports": reports,
@@ -1270,6 +1318,18 @@ async fn run(
         health.metrics.insert(
             "position_monitor_events".to_string(),
             json!(position_monitor_events),
+        );
+        health.metrics.insert(
+            "manual_close_requests".to_string(),
+            json!(manual_close_requests),
+        );
+        health.metrics.insert(
+            "manual_close_failed".to_string(),
+            json!(manual_close_failed),
+        );
+        health.metrics.insert(
+            "manual_close_reports".to_string(),
+            json!(manual_close_reports),
         );
         health
             .metrics

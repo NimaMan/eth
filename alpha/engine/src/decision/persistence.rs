@@ -6,10 +6,12 @@ use eth_alpha_core::{
     strategy::StrategyDecision,
 };
 
-use crate::{AlphaEngine, EngineExecutionAdapter};
+use crate::{
+    decision::{attach_risk_event_evidence_to_payload, enrich_reason_details_with_risk_event},
+    AlphaEngine, EngineExecutionAdapter,
+};
 
 use super::{risk_kind_key, strategy_decision_record};
-use serde_json::{json, Map, Value};
 
 impl<E, R, S> AlphaEngine<E, R, S>
 where
@@ -106,69 +108,8 @@ where
             event.pool_address.as_ref().map(ToString::to_string),
             decision,
         );
-        attach_risk_event_evidence(&mut record.reason_details, &mut record.payload, event);
+        enrich_reason_details_with_risk_event(&mut record.reason_details, event);
+        attach_risk_event_evidence_to_payload(&mut record.payload, event);
         self.store.record_strategy_decision(&record).await
-    }
-}
-
-fn attach_risk_event_evidence(
-    reason_details: &mut Option<Value>,
-    payload: &mut Value,
-    event: &RiskEvent,
-) {
-    let Some(evidence) = event.evidence.as_ref() else {
-        return;
-    };
-    let details = reason_details.get_or_insert_with(|| json!({}));
-    if !details.is_object() {
-        *details = json!({});
-    }
-    if let Some(map) = details.as_object_mut() {
-        map.insert("risk_event_evidence".to_string(), evidence.clone());
-        copy_evidence_field(map, evidence, "lp_approval_age_basis", "age_basis");
-        copy_evidence_field(
-            map,
-            evidence,
-            "trading_enabled_age_blocks_at_signal",
-            "trading_enabled_age_blocks",
-        );
-        copy_evidence_field(
-            map,
-            evidence,
-            "pool_age_blocks_at_signal",
-            "pool_age_blocks",
-        );
-        copy_evidence_field(
-            map,
-            evidence,
-            "trading_enabled_block",
-            "trading_enabled_block",
-        );
-        copy_evidence_field(map, evidence, "pool_creation_block", "pool_creation_block");
-        copy_evidence_field(map, evidence, "observed_block", "risk_observed_block");
-        copy_evidence_field(map, evidence, "signal_id", "signal_id");
-        copy_evidence_field(
-            map,
-            evidence,
-            "mempool_first_seen_at",
-            "mempool_first_seen_at",
-        );
-    }
-    if !payload.is_object() {
-        *payload = json!({});
-    }
-    if let Some(map) = payload.as_object_mut() {
-        map.insert("risk_event_evidence".to_string(), evidence.clone());
-    }
-}
-
-fn copy_evidence_field(
-    target: &mut Map<String, Value>,
-    evidence: &Value,
-    source_key: &str,
-    target_key: &str,
-) {
-    if let Some(value) = evidence.get(source_key) {
-        target.insert(target_key.to_string(), value.clone());
     }
 }

@@ -217,7 +217,9 @@ where
                 .await?;
         }
         let event_source = event.source.as_deref().unwrap_or("risk");
-        let reports = self.apply_decisions(decisions, event_source, None).await?;
+        let reports = self
+            .apply_risk_decisions(decisions, event_source, event)
+            .await?;
 
         // Worst-case baseline: mark open positions as drained on mined
         // liquidity removal or scam confirmation, even if strategy does not

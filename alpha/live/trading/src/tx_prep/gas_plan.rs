@@ -1,7 +1,11 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::budget::{estimate_eth_cost_from_gwei, PriorityFeeBudget};
+
+pub const MEMPOOL_RACE_GAS_LABEL: &str = "mempool_race";
+pub const MEMPOOL_RACE_GAS_SOURCE: &str = "eth_public_mempool_pending_tx_fee";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RankedFeeCandidate {
@@ -13,6 +17,8 @@ pub struct RankedFeeCandidate {
     pub likely_fits_at_p50: Option<bool>,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 impl RankedFeeCandidate {
@@ -36,6 +42,8 @@ pub struct GasPlan {
     pub gas_before_p50: Option<u64>,
     pub likely_fits_at_p50: Option<bool>,
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,6 +109,7 @@ fn plan_from_candidate(candidate: &RankedFeeCandidate, gas_used: u64) -> GasPlan
         gas_before_p50: candidate.gas_before_p50,
         likely_fits_at_p50: candidate.likely_fits_at_p50,
         source: candidate.source.clone(),
+        metadata: candidate.metadata.clone(),
     }
 }
 
@@ -130,6 +139,7 @@ mod tests {
             gas_before_p50: Some(rank * 21_000),
             likely_fits_at_p50: Some(true),
             source: Some("test".to_string()),
+            metadata: None,
         }
     }
 

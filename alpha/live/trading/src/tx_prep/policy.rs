@@ -5,10 +5,11 @@ use serde_json::{json, Value};
 use super::{
     build_priority_sell_request, GasPlanDecision, PreSubmitSimulation, PreparedSellRoute,
     PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy,
-    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError,
+    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError, MEMPOOL_RACE_GAS_LABEL,
+    MEMPOOL_RACE_GAS_SOURCE,
 };
 use crate::LiveTraderTxSignal;
-use crate::PrioritySellPlan;
+use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TxPrepConfig {
@@ -80,6 +81,7 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
     let ranked_fee_candidates = filter_ranked_fee_candidates(
         &input.ranked_fee_candidates,
         &config.required_gas_rank_source,
+        &input.plan,
     );
     if ranked_fee_candidates.is_empty() && config.required_gas_rank_source.is_some() {
         return TxPrepOutcome::Reject(TxPrepReject {
@@ -129,6 +131,7 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
 fn filter_ranked_fee_candidates(
     candidates: &[RankedFeeCandidate],
     required_source: &Option<String>,
+    plan: &PrioritySellPlan,
 ) -> Vec<RankedFeeCandidate> {
     let Some(required_source) = required_source
         .as_deref()
@@ -139,9 +142,19 @@ fn filter_ranked_fee_candidates(
     };
     candidates
         .iter()
-        .filter(|candidate| candidate.source.as_deref() == Some(required_source))
+        .filter(|candidate| {
+            candidate.source.as_deref() == Some(required_source)
+                || is_mempool_race_fee_candidate(plan, candidate)
+        })
         .cloned()
         .collect()
+}
+
+fn is_mempool_race_fee_candidate(plan: &PrioritySellPlan, candidate: &RankedFeeCandidate) -> bool {
+    plan.urgency == SellUrgency::MempoolPreMine
+        && plan.signal_source == LpSignalSource::MempoolLpApproval
+        && candidate.label == MEMPOOL_RACE_GAS_LABEL
+        && candidate.source.as_deref() == Some(MEMPOOL_RACE_GAS_SOURCE)
 }
 
 fn reject_route(error: TxPrepRouteError) -> TxPrepOutcome {
@@ -224,6 +237,7 @@ mod tests {
                 gas_before_p50: Some(450_000),
                 likely_fits_at_p50: Some(true),
                 source: Some("gas_rank".to_string()),
+                metadata: None,
             }],
             gas_rank_policy: None,
         }
@@ -319,6 +333,33 @@ mod tests {
                 assert_eq!(reject.reason, "gas_rank_source_not_allowed");
             }
             other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allows_mempool_race_candidate_for_mempool_liquidity_removal_exit() {
+        let mut config = config(100);
+        config.required_gas_rank_source = Some("eth_chain_server_gas_rank".to_string());
+        let mut input = input(4);
+        input.gas_rank_policy = Some(StrategyGasRankPolicy::mempool_race_only());
+        input.ranked_fee_candidates[0].label = MEMPOOL_RACE_GAS_LABEL.to_string();
+        input.ranked_fee_candidates[0].source = Some(MEMPOOL_RACE_GAS_SOURCE.to_string());
+
+        let outcome = prepare_priority_sell(&config, input);
+
+        match outcome {
+            TxPrepOutcome::Submit { signal, .. } => {
+                assert_eq!(signal.request.max_priority_fee_per_gas, "4000000000");
+                assert_eq!(
+                    signal
+                        .request
+                        .metadata
+                        .pointer("/gas_plan/source")
+                        .and_then(Value::as_str),
+                    Some(MEMPOOL_RACE_GAS_SOURCE)
+                );
+            }
+            other => panic!("expected submit, got {other:?}"),
         }
     }
 }

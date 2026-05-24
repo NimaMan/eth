@@ -20,11 +20,11 @@ use eth_live_trading::{
     KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
     KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
     LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, PlannerTxContext, PreSubmitSimulation,
-    PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig,
-    TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
-    UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
-    VaultInternalAllowanceChecker,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, MempoolRaceGasRankProvider, PlannerTxContext,
+    PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate,
+    StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
+    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
 use eth_strategies::{
     alpha11::{HOLD16_STRATEGY_NAME, INITIAL_ENTRY_BANKROLL_ETH},
@@ -601,8 +601,11 @@ pub(super) async fn build_kartal_real_adapter(
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
     let pre_submit_simulator =
         UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
-    let gas_rank_provider = ChainServerGasRankProvider::new(chain_server_url)
-        .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks);
+    let gas_rank_provider = MempoolRaceGasRankProvider::new(
+        ChainServerGasRankProvider::new(chain_server_url)
+            .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
+        preflight.status.rpc_url.clone(),
+    );
 
     let mut planner_config = LivePrioritySellPlannerConfig::default();
     planner_config.require_existing_allowance = false;
@@ -619,8 +622,7 @@ pub(super) async fn build_kartal_real_adapter(
         .gas_estimate
         .simulated_gas_estimate_buffer_bps = gas_policy.simulated_gas_buffer_bps;
     planner_config.normal_exit_gas_rank_policy = gas_policy.normal_exit_gas_rank_policy.clone();
-    planner_config.mempool_pre_mine_gas_rank_policy =
-        gas_policy.mempool_pre_mine_gas_rank_policy.clone();
+    planner_config.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
     planner_config.lp_approval_exit_gas_rank_policy =
         gas_policy.lp_approval_exit_gas_rank_policy.clone();
     let gas_estimate = planner_config.gas_estimate.clone();
