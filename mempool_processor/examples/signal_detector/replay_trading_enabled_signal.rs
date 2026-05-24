@@ -1,6 +1,6 @@
 use alloy_primitives::{Address as AlloyAddress, B256, U256};
 use clap::Parser;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use mempool_processor::function_detector::CreatorFunctionType;
 use mempool_processor::mempool_fetcher::MempoolTransaction;
 use mempool_processor::signal_detector::signal_manager::{SignalManager, SignalManagerConfig};
@@ -9,10 +9,10 @@ use mempool_processor::simulator::pool_buy_sell_simulator::PoolBuySellSimulator;
 use mempool_processor::simulator::simulation_manager::{
     SimulationResult, SimulationType, TxSimulationJob,
 };
-use mempool_processor::token_tracking::TokenTrackingCache;
 use mempool_processor::token_tracking::token_parameter_extraction::{
     fetch_token_decimals, fetch_token_metadata,
 };
+use mempool_processor::token_tracking::TokenTrackingCache;
 use mempool_processor::tx_router::{SimulationPriority, TransactionCategory};
 use reth_chain_query::provider::{RethQueryProvider, TransactionData};
 use reth_chain_query::to_checksum_address;
@@ -22,10 +22,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Builder;
-use tracing::{Level, info, warn};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
-use tx_processor::ProcessedTransaction;
 use tx_processor::tx_processor::TxProcessor;
+use tx_processor::ProcessedTransaction;
 use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 

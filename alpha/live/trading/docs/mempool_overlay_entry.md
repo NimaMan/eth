@@ -49,21 +49,12 @@ or the dependency sequence audit trail that made the signal true.
 
 ### 1. Persist projected entry evidence with the signal
 
-Add a public signal attachment table, for example:
+Add a public signal attachment table:
 
 ```sql
 CREATE TABLE live_trading.signal_entry_evidence (
-    signal_id BIGINT NOT NULL REFERENCES live_trading.signal_events(signal_id) ON DELETE CASCADE,
-    evidence_version TEXT NOT NULL,
-    base_block BIGINT NOT NULL,
-    simulated_at TIMESTAMPTZ NOT NULL,
-    dependency_tx_hashes TEXT[] NOT NULL,
-    dependency_fee_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    projected_pool JSONB NOT NULL,
-    viability JSONB NOT NULL,
-    vault_buy_simulation JSONB NOT NULL,
-    strategy_neutral_flags JSONB NOT NULL DEFAULT '{}'::jsonb,
-    audit JSONB NOT NULL DEFAULT '{}'::jsonb,
+    signal_id BIGINT PRIMARY KEY REFERENCES live_trading.signal_events(signal_id) ON DELETE CASCADE,
+    evidence JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
@@ -83,13 +74,20 @@ decision path. It should remain available as an internal audit/replay artifact,
 keyed by `signal_id`, so we can reproduce disagreements after the fact without
 making alpha replay the sequence on every poll.
 
-### 2. Expose entry evidence through chain-server
+The evidence JSON uses the `mempool_entry_evidence_v1` schema. The first
+implemented writer persists the existing `pool_buy_sell_probe` result and marks
+`vault_buy_simulation.metadata.exact_vault_calldata=false`. Alpha consumes and
+records this evidence, but it does not treat it as a valid tail-entry buy until
+`vault_buy_simulation.route=uniswap_v2_trading_vault` with successful exact
+deployed-vault calldata simulation is present.
+
+### 2. Expose mempool entry evidence through chain-server
 
 Extend the mempool signal API response with:
 
 ```json
 {
-  "entry_evidence": {
+  "mempool_entry_evidence": {
     "evidence_version": "mempool_entry_evidence_v1",
     "base_block": 25163949,
     "dependency_tx_hashes": ["0x..."],
@@ -119,24 +117,21 @@ Extend the mempool signal API response with:
 }
 ```
 
-`eth_alpha_trader` should reject the mempool-overlay entry path if entry
+`eth_alpha_trader` should reject the mempool-overlay entry path if mempool entry
 evidence is missing, stale, from the wrong vault, or from a different strategy
 execution route. Falling back to mined-state entry is allowed, but it must
 remain a separate decision and should keep using `buy_deferred` while confirmed
 state is unavailable.
 
-### 3. Add an entry-evidence consumer in alpha live trading
+### 3. Add a mempool-entry evidence consumer in alpha
 
-Add a module under `alpha/live/trading/src/planner/` that:
+Add the strategy-owned `MempoolEntryDecision` path that:
 
-- validates the evidence version, vault address, base block freshness, buy size,
-  and route;
+- validates the evidence version and route;
 - converts projected facts into the strategy entry context needed by Alpha11;
 - applies the same strategy entry rules used for mined-state entry;
-- builds the Kartal request from the exact vault calldata and simulation result
-  in the evidence package;
-- records dependency hashes, projected pool facts, gas used, and freshness in
-  the order metadata.
+- only accepts `entry.tail_after_enabling_tx` when successful exact V2 vault-buy
+  simulation evidence is present.
 
 The projected pool snapshot must be explicitly tagged so we do not confuse it
 with confirmed token-server state.

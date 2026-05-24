@@ -29,8 +29,8 @@ pub use ids::{
 };
 pub use market::{MarketEvent, PoolProtocol, PoolSnapshot, TokenSnapshot};
 pub use mempool_entry::{
-    MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION, MempoolEntryEvidence,
-    MempoolEntryViability, MempoolProjectedPool, MempoolVaultBuySimulation,
+    MempoolEntryEvidence, MempoolEntryViability, MempoolProjectedPool, MempoolVaultBuySimulation,
+    MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION,
 };
 pub use order::{OrderIntent, OrderSide, OrderStatus};
 pub use portfolio::{PortfolioLimits, PortfolioState};

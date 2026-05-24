@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use alloy_primitives::B256;
 use chrono::{DateTime, Utc};
-use eyre::{Result, eyre};
+use eyre::{eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -342,7 +342,7 @@ fn optional_text(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<Str
 
 #[cfg(test)]
 mod tests {
-    use super::{MempoolSignalKind, signal_sql};
+    use super::{signal_sql, MempoolSignalKind};
 
     #[test]
     fn old_signal_filters_map_to_explicit_event_kinds() {

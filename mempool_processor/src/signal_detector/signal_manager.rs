@@ -3,7 +3,9 @@ use crate::position_approval_call::decode_position_approval_call;
 use crate::signal_publisher::SignalPublisher;
 use crate::simulator::{BuySellResult, SimulationResult};
 use crate::token_tracking::TokenTrackingCache;
+use alloy_primitives::{Address, U256};
 use reth_chain_query::to_checksum_address;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -13,9 +15,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use super::{
-    LiquidityDetector, LpApprovalDetector, Signal, TaxDetector, TaxSignalType,
-    TokenSupplyRiskDetector, TradingStatusDetector, build_position_approval_signals,
-    enrich_erc20_liquidity_approval, trading_status_detector::TradingStatusChange,
+    build_position_approval_signals, enrich_erc20_liquidity_approval,
+    trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
+    TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
 };
 
 /// Configuration for signal detection
@@ -520,7 +522,10 @@ impl SignalManager {
                             creator_address: trading_signal.executor.clone(),
                             buy_tax: calculated_buy_tax.unwrap_or(0.0),
                             sell_tax: calculated_sell_tax.unwrap_or(0.0),
-                            mempool_entry_evidence: None,
+                            mempool_entry_evidence: build_mempool_entry_evidence(
+                                result,
+                                pool_context.as_ref(),
+                            ),
                             timestamp: chrono::Utc::now().timestamp() as u64,
                         },
                     ));
@@ -872,6 +877,13 @@ struct SignalPoolContext {
     denom_address: String,
     denom_currency: String,
     denom_decimals: Option<u8>,
+    denom_reserve: f64,
+    token_reserve: f64,
+    creation_block: Option<u64>,
+    latest_block: u64,
+    can_buy: bool,
+    can_sell: bool,
+    is_scam: bool,
 }
 
 async fn pool_context_for_address(
@@ -885,7 +897,287 @@ async fn pool_context_for_address(
         denom_address: pool.denom_address.clone(),
         denom_currency: pool.denom_currency.clone(),
         denom_decimals: known_denom_decimals(&pool.denom_currency, &pool.denom_address),
+        denom_reserve: pool.eth_reserve,
+        token_reserve: pool.token_reserve,
+        creation_block: pool.trading_enabled_block,
+        latest_block: pool.last_updated_block,
+        can_buy: pool.can_buy,
+        can_sell: pool.can_sell,
+        is_scam: pool.is_scam,
     })
+}
+
+fn build_mempool_entry_evidence(
+    result: &SimulationResult,
+    pool_context: Option<&SignalPoolContext>,
+) -> Option<Value> {
+    let pool_result = result.pool_viability_result.as_ref()?;
+    let protocol = result
+        .pool_type
+        .as_deref()
+        .map(normalize_evidence_protocol)
+        .unwrap_or_else(|| pool_type_label(pool_result.pool_type).to_string());
+    let denom_address = pool_context
+        .map(|context| context.denom_address.clone())
+        .or_else(|| projected_v2_denom_address(pool_result));
+    let denom_decimals = pool_context
+        .and_then(|context| context.denom_decimals)
+        .or_else(|| {
+            denom_address
+                .as_deref()
+                .and_then(|address| known_denom_decimals("WETH", address))
+        })
+        .unwrap_or(18);
+    let denom_symbol = pool_context
+        .map(|context| context.denom_currency.clone())
+        .or_else(|| {
+            denom_address
+                .as_deref()
+                .map(|address| denom_symbol_for_address(address))
+        });
+    let (projected_denom_reserve, projected_token_reserve) =
+        projected_v2_reserves(pool_result, denom_address.as_deref(), denom_decimals);
+    let denom_reserve = projected_denom_reserve
+        .or_else(|| pool_context.map(|context| format_f64_decimal(context.denom_reserve)))
+        .unwrap_or_else(|| "0".to_string());
+    let token_reserve = projected_token_reserve
+        .or_else(|| pool_context.map(|context| format_f64_decimal(context.token_reserve)))
+        .unwrap_or_else(|| "0".to_string());
+    let latest_block = pool_context
+        .map(|context| context.latest_block.max(pool_result.block_number))
+        .unwrap_or(pool_result.block_number);
+    let dependency_hashes = dependency_tx_hashes(pool_result, &result.request.tx.hash);
+
+    Some(json!({
+        "evidence_version": "mempool_entry_evidence_v1",
+        "base_block": pool_result.block_number,
+        "simulated_block": pool_result.block_number,
+        "simulated_at": chrono::Utc::now().to_rfc3339(),
+        "dependency_tx_hashes": dependency_hashes,
+        "dependency_fee_metadata": {
+            "tail_after_tx_hash": result.request.tx.hash,
+            "dependency_gas_price_wei": result.request.tx.gas_price.as_ref().map(|value| value.to_string()),
+            "dependency_value_wei": result.request.tx.value.to_string()
+        },
+        "projected_pool": {
+            "protocol": protocol,
+            "denom_address": denom_address,
+            "denom_symbol": denom_symbol,
+            "denom_reserve": denom_reserve,
+            "token_reserve": token_reserve,
+            "price_ratio_to_initial": Value::Null,
+            "creation_block": pool_context.and_then(|context| context.creation_block),
+            "latest_block": latest_block,
+            "can_buy": pool_result.can_buy && pool_context.map(|context| context.can_buy).unwrap_or(true),
+            "can_sell": pool_result.can_sell && pool_context.map(|context| context.can_sell).unwrap_or(true),
+            "is_scam": pool_context.map(|context| context.is_scam).unwrap_or(false)
+        },
+        "viability": {
+            "can_buy": pool_result.can_buy,
+            "can_approve": pool_result.can_approve,
+            "can_sell": pool_result.can_sell,
+            "buy_tax_percent": tax_value(pool_result.buy_tax_percent),
+            "sell_tax_percent": tax_value(pool_result.sell_tax_percent)
+        },
+        "vault_buy_simulation": {
+            "route": "pool_buy_sell_probe",
+            "would_revert": !pool_result.can_buy,
+            "gas_used": pool_result.buy_transaction.fees.gas_used,
+            "eth_spent_wei": pool_result.denom_spent.to_string(),
+            "tokens_received_raw": pool_result.tokens_received.to_string(),
+            "metadata": {
+                "exact_vault_calldata": false,
+                "source": "mempool_processor.pool_buy_sell_result",
+                "failure_reason": pool_result.failure_reason
+            }
+        },
+        "strategy_neutral_flags": {
+            "can_buy": pool_result.can_buy,
+            "can_approve": pool_result.can_approve,
+            "can_sell": pool_result.can_sell
+        },
+        "audit": {
+            "source": "mempool_processor",
+            "pool_buy_sell_probe": true,
+            "exact_vault_calldata": false,
+            "prior_transaction_count": pool_result.prior_transactions.len()
+        }
+    }))
+}
+
+fn projected_v2_denom_address(
+    pool_result: &tx_processor::PoolBuySellSimulationResult,
+) -> Option<String> {
+    let (token0, token1) = v2_pair_tokens(pool_result)?;
+    let denom = if token0 == pool_result.token_address {
+        token1
+    } else {
+        token0
+    };
+    Some(to_checksum_address(&denom))
+}
+
+fn projected_v2_reserves(
+    pool_result: &tx_processor::PoolBuySellSimulationResult,
+    denom_address: Option<&str>,
+    denom_decimals: u8,
+) -> (Option<String>, Option<String>) {
+    let Some((reserve0, reserve1)) = latest_v2_sync(pool_result) else {
+        return (None, None);
+    };
+    let denom = denom_address.and_then(parse_address);
+    let denom_is_token0 = denom
+        .map(|denom| {
+            v2_pair_tokens(pool_result)
+                .map(|(token0, _)| token0 == denom)
+                .unwrap_or_else(|| denom < pool_result.token_address)
+        })
+        .unwrap_or(false);
+    let (denom_reserve_raw, token_reserve_raw) = if denom_is_token0 {
+        (reserve0, reserve1)
+    } else {
+        (reserve1, reserve0)
+    };
+
+    (
+        Some(u256_to_decimal_string(denom_reserve_raw, denom_decimals)),
+        Some(token_reserve_raw.to_string()),
+    )
+}
+
+fn v2_pair_tokens(
+    pool_result: &tx_processor::PoolBuySellSimulationResult,
+) -> Option<(Address, Address)> {
+    for tx in &pool_result.prior_transactions {
+        for event in &tx.uniswap_v2_pair_created_events {
+            if event.pair_address == pool_result.pool_address {
+                return Some((event.token0, event.token1));
+            }
+        }
+    }
+    None
+}
+
+fn latest_v2_sync(pool_result: &tx_processor::PoolBuySellSimulationResult) -> Option<(U256, U256)> {
+    let mut latest = None;
+    for tx in &pool_result.prior_transactions {
+        for event in &tx.uniswap_v2_syncs {
+            if event.pair_address == pool_result.pool_address {
+                latest = Some((event.reserve0, event.reserve1));
+            }
+        }
+    }
+    latest
+}
+
+fn dependency_tx_hashes(
+    pool_result: &tx_processor::PoolBuySellSimulationResult,
+    fallback_hash: &str,
+) -> Vec<String> {
+    let mut hashes = pool_result
+        .prior_transactions
+        .iter()
+        .map(|tx| format!("{:#x}", tx.hash))
+        .collect::<Vec<_>>();
+    if hashes.is_empty() {
+        hashes.push(fallback_hash.to_string());
+    }
+    hashes
+}
+
+fn normalize_evidence_protocol(protocol: &str) -> String {
+    match protocol.trim().to_ascii_uppercase().as_str() {
+        "UNISWAPV2" | "UNISWAP-V2" | "V2" => "UNISWAP-V2",
+        "SUSHISWAP" | "SUSHISWAP-V2" | "SUSHI" | "SUSHI-V2" => "SUSHISWAP-V2",
+        "PANCAKESWAP" | "PANCAKESWAP-V2" | "PANCAKE-V2" => "PANCAKESWAP-V2",
+        "SHIBASWAP" | "SHIBASWAP-V2" => "SHIBASWAP-V2",
+        "FRAXSWAP" | "FRAXSWAP-V2" => "FRAXSWAP-V2",
+        other => other,
+    }
+    .to_string()
+}
+
+fn pool_type_label(pool_type: tx_processor::PoolType) -> &'static str {
+    match pool_type {
+        tx_processor::PoolType::UniswapV2 => "UNISWAP-V2",
+        tx_processor::PoolType::SushiSwap => "SUSHISWAP-V2",
+        tx_processor::PoolType::PancakeSwapV2 => "PANCAKESWAP-V2",
+        tx_processor::PoolType::ShibaSwapV2 => "SHIBASWAP-V2",
+        tx_processor::PoolType::FraxswapV2 => "FRAXSWAP-V2",
+        tx_processor::PoolType::UniswapV3 { .. } => "UNISWAP-V3",
+        tx_processor::PoolType::SushiSwapV3 { .. } => "SUSHISWAP-V3",
+        tx_processor::PoolType::PancakeSwapV3 { .. } => "PANCAKESWAP-V3",
+        tx_processor::PoolType::Curve => "CURVE",
+        tx_processor::PoolType::Balancer => "BALANCER",
+        tx_processor::PoolType::UniswapV4 => "UNISWAP-V4",
+    }
+}
+
+fn denom_symbol_for_address(address: &str) -> String {
+    if address.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000") {
+        "ETH".to_string()
+    } else if address.eq_ignore_ascii_case("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") {
+        "WETH".to_string()
+    } else {
+        address.to_string()
+    }
+}
+
+fn tax_value(value: f64) -> Value {
+    if value.is_finite() && value >= 0.0 {
+        json!(format_f64_decimal(value))
+    } else {
+        Value::Null
+    }
+}
+
+fn parse_address(value: &str) -> Option<Address> {
+    value.trim().parse::<Address>().ok()
+}
+
+fn format_f64_decimal(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
+    }
+    let mut text = format!("{value:.18}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text.is_empty() {
+        "0".to_string()
+    } else {
+        text
+    }
+}
+
+fn u256_to_decimal_string(value: U256, decimals: u8) -> String {
+    let decimals = usize::from(decimals);
+    let raw = value.to_string();
+    if decimals == 0 {
+        return raw;
+    }
+    let mut text = if raw.len() <= decimals {
+        let mut padded = String::with_capacity(decimals + 2);
+        padded.push_str("0.");
+        for _ in 0..(decimals - raw.len()) {
+            padded.push('0');
+        }
+        padded.push_str(&raw);
+        padded
+    } else {
+        let split = raw.len() - decimals;
+        format!("{}.{}", &raw[..split], &raw[split..])
+    };
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
 }
 
 fn known_denom_decimals(symbol: &str, address: &str) -> Option<u8> {

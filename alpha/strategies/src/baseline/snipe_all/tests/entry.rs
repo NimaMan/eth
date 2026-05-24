@@ -5,8 +5,11 @@ use eth_alpha_core::{
     amount::Amount,
     execution::{ExecutionReport, ExecutionStatus},
     ids::{OrderId, PositionId, TokenPoolId},
+    mempool_entry::{MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION},
     position::{Position, PositionKey},
+    risk::RISK_SOURCE_MEMPOOL_SIGNAL,
 };
+use serde_json::{json, Value};
 
 #[test]
 fn uses_configured_strategy_name() {
@@ -218,6 +221,119 @@ fn price_to_initial_entry_gate_allows_at_threshold_and_missing_ratio() {
 
         assert!(decision.order_intent().is_some());
     }
+}
+
+#[test]
+fn trading_enabled_mempool_entry_evidence_buys_projected_pool() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 2,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: None,
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+    let risk = trading_enabled_risk(
+        &pool,
+        Some(mempool_entry_evidence(&pool, Some(Decimal::new(12, 1)))),
+    );
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    let intent = decision.order_intent().expect("buy intent");
+    assert_eq!(intent.side, OrderSide::Buy);
+    assert_eq!(intent.pool_address, pool.address);
+    assert_eq!(decision.reason(), Some("entry.tail_after_enabling_tx"));
+}
+
+#[test]
+fn trading_enabled_without_mempool_entry_evidence_holds() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 2,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: None,
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+    let risk = trading_enabled_risk(&pool, None);
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(
+        decision.reason(),
+        Some("entry.mempool_entry_evidence:missing_evidence")
+    );
+}
+
+#[test]
+fn trading_enabled_mempool_entry_evidence_reuses_price_ratio_gate() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 2,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: None,
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig {
+        entry_init_policy: EntryInitPolicyConfig {
+            max_price_ratio_to_initial: Some(Decimal::new(15, 1)),
+            ..EntryInitPolicyConfig::default()
+        },
+        ..SnipeAllConfig::default()
+    });
+    let risk = trading_enabled_risk(
+        &pool,
+        Some(mempool_entry_evidence(&pool, Some(Decimal::new(151, 2)))),
+    );
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(
+        decision.reason(),
+        Some("entry.init_policy:price_to_initial_ratio_gt_max")
+    );
+}
+
+#[test]
+fn trading_enabled_mempool_probe_without_exact_vault_buy_holds() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 2,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: None,
+    };
+    let portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+    let mut evidence = mempool_entry_evidence(&pool, Some(Decimal::new(12, 1)));
+    evidence["vault_buy_simulation"]["route"] = json!("pool_buy_sell_probe");
+    let risk = trading_enabled_risk(&pool, Some(evidence));
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+
+    assert!(decision.is_hold());
+    assert_eq!(
+        decision.reason(),
+        Some("entry.mempool_entry_evidence:missing_successful_exact_vault_buy")
+    );
 }
 
 #[test]
@@ -664,4 +780,70 @@ fn entry_bankroll_restores_closed_profit_without_portfolio_position() {
         .unwrap();
 
     assert!(decision.order_intent().is_some());
+}
+
+fn trading_enabled_risk(pool: &PoolSnapshot, evidence: Option<Value>) -> RiskEvent {
+    RiskEvent {
+        kind: RiskKind::TradingEnabled,
+        severity: RiskSeverity::Info,
+        source: Some(RISK_SOURCE_MEMPOOL_SIGNAL.to_string()),
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        pending_tx_hash: None,
+        observed_block: Some(2),
+        message: "Trading enabled".to_string(),
+        evidence: evidence.map(|entry_evidence| {
+            let mut evidence = serde_json::Map::new();
+            evidence.insert(MEMPOOL_ENTRY_EVIDENCE_KEY.to_string(), entry_evidence);
+            Value::Object(evidence)
+        }),
+    }
+}
+
+fn mempool_entry_evidence(pool: &PoolSnapshot, price_ratio_to_initial: Option<Decimal>) -> Value {
+    let price_ratio_to_initial = price_ratio_to_initial.map(|value| value.to_string());
+    json!({
+        "evidence_version": MEMPOOL_ENTRY_EVIDENCE_VERSION,
+        "base_block": 2,
+        "simulated_block": 2,
+        "dependency_tx_hashes": [
+            "0x3333333333333333333333333333333333333333333333333333333333333333"
+        ],
+        "dependency_fee_metadata": {
+            "tail_after_tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "projected_pool": {
+            "protocol": "UNISWAP-V2",
+            "denom_address": pool
+                .denom_address
+                .map(|address| format!("{address:#x}")),
+            "denom_symbol": pool.denom_symbol.clone(),
+            "denom_reserve": "1",
+            "token_reserve": "100",
+            "price_ratio_to_initial": price_ratio_to_initial,
+            "creation_block": 1,
+            "latest_block": 2,
+            "can_buy": true,
+            "can_sell": true,
+            "is_scam": false
+        },
+        "viability": {
+            "can_buy": true,
+            "can_approve": true,
+            "can_sell": true,
+            "buy_tax_percent": "0",
+            "sell_tax_percent": "0"
+        },
+        "vault_buy_simulation": {
+            "route": "uniswap_v2_trading_vault",
+            "would_revert": false,
+            "gas_used": 176000,
+            "eth_spent_wei": "10000000000000000",
+            "tokens_received_raw": "1000000"
+        },
+        "strategy_neutral_flags": {},
+        "audit": {
+            "source": "unit_test"
+        }
+    })
 }

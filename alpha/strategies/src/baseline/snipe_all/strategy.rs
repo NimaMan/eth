@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use alloy_primitives::U256;
 use eth_alpha_core::{
-    Result, Strategy, StrategyContext, StrategyDecision,
     amount::{Amount, DecimalAmount},
     ids::{BlockNumber, PoolAddress, PositionId, StrategyName, TokenAddress},
     market::{MarketEvent, PoolSnapshot},
     order::{OrderIntent, OrderSide},
     position::{Position, PositionState},
     risk::{RiskEvent, RiskKind, RiskSeverity},
+    Result, Strategy, StrategyContext, StrategyDecision,
 };
 
 use crate::shared_rules;

@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 use super::category::ReasonCategory;
 
@@ -139,6 +139,9 @@ fn label_for(code: &str, raw: &str) -> String {
         }
         "entry.mempool_entry_evidence.invalid_evidence" => {
             "Entry hold: invalid mempool entry evidence".to_string()
+        }
+        "entry.mempool_entry_evidence.unsupported_evidence_version" => {
+            "Entry hold: unsupported mempool entry evidence version".to_string()
         }
         "entry.mempool_entry_evidence.missing_successful_exact_vault_buy" => {
             "Entry hold: missing successful exact vault buy evidence".to_string()

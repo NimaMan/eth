@@ -608,7 +608,11 @@ async fn insert_event(pool: &PgPool, event: SignalEventInsert) -> Result<i64> {
     Ok(row.try_get::<i64, _>("signal_id")?)
 }
 
-async fn write_signal_entry_evidence(pool: &PgPool, signal_id: i64, evidence: &Value) -> Result<()> {
+async fn write_signal_entry_evidence(
+    pool: &PgPool,
+    signal_id: i64,
+    evidence: &Value,
+) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO live_trading.signal_entry_evidence

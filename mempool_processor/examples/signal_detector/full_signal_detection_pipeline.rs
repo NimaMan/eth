@@ -498,7 +498,7 @@ async fn main() -> Result<()> {
     info!("✅ Transaction router initialized");
 
     // Initialize unified simulator with custom config
-    let simulator = Arc::new(MempoolSimulator::new(&reth_db_path, None)?);
+    let simulator = Arc::new(MempoolSimulator::new(&reth_db_path)?);
     info!("✅ MempoolSimulator initialized (no database lock issues!)");
 
     // Get latest block

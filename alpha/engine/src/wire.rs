@@ -11,12 +11,12 @@ use eth_alpha_core::{
     ids::TokenPoolId,
     market::{PoolProtocol, PoolSnapshot, UniswapV4PoolKeySnapshot},
     mempool_entry::MEMPOOL_ENTRY_EVIDENCE_KEY,
-    risk::{RISK_SOURCE_MEMPOOL_SIGNAL, RiskEvent, RiskKind, RiskSeverity},
+    risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_MEMPOOL_SIGNAL},
 };
-use eyre::{Result, eyre};
-use rust_decimal::{Decimal, prelude::FromPrimitive};
+use eyre::{eyre, Result};
+use rust_decimal::{prelude::FromPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LiveStatusResponse {
@@ -676,6 +676,46 @@ mod tests {
         assert_eq!(event.severity, RiskSeverity::Critical);
         assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
         assert!(event.pending_tx_hash.is_some());
+    }
+
+    #[test]
+    fn trading_enabled_signal_carries_mempool_entry_evidence() {
+        let entry_evidence = serde_json::json!({
+            "evidence_version": "mempool_entry_evidence_v1",
+            "base_block": 12
+        });
+        let signal = MempoolSignalWire {
+            signal_id: "1".to_string(),
+            signal_type: "trading_enabled".to_string(),
+            signal_source: None,
+            signal_created_at: None,
+            mempool_first_seen_at: None,
+            mempool_first_seen_ms: None,
+            detection_timestamp: None,
+            detection_tx_hash: None,
+            token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            pool_type: None,
+            creator_address: None,
+            subject_address: None,
+            headline: None,
+            value_1: None,
+            value_2: None,
+            flag: None,
+            payload: Value::Null,
+            mempool_entry_evidence: Some(entry_evidence.clone()),
+        };
+
+        let event = signal
+            .to_risk_event()
+            .expect("risk event")
+            .expect("non-empty event");
+
+        assert_eq!(event.kind, RiskKind::TradingEnabled);
+        assert_eq!(
+            event.evidence.unwrap()[MEMPOOL_ENTRY_EVIDENCE_KEY],
+            entry_evidence
+        );
     }
 
     #[test]

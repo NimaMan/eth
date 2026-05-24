@@ -1,4 +1,8 @@
-use eth_alpha_core::{market::PoolSnapshot, mempool_entry::MempoolEntryEvidence, risk::RiskEvent};
+use eth_alpha_core::{
+    market::PoolSnapshot,
+    mempool_entry::{MempoolEntryEvidence, MEMPOOL_ENTRY_EVIDENCE_VERSION},
+    risk::RiskEvent,
+};
 
 use crate::baseline::snipe_all::rule::RuleDecision;
 
@@ -22,6 +26,9 @@ pub fn evaluate(event: &RiskEvent) -> MempoolEntryDecision {
         Some(Err(_)) => return reject("invalid_evidence"),
         None => return reject("missing_entry_evidence"),
     };
+    if evidence.evidence_version != MEMPOOL_ENTRY_EVIDENCE_VERSION {
+        return reject("unsupported_evidence_version");
+    }
     if !evidence.has_successful_exact_vault_buy() {
         return reject("missing_successful_exact_vault_buy");
     }

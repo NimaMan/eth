@@ -42,11 +42,10 @@ use reth_chain_query::to_checksum_address;
 use tokio::runtime::Runtime;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
-use tx_processor::simulator::types::{
-    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
-};
 use tx_processor::tx_processor::TxProcessor;
-use tx_processor::ProcessedTransaction;
+use tx_processor::{
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType, ProcessedTransaction,
+};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 #[derive(Parser, Debug)]
