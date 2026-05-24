@@ -107,6 +107,7 @@ pub async fn run_checks(
         )
         .await?,
     );
+    checks.push(execution_replay::tail_entry_coverage_check(pool, result_set, strategy).await?);
     checks.push(
         execution_replay::tail_entry_intents_have_exact_vault_evidence_check(
             pool,

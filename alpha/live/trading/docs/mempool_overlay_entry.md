@@ -74,11 +74,12 @@ decision path. It should remain available as an internal audit/replay artifact,
 keyed by `signal_id`, so we can reproduce disagreements after the fact without
 making alpha replay the sequence on every poll.
 
-The evidence JSON uses the `mempool_entry_evidence_v1` schema. The first
-implemented writer persists the existing `pool_buy_sell_probe` result and marks
-`vault_buy_simulation.metadata.exact_vault_calldata=false`. Alpha consumes and
-records this evidence, but it does not treat it as a valid tail-entry buy until
-`vault_buy_simulation.route=uniswap_v2_trading_vault`,
+The evidence JSON uses the `mempool_entry_evidence_v1` schema. The generic
+`pool_buy_sell_probe` remains a diagnostic fallback and is marked with
+`vault_buy_simulation.metadata.exact_vault_calldata=false`. The mempool
+processor now also attempts the deployed V2 vault buy path on the projected
+pending state. Alpha only treats a trading-enabled signal as a valid tail-entry
+candidate when `vault_buy_simulation.route=uniswap_v2_trading_vault`,
 `vault_buy_simulation.metadata.exact_vault_calldata=true`, and successful exact
 deployed-vault calldata simulation are all present.
 

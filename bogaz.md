@@ -55,6 +55,21 @@ The practical consequence is:
   before another public run; conflicting caps or duplicated addresses are now the
   highest-risk failure mode.
 
+## Tail-Entry Production Parity Blockers 2026-05-24
+
+The current tail-entry hardening is useful, but it does not yet prove final
+production parity for same-block entry after a trading-enabled mempool
+dependency. These are active blockers before trusting tail-entry with live
+capital:
+
+| Order | Blocker | Required evidence |
+| --- | --- | --- |
+| 1 | Non-vacuous coverage checks | Strategy validation must count `trading_enabled` signals, signals with `mempool_entry_evidence`, successful exact-vault eligible signals, tail-entry intents, and tail-entry submitted/confirmed/deferred/failed/cancelled outcomes. Alpha11 tail-entry validation is blocked when this path is not actually exercised. |
+| 2 | Config-bound exact-vault evidence | `mempool_entry_evidence` must prove the configured production vault address, chain id, buy amount, and route version, not just a generic exact-vault-shaped route. |
+| 3 | Real receipt ordering preservation | Real order journal and receipt reconciliation must preserve `tail_after_tx_hash`, dependency priority fee, dependency gas price, selected priority fee, and ordering intent in final mined evidence. |
+| 4 | Dependency-relative tail gas policy | `tail_entry_buy` gas selection must compare our selected fee against the enabling transaction and validate the intended behind-dependency ordering. |
+| 5 | Same-block overlay proof | Backtest/live-backtest must either simulate dependency transaction plus exact vault calldata in the same overlay state or explicitly mark the run as post-mine `N+1` only and block same-block readiness. |
+
 ## Live Tx Submission Audit 2026-05-19
 
 Current intended path for real live execution:

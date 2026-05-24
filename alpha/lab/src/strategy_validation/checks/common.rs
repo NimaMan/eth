@@ -147,6 +147,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Are tail-entry buys backed by exact deployed-vault evidence?",
             "Requires tail-after-enabling buy intents to carry successful `uniswap_v2_trading_vault` calldata evidence, not the generic pool probe.",
         ),
+        "tail_entry_coverage" => (
+            "Did this validation run actually exercise the tail-entry path?",
+            "Counts trading_enabled signals, mempool entry evidence, exact-vault eligible signals, tail-entry intents, and tail-entry execution outcomes so tail-entry checks cannot pass vacuously.",
+        ),
         "tail_entry_buy_has_ordering_evidence" => (
             "Do tail-entry buys retain dependency ordering evidence?",
             "Requires tail-entry gas shadow events to include the dependency tx hash plus dependency fee evidence used to place behind the enabling tx.",

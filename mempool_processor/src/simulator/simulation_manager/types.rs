@@ -1,4 +1,5 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
+use serde_json::Value;
 use tx_processor::PoolBuySellSimulationResult;
 
 use crate::mempool_fetcher::MempoolTransaction;
@@ -39,6 +40,8 @@ pub struct SimulationResult {
     // Debug info for error analysis.
     pub debug_info: Option<String>,
     pub pool_viability_result: Option<PoolBuySellSimulationResult>,
+    // Exact deployed-vault buy result for mempool tail-entry evidence.
+    pub exact_vault_buy_result: Option<ExactVaultBuySimulationResult>,
     // Liquidity removal result (only populated for liquidity removal transactions).
     pub liquidity_removal_result: Option<LiquidityRemovalResult>,
 }
@@ -48,6 +51,26 @@ impl SimulationResult {
     pub fn buy_sell_result(&self) -> Option<BuySellResult> {
         self.pool_viability_result.as_ref().map(BuySellResult::from)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExactVaultBuySimulationResult {
+    pub route: String,
+    pub vault_address: Address,
+    pub owner_address: Address,
+    pub chain_id: u64,
+    pub simulated_block: u64,
+    pub dependency_tx_hashes: Vec<String>,
+    pub tail_after_tx_hash: Option<String>,
+    pub buy_amount_wei: U256,
+    pub min_tokens_out: U256,
+    pub expected_tokens_raw: Option<U256>,
+    pub tokens_received_raw: U256,
+    pub eth_spent_wei: U256,
+    pub gas_used: Option<u64>,
+    pub would_revert: bool,
+    pub revert_reason: Option<String>,
+    pub metadata: Value,
 }
 
 /// Buy/sell simulation result wrapper for backward compatibility.

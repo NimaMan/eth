@@ -180,6 +180,7 @@ async fn run(args: Args) -> Result<()> {
         pool_type: Some(format!("{:?}", pool_result.pool_type)),
         debug_info: None,
         pool_viability_result: Some(pool_result.clone()),
+        exact_vault_buy_result: None,
         liquidity_removal_result: None,
     };
 

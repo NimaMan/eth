@@ -33,6 +33,7 @@ impl SimulationManager {
                         return vec![SimulationResult {
                             request: request.clone(),
                             pool_viability_result: None,
+                            exact_vault_buy_result: None,
                             liquidity_removal_result: None,
                             error: Some(format!("No token address found for creator {}", creator)),
                             token_address: None,
@@ -51,6 +52,7 @@ impl SimulationManager {
                     return vec![SimulationResult {
                         request: request.clone(),
                         pool_viability_result: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                         error: Some(
                             "Contract creation: address calculation not implemented yet"
@@ -70,6 +72,7 @@ impl SimulationManager {
                 return vec![SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                     error: Some("Category doesn't support buy/sell simulation".to_string()),
                     token_address: None,
@@ -91,6 +94,7 @@ impl SimulationManager {
                 return vec![SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                     error: Some(format!("Invalid token address: {}", e)),
                     token_address: None,
@@ -108,6 +112,7 @@ impl SimulationManager {
                 return vec![SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                     error: Some(format!("Failed to resolve live simulation block: {}", err)),
                     token_address: Some(token_address),
@@ -179,6 +184,7 @@ impl SimulationManager {
                         "entry_probe_unsupported: Uniswap V4 buy/sell simulation is not enabled"
                             .to_string(),
                     ),
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                 });
                 continue;
@@ -203,6 +209,7 @@ impl SimulationManager {
                         pool_address: None,
                         pool_type: Some(cache_pool_type_label(&pool_state.pool_type).to_string()),
                         debug_info: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                     });
                     continue;
@@ -261,6 +268,7 @@ impl SimulationManager {
                         pool_address: Some(pool_address),
                         pool_type: Some(pool_type.clone()),
                         debug_info: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                     });
                     continue;
@@ -282,6 +290,7 @@ impl SimulationManager {
                     pool_address: Some(pool_address),
                     pool_type: Some(pool_type.clone()),
                     debug_info: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                 });
                 continue;
@@ -308,6 +317,7 @@ impl SimulationManager {
                         pool_address: Some(pool_address),
                         pool_type: Some(pool_type.clone()),
                         debug_info: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                     });
                     continue;
@@ -332,6 +342,7 @@ impl SimulationManager {
                         pool_address: Some(pool_address),
                         pool_type: Some(pool_type.clone()),
                         debug_info: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                     });
                     continue;
@@ -385,7 +396,7 @@ impl SimulationManager {
                             max_priority_fee_per_gas: Some(2_000_000_000),
                             prior_txs: replay_sequence.to_vec(),
                             block_number: Some(simulation_block),
-                            ..config
+                            ..config.clone()
                         };
 
                         self.mempool_simulator
@@ -424,6 +435,10 @@ impl SimulationManager {
                         info!("  [DEBUG] Address {} ETH change: {:?}", addr, eth_change);
                     }
 
+                    let exact_vault_buy_result = self
+                        .simulate_exact_vault_entry_buy(request, &config, replay_sequence)
+                        .await;
+
                     results.push(SimulationResult {
                         request: request.clone(),
                         pool_viability_result: Some(result),
@@ -433,6 +448,7 @@ impl SimulationManager {
                         pool_address: Some(pool_address),
                         pool_type: Some(pool_type.clone()),
                         debug_info: None,
+                        exact_vault_buy_result,
                         liquidity_removal_result: None,
                     });
                 }
@@ -447,6 +463,7 @@ impl SimulationManager {
                         pool_address: Some(pool_address),
                         pool_type: Some(pool_type.clone()),
                         debug_info: None,
+                        exact_vault_buy_result: None,
                         liquidity_removal_result: None,
                     });
                 }

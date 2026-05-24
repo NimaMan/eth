@@ -20,6 +20,13 @@ pub const MEMPOOL_SIM_WORKERS_ENV: &str = "MEMPOOL_SIM_WORKERS";
 pub const MEMPOOL_ZMQ_SIGNAL_ENDPOINT_ENV: &str = "MEMPOOL_ZMQ_SIGNAL_ENDPOINT";
 pub const MEMPOOL_DATABASE_CONFIG_KEY: &str = "databases.mempool.url";
 pub const MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD_ENV: &str = "MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD";
+pub const ETH_MAINNET_UNISWAP_V2_TRADING_VAULT_CONFIG: &str =
+    "ETH_MAINNET_UNISWAP_V2_TRADING_VAULT";
+pub const ETH_MAINNET_UNISWAP_V2_TRADING_VAULT_OWNER_CONFIG: &str =
+    "ETH_MAINNET_UNISWAP_V2_TRADING_VAULT_OWNER";
+pub const ALPHA_LIVE_ENTRY_BUY_WEI_CONFIG: &str = "ALPHA_LIVE_ENTRY_BUY_WEI";
+pub const ALPHA_LIVE_UNISWAP_V2_VAULT_BUY_GAS_LIMIT_CONFIG: &str =
+    "ALPHA_LIVE_UNISWAP_V2_VAULT_BUY_GAS_LIMIT";
 pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
 pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
@@ -84,6 +91,23 @@ pub fn reth_ipc_path_from_env() -> String {
 pub fn eth_rpc_url_from_env() -> String {
     config_value(&[ETH_RPC_URL_ENV, RETH_HTTP_RPC_ENV])
         .unwrap_or_else(|| DEFAULT_ETH_RPC_URL.to_string())
+}
+
+pub fn uniswap_v2_trading_vault_from_config() -> Option<String> {
+    config_value(&[ETH_MAINNET_UNISWAP_V2_TRADING_VAULT_CONFIG])
+}
+
+pub fn uniswap_v2_trading_vault_owner_from_config() -> Option<String> {
+    config_value(&[ETH_MAINNET_UNISWAP_V2_TRADING_VAULT_OWNER_CONFIG])
+}
+
+pub fn alpha_live_entry_buy_wei_from_config() -> Option<String> {
+    config_value(&[ALPHA_LIVE_ENTRY_BUY_WEI_CONFIG])
+}
+
+pub fn alpha_live_uniswap_v2_vault_buy_gas_limit_from_config() -> Option<u64> {
+    config_value(&[ALPHA_LIVE_UNISWAP_V2_VAULT_BUY_GAS_LIMIT_CONFIG])
+        .and_then(|value| value.parse::<u64>().ok())
 }
 
 /// Log directory for the mempool processor.

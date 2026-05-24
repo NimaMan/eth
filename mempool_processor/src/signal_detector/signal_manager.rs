@@ -1,7 +1,7 @@
 use crate::config::TaxDetectionConfig;
 use crate::position_approval_call::decode_position_approval_call;
 use crate::signal_publisher::SignalPublisher;
-use crate::simulator::{BuySellResult, SimulationResult};
+use crate::simulator::{BuySellResult, ExactVaultBuySimulationResult, SimulationResult};
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{Address, U256};
 use reth_chain_query::to_checksum_address;
@@ -948,6 +948,27 @@ fn build_mempool_entry_evidence(
         .unwrap_or(pool_result.block_number);
     let dependency_hashes = dependency_tx_hashes(pool_result, &result.request.tx.hash);
 
+    let (vault_buy_simulation, audit_exact_vault_calldata) =
+        if let Some(exact) = result.exact_vault_buy_result.as_ref() {
+            (exact_vault_buy_simulation_json(exact), true)
+        } else {
+            (
+                json!({
+                    "route": "pool_buy_sell_probe",
+                    "would_revert": !pool_result.can_buy,
+                    "gas_used": pool_result.buy_transaction.fees.gas_used,
+                    "eth_spent_wei": pool_result.denom_spent.to_string(),
+                    "tokens_received_raw": pool_result.tokens_received.to_string(),
+                    "metadata": {
+                        "exact_vault_calldata": false,
+                        "source": "mempool_processor.pool_buy_sell_result",
+                        "failure_reason": pool_result.failure_reason
+                    }
+                }),
+                false,
+            )
+        };
+
     Some(json!({
         "evidence_version": "mempool_entry_evidence_v1",
         "base_block": pool_result.block_number,
@@ -979,18 +1000,7 @@ fn build_mempool_entry_evidence(
             "buy_tax_percent": tax_value(pool_result.buy_tax_percent),
             "sell_tax_percent": tax_value(pool_result.sell_tax_percent)
         },
-        "vault_buy_simulation": {
-            "route": "pool_buy_sell_probe",
-            "would_revert": !pool_result.can_buy,
-            "gas_used": pool_result.buy_transaction.fees.gas_used,
-            "eth_spent_wei": pool_result.denom_spent.to_string(),
-            "tokens_received_raw": pool_result.tokens_received.to_string(),
-            "metadata": {
-                "exact_vault_calldata": false,
-                "source": "mempool_processor.pool_buy_sell_result",
-                "failure_reason": pool_result.failure_reason
-            }
-        },
+        "vault_buy_simulation": vault_buy_simulation,
         "strategy_neutral_flags": {
             "can_buy": pool_result.can_buy,
             "can_approve": pool_result.can_approve,
@@ -999,10 +1009,40 @@ fn build_mempool_entry_evidence(
         "audit": {
             "source": "mempool_processor",
             "pool_buy_sell_probe": true,
-            "exact_vault_calldata": false,
+            "exact_vault_calldata": audit_exact_vault_calldata,
             "prior_transaction_count": pool_result.prior_transactions.len()
         }
     }))
+}
+
+fn exact_vault_buy_simulation_json(result: &ExactVaultBuySimulationResult) -> Value {
+    json!({
+        "route": result.route,
+        "vault_address": to_checksum_address(&result.vault_address),
+        "owner_address": to_checksum_address(&result.owner_address),
+        "chain_id": result.chain_id,
+        "would_revert": result.would_revert,
+        "gas_used": result.gas_used,
+        "eth_spent_wei": result.eth_spent_wei.to_string(),
+        "tokens_received_raw": result.tokens_received_raw.to_string(),
+        "metadata": {
+            "exact_vault_calldata": true,
+            "source": "mempool_processor.exact_vault_buy_result",
+            "provider": result.metadata.get("provider").cloned(),
+            "event": result.metadata.get("event").cloned(),
+            "failure_reason": result.revert_reason,
+            "simulated_block": result.simulated_block,
+            "dependency_tx_hashes": result.dependency_tx_hashes,
+            "tail_after_tx_hash": result.tail_after_tx_hash,
+            "buy_amount_wei": result.buy_amount_wei.to_string(),
+            "min_tokens_out": result.min_tokens_out.to_string(),
+            "expected_tokens_raw": result.expected_tokens_raw.map(|value| value.to_string()),
+            "calldata_builder": result.metadata.get("calldata_builder").cloned(),
+            "deadline_policy": result.metadata.get("deadline_policy").cloned(),
+            "quote_gas_used": result.metadata.get("quote_gas_used").cloned(),
+            "quote_tokens_received_raw": result.metadata.get("quote_tokens_received_raw").cloned(),
+        }
+    })
 }
 
 fn projected_v2_denom_address(

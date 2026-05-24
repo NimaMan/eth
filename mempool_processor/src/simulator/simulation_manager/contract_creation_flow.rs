@@ -31,6 +31,7 @@ impl SimulationManager {
             pool_address: None,
             pool_type: None,
             debug_info: None,
+            exact_vault_buy_result: None,
             liquidity_removal_result: None,
         };
 

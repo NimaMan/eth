@@ -39,6 +39,7 @@ impl SimulationManager {
                     pool_address: None,
                     pool_type: None,
                     debug_info: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                 };
                 return vec![result];
@@ -58,6 +59,7 @@ impl SimulationManager {
                 return vec![SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
+                    exact_vault_buy_result: None,
                     liquidity_removal_result: None,
                     error: Some(format!("Liquidity removal result extraction failed: {}", e)),
                     token_address: None,
@@ -99,6 +101,7 @@ impl SimulationManager {
                                     pool_address: None,
                                     pool_type: None,
                                     debug_info: None,
+                                    exact_vault_buy_result: None,
                                     liquidity_removal_result: None,
                                 };
                                 return vec![result];
@@ -123,6 +126,7 @@ impl SimulationManager {
                                     pool_address: None,
                                     pool_type: None,
                                     debug_info: None,
+                                    exact_vault_buy_result: None,
                                     liquidity_removal_result: None,
                                 };
                                 return vec![result];
@@ -149,6 +153,7 @@ impl SimulationManager {
                 pool_address: removal_result.pool_address,
                 pool_type: removal_result.pool_type.clone(),
                 debug_info: removal_result.debug_info.clone(),
+                exact_vault_buy_result: None,
                 liquidity_removal_result: None,
             };
             return vec![result];
@@ -163,6 +168,7 @@ impl SimulationManager {
             pool_address: removal_result.pool_address,
             pool_type: removal_result.pool_type.clone(),
             debug_info: None,
+            exact_vault_buy_result: None,
             liquidity_removal_result: Some(removal_result),
         };
 
