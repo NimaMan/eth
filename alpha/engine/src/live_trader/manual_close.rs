@@ -4,6 +4,7 @@ use eth_alpha_core::{
     decision_rationale::source,
     execution::{ExecutionReport, ExecutionStatus},
     order::{OrderIntent, OrderSide},
+    position::Position,
     store::TradingStore,
     strategy::StrategyDecision,
 };
@@ -37,7 +38,7 @@ pub(super) async fn process_manual_close_requests<E>(
     store: &PostgresTradingStore,
     engine: &mut AlphaEngine<E, BlockCriticalRiskPolicy, PostgresTradingStore>,
     simulator: &LiveTxSimulator,
-    vault_address: Address,
+    vault_address: Option<Address>,
     current_block: Option<u64>,
     limit: usize,
 ) -> Result<ManualCloseProcessSummary>
@@ -102,7 +103,7 @@ async fn process_one_manual_close<E>(
     store: &PostgresTradingStore,
     engine: &mut AlphaEngine<E, BlockCriticalRiskPolicy, PostgresTradingStore>,
     simulator: &LiveTxSimulator,
-    vault_address: Address,
+    vault_address: Option<Address>,
     current_block: Option<u64>,
     request: &ManualCloseRequest,
 ) -> Result<Vec<ExecutionReport>>
@@ -137,14 +138,31 @@ where
             )
         })?;
 
-    let (vault_balance, balance_block) =
-        current_vault_token_balance(simulator, position.key.token_address, vault_address).await?;
-    let amount_raw = requested_close_amount(request, vault_balance)?;
-    let decimals = position
-        .entry_token_raw_amount
-        .as_ref()
-        .map(|amount| amount.decimals)
-        .unwrap_or(18);
+    let (available_tokens, decimals, balance_block, balance_source) = match vault_address {
+        Some(vault_address) => {
+            let (vault_balance, balance_block) =
+                current_vault_token_balance(simulator, position.key.token_address, vault_address)
+                    .await?;
+            let decimals = position
+                .entry_token_raw_amount
+                .as_ref()
+                .map(|amount| amount.decimals)
+                .ok_or_else(|| {
+                    eyre!(
+                        "manual close request {} cannot resolve token decimals from position",
+                        request.request_id
+                    )
+                })?;
+            (
+                vault_balance,
+                decimals,
+                balance_block,
+                "live_state_erc20_balanceOf_vault",
+            )
+        }
+        None => chain_sim_position_token_balance(&position, request)?,
+    };
+    let amount_raw = requested_close_amount(request, available_tokens)?;
     let defaults = SnipeAllConfig::default();
     let intent = OrderIntent {
         trade_id: Some(position.trade_id.clone()),
@@ -179,10 +197,10 @@ where
         "manual_close_request_id": request.request_id,
         "requested_percent": request.requested_percent,
         "requested_raw_amount": request.requested_raw_amount,
-        "vault_balance_raw": vault_balance.to_string(),
+        "available_token_balance_raw": available_tokens.to_string(),
         "resolved_amount_raw": amount_raw.to_string(),
         "balance_block": balance_block,
-        "balance_source": "live_state_erc20_balanceOf_vault",
+        "balance_source": balance_source,
     }));
     store.record_strategy_decision(&decision_record).await?;
 
@@ -195,6 +213,30 @@ where
                 request.request_id
             )
         })
+}
+
+fn chain_sim_position_token_balance(
+    position: &Position,
+    request: &ManualCloseRequest,
+) -> Result<(U256, u8, u64, &'static str)> {
+    let amount = position.entry_token_raw_amount.as_ref().ok_or_else(|| {
+        eyre!(
+            "manual close request {} cannot resolve simulated position token amount",
+            request.request_id
+        )
+    })?;
+    if amount.raw.is_zero() {
+        return Err(eyre!(
+            "simulated position token balance is zero for manual close request {}",
+            request.request_id
+        ));
+    }
+    Ok((
+        amount.raw,
+        amount.decimals,
+        position.entry_block.unwrap_or_default(),
+        "chain_sim_position_entry_token_amount",
+    ))
 }
 
 async fn current_vault_token_balance(

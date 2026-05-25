@@ -988,16 +988,13 @@ async fn run(
             }
         }
 
-        if let (Some(vault_address), Some(manual_close_live_simulator)) = (
-            manual_close_vault_address,
-            manual_close_live_simulator.as_ref(),
-        ) {
+        if let Some(manual_close_live_simulator) = manual_close_live_simulator.as_ref() {
             if !defer_event_processing && !suppress_events && (!first_poll || args.replay_current) {
                 match process_manual_close_requests(
                     &store,
                     &mut engine,
                     manual_close_live_simulator,
-                    vault_address,
+                    manual_close_vault_address,
                     status.progress.current_block,
                     default_manual_close_limit(),
                 )
