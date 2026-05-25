@@ -149,6 +149,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(live::processed_blocks);
 
+    let live_state_latest = warp::path!("eth" / "tokens" / "api" / "live" / "state" / "latest")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live::latest_state_frame);
+
     let ops_health = warp::path!("eth" / "tokens" / "api" / "ops" / "health")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -495,6 +500,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
+        .or(live_state_latest)
         .boxed();
 
     let ops_routes = ops_health

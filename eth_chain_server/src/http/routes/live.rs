@@ -230,6 +230,18 @@ pub(super) async fn processed_blocks(
     ))
 }
 
+pub(super) async fn latest_state_frame(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    let response = views::live::latest_live_state_frame(&state.recent_live_state_frames);
+    let status = if response.available {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    Ok(json_response(&response, status))
+}
+
 async fn event_response(
     event: LiveTokenEvent,
     after_block: u64,

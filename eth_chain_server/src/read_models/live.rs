@@ -12,7 +12,7 @@ use crate::live::{LiveTracker, LiveTrackerError, LiveTrackerProgress};
 use crate::read_models::surface::{self, PoolSurfaceFilter, TokenPoolSurfaceResponse};
 use crate::read_models::token::{TokenPnlView, TokenView};
 use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
-use crate::recent_blocks::{RecentLiveBlocks, RecentProcessedBlock};
+use crate::recent_blocks::{RecentLiveBlocks, RecentLiveStateFrame, RecentProcessedBlock};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LiveStatusResponse {
@@ -98,6 +98,12 @@ pub struct LiveRetentionResponse {
 pub struct RecentProcessedBlocksResponse {
     pub count: usize,
     pub blocks: Vec<RecentProcessedBlock>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LatestLiveStateFrameResponse {
+    pub available: bool,
+    pub state: Option<RecentLiveStateFrame>,
 }
 
 pub async fn status(tracker: &LiveTracker) -> LiveStatusResponse {
@@ -293,6 +299,16 @@ pub fn recent_processed_blocks(
     RecentProcessedBlocksResponse {
         count: blocks.len(),
         blocks,
+    }
+}
+
+pub fn latest_live_state_frame(
+    recent_live_state_frames: &crate::recent_blocks::RecentLiveStateFrames,
+) -> LatestLiveStateFrameResponse {
+    let state = recent_live_state_frames.latest();
+    LatestLiveStateFrameResponse {
+        available: state.is_some(),
+        state,
     }
 }
 
