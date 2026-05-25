@@ -89,7 +89,7 @@ const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
-const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON: &str =
+const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
     "chain_sim.live_backtest.skip_mempool_trading_enabled";
 
 async fn run(
@@ -562,14 +562,15 @@ async fn run(
                 }
                 continue;
             }
-            if let Some(skip_reason) =
-                mempool_signal_skip_reason_for_execution_mode(execution_mode, &signal.signal_type)
-            {
+            if let Some(reason_code) = mempool_signal_skip_reason_code_for_execution_mode(
+                execution_mode,
+                &signal.signal_type,
+            ) {
                 info!(
                     signal_id = %signal.signal_id,
                     signal_type = %signal.signal_type,
                     execution_mode = %execution_mode.label(),
-                    reason = skip_reason,
+                    reason_code = reason_code,
                     "skipping mempool signal for live trader execution mode"
                 );
                 record_signal_observation(
@@ -582,7 +583,7 @@ async fn run(
                     suppress_events,
                     &status,
                     json!({
-                        "reason": skip_reason,
+                        "reason_code": reason_code,
                         "execution_mode": execution_mode.label(),
                         "signal_type": signal.signal_type.as_str(),
                         "entry_path": "mined_pool_update",
@@ -1143,12 +1144,12 @@ async fn run(
     Ok(())
 }
 
-fn mempool_signal_skip_reason_for_execution_mode(
+fn mempool_signal_skip_reason_code_for_execution_mode(
     execution_mode: TraderExecutionMode,
     signal_type: &str,
 ) -> Option<&'static str> {
     (matches!(execution_mode, TraderExecutionMode::ChainSim) && signal_type == "trading_enabled")
-        .then_some(CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON)
+        .then_some(CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE)
 }
 
 #[cfg(test)]
@@ -1158,13 +1159,13 @@ mod tests {
     #[test]
     fn chain_sim_live_backtest_skips_trading_enabled_mempool_entries() {
         assert_eq!(
-            mempool_signal_skip_reason_for_execution_mode(
+            mempool_signal_skip_reason_code_for_execution_mode(
                 TraderExecutionMode::ChainSim,
                 "trading_enabled"
             ),
-            Some(CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON)
+            Some(CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE)
         );
-        assert!(mempool_signal_skip_reason_for_execution_mode(
+        assert!(mempool_signal_skip_reason_code_for_execution_mode(
             TraderExecutionMode::ChainSim,
             "liquidity_removal"
         )
@@ -1173,7 +1174,7 @@ mod tests {
 
     #[test]
     fn kartal_real_keeps_trading_enabled_mempool_entries() {
-        assert!(mempool_signal_skip_reason_for_execution_mode(
+        assert!(mempool_signal_skip_reason_code_for_execution_mode(
             TraderExecutionMode::KartalReal,
             "trading_enabled"
         )
