@@ -9,9 +9,10 @@ or build a broadcastable transaction.
 
 Live backtest keeps the fundamental backtest execution model. When a strategy
 observes a signal at block `N`, the simulated order is submitted at `N` and the
-terminal fill/failure is produced against post-block `N+1` state. For mempool
-`trading_enabled` tail-entry signals, this means the strategy can emit
-`entry.tail_after_enabling_tx`, but the adapter records
-`tail_entry_validation_mode=post_mine_n_plus_1` with
-`exact_overlay_simulation=false`. Same-block dependency ordering is a real-live
-deployment gate, not a live-backtest assumption.
+terminal fill/failure is produced against post-block `N+1` state.
+
+Mempool `trading_enabled` signals are observed but not routed into the
+chain-sim strategy as buy triggers. Chain-sim live backtests enter from the
+normal mined pool-update path once trading-enabled state is available. Same-block
+dependency ordering is a real-live Flashbots/Kartal policy, not a live-backtest
+assumption.

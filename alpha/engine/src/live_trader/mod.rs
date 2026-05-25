@@ -560,6 +560,23 @@ async fn run(
                 }
                 continue;
             }
+            if should_skip_mempool_signal_for_execution_mode(execution_mode, &signal.signal_type) {
+                record_signal_observation(
+                    &store,
+                    &observation_strategy_name,
+                    &signal,
+                    "ignored",
+                    0,
+                    first_poll,
+                    suppress_events,
+                    &status,
+                    json!({
+                        "reason": "chain_sim_backtest_uses_mined_entry_path_for_trading_enabled"
+                    }),
+                )
+                .await?;
+                continue;
+            }
             record_signal_observation(
                 &store,
                 &observation_strategy_name,
@@ -658,7 +675,6 @@ async fn run(
                 );
             }
         }
-
         for (pool_wire, pool) in polled_pools {
             let previous_block = seen_pool_blocks.get(&pool.address).copied();
             pool_updates
@@ -1111,4 +1127,36 @@ async fn run(
     }
 
     Ok(())
+}
+
+fn should_skip_mempool_signal_for_execution_mode(
+    execution_mode: TraderExecutionMode,
+    signal_type: &str,
+) -> bool {
+    matches!(execution_mode, TraderExecutionMode::ChainSim) && signal_type == "trading_enabled"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_sim_live_backtest_skips_trading_enabled_mempool_entries() {
+        assert!(should_skip_mempool_signal_for_execution_mode(
+            TraderExecutionMode::ChainSim,
+            "trading_enabled"
+        ));
+        assert!(!should_skip_mempool_signal_for_execution_mode(
+            TraderExecutionMode::ChainSim,
+            "liquidity_removal"
+        ));
+    }
+
+    #[test]
+    fn kartal_real_keeps_trading_enabled_mempool_entries() {
+        assert!(!should_skip_mempool_signal_for_execution_mode(
+            TraderExecutionMode::KartalReal,
+            "trading_enabled"
+        ));
+    }
 }
