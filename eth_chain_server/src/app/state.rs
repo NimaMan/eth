@@ -2,14 +2,17 @@ use std::sync::Arc;
 
 use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenRuntimeConfig};
 use eth_risk_atlas::RiskAtlasReader;
-use eyre::{eyre, Result};
+use eyre::{eyre, Result, WrapErr};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
 use crate::prices::ChainPriceService;
 use crate::ranges::RangeIndexManager;
-use crate::recent_blocks::{RecentLiveBlocks, RecentLiveFeeSamples, RecentLiveStateFrames};
+use crate::recent_blocks::{
+    mined_fee_sample_from_processed_block, RecentLiveBlocks, RecentLiveFeeSamples,
+    RecentLiveStateFrames,
+};
 use crate::stores::alpha_trading::AlphaTradingStore;
 use crate::stores::mempool_signals::MempoolSignalStore;
 use crate::token_analytics::network::TokenNetworkAnalysisManager;
@@ -131,6 +134,157 @@ impl ServerState {
             }
         });
     }
+
+    pub fn spawn_recent_live_fee_sample_recorder(&self) {
+        let Some(replay_store) = self.processed_block_replay_store.clone() else {
+            tracing::warn!(
+                "processed block disk cache disabled; gas-rank live fee samples cannot backfill from warmup"
+            );
+            return;
+        };
+        let mut events = self.live_tracker.subscribe();
+        let recent_live_fee_samples = self.recent_live_fee_samples.clone();
+        let chain_id = self.provider.chain_id();
+        let gas_rank_seed_blocks = 100usize;
+
+        tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(LiveTokenEvent::BlockApplied { block_number, .. }) => {
+                        let replay_store = replay_store.clone();
+                        let recent_live_fee_samples = recent_live_fee_samples.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            record_fee_sample_from_cache(
+                                replay_store.as_ref(),
+                                &recent_live_fee_samples,
+                                chain_id,
+                                block_number,
+                            )
+                        })
+                        .await
+                        {
+                            Ok(Ok(true)) => {}
+                            Ok(Ok(false)) => {
+                                tracing::debug!(
+                                    block_number,
+                                    "processed block cache miss while recording gas-rank sample"
+                                );
+                            }
+                            Ok(Err(error)) => {
+                                tracing::warn!(
+                                    block_number,
+                                    error = %error,
+                                    "failed to record gas-rank sample from processed block cache"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    block_number,
+                                    error = %error,
+                                    "gas-rank sample cache read task failed"
+                                );
+                            }
+                        }
+                    }
+                    Ok(LiveTokenEvent::RuntimeLive {
+                        current_block: Some(current_block),
+                        ..
+                    }) => {
+                        let replay_store = replay_store.clone();
+                        let recent_live_fee_samples = recent_live_fee_samples.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            seed_fee_samples_from_cache(
+                                replay_store.as_ref(),
+                                &recent_live_fee_samples,
+                                chain_id,
+                                current_block,
+                                gas_rank_seed_blocks,
+                            )
+                        })
+                        .await
+                        {
+                            Ok(Ok(recorded)) => {
+                                tracing::info!(
+                                    current_block,
+                                    recorded,
+                                    "seeded gas-rank fee samples from processed block cache"
+                                );
+                            }
+                            Ok(Err(error)) => {
+                                tracing::warn!(
+                                    current_block,
+                                    error = %error,
+                                    "failed to seed gas-rank fee samples from processed block cache"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    current_block,
+                                    error = %error,
+                                    "gas-rank sample seed task failed"
+                                );
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "gas-rank fee sample recorder lagged behind live tracker events"
+                        );
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+}
+
+fn seed_fee_samples_from_cache(
+    replay_store: &ProcessedBlockReplayStoreWriter,
+    recent_live_fee_samples: &RecentLiveFeeSamples,
+    chain_id: u64,
+    current_block: u64,
+    history_limit: usize,
+) -> Result<usize> {
+    let mut recorded = 0usize;
+    let start_block = current_block.saturating_sub(history_limit.saturating_sub(1) as u64);
+    for block_number in start_block..=current_block {
+        if record_fee_sample_from_cache(
+            replay_store,
+            recent_live_fee_samples,
+            chain_id,
+            block_number,
+        )? {
+            recorded += 1;
+        }
+    }
+    Ok(recorded)
+}
+
+fn record_fee_sample_from_cache(
+    replay_store: &ProcessedBlockReplayStoreWriter,
+    recent_live_fee_samples: &RecentLiveFeeSamples,
+    chain_id: u64,
+    block_number: u64,
+) -> Result<bool> {
+    let Some(key) = replay_store
+        .disk_cache_store()
+        .cached_key_for_block_number(chain_id, block_number)
+        .wrap_err_with(|| format!("failed to resolve processed block cache key {block_number}"))?
+    else {
+        return Ok(false);
+    };
+    let Some(block) = replay_store
+        .disk_cache_store()
+        .get(&key)
+        .wrap_err_with(|| format!("failed to read processed block cache {block_number}"))?
+    else {
+        return Ok(false);
+    };
+    recent_live_fee_samples.record(mined_fee_sample_from_processed_block(&block));
+    Ok(true)
 }
 
 struct RethIndexHandles {

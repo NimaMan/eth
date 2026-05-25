@@ -14,6 +14,7 @@ const OPS_HEALTH_HEARTBEAT_SECS: u64 = 60;
 pub async fn serve(config: ChainServerConfig) -> eyre::Result<()> {
     let state = ServerState::new(config.clone())?;
     state.spawn_recent_live_block_recorder();
+    state.spawn_recent_live_fee_sample_recorder();
     let routes = routes::routes(state.clone());
     let (bound_addr, server) = warp::serve(routes).try_bind_ephemeral(config.bind)?;
 

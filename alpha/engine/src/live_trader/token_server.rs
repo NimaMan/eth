@@ -1,3 +1,4 @@
+use super::live_state::LiveStateFrameResponse;
 use super::*;
 
 #[derive(Clone)]
@@ -18,6 +19,15 @@ impl TokenServerClient {
         self.get_json("/eth/tokens/api/live/status").await
     }
 
+    pub(super) async fn versioned_status(&self) -> Result<LiveStatusResponse> {
+        self.get_json("/api/v1/eth/live/status").await
+    }
+
+    pub(super) async fn gas_rank_samples(&self, limit: usize) -> Result<GasRankSamplesResponse> {
+        let path = format!("/api/v1/eth/alpha/gas-rank/samples?limit={limit}");
+        self.get_json(&path).await
+    }
+
     pub(super) async fn pools(&self) -> Result<LivePoolListResponse> {
         self.get_json("/eth/tokens/api/live/pools").await
     }
@@ -29,6 +39,10 @@ impl TokenServerClient {
     ) -> Result<MempoolSignalsResponse> {
         let path = format!("/eth/tokens/api/mempool/signals?limit={limit}&since_days={since_days}");
         self.get_json(&path).await
+    }
+
+    pub(super) async fn latest_live_state_frame(&self) -> Result<LiveStateFrameResponse> {
+        self.get_json("/eth/tokens/api/live/state/latest").await
     }
 
     async fn get_json<T>(&self, path: &str) -> Result<T>

@@ -24,6 +24,15 @@ pub struct LiveStatusResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct GasRankSamplesResponse {
+    pub source: String,
+    pub requested_blocks: usize,
+    pub available_recent_blocks: usize,
+    pub latest_block: Option<u64>,
+    pub latest_block_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LivePoolListResponse {
     pub count: usize,
     pub pools: Vec<PoolWire>,

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::wire::{
-    parse_address, LivePoolListResponse, LiveStatusResponse, MempoolSignalsResponse,
+    parse_address, GasRankSamplesResponse, LivePoolListResponse, LiveStatusResponse,
+    MempoolSignalsResponse,
 };
 use crate::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, EngineExecutionAdapter,
@@ -89,6 +90,8 @@ const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
+const CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS: u64 = 240;
+const CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS: u64 = 2_000;
 const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
     "chain_sim.live_backtest.skip_mempool_trading_enabled";
 
@@ -185,6 +188,13 @@ async fn run(
         }
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
+    let preflight_client = TokenServerClient::new(token_server_url.clone());
+    preflight_chain_server_readiness(
+        runner_name,
+        &preflight_client,
+        live_gas_policy.gas_rank_lookback_blocks as usize,
+    )
+    .await?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
     let reth_http_rpc = required_shared_config_value(&shared_config, RETH_HTTP_RPC_CONFIG)?;
     let entry_bankrolls_wei = strategy_specs
@@ -1142,6 +1152,81 @@ async fn run(
     }
 
     Ok(())
+}
+
+async fn preflight_chain_server_readiness(
+    runner_name: &str,
+    client: &TokenServerClient,
+    required_gas_rank_samples: usize,
+) -> Result<()> {
+    let timeout = Duration::from_secs(CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS);
+    let interval = Duration::from_millis(CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS);
+    let started = Instant::now();
+    let mut last_error = String::from("preflight has not run yet");
+
+    while started.elapsed() < timeout {
+        match chain_server_readiness_once(client, required_gas_rank_samples).await {
+            Ok((status, samples)) => {
+                info!(
+                    live_status = %status.progress.status,
+                    live_current_block = ?status.progress.current_block,
+                    gas_rank_available_recent_blocks = samples.available_recent_blocks,
+                    gas_rank_latest_block = ?samples.latest_block,
+                    gas_rank_source = %samples.source,
+                    "{} chain-server readiness preflight passed",
+                    runner_name
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                last_error = error.to_string();
+                warn!(
+                    error = %last_error,
+                    elapsed_secs = started.elapsed().as_secs(),
+                    timeout_secs = CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS,
+                    "{} waiting for chain-server readiness preflight",
+                    runner_name
+                );
+                time::sleep(interval).await;
+            }
+        }
+    }
+
+    Err(eyre!(
+        "{} requires chain-server live status and a gas-rank sample window of {} blocks before startup; last error after {}s: {}",
+        runner_name,
+        required_gas_rank_samples,
+        CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS,
+        last_error
+    ))
+}
+
+async fn chain_server_readiness_once(
+    client: &TokenServerClient,
+    required_gas_rank_samples: usize,
+) -> Result<(LiveStatusResponse, GasRankSamplesResponse)> {
+    let status = client.versioned_status().await?;
+    if status.progress.status != "live" {
+        return Err(eyre!(
+            "chain-server live status is {}; current_block={:?}; last_error={:?}",
+            status.progress.status,
+            status.progress.current_block,
+            status.progress.last_error
+        ));
+    }
+    let samples = client.gas_rank_samples(required_gas_rank_samples).await?;
+    if samples.available_recent_blocks < required_gas_rank_samples || samples.latest_block.is_none()
+    {
+        return Err(eyre!(
+            "chain-server gas-rank sample window is not ready; requested_blocks={}, required_blocks={}, available_recent_blocks={}, latest_block={:?}, source={}",
+            samples.requested_blocks,
+            required_gas_rank_samples,
+            samples.available_recent_blocks,
+            samples.latest_block,
+            samples.source
+        ));
+    }
+    Ok((status, samples))
 }
 
 fn mempool_signal_skip_reason_code_for_execution_mode(
