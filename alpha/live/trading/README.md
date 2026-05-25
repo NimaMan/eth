@@ -70,6 +70,7 @@ The decision loop is:
 | Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault buy | Active Alpha11 path |
 | Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
 | Mined LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available confirmed-chain risk exit |
+| Mined liquidity removal after entry | `exit.liquidity_removal` from `pool_update` | `mined_liquidity_removal_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Confirmed-chain removal, not a mempool race |
 | Mempool LP/removal risk | `exit.lp_approval` from `mempool_signal` or `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `mempool_race` | Kartal priority V2 vault sell | Requires a pending dependency tx hash |
 | Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
 | Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |

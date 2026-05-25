@@ -58,19 +58,19 @@ pub(super) async fn historical_market_buy_decisions_have_observations_check(
     if result_set.mode != "historical" {
         return Ok(check(
             "signal_scope",
-            "market_buy_has_historical_observation",
+            "pool_update_buy_has_historical_observation",
             Verdict::Pass,
-            "non-historical result set is not checked against Risk Atlas replay observations",
+            "non-historical result set is not checked against replayed pool observations",
             json!({ "mode": result_set.mode }),
         ));
     }
     count_check(
         pool,
         "signal_scope",
-        "market_buy_has_historical_observation",
+        "pool_update_buy_has_historical_observation",
         Verdict::Fail,
-        "historical market buy decisions join to the replay observation for that token, pool, and block",
-        "historical market buy decisions without matching replay observation rows",
+        "historical pool-update buy decisions join to the replay observation for that token, pool, and block",
+        "historical pool-update buy decisions without matching replay observation rows",
         r#"
         WITH rs AS (
             SELECT config->>'replay_run_id' AS replay_run_id
@@ -84,7 +84,7 @@ pub(super) async fn historical_market_buy_decisions_have_observations_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_buy'
-          AND sd.event_source = 'market'
+          AND sd.event_source = 'pool_update'
           AND rs.replay_run_id IS NOT NULL
           AND NOT EXISTS (
               SELECT 1
@@ -96,6 +96,46 @@ pub(super) async fn historical_market_buy_decisions_have_observations_check(
           )
         "#,
         &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn deferred_mempool_signals_have_reason_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "signal_scope",
+        "deferred_mempool_signal_has_reason",
+        Verdict::Fail,
+        "deferred mempool signal observations carry the live-backtest settlement wait reason",
+        "deferred mempool signal observations without the settlement wait reason",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_observations so
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = so.run_id
+        WHERE rsr.result_set_id = $1
+          AND so.event_source = 'mempool_signal'
+          AND so.decision = 'deferred'
+          AND (
+              $2::text IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trades t
+                  WHERE t.result_set_id = rsr.result_set_id
+                    AND t.run_id = so.run_id
+                    AND t.strategy_name = $2
+              )
+          )
+          AND (
+              so.event_key NOT LIKE 'deferred:%'
+              OR COALESCE(so.payload#>>'{extra,reason_code}', '') <> 'chain_sim.live_backtest.waiting_for_exact_settlement_state'
+          )
+        "#,
+        result_set_id,
         strategy,
     )
     .await

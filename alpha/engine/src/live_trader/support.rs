@@ -20,8 +20,9 @@ use crate::wire::{parse_address, LiveStatusResponse, MempoolSignalWire, PoolWire
 
 use super::{
     ALPHA_DATABASE_CONFIG_KEY, ALPHA_TRADER_LOG_DIR_CONFIG, CHAIN_SERVER_BIND_CONFIG,
-    DEFAULT_ALPHA_TRADER_LOG_DIR, MEMPOOL_SIGNAL_SOURCE, MINED_POOL_RISK_SOURCE,
-    POOL_UPDATE_SOURCE, POSITION_MONITOR_SOURCE,
+    DEFAULT_ALPHA_TRADER_LOG_DIR, LEGACY_MINED_POOL_RISK_SOURCE,
+    LEGACY_RETH_MINED_POOL_RISK_SOURCE, MEMPOOL_SIGNAL_SOURCE, MINED_POOL_RISK_SOURCE,
+    POOL_UPDATE_SOURCE,
 };
 
 pub(super) fn init_alpha_trader_ops_events(
@@ -80,6 +81,13 @@ pub(super) async fn load_persisted_watermarks(
     for cursor in cursors {
         match cursor.event_source.as_str() {
             POOL_UPDATE_SOURCE => {
+                if is_mined_pool_risk_event_key(&cursor.event_key) {
+                    mined_pool_risk_keys.insert(cursor.event_key);
+                    continue;
+                }
+                if cursor.event_key.starts_with("position_monitor:") {
+                    continue;
+                }
                 let Some(block_number) = cursor.block_number else {
                     continue;
                 };
@@ -94,15 +102,18 @@ pub(super) async fn load_persisted_watermarks(
             MEMPOOL_SIGNAL_SOURCE => {
                 signal_ids.insert(cursor.event_key);
             }
-            MINED_POOL_RISK_SOURCE => {
+            LEGACY_MINED_POOL_RISK_SOURCE | LEGACY_RETH_MINED_POOL_RISK_SOURCE => {
                 mined_pool_risk_keys.insert(cursor.event_key);
             }
-            POSITION_MONITOR_SOURCE => {}
             _ => {}
         }
     }
 
     Ok((pool_blocks, signal_ids, mined_pool_risk_keys))
+}
+
+fn is_mined_pool_risk_event_key(event_key: &str) -> bool {
+    event_key.starts_with("lp_approval:") || event_key.starts_with("liquidity_removal:")
 }
 
 fn cursor_pool_id(
@@ -176,7 +187,7 @@ pub(super) async fn record_position_monitor_observation(
     store
         .record_strategy_observation(StrategyObservationRecord {
             strategy_name: strategy_name.to_string(),
-            event_source: POSITION_MONITOR_SOURCE.to_string(),
+            event_source: POOL_UPDATE_SOURCE.to_string(),
             event_key: format!("position_monitor:{block_number}"),
             token_address: None,
             pool_address: None,
@@ -248,11 +259,66 @@ pub(super) async fn record_signal_observation(
     status: &LiveStatusResponse,
     extra: Value,
 ) -> Result<()> {
+    record_signal_observation_with_source(
+        store,
+        strategy_name,
+        MEMPOOL_SIGNAL_SOURCE,
+        &signal.signal_id,
+        signal,
+        decision,
+        report_count,
+        first_poll,
+        suppress_events,
+        status,
+        extra,
+    )
+    .await
+}
+
+pub(super) async fn record_deferred_signal_observation(
+    store: &PostgresTradingStore,
+    strategy_name: &str,
+    signal: &MempoolSignalWire,
+    decision: &str,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
+    record_signal_observation_with_source(
+        store,
+        strategy_name,
+        MEMPOOL_SIGNAL_SOURCE,
+        &format!("deferred:{}", signal.signal_id),
+        signal,
+        decision,
+        0,
+        first_poll,
+        suppress_events,
+        status,
+        extra,
+    )
+    .await
+}
+
+async fn record_signal_observation_with_source(
+    store: &PostgresTradingStore,
+    strategy_name: &str,
+    event_source: &str,
+    event_key: &str,
+    signal: &MempoolSignalWire,
+    decision: &str,
+    report_count: usize,
+    first_poll: bool,
+    suppress_events: bool,
+    status: &LiveStatusResponse,
+    extra: Value,
+) -> Result<()> {
     store
         .record_strategy_observation(StrategyObservationRecord {
             strategy_name: strategy_name.to_string(),
-            event_source: MEMPOOL_SIGNAL_SOURCE.to_string(),
-            event_key: signal.signal_id.clone(),
+            event_source: event_source.to_string(),
+            event_key: event_key.to_string(),
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
             block_number: status.progress.current_block,

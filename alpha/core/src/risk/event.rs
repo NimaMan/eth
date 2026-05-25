@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const RISK_SOURCE_MEMPOOL_SIGNAL: &str = "mempool_signal";
-pub const RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL: &str = "historical_mempool_signal";
-pub const RISK_SOURCE_RISK_ATLAS_MINED_CHAIN: &str = "risk_atlas_mined_chain";
+pub const RISK_SOURCE_POOL_UPDATE: &str = "pool_update";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RiskSeverity {

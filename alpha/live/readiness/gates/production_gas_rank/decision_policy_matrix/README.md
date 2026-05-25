@@ -28,6 +28,7 @@ tests.
 | Normal exit | `exit.max_hold_active_blocks`, restored max-hold exits, take-profit/stop-loss style strategy exits | `normal_exit` | `ALPHA_LIVE_NORMAL_EXIT_GAS_PROFILES` | `p85 -> p75 -> p50 -> normal` | V2 vault sell | Not a mempool race, but starts at `p85` so routine exits do not sit too far back. |
 | Mempool LP/removal race | Mempool source with pending tx hash, including `exit.lp_approval` from `mempool_signal` and `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `ALPHA_LIVE_MEMPOOL_RACE_EXIT_GAS_PROFILES` | `mempool_race` | Priority V2 vault sell | Reads the triggering mempool tx fee and bids above its effective priority fee with a deterministic per-tx buffer in the configured range. |
 | LP approval exit | Mined LP approval or buy-confirm-block LP approval, including `exit.lp_approval_mined_race` and `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES` | `p90 -> p75 -> p50 -> normal` | Priority V2 vault sell | One shared ladder for confirmed-chain/same-block LP approval exits. |
+| Mined liquidity-removal exit | Confirmed `exit.liquidity_removal` from `pool_update` | `mined_liquidity_removal_exit` | `ALPHA_LIVE_LP_APPROVAL_EXIT_GAS_PROFILES` | `p90 -> p75 -> p50 -> normal` | Priority V2 vault sell | Labeled separately from LP approval so mined removals are not mistaken for pending mempool races or LP approvals. |
 
 ## Profile Labels
 
@@ -49,7 +50,7 @@ Persisted execution report evidence should show:
 
 | Evidence field | Expected meaning |
 | --- | --- |
-| `gas_policy_action` | One of `entry_buy`, `normal_exit`, `mempool_race_exit`, `lp_approval_exit`. |
+| `gas_policy_action` | One of `entry_buy`, `tail_entry_buy`, `normal_exit`, `mempool_race_exit`, `lp_approval_exit`, `mined_liquidity_removal_exit`. |
 | `gas_policy_signal` | Original strategy signal/reason, preserved even when multiple reasons share a policy bucket. |
 | `gas_policy_profiles` | The configured ladder considered for the decision. |
 | `gas_policy_profile` | The actual selected profile after value caps. |

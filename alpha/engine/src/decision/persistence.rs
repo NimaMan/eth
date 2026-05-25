@@ -1,4 +1,5 @@
 use eth_alpha_core::{
+    decision_rationale::source,
     error::Result,
     market::MarketEvent,
     risk::{RiskEvent, RiskPolicy},
@@ -77,7 +78,7 @@ where
         self.store
             .record_strategy_decision(&strategy_decision_record(
                 strategy_name,
-                "position_monitor",
+                source::EVENT_SOURCE_POOL_UPDATE,
                 format!("position_monitor:{block_number}:{index}"),
                 Some(block_number),
                 intent.map(|intent| intent.token_address.to_string()),

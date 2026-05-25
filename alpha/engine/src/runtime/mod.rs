@@ -3,6 +3,7 @@ mod execution_flow;
 
 use eth_alpha_core::{
     amount::DecimalAmount,
+    decision_rationale::source,
     error::Result,
     execution::ExecutionReport,
     market::{MarketEvent, MarketSnapshotRef},
@@ -144,19 +145,32 @@ where
             }
         }
         for (strategy_name, decision) in market_decisions_to_record {
-            self.record_strategy_decision(&strategy_name, "market", event, &decision)
-                .await?;
+            self.record_strategy_decision(
+                &strategy_name,
+                source::EVENT_SOURCE_POOL_UPDATE,
+                event,
+                &decision,
+            )
+            .await?;
         }
         for (strategy_name, block_number, index, decision) in monitor_decisions_to_record {
             self.record_position_monitor_decision(&strategy_name, block_number, index, &decision)
                 .await?;
         }
         let mut reports = self
-            .apply_decisions(market_decisions, "market", market_valuation_pool)
+            .apply_decisions(
+                market_decisions,
+                source::EVENT_SOURCE_POOL_UPDATE,
+                market_valuation_pool,
+            )
             .await?;
         reports.extend(
-            self.apply_decisions(monitor_decisions, "position_monitor", market_valuation_pool)
-                .await?,
+            self.apply_decisions(
+                monitor_decisions,
+                source::EVENT_SOURCE_POOL_UPDATE,
+                market_valuation_pool,
+            )
+            .await?,
         );
         self.snapshot_open_positions_for_pool(event).await?;
         Ok(reports)

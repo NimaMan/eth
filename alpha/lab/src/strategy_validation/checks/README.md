@@ -48,7 +48,8 @@ strategy result and returns a backend-owned `CheckResult`.
 | Code | Question | Why We Ask | File |
 | --- | --- | --- | --- |
 | `historical_mempool_rows` | Did a historical backtest avoid pending mempool evidence? | Historical backtests must use mined/local evidence only. Pending mempool rows would leak live-only information into historical evaluation. | `signal_scope.rs` |
-| `market_buy_has_historical_observation` | Can every historical market buy be traced to an input observation? | A buy decision in historical mode should come from the replayed Risk Atlas observation for the same token, pool, and block. | `signal_scope.rs` |
+| `pool_update_buy_has_historical_observation` | Can every historical pool-update buy be traced to an input observation? | A buy decision in historical mode should come from the replayed pool observation for the same token, pool, and block. | `signal_scope.rs` |
+| `deferred_mempool_signal_has_reason` | Do deferred mempool observations explain why they were deferred? | Live-backtest mempool signals buffered behind chain-sim settlement readiness must retain the exact reason code so skipped ticks are auditable. | `signal_scope.rs` |
 | `submit_decisions_within_result_range` | Were submitted decisions made inside the replayed input range? | Decisions outside the result-set block window would contaminate the backtest window. | `signal_scope.rs` |
 | `trades_match_allowed_protocols` | Did trades respect configured protocol filters? | A V2-only candidate should not accidentally persist V3/V4 trades because entry filtering or read-model wiring drifted. | `signal_scope.rs` |
 
@@ -76,6 +77,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | --- | --- | --- | --- |
 | `terminal_report_matches_execution_delay` | Do fills land at the configured execution delay? | Backtests should honor the configured delay from submission to terminal execution result. | `execution_replay.rs` |
 | `submitted_orders_have_terminal_report_after_delay` | Does every elapsed submitted order have a terminal execution report? | A submitted order stuck past the execution delay means the execution adapter or persistence pipeline dropped the terminal outcome. | `execution_replay.rs` |
+| `live_chain_sim_execution_blocks_align` | Did live chain-sim use the exact expected simulation block? | Live backtest terminal reports must prove submitted block N, expected/simulation/receipt/event block N + execution_delay_blocks, with no stale simulator state. | `execution_replay.rs` |
 | `confirmed_reports_have_simulation_outputs` | Are confirmed fills backed by persisted EVM simulation output? | A confirmed fill must carry fill amount, gas, gas cost, and buy token output so PnL can be reconstructed. | `execution_replay.rs` |
 | `tail_entry_intent_has_exact_vault_buy_evidence` | Are tail-entry buys backed by exact deployed-vault evidence? | Tail-entry buys must prove the deployed vault route works, not only the generic pool buy/sell probe. | `execution_replay.rs` |
 | `tail_entry_buy_has_ordering_evidence` | Do tail-entry buys retain dependency ordering evidence? | Same-block tail entry only makes sense if the enabling tx hash and fee evidence used for behind-the-tx placement are persisted. | `execution_replay.rs` |
@@ -90,6 +92,8 @@ strategy result and returns a backend-owned `CheckResult`.
 | `exit_block_matches_sell_confirmed` | Does `exit_block` mean the sell-confirmed block? | Exit timing drives realized PnL, hold duration, and closed-trade chart points. | `lifecycle.rs` |
 | `no_exit_block_before_sell_confirmed` | Do open or failed trades avoid fake exit blocks? | Non-closed trades should not appear closed because of inferred or stale snapshot data. | `lifecycle.rs` |
 | `trade_rollup_matches_position` | Does each trade row still match its source position? | `trades` is a read model over `positions`; state, order ids, blocks, and protocol must not drift. | `lifecycle.rs` |
+| `execution_reports_mirror_trade_events` | Do execution reports mirror trade event rows? | The DB timeline should be reconstructible from both execution reports and trade events without missing or duplicated lifecycle rows. | `lifecycle.rs` |
+| `single_submitted_event_per_order` | Does each order have one submitted event before terminal state? | A clean lifecycle is one submitted row and at most one terminal row per buy/sell order. | `lifecycle.rs` |
 | `single_terminal_event_per_trade` | Does each trade have only one terminal buy and sell confirmation? | Duplicate terminal events corrupt lifecycle state and accounting. | `lifecycle.rs` |
 | `event_block_order` | Are lifecycle event blocks ordered correctly? | Buy submit, buy terminal, sell submit, and sell terminal blocks must form a possible timeline. | `lifecycle.rs` |
 | `active_hold_limit_submits_exit` | Did max-hold positions actually submit exits? | A position that reached the active hold limit should have a sell submission, otherwise the strategy lifecycle is stuck. | `lifecycle.rs` |
@@ -115,6 +119,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | --- | --- | --- | --- |
 | `no_snapshots_after_sell_confirmed` | Are closed trades no longer receiving snapshots? | Any snapshot appended after a sell-confirmed snapshot can corrupt latest value and charts. | `snapshots.rs` |
 | `no_open_snapshot_valued_after_sell_confirmed` | Were open-state snapshots valued only before the sell block? | An open-state valuation after sell confirmation creates impossible post-exit exposure. | `snapshots.rs` |
+| `no_snapshots_before_buy_confirmed` | Are valuation snapshots only recorded after buy confirmation? | Snapshot rows should not make a position look active before the buy-confirmed entry block. | `snapshots.rs` |
 | `latest_snapshot_block_matches_snapshots` | Does the trade latest snapshot pointer match persisted snapshots? | `trades.latest_snapshot_block` must point at the max persisted snapshot block for the trade. | `snapshots.rs` |
 | `latest_snapshot_values_match_trade` | Do trade latest fields match the latest snapshot? | Latest block coordinates, current value, PnL, and ROI in `trades` must match the latest `trade_snapshots` row. | `snapshots.rs` |
 | `snapshot_observed_not_after_valuation` | Are snapshot pool observations available at valuation time? | A snapshot valued at block N must not display pool observations from a later block. | `snapshots.rs` |

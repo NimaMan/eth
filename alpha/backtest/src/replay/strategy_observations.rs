@@ -1,4 +1,4 @@
-use eth_alpha_core::risk::RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL;
+use eth_alpha_core::risk::RISK_SOURCE_MEMPOOL_SIGNAL;
 use eth_alpha_engine::wire::{MempoolSignalWire, PoolWire};
 use eth_alpha_store::observations::{query_strategy_observations, StrategyObservation};
 use eyre::{Result, WrapErr};
@@ -35,6 +35,10 @@ pub async fn load_events_from_observations(
 
         match row.event_source.as_str() {
             "pool_update" => {
+                if payload.get("pool").is_none() {
+                    skipped_position_monitor += 1;
+                    continue;
+                }
                 let mut pool_wire: PoolWire = match serde_json::from_value(
                     payload.get("pool").cloned().unwrap_or(Value::Null),
                 ) {
@@ -137,8 +141,8 @@ fn historical_signal_risk_event(
         return Ok(None);
     };
     event.observed_block = Some(observed_block);
-    event.source = Some(RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL.to_string());
-    event.message = format!("historical confirmed signal: {}", event.message);
+    event.source = Some(RISK_SOURCE_MEMPOOL_SIGNAL.to_string());
+    event.message = format!("replayed mempool signal: {}", event.message);
     Ok(Some(event))
 }
 
@@ -146,7 +150,7 @@ fn historical_signal_risk_event(
 mod tests {
     use eth_alpha_core::{
         mempool_entry::MEMPOOL_ENTRY_EVIDENCE_KEY,
-        risk::{RiskKind, RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL},
+        risk::{RiskKind, RISK_SOURCE_MEMPOOL_SIGNAL},
     };
     use eth_alpha_engine::wire::MempoolSignalWire;
     use serde_json::{json, Value};
@@ -207,10 +211,7 @@ mod tests {
             .expect("trading enabled risk event");
 
         assert_eq!(event.kind, RiskKind::TradingEnabled);
-        assert_eq!(
-            event.source.as_deref(),
-            Some(RISK_SOURCE_HISTORICAL_MEMPOOL_SIGNAL)
-        );
+        assert_eq!(event.source.as_deref(), Some(RISK_SOURCE_MEMPOOL_SIGNAL));
         assert_eq!(event.observed_block, Some(12));
         assert_eq!(
             event.evidence.unwrap()[MEMPOOL_ENTRY_EVIDENCE_KEY],

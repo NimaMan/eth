@@ -111,9 +111,9 @@ impl PrioritySellPlan {
         match self.signal_source {
             LpSignalSource::MempoolLpApproval => source::EVENT_SOURCE_MEMPOOL_SIGNAL,
             LpSignalSource::MinedLpApproval | LpSignalSource::MinedLiquidityRemoval => {
-                source::EVENT_SOURCE_RISK_ATLAS_MINED_CHAIN
+                source::EVENT_SOURCE_POOL_UPDATE
             }
-            LpSignalSource::StrategyExit => source::EVENT_SOURCE_POSITION_MONITOR,
+            LpSignalSource::StrategyExit => source::EVENT_SOURCE_POOL_UPDATE,
         }
     }
 

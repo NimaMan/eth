@@ -106,6 +106,9 @@ pub fn tx_prep_metadata(
 }
 
 fn sell_gas_policy_action(plan: &PrioritySellPlan) -> &'static str {
+    if plan.signal_source == LpSignalSource::MinedLiquidityRemoval {
+        return "mined_liquidity_removal_exit";
+    }
     match &plan.urgency {
         SellUrgency::NormalExit => "normal_exit",
         SellUrgency::MempoolPreMine => "mempool_race_exit",
@@ -128,4 +131,44 @@ fn gas_policy_profile_labels(policy: &StrategyGasRankPolicy) -> Vec<&'static str
         .iter()
         .map(|profile| profile.label())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::Address;
+    use eth_alpha_core::{
+        amount::DecimalAmount,
+        decision_rationale::source,
+        ids::{PoolAddress, TradeId},
+    };
+
+    use crate::{LpSignalSource, PriorityRoute, PrioritySellPlan, SellUrgency};
+
+    use super::sell_gas_policy_action;
+
+    #[test]
+    fn mined_liquidity_removal_has_dedicated_gas_action_and_pool_update_source() {
+        let plan = PrioritySellPlan {
+            trade_id: TradeId("trade".to_string()),
+            token_address: Address::with_last_byte(1),
+            pool_address: PoolAddress::from("0xtoken:0xpool"),
+            observed_block: 1,
+            signal_source: LpSignalSource::MinedLiquidityRemoval,
+            urgency: SellUrgency::MinedApprovalRace,
+            route: PriorityRoute::PublicMempool,
+            max_priority_fee_per_gas_gwei: DecimalAmount::ZERO,
+            max_total_fee_eth: DecimalAmount::ZERO,
+            reason: "exit.liquidity_removal".to_string(),
+        };
+
+        assert_eq!(
+            sell_gas_policy_action(&plan),
+            "mined_liquidity_removal_exit"
+        );
+        assert_eq!(plan.event_source(), source::EVENT_SOURCE_POOL_UPDATE);
+        assert_eq!(
+            plan.decision_reason().unwrap().source.as_deref(),
+            Some(source::EVENT_SOURCE_POOL_UPDATE)
+        );
+    }
 }

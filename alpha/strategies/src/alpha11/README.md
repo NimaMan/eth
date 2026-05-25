@@ -91,8 +91,10 @@ for deploy review are:
 
 - `mempool_signal`: pending public mempool evidence, such as LP approval or
   remove-liquidity transactions before they are mined.
-- `risk_atlas_mined_chain`: confirmed-chain evidence derived from mined blocks.
-- `market`: pool-update or max-hold decisions, not a risk-signal source.
+- `pool_update`: confirmed mined-chain pool evidence from the live chain server,
+  including pool snapshots, mined LP approvals, mined liquidity removals, and
+  max-hold maintenance.
+- `manual_close`: operator-requested position close.
 
 For `alpha11-univ2-lp30-pool-update-block-hold16`, a sell reason of
 `exit.lp_approval` means the strategy exited on LP-token approval evidence. A
@@ -101,10 +103,8 @@ hold reason with code
 inside the `<=2` active-block launch window and the position remains governed by
 max hold. Those deferrals must carry the signal id, approval percentage, age
 basis, active-block age, and matching risk-event evidence in the persisted
-strategy decision details. Mined-chain replay records a deterministic
-`risk_atlas_mined_lp_approval:<block>:<token>:<pool>` source event id in the
-same evidence fields so it can be audited with the same checks as mempool
-signals.
+strategy decision details. Mined-chain replay uses the same `pool_update`
+source label so it can be audited with the same checks as live mined evidence.
 A sell reason of `exit.mempool_liquidity_removal_signal` means it exited on a
 pending remove-liquidity transaction. A sell reason of `exit.liquidity_removal`
 means confirmed-chain liquidity removal was already visible.

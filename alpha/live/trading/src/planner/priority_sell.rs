@@ -300,6 +300,10 @@ fn priority_sell_classification(
             LpSignalSource::MinedLpApproval,
             SellUrgency::MinedApprovalRace,
         ),
+        "exit.liquidity_removal" => (
+            LpSignalSource::MinedLiquidityRemoval,
+            SellUrgency::MinedApprovalRace,
+        ),
         "exit.lp_approval_buy_confirm_block" => (
             LpSignalSource::MinedLpApproval,
             SellUrgency::BuyConfirmBlockApproval,
@@ -596,6 +600,15 @@ mod tests {
 
         assert_eq!(signal_source, LpSignalSource::MinedLpApproval);
         assert_eq!(urgency, SellUrgency::BuyConfirmBlockApproval);
+    }
+
+    #[test]
+    fn mined_liquidity_removal_uses_explicit_mined_removal_source() {
+        let (signal_source, urgency) =
+            priority_sell_classification("exit.liquidity_removal", Some("pool_update"), None);
+
+        assert_eq!(signal_source, LpSignalSource::MinedLiquidityRemoval);
+        assert_eq!(urgency, SellUrgency::MinedApprovalRace);
     }
 
     #[test]

@@ -119,9 +119,13 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do mempool liquidity-removal signals avoid marking exposure as drained?",
             "Fails if a pending mempool liquidity-removal signal creates a same-block zero-value exposure snapshot before mined evidence exists.",
         ),
-        "market_buy_has_historical_observation" => (
-            "Can every historical market buy be traced to an input observation?",
-            "Joins market-sourced submit_buy decisions to the replay Risk Atlas observation at the same token, pool, and block.",
+        "pool_update_buy_has_historical_observation" => (
+            "Can every historical pool-update buy be traced to an input observation?",
+            "Joins pool_update-sourced submit_buy decisions to the replay pool observation at the same token, pool, and block.",
+        ),
+        "deferred_mempool_signal_has_reason" => (
+            "Do deferred mempool observations explain why they were deferred?",
+            "Requires live-backtest mempool signals buffered behind chain-sim settlement readiness to persist the explicit settlement-wait reason code.",
         ),
         "submit_decisions_within_result_range" => (
             "Were submitted decisions made inside the replayed input range?",
@@ -138,6 +142,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "submitted_orders_have_terminal_report_after_delay" => (
             "Does every elapsed submitted order have a terminal execution report?",
             "Fails if a submitted buy or sell order has no confirmed, failed, or cancelled report after the configured execution delay has elapsed.",
+        ),
+        "live_chain_sim_execution_blocks_align" => (
+            "Did live chain-sim use the exact expected simulation block?",
+            "For live backtests, requires submitted block N, expected/simulation/receipt/event block N + execution_delay_blocks, and rejects stale simulator state.",
         ),
         "confirmed_reports_have_simulation_outputs" => (
             "Are confirmed fills backed by persisted EVM simulation output?",
@@ -174,6 +182,14 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "trade_rollup_matches_position" => (
             "Does each trade row still match its source position?",
             "Compares trade rollups against position state, order identifiers, entry/exit blocks, and protocol so UI read models do not drift from the execution state.",
+        ),
+        "execution_reports_mirror_trade_events" => (
+            "Do execution reports mirror trade event rows?",
+            "Every scoped buy/sell execution report should have a matching trade event row with the same trade, order, side, status, and block so the DB event timeline stays auditable.",
+        ),
+        "single_submitted_event_per_order" => (
+            "Does each order have one submitted event before terminal state?",
+            "Groups buy/sell trade events by order and rejects missing or duplicate submitted events, plus duplicate terminal confirmed/failed/cancelled events.",
         ),
         "single_terminal_event_per_trade" => (
             "Does each trade have only one terminal buy and sell confirmation?",
@@ -266,6 +282,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "no_open_snapshot_valued_after_sell_confirmed" => (
             "Were open-state snapshots valued only before the sell block?",
             "Fails if a closed trade has any non-sell_confirmed snapshot whose valuation block is later than the sell_confirmed block.",
+        ),
+        "no_snapshots_before_buy_confirmed" => (
+            "Are valuation snapshots only recorded after buy confirmation?",
+            "Rejects trade snapshots whose valuation block is before the trade entry block, so active valuation rows cannot precede the buy_confirmed event.",
         ),
         "closed_trade_final_snapshot" => (
             "Does each closed trade have a final closed snapshot?",

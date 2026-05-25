@@ -1,7 +1,7 @@
 use alloy_primitives::Address;
 use eth_alpha_core::ids::{PoolAddress, TokenPoolId};
 use eth_alpha_core::market::PoolSnapshot;
-use eth_alpha_core::risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_RISK_ATLAS_MINED_CHAIN};
+use eth_alpha_core::risk::{RiskEvent, RiskKind, RiskSeverity, RISK_SOURCE_POOL_UPDATE};
 use eth_alpha_engine::wire::{decimal_from_f64, parse_address, parse_protocol};
 use eth_alpha_store::observations::{query_risk_atlas_observations, RiskAtlasObservation};
 use eyre::{Result, WrapErr};
@@ -66,7 +66,7 @@ pub async fn load_events_from_risk_atlas(
             events.push(eth_alpha_engine::EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LpApproval,
                 severity: RiskSeverity::Warning,
-                source: Some(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN.to_string()),
+                source: Some(RISK_SOURCE_POOL_UPDATE.to_string()),
                 token_address,
                 pool_address: Some(pool_address.clone()),
                 pending_tx_hash: None,
@@ -88,7 +88,7 @@ pub async fn load_events_from_risk_atlas(
             events.push(eth_alpha_engine::EngineEvent::Risk(RiskEvent {
                 kind: RiskKind::LiquidityRemoval,
                 severity: RiskSeverity::Critical,
-                source: Some(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN.to_string()),
+                source: Some(RISK_SOURCE_POOL_UPDATE.to_string()),
                 token_address,
                 pool_address: Some(pool_address.clone()),
                 pending_tx_hash: None,
@@ -182,10 +182,7 @@ fn risk_atlas_lp_approval_evidence(row: &RiskAtlasObservation, observed_block: u
     evidence.insert("signal_id".to_string(), json!(source_event_id.clone()));
     evidence.insert("source_event_id".to_string(), json!(source_event_id));
     evidence.insert("signal_type".to_string(), json!("lp_approval_mined_chain"));
-    evidence.insert(
-        "signal_source".to_string(),
-        json!(RISK_SOURCE_RISK_ATLAS_MINED_CHAIN),
-    );
+    evidence.insert("signal_source".to_string(), json!(RISK_SOURCE_POOL_UPDATE));
     evidence.insert("observed_block".to_string(), json!(observed_block));
     evidence.insert(
         "lp_approval_count_in_block".to_string(),

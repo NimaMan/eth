@@ -102,6 +102,35 @@ pub(super) async fn no_future_valued_open_snapshots_after_sell_check(
     .await
 }
 
+pub(super) async fn no_snapshots_before_buy_confirmation_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_snapshots_before_buy_confirmed",
+        Verdict::Fail,
+        "trade snapshots are not valued before the buy_confirmed entry block",
+        "snapshots whose valuation block is before the trade entry block",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t
+          ON t.run_id = ts.run_id
+         AND t.trade_id = ts.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND t.entry_block IS NOT NULL
+          AND COALESCE(ts.valuation_block_number, ts.block_number) < t.entry_block
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn latest_snapshot_values_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -384,8 +413,7 @@ pub(super) async fn zero_value_snapshot_pool_metrics_check(
                          AND re.kind = 'liquidity_removal'
                          AND re.pending_tx_hash IS NULL
                          AND COALESCE(re.payload->>'source', '') NOT IN (
-                             'mempool_signal',
-                             'historical_mempool_signal'
+                             'mempool_signal'
                          )
                          AND lower(re.pool_address) = lower(scoped.pool_address)
                          AND re.observed_block IS NOT NULL

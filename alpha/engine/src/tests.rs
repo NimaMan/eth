@@ -923,7 +923,7 @@ async fn engine_executes_approved_strategy_order() {
     assert_eq!(store.positions().len(), 1);
     let decisions = store.strategy_decisions();
     assert_eq!(decisions.len(), 1);
-    assert_eq!(decisions[0].event_source, "market");
+    assert_eq!(decisions[0].event_source, "pool_update");
     assert_eq!(decisions[0].action, "submit_buy");
     assert_eq!(decisions[0].order_side, Some(OrderSide::Buy));
     assert_eq!(engine.portfolio().active_position_count(), 1);

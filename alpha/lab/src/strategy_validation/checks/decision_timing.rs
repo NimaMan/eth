@@ -72,7 +72,11 @@ pub(super) async fn risk_sell_decisions_have_prior_risk_events_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_sell'
-          AND sd.event_source IN ('risk', 'mempool_signal', 'historical_mempool_signal', 'risk_atlas_mined_chain')
+          AND sd.event_source IN (
+              'risk',
+              'mempool_signal',
+              'pool_update'
+          )
           AND NOT EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re
@@ -107,7 +111,11 @@ pub(super) async fn risk_sell_decisions_submit_on_signal_block_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_sell'
-          AND sd.event_source IN ('risk', 'mempool_signal', 'historical_mempool_signal', 'risk_atlas_mined_chain')
+          AND sd.event_source IN (
+              'risk',
+              'mempool_signal',
+              'pool_update'
+          )
           AND NOT EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re

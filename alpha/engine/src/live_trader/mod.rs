@@ -72,8 +72,9 @@ pub use entrypoints::{run_live_backtest, run_live_real};
 
 const POOL_UPDATE_SOURCE: &str = "pool_update";
 const MEMPOOL_SIGNAL_SOURCE: &str = "mempool_signal";
-const MINED_POOL_RISK_SOURCE: &str = "mined_pool_update";
-const POSITION_MONITOR_SOURCE: &str = "position_monitor";
+const MINED_POOL_RISK_SOURCE: &str = POOL_UPDATE_SOURCE;
+const LEGACY_MINED_POOL_RISK_SOURCE: &str = "mined_pool_update";
+const LEGACY_RETH_MINED_POOL_RISK_SOURCE: &str = "reth_mined_pool_update";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
 const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
@@ -97,6 +98,8 @@ const CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS: u64 = 240;
 const CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS: u64 = 2_000;
 const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
     "chain_sim.live_backtest.skip_mempool_trading_enabled";
+const CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE: &str =
+    "chain_sim.live_backtest.waiting_for_exact_settlement_state";
 
 async fn run(
     runner_name: &'static str,
@@ -460,6 +463,7 @@ async fn run(
     let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids, mut seen_mined_pool_risk_keys) =
         load_persisted_watermarks(&store, &observation_strategy_name).await?;
+    let mut deferred_signal_wires = HashMap::new();
     let mut primed = false;
     let mut last_position_monitor_block: Option<u64> = None;
     let mut shutdown = ShutdownSignals::new()?;
@@ -652,72 +656,76 @@ async fn run(
             }
         }
 
-        let mut signal_wires = signals.signals;
-        signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
-        for signal in signal_wires {
-            let is_new = seen_signal_ids.insert(signal.signal_id.clone());
-            if !is_new || suppress_events || (first_poll && !args.replay_current) {
-                if is_new {
-                    record_signal_observation(
-                        &store,
-                        &observation_strategy_name,
-                        &signal,
-                        "primed",
-                        0,
-                        first_poll,
-                        suppress_events,
-                        &status,
-                        Value::Null,
-                    )
-                    .await?;
+        let defer_event_processing = !suppress_events && chain_sim_settlement_waiting_state > 0;
+        if defer_event_processing {
+            let mut deferred_signals = 0usize;
+            for signal in signals.signals {
+                if seen_signal_ids.contains(&signal.signal_id) {
+                    continue;
                 }
-                continue;
-            }
-            if let Some(reason_code) = mempool_signal_skip_reason_code_for_execution_mode(
-                execution_mode,
-                &signal.signal_type,
-            ) {
-                info!(
-                    signal_id = %signal.signal_id,
-                    signal_type = %signal.signal_type,
-                    execution_mode = %execution_mode.label(),
-                    reason_code = reason_code,
-                    "skipping mempool signal for live trader execution mode"
-                );
-                record_signal_observation(
+                deferred_signal_wires.insert(signal.signal_id.clone(), signal.clone());
+                record_deferred_signal_observation(
                     &store,
                     &observation_strategy_name,
                     &signal,
-                    "ignored",
-                    0,
+                    "deferred",
                     first_poll,
                     suppress_events,
                     &status,
                     json!({
-                        "reason_code": reason_code,
-                        "execution_mode": execution_mode.label(),
-                        "signal_type": signal.signal_type.as_str(),
-                        "entry_path": "mined_pool_update",
+                        "reason_code": CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE,
+                        "chain_sim_settlement_waiting_state": chain_sim_settlement_waiting_state,
+                        "chain_sim_settlement_loaded": chain_sim_settlement_loaded,
+                        "live_current_block": status.progress.current_block,
                     }),
                 )
                 .await?;
-                continue;
+                deferred_signals += 1;
             }
-            record_signal_observation(
-                &store,
-                &observation_strategy_name,
-                &signal,
-                "received",
-                0,
-                first_poll,
-                suppress_events,
-                &status,
-                json!({ "phase": "received", "reports": [] }),
-            )
-            .await?;
-            let mut event = match signal.to_risk_event() {
-                Ok(Some(event)) => event,
-                Ok(None) => {
+            warn!(
+                chain_sim_settlement_waiting_state,
+                chain_sim_settlement_loaded,
+                deferred_signals,
+                live_current_block = ?status.progress.current_block,
+                reason_code = CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE,
+                "deferring live-backtest strategy events until exact chain-sim settlement state is available"
+            );
+        } else {
+            let mut signal_wires = signals.signals;
+            if !deferred_signal_wires.is_empty() {
+                signal_wires.extend(deferred_signal_wires.drain().map(|(_, signal)| signal));
+            }
+            signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
+            for signal in signal_wires {
+                let is_new = seen_signal_ids.insert(signal.signal_id.clone());
+                if !is_new || suppress_events || (first_poll && !args.replay_current) {
+                    if is_new {
+                        record_signal_observation(
+                            &store,
+                            &observation_strategy_name,
+                            &signal,
+                            "primed",
+                            0,
+                            first_poll,
+                            suppress_events,
+                            &status,
+                            Value::Null,
+                        )
+                        .await?;
+                    }
+                    continue;
+                }
+                if let Some(reason_code) = mempool_signal_skip_reason_code_for_execution_mode(
+                    execution_mode,
+                    &signal.signal_type,
+                ) {
+                    info!(
+                        signal_id = %signal.signal_id,
+                        signal_type = %signal.signal_type,
+                        execution_mode = %execution_mode.label(),
+                        reason_code = reason_code,
+                        "skipping mempool signal for live trader execution mode"
+                    );
                     record_signal_observation(
                         &store,
                         &observation_strategy_name,
@@ -727,201 +735,102 @@ async fn run(
                         first_poll,
                         suppress_events,
                         &status,
-                        json!({ "reason": "missing_token_address" }),
+                        json!({
+                            "reason_code": reason_code,
+                            "execution_mode": execution_mode.label(),
+                            "signal_type": signal.signal_type.as_str(),
+                            "entry_path": MINED_POOL_RISK_SOURCE,
+                        }),
                     )
                     .await?;
                     continue;
                 }
-                Err(error) => {
-                    record_signal_observation(
-                        &store,
-                        &observation_strategy_name,
-                        &signal,
-                        "invalid",
-                        0,
-                        first_poll,
-                        suppress_events,
-                        &status,
-                        json!({ "error": error.to_string() }),
-                    )
-                    .await?;
-                    warn!(error = %error, signal_id = %signal.signal_id, "skipping mempool signal");
-                    continue;
-                }
-            };
-            let signal_block = event
-                .observed_block
-                .or(status.progress.current_block)
-                .unwrap_or_default();
-            if signal_block > 0 {
-                if event.observed_block.is_none() {
-                    event.observed_block = Some(signal_block);
-                }
-                adapter_current_block.store(signal_block, Ordering::Relaxed);
-            }
-            let pool_context = event
-                .pool_address
-                .as_ref()
-                .and_then(|pool_address| polled_pool_wires.get(pool_address));
-            annotate_signal_risk_event(&mut event, &signal, pool_context);
-            let projected_pool =
-                prime_projected_mempool_entry_pool(&event, &pool_updates, &adapter_current_block);
-            let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
-            let report_count = event_reports.len();
-            let decision = if report_count > 0 {
-                "submitted"
-            } else {
-                "hold"
-            };
-            record_signal_observation(
-                &store,
-                &observation_strategy_name,
-                &signal,
-                decision,
-                report_count,
-                first_poll,
-                suppress_events,
-                &status,
-                json!({
-                    "reports": reports_payload(&event_reports),
-                    "projected_pool_primed": projected_pool,
-                }),
-            )
-            .await?;
-            reports += report_count;
-            risk_events += 1;
-            for report in event_reports {
-                info!(
-                    order_id = %report.order_id.0,
-                    status = ?report.status,
-                    block_number = ?report.block_number,
-                    gas_used = ?report.gas_used,
-                    error = ?report.error,
-                    "chain-sim execution report"
-                );
-            }
-        }
-        for (pool_wire, pool) in polled_pools {
-            let previous_block = seen_pool_blocks.get(&pool.address).copied();
-            let changed = previous_block
-                .map(|previous| pool.latest_block > previous)
-                .unwrap_or(true);
-            if !changed {
-                continue;
-            }
-            seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
-            let mined_risk_candidates = mined_pool_risks_from_update(&pool_wire, &pool);
-            let mined_risk_candidate_count = mined_risk_candidates.len();
-
-            if suppress_events || (first_poll && !args.replay_current) {
-                let mut primed_mined_risks = 0usize;
-                for candidate in mined_risk_candidates {
-                    if seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
-                        record_mined_pool_risk_observation(
-                            &store,
-                            &observation_strategy_name,
-                            &candidate.key,
-                            &candidate.event,
-                            "primed",
-                            0,
-                            first_poll,
-                            suppress_events,
-                            &status,
-                            json!({ "phase": "primed_from_pool_update" }),
-                        )
-                        .await?;
-                        primed_mined_risks += 1;
-                    }
-                }
-                record_pool_observation(
+                record_signal_observation(
                     &store,
                     &observation_strategy_name,
-                    &pool_wire,
-                    &pool,
-                    previous_block,
-                    "primed",
+                    &signal,
+                    "received",
                     0,
                     first_poll,
                     suppress_events,
                     &status,
-                    json!({
-                        "mined_pool_risk_candidates": mined_risk_candidate_count,
-                        "mined_pool_risks_primed": primed_mined_risks,
-                    }),
+                    json!({ "phase": "received", "reports": [] }),
                 )
                 .await?;
-                continue;
-            }
-
-            let event = MarketEvent::PoolUpdated {
-                block_number: pool.latest_block,
-                pool: pool.clone(),
-            };
-            adapter_current_block.store(pool.latest_block, Ordering::Relaxed);
-            let event_reports = engine.handle_event(EngineEvent::Market(event)).await?;
-            let report_count = event_reports.len();
-            let decision = if report_count > 0 {
-                "submitted"
-            } else {
-                "hold"
-            };
-            record_pool_observation(
-                &store,
-                &observation_strategy_name,
-                &pool_wire,
-                &pool,
-                previous_block,
-                decision,
-                report_count,
-                first_poll,
-                suppress_events,
-                &status,
-                json!({
-                    "reports": reports_payload(&event_reports),
-                    "mined_pool_risk_candidates": mined_risk_candidate_count,
-                }),
-            )
-            .await?;
-            reports += report_count;
-            market_events += 1;
-            for report in event_reports {
-                info!(
-                    order_id = %report.order_id.0,
-                    status = ?report.status,
-                    block_number = ?report.block_number,
-                    gas_used = ?report.gas_used,
-                    error = ?report.error,
-                    "chain-sim execution report"
+                let mut event = match signal.to_risk_event() {
+                    Ok(Some(event)) => event,
+                    Ok(None) => {
+                        record_signal_observation(
+                            &store,
+                            &observation_strategy_name,
+                            &signal,
+                            "ignored",
+                            0,
+                            first_poll,
+                            suppress_events,
+                            &status,
+                            json!({ "reason": "missing_token_address" }),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    Err(error) => {
+                        record_signal_observation(
+                            &store,
+                            &observation_strategy_name,
+                            &signal,
+                            "invalid",
+                            0,
+                            first_poll,
+                            suppress_events,
+                            &status,
+                            json!({ "error": error.to_string() }),
+                        )
+                        .await?;
+                        warn!(error = %error, signal_id = %signal.signal_id, "skipping mempool signal");
+                        continue;
+                    }
+                };
+                let signal_block = event
+                    .observed_block
+                    .or(status.progress.current_block)
+                    .unwrap_or_default();
+                if signal_block > 0 {
+                    if event.observed_block.is_none() {
+                        event.observed_block = Some(signal_block);
+                    }
+                    adapter_current_block.store(signal_block, Ordering::Relaxed);
+                }
+                let pool_context = event
+                    .pool_address
+                    .as_ref()
+                    .and_then(|pool_address| polled_pool_wires.get(pool_address));
+                annotate_signal_risk_event(&mut event, &signal, pool_context);
+                let projected_pool = prime_projected_mempool_entry_pool(
+                    &event,
+                    &pool_updates,
+                    &adapter_current_block,
                 );
-            }
-
-            for candidate in mined_risk_candidates {
-                if !seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
-                    continue;
-                }
-                if let Some(block_number) = candidate.event.observed_block {
-                    adapter_current_block.store(block_number, Ordering::Relaxed);
-                }
-                let event_reports = engine
-                    .handle_event(EngineEvent::Risk(candidate.event.clone()))
-                    .await?;
+                let event_reports = engine.handle_event(EngineEvent::Risk(event)).await?;
                 let report_count = event_reports.len();
                 let decision = if report_count > 0 {
                     "submitted"
                 } else {
                     "hold"
                 };
-                record_mined_pool_risk_observation(
+                record_signal_observation(
                     &store,
                     &observation_strategy_name,
-                    &candidate.key,
-                    &candidate.event,
+                    &signal,
                     decision,
                     report_count,
                     first_poll,
                     suppress_events,
                     &status,
-                    json!({ "reports": reports_payload(&event_reports) }),
+                    json!({
+                        "reports": reports_payload(&event_reports),
+                        "projected_pool_primed": projected_pool,
+                    }),
                 )
                 .await?;
                 reports += report_count;
@@ -933,9 +842,148 @@ async fn run(
                         block_number = ?report.block_number,
                         gas_used = ?report.gas_used,
                         error = ?report.error,
-                        risk_key = %candidate.key,
-                        "chain-sim mined pool risk execution report"
+                        "chain-sim execution report"
                     );
+                }
+            }
+        }
+        if !defer_event_processing {
+            for (pool_wire, pool) in polled_pools {
+                let previous_block = seen_pool_blocks.get(&pool.address).copied();
+                let changed = previous_block
+                    .map(|previous| pool.latest_block > previous)
+                    .unwrap_or(true);
+                if !changed {
+                    continue;
+                }
+                seen_pool_blocks.insert(pool.address.clone(), pool.latest_block);
+                let mined_risk_candidates = mined_pool_risks_from_update(&pool_wire, &pool);
+                let mined_risk_candidate_count = mined_risk_candidates.len();
+
+                if suppress_events || (first_poll && !args.replay_current) {
+                    let mut primed_mined_risks = 0usize;
+                    for candidate in mined_risk_candidates {
+                        if seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
+                            record_mined_pool_risk_observation(
+                                &store,
+                                &observation_strategy_name,
+                                &candidate.key,
+                                &candidate.event,
+                                "primed",
+                                0,
+                                first_poll,
+                                suppress_events,
+                                &status,
+                                json!({ "phase": "primed_from_pool_update" }),
+                            )
+                            .await?;
+                            primed_mined_risks += 1;
+                        }
+                    }
+                    record_pool_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &pool_wire,
+                        &pool,
+                        previous_block,
+                        "primed",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({
+                            "mined_pool_risk_candidates": mined_risk_candidate_count,
+                            "mined_pool_risks_primed": primed_mined_risks,
+                        }),
+                    )
+                    .await?;
+                    continue;
+                }
+
+                let event = MarketEvent::PoolUpdated {
+                    block_number: pool.latest_block,
+                    pool: pool.clone(),
+                };
+                adapter_current_block.store(pool.latest_block, Ordering::Relaxed);
+                let event_reports = engine.handle_event(EngineEvent::Market(event)).await?;
+                let report_count = event_reports.len();
+                let decision = if report_count > 0 {
+                    "submitted"
+                } else {
+                    "hold"
+                };
+                record_pool_observation(
+                    &store,
+                    &observation_strategy_name,
+                    &pool_wire,
+                    &pool,
+                    previous_block,
+                    decision,
+                    report_count,
+                    first_poll,
+                    suppress_events,
+                    &status,
+                    json!({
+                        "reports": reports_payload(&event_reports),
+                        "mined_pool_risk_candidates": mined_risk_candidate_count,
+                    }),
+                )
+                .await?;
+                reports += report_count;
+                market_events += 1;
+                for report in event_reports {
+                    info!(
+                        order_id = %report.order_id.0,
+                        status = ?report.status,
+                        block_number = ?report.block_number,
+                        gas_used = ?report.gas_used,
+                        error = ?report.error,
+                        "chain-sim execution report"
+                    );
+                }
+
+                for candidate in mined_risk_candidates {
+                    if !seen_mined_pool_risk_keys.insert(candidate.key.clone()) {
+                        continue;
+                    }
+                    if let Some(block_number) = candidate.event.observed_block {
+                        adapter_current_block.store(block_number, Ordering::Relaxed);
+                    }
+                    let event_reports = engine
+                        .handle_event(EngineEvent::Risk(candidate.event.clone()))
+                        .await?;
+                    let report_count = event_reports.len();
+                    let decision = if report_count > 0 {
+                        "submitted"
+                    } else {
+                        "hold"
+                    };
+                    record_mined_pool_risk_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &candidate.key,
+                        &candidate.event,
+                        decision,
+                        report_count,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({ "reports": reports_payload(&event_reports) }),
+                    )
+                    .await?;
+                    reports += report_count;
+                    risk_events += 1;
+                    for report in event_reports {
+                        info!(
+                            order_id = %report.order_id.0,
+                            status = ?report.status,
+                            block_number = ?report.block_number,
+                            gas_used = ?report.gas_used,
+                            error = ?report.error,
+                            risk_key = %candidate.key,
+                            "chain-sim mined pool risk execution report"
+                        );
+                    }
                 }
             }
         }
@@ -944,7 +992,7 @@ async fn run(
             manual_close_vault_address,
             manual_close_live_simulator.as_ref(),
         ) {
-            if !suppress_events && (!first_poll || args.replay_current) {
+            if !defer_event_processing && !suppress_events && (!first_poll || args.replay_current) {
                 match process_manual_close_requests(
                     &store,
                     &mut engine,
@@ -968,7 +1016,7 @@ async fn run(
             }
         }
 
-        if !suppress_events && (!first_poll || args.replay_current) {
+        if !defer_event_processing && !suppress_events && (!first_poll || args.replay_current) {
             if let Some(block_number) = status.progress.current_block {
                 let should_monitor = last_position_monitor_block
                     .map(|previous| block_number > previous)

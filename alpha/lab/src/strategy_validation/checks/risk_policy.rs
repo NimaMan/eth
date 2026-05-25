@@ -31,8 +31,7 @@ pub(super) async fn liquidity_removal_risk_kind_source_check(
               AND (
                   re.pending_tx_hash IS NOT NULL
                   OR COALESCE(re.payload->>'source', '') IN (
-                      'mempool_signal',
-                      'historical_mempool_signal'
+                      'mempool_signal'
                   )
               )
           )
@@ -40,8 +39,7 @@ pub(super) async fn liquidity_removal_risk_kind_source_check(
               re.kind = 'mempool_liquidity_removal'
               AND re.pending_tx_hash IS NULL
               AND COALESCE(re.payload->>'source', '') NOT IN (
-                  'mempool_signal',
-                  'historical_mempool_signal'
+                  'mempool_signal'
               )
           )
         "#,
@@ -79,8 +77,7 @@ pub(super) async fn mempool_liquidity_removal_does_not_zero_snapshot_check(
                       AND (
                           re.pending_tx_hash IS NOT NULL
                           OR COALESCE(re.payload->>'source', '') IN (
-                              'mempool_signal',
-                              'historical_mempool_signal'
+                              'mempool_signal'
                           )
                       )
                   )
@@ -215,10 +212,7 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
               risk.kind IN ('mempool_liquidity_removal', 'liquidity_removal')
               AND (
                   risk.kind = 'mempool_liquidity_removal'
-                  OR COALESCE(risk.risk_source, '') IN (
-                      'mempool_signal',
-                      'historical_mempool_signal'
-                  )
+                  OR COALESCE(risk.risk_source, '') = 'mempool_signal'
               )
               AND EXISTS (
                   SELECT 1

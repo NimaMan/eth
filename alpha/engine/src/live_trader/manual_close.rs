@@ -1,6 +1,7 @@
 use alloy_primitives::{Address, Bytes, U256};
 use eth_alpha_core::{
     amount::Amount,
+    decision_rationale::source,
     execution::{ExecutionReport, ExecutionStatus},
     order::{OrderIntent, OrderSide},
     store::TradingStore,
@@ -18,7 +19,6 @@ use crate::{
 };
 
 const DEFAULT_MANUAL_CLOSE_LIMIT: usize = 5;
-const MANUAL_CLOSE_EVENT_SOURCE: &str = "manual_close";
 const MANUAL_CLOSE_REASON: &str = "manual.close_position";
 
 #[derive(Clone, Debug, Default)]
@@ -168,7 +168,7 @@ where
     let decision_block = current_block.or(Some(balance_block));
     let mut decision_record = strategy_decision_record(
         &request.strategy_name,
-        MANUAL_CLOSE_EVENT_SOURCE,
+        source::EVENT_SOURCE_MANUAL_CLOSE,
         format!("manual_close:{}", request.request_id),
         decision_block,
         Some(request.token_address.clone()),
@@ -187,7 +187,7 @@ where
     store.record_strategy_decision(&decision_record).await?;
 
     engine
-        .apply_decisions(vec![decision], MANUAL_CLOSE_EVENT_SOURCE, None)
+        .apply_decisions(vec![decision], source::EVENT_SOURCE_MANUAL_CLOSE, None)
         .await
         .wrap_err_with(|| {
             format!(
