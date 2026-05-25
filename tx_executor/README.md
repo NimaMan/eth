@@ -331,8 +331,11 @@ misconfigured or an authorized caller submits an unexpected transaction.
 - Use `nonce = null` for normal live flow; manual nonce is for recovery tooling.
 - Every real-capital request must include simulation evidence and value-cap
   metadata.
-- Public mempool broadcast requires explicit Kartal config:
-  `ETH_TX_EXECUTOR_BROADCAST_MODE=public_mempool` and signer key availability.
+- Live broadcast requires explicit Kartal config:
+  `ETH_TX_EXECUTOR_BROADCAST_MODE=broadcast` and signer key availability. The
+  raw `public_mempool` value remains accepted for direct public submission, but
+  `broadcast` is the operator-facing umbrella that can include public mempool
+  or Flashbots/private relay routes selected by the request policy.
 
 ## Where To Look First
 
