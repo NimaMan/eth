@@ -104,6 +104,16 @@ pub(super) fn routes(
         .and(super::with_state(state.clone()))
         .and_then(live::processed_blocks);
 
+    let live_state_latest = warp::path!("api" / "v1" / "eth" / "live" / "state" / "latest")
+        .and(warp::get())
+        .and(super::with_state(state.clone()))
+        .and_then(live::latest_state_frame);
+
+    let live_state_stream = warp::path!("api" / "v1" / "eth" / "live" / "state" / "stream")
+        .and(warp::get())
+        .and(super::with_state(state.clone()))
+        .and_then(live::state_frame_stream);
+
     let trading_live_status = warp::path!("api" / "v1" / "eth" / "trading" / "live" / "status")
         .and(warp::get())
         .and(super::with_state(state.clone()))
@@ -499,6 +509,8 @@ pub(super) fn routes(
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
+        .or(live_state_stream)
+        .or(live_state_latest)
         .boxed();
 
     let trading_routes = trading_live_status

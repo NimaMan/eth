@@ -9,6 +9,7 @@ use crate::{
     block_context::apply_prestate_diff,
     simulator::TxSimulator,
     tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},
+    SimulationSession,
 };
 
 /// A block-scoped state session that keeps one forked state warm and creates
@@ -73,8 +74,16 @@ impl BlockStateSession {
         self.block_number
     }
 
+    pub fn simulator(&self) -> Arc<TxSimulator> {
+        Arc::clone(&self.simulator)
+    }
+
     pub fn simulation_chain(&self) -> UnsignedTxChainSimulation {
         UnsignedTxChainSimulation::new(Arc::clone(&self.simulator), self.forked_state.clone())
+    }
+
+    pub fn simulation_session(&self) -> SimulationSession {
+        SimulationSession::new(Arc::clone(&self.simulator), self.forked_state.clone())
     }
 }
 

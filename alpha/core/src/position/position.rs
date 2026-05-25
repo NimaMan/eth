@@ -111,7 +111,7 @@ impl Position {
 
     pub fn mark_intent_created(&mut self, side: OrderSide) -> Result<()> {
         match (&self.state, side) {
-            (PositionState::Init, OrderSide::Buy) => {
+            (PositionState::Init | PositionState::BuyDeferred, OrderSide::Buy) => {
                 self.state = PositionState::BuyIntentCreated;
                 Ok(())
             }

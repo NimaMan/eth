@@ -1,6 +1,7 @@
 # Live Trader
 
-Live trader owns the live polling process.
+Live trader owns live event processing for both no-capital chain simulation and
+real Kartal execution.
 
 - `run_live_backtest()` uses live chain-state simulation and never contacts
   Kartal.
@@ -22,24 +23,69 @@ Real tx wiring belongs in `real_execution/`; common live polling stays in
 - `strategy_setup.rs`: strategy construction from live strategy specs.
 - `poll_error.rs`: token-server poll failure handling.
 - `risk_annotation.rs`: mempool-signal evidence enrichment.
+- `block_frame/`: block-boundary contract between chain-server and alpha.
+- `event_processing/`: per-tick event ordering and persistence rules.
+- `execution_lifecycle/`: submitted execution settlement for chain-sim
+  live-backtests.
+- `state/`: live pool, DB, and exact simulation-state responsibilities.
+
+## Live Event Sequence
+
+The intended live behavior is block-coupled:
+
+1. Chain server processes block `N`.
+2. Chain server updates live token, pool, gas-rank, and live simulation state
+   for block `N`.
+3. Chain server publishes a block-applied event for `N`.
+4. Alpha consumes that block event and builds strategy inputs for the updates
+   from block `N`.
+5. Strategies process those inputs and persist decisions, observations, order
+   intents, execution reports, and position updates with explicit block context.
+6. Alpha finishes block `N` before moving its strategy-processing cursor to
+   block `N+1`.
+
+This contract is meant to be the same for live backtest and real live trading.
+The execution backend differs, but strategy event ordering and block context
+must not.
+
+Current important implementation detail: `/eth/tokens/api/live/updates` is the
+block-applied signal and includes updated token/pool ids for the block.
+`/eth/tokens/api/live/pools` is a latest live pool surface, not a block delta.
+If alpha handles a block event and then reads the latest pool surface, the
+surface can include state newer than the block that triggered the loop. That is
+the block-coupling gap to remove: alpha should either consume a chain-server
+block frame containing the updated snapshots for block `N`, or fetch snapshots
+by the updated ids from a view pinned to block `N`.
+
+Live chain simulation has a second block-coupling requirement. A strategy
+decision observed at block `N` may target execution in block `N+1`; the
+simulator must select state for that required block, not whatever the global
+latest live state is when execution happens.
+
+Chain-sim live backtests now mirror real live trading lifecycle. Submission at
+block `N` persists a submitted execution report with
+`receipt_status = live_backtest_chain_sim_submitted` and
+`expected_confirmation_block = N+1`. When a later tick sees the exact live
+simulation state for `N+1`, `execution_lifecycle/ChainSimSettlement` loads that
+submitted report from Postgres, reconstructs the stored order intent, simulates
+the swap as the last transaction in block `N+1`, and persists the final
+execution report. If the exact state for `N+1` is unavailable, settlement stays
+pending and logs an infrastructure wait rather than writing `buy_failed`.
 
 ## Runtime Config
 
-The normal live trader service path reads polling settings from the shared root
+The normal live trader service path reads live settings from the shared root
 `config.env`:
 
-- `ALPHA_LIVE_TRADER_POLL_INTERVAL_MS`: full trader loop sleep. Keep this below
-  one second for mempool signal handling; startup rejects values above
-  `1000`.
 - `ALPHA_LIVE_MEMPOOL_SINCE_DAYS`: lookback window used when fetching stored
   mempool signals from the chain server.
 - `ALPHA_LIVE_SIGNAL_LIMIT`: max signal rows fetched per trader loop.
 - `ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN`: inclusive target-block window
   length for policy-driven tail-entry MEV-Share bundles.
 
-The CLI flags `--poll-interval-ms`, `--mempool-since-days`, and
-`--signal-limit` are explicit operator overrides only. The checked-in systemd
-services do not set separate copies of these values.
+The CLI flags `--mempool-since-days` and `--signal-limit` are explicit operator
+overrides only. The checked-in systemd services do not set separate copies of
+these values.
 
 ## Real Receipt Reconciliation
 
@@ -94,7 +140,9 @@ The suite currently locks these real-live assumptions:
 - Simulator state lag is an infrastructure deferral. It must not write
   `buy_failed`, must not consume bankroll, and must not synthesize a submitted
   tx. Deferred buy attempts are excluded from restored seen-pool state so the
-  strategy can retry while the entry window remains valid.
+  strategy can retry while the entry window remains valid, but the deferred
+  position itself is restored as a no-exposure retry anchor so repeated attempts
+  stay under one trade id.
 - Successful receipts confirm only when the expected deployed V2 vault event is
   present, and the resulting report uses actual vault event amounts plus receipt
   gas cost.

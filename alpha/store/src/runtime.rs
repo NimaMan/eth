@@ -682,6 +682,108 @@ impl PostgresTradingStore {
             .collect()
     }
 
+    pub async fn load_chain_sim_submitted_executions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ChainSimSubmittedExecutionRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT ON (er.order_id)
+                   er.order_id,
+                   er.block_number AS submitted_block_number,
+                   er.position_id,
+                   er.trade_id,
+                   er.order_side,
+                   positions.token_address,
+                   er.payload #>> '{mined_evidence,expected_confirmation_block}' AS expected_confirmation_block,
+                   oi.payload::text AS intent_payload
+            FROM alpha_trading.execution_reports er
+            JOIN alpha_trading.positions positions
+              ON positions.run_id = er.run_id
+             AND positions.position_id = er.position_id
+            JOIN LATERAL (
+                SELECT payload
+                FROM alpha_trading.order_intents oi
+                WHERE oi.run_id = er.run_id
+                  AND oi.trade_id = er.trade_id
+                  AND oi.side = er.order_side
+                  AND oi.created_at <= er.created_at
+                ORDER BY oi.created_at DESC, oi.id DESC
+                LIMIT 1
+            ) oi ON TRUE
+            WHERE er.run_id = $1
+              AND er.status = 'submitted'
+              AND er.position_id IS NOT NULL
+              AND er.order_side IN ('buy', 'sell')
+              AND er.payload #>> '{mined_evidence,receipt_status}' = 'live_backtest_chain_sim_submitted'
+              AND (
+                    (er.order_side = 'buy' AND positions.state = 'buy_submitted')
+                 OR (er.order_side = 'sell' AND positions.state = 'sell_submitted')
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.execution_reports final
+                  WHERE final.run_id = er.run_id
+                    AND final.order_id = er.order_id
+                    AND final.status IN ('confirmed', 'deferred', 'failed', 'cancelled')
+              )
+            ORDER BY er.order_id, er.created_at DESC, er.id DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(usize_to_i32(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let order_id = OrderId(row.try_get::<String, _>("order_id").map_err(store_error)?);
+                let submitted_block_number = row
+                    .try_get::<Option<i64>, _>("submitted_block_number")
+                    .map_err(store_error)?
+                    .and_then(i64_to_u64);
+                let expected_confirmation_block = row
+                    .try_get::<Option<String>, _>("expected_confirmation_block")
+                    .map_err(store_error)?
+                    .and_then(|value| value.parse::<u64>().ok());
+                let position_id = PositionId(
+                    row.try_get::<String, _>("position_id")
+                        .map_err(store_error)?,
+                );
+                let trade_id = row
+                    .try_get::<Option<String>, _>("trade_id")
+                    .map_err(store_error)?
+                    .map(TradeId);
+                let order_side = parse_order_side_label(
+                    &row.try_get::<String, _>("order_side")
+                        .map_err(store_error)?,
+                )?;
+                let token_address = row
+                    .try_get::<String, _>("token_address")
+                    .map_err(store_error)?
+                    .parse()
+                    .map_err(store_error)?;
+                let intent_payload = row
+                    .try_get::<String, _>("intent_payload")
+                    .map_err(store_error)?;
+                let intent = serde_json::from_str(&intent_payload).map_err(store_error)?;
+
+                Ok(ChainSimSubmittedExecutionRecord {
+                    order_id,
+                    submitted_block_number,
+                    expected_confirmation_block,
+                    position_id,
+                    trade_id,
+                    order_side,
+                    token_address,
+                    intent,
+                })
+            })
+            .collect()
+    }
+
     pub async fn load_active_hold_counters(
         &self,
         strategy_name: &str,

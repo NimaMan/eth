@@ -394,6 +394,30 @@ impl EngineExecutionAdapter for DeferredTestExecutionAdapter {
 }
 
 #[derive(Clone, Default)]
+struct SequencedDeferredExecutionAdapter {
+    next_order: Arc<AtomicU64>,
+}
+
+#[async_trait::async_trait]
+impl EngineExecutionAdapter for SequencedDeferredExecutionAdapter {
+    async fn execute(&self, _intent: OrderIntent) -> Result<ExecutionReport> {
+        let order_number = self.next_order.fetch_add(1, Ordering::Relaxed);
+        Ok(ExecutionReport {
+            order_id: OrderId(format!("deferred-order-{order_number}")),
+            status: ExecutionStatus::Deferred,
+            tx_hash: None,
+            block_number: Some(order_number),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("simulation state not ready".to_string()),
+        })
+    }
+}
+
+#[derive(Clone, Default)]
 struct CountingNextBlockValuationAdapter {
     valuation_calls: Arc<AtomicU64>,
 }
@@ -948,6 +972,52 @@ async fn repeated_buys_on_same_strategy_pool_get_distinct_trade_ids() {
             .count(),
         2
     );
+}
+
+#[tokio::test]
+async fn deferred_buy_retry_reuses_same_trade_id() {
+    let store = MemoryTradingStore::default();
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        SequencedDeferredExecutionAdapter::default(),
+    );
+    engine.add_strategy(Box::new(BuyOnMarketStrategy));
+
+    let token = Address::repeat_byte(0x11);
+    let pool_address = Address::repeat_byte(0x22);
+    engine
+        .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+            block_number: 1,
+            pool: pool_snapshot(token, pool_address, 1),
+        }))
+        .await
+        .unwrap();
+    engine
+        .handle_event(EngineEvent::Market(MarketEvent::PoolUpdated {
+            block_number: 2,
+            pool: pool_snapshot(token, pool_address, 2),
+        }))
+        .await
+        .unwrap();
+
+    let positions = store.positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].state, PositionState::BuyDeferred);
+    assert_eq!(
+        positions[0].entry_order_id.as_ref().map(|id| id.0.as_str()),
+        Some("deferred-order-1")
+    );
+
+    let intents = store.order_intents();
+    assert_eq!(intents.len(), 2);
+    assert_eq!(intents[0].trade_id, intents[1].trade_id);
+    assert_eq!(intents[0].trade_id.as_ref(), Some(&positions[0].trade_id));
+
+    let reports = store.execution_reports();
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].order_id.0, "deferred-order-0");
+    assert_eq!(reports[1].order_id.0, "deferred-order-1");
 }
 
 #[tokio::test]

@@ -16,8 +16,14 @@ pub use types::{
 };
 
 // Re-export buy swap simulator
-pub use buy_swap_simulator::{simulate_buy_swap, simulate_buy_swap_with_params, BuySwapResult};
+pub use buy_swap_simulator::{
+    simulate_buy_swap, simulate_buy_swap_with_params, simulate_buy_swap_with_params_and_chain,
+    BuySwapResult,
+};
 pub use cross_venue_buy_approve_sell::{
     simulate_cross_venue_buy_approve_sell, CrossVenueArbResult,
 };
-pub use sell_swap::{simulate_sell_swap, simulate_sell_swap_with_params, SellSwapResult};
+pub use sell_swap::{
+    simulate_sell_swap, simulate_sell_swap_with_params, simulate_sell_swap_with_params_and_chain,
+    SellSwapResult,
+};

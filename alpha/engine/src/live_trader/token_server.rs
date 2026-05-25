@@ -1,4 +1,3 @@
-use super::live_state::LiveStateFrameResponse;
 use super::*;
 
 #[derive(Clone)]
@@ -32,6 +31,17 @@ impl TokenServerClient {
         self.get_json("/eth/tokens/api/live/pools").await
     }
 
+    pub(super) async fn live_updates(
+        &self,
+        after_block: u64,
+        timeout_ms: u64,
+    ) -> Result<LiveUpdatesResponse> {
+        let path = format!(
+            "/eth/tokens/api/live/updates?after_block={after_block}&timeout_ms={timeout_ms}"
+        );
+        self.get_json(&path).await
+    }
+
     pub(super) async fn mempool_signals(
         &self,
         limit: i64,
@@ -41,8 +51,15 @@ impl TokenServerClient {
         self.get_json(&path).await
     }
 
-    pub(super) async fn latest_live_state_frame(&self) -> Result<LiveStateFrameResponse> {
-        self.get_json("/eth/tokens/api/live/state/latest").await
+    pub(super) async fn live_state_stream(&self) -> Result<reqwest::Response> {
+        let url = format!("{}/eth/tokens/api/live/state/stream", self.base_url);
+        self.http
+            .get(&url)
+            .send()
+            .await
+            .wrap_err_with(|| format!("request failed: {url}"))?
+            .error_for_status()
+            .wrap_err_with(|| format!("token server returned an error: {url}"))
     }
 
     async fn get_json<T>(&self, path: &str) -> Result<T>

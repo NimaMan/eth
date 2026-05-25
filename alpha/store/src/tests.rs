@@ -1,5 +1,11 @@
 use super::*;
-use eth_alpha_core::{ExecutionStatus, RiskKind};
+use eth_alpha_core::{
+    amount::DecimalAmount,
+    ids::{PortfolioId, PositionId, StrategyName, TokenAddress, TokenPoolId, WalletId},
+    market::PoolProtocol,
+    position::{Position, PositionKey, PositionState},
+    ExecutionStatus, RiskKind,
+};
 use serde_json::json;
 
 #[test]
@@ -50,4 +56,47 @@ fn heartbeat_metadata_is_json() {
         "positions": 3,
     });
     assert_eq!(metadata["live_status"], "live");
+}
+
+#[test]
+fn buy_failed_trade_accounting_records_realized_gas_loss_as_total_pnl() {
+    let mut position = sample_position(PositionState::BuyFailed);
+    position.gas_cost_eth = DecimalAmount::from_str_exact("0.000035334726801858").unwrap();
+
+    let fields = trade_accounting_fields_for_position(&position);
+
+    assert_eq!(fields.current_value_eth.as_deref(), Some("0"));
+    assert_eq!(fields.unrealized_pnl_eth.as_deref(), Some("0"));
+    assert_eq!(
+        fields.total_pnl_eth.as_deref(),
+        Some("-0.000035334726801858")
+    );
+}
+
+#[test]
+fn open_exposure_trade_accounting_waits_for_valuation_snapshot() {
+    let mut position = sample_position(PositionState::BuyConfirmed);
+    position.gas_cost_eth = DecimalAmount::from_str_exact("0.000035334726801858").unwrap();
+
+    let fields = trade_accounting_fields_for_position(&position);
+
+    assert!(fields.current_value_eth.is_none());
+    assert!(fields.unrealized_pnl_eth.is_none());
+    assert!(fields.total_pnl_eth.is_none());
+}
+
+fn sample_position(state: PositionState) -> Position {
+    let mut position = Position::new(
+        PositionId("pos_test".to_string()),
+        PositionKey {
+            portfolio_id: PortfolioId("portfolio".to_string()),
+            wallet_id: WalletId("wallet".to_string()),
+            strategy_name: StrategyName("strategy".to_string()),
+            token_address: TokenAddress::ZERO,
+            pool_address: TokenPoolId("0x0000000000000000000000000000000000000000".to_string()),
+            protocol: PoolProtocol::UniswapV2,
+        },
+    );
+    position.state = state;
+    position
 }

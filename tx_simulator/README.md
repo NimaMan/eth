@@ -65,9 +65,10 @@ Reth MDBX + canonical headers
   -> tx_processor, reth_chain_query, mempool_processor, pyreth
 ```
 
-Live simulation uses local historical context when it is caught up. Live
-pipelines that already hold block headers and `prestateTracer` diffMode output
-can open direct block state sessions from those inputs.
+Real live simulation uses `LiveTxSimulator`, which is backed only by the latest
+in-memory mined block session published by the live block processor. Latest
+local historical context remains available through `TxSimulator` and
+`LatestHistoricalTxSimulator`.
 
 ## Persistent Store Usage
 

@@ -15,7 +15,7 @@ use reth_chain_query::{
     RethQueryProvider,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{block_processor::BlockProcessor, ProcessedBlock};
 
@@ -238,6 +238,31 @@ pub struct LiveProcessedBlock {
     pub processed_block: ProcessedBlock,
     pub state_diffs: Option<Vec<PreStateFrame>>,
     pub processed_at: DateTime<Utc>,
+}
+
+/// Minimal live block state frame needed by remote live simulators.
+///
+/// The chain server owns the live block processor and keeps the canonical
+/// mined block state in memory. External live consumers should use this frame
+/// to reconstruct a `LiveTxSimulator` state for the exact published block
+/// instead of selecting a "latest" block from local Reth historical context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveBlockStateFrame {
+    pub header: reth_chain_query::provider::BlockHeader,
+    pub transaction_count: usize,
+    pub state_diff_count: Option<usize>,
+    pub state_diffs: Option<Vec<PreStateFrame>>,
+}
+
+impl LiveBlockStateFrame {
+    pub fn from_live_processed_block(processed: &LiveProcessedBlock) -> Self {
+        Self {
+            header: processed.processed_block.header.clone(),
+            transaction_count: processed.processed_block.transactions.len(),
+            state_diff_count: processed.state_diffs.as_ref().map(Vec::len),
+            state_diffs: processed.state_diffs.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

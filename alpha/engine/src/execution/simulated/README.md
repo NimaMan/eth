@@ -6,7 +6,8 @@ strategy evaluation and backtests.
 ## Behavior
 
 - Builds swap calldata from each `OrderIntent`.
-- Simulates the transaction against selected Reth or direct live chain state.
+- Simulates the transaction against selected Reth state for historical replay
+  or exact in-memory live state for live chain-sim settlement.
 - Records buy token amounts from simulated token balance deltas.
 - Records sell proceeds from simulated denom balance deltas.
 - Records gas used and simulated gas cost from execution transactions so
@@ -23,6 +24,12 @@ adapter.
 
 - `ChainSimExecutionAdapter`: historical replay/backtest; the runner sets the
   block before each event.
-- `LiveChainSimExecutionAdapter`: live no-capital trading; the adapter selects
-  the latest usable state from local Reth historical context or direct tracked
-  live state.
+- `LiveChainSimExecutionAdapter`: live no-capital trading; `execute()` records
+  submission immediately with `receipt_status =
+  live_backtest_chain_sim_submitted`. Final live-backtest fills are produced
+  later by `live_trader/execution_lifecycle/ChainSimSettlement`, which
+  simulates the submitted order against the exact expected execution block from
+  the in-memory live-state window.
+
+The live adapter never selects local Reth historical context. Historical/latest
+Reth simulation belongs to `TxSimulator` or `LatestHistoricalTxSimulator`.

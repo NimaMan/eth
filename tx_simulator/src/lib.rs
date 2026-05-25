@@ -55,7 +55,10 @@ pub mod block_simulation {
 
 // Re-export main types
 pub use crate::tx_chain::token_metadata::{TokenMetadataResult, TokenMetadataSimulator};
-pub use live::{LiveStateSource, LiveStateStatus, LiveTxSimulator};
+pub use live::{
+    InMemoryLiveBlockStateProvider, LatestHistoricalTxSimulator, LiveBlockState, LiveStateSource,
+    LiveStateStatus, LiveTxSimulator,
+};
 pub use session::{
     BlockReplaySession, BlockStateSession, BlockTxAdvanceProfile, BlockTxExecuteProfile,
     BlockTxStateSession, BlockTxTraceProfile, SessionStepSummary, SessionTransaction,

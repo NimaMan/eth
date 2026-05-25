@@ -5,8 +5,10 @@ use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use warp::http::StatusCode;
+use warp::Reply;
 
 use crate::http::reply::{error_response, json_response};
+use crate::http::sse;
 use crate::http::ServerState;
 use crate::live::StartLiveTrackerRequest;
 use crate::read_models as views;
@@ -240,6 +242,15 @@ pub(super) async fn latest_state_frame(
         StatusCode::SERVICE_UNAVAILABLE
     };
     Ok(json_response(&response, status))
+}
+
+pub(super) async fn state_frame_stream(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    Ok(
+        warp::sse::reply(warp::sse::keep_alive().stream(sse::live_state_frame_stream(state)))
+            .into_response(),
+    )
 }
 
 async fn event_response(

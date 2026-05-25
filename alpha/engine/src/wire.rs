@@ -39,6 +39,21 @@ pub struct LivePoolListResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct LiveUpdatesResponse {
+    pub event: String,
+    pub status: String,
+    pub block_number: Option<u64>,
+    #[serde(default)]
+    pub updated_tokens: Vec<String>,
+    #[serde(default)]
+    pub updated_v2_pools: Vec<String>,
+    #[serde(default)]
+    pub updated_v3_pools: Vec<String>,
+    #[serde(default)]
+    pub updated_v4_pools: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LiveProgressWire {
     pub status: String,
     pub current_block: Option<u64>,

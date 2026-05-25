@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::wire::{
     parse_address, GasRankSamplesResponse, LivePoolListResponse, LiveStatusResponse,
-    MempoolSignalsResponse,
+    LiveUpdatesResponse, MempoolSignalsResponse,
 };
 use crate::{
     AlphaEngine, BlockCriticalRiskPolicy, EngineEvent, EngineExecutionAdapter,
@@ -29,6 +29,7 @@ mod bankroll;
 mod cli;
 mod config_resolution;
 mod entrypoints;
+mod execution_lifecycle;
 mod gas_policy;
 mod live_state;
 mod manual_close;
@@ -49,6 +50,7 @@ use backtest::ChainSimGasPolicyBacktestAdapter;
 use bankroll::{entry_bankroll_summary_json, resolve_entry_bankroll_wei, single_strategy_value};
 use cli::{Args, RealExecutionArgs};
 use config_resolution::{resolve_cli_or_config_i64, resolve_cli_or_config_u64};
+use execution_lifecycle::ChainSimSettlement;
 use gas_policy::load_live_real_gas_policy;
 use live_state::spawn_live_state_publisher;
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
@@ -74,7 +76,6 @@ const MINED_POOL_RISK_SOURCE: &str = "mined_pool_update";
 const POSITION_MONITOR_SOURCE: &str = "position_monitor";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
-const ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG: &str = "ALPHA_LIVE_TRADER_POLL_INTERVAL_MS";
 const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
 const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
 const ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN_CONFIG: &str =
@@ -89,7 +90,9 @@ const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
-const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
+const LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS: u64 = 250;
+const LIVE_UPDATE_WAIT_TIMEOUT_MS: u64 = 30_000;
+const LIVE_POLL_ERROR_RETRY_MS: u64 = 1_000;
 const CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS: u64 = 240;
 const CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS: u64 = 2_000;
 const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
@@ -108,19 +111,6 @@ async fn run(
         .init();
 
     let shared_config = load_shared_config()?;
-    let poll_interval_ms = resolve_cli_or_config_u64(
-        args.poll_interval_ms,
-        &shared_config,
-        ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG,
-    )?;
-    if poll_interval_ms == 0 || poll_interval_ms > MAX_LIVE_TRADER_POLL_INTERVAL_MS {
-        return Err(eyre!(
-            "{} must be in the range 1..={}ms for live mempool signal handling; got {}",
-            ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG,
-            MAX_LIVE_TRADER_POLL_INTERVAL_MS,
-            poll_interval_ms
-        ));
-    }
     let mempool_since_days = resolve_cli_or_config_i64(
         args.mempool_since_days,
         &shared_config,
@@ -294,7 +284,11 @@ async fn run(
                 "process_started_at_unix_secs": process_started_at_unix_secs,
                 "token_server_url": &token_server_url,
                 "reth_datadir": &reth_datadir,
-                "poll_interval_ms": poll_interval_ms,
+                "loop_wait": if execution_mode == TraderExecutionMode::ChainSim {
+                    "chain_server_live_updates"
+                } else {
+                    "internal_real_mempool_signal_cadence"
+                },
                 "mempool_since_days": mempool_since_days,
                 "signal_limit": signal_limit,
                 "buy_wei": &single_buy_wei,
@@ -361,6 +355,20 @@ async fn run(
             Some(parse_address(&real_args.live_real_vault_address)?)
         }
         _ => None,
+    };
+    let chain_sim_settlement = if execution_mode == TraderExecutionMode::ChainSim {
+        Some(ChainSimSettlement::new(
+            store.clone(),
+            chain_sim_adapter.clone(),
+            Some(ChainSimGasPolicyBacktestAdapter::new(
+                chain_sim_adapter.clone(),
+                token_server_url.clone(),
+                reth_http_rpc.clone(),
+                live_gas_policy.clone(),
+            )),
+        ))
+    } else {
+        None
     };
     let receipt_reconciler = match (
         execution_mode,
@@ -515,7 +523,7 @@ async fn run(
                     &store,
                     args.once,
                     &mut shutdown,
-                    poll_interval_ms,
+                    poll_error_retry_delay(execution_mode),
                 )
                 .await?;
                 if should_stop {
@@ -540,6 +548,12 @@ async fn run(
                 }
             }
         }
+        {
+            let mut pool_updates = pool_updates.lock().expect("pool lock");
+            for (_, pool) in &polled_pools {
+                pool_updates.insert(pool.address.clone(), pool.clone());
+            }
+        }
 
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
@@ -550,6 +564,93 @@ async fn run(
         let mut reports = 0usize;
         let mut receipt_reports = 0usize;
         let mut receipt_unresolved = 0usize;
+        let mut chain_sim_settlement_loaded = 0usize;
+        let mut chain_sim_settlement_reports = 0usize;
+        let mut chain_sim_settlement_pending = 0usize;
+        let mut chain_sim_settlement_waiting_state = 0usize;
+        let mut chain_sim_settlement_missing_block = 0usize;
+
+        if !suppress_events {
+            if let (Some(settlement), Some(block_number)) =
+                (chain_sim_settlement.as_ref(), status.progress.current_block)
+            {
+                adapter_current_block.store(block_number, Ordering::Relaxed);
+                match settlement.reports_due_at(block_number).await {
+                    Ok(batch) => {
+                        chain_sim_settlement_loaded = batch.loaded;
+                        chain_sim_settlement_pending = batch.pending_future_block;
+                        chain_sim_settlement_waiting_state = batch.waiting_for_live_state;
+                        chain_sim_settlement_missing_block = batch.missing_submission_block;
+                        for report in batch.reports {
+                            let event_reports =
+                                engine.handle_event(EngineEvent::Execution(report)).await?;
+                            chain_sim_settlement_reports += event_reports.len();
+                            reports += event_reports.len();
+                            for report in event_reports {
+                                info!(
+                                    order_id = %report.order_id.0,
+                                    status = ?report.status,
+                                    block_number = ?report.block_number,
+                                    gas_used = ?report.gas_used,
+                                    error = ?report.error,
+                                    "chain-sim submitted execution settled"
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "chain-sim submitted execution settlement failed");
+                    }
+                }
+            }
+        }
+
+        if !suppress_events {
+            if let Some(reconciler) = &receipt_reconciler {
+                match store.load_submitted_executions(50).await {
+                    Ok(submitted) if submitted.is_empty() => {}
+                    Ok(submitted) => match reconciler
+                        .reconcile_after_processed_block(submitted, status.progress.current_block)
+                        .await
+                    {
+                        Ok(batch) => {
+                            receipt_unresolved = batch.unresolved.len();
+                            for issue in batch.unresolved {
+                                warn!(
+                                    order_id = %issue.order_id,
+                                    tx_hash = %issue.tx_hash,
+                                    reason = %issue.reason,
+                                    "real receipt reconciliation has no final vault evidence yet"
+                                );
+                            }
+                            for report in batch.reports {
+                                let event_reports =
+                                    engine.handle_event(EngineEvent::Execution(report)).await?;
+                                receipt_reports += event_reports.len();
+                                reports += event_reports.len();
+                                for report in event_reports {
+                                    info!(
+                                        order_id = %report.order_id.0,
+                                        status = ?report.status,
+                                        tx_hash = ?report.tx_hash,
+                                        block_number = ?report.block_number,
+                                        gas_used = ?report.gas_used,
+                                        error = ?report.error,
+                                        "real receipt reconciled execution report"
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            warn!(error = %error, "real receipt reconciliation failed");
+                        }
+                    },
+                    Err(error) => {
+                        warn!(error = %error, "failed to load submitted executions for receipt reconciliation");
+                    }
+                }
+            }
+        }
 
         let mut signal_wires = signals.signals;
         signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
@@ -702,11 +803,6 @@ async fn run(
         }
         for (pool_wire, pool) in polled_pools {
             let previous_block = seen_pool_blocks.get(&pool.address).copied();
-            pool_updates
-                .lock()
-                .expect("pool lock")
-                .insert(pool.address.clone(), pool.clone());
-
             let changed = previous_block
                 .map(|previous| pool.latest_block > previous)
                 .unwrap_or(true);
@@ -915,51 +1011,6 @@ async fn run(
             }
         }
 
-        if let Some(reconciler) = &receipt_reconciler {
-            match store.load_submitted_executions(50).await {
-                Ok(submitted) if submitted.is_empty() => {}
-                Ok(submitted) => match reconciler
-                    .reconcile_after_processed_block(submitted, status.progress.current_block)
-                    .await
-                {
-                    Ok(batch) => {
-                        receipt_unresolved = batch.unresolved.len();
-                        for issue in batch.unresolved {
-                            warn!(
-                                order_id = %issue.order_id,
-                                tx_hash = %issue.tx_hash,
-                                reason = %issue.reason,
-                                "real receipt reconciliation has no final vault evidence yet"
-                            );
-                        }
-                        for report in batch.reports {
-                            let event_reports =
-                                engine.handle_event(EngineEvent::Execution(report)).await?;
-                            receipt_reports += event_reports.len();
-                            reports += event_reports.len();
-                            for report in event_reports {
-                                info!(
-                                    order_id = %report.order_id.0,
-                                    status = ?report.status,
-                                    tx_hash = ?report.tx_hash,
-                                    block_number = ?report.block_number,
-                                    gas_used = ?report.gas_used,
-                                    error = ?report.error,
-                                    "real receipt reconciled execution report"
-                                );
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        warn!(error = %error, "real receipt reconciliation failed");
-                    }
-                },
-                Err(error) => {
-                    warn!(error = %error, "failed to load submitted executions for receipt reconciliation");
-                }
-            }
-        }
-
         if first_poll && !args.replay_current {
             info!(
                 pools = seen_pool_blocks.len(),
@@ -1008,6 +1059,11 @@ async fn run(
             manual_close_requests,
             manual_close_failed,
             manual_close_reports,
+            chain_sim_settlement_loaded,
+            chain_sim_settlement_reports,
+            chain_sim_settlement_pending,
+            chain_sim_settlement_waiting_state,
+            chain_sim_settlement_missing_block,
             receipt_reports,
             receipt_unresolved,
             reports,
@@ -1042,6 +1098,11 @@ async fn run(
             "manual_close_requests": manual_close_requests,
             "manual_close_failed": manual_close_failed,
             "manual_close_reports": manual_close_reports,
+            "chain_sim_settlement_loaded": chain_sim_settlement_loaded,
+            "chain_sim_settlement_reports": chain_sim_settlement_reports,
+            "chain_sim_settlement_pending": chain_sim_settlement_pending,
+            "chain_sim_settlement_waiting_state": chain_sim_settlement_waiting_state,
+            "chain_sim_settlement_missing_block": chain_sim_settlement_missing_block,
             "receipt_reports": receipt_reports,
             "receipt_unresolved": receipt_unresolved,
             "reports": reports,
@@ -1103,6 +1164,26 @@ async fn run(
             "manual_close_reports".to_string(),
             json!(manual_close_reports),
         );
+        health.metrics.insert(
+            "chain_sim_settlement_loaded".to_string(),
+            json!(chain_sim_settlement_loaded),
+        );
+        health.metrics.insert(
+            "chain_sim_settlement_reports".to_string(),
+            json!(chain_sim_settlement_reports),
+        );
+        health.metrics.insert(
+            "chain_sim_settlement_pending".to_string(),
+            json!(chain_sim_settlement_pending),
+        );
+        health.metrics.insert(
+            "chain_sim_settlement_waiting_state".to_string(),
+            json!(chain_sim_settlement_waiting_state),
+        );
+        health.metrics.insert(
+            "chain_sim_settlement_missing_block".to_string(),
+            json!(chain_sim_settlement_missing_block),
+        );
         health
             .metrics
             .insert("receipt_reports".to_string(), json!(receipt_reports));
@@ -1134,7 +1215,15 @@ async fn run(
             break;
         }
         tokio::select! {
-            _ = time::sleep(Duration::from_millis(poll_interval_ms)) => {}
+            wait_result = wait_for_next_loop_event(&client, execution_mode, status.progress.current_block) => {
+                if let Err(error) = wait_result {
+                    warn!(
+                        error = %error,
+                        "alpha trader live-update wait failed; retrying"
+                    );
+                    time::sleep(poll_error_retry_delay(execution_mode)).await;
+                }
+            }
             _ = shutdown.recv() => {
                 store
                     .mark_stopped(
@@ -1152,6 +1241,44 @@ async fn run(
     }
 
     Ok(())
+}
+
+async fn wait_for_next_loop_event(
+    client: &TokenServerClient,
+    execution_mode: TraderExecutionMode,
+    current_block: Option<u64>,
+) -> Result<()> {
+    match execution_mode {
+        TraderExecutionMode::ChainSim => {
+            let after_block = current_block.unwrap_or_default();
+            let update = client
+                .live_updates(after_block, LIVE_UPDATE_WAIT_TIMEOUT_MS)
+                .await?;
+            tracing::debug!(
+                event = %update.event,
+                status = %update.status,
+                after_block,
+                update_block = ?update.block_number,
+                "alpha trader live update wait completed"
+            );
+        }
+        TraderExecutionMode::KartalReal => {
+            time::sleep(Duration::from_millis(
+                LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS,
+            ))
+            .await;
+        }
+    }
+    Ok(())
+}
+
+fn poll_error_retry_delay(execution_mode: TraderExecutionMode) -> Duration {
+    match execution_mode {
+        TraderExecutionMode::ChainSim => Duration::from_millis(LIVE_POLL_ERROR_RETRY_MS),
+        TraderExecutionMode::KartalReal => {
+            Duration::from_millis(LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS)
+        }
+    }
 }
 
 async fn preflight_chain_server_readiness(

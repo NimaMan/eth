@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use alloy_primitives::U256;
-use eth_alpha_core::{ids::PoolAddress, portfolio::PortfolioState, store::TradingStore};
+use eth_alpha_core::{
+    ids::PoolAddress, portfolio::PortfolioState, position::PositionState, store::TradingStore,
+};
 use eth_alpha_store::{ActiveHoldCounterRecord, PostgresTradingStore};
 use eth_strategies::{shared_rules::live::LiveStrategySpec, RestoredEntryBankroll};
 use eyre::{Result, WrapErr};
@@ -77,6 +79,12 @@ pub(super) async fn restore_runtime_state(
         let restored_entry_bankroll =
             restored_entry_bankroll_from_terminal_positions(&terminal_positions, buy_wei);
         entry_bankrolls_by_strategy.insert(spec.strategy_name.clone(), restored_entry_bankroll);
+        for position in terminal_positions
+            .into_iter()
+            .filter(|position| position.state == PositionState::BuyDeferred)
+        {
+            portfolio.positions.insert(position.id.clone(), position);
+        }
 
         let restored_positions = store
             .load_active_positions(&spec.strategy_name)

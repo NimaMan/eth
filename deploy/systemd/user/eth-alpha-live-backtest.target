@@ -1,7 +1,7 @@
 [Unit]
 Description=Ethereum alpha live backtest pipeline
-Wants=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-live-backtest.service
-After=eth-chain-server.service eth-mempool-signal-detector.service eth-alpha-live-backtest.service
+Wants=eth-mempool-signal-detector.service eth-alpha-live-backtest.service
+After=eth-mempool-signal-detector.service eth-alpha-live-backtest.service
 
 [Install]
 WantedBy=default.target

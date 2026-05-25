@@ -8,9 +8,10 @@ The `session` module is the preferred high-level surface for long-lived simulati
 After creation, each `step_*` call executes synchronously on that warm fork and commits only to
 the in-memory overlay.
 
-Live pipelines should usually call `LiveTxSimulator::start_latest_session()` when they need latest
-local historical context, or `block_state_session_from_prestate_diffs` when they already hold live
-block headers and `prestateTracer` diffMode output.
+Live pipelines should build a `BlockStateSession` from the latest mined block
+header and `prestateTracer` diffMode output, then publish that session to
+`LiveTxSimulator`. Latest local historical context belongs to `TxSimulator` or
+`LatestHistoricalTxSimulator`, not the live simulator.
 
 Use it when a workflow can contain any sequence of:
 

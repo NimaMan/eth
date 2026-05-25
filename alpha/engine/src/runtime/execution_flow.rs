@@ -4,7 +4,7 @@ use eth_alpha_core::{
     execution::{ExecutionReport, ExecutionStatus},
     ids::{PositionId, TokenPoolId},
     order::{OrderIntent, OrderSide},
-    position::{Position, PositionKey, PositionSnapshot},
+    position::{Position, PositionKey, PositionSnapshot, PositionState},
     risk::{RiskDecision, RiskEvent, RiskPolicy},
     store::TradingStore,
     strategy::StrategyDecision,
@@ -372,6 +372,14 @@ where
             {
                 return position;
             }
+        } else if let Some(position) = self
+            .portfolio
+            .positions
+            .values()
+            .find(|position| position.key == key && position.state == PositionState::BuyDeferred)
+            .cloned()
+        {
+            return position;
         }
         let trade_id = intent.trade_id.clone().unwrap_or_else(new_trade_id);
         let id = PositionId(trade_id.0.clone());

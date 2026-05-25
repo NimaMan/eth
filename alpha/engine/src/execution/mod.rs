@@ -7,7 +7,7 @@
 //! | Adapter | Purpose |
 //! |---------|---------|
 //! | `ChainSimExecutionAdapter` | Historical backtest simulation via `tx_simulator` |
-//! | `LiveChainSimExecutionAdapter` | Live no-capital simulation via `LiveTxSimulator` |
+//! | `LiveChainSimExecutionAdapter` | Live no-capital submission plus exact-block in-memory chain-sim settlement |
 //! | `TxExecutorAdapter` | Crate-private real live submission via Kartal |
 
 pub(crate) mod real;

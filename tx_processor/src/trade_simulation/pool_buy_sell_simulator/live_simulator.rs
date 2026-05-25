@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eyre::Result;
-use tx_simulator::{LiveTxSimulator, TxSimulator, UnsignedTxChainSimulation};
+use tx_simulator::{LatestHistoricalTxSimulator, TxSimulator, UnsignedTxChainSimulation};
 
 use crate::trade_simulation::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
 use crate::tx_processor::TxProcessor;
@@ -10,12 +10,15 @@ use super::entry::{check_can_buy_sell_pool, check_can_buy_sell_pool_with_chain};
 
 #[derive(Clone)]
 pub struct LivePoolBuySellSimulator {
-    live_tx_simulator: LiveTxSimulator,
+    live_tx_simulator: LatestHistoricalTxSimulator,
     tx_processor: Arc<TxProcessor>,
 }
 
 impl LivePoolBuySellSimulator {
-    pub fn new(live_tx_simulator: LiveTxSimulator, tx_processor: Arc<TxProcessor>) -> Self {
+    pub fn new(
+        live_tx_simulator: LatestHistoricalTxSimulator,
+        tx_processor: Arc<TxProcessor>,
+    ) -> Self {
         Self {
             live_tx_simulator,
             tx_processor,
@@ -24,12 +27,12 @@ impl LivePoolBuySellSimulator {
 
     pub fn from_simulator(simulator: Arc<TxSimulator>) -> Self {
         Self::new(
-            LiveTxSimulator::from_simulator(simulator),
+            LatestHistoricalTxSimulator::from_simulator(simulator),
             Arc::new(TxProcessor::new()),
         )
     }
 
-    pub fn live_tx_simulator(&self) -> &LiveTxSimulator {
+    pub fn live_tx_simulator(&self) -> &LatestHistoricalTxSimulator {
         &self.live_tx_simulator
     }
 

@@ -23,7 +23,7 @@ pub(super) async fn handle_poll_error(
     store: &PostgresTradingStore,
     once: bool,
     shutdown: &mut ShutdownSignals,
-    poll_interval_ms: u64,
+    retry_delay: Duration,
 ) -> Result<bool> {
     warn!(error = %error, "alpha trader poll failed");
     let mut issue = PipelineIssue::new(
@@ -84,7 +84,7 @@ pub(super) async fn handle_poll_error(
     }
 
     tokio::select! {
-        _ = time::sleep(Duration::from_millis(poll_interval_ms)) => Ok(false),
+        _ = time::sleep(retry_delay) => Ok(false),
         _ = shutdown.recv() => {
             store
                 .mark_stopped(

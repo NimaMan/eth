@@ -1,23 +1,31 @@
 use crate::{
-    SessionTransaction, SignedTransaction, SimulationResult, SimulationSession,
+    BlockStateSession, SessionTransaction, SignedTransaction, SimulationResult, SimulationSession,
     SimulationSessionOptions, TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation,
 };
+use alloy_primitives::B256;
 use eyre::{eyre, Result};
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
 
-/// Source selected for live-first state.
+const DEFAULT_LIVE_STATE_WINDOW_CAPACITY: usize = 16;
+
+/// Source selected for a stateful simulation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LiveStateSource {
-    /// State comes from local Reth providers.
+    /// State comes from an in-memory mined block session published live.
+    InMemoryLiveBlockSession,
+    /// State comes from local Reth historical context.
+    ///
+    /// This source is intentionally not produced by `LiveTxSimulator`. It is
+    /// kept for explicit historical/latest-Reth adapters and diagnostics.
     LocalHistoricalContext,
-    /// State comes from a tracked live-state provider.
-    TrackedLiveState,
 }
 
-/// Diagnostic state-selection result for live simulation.
+/// Diagnostic state-selection result for simulation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct LiveStateStatus {
     pub selected_block_number: u64,
+    pub selected_block_hash: Option<B256>,
     pub source: LiveStateSource,
     pub latest_reth_finished_block_number: u64,
     pub latest_historical_context_block_number: u64,
@@ -27,30 +35,314 @@ pub struct LiveStateStatus {
 
 impl LiveStateStatus {
     pub const fn uses_tracked_live_state(&self) -> bool {
-        matches!(self.source, LiveStateSource::TrackedLiveState)
+        matches!(self.source, LiveStateSource::InMemoryLiveBlockSession)
     }
 
     pub const fn local_context_lags_selected_state(&self) -> bool {
-        self.uses_tracked_live_state()
+        false
     }
 
+    /// Real live pre-submit simulation is only ready when the selected live
+    /// state exactly matches the decision block.
     pub const fn is_ready_for_block(&self, required_block_number: u64) -> bool {
-        self.selected_block_number >= required_block_number
+        self.selected_block_number == required_block_number
     }
 }
 
-/// Live-first transaction simulator for latency-sensitive trading paths.
+/// Latest mined live block state held in memory by the live block processor.
+#[derive(Clone)]
+pub struct LiveBlockState {
+    pub block_number: u64,
+    pub block_hash: Option<B256>,
+    pub state_root: Option<B256>,
+    session: BlockStateSession,
+}
+
+impl LiveBlockState {
+    pub fn new(session: BlockStateSession) -> Self {
+        Self {
+            block_number: session.block_number(),
+            block_hash: None,
+            state_root: None,
+            session,
+        }
+    }
+
+    pub fn with_block_hash(mut self, block_hash: B256) -> Self {
+        self.block_hash = Some(block_hash);
+        self
+    }
+
+    pub fn with_state_root(mut self, state_root: B256) -> Self {
+        self.state_root = Some(state_root);
+        self
+    }
+
+    pub fn session(&self) -> &BlockStateSession {
+        &self.session
+    }
+}
+
+/// Shared in-memory provider for a small exact live block-state window.
+#[derive(Clone)]
+pub struct InMemoryLiveBlockStateProvider {
+    inner: Arc<RwLock<LiveBlockStateWindow>>,
+}
+
+struct LiveBlockStateWindow {
+    states: VecDeque<LiveBlockState>,
+    capacity: usize,
+}
+
+impl Default for InMemoryLiveBlockStateProvider {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(LiveBlockStateWindow {
+                states: VecDeque::with_capacity(DEFAULT_LIVE_STATE_WINDOW_CAPACITY),
+                capacity: DEFAULT_LIVE_STATE_WINDOW_CAPACITY,
+            })),
+        }
+    }
+}
+
+impl InMemoryLiveBlockStateProvider {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn publish_latest(&self, state: LiveBlockState) -> Result<()> {
+        let mut window = self
+            .inner
+            .write()
+            .map_err(|_| eyre!("in-memory live block state lock poisoned"))?;
+        if let Some(index) = window
+            .states
+            .iter()
+            .position(|existing| existing.block_number == state.block_number)
+        {
+            window.states.remove(index);
+        }
+        window.states.push_front(state);
+        while window.states.len() > window.capacity {
+            window.states.pop_back();
+        }
+        Ok(())
+    }
+
+    pub fn clear(&self) -> Result<()> {
+        let mut window = self
+            .inner
+            .write()
+            .map_err(|_| eyre!("in-memory live block state lock poisoned"))?;
+        window.states.clear();
+        Ok(())
+    }
+
+    pub fn latest_state(&self) -> Result<LiveBlockState> {
+        self.inner
+            .read()
+            .map_err(|_| eyre!("in-memory live block state lock poisoned"))?
+            .states
+            .front()
+            .cloned()
+            .ok_or_else(|| eyre!("latest in-memory live block state is unavailable"))
+    }
+
+    pub fn state_at(&self, block_number: u64) -> Result<LiveBlockState> {
+        self.inner
+            .read()
+            .map_err(|_| eyre!("in-memory live block state lock poisoned"))?
+            .states
+            .iter()
+            .find(|state| state.block_number == block_number)
+            .cloned()
+            .ok_or_else(|| eyre!("in-memory live block state {block_number} is unavailable"))
+    }
+
+    pub fn has_state_at(&self, block_number: u64) -> Result<bool> {
+        Ok(self
+            .inner
+            .read()
+            .map_err(|_| eyre!("in-memory live block state lock poisoned"))?
+            .states
+            .iter()
+            .any(|state| state.block_number == block_number))
+    }
+}
+
+/// Live transaction simulator backed only by in-memory mined block sessions.
 ///
-/// `TxSimulator` remains the general-purpose historical/direct-DB engine. This
-/// wrapper selects the latest locally readable historical context. In-process
-/// live block runtimes that already have exact prestate diffs should use
-/// `TxSimulator::block_state_session_from_prestate_diffs` directly.
+/// `TxSimulator` remains the general historical/Reth DB simulator. This type
+/// may use shared `TxSimulator` execution machinery, but it never selects
+/// headers or state from Reth DB. If the requested in-memory live block session
+/// is unavailable, simulation fails.
 #[derive(Clone)]
 pub struct LiveTxSimulator {
     simulator: Arc<TxSimulator>,
+    provider: InMemoryLiveBlockStateProvider,
 }
 
 impl LiveTxSimulator {
+    pub fn new(simulator: Arc<TxSimulator>, provider: InMemoryLiveBlockStateProvider) -> Self {
+        Self {
+            simulator,
+            provider,
+        }
+    }
+
+    pub fn from_latest_state(state: LiveBlockState) -> Self {
+        let simulator = state.session().simulator();
+        let provider = InMemoryLiveBlockStateProvider::new();
+        provider
+            .publish_latest(state)
+            .expect("fresh in-memory live block provider must be writable");
+        Self {
+            simulator,
+            provider,
+        }
+    }
+
+    pub fn simulator(&self) -> Arc<TxSimulator> {
+        Arc::clone(&self.simulator)
+    }
+
+    pub fn provider(&self) -> InMemoryLiveBlockStateProvider {
+        self.provider.clone()
+    }
+
+    /// Latest block for which this simulator has an exact in-memory session.
+    pub async fn latest_state_block_number(&self) -> Result<u64> {
+        Ok(self.latest_state_status().await?.selected_block_number)
+    }
+
+    /// Full diagnostics for the latest in-memory live simulation state.
+    pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
+        self.latest_state_status_blocking()
+    }
+
+    /// Full diagnostics, requiring the exact signal dependency block.
+    pub async fn latest_state_status_at_or_after(
+        &self,
+        required_block_number: u64,
+    ) -> Result<LiveStateStatus> {
+        let status = self.latest_state_status().await?;
+        if !status.is_ready_for_block(required_block_number) {
+            return Err(eyre!(
+                "live simulation state block mismatch: selected_block={} required_block={} source={:?}",
+                status.selected_block_number,
+                required_block_number,
+                status.source
+            ));
+        }
+        Ok(status)
+    }
+
+    /// True when the in-memory live-state window still has an exact block.
+    pub async fn has_state_at(&self, block_number: u64) -> Result<bool> {
+        self.provider.has_state_at(block_number)
+    }
+
+    /// Blocking variant for callers that already run this work outside an async
+    /// hot path.
+    pub fn latest_state_status_blocking(&self) -> Result<LiveStateStatus> {
+        let latest = self.provider.latest_state()?;
+        Ok(LiveStateStatus {
+            selected_block_number: latest.block_number,
+            selected_block_hash: latest.block_hash,
+            source: LiveStateSource::InMemoryLiveBlockSession,
+            latest_reth_finished_block_number: latest.block_number,
+            latest_historical_context_block_number: latest.block_number,
+            latest_live_block_number: Some(latest.block_number),
+            latest_tracked_state_block_number: Some(latest.block_number),
+        })
+    }
+
+    /// Latest block announced by the in-memory live-state source.
+    pub async fn latest_live_block_number(&self) -> Result<Option<u64>> {
+        Ok(Some(self.provider.latest_state()?.block_number))
+    }
+
+    /// Start a stateful simulation chain at the latest in-memory state block.
+    pub async fn start_latest_chain(&self) -> Result<UnsignedTxChainSimulation> {
+        Ok(self.provider.latest_state()?.session().simulation_chain())
+    }
+
+    /// Start a stateful simulation chain at a specific live block.
+    pub async fn start_chain_at(&self, block_number: u64) -> Result<UnsignedTxChainSimulation> {
+        Ok(self
+            .provider
+            .state_at(block_number)?
+            .session()
+            .simulation_chain())
+    }
+
+    /// Start a mixed signed/unsigned session at the latest in-memory state.
+    pub async fn start_latest_session(&self) -> Result<SimulationSession> {
+        Ok(self.provider.latest_state()?.session().simulation_session())
+    }
+
+    /// Start a mixed signed/unsigned session at a specific live block.
+    pub async fn start_session_at(&self, block_number: u64) -> Result<SimulationSession> {
+        Ok(self
+            .provider
+            .state_at(block_number)?
+            .session()
+            .simulation_session())
+    }
+
+    /// Simulate one unsigned transaction against the latest in-memory state.
+    pub async fn simulate_transaction(
+        &self,
+        transaction: UnsignedTransaction,
+    ) -> Result<SimulationResult> {
+        let mut session = self.start_latest_session().await?;
+        session.step_unsigned(transaction)
+    }
+
+    /// Simulate one signed transaction against the latest in-memory state.
+    pub async fn simulate_signed_transaction(
+        &self,
+        transaction: &SignedTransaction,
+    ) -> Result<SimulationResult> {
+        let mut session = self.start_latest_session().await?;
+        session.step_signed(transaction)
+    }
+
+    /// Simulate a sequence of unsigned transactions against the latest in-memory state.
+    pub async fn simulate_sequence(
+        &self,
+        transactions: Vec<UnsignedTransaction>,
+    ) -> Result<Vec<SimulationResult>> {
+        let mut session = self.start_latest_session().await?;
+        let mut results = Vec::with_capacity(transactions.len());
+        for transaction in transactions {
+            results.push(session.step_unsigned(transaction)?);
+        }
+        Ok(results)
+    }
+
+    /// Simulate a mixed signed/unsigned sequence against the latest in-memory state.
+    pub async fn simulate_mixed_sequence(
+        &self,
+        transactions: Vec<SessionTransaction>,
+    ) -> Result<Vec<SimulationResult>> {
+        let mut session = self.start_latest_session().await?;
+        let mut results = Vec::with_capacity(transactions.len());
+        for transaction in transactions {
+            results.push(session.step(transaction)?);
+        }
+        Ok(results)
+    }
+}
+
+/// Explicit adapter for callers that want the latest locally-readable Reth
+/// historical context. This is not a live pre-submit simulator.
+#[derive(Clone)]
+pub struct LatestHistoricalTxSimulator {
+    simulator: Arc<TxSimulator>,
+}
+
+impl LatestHistoricalTxSimulator {
     pub fn new(reth_datadir: &str) -> Result<Self> {
         Ok(Self::from_simulator(Arc::new(TxSimulator::new(
             reth_datadir,
@@ -65,45 +357,23 @@ impl LiveTxSimulator {
         Arc::clone(&self.simulator)
     }
 
-    /// Latest block for which this wrapper can open a simulation session.
     pub async fn latest_state_block_number(&self) -> Result<u64> {
         Ok(self.latest_state_status().await?.selected_block_number)
     }
 
-    /// Full state-selection diagnostics for live simulation.
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
         self.latest_state_status_blocking()
     }
 
-    /// Full state-selection diagnostics, requiring state at or after the
-    /// caller's exact signal dependency block.
-    pub async fn latest_state_status_at_or_after(
-        &self,
-        required_block_number: u64,
-    ) -> Result<LiveStateStatus> {
-        let status = self.latest_state_status().await?;
-        if !status.is_ready_for_block(required_block_number) {
-            return Err(eyre!(
-                "live simulation state is not ready: selected_block={} required_block={} latest_reth_finished_block={} latest_historical_context_block={} source={:?}",
-                status.selected_block_number,
-                required_block_number,
-                status.latest_reth_finished_block_number,
-                status.latest_historical_context_block_number,
-                status.source
-            ));
-        }
-        Ok(status)
-    }
-
-    /// Blocking variant for callers that already run this work outside an async
-    /// hot path.
     pub fn latest_state_status_blocking(&self) -> Result<LiveStateStatus> {
         let latest_reth_finished = self.latest_reth_finished_block_number()?;
         let latest_historical_context = self.latest_historical_context_block_number()?;
-        select_state_status(latest_reth_finished, latest_historical_context, None, None)
+        Ok(local_historical_context_state_status(
+            latest_reth_finished,
+            latest_historical_context,
+        ))
     }
 
-    /// Latest block announced by an external live-state source.
     pub async fn latest_live_block_number(&self) -> Result<Option<u64>> {
         Ok(None)
     }
@@ -114,9 +384,6 @@ impl LiveTxSimulator {
     }
 
     /// Compatibility alias for callers that still use the old name.
-    ///
-    /// This is raw Reth Finish-stage progress, not necessarily the latest block
-    /// whose header/state context is readable from local Reth.
     pub fn latest_persisted_block_number(&self) -> Result<u64> {
         self.latest_reth_finished_block_number()
     }
@@ -126,7 +393,6 @@ impl LiveTxSimulator {
         self.simulator.latest_historical_context_block_number()
     }
 
-    /// Start a stateful simulation chain at the latest selected state block.
     pub async fn start_latest_chain(&self) -> Result<UnsignedTxChainSimulation> {
         let block_number = self.latest_state_status().await?.selected_block_number;
         self.simulator
@@ -134,20 +400,17 @@ impl LiveTxSimulator {
             .await
     }
 
-    /// Start a stateful simulation chain at a specific block.
     pub async fn start_chain_at(&self, block_number: u64) -> Result<UnsignedTxChainSimulation> {
         self.simulator
             .start_simulation_chain(Some(block_number))
             .await
     }
 
-    /// Start a mixed signed/unsigned session at the latest live-first state.
     pub async fn start_latest_session(&self) -> Result<SimulationSession> {
         let block_number = self.latest_state_status().await?.selected_block_number;
         self.start_session_at(block_number).await
     }
 
-    /// Start a mixed signed/unsigned session at a specific block.
     pub async fn start_session_at(&self, block_number: u64) -> Result<SimulationSession> {
         self.simulator
             .simulation_session_with_options(SimulationSessionOptions {
@@ -157,7 +420,6 @@ impl LiveTxSimulator {
             .await
     }
 
-    /// Simulate one unsigned transaction against the latest selected state.
     pub async fn simulate_transaction(
         &self,
         transaction: UnsignedTransaction,
@@ -165,121 +427,30 @@ impl LiveTxSimulator {
         let mut session = self.start_latest_session().await?;
         session.step_unsigned(transaction)
     }
-
-    /// Simulate one signed transaction against the latest selected state.
-    pub async fn simulate_signed_transaction(
-        &self,
-        transaction: &SignedTransaction,
-    ) -> Result<SimulationResult> {
-        let mut session = self.start_latest_session().await?;
-        session.step_signed(transaction)
-    }
-
-    /// Simulate a sequence of unsigned transactions against the latest selected state.
-    pub async fn simulate_sequence(
-        &self,
-        transactions: Vec<UnsignedTransaction>,
-    ) -> Result<Vec<SimulationResult>> {
-        let mut session = self.start_latest_session().await?;
-        let mut results = Vec::with_capacity(transactions.len());
-        for transaction in transactions {
-            results.push(session.step_unsigned(transaction)?);
-        }
-        Ok(results)
-    }
-
-    /// Simulate a mixed signed/unsigned sequence against the latest selected state.
-    pub async fn simulate_mixed_sequence(
-        &self,
-        transactions: Vec<SessionTransaction>,
-    ) -> Result<Vec<SimulationResult>> {
-        let mut session = self.start_latest_session().await?;
-        let mut results = Vec::with_capacity(transactions.len());
-        for transaction in transactions {
-            results.push(session.step(transaction)?);
-        }
-        Ok(results)
-    }
-}
-
-fn select_state_status(
-    latest_reth_finished: u64,
-    latest_historical_context: u64,
-    latest_live: Option<u64>,
-    latest_tracked_state: Option<u64>,
-) -> Result<LiveStateStatus> {
-    let Some(live_head) = latest_live else {
-        return Ok(local_historical_context_state_status(
-            latest_reth_finished,
-            latest_historical_context,
-            latest_live,
-            latest_tracked_state,
-        ));
-    };
-
-    if latest_historical_context >= live_head {
-        return Ok(local_historical_context_state_status(
-            latest_reth_finished,
-            latest_historical_context,
-            latest_live,
-            latest_tracked_state,
-        ));
-    }
-
-    if let Some(tracked_state) = latest_tracked_state.filter(|block| *block >= live_head) {
-        return Ok(LiveStateStatus {
-            selected_block_number: tracked_state,
-            source: LiveStateSource::TrackedLiveState,
-            latest_reth_finished_block_number: latest_reth_finished,
-            latest_historical_context_block_number: latest_historical_context,
-            latest_live_block_number: latest_live,
-            latest_tracked_state_block_number: latest_tracked_state,
-        });
-    }
-
-    Err(eyre!(
-        "live tracked state is behind live head: latest_live={live_head}, latest_historical_context={latest_historical_context}, latest_reth_finished={latest_reth_finished}, latest_tracked_state={latest_tracked_state:?}"
-    ))
 }
 
 fn local_historical_context_state_status(
     latest_reth_finished: u64,
     latest_historical_context: u64,
-    latest_live: Option<u64>,
-    latest_tracked_state: Option<u64>,
 ) -> LiveStateStatus {
     LiveStateStatus {
         selected_block_number: latest_historical_context,
+        selected_block_hash: None,
         source: LiveStateSource::LocalHistoricalContext,
         latest_reth_finished_block_number: latest_reth_finished,
         latest_historical_context_block_number: latest_historical_context,
-        latest_live_block_number: latest_live,
-        latest_tracked_state_block_number: latest_tracked_state,
+        latest_live_block_number: None,
+        latest_tracked_state_block_number: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{select_state_status, LiveStateSource};
+    use super::{local_historical_context_state_status, LiveStateSource};
 
     #[test]
-    fn uses_local_historical_context_when_no_live_state_exists() {
-        let status = select_state_status(100, 100, None, None).unwrap();
-        assert_eq!(status.selected_block_number, 100);
-        assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
-        assert!(!status.local_context_lags_selected_state());
-    }
-
-    #[test]
-    fn uses_local_historical_context_when_it_is_caught_up() {
-        let status = select_state_status(105, 105, Some(105), Some(105)).unwrap();
-        assert_eq!(status.selected_block_number, 105);
-        assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
-    }
-
-    #[test]
-    fn uses_historical_context_when_reth_finished_is_ahead_of_static_headers() {
-        let status = select_state_status(106, 105, Some(105), Some(105)).unwrap();
+    fn historical_adapter_status_is_explicitly_local_context() {
+        let status = local_historical_context_state_status(106, 105);
         assert_eq!(status.selected_block_number, 105);
         assert_eq!(status.source, LiveStateSource::LocalHistoricalContext);
         assert_eq!(status.latest_reth_finished_block_number, 106);
@@ -287,21 +458,18 @@ mod tests {
     }
 
     #[test]
-    fn uses_tracked_live_state_when_it_is_ahead_of_local_context() {
-        let status = select_state_status(100, 100, Some(102), Some(102)).unwrap();
-        assert_eq!(status.selected_block_number, 102);
-        assert_eq!(status.source, LiveStateSource::TrackedLiveState);
-        assert!(status.uses_tracked_live_state());
-        assert!(status.local_context_lags_selected_state());
-    }
-
-    #[test]
-    fn fails_when_live_head_is_ahead_but_tracked_state_is_missing() {
-        assert!(select_state_status(100, 100, Some(102), None).is_err());
-    }
-
-    #[test]
-    fn fails_when_live_head_is_ahead_but_tracked_state_is_stale() {
-        assert!(select_state_status(100, 100, Some(102), Some(101)).is_err());
+    fn live_readiness_requires_exact_decision_block() {
+        let status = super::LiveStateStatus {
+            selected_block_number: 102,
+            selected_block_hash: None,
+            source: LiveStateSource::InMemoryLiveBlockSession,
+            latest_reth_finished_block_number: 102,
+            latest_historical_context_block_number: 102,
+            latest_live_block_number: Some(102),
+            latest_tracked_state_block_number: Some(102),
+        };
+        assert!(status.is_ready_for_block(102));
+        assert!(!status.is_ready_for_block(101));
+        assert!(!status.is_ready_for_block(103));
     }
 }

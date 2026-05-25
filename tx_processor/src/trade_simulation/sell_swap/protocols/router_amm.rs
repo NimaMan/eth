@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 use eyre::{eyre, Result};
 use std::sync::Arc;
 use tx_simulator::tx_builders;
-use tx_simulator::TxSimulator;
+use tx_simulator::{TxSimulator, UnsignedTxChainSimulation};
 
 use crate::trade_simulation::types::PoolBuySellParameters;
 use crate::tx_processor::TxProcessor;
@@ -24,6 +24,26 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sel
     tokens_to_sell: U256,
     block: u64,
 ) -> Result<SellSwapResult> {
+    let chain = simulator.start_simulation_chain(Some(block)).await?;
+    simulate_router_protocol_sell_with_chain(
+        simulator,
+        tx_processor,
+        config,
+        tokens_to_sell,
+        block,
+        chain,
+    )
+    .await
+}
+
+pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sell_with_chain(
+    _simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    config: PoolBuySellParameters,
+    tokens_to_sell: U256,
+    block: u64,
+    mut chain: UnsignedTxChainSimulation,
+) -> Result<SellSwapResult> {
     let seller_address = config.buyer_address;
     let route = config
         .pool_type
@@ -35,7 +55,6 @@ pub(in crate::trade_simulation::sell_swap) async fn simulate_router_protocol_sel
             )
         })?;
 
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     let base_fee = chain.block_base_fee();
     chain.set_eth_balance(seller_address, U256::from(SELLER_ETH_FUND))?;
     let balance_setup = prepare_seller_token_balance(

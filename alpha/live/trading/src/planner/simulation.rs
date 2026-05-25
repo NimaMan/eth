@@ -137,7 +137,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
         })?;
 
         let base_metadata = json!({
-            "provider": "reth_exact_calldata_uniswap_v2_trading_vault",
+            "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
             "route_protocol": route.protocol,
             "vault_address": self.vault_address.to_string(),
             "from": from.to_string(),
@@ -162,7 +162,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
         if !result.success {
             return Ok(PreSubmitSimulation {
                 block_number: status.selected_block_number,
-                block_hash: None,
+                block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
                 state_root: None,
                 expected_output_token: Some("ETH".to_string()),
                 expected_output_amount: None,
@@ -187,7 +187,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
 
                 Ok(PreSubmitSimulation {
                     block_number: status.selected_block_number,
-                    block_hash: None,
+                    block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
                     state_root: None,
                     expected_output_token: Some(input.intent.token_address.to_string()),
                     expected_output_amount: Some(fill.tokens_received.to_string()),
@@ -200,7 +200,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
                     gas_used: Some(result.gas_used),
                     would_revert: false,
                     metadata: json!({
-                        "provider": "reth_exact_calldata_uniswap_v2_trading_vault",
+                        "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
                         "event": "BoughtV2",
                         "eth_spent_wei": fill.eth_spent.to_string(),
                         "tokens_received_raw": fill.tokens_received.to_string(),
@@ -223,7 +223,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
 
                 Ok(PreSubmitSimulation {
                     block_number: status.selected_block_number,
-                    block_hash: None,
+                    block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
                     state_root: None,
                     expected_output_token: Some("ETH".to_string()),
                     expected_output_amount: Some(fill.eth_received.to_string()),
@@ -236,7 +236,7 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
                     gas_used: Some(result.gas_used),
                     would_revert: false,
                     metadata: json!({
-                        "provider": "reth_exact_calldata_uniswap_v2_trading_vault",
+                        "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
                         "event": "EmergencySoldV2",
                         "amount_in_raw": fill.amount_in.to_string(),
                         "eth_received_wei": fill.eth_received.to_string(),

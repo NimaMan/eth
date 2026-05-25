@@ -18,7 +18,7 @@ use crate::common::convert::ipc_to_unsigned_tx;
 use crate::mempool_fetcher::MempoolTransaction;
 use tx_processor::PoolBuySellParameters;
 use tx_simulator::{
-    LiveStateStatus, LiveTxSimulator, SimulationResult as TxSimResult, TxSimulator,
+    LatestHistoricalTxSimulator, LiveStateStatus, SimulationResult as TxSimResult, TxSimulator,
     UnsignedTransaction,
 };
 
@@ -26,8 +26,8 @@ use tx_simulator::{
 pub struct MempoolSimulator {
     /// The underlying TxSimulator for direct simulation
     tx_simulator: Arc<TxSimulator>,
-    /// Live-first selector for mempool simulations.
-    live_tx_simulator: LiveTxSimulator,
+    /// Latest locally-readable Reth context selector for mempool simulations.
+    live_tx_simulator: LatestHistoricalTxSimulator,
     /// The pool buy/sell simulator
     pool_simulator: PoolBuySellSimulator,
 }
@@ -63,7 +63,7 @@ impl MempoolSimulator {
         info!("Initializing mempool simulator...");
 
         let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
-        let live_tx_simulator = LiveTxSimulator::from_simulator(tx_simulator.clone());
+        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
 
         // Create pool simulator with the same TxSimulator
         let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())?;
@@ -84,7 +84,7 @@ impl MempoolSimulator {
         info!("Initializing mempool simulator from shared TxSimulator...");
 
         // Reuse the provided TxSimulator for both single and pool simulations
-        let live_tx_simulator = LiveTxSimulator::from_simulator(tx_simulator.clone());
+        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
         let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())?;
 
         info!("✅ Mempool simulator initialized with shared TxSimulator");
@@ -101,7 +101,7 @@ impl MempoolSimulator {
         info!("Initializing mempool simulator with custom buyer...");
 
         let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
-        let live_tx_simulator = LiveTxSimulator::from_simulator(tx_simulator.clone());
+        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
 
         // Create pool simulator with custom buyer and default amount
         let default_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH

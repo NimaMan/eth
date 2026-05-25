@@ -149,42 +149,50 @@ pub(super) fn outcome_from_selection(
             selection.status
         )
     });
-    let evidence = MinedExecutionEvidence {
-        receipt_block_number: report.block_number,
-        submitted_block_number: report.block_number.map(|block| block.saturating_sub(1)),
-        expected_confirmation_block: report.block_number,
-        confirmation_lag_blocks: Some(1),
-        effective_gas_price_wei,
-        paid_gas_cost_wei,
-        selected_gas_limit: Some(gas_limit.to_string()),
-        selected_max_fee_per_gas_wei: selection.max_fee_per_gas_gwei.map(gwei_to_wei_string),
-        selected_max_priority_fee_per_gas_wei: selection.priority_fee_gwei.map(gwei_to_wei_string),
-        selected_bribe_priority_fee_per_gas_wei: selection
-            .priority_fee_gwei
-            .map(gwei_to_wei_string),
-        selected_bribe_max_fee_per_gas_wei: selection.max_fee_per_gas_gwei.map(gwei_to_wei_string),
-        gas_policy_action: Some(selection.action),
-        gas_policy_signal: Some(selection.signal),
-        gas_policy_status: Some(selection.status),
-        gas_policy_profile: selection.selected_profile,
-        gas_policy_profiles: Some(selection.profiles),
-        gas_rank_source: selection.source,
-        gas_estimated_max_cost_eth: selection.estimated_max_cost_eth.map(decimal_string),
-        gas_estimated_priority_spend_eth: selection
-            .estimated_priority_spend_eth
-            .map(decimal_string),
-        gas_policy_guard: Some(gas_policy_guard),
-        gas_policy_tail_after_tx_hash: tail_entry_ordering
-            .as_ref()
-            .and_then(|evidence| evidence.tail_after_tx_hash.clone()),
-        gas_policy_dependency_priority_fee_wei: tail_entry_ordering
-            .as_ref()
-            .and_then(|evidence| evidence.dependency_priority_fee_wei.clone()),
-        gas_policy_dependency_gas_price_wei: tail_entry_ordering
-            .as_ref()
-            .and_then(|evidence| evidence.dependency_gas_price_wei.clone()),
-        ..MinedExecutionEvidence::default()
+    let mut evidence = report.mined_evidence.clone().unwrap_or_default();
+    evidence.receipt_block_number = evidence.receipt_block_number.or(report.block_number);
+    evidence.simulation_block_number = evidence.simulation_block_number.or(report.block_number);
+    evidence.submitted_block_number = evidence
+        .submitted_block_number
+        .or_else(|| report.block_number.map(|block| block.saturating_sub(1)));
+    evidence.expected_confirmation_block =
+        evidence.expected_confirmation_block.or(report.block_number);
+    evidence.confirmation_lag_blocks = match (
+        evidence.receipt_block_number,
+        evidence.expected_confirmation_block,
+    ) {
+        (Some(actual), Some(expected)) => Some(actual as i64 - expected as i64),
+        _ => evidence.confirmation_lag_blocks,
     };
+    evidence.effective_gas_price_wei = effective_gas_price_wei;
+    evidence.paid_gas_cost_wei = paid_gas_cost_wei;
+    evidence.selected_gas_limit = Some(gas_limit.to_string());
+    evidence.selected_max_fee_per_gas_wei = selection.max_fee_per_gas_gwei.map(gwei_to_wei_string);
+    evidence.selected_max_priority_fee_per_gas_wei =
+        selection.priority_fee_gwei.map(gwei_to_wei_string);
+    evidence.selected_bribe_priority_fee_per_gas_wei =
+        selection.priority_fee_gwei.map(gwei_to_wei_string);
+    evidence.selected_bribe_max_fee_per_gas_wei =
+        selection.max_fee_per_gas_gwei.map(gwei_to_wei_string);
+    evidence.gas_policy_action = Some(selection.action);
+    evidence.gas_policy_signal = Some(selection.signal);
+    evidence.gas_policy_status = Some(selection.status);
+    evidence.gas_policy_profile = selection.selected_profile;
+    evidence.gas_policy_profiles = Some(selection.profiles);
+    evidence.gas_rank_source = selection.source;
+    evidence.gas_estimated_max_cost_eth = selection.estimated_max_cost_eth.map(decimal_string);
+    evidence.gas_estimated_priority_spend_eth =
+        selection.estimated_priority_spend_eth.map(decimal_string);
+    evidence.gas_policy_guard = Some(gas_policy_guard);
+    evidence.gas_policy_tail_after_tx_hash = tail_entry_ordering
+        .as_ref()
+        .and_then(|evidence| evidence.tail_after_tx_hash.clone());
+    evidence.gas_policy_dependency_priority_fee_wei = tail_entry_ordering
+        .as_ref()
+        .and_then(|evidence| evidence.dependency_priority_fee_wei.clone());
+    evidence.gas_policy_dependency_gas_price_wei = tail_entry_ordering
+        .as_ref()
+        .and_then(|evidence| evidence.dependency_gas_price_wei.clone());
     ShadowGasOutcome {
         evidence,
         gas_cost,
@@ -289,7 +297,7 @@ mod tests {
     use eth_alpha_core::{
         amount::{Amount, DecimalAmount},
         decision_rationale::{DecisionReason, ReasonCategory},
-        execution::{ExecutionReport, ExecutionStatus},
+        execution::{ExecutionReport, ExecutionStatus, MinedExecutionEvidence},
         ids::{OrderId, PoolAddress, PortfolioId, StrategyName, WalletId},
         market::PoolProtocol,
         order::{OrderIntent, OrderSide},
@@ -442,6 +450,41 @@ mod tests {
         assert!(report.filled_amount.is_none());
         assert!(report.gas_cost.is_none());
         assert!(report.error.as_deref().unwrap().contains("rejected"));
+    }
+
+    #[test]
+    fn shadow_policy_preserves_live_chain_sim_block_evidence() {
+        let mut report = report(100_000, 10_000_000_000_000);
+        report.mined_evidence = Some(MinedExecutionEvidence {
+            receipt_block_number: Some(100),
+            simulation_block_number: Some(100),
+            submitted_block_number: Some(99),
+            expected_confirmation_block: Some(100),
+            confirmation_lag_blocks: Some(0),
+            receipt_status: Some("live_backtest_chain_sim".to_string()),
+            ..MinedExecutionEvidence::default()
+        });
+        let outcome = outcome_from_selection(
+            &intent(OrderSide::Buy),
+            &report,
+            300_000,
+            150_000,
+            selected(2, 20),
+        );
+
+        assert_eq!(outcome.evidence.submitted_block_number, Some(99));
+        assert_eq!(outcome.evidence.expected_confirmation_block, Some(100));
+        assert_eq!(outcome.evidence.simulation_block_number, Some(100));
+        assert_eq!(outcome.evidence.receipt_block_number, Some(100));
+        assert_eq!(outcome.evidence.confirmation_lag_blocks, Some(0));
+        assert_eq!(
+            outcome.evidence.receipt_status.as_deref(),
+            Some("live_backtest_chain_sim")
+        );
+        assert_eq!(
+            outcome.evidence.gas_policy_action.as_deref(),
+            Some("entry_buy")
+        );
     }
 
     #[test]

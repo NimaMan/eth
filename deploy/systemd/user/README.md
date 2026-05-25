@@ -3,14 +3,23 @@
 These user-level units keep the alpha execution processes separated by
 broadcast capability.
 
-Install or refresh the symlinks with `../../node/scripts/install-user-services.sh`.
+Install or refresh the symlinks with:
+
+```bash
+/home/nima/code/crypto/blockchains/eth/deploy/node/scripts/install-user-services.sh
+```
+
+Chain-server is intentionally not a user unit. It is a system service installed
+from `deploy/systemd/eth-chain-server.service` and managed with
+`sudo systemctl`. The user alpha services perform runtime readiness checks
+against the chain-server API instead of starting a second chain-server process.
 
 | Unit | Purpose | Broadcast capability |
 | --- | --- | --- |
 | `eth-alpha-live-backtest.service` | Live no-capital alpha backtest runner using `eth_alpha_live_backtest_trader`. | None; never contacts Kartal. |
 | `eth-alpha-live-real-trading.service` | Live real-executor runner using `eth_alpha_live_trader` with strategy-owned bankroll entries. | Kartal public mempool only when the explicit hold16 deploy guard passes. |
-| `eth-alpha-live-backtest.target` | Chain server, mempool signal detector, and live chain-sim alpha backtest. | None. |
-| `eth-alpha-live-real-trading.target` | Chain server, mempool signal detector, and live real-executor alpha runner. | Same as the real-trading service. |
+| `eth-alpha-live-backtest.target` | Mempool signal detector and live chain-sim alpha backtest. Chain-server must already be running as the system unit. | None. |
+| `eth-alpha-live-real-trading.target` | Mempool signal detector and live real-executor alpha runner. Chain-server and Kartal signer must already be running as system units. | Same as the real-trading service. |
 
 Backtests are intentionally not systemd services here. They are on-demand
 historical jobs from `alpha/backtest` and must stay simulator-only.

@@ -11,8 +11,9 @@ mod schema;
 mod trading_store;
 
 pub use postgres::{
-    ActiveHoldCounterRecord, ManualCloseRequest, PostgresTradingStore, StrategyObservationCursor,
-    StrategyObservationRecord, SubmittedExecutionRecord,
+    ActiveHoldCounterRecord, ChainSimSubmittedExecutionRecord, ManualCloseRequest,
+    PostgresTradingStore, StrategyObservationCursor, StrategyObservationRecord,
+    SubmittedExecutionRecord,
 };
 
 pub(crate) use codec::*;
@@ -29,19 +30,51 @@ use sqlx::{Postgres, Row, Transaction};
 
 use schema::MIGRATIONS;
 
+struct TradeAccountingFields {
+    current_value_eth: Option<String>,
+    unrealized_pnl_eth: Option<String>,
+    total_pnl_eth: Option<String>,
+}
+
+fn trade_accounting_fields_for_position(position: &Position) -> TradeAccountingFields {
+    if matches!(
+        position.state,
+        PositionState::BuyDeferred
+            | PositionState::BuyFailed
+            | PositionState::BuyCancelled
+            | PositionState::Cancelled
+    ) {
+        return TradeAccountingFields {
+            current_value_eth: Some("0".to_string()),
+            unrealized_pnl_eth: Some("0".to_string()),
+            total_pnl_eth: Some(position.realized_pnl().to_string()),
+        };
+    }
+
+    TradeAccountingFields {
+        current_value_eth: None,
+        unrealized_pnl_eth: None,
+        total_pnl_eth: None,
+    }
+}
+
 impl PostgresTradingStore {
     async fn upsert_trade_for_position(&self, position: &Position) -> Result<()> {
         let payload = to_json(position)?;
         let result_set_id = self.result_set_id().await?;
+        let state_label = position_state_label(&position.state);
+        let realized_pnl_eth = position.realized_pnl().to_string();
+        let accounting = trade_accounting_fields_for_position(position);
         sqlx::query(
             r#"
             INSERT INTO alpha_trading.trades (
                 trade_id, result_set_id, run_id, position_id, strategy_name,
                 token_address, pool_address, protocol, state, entry_order_id, exit_order_id,
-                entry_block, exit_block, entry_cost_eth, exit_value_eth, gas_cost_eth,
-                realized_pnl_eth, payload, created_at, updated_at
+                entry_block, exit_block, entry_cost_eth, exit_value_eth, current_value_eth,
+                gas_cost_eth, realized_pnl_eth, unrealized_pnl_eth, total_pnl_eth,
+                payload, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), NOW())
             ON CONFLICT (trade_id) DO UPDATE SET
                 result_set_id = EXCLUDED.result_set_id,
                 run_id = EXCLUDED.run_id,
@@ -57,9 +90,12 @@ impl PostgresTradingStore {
                 exit_block = EXCLUDED.exit_block,
                 entry_cost_eth = EXCLUDED.entry_cost_eth,
                 exit_value_eth = EXCLUDED.exit_value_eth,
+                current_value_eth = COALESCE(EXCLUDED.current_value_eth, alpha_trading.trades.current_value_eth),
                 gas_cost_eth = EXCLUDED.gas_cost_eth,
                 realized_pnl_eth = EXCLUDED.realized_pnl_eth,
+                unrealized_pnl_eth = COALESCE(EXCLUDED.unrealized_pnl_eth, alpha_trading.trades.unrealized_pnl_eth),
                 total_pnl_eth = CASE
+                    WHEN EXCLUDED.total_pnl_eth IS NOT NULL THEN EXCLUDED.total_pnl_eth
                     WHEN EXCLUDED.state IN ('buy_confirmed', 'sell_intent_created', 'sell_submitted', 'sell_failed', 'sell_cancelled')
                          AND NULLIF(EXCLUDED.realized_pnl_eth, '') IS NOT NULL
                          AND NULLIF(alpha_trading.trades.unrealized_pnl_eth, '') IS NOT NULL
@@ -95,15 +131,18 @@ impl PostgresTradingStore {
         .bind(position.key.token_address.to_string())
         .bind(position.key.pool_address.to_string())
         .bind(protocol_label(&position.key.protocol))
-        .bind(position_state_label(&position.state))
+        .bind(state_label)
         .bind(position.entry_order_id.as_ref().map(|id| id.0.as_str()))
         .bind(position.exit_order_id.as_ref().map(|id| id.0.as_str()))
         .bind(position.entry_block.map(u64_to_i64))
         .bind(position.exit_block.map(u64_to_i64))
         .bind(position.entry_cost_basis.map(|value| value.to_string()))
         .bind(position.exit_proceeds.map(|value| value.to_string()))
+        .bind(accounting.current_value_eth.as_deref())
         .bind(position.gas_cost_eth.to_string())
-        .bind(position.realized_pnl().to_string())
+        .bind(realized_pnl_eth)
+        .bind(accounting.unrealized_pnl_eth.as_deref())
+        .bind(accounting.total_pnl_eth.as_deref())
         .bind(payload)
         .execute(&self.pool)
         .await
@@ -727,13 +766,23 @@ impl PostgresTradingStore {
                 END,
                 current_value_eth = CASE
                     WHEN $2 = 'sell' AND $3 = 'confirmed' THEN '0'
+                    WHEN $2 = 'buy' AND $3 IN ('deferred', 'failed', 'cancelled') THEN '0'
                     ELSE current_value_eth
+                END,
+                realized_pnl_eth = CASE
+                    WHEN $2 = 'buy' AND $3 IN ('failed', 'cancelled') AND $7 IS NOT NULL
+                    THEN (-NULLIF($7, '')::numeric)::text
+                    ELSE realized_pnl_eth
                 END,
                 unrealized_pnl_eth = CASE
                     WHEN $2 = 'sell' AND $3 = 'confirmed' THEN '0'
+                    WHEN $2 = 'buy' AND $3 IN ('deferred', 'failed', 'cancelled') THEN '0'
                     ELSE unrealized_pnl_eth
                 END,
                 total_pnl_eth = CASE
+                    WHEN $2 = 'buy' AND $3 IN ('failed', 'cancelled') AND $7 IS NOT NULL
+                    THEN (-NULLIF($7, '')::numeric)::text
+                    WHEN $2 = 'buy' AND $3 = 'deferred' THEN COALESCE(realized_pnl_eth, '0')
                     WHEN $2 = 'sell' AND $3 = 'confirmed' THEN realized_pnl_eth
                     ELSE total_pnl_eth
                 END,

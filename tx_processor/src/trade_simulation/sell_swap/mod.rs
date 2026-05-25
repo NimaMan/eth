@@ -4,12 +4,14 @@ mod protocols;
 use alloy_primitives::{Address, U256};
 use eyre::Result;
 use std::sync::Arc;
-use tx_simulator::TxSimulator;
+use tx_simulator::{TxSimulator, UnsignedTxChainSimulation};
 
 use super::types::{PoolBuySellParameters, PoolType};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
-use protocols::router_amm::simulate_router_protocol_sell;
+use protocols::router_amm::{
+    simulate_router_protocol_sell, simulate_router_protocol_sell_with_chain,
+};
 use protocols::uniswap::v3::simulate_universal_router_v3_sell;
 use protocols::uniswap::v4::simulate_universal_router_v4_sell;
 
@@ -86,6 +88,40 @@ pub async fn simulate_sell_swap_with_params(
         }
         pool_type => Err(eyre::eyre!(
             "Pool type {:?} not yet supported for sell-only simulation",
+            pool_type
+        )),
+    }
+}
+
+pub async fn simulate_sell_swap_with_params_and_chain(
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    mut config: PoolBuySellParameters,
+    tokens_to_sell: U256,
+    chain: UnsignedTxChainSimulation,
+) -> Result<SellSwapResult> {
+    let block = config
+        .block_number
+        .unwrap_or_else(|| chain.current_state().block_number);
+    config.block_number = Some(block);
+
+    match config.pool_type {
+        pool_type if pool_type.known_v2_protocol().is_some() => {
+            simulate_router_protocol_sell_with_chain(
+                simulator,
+                tx_processor,
+                config,
+                tokens_to_sell,
+                block,
+                chain,
+            )
+            .await
+        }
+        PoolType::UniswapV3 { .. } | PoolType::UniswapV4 => Err(eyre::eyre!(
+            "V3/V4 sell-only simulation with caller-supplied live chain is not implemented"
+        )),
+        pool_type => Err(eyre::eyre!(
+            "Pool type {:?} not yet supported for live-chain sell simulation",
             pool_type
         )),
     }

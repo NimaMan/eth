@@ -13,7 +13,7 @@ What This Module Provides
 - Mixed simulation sessions: `SimulationSession` keeps one warm fork for arbitrary signed/unsigned sequences, balance/nonce overrides, and read-only calls.
 - Block replay sessions: `BlockReplaySession` pins replay options for trace, profile, and execute-only lower-bound runs.
 - Trace collector reset: Block call-tracing keeps one tracing inspector alive and resets its per-tx trace buffers between transactions for Reth-style performance. Upstream Reth/REVM calls this `fuse`.
-- Live state: `live::LiveTxSimulator` uses MDBX when it is caught up, otherwise the state tracked by the live block processor.
+- Live state: `live::LiveTxSimulator` uses only the in-memory live block-session window published by the live block processor. It does not fall back to MDBX/Reth historical context.
 
 How This Compares To Reth
 - Reth debug RPC constructs an EVM env from canonical headers, executes with tracing inspectors for debug paths, and resets inspectors across block tracing. In upstream code the reset method is named `fuse`.
@@ -39,14 +39,14 @@ Key Building Blocks Here
 - Batch sequence (bundle): tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
 - Live simulator: tx_simulator/src/live/simulator.rs:1
-  - Selects local historical context when caught up, otherwise tracked live state.
+  - Uses in-memory live block sessions only; latest-Reth context is exposed separately as `LatestHistoricalTxSimulator`.
 - Revert decoding helpers: tx_simulator/src/revert/:1
 
 Equivalence Guarantees and Caveats
 - Canonical headers: All at‑block methods read headers via `HeaderProvider::header_by_number`; immediately after import there can be a short canonicalization window where this returns None.
 - Fees and gas: For signed txs we use tx‑provided gas and fees; for unsigned we allow EIP‑1559 or legacy fee fields and can derive safe defaults with base fee when needed.
 - Trace format: Exported via geth builders; shape is intended to match `debug_*` RPC traces (including `withLog` when enabled).
-- Live state: For blocks ahead of local historical context, live APIs require tracked live state from the live block processor.
+- Live state: Live APIs require an exact in-memory state session from the live published window.
 
 Typical Uses
 - Replace `debug_traceCall`/`debug_traceBlockByNumber` with local, zero‑RPC equivalents.

@@ -55,9 +55,10 @@ contracts from turning into a runtime orchestrator.
 
 ## Lessons From Current Code
 
-`LiveTxSimulator` already uses MDBX when it is caught up and otherwise uses
-tracked live state. The improvement is to keep the shared snapshot schemas and
-store traits outside `tx_simulator` so every crate depends on one contract.
+`LiveTxSimulator` is live-only and expects an in-memory mined block session from
+the live block processor. Latest local historical context stays under
+`TxSimulator` / `LatestHistoricalTxSimulator`. The shared snapshot schemas and
+store traits stay outside `tx_simulator` so every crate depends on one contract.
 
 When writing a block, publish atomically:
 

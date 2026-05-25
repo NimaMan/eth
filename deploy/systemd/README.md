@@ -7,7 +7,7 @@ Ethereum execution, beacon, chain-processing, signer, and alpha runtime units.
 | Path | Purpose |
 | --- | --- |
 | `*.service`, `*.socket` | System-level units copied to `/etc/systemd/system/`. |
-| `user/` | User-level node and alpha units linked into `$HOME/.config/systemd/user`. |
+| `user/` | User-level alpha runner and mempool detector units linked into `$HOME/.config/systemd/user`. |
 
 Current system units:
 
@@ -21,7 +21,9 @@ Current system units:
 - `eth-mempool-processor.service` - Rust mempool signal detector.
 
 Current user units are documented in `user/README.md` and are installed by
-`../node/scripts/install-user-services.sh`.
+`../node/scripts/install-user-services.sh`. Chain-server is not installed as a
+user unit; keep exactly one `eth_chain_server` process, owned by the system
+`eth-chain-server.service`.
 
 Build the live processor before starting the service:
 

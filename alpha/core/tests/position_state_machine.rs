@@ -132,6 +132,41 @@ fn deferred_buy_has_no_exposure_and_is_not_failed() {
 }
 
 #[test]
+fn deferred_buy_can_retry_same_position() {
+    let mut position = position();
+    let first_order_id = OrderId("buy-1".to_string());
+    let second_order_id = OrderId("buy-2".to_string());
+
+    position.mark_intent_created(OrderSide::Buy).unwrap();
+    position
+        .mark_order_submitted(first_order_id.clone(), OrderSide::Buy)
+        .unwrap();
+    position
+        .apply_execution_report(&ExecutionReport {
+            order_id: first_order_id,
+            status: ExecutionStatus::Deferred,
+            tx_hash: None,
+            block_number: Some(1),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("simulation state not ready".to_string()),
+        })
+        .unwrap();
+
+    position.mark_intent_created(OrderSide::Buy).unwrap();
+    position
+        .mark_order_submitted(second_order_id.clone(), OrderSide::Buy)
+        .unwrap();
+
+    assert_eq!(position.state, PositionState::BuySubmitted);
+    assert_eq!(position.entry_order_id.as_ref(), Some(&second_order_id));
+    assert!(!position.has_exposure());
+}
+
+#[test]
 fn failed_sell_keeps_exposure_and_can_retry() {
     let mut position = position();
     let buy_order_id = OrderId("buy-1".to_string());

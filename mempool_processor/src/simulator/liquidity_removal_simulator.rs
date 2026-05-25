@@ -16,7 +16,7 @@ use tracing::{error, warn};
 use tx_processor::processed_tx_provider::ProcessedTxProvider;
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
 use tx_processor::ProcessedTransaction;
-use tx_simulator::{LiveTxSimulator, TxSimulator, UnsignedTransaction};
+use tx_simulator::{LatestHistoricalTxSimulator, TxSimulator, UnsignedTransaction};
 
 struct SimRequest {
     simulator: Arc<TxSimulator>,
@@ -124,13 +124,13 @@ struct ProtocolRemovalInfo {
 
 pub struct LiquidityRemovalSimulator {
     simulator: Arc<TxSimulator>,
-    live_tx_simulator: LiveTxSimulator,
+    live_tx_simulator: LatestHistoricalTxSimulator,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl LiquidityRemovalSimulator {
     pub fn new(simulator: Arc<TxSimulator>) -> Self {
-        let live_tx_simulator = LiveTxSimulator::from_simulator(simulator.clone());
+        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(simulator.clone());
         Self {
             simulator,
             live_tx_simulator,

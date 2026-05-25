@@ -1,6 +1,6 @@
 use eth_alpha_core::{
     ids::{OrderId, PositionId, TokenAddress, TradeId, TxHash},
-    order::OrderSide,
+    order::{OrderIntent, OrderSide},
 };
 use serde_json::Value;
 use sqlx::postgres::PgPool;
@@ -73,6 +73,18 @@ pub struct SubmittedExecutionRecord {
     pub gas_policy_tail_after_tx_hash: Option<String>,
     pub gas_policy_dependency_priority_fee_wei: Option<String>,
     pub gas_policy_dependency_gas_price_wei: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainSimSubmittedExecutionRecord {
+    pub order_id: OrderId,
+    pub submitted_block_number: Option<u64>,
+    pub expected_confirmation_block: Option<u64>,
+    pub position_id: PositionId,
+    pub trade_id: Option<TradeId>,
+    pub order_side: OrderSide,
+    pub token_address: TokenAddress,
+    pub intent: OrderIntent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

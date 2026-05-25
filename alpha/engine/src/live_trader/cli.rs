@@ -2,7 +2,6 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) struct Args {
-    pub(super) poll_interval_ms: Option<u64>,
     pub(super) mempool_since_days: Option<i64>,
     pub(super) signal_limit: Option<i64>,
     pub(super) run_id: Option<String>,
@@ -23,10 +22,6 @@ pub(super) struct RealExecutionArgs {
 
 #[derive(Debug, Parser)]
 struct LiveCommonCli {
-    /// Optional override for ALPHA_LIVE_TRADER_POLL_INTERVAL_MS in config.env.
-    #[arg(long)]
-    poll_interval_ms: Option<u64>,
-
     /// Optional override for ALPHA_LIVE_MEMPOOL_SINCE_DAYS in config.env.
     #[arg(long)]
     mempool_since_days: Option<i64>,
@@ -102,7 +97,6 @@ pub(super) fn parse_live_real_args() -> (Args, RealExecutionArgs) {
 impl From<LiveCommonCli> for Args {
     fn from(common: LiveCommonCli) -> Self {
         Self {
-            poll_interval_ms: common.poll_interval_ms,
             mempool_since_days: common.mempool_since_days,
             signal_limit: common.signal_limit,
             run_id: common.run_id,

@@ -3,13 +3,13 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tx_simulator::{LiveTxSimulator, TxSimulator};
+use tx_simulator::{LatestHistoricalTxSimulator, TxSimulator};
 
 /// Python wrapper for live-first transaction simulation.
 #[pyclass(name = "LiveTxSimulator")]
 pub struct PyLiveTxSimulator {
     runtime: Arc<Runtime>,
-    simulator: LiveTxSimulator,
+    simulator: LatestHistoricalTxSimulator,
 }
 
 impl PyLiveTxSimulator {
@@ -17,7 +17,7 @@ impl PyLiveTxSimulator {
         let runtime = Runtime::new().expect("Failed to create runtime");
         Self {
             runtime: Arc::new(runtime),
-            simulator: LiveTxSimulator::from_simulator(simulator),
+            simulator: LatestHistoricalTxSimulator::from_simulator(simulator),
         }
     }
 }
@@ -36,7 +36,7 @@ impl PyLiveTxSimulator {
 
         let reth_datadir = std::env::var("PYRETH_DATADIR")
             .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-        let simulator = LiveTxSimulator::new(&reth_datadir)
+        let simulator = LatestHistoricalTxSimulator::new(&reth_datadir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
         let runtime = Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
@@ -47,14 +47,14 @@ impl PyLiveTxSimulator {
         })
     }
 
-    /// Latest block with state: local historical context when caught up, otherwise tracked live state.
+    /// Latest block with state from local historical context.
     pub fn latest_state_block_number(&self) -> PyResult<u64> {
         self.runtime
             .block_on(self.simulator.latest_state_block_number())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
-    /// Latest block announced by tracked live state, if available.
+    /// Latest live block is not available from this latest-historical wrapper.
     pub fn latest_live_block_number(&self) -> PyResult<Option<u64>> {
         self.runtime
             .block_on(self.simulator.latest_live_block_number())
@@ -82,7 +82,7 @@ impl PyLiveTxSimulator {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
-    /// Simulate one transaction against the latest tracked live state.
+    /// Simulate one transaction against the latest local historical state.
     pub fn simulate_transaction(
         &self,
         transaction: &Bound<'_, PyDict>,

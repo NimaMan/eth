@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
 use std::sync::Arc;
-use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
 
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
@@ -58,6 +58,26 @@ pub async fn simulate_buy_swap_with_params(
         return simulate_v4_buy_swap(simulator, tx_processor, config, block).await;
     }
 
+    let chain = simulator.start_simulation_chain(Some(block)).await?;
+    simulate_buy_swap_with_params_and_chain(simulator, tx_processor, config, chain).await
+}
+
+pub async fn simulate_buy_swap_with_params_and_chain(
+    _simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
+    mut config: PoolBuySellParameters,
+    mut chain: UnsignedTxChainSimulation,
+) -> Result<BuySwapResult> {
+    let block = config
+        .block_number
+        .unwrap_or_else(|| chain.current_state().block_number);
+    config.block_number = Some(block);
+    if matches!(config.pool_type, PoolType::UniswapV4) {
+        return Err(eyre::eyre!(
+            "Uniswap V4 buy-only simulation with caller-supplied live chain is not implemented"
+        ));
+    }
+
     let buyer_address = config.buyer_address;
     // Build route
     let route = config
@@ -81,7 +101,6 @@ pub async fn simulate_buy_swap_with_params(
         slippage_bps,
         deadline,
     );
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     let base_fee = chain.block_base_fee();
     chain.set_eth_balance(
         buyer_address,

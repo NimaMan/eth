@@ -70,16 +70,7 @@ where
 {
     async fn execute(&self, intent: OrderIntent) -> Result<ExecutionReport> {
         let mut report = self.inner.execute(intent.clone()).await?;
-        if should_attach_shadow(&report) {
-            match self.shadow_outcome(&intent, &report).await {
-                Ok(outcome) => apply_shadow_outcome(&mut report, outcome),
-                Err(error) => {
-                    let outcome =
-                        self.shadow_rejection_outcome(&intent, &report, error.to_string());
-                    apply_shadow_outcome(&mut report, outcome);
-                }
-            }
-        }
+        self.apply_shadow_if_applicable(&intent, &mut report).await;
         Ok(report)
     }
 
@@ -96,6 +87,22 @@ impl<E> ChainSimGasPolicyBacktestAdapter<E>
 where
     E: EngineExecutionAdapter,
 {
+    pub(in crate::live_trader) async fn apply_shadow_if_applicable(
+        &self,
+        intent: &OrderIntent,
+        report: &mut ExecutionReport,
+    ) {
+        if should_attach_shadow(report) {
+            match self.shadow_outcome(intent, report).await {
+                Ok(outcome) => apply_shadow_outcome(report, outcome),
+                Err(error) => {
+                    let outcome = self.shadow_rejection_outcome(intent, report, error.to_string());
+                    apply_shadow_outcome(report, outcome);
+                }
+            }
+        }
+    }
+
     async fn shadow_outcome(
         &self,
         intent: &OrderIntent,
