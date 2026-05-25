@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{hex, keccak256, Address, Bytes, U256};
 use alloy_sol_types::{sol, SolCall};
 use clap::{Parser, ValueEnum};
 use eyre::{eyre, Result, WrapErr};
@@ -37,6 +37,13 @@ enum Scenario {
     CurrentStateSell,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+enum TxPosition {
+    Before,
+    After,
+}
+
 #[derive(Debug, Parser)]
 #[command(about = "Simulate the deployed Uniswap V2 trading vault against local Reth state")]
 struct Args {
@@ -64,6 +71,16 @@ struct Args {
     deadline: u64,
     #[arg(long)]
     block: Option<u64>,
+    #[arg(long)]
+    tx_index: Option<usize>,
+    #[arg(long, value_enum, default_value_t = TxPosition::Before)]
+    tx_position: TxPosition,
+    #[arg(long)]
+    overlay_vault_code_hex: Option<String>,
+    #[arg(long)]
+    synthetic_vault_token_balance_raw: Option<String>,
+    #[arg(long)]
+    synthetic_owner_eth_wei: Option<String>,
     #[arg(long, default_value = DEFAULT_MAX_FEE_PER_GAS_WEI)]
     max_fee_per_gas_wei: String,
     #[arg(long, default_value = DEFAULT_PRIORITY_FEE_PER_GAS_WEI)]
@@ -83,6 +100,21 @@ async fn main() -> Result<()> {
         .sell_amount_raw
         .as_deref()
         .map(|value| parse_u256(value, "sell_amount_raw"))
+        .transpose()?;
+    let synthetic_vault_token_balance = args
+        .synthetic_vault_token_balance_raw
+        .as_deref()
+        .map(|value| parse_u256(value, "synthetic_vault_token_balance_raw"))
+        .transpose()?;
+    let synthetic_owner_eth = args
+        .synthetic_owner_eth_wei
+        .as_deref()
+        .map(|value| parse_u256(value, "synthetic_owner_eth_wei"))
+        .transpose()?;
+    let overlay_vault_code = args
+        .overlay_vault_code_hex
+        .as_deref()
+        .map(|value| parse_hex_bytes(value, "overlay_vault_code_hex"))
         .transpose()?;
     let buy_eth = parse_u256(&args.buy_eth_wei, "buy_eth_wei")?;
     let min_tokens_out = parse_u256(&args.min_tokens_out_raw, "min_tokens_out_raw")?;
@@ -104,8 +136,43 @@ async fn main() -> Result<()> {
         ));
     }
 
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    let (mut chain, coordinate_tx_hash) = if let Some(tx_index) = args.tx_index {
+        let mut session = simulator.block_tx_state_session(block).await?;
+        let tx_hash = session.transaction_hash(tx_index)?;
+        let chain = match args.tx_position {
+            TxPosition::Before => session.simulation_chain_before_tx(tx_index)?,
+            TxPosition::After => session.simulation_chain_after_tx(tx_index)?,
+        };
+        (chain, Some(tx_hash.to_string()))
+    } else {
+        (simulator.start_simulation_chain(Some(block)).await?, None)
+    };
     let base_fee_per_gas = chain.block_base_fee();
+
+    let vault_code_was_overlayed = if let Some(code) = overlay_vault_code {
+        if code.is_empty() {
+            return Err(eyre!("overlay_vault_code_hex decoded to empty bytecode"));
+        }
+        chain.set_account_code(vault, code)?;
+        true
+    } else {
+        false
+    };
+    let owner_eth_previous = if let Some(balance) = synthetic_owner_eth {
+        Some(chain.set_eth_balance(owner, balance)?)
+    } else {
+        None
+    };
+    let synthetic_vault_balance_slot = if let Some(balance) = synthetic_vault_token_balance {
+        Some(
+            inject_standard_erc20_balance(&mut chain, token, vault, balance)?.ok_or_else(|| {
+                eyre!("could not inject synthetic vault token balance for token {token}")
+            })?,
+        )
+    } else {
+        None
+    };
+
     let balances_before = balances(&mut chain, token, owner, vault)?;
 
     let mut buy_result = None;
@@ -155,7 +222,7 @@ async fn main() -> Result<()> {
     };
 
     let sell_amount = requested_sell_amount.unwrap_or_else(|| match args.scenario {
-        Scenario::CurrentStateSell => transfer_amount,
+        Scenario::CurrentStateSell => vault_tokens_available,
         Scenario::WalletTransferThenSell | Scenario::BuyThenSell => vault_tokens_available,
     });
 
@@ -197,6 +264,11 @@ async fn main() -> Result<()> {
         "reth_datadir": reth_datadir,
         "latest_context_block": latest_block,
         "block": block,
+        "state_coordinate": {
+            "tx_index": args.tx_index,
+            "tx_position": args.tx_index.map(|_| format!("{:?}", args.tx_position)),
+            "tx_hash": coordinate_tx_hash,
+        },
         "owner": owner.to_string(),
         "vault": vault.to_string(),
         "token": token.to_string(),
@@ -208,6 +280,13 @@ async fn main() -> Result<()> {
             "min_tokens_out_raw": min_tokens_out.to_string(),
             "min_eth_out_wei": min_eth_out.to_string(),
             "sell_amount_raw": sell_amount.to_string()
+        },
+        "overrides": {
+            "vault_code_overlayed": vault_code_was_overlayed,
+            "synthetic_vault_token_balance_raw": synthetic_vault_token_balance.map(|value| value.to_string()),
+            "synthetic_vault_balance_slot": synthetic_vault_balance_slot,
+            "synthetic_owner_eth_wei": synthetic_owner_eth.map(|value| value.to_string()),
+            "synthetic_owner_eth_previous_wei": owner_eth_previous.map(|value| value.to_string())
         },
         "gas_policy": {
             "kind": "eip1559_public_priority_fee",
@@ -296,6 +375,14 @@ fn parse_u128(value: &str, label: &str) -> Result<u128> {
         .wrap_err_with(|| format!("invalid {label} value {value:?}"))
 }
 
+fn parse_hex_bytes(value: &str, label: &str) -> Result<Bytes> {
+    let trimmed = value.trim();
+    let without_prefix = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    let decoded = hex::decode(without_prefix)
+        .wrap_err_with(|| format!("invalid {label} hex value length={}", trimmed.len()))?;
+    Ok(Bytes::from(decoded))
+}
+
 fn erc20_balance(
     chain: &mut UnsignedTxChainSimulation,
     token: Address,
@@ -307,6 +394,31 @@ fn erc20_balance(
         return Err(eyre!("balanceOf({owner}) failed for token {token}"));
     }
     decode_u256(&result.output, "balanceOf output")
+}
+
+fn inject_standard_erc20_balance(
+    chain: &mut UnsignedTxChainSimulation,
+    token: Address,
+    owner: Address,
+    amount: U256,
+) -> Result<Option<u64>> {
+    for slot in 0..64 {
+        let storage_key = standard_erc20_balance_storage_key(owner, slot);
+        let previous = chain.set_account_storage(token, storage_key, amount)?;
+        let observed = erc20_balance(chain, token, owner)?;
+        if observed == amount {
+            return Ok(Some(slot));
+        }
+        chain.set_account_storage(token, storage_key, previous)?;
+    }
+    Ok(None)
+}
+
+fn standard_erc20_balance_storage_key(owner: Address, slot: u64) -> U256 {
+    let mut input = [0u8; 64];
+    input[..32].copy_from_slice(owner.into_word().as_slice());
+    input[32..].copy_from_slice(&U256::from(slot).to_be_bytes::<32>());
+    U256::from_be_slice(keccak256(input).as_slice())
 }
 
 fn erc20_transfer_tx(

@@ -19,6 +19,7 @@ use eyre::{Result, WrapErr};
 use reth_primitives_traits::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
+use revm::bytecode::Bytecode;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -146,6 +147,15 @@ impl UnsignedTxChainSimulation {
         account.balance = balance;
         self.forked_state.db.insert_account_info(owner, account);
         Ok(previous)
+    }
+
+    pub fn set_account_code(&mut self, address: Address, code: Bytes) -> Result<()> {
+        let mut account = self.forked_state.db.basic(address)?.unwrap_or_default();
+        let bytecode = Bytecode::new_raw(code);
+        account.code_hash = bytecode.hash_slow();
+        account.code = Some(bytecode);
+        self.forked_state.db.insert_account_info(address, account);
+        Ok(())
     }
 
     /// Treat an address as an EOA inside this fork only.

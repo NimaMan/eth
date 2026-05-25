@@ -1,6 +1,6 @@
 # SSS Creator TransferFrom Pair-Balance Drain
 
-Status: chain-parity first pass complete; route-execution parity still open.
+Status: chain parity and Alpha-route replay complete; detector research open.
 
 This is the second unresolved Risk Atlas issue after the Compass helper-route
 V2 vault parity issue. The broad SSS investigation proved token-builder/range
@@ -99,8 +99,57 @@ After that fix, local Reth-backed replay succeeds for the target transactions:
 | WETH drain sell | `200` | processed successfully; router/pair/WETH call tree captured |
 
 This proves the local transaction replay path can process the exact block
-coordinates. It does not yet prove Alpha's executable sell route would have
-exited from the same prestate.
+coordinates. Alpha route parity is a separate check because production trading
+uses the deployed V2 vault path, not an arbitrary observed sender.
+
+## Alpha Route Parity
+
+Alpha's current executable V2 route is the deployed Uniswap V2 trading vault:
+
+| Field | Value |
+| --- | --- |
+| vault | `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` |
+| owner/default sender | `0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27` |
+
+That vault did not exist at the historical SSS block, so exact route replay
+uses a code overlay. This is not chain truth for the historical address; it is
+a route-capability probe that answers: if Alpha's current vault held SSS at
+that prestate, could it sell through our production V2 path?
+
+Replay setup:
+
+- state source: `TxSimulator::block_tx_state_session(25_041_123)`;
+- state coordinates: before tx `197`, after tx `197`, after tx `198`, and after
+  tx `200`;
+- code override: latest deployed vault bytecode overlaid onto the vault address;
+- token override: synthetic `1 SSS` balance (`1,000,000,000` raw) assigned to
+  the vault;
+- balance-slot proof: SSS standard balance mapping slot `1`;
+- gas override: synthetic owner ETH for gas only;
+- min ETH out: `1 wei`.
+
+Result:
+
+| Coordinate | State | Route Result | Revert | Gas Used |
+| --- | --- | --- | --- | ---: |
+| tx `197` | before creator pair-token transfer | failed | `TransferHelper: TRANSFER_FROM_FAILED` | `123,403` |
+| tx `197` | after creator pair-token transfer | failed | `TransferHelper: TRANSFER_FROM_FAILED` | `140,503` |
+| tx `198` | after creator `sync()` | failed | `TransferHelper: TRANSFER_FROM_FAILED` | `140,503` |
+| tx `200` | after WETH drain sell | failed | `TransferHelper: TRANSFER_FROM_FAILED` | `120,397` |
+
+The pre-tx-197 trace is decisive. The vault can call SSS `approve()` and then
+calls the router's `swapExactTokensForETHSupportingFeeOnTransferTokens`, but
+the router's `transferFrom(vault, pair, 1 SSS)` fails. The token also makes an
+internal creator/control call with the 2300-gas stipend before the router
+reports `TransferHelper: TRANSFER_FROM_FAILED`.
+
+Conclusion: for this anchor case, Alpha's current deployed V2 vault route
+cannot sell SSS even before the creator drains the pair's token balance. The
+`control_transfer_from_pair_before_sync` pattern is therefore an avoid signal
+for our route, not a reliable recoverable-exit signal. If a position is already
+held, live code must still run exact route replay and gas policy before any
+priority exit; this case must not be treated as proof that front-running the
+drain is executable.
 
 ## Classification
 
@@ -177,20 +226,20 @@ Exit policy:
   and gas-rank policy say the exit is executable and economic.
 - If the evidence is only mined after WETH is already dust, do not submit an
   uneconomic sell.
-- If exact Alpha-route replay shows normal holders cannot exit after the
-  transfer/sync, this becomes an avoid-only signal rather than an exit signal.
+- For the SSS anchor case, exact Alpha-route replay shows the current deployed
+  V2 vault cannot sell even before the transfer/sync sequence. Treat this as
+  avoid-only unless a later route-specific replay proves a different executable
+  path.
 
 ## Open Work
 
-1. Run Alpha's actual executable sell route at pre-tx-197, post-tx-197,
-   post-tx-198, and post-tx-200 coordinates.
-2. Decide whether the live mempool detector should key on tx input
+1. Decide whether the live mempool detector should key on tx input
    `transferFrom(pair, ...)`, the token `Transfer(pool -> actor)` log, or both.
-3. Run a corpus query for creator/control `transferFrom(pair, ...)` events with
+2. Run a corpus query for creator/control `transferFrom(pair, ...)` events with
    large previous reserve share and retained WETH.
-4. Measure false positives for migrations, rescue operations, fee/reflection
+3. Measure false positives for migrations, rescue operations, fee/reflection
    mechanics, and manual pool maintenance.
-5. If false positives are acceptable, implement a Risk Atlas detector and add a
+4. If false positives are acceptable, implement a Risk Atlas detector and add a
    regression fixture anchored on this coordinate.
 
 ## Related Files

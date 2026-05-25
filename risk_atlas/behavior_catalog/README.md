@@ -83,7 +83,9 @@ that copies current token balances into the pair's stored reserves. The scam
 signal is the combination of a suspicious pair-balance change plus `sync()`
 making that manipulated balance visible to the AMM state. SSS is the anchor
 case for the `control_transfer_from_pair + direct_sync +
-denom_drain + token_reserve_dust` variant; the focused investigation is
+denom_drain + token_reserve_dust` variant. Alpha's current deployed V2 vault
+route cannot sell SSS even before the control transfer, so the anchor case is
+avoid-only for that route; the focused investigation is
 `risk_atlas/investigations/sss_creator_transfer_from_pair_drain_25041123/`.
 
 ### `privileged_seller_reserve_drain`
