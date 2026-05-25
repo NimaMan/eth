@@ -747,27 +747,16 @@ impl LiveTokenRuntime {
         };
 
         if let Some(parent_session) = parent_session {
-            match simulator
+            return simulator
                 .block_state_session_from_parent_prestate_diffs(
                     &parent_session,
                     block_number,
                     block_hash,
                     parent_hash,
-                    block_header.clone(),
+                    block_header,
                     state_diffs,
                 )
-                .await
-            {
-                Ok(session) => return Ok(session),
-                Err(error) => {
-                    tracing::info!(
-                        target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                        block_number,
-                        error = %error,
-                        "rebuilding direct live block state session from current prestate diffs"
-                    );
-                }
-            }
+                .await;
         }
 
         simulator

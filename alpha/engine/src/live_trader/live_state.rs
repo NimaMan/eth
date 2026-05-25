@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use alloy_primitives::B256;
 use eyre::{eyre, Result, WrapErr};
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -103,7 +104,7 @@ async fn publish_live_state_response(
     if Some(block_number) == *last_published_block {
         return Ok(None);
     }
-    let live_state = live_block_state_from_frame(simulator, state.frame)
+    let live_state = live_block_state_from_frame(simulator, provider, state.frame)
         .await
         .wrap_err_with(|| format!("failed to build live block state for {block_number}"))?;
     provider.publish_latest(live_state)?;
@@ -161,6 +162,7 @@ fn sse_event_data(event: &[u8]) -> Result<Option<String>> {
 
 async fn live_block_state_from_frame(
     simulator: Arc<TxSimulator>,
+    provider: &InMemoryLiveBlockStateProvider,
     frame: LiveBlockStateFrame,
 ) -> Result<LiveBlockState> {
     let block_number = frame.header.number;
@@ -176,6 +178,21 @@ async fn live_block_state_from_frame(
         ));
     }
     let header = sealed_header_from_processed_block_header(&frame.header);
+    if let Some(parent_state) =
+        exact_live_parent_state(provider, block_number, frame.header.parent_hash)?
+    {
+        let session = simulator
+            .block_state_session_from_parent_prestate_diffs(
+                parent_state.session(),
+                block_number,
+                frame.header.hash,
+                frame.header.parent_hash,
+                header,
+                &state_diffs,
+            )
+            .await?;
+        return Ok(LiveBlockState::new(session).with_block_hash(frame.header.hash));
+    }
     let session = simulator
         .block_state_session_from_prestate_diffs(
             block_number,
@@ -186,6 +203,30 @@ async fn live_block_state_from_frame(
         )
         .await?;
     Ok(LiveBlockState::new(session).with_block_hash(frame.header.hash))
+}
+
+fn exact_live_parent_state(
+    provider: &InMemoryLiveBlockStateProvider,
+    block_number: u64,
+    expected_parent_hash: B256,
+) -> Result<Option<LiveBlockState>> {
+    let parent_block = block_number
+        .checked_sub(1)
+        .ok_or_else(|| eyre!("cannot build direct live state for genesis block"))?;
+    let parent_state = match provider.state_at(parent_block) {
+        Ok(parent_state) => parent_state,
+        Err(_) => return Ok(None),
+    };
+    if parent_state.block_hash != Some(expected_parent_hash) {
+        return Err(eyre!(
+            "chain-server live state frame parent hash mismatch for block {}: parent frame block={} hash={:?}, expected={}",
+            block_number,
+            parent_state.block_number,
+            parent_state.block_hash,
+            expected_parent_hash
+        ));
+    }
+    Ok(Some(parent_state))
 }
 
 #[cfg(test)]

@@ -13,3 +13,7 @@ or block.
 Live processors that already have block headers and state diffs should pass
 those values directly to `block_state_session_from_prestate_diffs` or
 `block_state_session_from_parent_prestate_diffs`.
+
+Direct live state construction is exact-parent only. Applying block `N` diffs
+over a historical base older than `N-1` is not allowed because it drops state
+from intervening blocks, including newly created pools and reserve updates.

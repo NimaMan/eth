@@ -23,4 +23,8 @@ Direct live processors build sessions with:
 - `block_state_session_from_parent_prestate_diffs`
 
 Those APIs keep the live block pipeline in-process and avoid external cache
-hydration inside `tx_simulator`.
+hydration inside `tx_simulator`. `block_state_session_from_prestate_diffs`
+requires the exact parent block state from local Reth; it must not construct a
+live frame from an older historical base. When a caller already has the parent
+live session, `block_state_session_from_parent_prestate_diffs` is the preferred
+path.

@@ -169,78 +169,34 @@ impl<'a> BlockContextLoader<'a> {
         let parent_block = block_number
             .checked_sub(1)
             .ok_or_else(|| eyre!("cannot build direct live state for genesis block"))?;
-        let parent_state_available = match self.try_load_historical_state(parent_block).await {
-            Ok(state) => state.is_some(),
-            Err(error) => {
-                debug!(
+        self.try_load_historical_state(parent_block)
+            .await?
+            .ok_or_else(|| {
+                eyre!(
+                    "cannot build direct live state for block {}: exact parent state {} is unavailable from Reth historical state",
                     block_number,
-                    parent_block,
-                    error = %error,
-                    "direct live state parent state unavailable; using latest historical base"
-                );
-                false
-            }
-        };
-        let parent_header = match self.fetch_header_from_mdbx(parent_block) {
-            Ok(header) => header,
-            Err(error) => {
-                debug!(
-                    block_number,
-                    parent_block,
-                    error = %error,
-                    "direct live state parent header unavailable; using latest historical base"
-                );
-                None
-            }
-        };
-
-        let (base_block, base_header) = match (parent_state_available, parent_header) {
-            (true, Some(parent_header)) => {
-                if parent_header.hash() != parent_hash {
-                    return Err(eyre!(
-                        "direct live state parent hash mismatch for block {}: parent header={}, expected={}",
-                        block_number,
-                        parent_header.hash(),
-                        parent_hash
-                    ));
-                }
-                (parent_block, parent_header)
-            }
-            _ => {
-                let base_block = self
-                    .simulator
-                    .latest_historical_context_block_number()?
-                    .min(parent_block);
-                self
-                    .try_load_historical_state(base_block)
-                    .await?
-                    .ok_or_else(|| {
-                        eyre!(
-                            "cannot build direct live state for block {}: base {} is unavailable from Reth historical state",
-                            block_number,
-                            base_block
-                        )
-                    })?;
-                let base_header = self.fetch_header_from_mdbx(base_block)?.ok_or_else(|| {
-                    eyre!(
-                        "cannot build direct live state for block {}: base header {} is unavailable from Reth historical headers",
-                        block_number,
-                        base_block
-                    )
-                })?;
-                debug!(
-                    block_number,
-                    parent_block,
-                    base_block,
-                    "using latest historical base plus prestate diff overlay for direct live state"
-                );
-                (base_block, base_header)
-            }
-        };
+                    parent_block
+                )
+            })?;
+        let parent_header = self.fetch_header_from_mdbx(parent_block)?.ok_or_else(|| {
+            eyre!(
+                "cannot build direct live state for block {}: exact parent header {} is unavailable from Reth historical headers",
+                block_number,
+                parent_block
+            )
+        })?;
+        if parent_header.hash() != parent_hash {
+            return Err(eyre!(
+                "direct live state parent hash mismatch for block {}: parent header={}, expected={}",
+                block_number,
+                parent_header.hash(),
+                parent_hash
+            ));
+        }
 
         let mut fork_state = forked_state_from_refreshing_historical_state(
-            base_block,
-            base_header,
+            parent_block,
+            parent_header,
             self.simulator.provider_factory.clone(),
         );
 

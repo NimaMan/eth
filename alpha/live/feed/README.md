@@ -61,8 +61,10 @@ processed live block.
 Warmup replays old confirmed blocks with the regular Reth post-block metadata
 provider. Live tail blocks use the direct live block session built from the
 processed block header plus RPC state diffs, so same-block token and V2 pool
-metadata comes from the in-process post-block state before falling back to local
-Reth.
+metadata comes from the in-process post-block state. If the in-memory parent
+session is missing during startup, local Reth may bootstrap a live session only
+when the exact parent block state is available; older historical bases are not
+valid for live tail state.
 
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, direct live block application, and read-only consumers.
 
