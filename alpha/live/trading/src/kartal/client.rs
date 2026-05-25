@@ -3,9 +3,8 @@ use serde::de::DeserializeOwned;
 use super::{
     policy_journal::KartalPolicyDecisionList,
     wire::{
-        KartalEthTxExecutorStatus, KartalFlashbotsTailBundleRequest,
-        KartalFlashbotsTailBundleResult, KartalSubmitDirectRawResult,
-        LiveDirectRawTransactionRequest,
+        KartalEthTxExecutorStatus, KartalSubmitDirectRawResult, KartalSubmitTransactionRequest,
+        KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
     },
 };
 
@@ -65,14 +64,14 @@ impl KartalClient {
         decode_response(response).await
     }
 
-    pub async fn submit_flashbots_tail_bundle(
+    pub async fn submit_transaction(
         &self,
-        request: &KartalFlashbotsTailBundleRequest,
-    ) -> Result<KartalFlashbotsTailBundleResult, KartalClientError> {
+        request: &KartalSubmitTransactionRequest,
+    ) -> Result<KartalSubmitTransactionResult, KartalClientError> {
         self.require_token()?;
         let response = self
             .http
-            .post(self.config.endpoint("/eth/tx/flashbots/mev-share-tail"))
+            .post(self.config.endpoint("/eth/tx/submit"))
             .bearer_auth(self.config.bearer_token.trim())
             .json(request)
             .send()

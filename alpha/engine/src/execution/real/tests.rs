@@ -11,8 +11,8 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     LiveDirectRawTransactionRequest, LivePrioritySellPlannerError, LivePrioritySellPlannerInput,
-    LiveTxExecution, PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput,
-    PrioritySellPlannerOutcome, TxPrepRequestContext,
+    PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput, PrioritySellPlannerOutcome,
+    TxOrderingPolicy, TxPrepRequestContext, TxSubmissionPolicy,
 };
 use serde_json::{json, Value};
 
@@ -153,7 +153,7 @@ fn signal(attempt_id: Option<&str>) -> LiveTraderTxSignal {
         token_address: Some(Address::with_last_byte(0x11)),
         pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
         observed_block: Some(25_128_246),
-        execution: LiveTxExecution::DirectRaw,
+        submission_policy: TxSubmissionPolicy::PublicMempool,
         request: LiveDirectRawTransactionRequest {
             attempt_id: attempt_id.map(str::to_string),
             chain_id: 1,
@@ -346,8 +346,10 @@ async fn broadcast_result_becomes_submitted_report() {
 async fn flashbots_bundle_result_becomes_submitted_report_with_bundle_evidence() {
     let tail_hash = format!("0x{}", "33".repeat(32));
     let mut signal = signal(Some("attempt-1"));
-    signal.execution = LiveTxExecution::FlashbotsMevShareTail {
-        tail_after_tx_hash: tail_hash.clone(),
+    signal.submission_policy = TxSubmissionPolicy::FlashbotsMevShare {
+        ordering: TxOrderingPolicy::TailAfter {
+            tx_hash: tail_hash.clone(),
+        },
         target_block: Some(25_128_247),
         max_block: Some(25_128_249),
         can_revert: false,

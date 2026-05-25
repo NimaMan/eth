@@ -18,8 +18,9 @@ use eth_alpha_core::{
     order::OrderIntent,
 };
 use eth_live_trading::{
-    KartalExecutorClient, KartalSubmitDirectRawResult, LivePrioritySellPlannerInput,
-    LiveTraderTxSignal, LiveTxExecution, PrioritySellPlanner, PrioritySellPlannerOutcome,
+    KartalExecutorClient, KartalSubmitDirectRawResult, KartalSubmitTransactionResult,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
+    PrioritySellPlannerOutcome, TxOrderingPolicy, TxSubmissionPolicy,
 };
 use serde_json::Value;
 
@@ -55,6 +56,21 @@ pub struct LiveTxSubmissionResult {
     pub bundle_target_block: Option<BlockNumber>,
     pub bundle_max_block: Option<BlockNumber>,
     pub bundle_tail_after_tx_hash: Option<String>,
+}
+
+impl From<KartalSubmitTransactionResult> for LiveTxSubmissionResult {
+    fn from(result: KartalSubmitTransactionResult) -> Self {
+        Self {
+            attempt_id: result.attempt_id,
+            status: result.status,
+            tx_hash: result.tx_hash,
+            error: result.error,
+            bundle_hash: result.bundle_hash,
+            bundle_target_block: result.target_block,
+            bundle_max_block: result.max_block,
+            bundle_tail_after_tx_hash: result.tail_after_tx_hash,
+        }
+    }
 }
 
 impl From<KartalSubmitDirectRawResult> for LiveTxSubmissionResult {
@@ -328,12 +344,14 @@ fn submission_evidence(
         &["tail_entry_ordering", "dependency_gas_price_wei"],
     );
 
-    if let LiveTxExecution::FlashbotsMevShareTail {
-        tail_after_tx_hash,
+    if let TxSubmissionPolicy::FlashbotsMevShare {
+        ordering: TxOrderingPolicy::TailAfter {
+            tx_hash: tail_after_tx_hash,
+        },
         target_block,
         max_block,
         ..
-    } = &signal.execution
+    } = &signal.submission_policy
     {
         evidence.private_execution_transport = Some("flashbots_mev_share_v0.1".to_string());
         evidence.bundle_hash = result.bundle_hash.clone();

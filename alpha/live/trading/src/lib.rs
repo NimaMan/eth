@@ -25,9 +25,9 @@ pub use kartal::{
 };
 pub use kartal_executor::{
     KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalExecutorClientError, KartalFlashbotsTailBundleRequest, KartalFlashbotsTailBundleResult,
-    KartalSimulationReference, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, LiveTxExecution,
+    KartalExecutorClientError, KartalSimulationReference, KartalSubmitDirectRawResult,
+    KartalSubmitTransactionRequest, KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
+    LiveTraderTxSignal, LiveTxExecution, TxOrderingPolicy, TxSubmissionPolicy,
 };
 pub use lp_approval_exit::{
     plan_lp_approval_response, BribeExitConfig, HeldPositionContext, LpApprovalSignal,

@@ -20,8 +20,8 @@ impl KartalExecutorClientConfig {
         join_endpoint(&self.base_url, "/eth/tx/direct-raw")
     }
 
-    fn flashbots_tail_bundle_url(&self) -> String {
-        join_endpoint(&self.base_url, "/eth/tx/flashbots/mev-share-tail")
+    fn submit_url(&self) -> String {
+        join_endpoint(&self.base_url, "/eth/tx/submit")
     }
 }
 
@@ -46,9 +46,12 @@ impl KartalExecutorClient {
     pub async fn submit_signal(
         &self,
         signal: &LiveTraderTxSignal,
-    ) -> Result<KartalSubmitDirectRawResult, KartalExecutorClientError> {
-        self.submit_direct_raw(&signal.request_with_strategy_metadata())
-            .await
+    ) -> Result<KartalSubmitTransactionResult, KartalExecutorClientError> {
+        self.submit_transaction(&KartalSubmitTransactionRequest {
+            transaction: signal.request_with_strategy_metadata(),
+            submission_policy: signal.submission_policy.clone(),
+        })
+        .await
     }
 
     pub async fn submit_direct_raw(
@@ -84,10 +87,10 @@ impl KartalExecutorClient {
             .map_err(KartalExecutorClientError::Http)
     }
 
-    pub async fn submit_flashbots_tail_bundle(
+    pub async fn submit_transaction(
         &self,
-        request: &KartalFlashbotsTailBundleRequest,
-    ) -> Result<KartalFlashbotsTailBundleResult, KartalExecutorClientError> {
+        request: &KartalSubmitTransactionRequest,
+    ) -> Result<KartalSubmitTransactionResult, KartalExecutorClientError> {
         if self.config.bearer_token.trim().is_empty() {
             return Err(KartalExecutorClientError::Config(
                 "Kartal bearer token is empty".to_string(),
@@ -96,7 +99,7 @@ impl KartalExecutorClient {
 
         let response = self
             .http
-            .post(self.config.flashbots_tail_bundle_url())
+            .post(self.config.submit_url())
             .bearer_auth(self.config.bearer_token.trim())
             .json(request)
             .send()
@@ -112,7 +115,7 @@ impl KartalExecutorClient {
         }
 
         response
-            .json::<KartalFlashbotsTailBundleResult>()
+            .json::<KartalSubmitTransactionResult>()
             .await
             .map_err(KartalExecutorClientError::Http)
     }
@@ -137,7 +140,8 @@ pub struct LiveTraderTxSignal {
     pub pool_address: Option<PoolAddress>,
     pub observed_block: Option<BlockNumber>,
     #[serde(default)]
-    pub execution: LiveTxExecution,
+    #[serde(alias = "execution")]
+    pub submission_policy: TxSubmissionPolicy,
     pub request: LiveDirectRawTransactionRequest,
 }
 
@@ -178,6 +182,10 @@ impl LiveTraderTxSignal {
         if let Some(observed_block) = self.observed_block {
             metadata.insert("observed_block".to_string(), json!(observed_block));
         }
+        metadata.insert(
+            "submission_policy".to_string(),
+            serde_json::to_value(&self.submission_policy).unwrap_or(Value::Null),
+        );
 
         Value::Object(metadata)
     }
@@ -185,10 +193,10 @@ impl LiveTraderTxSignal {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LiveTxExecution {
-    DirectRaw,
-    FlashbotsMevShareTail {
-        tail_after_tx_hash: String,
+pub enum TxSubmissionPolicy {
+    PublicMempool,
+    FlashbotsMevShare {
+        ordering: TxOrderingPolicy,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_block: Option<BlockNumber>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,10 +206,18 @@ pub enum LiveTxExecution {
     },
 }
 
-impl Default for LiveTxExecution {
+impl Default for TxSubmissionPolicy {
     fn default() -> Self {
-        Self::DirectRaw
+        Self::PublicMempool
     }
+}
+
+pub type LiveTxExecution = TxSubmissionPolicy;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TxOrderingPolicy {
+    TailAfter { tx_hash: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -258,24 +274,27 @@ pub struct KartalSubmitDirectRawResult {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KartalFlashbotsTailBundleRequest {
+pub struct KartalSubmitTransactionRequest {
     pub transaction: LiveDirectRawTransactionRequest,
-    pub tail_after_tx_hash: String,
-    pub target_block: u64,
-    pub max_block: u64,
     #[serde(default)]
-    pub can_revert: bool,
+    pub submission_policy: TxSubmissionPolicy,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KartalFlashbotsTailBundleResult {
+pub struct KartalSubmitTransactionResult {
     pub attempt_id: String,
     pub status: String,
-    pub tx_hash: String,
-    pub bundle_hash: String,
-    pub tail_after_tx_hash: String,
-    pub target_block: u64,
-    pub max_block: u64,
+    pub tx_hash: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub bundle_hash: Option<String>,
+    #[serde(default)]
+    pub tail_after_tx_hash: Option<String>,
+    #[serde(default)]
+    pub target_block: Option<u64>,
+    #[serde(default)]
+    pub max_block: Option<u64>,
     pub from: String,
     pub to: String,
     pub nonce: Value,
@@ -283,6 +302,28 @@ pub struct KartalFlashbotsTailBundleResult {
     pub max_fee_per_gas: Value,
     pub max_priority_fee_per_gas: Value,
     pub elapsed_ms: Value,
+}
+
+impl From<KartalSubmitDirectRawResult> for KartalSubmitTransactionResult {
+    fn from(result: KartalSubmitDirectRawResult) -> Self {
+        Self {
+            attempt_id: result.attempt_id,
+            status: result.status,
+            tx_hash: result.tx_hash,
+            error: result.error,
+            bundle_hash: None,
+            tail_after_tx_hash: None,
+            target_block: None,
+            max_block: None,
+            from: result.from,
+            to: result.to,
+            nonce: result.nonce,
+            gas_limit: result.gas_limit,
+            max_fee_per_gas: result.max_fee_per_gas,
+            max_priority_fee_per_gas: result.max_priority_fee_per_gas,
+            elapsed_ms: result.elapsed_ms,
+        }
+    }
 }
 
 fn join_endpoint(base_url: &str, path: &str) -> String {
@@ -345,7 +386,7 @@ mod tests {
             token_address: Some(Address::with_last_byte(0x11)),
             pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
             observed_block: Some(25_110_001),
-            execution: LiveTxExecution::DirectRaw,
+            submission_policy: TxSubmissionPolicy::PublicMempool,
             request: request(),
         };
 
@@ -359,6 +400,41 @@ mod tests {
         assert_eq!(request.metadata["strategy_run_id"], json!("run-1"));
         assert_eq!(request.metadata["trade_id"], json!("trade-1"));
         assert_eq!(request.metadata["observed_block"], json!(25_110_001));
+        assert_eq!(
+            request.metadata["submission_policy"],
+            json!({"kind": "public_mempool"})
+        );
+    }
+
+    #[test]
+    fn flashbots_submission_policy_serializes_as_kartal_policy() {
+        let request = KartalSubmitTransactionRequest {
+            transaction: request(),
+            submission_policy: TxSubmissionPolicy::FlashbotsMevShare {
+                ordering: TxOrderingPolicy::TailAfter {
+                    tx_hash: format!("0x{}", "11".repeat(32)),
+                },
+                target_block: Some(25_128_247),
+                max_block: Some(25_128_249),
+                can_revert: false,
+            },
+        };
+
+        let value = serde_json::to_value(request).unwrap();
+
+        assert_eq!(
+            value["submission_policy"],
+            json!({
+                "kind": "flashbots_mev_share",
+                "ordering": {
+                    "kind": "tail_after",
+                    "tx_hash": format!("0x{}", "11".repeat(32))
+                },
+                "target_block": 25_128_247,
+                "max_block": 25_128_249,
+                "can_revert": false
+            })
+        );
     }
 
     #[test]

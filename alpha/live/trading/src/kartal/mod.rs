@@ -11,6 +11,6 @@ pub use client::{KartalClient, KartalClientConfig, KartalClientError, KartalServ
 pub use policy_journal::{KartalPolicyDecision, KartalPolicyDecisionList};
 pub use wire::{
     KartalDailySpendStatus, KartalEthTxExecutorStatus, KartalEthTxPolicyStatus,
-    KartalFlashbotsTailBundleRequest, KartalFlashbotsTailBundleResult, KartalStatusBroadcastMode,
-    KartalSubmitDirectRawResult,
+    KartalStatusBroadcastMode, KartalSubmitDirectRawResult, KartalSubmitTransactionRequest,
+    KartalSubmitTransactionResult,
 };

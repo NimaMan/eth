@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::{
-    KartalBribeRequest, KartalFlashbotsTailBundleRequest, KartalFlashbotsTailBundleResult,
-    KartalSimulationReference, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, LiveTxExecution,
+    KartalBribeRequest, KartalSimulationReference, KartalSubmitDirectRawResult,
+    KartalSubmitTransactionRequest, KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
+    LiveTraderTxSignal, LiveTxExecution, TxOrderingPolicy, TxSubmissionPolicy,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -33,6 +33,8 @@ pub struct KartalEthTxExecutorStatus {
     pub rpc_url: String,
     pub journal_path: Option<String>,
     pub direct_raw_endpoint: String,
+    #[serde(default)]
+    pub submit_endpoint: Option<String>,
     #[serde(default)]
     pub flashbots_tail_bundle_endpoint: Option<String>,
     #[serde(default)]
@@ -88,6 +90,7 @@ mod tests {
             "rpc_url": "http://127.0.0.1:8545",
             "journal_path": null,
             "direct_raw_endpoint": "/eth/tx/direct-raw",
+            "submit_endpoint": "/eth/tx/submit",
             "flashbots_tail_bundle_endpoint": "/eth/tx/flashbots/mev-share-tail",
             "flashbots_relay_url": "https://relay.flashbots.net",
             "flashbots_auth_configured": true,

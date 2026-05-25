@@ -11,7 +11,7 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     derive_min_output_from_expected_output, KartalBribeRequest, KartalSubmitDirectRawResult,
-    LiveDirectRawTransactionRequest, LiveTraderTxSignal, PreSubmitSimulation,
+    LiveDirectRawTransactionRequest, LiveTraderTxSignal, PreSubmitSimulation, TxSubmissionPolicy,
 };
 use serde_json::{json, Value};
 
@@ -81,7 +81,7 @@ fn signal() -> LiveTraderTxSignal {
             Address::repeat_byte(0x22).to_string(),
         )),
         observed_block: Some(25_128_246),
-        execution: eth_live_trading::LiveTxExecution::DirectRaw,
+        submission_policy: TxSubmissionPolicy::PublicMempool,
         request: LiveDirectRawTransactionRequest {
             attempt_id: Some("gate3-attempt-1".to_string()),
             chain_id: 1,

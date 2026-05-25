@@ -50,6 +50,7 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         rpc_url: "http://172.18.0.1:8545".to_string(),
         journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
         direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
+        submit_endpoint: Some("/eth/tx/submit".to_string()),
         flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
         flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
         flashbots_auth_configured: Some(true),
@@ -172,4 +173,38 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
     .unwrap_err();
 
     assert!(error.to_string().contains("max_value_wei"));
+}
+
+#[test]
+fn tail_entry_buy_uses_flashbots_submission_policy() {
+    let tail_hash = format!("0x{}", "11".repeat(32));
+    let policy = buy_submission_policy(
+        true,
+        3,
+        "tail_entry_buy",
+        &Some(TailEntryOrderingEvidence {
+            tail_after_tx_hash: Some(tail_hash.clone()),
+            dependency_priority_fee_wei: Some("100".to_string()),
+            dependency_gas_price_wei: None,
+        }),
+        25_128_246,
+    )
+    .unwrap();
+
+    assert_eq!(
+        policy,
+        TxSubmissionPolicy::FlashbotsMevShare {
+            ordering: TxOrderingPolicy::TailAfter { tx_hash: tail_hash },
+            target_block: Some(25_128_247),
+            max_block: Some(25_128_249),
+            can_revert: false,
+        }
+    );
+}
+
+#[test]
+fn non_tail_entry_uses_public_mempool_policy() {
+    let policy = buy_submission_policy(true, 3, "entry_buy", &None, 25_128_246).unwrap();
+
+    assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
 }
