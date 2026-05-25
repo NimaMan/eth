@@ -19,7 +19,6 @@ pub(super) struct RealExecutionArgs {
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
     pub(super) allow_public_mempool_live_validation: bool,
-    pub(super) flashbots_tail_max_block_span: u64,
 }
 
 #[derive(Debug, Parser)]
@@ -89,10 +88,6 @@ struct LiveRealOnlyCli {
     /// any non-dry-run Kartal status.
     #[arg(long, default_value_t = false)]
     allow_public_mempool_live_validation: bool,
-
-    /// Inclusive target-block window length for tail-entry MEV-Share bundles.
-    #[arg(long, default_value_t = DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN)]
-    flashbots_tail_max_block_span: u64,
 }
 
 pub(super) fn parse_live_backtest_args() -> Args {
@@ -127,7 +122,6 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
             allow_public_mempool_live_validation: real.allow_public_mempool_live_validation,
-            flashbots_tail_max_block_span: real.flashbots_tail_max_block_span,
         }
     }
 }

@@ -53,7 +53,9 @@ use live_state::spawn_live_state_publisher;
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use mined_pool_risks::mined_pool_risks_from_update;
 use poll_error::handle_poll_error;
-use real_execution::{build_kartal_real_adapter, preflight_kartal_real};
+use real_execution::{
+    build_kartal_real_adapter, preflight_kartal_real, validate_flashbots_tail_max_block_span,
+};
 use receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
 use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
@@ -74,6 +76,8 @@ const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
 const ALPHA_LIVE_TRADER_POLL_INTERVAL_MS_CONFIG: &str = "ALPHA_LIVE_TRADER_POLL_INTERVAL_MS";
 const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
 const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
+const ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN_CONFIG: &str =
+    "ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN";
 const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 const RETH_HTTP_RPC_CONFIG: &str = "RETH_HTTP_RPC";
@@ -83,7 +87,6 @@ const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
-const DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN: u64 = 3;
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
 
@@ -144,6 +147,17 @@ async fn run(
             execution_mode.label()
         ));
     }
+    let flashbots_tail_max_block_span = if execution_mode.uses_kartal() {
+        let span = resolve_cli_or_config_u64(
+            None,
+            &shared_config,
+            ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN_CONFIG,
+        )?;
+        validate_flashbots_tail_max_block_span(span)?;
+        Some(span)
+    } else {
+        None
+    };
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
     let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
     live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
@@ -154,7 +168,19 @@ async fn run(
     };
     let mut kartal_real_preflight = match real_args.as_ref() {
         None => None,
-        Some(real_args) => Some(preflight_kartal_real(real_args, &args, &strategy_specs).await?),
+        Some(real_args) => {
+            let flashbots_tail_max_block_span = flashbots_tail_max_block_span
+                .expect("kartal-real execution requires Flashbots tail span config");
+            Some(
+                preflight_kartal_real(
+                    real_args,
+                    &args,
+                    &strategy_specs,
+                    flashbots_tail_max_block_span,
+                )
+                .await?,
+            )
+        }
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
@@ -247,7 +273,7 @@ async fn run(
                         },
                         "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation,
                         "flashbots_submission_owner": "kartal",
-                        "flashbots_tail_max_block_span": real_args.flashbots_tail_max_block_span
+                        "flashbots_tail_max_block_span": flashbots_tail_max_block_span
                     })
                 } else {
                     Value::Null
@@ -361,6 +387,8 @@ async fn run(
                 exact_pre_submit_live_simulator,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
+                flashbots_tail_max_block_span
+                    .expect("kartal-real execution requires Flashbots tail span config"),
                 live_real_gas_policy
                     .clone()
                     .expect("kartal-real gas policy must exist"),

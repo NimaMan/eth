@@ -33,7 +33,6 @@ fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
         live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
         allow_public_mempool_live_validation,
-        flashbots_tail_max_block_span: 3,
     }
 }
 

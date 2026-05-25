@@ -34,6 +34,8 @@ The normal live trader service path reads polling settings from the shared root
 - `ALPHA_LIVE_MEMPOOL_SINCE_DAYS`: lookback window used when fetching stored
   mempool signals from the chain server.
 - `ALPHA_LIVE_SIGNAL_LIMIT`: max signal rows fetched per trader loop.
+- `ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN`: inclusive target-block window
+  length for policy-driven tail-entry MEV-Share bundles.
 
 The CLI flags `--poll-interval-ms`, `--mempool-since-days`, and
 `--signal-limit` are explicit operator overrides only. The checked-in systemd

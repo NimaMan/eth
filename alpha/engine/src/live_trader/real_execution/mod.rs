@@ -755,9 +755,10 @@ pub(super) async fn preflight_kartal_real(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
+    flashbots_tail_max_block_span: u64,
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    validate_flashbots_tail_entry_args(args)?;
+    validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span)?;
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
@@ -776,6 +777,7 @@ pub(super) async fn build_kartal_real_adapter(
     exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
+    flashbots_tail_max_block_span: u64,
     gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
@@ -848,7 +850,7 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
-        flashbots_tail_max_block_span: args.flashbots_tail_max_block_span,
+        flashbots_tail_max_block_span,
     };
     let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(
         &args.kartal_url,
@@ -1021,10 +1023,10 @@ fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
     Ok(token)
 }
 
-fn validate_flashbots_tail_entry_args(args: &RealExecutionArgs) -> Result<()> {
-    if args.flashbots_tail_max_block_span == 0 {
+pub(super) fn validate_flashbots_tail_max_block_span(span: u64) -> Result<()> {
+    if span == 0 {
         return Err(eyre!(
-            "--flashbots-tail-max-block-span must be greater than zero"
+            "ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN must be greater than zero"
         ));
     }
     Ok(())
