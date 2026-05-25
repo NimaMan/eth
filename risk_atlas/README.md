@@ -49,6 +49,21 @@ read flat reports for page state; its Risk Atlas pages should use the
 | `scam_analytics/` | Scam-label, mechanism, and mempool-management research that feeds the atlas. |
 | `modeling/` | Dataset/model experiments built from imported Risk Atlas runs. |
 
+## Core Questions
+
+Risk Atlas exists to answer these questions before downstream systems rely on a
+token/pool fact:
+
+| Question | Owner |
+| --- | --- |
+| What did the chain actually do at the relevant block and transaction coordinates? | `token_lab/cases/` and `investigations/parity/` |
+| Do source observations, token-builder state, simulator probes, and Alpha executable routes agree with chain truth? | `token_lab/categories/source_simulator_parity/` |
+| What mechanism or behavior label best describes the token/pool event? | `token_lab/categories/mechanism_classification/` and `investigations/behavior_catalog/` |
+| Is the fact executable for our route, denomination, size, and timing constraints? | `token_lab/categories/execution_viability/` |
+| How should the fact be displayed without stale liquidity, misleading price ratios, or missing risk context? | `token_lab/categories/display_read_model/` |
+| Does the fact need scam-label/model research? | `scam_analytics/` and `modeling/` |
+| Does the fact imply a trading policy or threshold? | `alpha/lab/strategy_analysis/` |
+
 Executable scripts belong in the module that owns the capability rather than in
 a generic Risk Atlas helper bucket.
 

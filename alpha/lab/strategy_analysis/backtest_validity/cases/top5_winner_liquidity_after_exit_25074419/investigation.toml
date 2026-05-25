@@ -1,6 +1,6 @@
 title = "Top-five winner liquidity-after-exit review"
 status = "explained"
-category = "backtest_result_validity"
+category = "backtest_validity"
 run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
 source_run_id = "snipe-all-v1-chain-sim-live-v4"
 range_start_block = 25065694

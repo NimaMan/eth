@@ -3,6 +3,19 @@
 Parity tools replay historical behavior and compare our simulator against chain
 truth.
 
+## Questions
+
+Every parity note should answer:
+
+| Question | Why It Matters |
+| --- | --- |
+| What chain state is authoritative: parent block, block prefix before tx N, after tx N, or end-of-block? | Prevents using the wrong pre-state. |
+| Which prior transactions must be replayed to reconstruct the relevant state? | Finds missing setup/control transactions. |
+| Which route is being compared: observed chain sender/route, simulator route, or Alpha executable route? | Avoids false equivalence between helper routes and production routes. |
+| What exact fields must match: logs, balances, reserves, revert reason, tax, proceeds, pool identity, and risk flags? | Defines pass/fail criteria. |
+| If parity fails, is the failure in chain input, source observation, simulator state, route builder, or expected token behavior? | Routes the fix to the right owner. |
+| What downstream claims are blocked until parity is resolved? | Stops bad facts from becoming strategy/model evidence. |
+
 Minimum checks for a transaction replay:
 
 - original tx succeeds or reverts the same way;

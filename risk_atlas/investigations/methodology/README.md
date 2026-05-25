@@ -31,7 +31,6 @@ the owning production module first.
 | Category | Primary Question | Blocks Promotion? |
 | --- | --- | --- |
 | `source_simulator_parity` | Do chain truth, token-builder/source observations, simulator route probes, and Alpha executable routes agree? | Yes. This blocks strategy evidence and model data for the affected protocol/cohort. |
-| `backtest_result_validity` | Is reported PnL/accounting/lifecycle state correct under the declared execution model? | Yes for the affected run/policy. |
 | `mechanism_classification` | What behavior or scam mechanism happened, and are labels precise enough? | Blocks labels/features when unresolved. |
 | `display_read_model` | How should Risk Atlas/Asena surface behavior without misleading operators? | Blocks UI trust, not necessarily execution. |
 | `execution_viability` | What route, denomination, or size constraint is part of the token/pool execution fact? | Blocks execution claims until the fact is clear. Strategy-policy interpretation belongs in Alpha lab. |
@@ -57,3 +56,6 @@ policy.
 
 Validated facts that imply a strategy decision should be indexed in
 `../../../alpha/lab/strategy_analysis/risk_atlas_inputs/`.
+
+Position, PnL, lifecycle, and strategy-result validity investigations belong in
+`../../../alpha/lab/strategy_analysis/backtest_validity/`, not in Risk Atlas.

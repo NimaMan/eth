@@ -106,6 +106,9 @@ windows, eligibility thresholds, scam/risk rates, liquidity quality, and other
 questions used to design Alpha strategies. Risk Atlas supplies chain and risk
 facts; Alpha lab owns the strategy-facing interpretation.
 
+Position-level and strategy-result investigations belong under
+`strategy_analysis/backtest_validity/`.
+
 ## Position Lab
 
 Single position/token checks for entry report consistency, observation joins,

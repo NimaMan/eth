@@ -1,6 +1,6 @@
 title = "Sell proceeds recipient-net attribution in 15k historical baseline"
 status = "fixed"
-category = "backtest_result_validity"
+category = "backtest_validity"
 previous_run_id = "hist-snipe-all-poolonly-15k-weth-only-20260513-134623"
 fixed_run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
 source_run_id = "snipe-all-v1-chain-sim-live-v4"

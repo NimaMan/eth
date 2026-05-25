@@ -4,6 +4,19 @@ Cases where the token/pool fact is about executable trade scope, route support,
 denomination support, or size sensitivity. Token Lab owns the factual evidence;
 Alpha lab owns the strategy-policy interpretation.
 
+## Questions
+
+Ask these before turning a pool fact into an executable strategy assumption:
+
+| Question | Why It Matters |
+| --- | --- |
+| Which route is being tested: protocol, router/vault, sender, recipient, denomination, and amount? | Execution facts are route-specific. |
+| Is the quote denomination supported by the route and accounting layer? | Prevents stable/other-denom pools from being treated as WETH-equivalent. |
+| Does the intended size execute, and what smaller/larger sizes change the result? | Identifies fixed-size failures and adaptive-sizing candidates. |
+| Does buy succeed, sell succeed, or only one side succeed? | Separates entry eligibility from exit/recovery assumptions. |
+| Does execution depend on address, route, timing, or state after another transaction? | Determines whether the fact is generally tradeable or route-specific. |
+| Is this a Risk Atlas fact or an Alpha policy decision? | Risk Atlas records viability; Alpha chooses thresholds and strategy variants. |
+
 ## Cases
 
 | Status | Case | Current Fact |

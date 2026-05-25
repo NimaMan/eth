@@ -8,6 +8,9 @@ The category taxonomy lives in `../categories/`. Cases stay in this flat folder
 so links remain stable; category folders index cases rather than duplicating or
 moving them.
 
+Position-level and strategy-result validation cases belong in
+`../../../alpha/lab/strategy_analysis/backtest_validity/`.
+
 ## Folder Contract
 
 Use stable case folder names:

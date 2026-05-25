@@ -77,6 +77,8 @@ facts; Alpha lab owns the strategy analysis and policy interpretation.
 Risk Atlas facts that need strategy-policy interpretation are indexed in
 `risk_atlas_inputs/`.
 
+Position and strategy-result investigations are indexed in `backtest_validity/`.
+
 The first implementation computes time windows from block distance using a
 `12s` Ethereum block-time estimate because the current price-ratio history is
 block-number based. It also uses the current run snapshot for buy/sell

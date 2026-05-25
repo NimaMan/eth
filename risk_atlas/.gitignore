@@ -1,1 +1,6 @@
 /data/
+
+# Generated model and analysis outputs.
+/modeling/artifacts/*
+!/modeling/artifacts/.gitkeep
+/scam_analytics/artifacts/mempool_management/*.csv
