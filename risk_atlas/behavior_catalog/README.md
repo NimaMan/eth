@@ -10,6 +10,9 @@ a display rule.
 
 - `sync_without_transfer`: pool reserves change after a direct `sync()` without
   matching token or denom transfers in the same transaction.
+- `control_transfer_from_pair`: creator/control transaction calls the token with
+  `transferFrom(pair, recipient, amount)` and moves pool-held token without a
+  normal pair `Swap`, `Mint`, or `Burn` event.
 - `reserve_discontinuity`: token or denom reserve changes by an extreme ratio
   compared with the previous sync.
 - `denom_drain`: denom reserve drops below a safety threshold after prior
@@ -77,10 +80,11 @@ Common evidence:
 
 The `sync()` call is not itself the drain. `sync()` is a normal V2 pair method
 that copies current token balances into the pair's stored reserves. The scam
-signal is the combination of an unexplained pair-balance change plus `sync()`
+signal is the combination of a suspicious pair-balance change plus `sync()`
 making that manipulated balance visible to the AMM state. SSS is the anchor
-case for the `sync_without_transfer + reserve_discontinuity +
-token_reserve_dust` variant.
+case for the `control_transfer_from_pair + direct_sync +
+denom_drain + token_reserve_dust` variant; the focused investigation is
+`risk_atlas/investigations/sss_creator_transfer_from_pair_drain_25041123/`.
 
 ### `privileged_seller_reserve_drain`
 

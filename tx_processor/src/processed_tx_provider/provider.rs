@@ -21,7 +21,7 @@ use crate::tx_processor::{
     TxProcessor,
 };
 use alloy_primitives::{keccak256, Address, B256};
-use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
+use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::{Result, WrapErr};
 use reth_chain_query::ChainQuery;
 use reth_primitives_traits::SealedHeader;
@@ -352,7 +352,7 @@ impl ProcessedTxProvider {
             .trace_transaction_in_block_by_hash(
                 block_hash,
                 tx_hash,
-                GethDebugTracingOptions::default(),
+                GethDebugTracingOptions::call_tracer(CallConfig::default().with_log()),
             )
             .await?;
 

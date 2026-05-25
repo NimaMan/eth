@@ -3,8 +3,10 @@
 Status: display/read-model and durable observation fields implemented. A fresh
 token-builder range replay on 2026-05-20 reproduces the reserve collapse,
 same-block WETH drain, post-drain dust-token reserve state, and `cannot_sell`
-read model. The chain-parity question is settled; the remaining work is to
-decide whether to add earlier warning detectors around the direct `sync()`.
+read model. The chain-parity question is settled for the broad SSS range. The
+remaining mechanism-classification work is tracked in the focused
+[`sss_creator_transfer_from_pair_drain_25041123`](../sss_creator_transfer_from_pair_drain_25041123/)
+investigation.
 
 This investigation tracks the SSS pool whose displayed price ratio became
 extremely high while the pool was also marked `cannot_sell`.
@@ -34,6 +36,8 @@ The first objective was parity, not classification:
   `0x1d8bcaff714a59ba96aba2db3ac58e7862723382d02394aaac6d541d2bcbbe5e`
 - `first_tracked_buy`:
   `0xf398d2afa25ae98b7576382a8e7487070bad7d9954b41e2cdfadcfee80cdbf20`
+- `creator_pool_token_transfer`:
+  `0x487bb861bbd8f86e65e39f3560afa18b8ca99f7b955f0e276f50739f54cbcefb`
 - `creator_sync_after_reserve_collapse`:
   `0x620827c84f54de392802cbc7b7fb7fdf565591d26481d4eb1ec1e7d47d3bc660`
 - `weth_drain_sell`:
@@ -60,8 +64,12 @@ Initial observations from the range `25,041,048..25,041,137`.
 
 - `initial_liquidity` creates the pair, sends `1,000,000,000` SSS and `1 WETH`,
   then syncs.
+- `creator_pool_token_transfer` is a creator call to the SSS token that moves
+  `119,838,850.441209632 SSS` from the pair to the later drain wallet at tx
+  index `197`.
 - `creator_sync_after_reserve_collapse` is a direct pool call from the creator
-  that emits a `Sync` after the token reserve collapsed.
+  at tx index `198` that emits a `Sync` after the pair's actual token balance
+  has already collapsed.
 - `weth_drain_sell` transfers SSS into the pool and drains about `8.594 WETH`.
 - `later_buy` buys after the WETH drain and leaves the pool with only
   `697.712149384` SSS.
@@ -77,9 +85,11 @@ present while token reserve is dust relative to total supply.
 - Replayed `initial_liquidity` and verified pair creation, LP state, and
   reserves through the range read model.
 - Replayed `first_tracked_buy` and verified buy activity.
+- Replayed `creator_pool_token_transfer` and verified that chain truth records
+  a token `Transfer(pool -> drain_wallet)` before the creator `sync()`.
 - Replayed `creator_sync_after_reserve_collapse` and verified that the token
-  builder records the direct creator `sync` with zero token or denom transfers;
-  chain truth shows `balanceOf(pool)` collapsed before `sync()`.
+  builder records the direct creator `sync` with zero token or denom transfers
+  in that tx; the pair balance had already changed in tx `197`.
 - Replayed `weth_drain_sell` and verified the observed sell-like tx succeeds and
   drains WETH.
 - Replayed `later_buy` and verified the post-buy reserve state.
@@ -104,8 +114,11 @@ This is not the current/latest market state shown by Dexscreener:
 
 The key transactions were present in token-builder activity rows:
 
+- `creator_pool_token_transfer`: creator `transferFrom(pair, drain_wallet, ...)`
+  moves pool-held SSS at tx index `197`.
 - `creator_sync_after_reserve_collapse`: zero token transfers and zero denom
-  transfers in the creator tx.
+  transfers in the sync tx itself; it publishes the tx `197` balance change into
+  stored reserves.
 - `weth_drain_sell`: `8.594034272473914 WETH` sell volume in the same block.
 - `later_buy`: `1.485 WETH` buy volume, ending in the dust-token reserve state.
 
@@ -142,56 +155,62 @@ WETH drain sell is observed from executed chain data.
 - The pool has at least one observed sell-like transaction on chain.
 - The token builder reproduces the observed sell-like WETH drain and final
   range-end `can_buy=true`, `can_sell=false` state.
-- The creator-triggered `sync()` after token reserve collapse is a critical
-  suspicious event.
+- The creator-triggered pool-token `transferFrom` before `sync()` is the
+  earliest confirmed suspicious event.
+- The creator-triggered `sync()` after token reserve collapse is the reserve
+  publication step before the same-block WETH drain.
 
 ### Mechanism Classification
 
 SSS belongs in the reserve-drain scam family. The closest existing production
-label is `pair_balance_backdoor_drain` / `Backdoored Pair-Balance Drain`, but
-the exact low-level balance mutation still needs final proof before we mark it
-verified under that label.
+label is `pair_balance_backdoor_drain` / `Backdoored Pair-Balance Drain`. Exact
+chain truth now shows the subtype is creator/control `transferFrom(pair, ...)`
+followed by direct `sync()` and WETH drain.
 
 The confirmed dynamic is:
 
 1. the pool had meaningful token and WETH reserves;
-2. the pair's actual SSS token balance collapsed by roughly `1,000,000x`;
-3. the creator called `sync()`, which made the pair's stored reserves reflect
+2. the creator moved nearly all pair-held SSS to the later drain wallet with
+   `transferFrom(pair, drain_wallet, ...)`;
+3. the pair's actual SSS token balance collapsed by roughly `1,000,000x`;
+4. the creator called `sync()`, which made the pair's stored reserves reflect
    the already-collapsed token balance;
-4. WETH was then drained by a same-block sell-like transaction;
-5. later buys saw a pool with non-zero WETH but token-reserve dust, making raw
+5. WETH was then drained by a same-block sell-like transaction;
+6. later buys saw a pool with non-zero WETH but token-reserve dust, making raw
    AMM price ratios misleading.
 
 So the detector is not "any `sync()` is bad". The detector candidate is the
 compound pattern:
 
 ```text
-creator/control sync
-  + no matching normal token/denom transfer explanation
+creator/control transferFrom(pair, ...)
+  + direct creator/control sync
   + extreme token reserve discontinuity
   + meaningful WETH still present
   + later or same-block WETH drain / cannot-sell state
 ```
 
-Until the exact balance mutation is classified, this should be treated as a
-probable `pair_balance_backdoor_drain` variant, with `unknown_reserve_drain` as
-the fallback label if the backdoor evidence cannot be proven.
+This should be treated as a `pair_balance_backdoor_drain` variant, with
+`unknown_reserve_drain` only as the fallback if a later route replay contradicts
+the current chain interpretation.
 
 ### Detector Candidates
 
-- `sync_without_transfer`
+- `control_transfer_from_pair`
+- `sync_without_transfer` as a secondary reserve-publication feature
 - `reserve_discontinuity`
 - `token_reserve_dust`
 - `price_ratio_extreme_low_supply`
-- `pair_balance_backdoor_drain` when the unexplained pair-balance mutation is
-  proven
+- `pair_balance_backdoor_drain` when suspicious pair-balance movement is tied
+  to creator/control pair-token movement
 - `unknown_reserve_drain` as the conservative fallback
 - `observed_sell_simulator_fail` only if a same-prestate synthetic sell fails
 
 ### Open Work
 
-- Decide whether the range builder should flag this pool before the WETH drain,
-  at the direct `sync()`, or both.
+- The focused `sss_creator_transfer_from_pair_drain_25041123` investigation
+  owns the creator `transferFrom(pair, ...)` and direct `sync()` early-warning
+  question.
 - Decide whether to run a same-prestate synthetic sell to distinguish privileged
   seller behavior from simulator route/account gaps.
 
