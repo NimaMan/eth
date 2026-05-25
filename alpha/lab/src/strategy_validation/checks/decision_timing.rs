@@ -4,6 +4,15 @@ use sqlx::PgPool;
 use super::super::report::{CheckResult, Verdict};
 use super::common::count_check;
 
+const RISK_EXIT_REASON_SQL: &str = r#"
+          AND sd.reason_code IN (
+              'exit.liquidity_removal',
+              'exit.lp_approval',
+              'exit.scam',
+              'exit.tax'
+          )
+"#;
+
 pub(super) async fn submitted_events_have_decisions_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -58,13 +67,7 @@ pub(super) async fn risk_sell_decisions_have_prior_risk_events_check(
     result_set_id: &str,
     strategy: Option<&str>,
 ) -> Result<CheckResult> {
-    count_check(
-        pool,
-        "decision_timing",
-        "risk_sell_has_available_signal",
-        Verdict::Fail,
-        "risk sell decisions have a risk event at or before the decision block",
-        "risk sell decisions without prior local risk evidence",
+    let sql = format!(
         r#"
         SELECT count(*)
         FROM alpha_trading.strategy_decisions sd
@@ -72,11 +75,7 @@ pub(super) async fn risk_sell_decisions_have_prior_risk_events_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_sell'
-          AND sd.event_source IN (
-              'risk',
-              'mempool_signal',
-              'pool_update'
-          )
+{RISK_EXIT_REASON_SQL}
           AND NOT EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re
@@ -85,7 +84,16 @@ pub(super) async fn risk_sell_decisions_have_prior_risk_events_check(
                 AND (re.pool_address IS NULL OR sd.pool_address IS NULL OR lower(re.pool_address) = lower(sd.pool_address))
                 AND re.observed_block <= sd.block_number
           )
-        "#,
+        "#
+    );
+    count_check(
+        pool,
+        "decision_timing",
+        "risk_sell_has_available_signal",
+        Verdict::Fail,
+        "risk sell decisions have a risk event at or before the decision block",
+        "risk sell decisions without prior local risk evidence",
+        &sql,
         result_set_id,
         strategy,
     )
@@ -97,13 +105,7 @@ pub(super) async fn risk_sell_decisions_submit_on_signal_block_check(
     result_set_id: &str,
     strategy: Option<&str>,
 ) -> Result<CheckResult> {
-    count_check(
-        pool,
-        "decision_timing",
-        "risk_sell_signal_block_immediate",
-        Verdict::Fail,
-        "risk-triggered sell decisions are submitted on the same block as the matching risk signal",
-        "risk sell decisions whose matching risk evidence is not same-block",
+    let sql = format!(
         r#"
         SELECT count(*)
         FROM alpha_trading.strategy_decisions sd
@@ -111,11 +113,7 @@ pub(super) async fn risk_sell_decisions_submit_on_signal_block_check(
         WHERE rsr.result_set_id = $1
           AND ($2::text IS NULL OR sd.strategy_name = $2)
           AND sd.action = 'submit_sell'
-          AND sd.event_source IN (
-              'risk',
-              'mempool_signal',
-              'pool_update'
-          )
+{RISK_EXIT_REASON_SQL}
           AND NOT EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re
@@ -124,7 +122,16 @@ pub(super) async fn risk_sell_decisions_submit_on_signal_block_check(
                 AND (re.pool_address IS NULL OR sd.pool_address IS NULL OR lower(re.pool_address) = lower(sd.pool_address))
                 AND re.observed_block = sd.block_number
           )
-        "#,
+        "#
+    );
+    count_check(
+        pool,
+        "decision_timing",
+        "risk_sell_signal_block_immediate",
+        Verdict::Fail,
+        "risk-triggered sell decisions are submitted on the same block as the matching risk signal",
+        "risk sell decisions whose matching risk evidence is not same-block",
+        &sql,
         result_set_id,
         strategy,
     )

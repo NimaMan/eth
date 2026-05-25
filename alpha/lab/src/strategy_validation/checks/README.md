@@ -59,8 +59,8 @@ strategy result and returns a backend-owned `CheckResult`.
 | --- | --- | --- | --- |
 | `buy_submitted_has_decision` | Can every buy submission be explained by a strategy decision? | Every buy order should trace to a same-block `submit_buy` decision for auditability. | `decision_timing.rs` |
 | `sell_submitted_has_decision` | Can every sell submission be explained by a strategy decision? | Every sell order should trace to a same-block `submit_sell` decision for auditability. | `decision_timing.rs` |
-| `risk_sell_has_available_signal` | Was each risk-triggered sell based on already-available evidence? | A risk exit should not depend on evidence observed after the decision block. | `decision_timing.rs` |
-| `risk_sell_signal_block_immediate` | Did risk-triggered exits submit immediately on the signal block? | For risk-driven exits, delayed submission can materially change loss and should be explicit. | `decision_timing.rs` |
+| `risk_sell_has_available_signal` | Was each risk-triggered sell based on already-available evidence? | Risk exits such as liquidity removal, LP approval, scam, and tax exits should not depend on evidence observed after the decision block. Max-hold and manual exits are not risk-triggered sells for this check. | `decision_timing.rs` |
+| `risk_sell_signal_block_immediate` | Did risk-triggered exits submit immediately on the signal block? | For risk-driven exits, delayed submission can materially change loss and should be explicit. Max-hold and manual exits are not risk-triggered sells for this check. | `decision_timing.rs` |
 
 ### Risk Policy
 
