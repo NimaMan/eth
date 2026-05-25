@@ -1,7 +1,7 @@
 use super::TransactionSigner;
 use crate::{
     error::{EthTxExecutorError, Result},
-    types::{PreparedDirectRawTransaction, SignedTransaction},
+    types::{PreparedDirectRawTransaction, SignedFlashbotsAuth, SignedTransaction},
 };
 use async_trait::async_trait;
 use ethers_core::{
@@ -78,5 +78,34 @@ impl TransactionSigner for LocalTransactionSigner {
             tx_hash,
             raw_tx_hex: format!("0x{}", hex::encode(raw.as_ref())),
         })
+    }
+
+    async fn sign_flashbots_auth(&self, body_hash: &str) -> Result<SignedFlashbotsAuth> {
+        validate_flashbots_body_hash(body_hash)?;
+        let signature = self.wallet.sign_message(body_hash.to_string()).await?;
+        let signature = prefix_hex(signature.to_string());
+        Ok(SignedFlashbotsAuth {
+            body_hash: body_hash.to_string(),
+            signature,
+        })
+    }
+}
+
+fn validate_flashbots_body_hash(body_hash: &str) -> Result<()> {
+    let trimmed = body_hash.trim();
+    if trimmed.len() == 66 && trimmed.starts_with("0x") {
+        Ok(())
+    } else {
+        Err(EthTxExecutorError::Signer(
+            "Flashbots auth body hash must be a 32-byte 0x-prefixed hex value".to_string(),
+        ))
+    }
+}
+
+fn prefix_hex(value: String) -> String {
+    if value.starts_with("0x") {
+        value
+    } else {
+        format!("0x{value}")
     }
 }

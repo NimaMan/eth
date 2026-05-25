@@ -11,7 +11,7 @@ use ethers_core::types::Address;
 
 use crate::{
     error::Result,
-    types::{PreparedDirectRawTransaction, SignedTransaction},
+    types::{PreparedDirectRawTransaction, SignedFlashbotsAuth, SignedTransaction},
 };
 
 #[async_trait]
@@ -22,4 +22,6 @@ pub trait TransactionSigner: Send + Sync {
         &self,
         request: &PreparedDirectRawTransaction,
     ) -> Result<SignedTransaction>;
+
+    async fn sign_flashbots_auth(&self, body_hash: &str) -> Result<SignedFlashbotsAuth>;
 }

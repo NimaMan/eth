@@ -10,7 +10,7 @@ use tokio::{
 use super::{SignerWireRequest, SignerWireResponse, TransactionSigner, ETH_SIGNER_WIRE_SCHEMA};
 use crate::{
     error::{EthTxExecutorError, Result},
-    types::{PreparedDirectRawTransaction, SignedTransaction},
+    types::{PreparedDirectRawTransaction, SignedFlashbotsAuth, SignedTransaction},
 };
 
 #[derive(Debug, Clone)]
@@ -117,6 +117,43 @@ impl TransactionSigner for UnixSocketTransactionSigner {
             ))),
         }
     }
+
+    async fn sign_flashbots_auth(&self, body_hash: &str) -> Result<SignedFlashbotsAuth> {
+        let response = self
+            .send_request(SignerWireRequest::sign_flashbots_auth(body_hash))
+            .await?;
+
+        match response {
+            SignerWireResponse::SignedFlashbotsAuth {
+                schema,
+                signer,
+                signed,
+            } => {
+                if schema != ETH_SIGNER_WIRE_SCHEMA {
+                    return Err(EthTxExecutorError::Signer(format!(
+                        "unexpected signer response schema {schema:?}"
+                    )));
+                }
+                if signer != self.signer_address {
+                    return Err(EthTxExecutorError::Signer(format!(
+                        "signer response address {signer:?} does not match configured signer {:?}",
+                        self.signer_address
+                    )));
+                }
+                if signed.body_hash != body_hash {
+                    return Err(EthTxExecutorError::Signer(format!(
+                        "signer response body hash {:?} does not match requested {:?}",
+                        signed.body_hash, body_hash
+                    )));
+                }
+                Ok(signed)
+            }
+            SignerWireResponse::Error { error, .. } => Err(EthTxExecutorError::Signer(error)),
+            other => Err(EthTxExecutorError::Signer(format!(
+                "unexpected signer response kind: {other:?}"
+            ))),
+        }
+    }
 }
 
 trait TrimAscii {
@@ -197,6 +234,50 @@ mod tests {
 
         assert!(signed.raw_tx_hex.starts_with("0x"));
         assert_ne!(signed.raw_tx_hex, "0x");
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn unix_socket_signer_round_trips_flashbots_auth_signature() {
+        let path = std::env::temp_dir().join(format!(
+            "tx-executor-flashbots-signer-{}.sock",
+            uuid::Uuid::new_v4()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let local = LocalTransactionSigner::from_private_key(
+            "0x59c6995e998f97a5a0044966f094538b8ba11502bc50c61e1722e5fb2935b8f1",
+            1,
+        )
+        .unwrap();
+        let signer_address = local.address();
+        let body_hash = format!("0x{}", "22".repeat(32));
+        let expected_body_hash = body_hash.clone();
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut request = Vec::new();
+            reader.read_until(b'\n', &mut request).await.unwrap();
+            let request: SignerWireRequest = serde_json::from_slice(request.trim_ascii()).unwrap();
+            let response = match request {
+                SignerWireRequest::SignFlashbotsAuth { body_hash, .. } => {
+                    assert_eq!(body_hash, expected_body_hash);
+                    let signed = local.sign_flashbots_auth(&body_hash).await.unwrap();
+                    SignerWireResponse::signed_flashbots_auth(local.address(), signed)
+                }
+                _ => SignerWireResponse::error("unexpected request"),
+            };
+            let mut stream = reader.into_inner();
+            let mut encoded = serde_json::to_vec(&response).unwrap();
+            encoded.push(b'\n');
+            stream.write_all(&encoded).await.unwrap();
+        });
+
+        let remote = UnixSocketTransactionSigner::new(&path, signer_address);
+        let signed = remote.sign_flashbots_auth(&body_hash).await.unwrap();
+
+        assert_eq!(signed.body_hash, body_hash);
+        assert!(signed.signature.starts_with("0x"));
         let _ = tokio::fs::remove_file(path).await;
     }
 }
