@@ -11,7 +11,7 @@ Every case with `investigation.toml` should set one of these categories.
 | `source_simulator_parity` | `source_simulator_parity/` | 3 current cases |
 | `backtest_result_validity` | `backtest_result_validity/` | 4 current cases |
 | `mechanism_classification` | `mechanism_classification/` | 3 current cases |
-| `display_read_model` | `display_read_model/` | 2 current cases |
+| `display_read_model` | `display_read_model/` | 1 current case |
 | `execution_viability` | `execution_viability/` | 2 current cases |
 
 Cases without `investigation.toml` should still be placed in the closest
