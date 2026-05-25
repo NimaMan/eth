@@ -4,8 +4,8 @@ ETH-level module for token/pool risk intelligence.
 
 Risk Atlas owns the durable `risk_atlas_*` DB contract, the Rust reader/writer
 crate, and the page-ready analytics contract served by `eth_chain_server`.
-Scam analytics, investigations, network analytics, and modeling are first-class
-subdomains under this module.
+Scam analytics, token lab, investigations, network analytics, and modeling are
+first-class subdomains under this module.
 
 ## Ownership
 
@@ -16,8 +16,10 @@ risk_atlas
   -> durable atlas schema, ingestion rows, aggregate read models, page contract
 risk_atlas/scam_analytics
   -> labels, target semantics, mechanism review, mempool-management research
+risk_atlas/token_lab
+  -> concrete token/pool case reviews and reproducible case notes
 risk_atlas/investigations
-  -> concrete token/pool reviews, parity method, behavior/mechanism catalog
+  -> cross-cutting parity method and behavior/mechanism catalog
 risk_atlas/network_analytics
   -> actor, wallet, fund-flow, and pool-network risk studies
 risk_atlas/modeling
@@ -41,7 +43,8 @@ read flat reports for page state; its Risk Atlas pages should use the
 | Path | Purpose |
 | --- | --- |
 | `src/` | `eth_risk_atlas` Rust crate: schema structs, DB reader/writer, ingest contracts, and page/story builders. |
-| `investigations/` | Concrete cases, parity methodology, and the shared behavior/mechanism catalog. |
+| `token_lab/` | Concrete token/pool case reviews with narrative, metadata, and artifacts. |
+| `investigations/` | Cross-cutting methodology, parity rules, behavior catalog, and promotion queue learned from token cases. |
 | `network_analytics/` | Token-network, pool-network, and second-order fund-flow case studies. |
 | `scam_analytics/` | Scam-label, mechanism, and mempool-management research that feeds the atlas. |
 | `modeling/` | Dataset/model experiments built from imported Risk Atlas runs. |

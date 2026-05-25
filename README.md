@@ -117,7 +117,7 @@ Use this map before broad searching:
 | How does alpha prepare a live transaction? | `alpha/live/trading/README.md` | `alpha/live/trading/src/tx_prep/`, `alpha/engine/src/execution/real/README.md`, `alpha/block_tx_rank/README.md` |
 | How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
 | How do we deploy and audit an ETH on-chain contract? | `deploy/onchain/README.md` | contract-specific folders such as `deploy/onchain/uniswap-v2-trading-vault/` |
-| How do I investigate token behavior or launch strategy stats? | `risk_atlas/README.md` | `risk_atlas/investigations/README.md`, `risk_atlas/scam_analytics/`, `risk_atlas/network_analytics/`, `alpha/lab/strategy_analysis/` |
+| How do I investigate token behavior or launch strategy stats? | `risk_atlas/README.md` | `risk_atlas/token_lab/`, `risk_atlas/investigations/README.md`, `risk_atlas/scam_analytics/`, `risk_atlas/network_analytics/`, `alpha/lab/strategy_analysis/` |
 | How are node paths and services configured? | `deploy/node/README.md` | `config.env`, `deploy/node/scripts/`, `deploy/systemd/` |
 | How do archived Solidity executor experiments fit? | `solidity/README.md` | current production simulation paths live in `tx_simulator/` and `tx_processor/` |
 
@@ -232,7 +232,7 @@ Use focused tests/examples near the owner crate:
 | Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
-| Risk Atlas investigations and strategy cohorts | `risk_atlas/README.md`, one case folder under `risk_atlas/investigations/cases/`, and `alpha/lab/strategy_analysis/README.md` |
+| Risk Atlas investigations and strategy cohorts | `risk_atlas/README.md`, one case folder under `risk_atlas/token_lab/cases/`, and `alpha/lab/strategy_analysis/README.md` |
 
 Generated output and heavy directories are not orientation sources. Avoid
 starting from `target/`, `logs/`, `.pytest_cache/`, or `vendor/reth/` unless the

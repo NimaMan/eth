@@ -286,10 +286,10 @@ Feature rows must declare an `as_of_block`.
 
 ## First Data Sources
 
-Start with already reviewed Risk Atlas investigations, then expand to
+Start with already reviewed Risk Atlas token-lab cases, then expand to
 token-server and indexed chain-observation outputs:
 
-- `risk_atlas/investigations/*/investigation.toml`
+- `risk_atlas/token_lab/cases/*/investigation.toml`
 - token server pool summaries with `scam_mechanism`
 - source observation rows with first bad block and sell failures
 - network analytics timeline features for suspicious graph/fund-flow behavior

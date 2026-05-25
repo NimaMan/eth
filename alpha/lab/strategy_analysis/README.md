@@ -74,6 +74,9 @@ Keep this contract aligned with the `/eth/trade/` eligibility table and
 `alpha/strategies/README.md`. Risk Atlas supplies the underlying chain and risk
 facts; Alpha lab owns the strategy analysis and policy interpretation.
 
+Risk Atlas facts that need strategy-policy interpretation are indexed in
+`risk_atlas_inputs/`.
+
 The first implementation computes time windows from block distance using a
 `12s` Ethereum block-time estimate because the current price-ratio history is
 block-number based. It also uses the current run snapshot for buy/sell

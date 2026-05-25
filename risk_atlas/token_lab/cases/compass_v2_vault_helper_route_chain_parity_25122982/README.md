@@ -18,7 +18,7 @@ routes that successfully sold on chain.
 | Deployed V2 vault | `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597` |
 | Vault owner | `0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27` |
 | Vault source | `solidity/baygus-executor/contracts/src/UniswapV2TradingVault.sol` |
-| Parent investigation | `risk_atlas/investigations/cases/external_router_classic_v2_scope_25122982/` |
+| Parent investigation | `risk_atlas/token_lab/cases/external_router_classic_v2_scope_25122982/` |
 
 ## Conclusion
 

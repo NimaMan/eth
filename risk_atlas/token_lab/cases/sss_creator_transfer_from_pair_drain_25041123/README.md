@@ -245,7 +245,7 @@ Exit policy:
 ## Related Files
 
 - broad SSS investigation:
-  `risk_atlas/investigations/cases/sss_space_services_25041048/`
+  `risk_atlas/token_lab/cases/sss_space_services_25041048/`
 - behavior catalog:
   `risk_atlas/investigations/behavior_catalog/README.md`
 - parity tools:

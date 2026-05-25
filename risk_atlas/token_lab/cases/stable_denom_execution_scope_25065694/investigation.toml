@@ -1,6 +1,6 @@
 title = "Stable-denom execution scope in 15k historical baseline"
 status = "fixed"
-category = "alpha_strategy_input"
+category = "execution_viability"
 previous_run_id = "hist-snipe-all-poolonly-15k-v3-ur-decoded-20260513-132029"
 fixed_run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
 source_run_id = "snipe-all-v1-chain-sim-live-v4"

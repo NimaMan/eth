@@ -354,8 +354,9 @@ Run facts from Strategy Lab:
 - Strategy Lab now prints `Buy Failed Entries` and `Open Failed Exits` tables
   so failed entries and retryable failed exits are visible without ad hoc SQL.
 
-Keep this ledger focused on strategy work. Token/pool parity investigations
-belong in `risk_atlas/investigations/README.md`.
+Keep this ledger focused on strategy work. Concrete token/pool cases belong in
+`risk_atlas/token_lab/cases/`; cross-case parity rules belong in
+`risk_atlas/investigations/README.md`.
 
 | Priority | Status | Issue | Evidence | Fix / Next Check |
 | --- | --- | --- | --- | --- |

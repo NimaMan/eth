@@ -1,8 +1,12 @@
-# Investigation Cases
+# Token Lab Cases
 
 Concrete token and pool investigations live here. Each case should be small
 enough to reproduce and specific enough to become a regression test, detector
 candidate, display rule, or Alpha lab input.
+
+The category taxonomy lives in `../categories/`. Cases stay in this flat folder
+so links remain stable; category folders index cases rather than duplicating or
+moving them.
 
 ## Folder Contract
 

@@ -86,7 +86,7 @@ case for the `control_transfer_from_pair + direct_sync +
 denom_drain + token_reserve_dust` variant. Alpha's current deployed V2 vault
 route cannot sell SSS even before the control transfer, so the anchor case is
 avoid-only for that route; the focused investigation is
-`risk_atlas/investigations/cases/sss_creator_transfer_from_pair_drain_25041123/`.
+`risk_atlas/token_lab/cases/sss_creator_transfer_from_pair_drain_25041123/`.
 
 ### `privileged_seller_reserve_drain`
 
