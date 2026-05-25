@@ -33,7 +33,6 @@ fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
         live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
         allow_public_mempool_live_validation,
-        flashbots_tail_entry_enabled: false,
         flashbots_tail_max_block_span: 3,
     }
 }
@@ -179,7 +178,6 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
 fn tail_entry_buy_uses_flashbots_submission_policy() {
     let tail_hash = format!("0x{}", "11".repeat(32));
     let policy = buy_submission_policy(
-        true,
         3,
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
@@ -204,7 +202,7 @@ fn tail_entry_buy_uses_flashbots_submission_policy() {
 
 #[test]
 fn non_tail_entry_uses_public_mempool_policy() {
-    let policy = buy_submission_policy(true, 3, "entry_buy", &None, 25_128_246).unwrap();
+    let policy = buy_submission_policy(3, "entry_buy", &None, 25_128_246).unwrap();
 
     assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
 }

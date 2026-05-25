@@ -19,7 +19,6 @@ pub(super) struct RealExecutionArgs {
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
     pub(super) allow_public_mempool_live_validation: bool,
-    pub(super) flashbots_tail_entry_enabled: bool,
     pub(super) flashbots_tail_max_block_span: u64,
 }
 
@@ -91,11 +90,6 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value_t = false)]
     allow_public_mempool_live_validation: bool,
 
-    /// Submit trading-enabled tail entries as Flashbots MEV-Share bundles
-    /// after the pending enabling transaction.
-    #[arg(long, default_value_t = false)]
-    flashbots_tail_entry_enabled: bool,
-
     /// Inclusive target-block window length for tail-entry MEV-Share bundles.
     #[arg(long, default_value_t = DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN)]
     flashbots_tail_max_block_span: u64,
@@ -133,7 +127,6 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
             allow_public_mempool_live_validation: real.allow_public_mempool_live_validation,
-            flashbots_tail_entry_enabled: real.flashbots_tail_entry_enabled,
             flashbots_tail_max_block_span: real.flashbots_tail_max_block_span,
         }
     }

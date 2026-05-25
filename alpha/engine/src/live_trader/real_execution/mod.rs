@@ -290,7 +290,6 @@ struct KartalRealPlanner<P, G> {
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
     gas_policy: LiveRealGasPolicy,
-    flashbots_tail_entry_enabled: bool,
     flashbots_tail_max_block_span: u64,
 }
 
@@ -404,7 +403,6 @@ where
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
         let submission_policy = buy_submission_policy(
-            self.flashbots_tail_entry_enabled,
             self.flashbots_tail_max_block_span,
             gas_policy_action,
             &tail_entry_ordering,
@@ -490,7 +488,6 @@ where
                         "tail_after_tx_hash": tail_entry_ordering.as_ref().and_then(|evidence| evidence.tail_after_tx_hash.clone()),
                         "dependency_priority_fee_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_priority_fee_wei.clone()),
                         "dependency_gas_price_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_gas_price_wei.clone()),
-                        "flashbots_tail_entry_enabled": self.flashbots_tail_entry_enabled,
                     },
                     "production_gas_guard": {
                         "required_gas_rank_source": self.gas_policy.required_gas_rank_source.as_str(),
@@ -522,13 +519,12 @@ struct TailEntryOrderingEvidence {
 }
 
 fn buy_submission_policy(
-    flashbots_tail_entry_enabled: bool,
     flashbots_tail_max_block_span: u64,
     gas_policy_action: &str,
     tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
     current_block: u64,
 ) -> eth_alpha_core::error::Result<TxSubmissionPolicy> {
-    if !flashbots_tail_entry_enabled || gas_policy_action != "tail_entry_buy" {
+    if gas_policy_action != "tail_entry_buy" {
         return Ok(TxSubmissionPolicy::PublicMempool);
     }
     let tail_after_tx_hash = tail_entry_ordering
@@ -761,9 +757,7 @@ pub(super) async fn preflight_kartal_real(
     strategy_specs: &[LiveStrategySpec],
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    if args.flashbots_tail_entry_enabled {
-        validate_flashbots_tail_entry_args(args)?;
-    }
+    validate_flashbots_tail_entry_args(args)?;
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
@@ -854,7 +848,6 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
-        flashbots_tail_entry_enabled: args.flashbots_tail_entry_enabled,
         flashbots_tail_max_block_span: args.flashbots_tail_max_block_span,
     };
     let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(
@@ -889,14 +882,14 @@ fn validate_kartal_real_status(
             "Kartal ETH tx policy must have non-empty target and selector allowlists"
         ));
     }
-    if args.flashbots_tail_entry_enabled && status.submit_endpoint.is_none() {
+    if status.submit_endpoint.is_none() {
         return Err(eyre!(
-            "Flashbots tail-entry execution requires Kartal /eth/tx/submit support"
+            "kartal-real trader requires Kartal /eth/tx/submit support"
         ));
     }
-    if args.flashbots_tail_entry_enabled && status.flashbots_auth_configured != Some(true) {
+    if status.flashbots_auth_configured != Some(true) {
         return Err(eyre!(
-            "Flashbots tail-entry execution requires Flashbots auth configured in Kartal"
+            "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
         ));
     }
     match status.broadcast_mode {

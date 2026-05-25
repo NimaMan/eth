@@ -246,7 +246,6 @@ async fn run(
                             "dry_run"
                         },
                         "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation,
-                        "flashbots_tail_entry_enabled": real_args.flashbots_tail_entry_enabled,
                         "flashbots_submission_owner": "kartal",
                         "flashbots_tail_max_block_span": real_args.flashbots_tail_max_block_span
                     })
