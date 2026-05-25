@@ -29,6 +29,7 @@ mod cli;
 mod config_resolution;
 mod entrypoints;
 mod gas_policy;
+mod live_state;
 mod manual_close;
 mod mined_pool_risks;
 mod poll_error;
@@ -48,6 +49,7 @@ use bankroll::{entry_bankroll_summary_json, resolve_entry_bankroll_wei, single_s
 use cli::{Args, RealExecutionArgs};
 use config_resolution::{resolve_cli_or_config_i64, resolve_cli_or_config_u64};
 use gas_policy::load_live_real_gas_policy;
+use live_state::spawn_live_state_publisher;
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use mined_pool_risks::mined_pool_risks_from_update;
 use poll_error::handle_poll_error;
@@ -81,6 +83,8 @@ const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
+const DEFAULT_FLASHBOTS_AUTH_KEY_ENV: &str = "FLASHBOTS_AUTH_PRIVATE_KEY";
+const DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN: u64 = 3;
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
 
@@ -242,7 +246,11 @@ async fn run(
                         } else {
                             "dry_run"
                         },
-                        "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation
+                        "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation,
+                        "flashbots_tail_entry_enabled": real_args.flashbots_tail_entry_enabled,
+                        "flashbots_relay_url": &real_args.flashbots_relay_url,
+                        "flashbots_auth_key_env": &real_args.flashbots_auth_key_env,
+                        "flashbots_tail_max_block_span": real_args.flashbots_tail_max_block_span
                     })
                 } else {
                     Value::Null
@@ -284,15 +292,25 @@ async fn run(
     let restored_stale_submitted_positions = restored_runtime.stale_submitted_positions;
     let restored_position_count = restored_runtime.active_position_count;
 
-    let live_simulator = tx_simulator::LiveTxSimulator::new(&reth_datadir)
-        .wrap_err("failed to initialize live chain simulator")?;
+    let tx_simulator = Arc::new(
+        tx_simulator::TxSimulator::new(&reth_datadir)
+            .wrap_err("failed to initialize tx simulator")?,
+    );
+    let live_state_provider = tx_simulator::InMemoryLiveBlockStateProvider::new();
+    let live_simulator =
+        tx_simulator::LiveTxSimulator::new(tx_simulator.clone(), live_state_provider.clone());
+    spawn_live_state_publisher(
+        TokenServerClient::new(token_server_url.clone()),
+        live_state_provider,
+        tx_simulator.clone(),
+    );
     let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
     let next_order_sequence = store
         .max_order_sequence_for_prefix(&run_id)
         .await
         .wrap_err("failed to restore alpha trader order sequence")?;
     let chain_sim_adapter = LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
-        live_simulator,
+        live_simulator.clone(),
         tx_processor,
         run_id.clone(),
         next_order_sequence,
@@ -300,7 +318,7 @@ async fn run(
     .wrap_err("failed to initialize chain-sim execution adapter")?;
     let adapter_current_block = chain_sim_adapter.current_block();
     let pool_updates = chain_sim_adapter.pools();
-    let exact_pre_submit_live_simulator = chain_sim_adapter.live_simulator();
+    let exact_pre_submit_live_simulator = Some(live_simulator.clone());
     let manual_close_live_simulator = exact_pre_submit_live_simulator.clone();
     let state_status_adapter = chain_sim_adapter.clone();
     let manual_close_vault_address = match (execution_mode, real_args.as_ref()) {
@@ -760,12 +778,15 @@ async fn run(
             }
         }
 
-        if let Some(vault_address) = manual_close_vault_address {
+        if let (Some(vault_address), Some(manual_close_live_simulator)) = (
+            manual_close_vault_address,
+            manual_close_live_simulator.as_ref(),
+        ) {
             if !suppress_events && (!first_poll || args.replay_current) {
                 match process_manual_close_requests(
                     &store,
                     &mut engine,
-                    &manual_close_live_simulator,
+                    manual_close_live_simulator,
                     vault_address,
                     status.progress.current_block,
                     default_manual_close_limit(),

@@ -515,7 +515,14 @@ impl PostgresTradingStore {
                    er.payload #>> '{mined_evidence,gas_rank_source}' AS gas_rank_source,
                    er.payload #>> '{mined_evidence,gas_estimated_max_cost_eth}' AS gas_estimated_max_cost_eth,
                    er.payload #>> '{mined_evidence,gas_estimated_priority_spend_eth}' AS gas_estimated_priority_spend_eth,
-                   er.payload #>> '{mined_evidence,gas_policy_guard}' AS gas_policy_guard
+                   er.payload #>> '{mined_evidence,gas_policy_guard}' AS gas_policy_guard,
+                   er.payload #>> '{mined_evidence,private_execution_transport}' AS private_execution_transport,
+                   er.payload #>> '{mined_evidence,bundle_hash}' AS bundle_hash,
+                   er.payload #>> '{mined_evidence,bundle_target_block}' AS bundle_target_block,
+                   er.payload #>> '{mined_evidence,bundle_max_block}' AS bundle_max_block,
+                   er.payload #>> '{mined_evidence,gas_policy_tail_after_tx_hash}' AS gas_policy_tail_after_tx_hash,
+                   er.payload #>> '{mined_evidence,gas_policy_dependency_priority_fee_wei}' AS gas_policy_dependency_priority_fee_wei,
+                   er.payload #>> '{mined_evidence,gas_policy_dependency_gas_price_wei}' AS gas_policy_dependency_gas_price_wei
             FROM alpha_trading.execution_reports er
             JOIN alpha_trading.positions positions
               ON positions.run_id = er.run_id
@@ -618,6 +625,29 @@ impl PostgresTradingStore {
                 let gas_policy_guard = row
                     .try_get::<Option<String>, _>("gas_policy_guard")
                     .map_err(store_error)?;
+                let private_execution_transport = row
+                    .try_get::<Option<String>, _>("private_execution_transport")
+                    .map_err(store_error)?;
+                let bundle_hash = row
+                    .try_get::<Option<String>, _>("bundle_hash")
+                    .map_err(store_error)?;
+                let bundle_target_block = row
+                    .try_get::<Option<String>, _>("bundle_target_block")
+                    .map_err(store_error)?
+                    .and_then(|value| value.parse::<u64>().ok());
+                let bundle_max_block = row
+                    .try_get::<Option<String>, _>("bundle_max_block")
+                    .map_err(store_error)?
+                    .and_then(|value| value.parse::<u64>().ok());
+                let gas_policy_tail_after_tx_hash = row
+                    .try_get::<Option<String>, _>("gas_policy_tail_after_tx_hash")
+                    .map_err(store_error)?;
+                let gas_policy_dependency_priority_fee_wei = row
+                    .try_get::<Option<String>, _>("gas_policy_dependency_priority_fee_wei")
+                    .map_err(store_error)?;
+                let gas_policy_dependency_gas_price_wei = row
+                    .try_get::<Option<String>, _>("gas_policy_dependency_gas_price_wei")
+                    .map_err(store_error)?;
                 Ok(SubmittedExecutionRecord {
                     order_id,
                     tx_hash,
@@ -640,6 +670,13 @@ impl PostgresTradingStore {
                     gas_estimated_max_cost_eth,
                     gas_estimated_priority_spend_eth,
                     gas_policy_guard,
+                    private_execution_transport,
+                    bundle_hash,
+                    bundle_target_block,
+                    bundle_max_block,
+                    gas_policy_tail_after_tx_hash,
+                    gas_policy_dependency_priority_fee_wei,
+                    gas_policy_dependency_gas_price_wei,
                 })
             })
             .collect()

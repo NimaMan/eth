@@ -90,6 +90,7 @@ pub fn build_priority_sell_request(
         token_address: Some(plan.token_address),
         pool_address: Some(plan.pool_address.clone()),
         observed_block: context.observed_block.or(Some(plan.observed_block)),
+        execution: crate::LiveTxExecution::DirectRaw,
         request,
     }
 }

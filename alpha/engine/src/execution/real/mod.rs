@@ -18,9 +18,8 @@ use eth_alpha_core::{
     order::OrderIntent,
 };
 use eth_live_trading::{
-    KartalExecutorClient, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
-    PrioritySellPlannerOutcome,
+    KartalExecutorClient, KartalSubmitDirectRawResult, LivePrioritySellPlannerInput,
+    LiveTraderTxSignal, LiveTxExecution, PrioritySellPlanner, PrioritySellPlannerOutcome,
 };
 use serde_json::Value;
 
@@ -43,7 +42,34 @@ pub trait LiveTxSubmitter: Send + Sync {
     async fn submit_signal(
         &self,
         signal: &LiveTraderTxSignal,
-    ) -> std::result::Result<KartalSubmitDirectRawResult, String>;
+    ) -> std::result::Result<LiveTxSubmissionResult, String>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiveTxSubmissionResult {
+    pub attempt_id: String,
+    pub status: String,
+    pub tx_hash: Option<String>,
+    pub error: Option<String>,
+    pub bundle_hash: Option<String>,
+    pub bundle_target_block: Option<BlockNumber>,
+    pub bundle_max_block: Option<BlockNumber>,
+    pub bundle_tail_after_tx_hash: Option<String>,
+}
+
+impl From<KartalSubmitDirectRawResult> for LiveTxSubmissionResult {
+    fn from(result: KartalSubmitDirectRawResult) -> Self {
+        Self {
+            attempt_id: result.attempt_id,
+            status: result.status,
+            tx_hash: result.tx_hash,
+            error: result.error,
+            bundle_hash: None,
+            bundle_target_block: None,
+            bundle_max_block: None,
+            bundle_tail_after_tx_hash: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -117,9 +143,10 @@ impl LiveTxSubmitter for KartalExecutorClient {
     async fn submit_signal(
         &self,
         signal: &LiveTraderTxSignal,
-    ) -> std::result::Result<KartalSubmitDirectRawResult, String> {
+    ) -> std::result::Result<LiveTxSubmissionResult, String> {
         KartalExecutorClient::submit_signal(self, signal)
             .await
+            .map(Into::into)
             .map_err(|error| error.to_string())
     }
 }
@@ -208,20 +235,20 @@ where
             order_id,
             result,
             observed_block,
-            &signal.request,
+            &signal,
         ))
     }
 }
 
 fn execution_report_from_kartal_result(
     order_id: OrderId,
-    result: KartalSubmitDirectRawResult,
+    result: LiveTxSubmissionResult,
     observed_block: Option<BlockNumber>,
-    request: &LiveDirectRawTransactionRequest,
+    signal: &LiveTraderTxSignal,
 ) -> ExecutionReport {
     let status_key = result.status.trim().to_ascii_lowercase();
     let status = match status_key.as_str() {
-        "broadcast" => ExecutionStatus::Submitted,
+        "broadcast" | "bundle_submitted" => ExecutionStatus::Submitted,
         "received" | "signed" => ExecutionStatus::Pending,
         "dry_run" => ExecutionStatus::Cancelled,
         "rejected" => ExecutionStatus::Cancelled,
@@ -229,7 +256,7 @@ fn execution_report_from_kartal_result(
         _ => ExecutionStatus::Failed,
     };
     let (tx_hash, tx_hash_error) = parse_tx_hash(result.tx_hash.as_deref());
-    let error = report_error(&status, &status_key, result.error, tx_hash_error);
+    let error = report_error(&status, &status_key, result.error.clone(), tx_hash_error);
 
     ExecutionReport {
         order_id,
@@ -240,18 +267,20 @@ fn execution_report_from_kartal_result(
         token_amount: None,
         gas_used: None,
         gas_cost: None,
-        mined_evidence: Some(submission_evidence(observed_block, request)),
+        mined_evidence: Some(submission_evidence(observed_block, signal, &result)),
         error,
     }
 }
 
 fn submission_evidence(
     observed_block: Option<BlockNumber>,
-    request: &LiveDirectRawTransactionRequest,
+    signal: &LiveTraderTxSignal,
+    result: &LiveTxSubmissionResult,
 ) -> MinedExecutionEvidence {
+    let request = &signal.request;
     let bribe = request.bribe.as_ref();
     let metadata = &request.metadata;
-    MinedExecutionEvidence {
+    let mut evidence = MinedExecutionEvidence {
         submitted_block_number: observed_block,
         selected_gas_limit: non_empty_string(&request.gas_limit),
         selected_max_fee_per_gas_wei: non_empty_string(&request.max_fee_per_gas),
@@ -287,7 +316,35 @@ fn submission_evidence(
         gas_policy_guard: metadata_string(metadata, &["gas_policy", "guard"])
             .or_else(|| metadata_string(metadata, &["gas_policy", "economic_guard"])),
         ..MinedExecutionEvidence::default()
+    };
+    evidence.gas_policy_tail_after_tx_hash =
+        metadata_string(metadata, &["tail_entry_ordering", "tail_after_tx_hash"]);
+    evidence.gas_policy_dependency_priority_fee_wei = metadata_string(
+        metadata,
+        &["tail_entry_ordering", "dependency_priority_fee_wei"],
+    );
+    evidence.gas_policy_dependency_gas_price_wei = metadata_string(
+        metadata,
+        &["tail_entry_ordering", "dependency_gas_price_wei"],
+    );
+
+    if let LiveTxExecution::FlashbotsMevShareTail {
+        tail_after_tx_hash,
+        target_block,
+        max_block,
+        ..
+    } = &signal.execution
+    {
+        evidence.private_execution_transport = Some("flashbots_mev_share_v0.1".to_string());
+        evidence.bundle_hash = result.bundle_hash.clone();
+        evidence.bundle_target_block = result.bundle_target_block.or(*target_block);
+        evidence.bundle_max_block = result.bundle_max_block.or(*max_block);
+        evidence.gas_policy_tail_after_tx_hash = result
+            .bundle_tail_after_tx_hash
+            .clone()
+            .or_else(|| non_empty_string(tail_after_tx_hash));
     }
+    evidence
 }
 
 fn non_empty_string(value: &str) -> Option<String> {

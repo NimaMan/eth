@@ -37,6 +37,8 @@ pub struct MinedExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt_block_number: Option<BlockNumber>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulation_block_number: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<BlockHash>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transaction_index: Option<u64>,
@@ -84,6 +86,20 @@ pub struct MinedExecutionEvidence {
     pub gas_estimated_priority_spend_eth: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_policy_guard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_execution_transport: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_target_block: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_max_block: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_ordering_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_dependency_block_number: Option<BlockNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_dependency_transaction_index: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_policy_tail_after_tx_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

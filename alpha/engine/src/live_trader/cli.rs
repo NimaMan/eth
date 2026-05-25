@@ -19,6 +19,10 @@ pub(super) struct RealExecutionArgs {
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
     pub(super) allow_public_mempool_live_validation: bool,
+    pub(super) flashbots_tail_entry_enabled: bool,
+    pub(super) flashbots_relay_url: String,
+    pub(super) flashbots_auth_key_env: String,
+    pub(super) flashbots_tail_max_block_span: u64,
 }
 
 #[derive(Debug, Parser)]
@@ -88,6 +92,24 @@ struct LiveRealOnlyCli {
     /// any non-dry-run Kartal status.
     #[arg(long, default_value_t = false)]
     allow_public_mempool_live_validation: bool,
+
+    /// Submit trading-enabled tail entries as Flashbots MEV-Share bundles
+    /// after the pending enabling transaction.
+    #[arg(long, default_value_t = false)]
+    flashbots_tail_entry_enabled: bool,
+
+    /// Flashbots relay URL for MEV-Share bundle submission.
+    #[arg(long, default_value = eth_live_trading::DEFAULT_FLASHBOTS_RELAY_URL)]
+    flashbots_relay_url: String,
+
+    /// Env var containing the Flashbots auth private key. This is only a
+    /// relay reputation/auth key, not the transaction signing key.
+    #[arg(long, default_value = DEFAULT_FLASHBOTS_AUTH_KEY_ENV)]
+    flashbots_auth_key_env: String,
+
+    /// Inclusive target-block window length for tail-entry MEV-Share bundles.
+    #[arg(long, default_value_t = DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN)]
+    flashbots_tail_max_block_span: u64,
 }
 
 pub(super) fn parse_live_backtest_args() -> Args {
@@ -122,6 +144,10 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
             allow_public_mempool_live_validation: real.allow_public_mempool_live_validation,
+            flashbots_tail_entry_enabled: real.flashbots_tail_entry_enabled,
+            flashbots_relay_url: real.flashbots_relay_url,
+            flashbots_auth_key_env: real.flashbots_auth_key_env,
+            flashbots_tail_max_block_span: real.flashbots_tail_max_block_span,
         }
     }
 }

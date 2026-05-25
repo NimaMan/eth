@@ -109,7 +109,16 @@ where
             let Some(receipt) = self.provider.transaction_receipt(record.tx_hash).await? else {
                 continue;
             };
-            match reconcile_receipt(&record, &receipt, self.vault_address)? {
+            let dependency_receipt = match dependency_tx_hash(&record)? {
+                Some(tx_hash) => self.provider.transaction_receipt(tx_hash).await?,
+                None => None,
+            };
+            match reconcile_receipt(
+                &record,
+                &receipt,
+                dependency_receipt.as_ref(),
+                self.vault_address,
+            )? {
                 ReceiptReconciliation::Final(report) => reports.push(report),
                 ReceiptReconciliation::Unresolved(issue) => unresolved.push(issue),
             }
@@ -141,6 +150,7 @@ enum ReceiptReconciliation {
 fn reconcile_receipt(
     record: &SubmittedExecutionRecord,
     receipt: &RpcTransactionReceipt,
+    dependency_receipt: Option<&RpcTransactionReceipt>,
     vault_address: Address,
 ) -> Result<ReceiptReconciliation> {
     let block_number = receipt.block_number()?;
@@ -149,7 +159,12 @@ fn reconcile_receipt(
     let receipt_status = receipt.status()?;
     match receipt_status {
         ReceiptStatus::Failed => {
-            let mined_evidence = Some(mined_evidence(record, receipt, &gas_cost)?);
+            let mined_evidence = Some(mined_evidence(
+                record,
+                receipt,
+                dependency_receipt,
+                &gas_cost,
+            )?);
             Ok(ReceiptReconciliation::Final(ExecutionReport {
                 order_id: record.order_id.clone(),
                 status: ExecutionStatus::Failed,
@@ -181,7 +196,12 @@ fn reconcile_receipt(
                 ));
             };
 
-            let mined_evidence = Some(mined_evidence(record, receipt, &gas_cost)?);
+            let mined_evidence = Some(mined_evidence(
+                record,
+                receipt,
+                dependency_receipt,
+                &gas_cost,
+            )?);
             Ok(ReceiptReconciliation::Final(ExecutionReport {
                 order_id: record.order_id.clone(),
                 status: ExecutionStatus::Confirmed,
@@ -208,6 +228,7 @@ fn reconcile_receipt(
 fn mined_evidence(
     record: &SubmittedExecutionRecord,
     receipt: &RpcTransactionReceipt,
+    dependency_receipt: Option<&RpcTransactionReceipt>,
     gas_cost: &Option<Amount>,
 ) -> Result<MinedExecutionEvidence> {
     let block_number = receipt.block_number()?;
@@ -219,8 +240,11 @@ fn mined_evidence(
         _ => None,
     };
 
+    let dependency_ordering = dependency_ordering_evidence(record, receipt, dependency_receipt)?;
+
     Ok(MinedExecutionEvidence {
         receipt_block_number: block_number,
+        simulation_block_number: None,
         block_hash: receipt.block_hash()?,
         transaction_index: receipt.transaction_index()?,
         cumulative_gas_used: receipt.cumulative_gas_used()?,
@@ -247,11 +271,82 @@ fn mined_evidence(
         gas_estimated_max_cost_eth: record.gas_estimated_max_cost_eth.clone(),
         gas_estimated_priority_spend_eth: record.gas_estimated_priority_spend_eth.clone(),
         gas_policy_guard: record.gas_policy_guard.clone(),
-        gas_policy_tail_after_tx_hash: None,
-        gas_policy_dependency_priority_fee_wei: None,
-        gas_policy_dependency_gas_price_wei: None,
+        private_execution_transport: record.private_execution_transport.clone(),
+        bundle_hash: record.bundle_hash.clone(),
+        bundle_target_block: record.bundle_target_block,
+        bundle_max_block: record.bundle_max_block,
+        bundle_ordering_status: dependency_ordering.status,
+        bundle_dependency_block_number: dependency_ordering.block_number,
+        bundle_dependency_transaction_index: dependency_ordering.transaction_index,
+        gas_policy_tail_after_tx_hash: record.gas_policy_tail_after_tx_hash.clone(),
+        gas_policy_dependency_priority_fee_wei: record
+            .gas_policy_dependency_priority_fee_wei
+            .clone(),
+        gas_policy_dependency_gas_price_wei: record.gas_policy_dependency_gas_price_wei.clone(),
         accepted_confirmation_depth: Some(ACCEPTED_CONFIRMATION_DEPTH),
         recheck_confirmation_depth: Some(RECHECK_CONFIRMATION_DEPTH),
+    })
+}
+
+#[derive(Default)]
+struct DependencyOrderingEvidence {
+    status: Option<String>,
+    block_number: Option<u64>,
+    transaction_index: Option<u64>,
+}
+
+fn dependency_tx_hash(record: &SubmittedExecutionRecord) -> Result<Option<TxHash>> {
+    let Some(value) = record.gas_policy_tail_after_tx_hash.as_deref() else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<TxHash>()
+        .map(Some)
+        .wrap_err_with(|| format!("invalid tail dependency tx hash {trimmed:?}"))
+}
+
+fn dependency_ordering_evidence(
+    record: &SubmittedExecutionRecord,
+    receipt: &RpcTransactionReceipt,
+    dependency_receipt: Option<&RpcTransactionReceipt>,
+) -> Result<DependencyOrderingEvidence> {
+    if record.gas_policy_tail_after_tx_hash.is_none() {
+        return Ok(DependencyOrderingEvidence::default());
+    }
+    let Some(dependency_receipt) = dependency_receipt else {
+        return Ok(DependencyOrderingEvidence {
+            status: Some("dependency_receipt_missing".to_string()),
+            ..DependencyOrderingEvidence::default()
+        });
+    };
+
+    let dependency_block = dependency_receipt.block_number()?;
+    let dependency_index = dependency_receipt.transaction_index()?;
+    let our_block = receipt.block_number()?;
+    let our_index = receipt.transaction_index()?;
+    let status = match (dependency_block, dependency_index, our_block, our_index) {
+        (Some(dep_block), Some(dep_index), Some(block), Some(index))
+            if dep_block == block && dep_index < index =>
+        {
+            "verified_same_block_after_dependency"
+        }
+        (Some(dep_block), Some(_), Some(block), Some(_)) if dep_block != block => {
+            "dependency_mined_in_different_block"
+        }
+        (Some(_), Some(dep_index), Some(_), Some(index)) if dep_index >= index => {
+            "not_after_dependency"
+        }
+        _ => "missing_ordering_fields",
+    };
+
+    Ok(DependencyOrderingEvidence {
+        status: Some(status.to_string()),
+        block_number: dependency_block,
+        transaction_index: dependency_index,
     })
 }
 
@@ -558,6 +653,13 @@ mod tests {
             gas_estimated_max_cost_eth: Some("0.01".to_string()),
             gas_estimated_priority_spend_eth: Some("0.004".to_string()),
             gas_policy_guard: Some("priority_fee_budget".to_string()),
+            private_execution_transport: None,
+            bundle_hash: None,
+            bundle_target_block: None,
+            bundle_max_block: None,
+            gas_policy_tail_after_tx_hash: None,
+            gas_policy_dependency_priority_fee_wei: None,
+            gas_policy_dependency_gas_price_wei: None,
         }
     }
 
@@ -568,10 +670,22 @@ mod tests {
         signature: &str,
         words: [U256; 3],
     ) -> RpcTransactionReceipt {
+        receipt_at(status, vault, token, signature, words, 100, 7)
+    }
+
+    fn receipt_at(
+        status: &str,
+        vault: Address,
+        token: Address,
+        signature: &str,
+        words: [U256; 3],
+        block_number: u64,
+        transaction_index: u64,
+    ) -> RpcTransactionReceipt {
         serde_json::from_value(json!({
-            "blockNumber": "0x64",
+            "blockNumber": format!("0x{block_number:x}"),
             "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "transactionIndex": "0x7",
+            "transactionIndex": format!("0x{transaction_index:x}"),
             "status": status,
             "gasUsed": "0x5208",
             "cumulativeGasUsed": "0xa410",
@@ -607,7 +721,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };
@@ -636,7 +752,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };
@@ -659,6 +777,54 @@ mod tests {
     }
 
     #[test]
+    fn tail_entry_receipt_records_dependency_ordering() {
+        let vault = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let receipt = receipt_at(
+            "0x1",
+            vault,
+            token,
+            BOUGHT_V2_SIGNATURE,
+            [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+            100,
+            7,
+        );
+        let dependency_receipt = receipt_at(
+            "0x1",
+            vault,
+            token,
+            BOUGHT_V2_SIGNATURE,
+            [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+            100,
+            3,
+        );
+        let mut submitted = submitted(OrderSide::Buy, token);
+        submitted.gas_policy_action = Some("tail_entry_buy".to_string());
+        submitted.private_execution_transport = Some("flashbots_mev_share_v0.1".to_string());
+        submitted.bundle_hash = Some(format!("0x{}", "44".repeat(32)));
+        submitted.gas_policy_tail_after_tx_hash = Some(format!("0x{}", "33".repeat(32)));
+
+        let report = match reconcile_receipt(&submitted, &receipt, Some(&dependency_receipt), vault)
+            .unwrap()
+        {
+            ReceiptReconciliation::Final(report) => report,
+            ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
+        };
+        let evidence = report.mined_evidence.expect("mined evidence");
+
+        assert_eq!(
+            evidence.bundle_ordering_status.as_deref(),
+            Some("verified_same_block_after_dependency")
+        );
+        assert_eq!(evidence.bundle_dependency_block_number, Some(100));
+        assert_eq!(evidence.bundle_dependency_transaction_index, Some(3));
+        assert_eq!(
+            evidence.gas_policy_tail_after_tx_hash.as_deref(),
+            submitted.gas_policy_tail_after_tx_hash.as_deref()
+        );
+    }
+
+    #[test]
     fn gate3_a6_receipt_evidence_records_actual_paid_gas_cost() {
         let vault = Address::repeat_byte(0x22);
         let token = Address::repeat_byte(0x33);
@@ -671,7 +837,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };
@@ -738,7 +906,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };
@@ -762,7 +932,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Sell, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Sell, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };
@@ -789,7 +961,8 @@ mod tests {
             [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
         );
 
-        let result = reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap();
+        let result =
+            reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault).unwrap();
 
         assert!(matches!(result, ReceiptReconciliation::Unresolved(_)));
     }
@@ -807,7 +980,9 @@ mod tests {
         );
 
         let report =
-            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, vault).unwrap() {
+            match reconcile_receipt(&submitted(OrderSide::Buy, token), &receipt, None, vault)
+                .unwrap()
+            {
                 ReceiptReconciliation::Final(report) => report,
                 ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
             };

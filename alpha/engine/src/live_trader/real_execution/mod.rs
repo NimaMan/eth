@@ -15,14 +15,15 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasEstimateConfig,
-    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
+    derive_min_output_from_expected_output, ChainServerGasRankProvider, FlashbotsMevShareClient,
+    FlashbotsMevShareClientConfig, FlashbotsTailBundleRequest, GasEstimateConfig, GasRankPlan,
+    GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
     KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
     KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
     LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, MempoolRaceGasRankProvider, PlannerTxContext,
-    PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate,
-    StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
+    LivePrioritySellPlannerInput, LiveTraderTxSignal, LiveTxExecution, MempoolRaceGasRankProvider,
+    PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
+    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
@@ -35,7 +36,8 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::execution::real::{
-    LiveTradingPlannerBridge, LiveTxPlanner, LiveTxPlanningInputResolver, TxExecutorAdapter,
+    LiveTradingPlannerBridge, LiveTxPlanner, LiveTxPlanningInputResolver, LiveTxSubmissionResult,
+    LiveTxSubmitter, TxExecutorAdapter,
 };
 use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
 
@@ -288,6 +290,78 @@ struct KartalRealPlanner<P, G> {
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
     gas_policy: LiveRealGasPolicy,
+    flashbots_tail_entry_enabled: bool,
+}
+
+struct KartalFlashbotsSubmitter {
+    kartal: KartalExecutorClient,
+    flashbots: Option<FlashbotsMevShareClient>,
+    tail_max_block_span: u64,
+}
+
+#[async_trait]
+impl LiveTxSubmitter for KartalFlashbotsSubmitter {
+    async fn submit_signal(
+        &self,
+        signal: &LiveTraderTxSignal,
+    ) -> std::result::Result<LiveTxSubmissionResult, String> {
+        match &signal.execution {
+            LiveTxExecution::DirectRaw => self
+                .kartal
+                .submit_signal(signal)
+                .await
+                .map(Into::into)
+                .map_err(|error| error.to_string()),
+            LiveTxExecution::FlashbotsMevShareTail {
+                tail_after_tx_hash,
+                target_block,
+                max_block,
+                can_revert,
+            } => {
+                let flashbots = self.flashbots.as_ref().ok_or_else(|| {
+                    "tail-entry signal requires Flashbots MEV-Share client".to_string()
+                })?;
+                let signed = self
+                    .kartal
+                    .sign_direct_raw(&signal.request_with_strategy_metadata())
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if signed.status.trim().to_ascii_lowercase() != "signed" {
+                    return Err(format!(
+                        "Kartal sign-direct-raw returned unexpected status {}",
+                        signed.status
+                    ));
+                }
+                let target = (*target_block)
+                    .or_else(|| signal.observed_block.map(|block| block.saturating_add(1)))
+                    .ok_or_else(|| {
+                        "tail-entry Flashbots bundle requires observed or target block".to_string()
+                    })?;
+                let span = self.tail_max_block_span.max(1);
+                let max = (*max_block).unwrap_or_else(|| target.saturating_add(span - 1));
+                let submission = flashbots
+                    .send_tail_bundle(FlashbotsTailBundleRequest {
+                        tail_after_tx_hash: tail_after_tx_hash.clone(),
+                        signed_tx: signed.raw_tx_hex,
+                        target_block: target,
+                        max_block: max,
+                        can_revert: *can_revert,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(LiveTxSubmissionResult {
+                    attempt_id: signed.attempt_id,
+                    status: "bundle_submitted".to_string(),
+                    tx_hash: Some(signed.tx_hash),
+                    error: None,
+                    bundle_hash: Some(submission.bundle_hash),
+                    bundle_target_block: Some(submission.target_block),
+                    bundle_max_block: Some(submission.max_block),
+                    bundle_tail_after_tx_hash: Some(submission.tail_after_tx_hash),
+                })
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -367,6 +441,7 @@ where
         let gas_policy_signal = buy_policy_context.signal.clone();
         let gas_policy_guard = buy_policy_context.guard;
         let gas_rank_policy = buy_policy_context.policy.clone();
+        let tail_entry_ordering = tail_entry_ordering_evidence(&input.intent, gas_policy_action);
         let fee = select_entry_gas_fee(
             &gas_rank,
             &gas_rank_policy,
@@ -380,6 +455,22 @@ where
         let trade_id = input.intent.trade_id.clone().ok_or_else(|| {
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
+        let execution = buy_execution_route(
+            self.flashbots_tail_entry_enabled,
+            gas_policy_action,
+            &tail_entry_ordering,
+            input.context.current_block,
+        )?;
+        let wire_protocol = match &execution {
+            LiveTxExecution::DirectRaw => "eth_direct_raw_v1",
+            LiveTxExecution::FlashbotsMevShareTail { .. } => "eth_mev_share_tail_bundle_v1",
+        };
+        let executor_boundary = match &execution {
+            LiveTxExecution::DirectRaw => "kartal_eth_tx_executor",
+            LiveTxExecution::FlashbotsMevShareTail { .. } => {
+                "kartal_eth_tx_executor_sign_only+flashbots_mev_share"
+            }
+        };
 
         Ok(LiveTraderTxSignal {
             strategy_name: input.context.tx.strategy_name.clone(),
@@ -388,6 +479,7 @@ where
             token_address: Some(input.intent.token_address),
             pool_address: Some(input.intent.pool_address.clone()),
             observed_block: Some(input.context.current_block),
+            execution,
             request: LiveDirectRawTransactionRequest {
                 attempt_id: Some(format!(
                     "{}-entry-{}",
@@ -416,9 +508,9 @@ where
                     metadata: simulation.metadata(),
                 }),
                 metadata: json!({
-                    "wire_protocol": "eth_direct_raw_v1",
+                    "wire_protocol": wire_protocol,
                     "intent_kind": "entry_buy",
-                    "executor_boundary": "kartal_eth_tx_executor",
+                    "executor_boundary": executor_boundary,
                     "tx_prep_version": 1,
                     "reason": input.intent.decision_reason.as_ref().map(|reason| reason.code.clone()).unwrap_or_else(|| "entry.live_buy".to_string()),
                     "route": {
@@ -447,6 +539,12 @@ where
                         "estimated_max_cost_eth": fee.estimated_max_cost_eth(estimated_gas_used),
                         "estimated_priority_spend_eth": fee.estimated_priority_spend_eth(estimated_gas_used),
                     },
+                    "tail_entry_ordering": {
+                        "tail_after_tx_hash": tail_entry_ordering.as_ref().and_then(|evidence| evidence.tail_after_tx_hash.clone()),
+                        "dependency_priority_fee_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_priority_fee_wei.clone()),
+                        "dependency_gas_price_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_gas_price_wei.clone()),
+                        "flashbots_tail_entry_enabled": self.flashbots_tail_entry_enabled,
+                    },
                     "production_gas_guard": {
                         "required_gas_rank_source": self.gas_policy.required_gas_rank_source.as_str(),
                         "max_priority_fee_gwei": self.gas_policy.max_priority_fee_gwei,
@@ -467,6 +565,76 @@ where
             },
         })
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TailEntryOrderingEvidence {
+    tail_after_tx_hash: Option<String>,
+    dependency_priority_fee_wei: Option<String>,
+    dependency_gas_price_wei: Option<String>,
+}
+
+fn buy_execution_route(
+    flashbots_tail_entry_enabled: bool,
+    gas_policy_action: &str,
+    tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
+    current_block: u64,
+) -> eth_alpha_core::error::Result<LiveTxExecution> {
+    if !flashbots_tail_entry_enabled || gas_policy_action != "tail_entry_buy" {
+        return Ok(LiveTxExecution::DirectRaw);
+    }
+    let tail_after_tx_hash = tail_entry_ordering
+        .as_ref()
+        .and_then(|evidence| evidence.tail_after_tx_hash.clone())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
+            reason: "Flashbots tail-entry buy requires dependency tail_after_tx_hash".to_string(),
+            block_number: Some(current_block),
+        })?;
+    Ok(LiveTxExecution::FlashbotsMevShareTail {
+        tail_after_tx_hash,
+        target_block: Some(current_block.saturating_add(1)),
+        max_block: None,
+        can_revert: false,
+    })
+}
+
+fn tail_entry_ordering_evidence(
+    intent: &OrderIntent,
+    gas_policy_action: &str,
+) -> Option<TailEntryOrderingEvidence> {
+    if intent.side != OrderSide::Buy || gas_policy_action != "tail_entry_buy" {
+        return None;
+    }
+    let dependency_fee_metadata = intent
+        .decision_reason
+        .as_ref()?
+        .details
+        .get("risk_event_evidence")?
+        .get("mempool_entry_evidence")?
+        .get("dependency_fee_metadata")?;
+    Some(TailEntryOrderingEvidence {
+        tail_after_tx_hash: json_string_field(dependency_fee_metadata, "tail_after_tx_hash"),
+        dependency_priority_fee_wei: json_string_field(
+            dependency_fee_metadata,
+            "dependency_priority_fee_wei",
+        ),
+        dependency_gas_price_wei: json_string_field(
+            dependency_fee_metadata,
+            "dependency_gas_price_wei",
+        ),
+    })
+}
+
+fn json_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    let value = value.get(key)?;
+    if value.is_null() {
+        return None;
+    }
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| Some(value.to_string()))
 }
 
 fn planner_error(error: LivePrioritySellPlannerError) -> AlphaCoreError {
@@ -641,6 +809,10 @@ pub(super) async fn preflight_kartal_real(
     strategy_specs: &[LiveStrategySpec],
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
+    if args.flashbots_tail_entry_enabled {
+        validate_flashbots_tail_entry_args(args)?;
+        let _ = load_flashbots_auth_key(&args.flashbots_auth_key_env)?;
+    }
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
@@ -656,7 +828,7 @@ pub(super) async fn build_kartal_real_adapter(
     store: PostgresTradingStore,
     run_id: String,
     valuation_adapter: LiveChainSimExecutionAdapter,
-    exact_pre_submit_live_simulator: tx_simulator::LiveTxSimulator,
+    exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
     gas_policy: LiveRealGasPolicy,
@@ -664,6 +836,11 @@ pub(super) async fn build_kartal_real_adapter(
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
     let vault =
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
+    let Some(exact_pre_submit_live_simulator) = exact_pre_submit_live_simulator else {
+        return Err(eyre!(
+            "kartal-real execution requires a live-only in-memory LiveTxSimulator; Reth historical context is not allowed for real pre-submit"
+        ));
+    };
     let pre_submit_simulator =
         UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
     let gas_rank_provider = MempoolRaceGasRankProvider::new(
@@ -726,11 +903,27 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
+        flashbots_tail_entry_enabled: args.flashbots_tail_entry_enabled,
     };
-    let submitter = KartalExecutorClient::new(KartalExecutorClientConfig::new(
+    let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(
         &args.kartal_url,
-        preflight.token,
+        preflight.token.clone(),
     ));
+    let flashbots = if args.flashbots_tail_entry_enabled {
+        Some(FlashbotsMevShareClient::new(
+            FlashbotsMevShareClientConfig::new(
+                &args.flashbots_relay_url,
+                load_flashbots_auth_key(&args.flashbots_auth_key_env)?,
+            ),
+        )?)
+    } else {
+        None
+    };
+    let submitter = KartalFlashbotsSubmitter {
+        kartal,
+        flashbots,
+        tail_max_block_span: args.flashbots_tail_max_block_span,
+    };
     let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id);
     Ok(Box::new(RealExecutionWithValuation::new(
         executor,
@@ -756,6 +949,11 @@ fn validate_kartal_real_status(
     if status.policy.allowed_target_count == 0 || status.policy.allowed_selector_count == 0 {
         return Err(eyre!(
             "Kartal ETH tx policy must have non-empty target and selector allowlists"
+        ));
+    }
+    if args.flashbots_tail_entry_enabled && status.sign_direct_raw_endpoint.is_none() {
+        return Err(eyre!(
+            "Flashbots tail-entry execution requires Kartal /eth/tx/sign-direct-raw support"
         ));
     }
     match status.broadcast_mode {
@@ -885,6 +1083,26 @@ fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env}"))?;
     Ok(token)
+}
+
+fn load_flashbots_auth_key(key_env: &str) -> Result<String> {
+    let key = std::env::var(key_env)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| eyre!("missing Flashbots auth private key in {key_env}"))?;
+    Ok(key)
+}
+
+fn validate_flashbots_tail_entry_args(args: &RealExecutionArgs) -> Result<()> {
+    if args.flashbots_tail_max_block_span == 0 {
+        return Err(eyre!(
+            "--flashbots-tail-max-block-span must be greater than zero"
+        ));
+    }
+    if args.flashbots_relay_url.trim().is_empty() {
+        return Err(eyre!("--flashbots-relay-url must not be empty"));
+    }
+    Ok(())
 }
 
 fn parse_live_real_address(value: &str, label: &str) -> Result<Address> {

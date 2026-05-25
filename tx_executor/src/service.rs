@@ -6,7 +6,9 @@ use crate::{
     repository::{ExecutionEvent, ExecutionRecorder},
     request::DirectRawTransactionRequest,
     signer::TransactionSigner,
-    types::{ExecutionStatus, PreparedDirectRawTransaction, SubmitDirectRawResult},
+    types::{
+        ExecutionStatus, PreparedDirectRawTransaction, SignDirectRawResult, SubmitDirectRawResult,
+    },
     validation::prepare_direct_raw_request,
 };
 use serde_json::json;
@@ -148,6 +150,62 @@ impl EthTxExecutionService {
                 }
             },
         }
+    }
+
+    pub async fn sign_direct_raw(
+        &self,
+        request: DirectRawTransactionRequest,
+    ) -> Result<SignDirectRawResult> {
+        let started = Instant::now();
+        let mut prepared =
+            prepare_direct_raw_request(&self.config, request, self.signer.address())?;
+        self.record(
+            &prepared.attempt_id,
+            ExecutionStatus::Received,
+            "direct raw sign request received",
+            json!({
+                "from": prepared.from,
+                "to": prepared.to,
+                "chain_id": prepared.chain_id,
+                "gas_limit": prepared.gas_limit,
+                "max_fee_per_gas": prepared.max_fee_per_gas,
+                "max_priority_fee_per_gas": prepared.max_priority_fee_per_gas,
+                "simulation": prepared.simulation,
+                "metadata": prepared.metadata,
+                "sign_only": true,
+            }),
+        )
+        .await;
+
+        let nonce = self.nonce_manager.reserve(prepared.nonce).await?;
+        prepared.nonce = Some(nonce);
+
+        let signed = self.signer.sign_direct_raw(&prepared).await?;
+        self.record(
+            &prepared.attempt_id,
+            ExecutionStatus::Signed,
+            "transaction signed for external bundle submission",
+            json!({
+                "tx_hash": signed.tx_hash,
+                "nonce": nonce,
+                "sign_only": true,
+            }),
+        )
+        .await;
+
+        Ok(SignDirectRawResult {
+            attempt_id: prepared.attempt_id,
+            status: ExecutionStatus::Signed,
+            tx_hash: signed.tx_hash,
+            raw_tx_hex: signed.raw_tx_hex,
+            from: prepared.from,
+            to: prepared.to,
+            nonce,
+            gas_limit: prepared.gas_limit,
+            max_fee_per_gas: prepared.max_fee_per_gas,
+            max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
+            elapsed_ms: started.elapsed().as_millis(),
+        })
     }
 
     fn result(

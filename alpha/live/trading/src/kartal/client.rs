@@ -3,7 +3,8 @@ use serde::de::DeserializeOwned;
 use super::{
     policy_journal::KartalPolicyDecisionList,
     wire::{
-        KartalEthTxExecutorStatus, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
+        KartalEthTxExecutorStatus, KartalSignDirectRawResult, KartalSubmitDirectRawResult,
+        LiveDirectRawTransactionRequest,
     },
 };
 
@@ -56,6 +57,21 @@ impl KartalClient {
         let response = self
             .http
             .post(self.config.endpoint("/eth/tx/direct-raw"))
+            .bearer_auth(self.config.bearer_token.trim())
+            .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    pub async fn sign_direct_raw(
+        &self,
+        request: &LiveDirectRawTransactionRequest,
+    ) -> Result<KartalSignDirectRawResult, KartalClientError> {
+        self.require_token()?;
+        let response = self
+            .http
+            .post(self.config.endpoint("/eth/tx/sign-direct-raw"))
             .bearer_auth(self.config.bearer_token.trim())
             .json(request)
             .send()

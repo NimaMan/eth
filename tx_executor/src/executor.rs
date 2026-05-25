@@ -73,4 +73,11 @@ impl EthTxExecutor {
     ) -> Result<crate::types::SubmitDirectRawResult> {
         self.service.submit_direct_raw(request).await
     }
+
+    pub async fn sign_direct_raw(
+        &self,
+        request: crate::request::DirectRawTransactionRequest,
+    ) -> Result<crate::types::SignDirectRawResult> {
+        self.service.sign_direct_raw(request).await
+    }
 }

@@ -11,8 +11,8 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     LiveDirectRawTransactionRequest, LivePrioritySellPlannerError, LivePrioritySellPlannerInput,
-    PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput, PrioritySellPlannerOutcome,
-    TxPrepRequestContext,
+    LiveTxExecution, PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput,
+    PrioritySellPlannerOutcome, TxPrepRequestContext,
 };
 use serde_json::{json, Value};
 
@@ -107,7 +107,7 @@ impl LiveTxPlanningInputResolver for FixedPlanningInputResolver {
 }
 
 struct FixedSubmitter {
-    result: Mutex<Option<std::result::Result<KartalSubmitDirectRawResult, String>>>,
+    result: Mutex<Option<std::result::Result<LiveTxSubmissionResult, String>>>,
 }
 
 #[async_trait]
@@ -115,7 +115,7 @@ impl LiveTxSubmitter for FixedSubmitter {
     async fn submit_signal(
         &self,
         _signal: &LiveTraderTxSignal,
-    ) -> std::result::Result<KartalSubmitDirectRawResult, String> {
+    ) -> std::result::Result<LiveTxSubmissionResult, String> {
         self.result
             .lock()
             .expect("submitter result lock")
@@ -153,6 +153,7 @@ fn signal(attempt_id: Option<&str>) -> LiveTraderTxSignal {
         token_address: Some(Address::with_last_byte(0x11)),
         pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
         observed_block: Some(25_128_246),
+        execution: LiveTxExecution::DirectRaw,
         request: LiveDirectRawTransactionRequest {
             attempt_id: attempt_id.map(str::to_string),
             chain_id: 1,
@@ -267,6 +268,10 @@ fn submit_result(status: &str, error: Option<&str>) -> KartalSubmitDirectRawResu
     }
 }
 
+fn submission_result(status: &str, error: Option<&str>) -> LiveTxSubmissionResult {
+    submit_result(status, error).into()
+}
+
 #[tokio::test]
 async fn bridge_turns_priority_sell_planner_submit_into_signal() {
     let bridge = LiveTradingPlannerBridge::new(
@@ -318,7 +323,7 @@ async fn broadcast_result_becomes_submitted_report() {
             signal: signal(Some("attempt-1")),
         },
         FixedSubmitter {
-            result: Mutex::new(Some(Ok(submit_result("broadcast", None)))),
+            result: Mutex::new(Some(Ok(submission_result("broadcast", None)))),
         },
     );
 
@@ -338,13 +343,64 @@ async fn broadcast_result_becomes_submitted_report() {
 }
 
 #[tokio::test]
+async fn flashbots_bundle_result_becomes_submitted_report_with_bundle_evidence() {
+    let tail_hash = format!("0x{}", "33".repeat(32));
+    let mut signal = signal(Some("attempt-1"));
+    signal.execution = LiveTxExecution::FlashbotsMevShareTail {
+        tail_after_tx_hash: tail_hash.clone(),
+        target_block: Some(25_128_247),
+        max_block: Some(25_128_249),
+        can_revert: false,
+    };
+    signal.request.metadata["gas_policy"]["action"] = json!("tail_entry_buy");
+    signal.request.metadata["tail_entry_ordering"] = json!({
+        "tail_after_tx_hash": tail_hash.clone(),
+        "dependency_priority_fee_wei": "2000000000"
+    });
+    let adapter = TxExecutorAdapter::new(
+        FixedPlanner { signal },
+        FixedSubmitter {
+            result: Mutex::new(Some(Ok(LiveTxSubmissionResult {
+                attempt_id: "attempt-1".to_string(),
+                status: "bundle_submitted".to_string(),
+                tx_hash: Some(format!("0x{}", "11".repeat(32))),
+                error: None,
+                bundle_hash: Some(format!("0x{}", "44".repeat(32))),
+                bundle_target_block: Some(25_128_247),
+                bundle_max_block: Some(25_128_249),
+                bundle_tail_after_tx_hash: Some(tail_hash.clone()),
+            }))),
+        },
+    );
+
+    let report = adapter.execute(intent()).await.unwrap();
+    let evidence = report.mined_evidence.expect("submitted evidence");
+
+    assert_eq!(report.status, ExecutionStatus::Submitted);
+    assert_eq!(
+        evidence.private_execution_transport.as_deref(),
+        Some("flashbots_mev_share_v0.1")
+    );
+    assert_eq!(evidence.bundle_target_block, Some(25_128_247));
+    assert_eq!(evidence.bundle_max_block, Some(25_128_249));
+    assert_eq!(
+        evidence.gas_policy_tail_after_tx_hash.as_deref(),
+        Some(tail_hash.as_str())
+    );
+    assert_eq!(
+        evidence.gas_policy_dependency_priority_fee_wei.as_deref(),
+        Some("2000000000")
+    );
+}
+
+#[tokio::test]
 async fn dry_run_result_is_cancelled_because_nothing_was_broadcast() {
     let adapter = TxExecutorAdapter::new(
         FixedPlanner {
             signal: signal(Some("attempt-1")),
         },
         FixedSubmitter {
-            result: Mutex::new(Some(Ok(submit_result("dry_run", None)))),
+            result: Mutex::new(Some(Ok(submission_result("dry_run", None)))),
         },
     );
 

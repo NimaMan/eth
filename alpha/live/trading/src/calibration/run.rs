@@ -285,6 +285,7 @@ mod tests {
             rpc_url: "http://127.0.0.1:8545".to_string(),
             journal_path: None,
             direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
+            sign_direct_raw_endpoint: Some("/eth/tx/sign-direct-raw".to_string()),
             policy: KartalEthTxPolicyStatus {
                 version: "test".to_string(),
                 allowed_from_count: 0,

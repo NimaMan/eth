@@ -19,6 +19,10 @@ impl KartalExecutorClientConfig {
     fn direct_raw_url(&self) -> String {
         join_endpoint(&self.base_url, "/eth/tx/direct-raw")
     }
+
+    fn sign_direct_raw_url(&self) -> String {
+        join_endpoint(&self.base_url, "/eth/tx/sign-direct-raw")
+    }
 }
 
 #[derive(Clone)]
@@ -79,6 +83,39 @@ impl KartalExecutorClient {
             .await
             .map_err(KartalExecutorClientError::Http)
     }
+
+    pub async fn sign_direct_raw(
+        &self,
+        request: &LiveDirectRawTransactionRequest,
+    ) -> Result<KartalSignDirectRawResult, KartalExecutorClientError> {
+        if self.config.bearer_token.trim().is_empty() {
+            return Err(KartalExecutorClientError::Config(
+                "Kartal bearer token is empty".to_string(),
+            ));
+        }
+
+        let response = self
+            .http
+            .post(self.config.sign_direct_raw_url())
+            .bearer_auth(self.config.bearer_token.trim())
+            .json(request)
+            .send()
+            .await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(KartalExecutorClientError::Server {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        response
+            .json::<KartalSignDirectRawResult>()
+            .await
+            .map_err(KartalExecutorClientError::Http)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -99,6 +136,8 @@ pub struct LiveTraderTxSignal {
     pub token_address: Option<TokenAddress>,
     pub pool_address: Option<PoolAddress>,
     pub observed_block: Option<BlockNumber>,
+    #[serde(default)]
+    pub execution: LiveTxExecution,
     pub request: LiveDirectRawTransactionRequest,
 }
 
@@ -141,6 +180,27 @@ impl LiveTraderTxSignal {
         }
 
         Value::Object(metadata)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LiveTxExecution {
+    DirectRaw,
+    FlashbotsMevShareTail {
+        tail_after_tx_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_block: Option<BlockNumber>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_block: Option<BlockNumber>,
+        #[serde(default)]
+        can_revert: bool,
+    },
+}
+
+impl Default for LiveTxExecution {
+    fn default() -> Self {
+        Self::DirectRaw
     }
 }
 
@@ -194,6 +254,21 @@ pub struct KartalSubmitDirectRawResult {
     pub max_fee_per_gas: Value,
     pub max_priority_fee_per_gas: Value,
     pub error: Option<String>,
+    pub elapsed_ms: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KartalSignDirectRawResult {
+    pub attempt_id: String,
+    pub status: String,
+    pub tx_hash: String,
+    pub raw_tx_hex: String,
+    pub from: String,
+    pub to: String,
+    pub nonce: Value,
+    pub gas_limit: Value,
+    pub max_fee_per_gas: Value,
+    pub max_priority_fee_per_gas: Value,
     pub elapsed_ms: Value,
 }
 
@@ -257,6 +332,7 @@ mod tests {
             token_address: Some(Address::with_last_byte(0x11)),
             pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
             observed_block: Some(25_110_001),
+            execution: LiveTxExecution::DirectRaw,
             request: request(),
         };
 

@@ -49,3 +49,18 @@ pub struct SubmitDirectRawResult {
     pub error: Option<String>,
     pub elapsed_ms: u128,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignDirectRawResult {
+    pub attempt_id: String,
+    pub status: ExecutionStatus,
+    pub tx_hash: H256,
+    pub raw_tx_hex: String,
+    pub from: Address,
+    pub to: Address,
+    pub nonce: U256,
+    pub gas_limit: U256,
+    pub max_fee_per_gas: U256,
+    pub max_priority_fee_per_gas: U256,
+    pub elapsed_ms: u128,
+}

@@ -16,7 +16,7 @@ use eth_live_trading::{
 use serde_json::{json, Value};
 
 use crate::{
-    execution::real::{LiveTxPlanner, LiveTxSubmitter, TxExecutorAdapter},
+    execution::real::{LiveTxPlanner, LiveTxSubmissionResult, LiveTxSubmitter, TxExecutorAdapter},
     EngineExecutionAdapter,
 };
 
@@ -34,7 +34,7 @@ impl LiveTxPlanner for FixedPlanner {
 
 #[derive(Clone)]
 struct FixedSubmitter {
-    result: KartalSubmitDirectRawResult,
+    result: LiveTxSubmissionResult,
 }
 
 #[async_trait]
@@ -42,7 +42,7 @@ impl LiveTxSubmitter for FixedSubmitter {
     async fn submit_signal(
         &self,
         _signal: &LiveTraderTxSignal,
-    ) -> std::result::Result<KartalSubmitDirectRawResult, String> {
+    ) -> std::result::Result<LiveTxSubmissionResult, String> {
         Ok(self.result.clone())
     }
 }
@@ -81,6 +81,7 @@ fn signal() -> LiveTraderTxSignal {
             Address::repeat_byte(0x22).to_string(),
         )),
         observed_block: Some(25_128_246),
+        execution: eth_live_trading::LiveTxExecution::DirectRaw,
         request: LiveDirectRawTransactionRequest {
             attempt_id: Some("gate3-attempt-1".to_string()),
             chain_id: 1,
@@ -122,7 +123,7 @@ async fn execute_status(status: &str, tx_hash: Option<&str>) -> ExecutionReport 
     let adapter = TxExecutorAdapter::new(
         FixedPlanner { signal: signal() },
         FixedSubmitter {
-            result: submit_result(status, tx_hash),
+            result: submit_result(status, tx_hash).into(),
         },
     );
     adapter.execute(intent(OrderSide::Buy)).await.unwrap()

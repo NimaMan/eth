@@ -66,6 +66,13 @@ pub struct SubmittedExecutionRecord {
     pub gas_estimated_max_cost_eth: Option<String>,
     pub gas_estimated_priority_spend_eth: Option<String>,
     pub gas_policy_guard: Option<String>,
+    pub private_execution_transport: Option<String>,
+    pub bundle_hash: Option<String>,
+    pub bundle_target_block: Option<u64>,
+    pub bundle_max_block: Option<u64>,
+    pub gas_policy_tail_after_tx_hash: Option<String>,
+    pub gas_policy_dependency_priority_fee_wei: Option<String>,
+    pub gas_policy_dependency_gas_price_wei: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

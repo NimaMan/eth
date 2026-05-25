@@ -9,6 +9,8 @@ workspace = "../../.."
 alloy-primitives = { workspace = true }
 async-trait = { workspace = true }
 eth_alpha_core = { path = "../../core" }
+ethers-core = "2.0.14"
+ethers-signers = "2.0.14"
 hex = { workspace = true }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }

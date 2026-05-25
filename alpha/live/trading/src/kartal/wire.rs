@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::{
-    KartalBribeRequest, KartalSimulationReference, KartalSubmitDirectRawResult,
-    LiveDirectRawTransactionRequest, LiveTraderTxSignal,
+    KartalBribeRequest, KartalSignDirectRawResult, KartalSimulationReference,
+    KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest, LiveTraderTxSignal,
+    LiveTxExecution,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ pub struct KartalEthTxExecutorStatus {
     pub rpc_url: String,
     pub journal_path: Option<String>,
     pub direct_raw_endpoint: String,
+    #[serde(default)]
+    pub sign_direct_raw_endpoint: Option<String>,
     pub policy: KartalEthTxPolicyStatus,
 }
 
@@ -81,6 +84,7 @@ mod tests {
             "rpc_url": "http://127.0.0.1:8545",
             "journal_path": null,
             "direct_raw_endpoint": "/eth/tx/direct-raw",
+            "sign_direct_raw_endpoint": "/eth/tx/sign-direct-raw",
             "policy": {
                 "version": "eth_tx_policy_v1",
                 "allowed_from_count": 0,
@@ -107,5 +111,9 @@ mod tests {
 
         assert!(status.broadcast_mode.is_dry_run());
         assert_eq!(status.policy.allowed_target_count, 0);
+        assert_eq!(
+            status.sign_direct_raw_endpoint.as_deref(),
+            Some("/eth/tx/sign-direct-raw")
+        );
     }
 }
