@@ -89,10 +89,8 @@ const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
-const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
-    "chain_sim.live_backtest.skip_mempool_trading_enabled";
 const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON: &str =
-    "chain-sim live backtest skips mempool trading_enabled buy signals and waits for the regular mined pool-update entry path";
+    "chain_sim.live_backtest.skip_mempool_trading_enabled";
 
 async fn run(
     runner_name: &'static str,
@@ -571,7 +569,6 @@ async fn run(
                     signal_id = %signal.signal_id,
                     signal_type = %signal.signal_type,
                     execution_mode = %execution_mode.label(),
-                    reason_code = CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE,
                     reason = skip_reason,
                     "skipping mempool signal for live trader execution mode"
                 );
@@ -585,7 +582,6 @@ async fn run(
                     suppress_events,
                     &status,
                     json!({
-                        "reason_code": CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE,
                         "reason": skip_reason,
                         "execution_mode": execution_mode.label(),
                         "signal_type": signal.signal_type.as_str(),
@@ -1173,18 +1169,6 @@ mod tests {
             "liquidity_removal"
         )
         .is_none());
-    }
-
-    #[test]
-    fn chain_sim_live_backtest_records_clear_skip_reason() {
-        let reason = mempool_signal_skip_reason_for_execution_mode(
-            TraderExecutionMode::ChainSim,
-            "trading_enabled",
-        )
-        .expect("chain-sim trading_enabled skip reason");
-
-        assert!(reason.contains("skips mempool trading_enabled buy signals"));
-        assert!(reason.contains("mined pool-update entry path"));
     }
 
     #[test]
