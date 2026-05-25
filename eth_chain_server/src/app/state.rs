@@ -9,7 +9,7 @@ use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
 use crate::prices::ChainPriceService;
 use crate::ranges::RangeIndexManager;
-use crate::recent_blocks::RecentLiveBlocks;
+use crate::recent_blocks::{RecentLiveBlocks, RecentLiveFeeSamples, RecentLiveStateFrames};
 use crate::stores::alpha_trading::AlphaTradingStore;
 use crate::stores::mempool_signals::MempoolSignalStore;
 use crate::token_analytics::network::TokenNetworkAnalysisManager;
@@ -25,6 +25,8 @@ pub struct ServerState {
     pub live_chain_runtime: LiveChainRuntime,
     pub token_network_analytics: TokenNetworkAnalysisManager,
     pub recent_live_blocks: RecentLiveBlocks,
+    pub recent_live_fee_samples: RecentLiveFeeSamples,
+    pub recent_live_state_frames: RecentLiveStateFrames,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     pub processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
     pub mempool_signals: MempoolSignalStore,
@@ -68,11 +70,15 @@ impl ServerState {
             provider.clone(),
             processed_block_replay_store.clone(),
         );
+        let recent_live_fee_samples = RecentLiveFeeSamples::new(config.history_limit.max(128));
+        let recent_live_state_frames = RecentLiveStateFrames::new(16);
         let live_chain_runtime = LiveChainRuntime::new(
             live_chain_runtime_config(&config),
             provider.clone(),
             live_tracker.clone(),
             processed_block_replay_store.clone(),
+            recent_live_fee_samples.clone(),
+            recent_live_state_frames.clone(),
         );
         let token_network_analytics = TokenNetworkAnalysisManager::new(
             provider.clone(),
@@ -94,6 +100,8 @@ impl ServerState {
             live_chain_runtime,
             token_network_analytics,
             recent_live_blocks,
+            recent_live_fee_samples,
+            recent_live_state_frames,
             processed_block_disk_cache,
             processed_block_replay_store,
             mempool_signals,

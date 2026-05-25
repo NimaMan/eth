@@ -792,7 +792,8 @@ pub(super) async fn build_kartal_real_adapter(
         UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
     let gas_rank_provider = MempoolRaceGasRankProvider::new(
         ChainServerGasRankProvider::new(chain_server_url)
-            .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
+            .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks)
+            .with_priority_tie_breaker_gwei(gas_policy.gas_rank_priority_tie_breaker_gwei),
         preflight.status.rpc_url.clone(),
     )
     .with_priority_buffer_range_gwei(

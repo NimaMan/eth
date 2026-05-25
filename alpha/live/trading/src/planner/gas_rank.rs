@@ -1,6 +1,7 @@
 use alloy_primitives::U256;
 use async_trait::async_trait;
 use eth_alpha_core::amount::DecimalAmount;
+use eth_block_tx_rank::{estimate_from_samples, CandidateTxGas, MinedBlockFeeSample};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -16,6 +17,12 @@ pub struct GasRankPlan {
     pub predicted_base_fee_gwei: DecimalAmount,
     pub candidates: Vec<RankedFeeCandidate>,
 }
+
+const DEFAULT_PRIORITY_TIE_BREAKER_GWEI: &str = "0.1456";
+const GAS_RANK_SOURCE: &str = "eth_chain_server_gas_rank";
+const WEI_PER_GWEI: u64 = 1_000_000_000;
+const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
+const EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 
 #[async_trait]
 pub trait GasRankProvider: Send + Sync {
@@ -53,6 +60,7 @@ pub struct ChainServerGasRankProvider {
     http: reqwest::Client,
     base_url: String,
     lookback_blocks: u64,
+    priority_tie_breaker_gwei: DecimalAmount,
 }
 
 impl ChainServerGasRankProvider {
@@ -61,6 +69,10 @@ impl ChainServerGasRankProvider {
             http: reqwest::Client::new(),
             base_url: base_url.into(),
             lookback_blocks: 100,
+            priority_tie_breaker_gwei: DecimalAmount::from_str_exact(
+                DEFAULT_PRIORITY_TIE_BREAKER_GWEI,
+            )
+            .unwrap_or_default(),
         }
     }
 
@@ -69,10 +81,19 @@ impl ChainServerGasRankProvider {
         self
     }
 
+    pub fn with_priority_tie_breaker_gwei(
+        mut self,
+        priority_tie_breaker_gwei: DecimalAmount,
+    ) -> Self {
+        self.priority_tie_breaker_gwei = priority_tie_breaker_gwei.max(DecimalAmount::ZERO);
+        self
+    }
+
     fn endpoint(&self) -> String {
         format!(
-            "{}/api/v1/eth/alpha/gas-rank/estimate",
-            self.base_url.trim_end_matches('/')
+            "{}/api/v1/eth/alpha/gas-rank/samples?limit={}",
+            self.base_url.trim_end_matches('/'),
+            self.lookback_blocks
         )
     }
 }
@@ -89,41 +110,352 @@ impl GasRankProvider for ChainServerGasRankProvider {
                 "cannot request gas rank without simulation gas evidence: {error}"
             ))
         })?;
-        let request = json!({
-            "gas_limit": route.gas_limit,
-            "estimated_gas_used": estimated_gas_used,
-            "lookback_blocks": self.lookback_blocks,
-        });
         let response = self
             .http
-            .post(self.endpoint())
-            .json(&request)
+            .get(self.endpoint())
             .send()
             .await
             .map_err(|error| {
                 LivePrioritySellPlannerError::GasRank(format!(
-                    "eth_chain_server gas-rank request failed: {error}"
+                    "eth_chain_server gas-rank samples request failed: {error}"
                 ))
             })?;
         let status = response.status();
         let body = response.text().await.map_err(|error| {
             LivePrioritySellPlannerError::GasRank(format!(
-                "eth_chain_server gas-rank response body read failed: {error}"
+                "eth_chain_server gas-rank samples response body read failed: {error}"
             ))
         })?;
         if !status.is_success() {
             return Err(LivePrioritySellPlannerError::GasRank(format!(
-                "eth_chain_server gas-rank returned HTTP {}: {}",
+                "eth_chain_server gas-rank samples returned HTTP {}: {}",
                 status.as_u16(),
                 body
             )));
         }
-        let payload = serde_json::from_str::<Value>(&body).map_err(|error| {
-            LivePrioritySellPlannerError::GasRank(format!(
-                "eth_chain_server gas-rank JSON decode failed: {error}; body={body}"
-            ))
-        })?;
-        gas_rank_plan_from_chain_server_response(&payload)
+        let payload =
+            serde_json::from_str::<ChainServerGasRankSamplesResponse>(&body).map_err(|error| {
+                LivePrioritySellPlannerError::GasRank(format!(
+                    "eth_chain_server gas-rank samples JSON decode failed: {error}; body={body}"
+                ))
+            })?;
+        gas_rank_plan_from_processed_block_samples(
+            payload,
+            route.gas_limit,
+            estimated_gas_used,
+            self.priority_tie_breaker_gwei,
+        )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ChainServerGasRankSamplesResponse {
+    source: String,
+    requested_blocks: usize,
+    available_recent_blocks: usize,
+    latest_block: Option<u64>,
+    latest_block_hash: Option<String>,
+    samples: Vec<RecentLiveFeeSampleWire>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RecentLiveFeeSampleWire {
+    sample: MinedBlockFeeSample,
+    applied_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RecommendationProfile {
+    label: &'static str,
+    priority: RecommendationPriority,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RecommendationPriority {
+    TargetPosition {
+        target_position: u64,
+        sample_quantile: f64,
+    },
+    PriorityPercentile {
+        percentile: f64,
+    },
+}
+
+const RECOMMENDATION_PROFILES: [RecommendationProfile; 20] = [
+    RecommendationProfile {
+        label: "normal",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 50,
+            sample_quantile: 0.50,
+        },
+    },
+    RecommendationProfile {
+        label: "rank25",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 25,
+            sample_quantile: 0.50,
+        },
+    },
+    RecommendationProfile {
+        label: "rank10",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 10,
+            sample_quantile: 0.50,
+        },
+    },
+    RecommendationProfile {
+        label: "rank5",
+        priority: RecommendationPriority::TargetPosition {
+            target_position: 5,
+            sample_quantile: 0.50,
+        },
+    },
+    RecommendationProfile {
+        label: "p50",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.50 },
+    },
+    RecommendationProfile {
+        label: "p55",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.55 },
+    },
+    RecommendationProfile {
+        label: "p60",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.60 },
+    },
+    RecommendationProfile {
+        label: "p65",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.65 },
+    },
+    RecommendationProfile {
+        label: "p70",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.70 },
+    },
+    RecommendationProfile {
+        label: "p75",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.75 },
+    },
+    RecommendationProfile {
+        label: "p77",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.77 },
+    },
+    RecommendationProfile {
+        label: "p85",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.85 },
+    },
+    RecommendationProfile {
+        label: "p88",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.88 },
+    },
+    RecommendationProfile {
+        label: "p90",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.90 },
+    },
+    RecommendationProfile {
+        label: "p92",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.92 },
+    },
+    RecommendationProfile {
+        label: "p94",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.94 },
+    },
+    RecommendationProfile {
+        label: "p95",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.95 },
+    },
+    RecommendationProfile {
+        label: "p96",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.96 },
+    },
+    RecommendationProfile {
+        label: "p97",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.97 },
+    },
+    RecommendationProfile {
+        label: "p99",
+        priority: RecommendationPriority::PriorityPercentile { percentile: 0.99 },
+    },
+];
+
+fn gas_rank_plan_from_processed_block_samples(
+    response: ChainServerGasRankSamplesResponse,
+    gas_limit: u64,
+    estimated_gas_used: u64,
+    priority_tie_breaker_gwei: DecimalAmount,
+) -> Result<GasRankPlan, LivePrioritySellPlannerError> {
+    let samples = response
+        .samples
+        .iter()
+        .map(|entry| entry.sample.clone())
+        .collect::<Vec<_>>();
+    if samples.is_empty() {
+        return Err(gas_rank_parse_error(
+            "eth_chain_server returned no live fee samples from processed blocks",
+        ));
+    }
+    let latest_sample = samples
+        .iter()
+        .max_by_key(|sample| sample.block_number)
+        .ok_or_else(|| gas_rank_parse_error("missing latest live fee sample"))?;
+    let predicted_base_fee = predict_next_base_fee_from_sample(latest_sample);
+    let priority_tie_breaker =
+        decimal_gwei_to_wei(priority_tie_breaker_gwei, "priority_tie_breaker_gwei")?;
+    let predicted_base_fee_gwei = wei_to_decimal_gwei(predicted_base_fee)?;
+    let candidates = RECOMMENDATION_PROFILES
+        .iter()
+        .copied()
+        .map(|profile| {
+            ranked_fee_candidate_from_profile(
+                profile,
+                gas_limit,
+                estimated_gas_used,
+                predicted_base_fee,
+                priority_tie_breaker,
+                &samples,
+                &response,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GasRankPlan {
+        predicted_base_fee_gwei,
+        candidates,
+    })
+}
+
+fn ranked_fee_candidate_from_profile(
+    profile: RecommendationProfile,
+    gas_limit: u64,
+    estimated_gas_used: u64,
+    predicted_base_fee: U256,
+    priority_tie_breaker: U256,
+    samples: &[MinedBlockFeeSample],
+    response: &ChainServerGasRankSamplesResponse,
+) -> Result<RankedFeeCandidate, LivePrioritySellPlannerError> {
+    let raw_priority_fee = match profile.priority {
+        RecommendationPriority::TargetPosition {
+            target_position,
+            sample_quantile,
+        } => recommended_priority(samples, target_position, sample_quantile),
+        RecommendationPriority::PriorityPercentile { percentile } => {
+            recommended_priority_percentile(samples, percentile)
+        }
+    };
+    let priority_fee = raw_priority_fee.saturating_add(priority_tie_breaker);
+    let max_fee = suggested_max_fee(predicted_base_fee, priority_fee);
+    let rank = estimate_from_samples(
+        CandidateTxGas {
+            gas_limit,
+            max_fee_per_gas: max_fee,
+            max_priority_fee_per_gas: priority_fee,
+        },
+        predicted_base_fee,
+        samples,
+    )
+    .map_err(|error| gas_rank_parse_error(format!("failed to estimate gas rank: {error}")))?;
+
+    Ok(RankedFeeCandidate {
+        label: profile.label.to_string(),
+        priority_fee_gwei: wei_to_decimal_gwei(priority_fee)?,
+        max_fee_per_gas_gwei: wei_to_decimal_gwei(max_fee)?,
+        rank_position_p50: Some(rank.position_p50),
+        gas_before_p50: Some(rank.gas_before_p50),
+        likely_fits_at_p50: Some(rank.likely_fits_at_p50),
+        source: Some(GAS_RANK_SOURCE.to_string()),
+        metadata: Some(json!({
+            "method": "local_estimate_from_processed_block_fee_samples",
+            "sample_source": response.source.as_str(),
+            "requested_blocks": response.requested_blocks,
+            "available_recent_blocks": response.available_recent_blocks,
+            "latest_block": response.latest_block,
+            "latest_block_hash": response.latest_block_hash.as_deref(),
+            "latest_sample_applied_at_unix_ms": response.samples.first().map(|entry| entry.applied_at_unix_ms),
+            "sampled_blocks": samples.len(),
+            "sampled_transactions": samples.iter().map(|sample| sample.transactions.len()).sum::<usize>(),
+            "estimated_gas_used": estimated_gas_used,
+            "raw_priority_fee_wei": raw_priority_fee.to_string(),
+            "priority_tie_breaker_wei": priority_tie_breaker.to_string(),
+            "predicted_base_fee_wei": predicted_base_fee.to_string(),
+        })),
+    })
+}
+
+fn recommended_priority(
+    samples: &[MinedBlockFeeSample],
+    target_position: u64,
+    sample_quantile: f64,
+) -> U256 {
+    let values = samples
+        .iter()
+        .map(|sample| priority_for_target_position(sample, target_position))
+        .collect::<Vec<_>>();
+    quantile_u256(values, sample_quantile)
+}
+
+fn recommended_priority_percentile(samples: &[MinedBlockFeeSample], percentile: f64) -> U256 {
+    let values = samples
+        .iter()
+        .flat_map(|sample| {
+            sample
+                .transactions
+                .iter()
+                .map(|tx| tx.effective_priority_fee)
+        })
+        .collect::<Vec<_>>();
+    quantile_u256(values, percentile)
+}
+
+fn priority_for_target_position(sample: &MinedBlockFeeSample, target_position: u64) -> U256 {
+    let mut priorities = sample
+        .transactions
+        .iter()
+        .map(|tx| tx.effective_priority_fee)
+        .collect::<Vec<_>>();
+    if priorities.is_empty() {
+        return U256::ZERO;
+    }
+    priorities.sort_unstable_by(|left, right| right.cmp(left));
+    let index = target_position.saturating_sub(1) as usize;
+    if index >= priorities.len() {
+        U256::ZERO
+    } else {
+        priorities[index].saturating_add(U256::from(1u64))
+    }
+}
+
+fn quantile_u256(mut values: Vec<U256>, quantile: f64) -> U256 {
+    if values.is_empty() {
+        return U256::ZERO;
+    }
+    values.sort_unstable();
+    let bounded = quantile.clamp(0.0, 1.0);
+    let index = ((values.len().saturating_sub(1) as f64) * bounded).round() as usize;
+    values[index]
+}
+
+fn suggested_max_fee(predicted_base_fee: U256, priority_fee: U256) -> U256 {
+    let base_fee_cushion = predicted_base_fee + (predicted_base_fee / U256::from(8u64));
+    base_fee_cushion + priority_fee
+}
+
+fn predict_next_base_fee_from_sample(sample: &MinedBlockFeeSample) -> U256 {
+    let parent_base_fee = sample.base_fee_per_gas;
+    let parent_gas_target = sample.gas_limit / EIP1559_ELASTICITY_MULTIPLIER;
+    if parent_gas_target == 0 || sample.gas_used == parent_gas_target {
+        return parent_base_fee;
+    }
+
+    if sample.gas_used > parent_gas_target {
+        let gas_used_delta = U256::from(sample.gas_used - parent_gas_target);
+        let base_fee_delta = (parent_base_fee * gas_used_delta)
+            / U256::from(parent_gas_target)
+            / U256::from(EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR);
+        parent_base_fee + base_fee_delta.max(U256::from(1u64))
+    } else {
+        let gas_used_delta = U256::from(parent_gas_target - sample.gas_used);
+        let base_fee_delta = (parent_base_fee * gas_used_delta)
+            / U256::from(parent_gas_target)
+            / U256::from(EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR);
+        parent_base_fee.saturating_sub(base_fee_delta)
     }
 }
 
@@ -258,51 +590,6 @@ impl<G> MempoolRaceGasRankProvider<G> {
                 ))
             })
     }
-}
-
-fn gas_rank_plan_from_chain_server_response(
-    payload: &Value,
-) -> Result<GasRankPlan, LivePrioritySellPlannerError> {
-    let candidate = payload
-        .get("candidate")
-        .ok_or_else(|| gas_rank_parse_error("missing candidate"))?;
-    let predicted_base_fee_gwei = decimal_field(candidate, "predicted_base_fee_gwei", "candidate")?;
-    let recommendations = payload
-        .get("recommendations")
-        .and_then(Value::as_array)
-        .ok_or_else(|| gas_rank_parse_error("missing recommendations"))?;
-    let mut candidates = Vec::with_capacity(recommendations.len());
-    for recommendation in recommendations {
-        let label = string_field(recommendation, "label", "recommendation")?.to_ascii_lowercase();
-        let rank = recommendation.get("rank").unwrap_or(&Value::Null);
-        candidates.push(RankedFeeCandidate {
-            label,
-            priority_fee_gwei: decimal_field(
-                recommendation,
-                "priority_fee_gwei",
-                "recommendation",
-            )?,
-            max_fee_per_gas_gwei: decimal_field(
-                recommendation,
-                "max_fee_per_gas_gwei",
-                "recommendation",
-            )?,
-            rank_position_p50: u64_field(rank, "position_p50"),
-            gas_before_p50: u64_field(rank, "gas_before_p50"),
-            likely_fits_at_p50: bool_field(rank, "likely_fits_at_p50"),
-            source: Some("eth_chain_server_gas_rank".to_string()),
-            metadata: None,
-        });
-    }
-    if candidates.is_empty() {
-        return Err(gas_rank_parse_error(
-            "eth_chain_server gas-rank returned no recommendations",
-        ));
-    }
-    Ok(GasRankPlan {
-        predicted_base_fee_gwei,
-        candidates,
-    })
 }
 
 #[derive(Clone, Debug)]
@@ -498,7 +785,7 @@ fn wei_to_decimal_gwei(wei: U256) -> Result<DecimalAmount, LivePrioritySellPlann
             "cannot convert wei amount {wei} to decimal: {error}"
         ))
     })?;
-    Ok(wei_decimal / DecimalAmount::from(1_000_000_000u64))
+    Ok(wei_decimal / DecimalAmount::from(WEI_PER_GWEI))
 }
 
 fn effective_priority_fee(
@@ -512,49 +799,6 @@ fn effective_priority_fee(
     max_priority_fee_per_gas.min(max_fee_per_gas - base_fee_per_gas)
 }
 
-fn decimal_field(
-    value: &Value,
-    field: &str,
-    context: &str,
-) -> Result<DecimalAmount, LivePrioritySellPlannerError> {
-    let raw = value
-        .get(field)
-        .ok_or_else(|| gas_rank_parse_error(format!("missing {context}.{field}")))?;
-    let text = match raw {
-        Value::Number(number) => number.to_string(),
-        Value::String(text) => text.clone(),
-        other => {
-            return Err(gas_rank_parse_error(format!(
-                "invalid {context}.{field} decimal value: {other}"
-            )));
-        }
-    };
-    text.parse::<DecimalAmount>().map_err(|error| {
-        gas_rank_parse_error(format!(
-            "invalid {context}.{field} decimal value {text:?}: {error}"
-        ))
-    })
-}
-
-fn string_field<'a>(
-    value: &'a Value,
-    field: &str,
-    context: &str,
-) -> Result<&'a str, LivePrioritySellPlannerError> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| gas_rank_parse_error(format!("missing {context}.{field}")))
-}
-
-fn u64_field(value: &Value, field: &str) -> Option<u64> {
-    value.get(field).and_then(Value::as_u64)
-}
-
-fn bool_field(value: &Value, field: &str) -> Option<bool> {
-    value.get(field).and_then(Value::as_bool)
-}
-
 fn gas_rank_parse_error(message: impl Into<String>) -> LivePrioritySellPlannerError {
     LivePrioritySellPlannerError::GasRank(message.into())
 }
@@ -562,50 +806,45 @@ fn gas_rank_parse_error(message: impl Into<String>) -> LivePrioritySellPlannerEr
 #[cfg(test)]
 mod chain_server_tests {
     use super::*;
+    use alloy_primitives::B256;
+    use eth_block_tx_rank::MinedTxFeeSample;
 
     #[test]
-    fn parses_chain_server_recommendations_into_named_candidates() {
-        let payload = json!({
-            "candidate": {
-                "predicted_base_fee_gwei": 0.112345678
-            },
-            "recommendations": [
-                {
-                    "label": "Normal",
-                    "priority_fee_gwei": 0.5,
-                    "max_fee_per_gas_gwei": 0.626388888,
-                    "rank": {
-                        "position_p50": 50,
-                        "gas_before_p50": 1000000,
-                        "likely_fits_at_p50": true
-                    }
-                },
-                {
-                    "label": "P90",
-                    "priority_fee_gwei": 2,
-                    "max_fee_per_gas_gwei": 2.126388888,
-                    "rank": {
-                        "position_p50": 10,
-                        "gas_before_p50": 200000,
-                        "likely_fits_at_p50": true
-                    }
-                }
-            ]
-        });
+    fn builds_ranked_candidates_from_processed_block_samples() {
+        let response = ChainServerGasRankSamplesResponse {
+            source: "eth_chain_server_recent_live_fee_samples_from_processed_transactions"
+                .to_string(),
+            requested_blocks: 1,
+            available_recent_blocks: 1,
+            latest_block: Some(100),
+            latest_block_hash: Some(B256::ZERO.to_string()),
+            samples: vec![fee_sample_wire(100, &[1, 2, 3])],
+        };
 
-        let plan = gas_rank_plan_from_chain_server_response(&payload).unwrap();
+        let plan = gas_rank_plan_from_processed_block_samples(
+            response,
+            120_000,
+            100_000,
+            DecimalAmount::new(1, 1),
+        )
+        .unwrap();
 
-        assert_eq!(plan.predicted_base_fee_gwei.to_string(), "0.112345678");
-        assert_eq!(plan.candidates.len(), 2);
-        assert_eq!(plan.candidates[0].label, "normal");
-        assert_eq!(plan.candidates[0].priority_fee_gwei.to_string(), "0.5");
-        assert_eq!(plan.candidates[0].rank_position_p50, Some(50));
+        let p90 = plan
+            .candidates
+            .iter()
+            .find(|candidate| candidate.label == "p90")
+            .expect("p90 candidate");
+        assert_eq!(plan.predicted_base_fee_gwei.to_string(), "0.10");
+        assert_eq!(p90.priority_fee_gwei.to_string(), "3.10");
+        assert_eq!(p90.max_fee_per_gas_gwei.to_string(), "3.2125");
+        assert_eq!(p90.source.as_deref(), Some(GAS_RANK_SOURCE));
         assert_eq!(
-            plan.candidates[0].source.as_deref(),
-            Some("eth_chain_server_gas_rank")
+            p90.metadata
+                .as_ref()
+                .and_then(|value| value.get("method"))
+                .and_then(Value::as_str),
+            Some("local_estimate_from_processed_block_fee_samples")
         );
-        assert_eq!(plan.candidates[1].label, "p90");
-        assert_eq!(plan.candidates[1].priority_fee_gwei.to_string(), "2");
     }
 
     #[test]
@@ -659,5 +898,35 @@ mod chain_server_tests {
         assert!(left >= min);
         assert!(left <= max);
         assert_ne!(left, min);
+    }
+
+    fn fee_sample_wire(block_number: u64, priority_fees_gwei: &[u64]) -> RecentLiveFeeSampleWire {
+        let base_fee = U256::from(100_000_000u64);
+        RecentLiveFeeSampleWire {
+            sample: MinedBlockFeeSample {
+                block_number,
+                block_hash: B256::ZERO,
+                gas_limit: 30_000_000,
+                gas_used: 15_000_000,
+                base_fee_per_gas: base_fee,
+                transactions: priority_fees_gwei
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(index, priority_gwei)| {
+                        let priority = U256::from(priority_gwei * WEI_PER_GWEI);
+                        MinedTxFeeSample {
+                            tx_hash: B256::ZERO,
+                            tx_index: index as u64,
+                            gas_limit: 21_000,
+                            gas_used: 21_000,
+                            effective_gas_price: base_fee + priority,
+                            effective_priority_fee: priority,
+                        }
+                    })
+                    .collect(),
+            },
+            applied_at_unix_ms: 1_000,
+        }
     }
 }

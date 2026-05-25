@@ -6,6 +6,7 @@ use rust_decimal::Decimal;
 
 const LIVE_GAS_REQUIRED_SOURCE_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_REQUIRED_SOURCE";
 const LIVE_GAS_LOOKBACK_BLOCKS_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_LOOKBACK_BLOCKS";
+const LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG: &str = "ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI";
 const LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG: &str = "ALPHA_LIVE_GAS_SIMULATED_GAS_BUFFER_BPS";
 const LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG: &str = "ALPHA_LIVE_GAS_MAX_PRIORITY_FEE_GWEI";
 const LIVE_ENTRY_MAX_GAS_FEE_ETH_CONFIG: &str = "ALPHA_LIVE_ENTRY_MAX_ESTIMATED_GAS_FEE_ETH";
@@ -27,6 +28,7 @@ const LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG: &str =
 pub(super) struct LiveRealGasPolicy {
     pub(super) required_gas_rank_source: String,
     pub(super) gas_rank_lookback_blocks: u64,
+    pub(super) gas_rank_priority_tie_breaker_gwei: Decimal,
     pub(super) simulated_gas_buffer_bps: u64,
     pub(super) max_priority_fee_gwei: Decimal,
     pub(super) entry_max_estimated_gas_fee_eth: Decimal,
@@ -55,6 +57,10 @@ pub(super) fn load_live_real_gas_policy(
     LiveRealGasPolicy {
         required_gas_rank_source: required_config_string(config, LIVE_GAS_REQUIRED_SOURCE_CONFIG)?,
         gas_rank_lookback_blocks,
+        gas_rank_priority_tie_breaker_gwei: required_config_decimal(
+            config,
+            LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG,
+        )?,
         simulated_gas_buffer_bps: required_config_u64(
             config,
             LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG,
@@ -124,6 +130,11 @@ impl LiveRealGasPolicy {
         if self.mempool_race_priority_buffer_min_gwei < Decimal::ZERO {
             return Err(eyre!(
                 "{LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG} must be non-negative"
+            ));
+        }
+        if self.gas_rank_priority_tie_breaker_gwei < Decimal::ZERO {
+            return Err(eyre!(
+                "{LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG} must be non-negative"
             ));
         }
         if self.mempool_race_priority_buffer_max_gwei < self.mempool_race_priority_buffer_min_gwei {
@@ -244,6 +255,7 @@ mod tests {
         LiveRealGasPolicy {
             required_gas_rank_source: "eth_chain_server_gas_rank".to_string(),
             gas_rank_lookback_blocks: 100,
+            gas_rank_priority_tie_breaker_gwei: Decimal::new(1456, 4),
             simulated_gas_buffer_bps: 2500,
             max_priority_fee_gwei: Decimal::new(35, 1),
             entry_max_estimated_gas_fee_eth: Decimal::new(12, 4),

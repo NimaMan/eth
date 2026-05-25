@@ -258,6 +258,15 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(alpha::gas_rank_estimate);
 
+    let alpha_gas_rank_samples =
+        warp::path!("eth" / "tokens" / "api" / "alpha" / "gas-rank" / "samples")
+            .and(warp::get())
+            .and(warp::query::<
+                crate::read_models::gas_rank::GasRankSamplesRequest,
+            >())
+            .and(with_state(state.clone()))
+            .and_then(alpha::gas_rank_samples);
+
     let alpha_vault_simulation =
         warp::path!("eth" / "tokens" / "api" / "alpha" / "simulations" / "vault")
             .and(warp::post())
@@ -506,6 +515,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     let alpha_routes = alpha_strategy_performance
         .or(alpha_strategy_reset)
         .or(alpha_vault_simulation)
+        .or(alpha_gas_rank_samples)
         .or(alpha_gas_rank_estimate)
         .or(alpha_strategy_detail)
         .or(alpha_strategies)

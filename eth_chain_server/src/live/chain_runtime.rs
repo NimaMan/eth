@@ -13,8 +13,12 @@ use eyre::{bail, Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{watch, Mutex};
 use tx_processor::{
-    LiveBlockProcessor, LiveBlockProcessorConfig, LiveProcessedBlock, ProcessedBlock,
-    ProcessedBlockReplayStoreWriter,
+    LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockStateFrame, LiveProcessedBlock,
+    ProcessedBlock, ProcessedBlockReplayStoreWriter,
+};
+
+use crate::recent_blocks::{
+    mined_fee_sample_from_processed_block, RecentLiveFeeSamples, RecentLiveStateFrames,
 };
 
 const LIVE_CHAIN_RUNTIME_PHASE: &str = "live_chain_runtime";
@@ -36,6 +40,8 @@ struct LiveChainRuntimeInner {
     provider: Arc<RethQueryProvider>,
     live_tracker: LiveTokenRuntime,
     processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
+    recent_live_fee_samples: RecentLiveFeeSamples,
+    recent_live_state_frames: RecentLiveStateFrames,
     shutdown_tx: watch::Sender<bool>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -46,6 +52,8 @@ impl LiveChainRuntime {
         provider: Arc<RethQueryProvider>,
         live_tracker: LiveTokenRuntime,
         processed_block_replay_store: Option<Arc<ProcessedBlockReplayStoreWriter>>,
+        recent_live_fee_samples: RecentLiveFeeSamples,
+        recent_live_state_frames: RecentLiveStateFrames,
     ) -> Self {
         let (shutdown_tx, _) = watch::channel(false);
         Self {
@@ -54,6 +62,8 @@ impl LiveChainRuntime {
                 provider,
                 live_tracker,
                 processed_block_replay_store,
+                recent_live_fee_samples,
+                recent_live_state_frames,
                 shutdown_tx,
                 task: Mutex::new(None),
             }),
@@ -225,6 +235,10 @@ impl LiveChainRuntime {
 
     async fn apply_processed(&self, processed: LiveProcessedBlock) -> Result<()> {
         let block_number = processed.execution_info.block_number;
+        let fee_sample = mined_fee_sample_from_processed_block(&processed.processed_block);
+        self.inner
+            .recent_live_state_frames
+            .record(LiveBlockStateFrame::from_live_processed_block(&processed));
         let disk_cache_write_ms = self
             .write_processed_block_if_missing(processed.processed_block.clone())
             .await?;
@@ -233,7 +247,9 @@ impl LiveChainRuntime {
             .live_tracker
             .apply_live_block_update(update)
             .await
-            .wrap_err_with(|| format!("failed to apply live block update {block_number}"))
+            .wrap_err_with(|| format!("failed to apply live block update {block_number}"))?;
+        self.inner.recent_live_fee_samples.record(fee_sample);
+        Ok(())
     }
 
     async fn write_processed_block_if_missing(&self, block: ProcessedBlock) -> Result<u128> {

@@ -49,7 +49,8 @@ impl<E> ChainSimGasPolicyBacktestAdapter<E> {
             inner,
             gas_rank: MempoolRaceGasRankProvider::new(
                 ChainServerGasRankProvider::new(chain_server_url)
-                    .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks),
+                    .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks)
+                    .with_priority_tie_breaker_gwei(gas_policy.gas_rank_priority_tie_breaker_gwei),
                 rpc_url,
             )
             .with_priority_buffer_range_gwei(

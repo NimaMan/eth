@@ -4,7 +4,7 @@ use warp::http::StatusCode;
 
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
-use crate::read_models::gas_rank::{self, GasRankEstimateRequest};
+use crate::read_models::gas_rank::{self, GasRankEstimateRequest, GasRankSamplesRequest};
 use crate::stores::alpha_trading::{AlphaStrategyResetRequest, StrategyPerformanceQuery};
 
 pub(super) async fn strategies(state: ServerState) -> Result<warp::reply::Response, Infallible> {
@@ -89,4 +89,15 @@ pub(super) async fn gas_rank_estimate(
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }
+}
+
+pub(super) async fn gas_rank_samples(
+    query: GasRankSamplesRequest,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    let limit = query.limit.unwrap_or(100);
+    Ok(json_response(
+        &gas_rank::recent_samples(&state, limit),
+        StatusCode::OK,
+    ))
 }
