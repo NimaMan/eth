@@ -63,7 +63,8 @@ mod tests {
             ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
             INITIAL_ENTRY_BANKROLL_ETH, LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
         },
-        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_HOLD16_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
+        ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_HOLD16_ALL_POOLS_STRATEGY_NAME,
+        ALPHA11_HOLD16_STRATEGY_NAME, ALPHA11_STRATEGY_IMPL,
     };
     use serde_json::json;
 
@@ -241,5 +242,31 @@ mod tests {
         );
         assert_eq!(spec.buy_wei, "10000000000000000");
         assert_eq!(spec.max_entry_pools, None);
+    }
+
+    #[test]
+    fn alpha11_hold16_all_pools_strategy_set_resolves_without_protocol_filter() {
+        let mut args = alpha11_hold15_args();
+        args.strategy_set = Some(ALPHA11_HOLD16_ALL_POOLS_STRATEGY_NAME.to_string());
+
+        let specs = build_strategy_specs(&args, TraderExecutionMode::ChainSim)
+            .expect("alpha11 all-pools hold16 specs");
+
+        assert_eq!(specs.len(), 1);
+        let spec = &specs[0];
+        assert_eq!(spec.strategy_name, ALPHA11_HOLD16_ALL_POOLS_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, ALPHA11_STRATEGY_IMPL);
+        assert!(spec.allowed_protocols.is_empty());
+        assert_eq!(spec.max_hold_blocks, Some(16));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(INITIAL_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.max_entry_pools, None);
+        assert_eq!(
+            live_strategy_spec_config_json(spec)["allowed_protocols"],
+            json!([])
+        );
     }
 }

@@ -1,10 +1,10 @@
 use crate::{
     alpha11::{
         BUY_WEI, ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
-        HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME, INITIAL_ENTRY_BANKROLL_ETH,
-        LIVE_VALIDATION_ENTRY_BANKROLL_ETH, LIVE_VALIDATION_MAX_ENTRY_POOLS,
-        LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS, MIN_LIQUIDITY_ETH,
-        MIN_LIQUIDITY_USD, STRATEGY_IMPL,
+        HOLD16_ALL_POOLS_STRATEGY_NAME, HOLD3_VALIDATION_STRATEGY_NAME, HOLD_SWEEP_SET_NAME,
+        INITIAL_ENTRY_BANKROLL_ETH, LIVE_VALIDATION_ENTRY_BANKROLL_ETH,
+        LIVE_VALIDATION_MAX_ENTRY_POOLS, LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
+        MIN_LIQUIDITY_ETH, MIN_LIQUIDITY_USD, STRATEGY_IMPL,
     },
     shared_rules::live::{LiveEntryInitPolicySpec, LiveStrategySpec, LiveStrategySpecOptions},
 };
@@ -14,10 +14,12 @@ const MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
 pub const SET_NAME: &str = HOLD_SWEEP_SET_NAME;
 
 pub fn specs(options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
-    [12_u64, 14, 15, 16, 18, 20, 25, 50, 100]
+    let mut specs = [12_u64, 14, 15, 16, 18, 20, 25, 50, 100]
         .into_iter()
         .map(|max_hold_blocks| spec(max_hold_blocks, options))
-        .collect()
+        .collect::<Vec<_>>();
+    specs.insert(4, hold16_all_pools_spec(options));
+    specs
 }
 
 pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
@@ -26,6 +28,14 @@ pub fn hold15_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
 
 pub fn hold16_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     spec(16, options)
+}
+
+pub fn hold16_all_pools_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
+    let mut spec = spec(16, options);
+    spec.strategy_name = HOLD16_ALL_POOLS_STRATEGY_NAME.to_string();
+    spec.strategy_label = "Alpha11 all pools LP30 pool-update-block hold 16".to_string();
+    spec.allowed_protocols = Vec::new();
+    spec
 }
 
 pub fn hold3_validation_spec(options: &LiveStrategySpecOptions) -> LiveStrategySpec {
@@ -77,13 +87,15 @@ fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrateg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alpha11::{HOLD15_STRATEGY_NAME, HOLD16_STRATEGY_NAME};
+    use crate::alpha11::{
+        HOLD15_STRATEGY_NAME, HOLD16_ALL_POOLS_STRATEGY_NAME, HOLD16_STRATEGY_NAME,
+    };
 
     #[test]
     fn set_matches_hold_sweep() {
         let specs = specs(&LiveStrategySpecOptions::default());
 
-        assert_eq!(specs.len(), 9);
+        assert_eq!(specs.len(), 10);
         assert_eq!(
             specs
                 .iter()
@@ -94,6 +106,7 @@ mod tests {
                 "alpha11-univ2-lp30-pool-update-block-hold14",
                 HOLD15_STRATEGY_NAME,
                 HOLD16_STRATEGY_NAME,
+                HOLD16_ALL_POOLS_STRATEGY_NAME,
                 "alpha11-univ2-lp30-pool-update-block-hold18",
                 "alpha11-univ2-lp30-pool-update-block-hold20",
                 "alpha11-univ2-lp30-pool-update-block-hold25",
@@ -110,6 +123,7 @@ mod tests {
                 Some(12),
                 Some(14),
                 Some(15),
+                Some(16),
                 Some(16),
                 Some(18),
                 Some(20),
@@ -158,8 +172,14 @@ mod tests {
             .iter()
             .all(|spec| spec.min_liquidity_usd == MIN_LIQUIDITY_USD));
         assert!(specs.iter().all(|spec| spec.max_entry_pools.is_none()));
+        let all_pools = specs
+            .iter()
+            .find(|spec| spec.strategy_name == HOLD16_ALL_POOLS_STRATEGY_NAME)
+            .expect("all-pools hold16 spec in sweep");
+        assert!(all_pools.allowed_protocols.is_empty());
         assert!(specs
             .iter()
+            .filter(|spec| spec.strategy_name != HOLD16_ALL_POOLS_STRATEGY_NAME)
             .all(|spec| spec.allowed_protocols == vec!["UNISWAP-V2".to_string()]));
     }
 
@@ -177,6 +197,30 @@ mod tests {
         assert_eq!(spec.max_entry_pools, None);
         assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
+        assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
+        assert!(spec.exit_liquidity_removal);
+        assert!(spec.exit_lp_approval);
+        assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
+    }
+
+    #[test]
+    fn hold16_all_pools_spec_removes_protocol_filter_only() {
+        let spec = hold16_all_pools_spec(&LiveStrategySpecOptions::default());
+
+        assert_eq!(spec.strategy_name, HOLD16_ALL_POOLS_STRATEGY_NAME);
+        assert_eq!(spec.strategy_impl, STRATEGY_IMPL);
+        assert_eq!(
+            spec.strategy_label,
+            "Alpha11 all pools LP30 pool-update-block hold 16"
+        );
+        assert_eq!(spec.max_hold_blocks, Some(16));
+        assert_eq!(
+            spec.entry_bankroll_eth.as_deref(),
+            Some(INITIAL_ENTRY_BANKROLL_ETH)
+        );
+        assert_eq!(spec.max_entry_pools, None);
+        assert_eq!(spec.buy_wei, BUY_WEI);
+        assert!(spec.allowed_protocols.is_empty());
         assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
         assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);

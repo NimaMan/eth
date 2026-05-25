@@ -6,6 +6,7 @@ pub const STRATEGY_IMPL: &str = "alpha11";
 pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold-sweep";
 pub const HOLD15_STRATEGY_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold15";
 pub const HOLD16_STRATEGY_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold16";
+pub const HOLD16_ALL_POOLS_STRATEGY_NAME: &str = "alpha11-all-pools-lp30-pool-update-block-hold16";
 pub const HOLD3_VALIDATION_STRATEGY_NAME: &str =
     "alpha11-univ2-lp30-pool-update-block-hold3-validation";
 pub const BUY_WEI: &str = "10000000000000000";
