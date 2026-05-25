@@ -35,3 +35,23 @@ tradeability analysis.
 - Raw EVM execution and DB-backed simulation live in `tx_simulator`.
 - Processed tx and block decoding live in `tx_processor/` and
   `block_processor/`.
+
+## Execution Viability Checks
+
+Trade simulation answers the execution question:
+
+> Can this route buy and sell this token from the same pre-state that existed
+> on chain?
+
+Required checks:
+
+- simulate buy at the target block;
+- simulate sell after the buy;
+- compare with observed on-chain buys and sells when they exist;
+- classify failures as token behavior, router behavior, state setup, or
+  simulator bug;
+- record tax and received amounts in denom units.
+
+Observed on-chain sells are especially important. If the chain has a successful
+sell but this simulator says selling is impossible, the route and sender must be
+replayed before that simulator result is used as a trading guardrail.

@@ -1,0 +1,43 @@
+title = "External-router sell scope for classic V2 strategy routes"
+status = "confirmed"
+category = "source_simulator_parity"
+source_run_id = "risk-atlas-uniswap-v2-20k-20260520"
+area = "route-specific sellability"
+classification = "helper_route_sell_observed_classic_v2_route_not_sellable"
+range_start_block = 25120165
+range_end_block = 25140164
+
+[[tokens]]
+symbol = "COMPASS AI"
+token = "0x47a71baffde69472b60031f79361e556964aaf61"
+pool = "0x7f4e96d4087cb9d3962f3f37c89bb92a34806138"
+block = 25129615
+protocol = "uniswap-v2"
+failure_class = "observed_sell_via_external_router"
+observed_sell_count = 1
+observed_sell_weth = "0.01748963470624494"
+classic_v2_buy = true
+classic_v2_approve = true
+classic_v2_sell = false
+classic_v2_failure = "TransferHelper: TRANSFER_FROM_FAILED"
+deployed_v2_vault_historical_exact = "not_available; vault address has no code at block 25129615"
+deployed_v2_vault_current_buy_then_sell = "sell fails with TransferHelper: TRANSFER_FROM_FAILED at local head 25167381"
+disposition = "stateful_fresh_buyer_restriction; sell-only classic route succeeds but buy-then-sell fails"
+
+[[tokens]]
+symbol = "Compass"
+token = "0xc38a7a4b93bd2112a021c1b55756e5d1805cd237"
+pool = "0x0d3d3a33c430f3d43d561551f26a7b7114a93e30"
+block = 25122982
+protocol = "uniswap-v2"
+failure_class = "observed_sell_via_external_router"
+observed_sell_count = 3
+observed_sell_weth = "0.8245830985731981"
+classic_v2_buy = true
+classic_v2_approve = true
+classic_v2_sell = false
+classic_v2_failure = "TransferHelper: TRANSFER_FROM_FAILED"
+deployed_v2_vault_historical_exact = "not_available; vault address has no code at block 25122982"
+deployed_v2_vault_historical_route_shape = "seller=vault classic V2 route fails with TransferHelper: TRANSFER_FROM_FAILED"
+deployed_v2_vault_current_buy_then_sell = "buy succeeds and sell succeeds at local head 25167381; current-state smoke test only"
+disposition = "primary_chain_parity_case; helper routes sell from liquid pool while classic V2 route fails"

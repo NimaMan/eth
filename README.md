@@ -20,6 +20,7 @@ The root Rust workspace is this directory. Current workspace members from
 | `reth_chain_query/` | `reth_chain_query` | Typed direct DB queries, common addresses, entity views, RethIndex tables, live head helpers, and AMM/Dex helpers. |
 | `tx_processor/` | `tx_processor` | Processed transactions and blocks: log decoding, traces, balance deltas, tax math, disk cache, and live block processing. |
 | `eth_token/` | `eth_token` | Token, pool, health, lifecycle, and network state built from processed blocks/transactions. |
+| `risk_atlas/` | `eth_risk_atlas` | Durable token/pool risk intelligence, Risk Atlas DB/read models, investigations, scam analytics, network analytics, and modeling. |
 | `eth_chain_server/` | `eth_chain_server` | Runtime/API around `eth_token`; live tracker host, processed-block cache reader, HTTP/SSE views, and alpha-facing endpoints. |
 | `mempool_processor/` | `mempool_processor` | Reth IPC mempool fetch, function detection, pending simulation, semantic signal detection, DB writers, and ZMQ publishing. |
 | `pyreth/` | `pyreth` | PyO3 bindings over the Rust simulator, chain query, tx processor, and selected higher-level helpers. |
@@ -38,7 +39,6 @@ Important adjacent code that is not currently a root workspace member:
 | --- | --- |
 | `tx_executor/` | Direct transaction submission core. Receives prepared transactions; does not choose strategy, routes, or rank. |
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
-| `token_lab/` | Repeatable token/pool investigations, launch strategy analysis, parity checks, and detector prototypes. |
 | `deploy/` | ETH-owned deployment assets, including node scripts, systemd units, and on-chain deployment ledgers. |
 | `solidity/` | Archived Solidity executor/contracts and experiments. Current v4 simulation uses deployed Uniswap periphery. |
 | `deploy/onchain/` | ETH mainnet contract deployment runbooks, configs, audit checklists, Kartal dry-runs, receipt evidence, and reproducible signoff records. |
@@ -117,7 +117,7 @@ Use this map before broad searching:
 | How does alpha prepare a live transaction? | `alpha/live/trading/README.md` | `alpha/live/trading/src/tx_prep/`, `alpha/engine/src/execution/real/README.md`, `alpha/block_tx_rank/README.md` |
 | How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
 | How do we deploy and audit an ETH on-chain contract? | `deploy/onchain/README.md` | contract-specific folders such as `deploy/onchain/uniswap-v2-trading-vault/` |
-| How do I investigate token behavior or launch strategy stats? | `token_lab/README.md` | `token_lab/cases/README.md`, `token_lab/strategy/README.md`, `tools/detectors/`, `tools/chain_truth/`, `tools/parity/` |
+| How do I investigate token behavior or launch strategy stats? | `risk_atlas/README.md` | `risk_atlas/investigations/README.md`, `risk_atlas/scam_analytics/`, `risk_atlas/network_analytics/`, `alpha/lab/strategy_analysis/` |
 | How are node paths and services configured? | `deploy/node/README.md` | `config.env`, `deploy/node/scripts/`, `deploy/systemd/` |
 | How do archived Solidity executor experiments fit? | `solidity/README.md` | current production simulation paths live in `tx_simulator/` and `tx_processor/` |
 
@@ -232,7 +232,7 @@ Use focused tests/examples near the owner crate:
 | Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
-| Token lab cases and strategy cohorts | `token_lab/README.md`, `token_lab/strategy/README.md`, and one case folder under `token_lab/cases/` |
+| Risk Atlas investigations and strategy cohorts | `risk_atlas/README.md`, one case folder under `risk_atlas/investigations/cases/`, and `alpha/lab/strategy_analysis/README.md` |
 
 Generated output and heavy directories are not orientation sources. Avoid
 starting from `target/`, `logs/`, `.pytest_cache/`, or `vendor/reth/` unless the

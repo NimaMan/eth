@@ -1,0 +1,66 @@
+title = "vyp token network and liquidity-drain study"
+status = "investigating"
+category = "network_actor_context"
+area = "token network / second-order fund-flow"
+classification = "liquidity_drain_with_wallet_cluster"
+
+token = "0x8ceda8619ad186e7c9bca77734e48c8f518f5d01"
+symbol = "vyp"
+name = "vyp"
+decimals = 9
+
+pool = "0xd8e654a9b4e861b54adb903ada20e3787dbd0079"
+pool_protocol = "uniswap-v2"
+denom = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+denom_symbol = "WETH"
+
+activity_start_block = 25077324
+activity_end_block = 25081722
+replay_start_block = 25077304
+replay_end_block = 25081742
+peak_liquidity_block = 25077493
+drain_block = 25077595
+
+creator_or_drain_actor = "0x3b6a5e29d68251265d5ca522f79caad95392b47b"
+
+[key_txs]
+token_creation = "0x4f55f16ce6d60a16155d2cc1264d16e6bca06b3c4a1456deafda31fb46d74652"
+pair_sync_before_drain = "0x11842a615f69bbe76cf1942a34af4e31afb226eb59162799ce9894f0d3ea5aee"
+drain_sell = "0x834fead8ee0ed75b360441ad448351509f897dab5f2be655c3aef8a801f78697"
+
+[reserve_samples]
+first_activity_block_weth = "1.245731097010885559"
+peak_weth = "28.284524657374708461"
+post_drain_weth = "0.000018052161427478"
+latest_checked_weth = "0.000028052161427478"
+peak_to_post_drain_weth_drop_percent = "99.999900821520717"
+
+[network_replay]
+token_blocks = 114
+token_graph_nodes = 863
+token_graph_edges = 2691
+token_graph_addresses = 234
+flow_context_seeds = 16
+flow_context_blocks = 155
+flow_context_nodes = 21
+flow_context_edges = 53
+flow_context_clusters = 3
+
+[[flow_clusters]]
+kind = "shared_sink"
+connector = "0x50995f97f63f8ec9a131272269f1388d88a03990"
+members = 11
+confidence = "0.78"
+interpretation = "EOA shared sink; higher-signal than router/pair flow edges"
+
+[[protocol_addresses_to_label]]
+address = "0x7a250d5630b4cf539739df2c5dacb4c659f2488d"
+label = "uniswap-v2-router"
+
+[[protocol_addresses_to_label]]
+address = "0xd8e654a9b4e861b54adb903ada20e3787dbd0079"
+label = "vyp-weth-uniswap-v2-pair"
+
+[[protocol_addresses_to_label]]
+address = "0x0000000000001ff3684f28c67538d4d072c22734"
+label = "0x-allowance-holder"

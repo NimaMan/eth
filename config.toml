@@ -29,6 +29,9 @@ rabbitmq_url_env = "RABBITMQ_URL"
 [databases.alpha]
 url = "postgresql://postgres:postgres@localhost:5432/eth_db"
 
+[databases.risk_atlas]
+url = "postgresql://postgres:postgres@localhost:5432/eth_db"
+
 [databases.mempool]
 url = "postgresql://postgres:postgres@localhost:5432/eth_db"
 

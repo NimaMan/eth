@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
             print!("{RISK_ATLAS_SCHEMA_SQL}");
         }
         "migrate" => {
-            let config = RiskAtlasConfig::default();
+            let config = RiskAtlasConfig::from_shared_config()?;
             let pool = PgPool::connect(&config.database_url).await?;
             apply(&pool).await?;
             println!("risk atlas migrations applied");
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
             let report = std::env::args()
                 .nth(2)
                 .unwrap_or_else(|| DEFAULT_100K_DISTRIBUTION_REPORT.to_string());
-            let config = RiskAtlasConfig::default();
+            let config = RiskAtlasConfig::from_shared_config()?;
             let pool = PgPool::connect(&config.database_url).await?;
             apply(&pool).await?;
             let import = import_distribution_report(&report, None)?;

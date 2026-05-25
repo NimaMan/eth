@@ -1,6 +1,7 @@
 pub mod migrate;
 pub mod reader;
 pub mod schema;
+mod schema_sql;
 pub mod writer;
 
 pub use reader::RiskAtlasReader;

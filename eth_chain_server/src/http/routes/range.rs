@@ -203,38 +203,40 @@ pub(super) async fn export_risk_atlas(
 ) -> Result<warp::reply::Response, Infallible> {
     match state.range_indexer.get_run(&run_id).await {
         Some(run) => match views::risk_atlas::range_import(&run).await {
-            Ok(import) => match RiskAtlasWriter::connect(&state.config.alpha_database_url).await {
-                Ok(writer) => {
-                    if let Err(error) = migrate::apply(writer.pool()).await {
-                        return Ok(error_response(
-                            format!("failed to migrate Risk Atlas database: {error}"),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        ));
+            Ok(import) => {
+                match RiskAtlasWriter::connect(&state.config.risk_atlas_database_url).await {
+                    Ok(writer) => {
+                        if let Err(error) = migrate::apply(writer.pool()).await {
+                            return Ok(error_response(
+                                format!("failed to migrate Risk Atlas database: {error}"),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            ));
+                        }
+                        if let Err(error) = writer.replace_report_import(&import).await {
+                            return Ok(error_response(
+                                format!("failed to write Risk Atlas export: {error}"),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            ));
+                        }
+                        Ok(json_response(
+                            &RiskAtlasExportResponse {
+                                run_id: import.run.run_id,
+                                source_run_id: run_id,
+                                pool_rows: import.pool_eligibility.len(),
+                                event_evidence_rows: import.event_evidence.len(),
+                                observation_rows: import.observations.len(),
+                                distributions: import.distributions.len(),
+                                active_targets: import.active_targets.len(),
+                            },
+                            StatusCode::OK,
+                        ))
                     }
-                    if let Err(error) = writer.replace_report_import(&import).await {
-                        return Ok(error_response(
-                            format!("failed to write Risk Atlas export: {error}"),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        ));
-                    }
-                    Ok(json_response(
-                        &RiskAtlasExportResponse {
-                            run_id: import.run.run_id,
-                            source_run_id: run_id,
-                            pool_rows: import.pool_eligibility.len(),
-                            event_evidence_rows: import.event_evidence.len(),
-                            observation_rows: import.observations.len(),
-                            distributions: import.distributions.len(),
-                            active_targets: import.active_targets.len(),
-                        },
-                        StatusCode::OK,
-                    ))
+                    Err(error) => Ok(error_response(
+                        format!("failed to connect Risk Atlas database: {error}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    )),
                 }
-                Err(error) => Ok(error_response(
-                    format!("failed to connect Risk Atlas database: {error}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )),
-            },
+            }
             Err(error) => Ok(error_response(
                 format!("failed to build Risk Atlas export: {error}"),
                 StatusCode::INTERNAL_SERVER_ERROR,

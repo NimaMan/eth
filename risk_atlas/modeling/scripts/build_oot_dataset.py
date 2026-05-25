@@ -14,10 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from risk_atlas_modeling import db
-from risk_atlas_modeling.datasets.extract import SQL_ROOT
 from risk_atlas_modeling.datasets.labels import POOL_KEYS, build_labeled_dataset
 from risk_atlas_modeling.datasets.splits import split_labels
 from risk_atlas_modeling.oot_config import OotExperimentConfig, load_oot_config
+from risk_atlas_modeling.queries import EVENT_EVIDENCE_SQL, OBSERVATIONS_SQL, SCAM_LABELS_SQL
 
 
 def main() -> None:
@@ -97,9 +97,9 @@ def main() -> None:
 def extract_frames(run_id: str, protocol: str) -> dict[str, pd.DataFrame]:
     params = {"run_id": run_id, "protocol": protocol}
     return {
-        "observations": db.read_sql_file(SQL_ROOT / "observations.sql", params),
-        "scam_labels": db.read_sql_file(SQL_ROOT / "scam_labels.sql", params),
-        "event_evidence": db.read_sql_file(SQL_ROOT / "event_evidence.sql", params),
+        "observations": db.read_sql(OBSERVATIONS_SQL, params),
+        "scam_labels": db.read_sql(SCAM_LABELS_SQL, params),
+        "event_evidence": db.read_sql(EVENT_EVIDENCE_SQL, params),
     }
 
 

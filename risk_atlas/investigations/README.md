@@ -1,19 +1,20 @@
 # Investigations
 
-Each investigation is a concrete token or pool review. Investigations should be
-small enough to reproduce and specific enough to become regression tests.
+Investigations are the Risk Atlas evidence layer. They include concrete token or
+pool cases, the parity method used to validate facts, and the shared catalog of
+behavior/mechanism labels learned from those cases.
 
 Use a stable folder name:
 
 ```text
-<token_symbol_or_name>_<short_context>_<start_block>
+cases/<token_symbol_or_name>_<short_context>_<start_block>
 ```
 
 Examples:
 
 ```text
-sss_space_services_25041048
-biba_primary_v2_pool_25039257
+cases/sss_space_services_25041048
+cases/biba_primary_v2_pool_25039257
 ```
 
 Investigations are not just notes. A complete investigation `README.md` should
@@ -33,6 +34,19 @@ Investigation folders should normally contain only:
 
 Generated artifacts belong under `artifacts/` and are ignored by default.
 
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `cases/` | Concrete token/pool investigations with narrative, metadata, and artifacts. |
+| `parity/` | Chain truth vs token-builder/source observation vs simulator vs Alpha route methodology. |
+| `behavior_catalog/` | Shared catalog of suspicious behavior patterns and scam mechanism families. |
+
+Investigation scripts belong in the module that owns the capability. For
+example, token tracking audits belong under `eth_token`, route replays belong
+under `tx_simulator` or `tx_processor`, and strategy analysis belongs under
+`alpha/lab`.
+
 ## Current Issue Ledger
 
 Keep this ledger categorized. The first category is always the parity gate:
@@ -47,7 +61,7 @@ claims.
 | `source_simulator_parity` | Do chain truth, token-builder/source observations, and simulator route probes agree? | Yes. This blocks strategy evidence and model data for the affected protocol/cohort. |
 | `backtest_result_validity` | Is reported PnL/accounting/lifecycle state correct under the declared execution model? | Yes for the affected run/policy. |
 | `mechanism_classification` | What behavior or scam mechanism happened, and are labels precise enough? | Blocks labels/features when unresolved. |
-| `strategy_policy_research` | Given valid facts, what should the strategy do? | Does not mean the simulator is wrong; it defines a policy variant or exclusion. |
+| `alpha_strategy_input` | Does a fact belong in Alpha lab for strategy/cohort analysis? | No; Risk Atlas records the fact and Alpha lab owns the policy decision. |
 | `display_read_model` | How should Risk Atlas/Asena surface the behavior without misleading operators? | Blocks UI trust, not necessarily execution. |
 | `network_actor_context` | Do wallet/fund-flow relationships add explanatory or predictive signal? | Research only until promoted into features. |
 | `ops_freshness_recheck` | Old evidence may be stale; does it still reproduce on current code? | Blocks only if reproduced. |
@@ -69,8 +83,8 @@ evidence base is trustworthy.
 
 | Order | Priority | Category | Status | Issue | Why It Ranks Here | Next Check |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | `source_simulator_parity` | confirmed | [helper-route V2 sell parity](compass_v2_vault_helper_route_chain_parity_25122982/) | `Compass` has meaningful WETH reserves and non-dust same-block helper-route sells, while actual pre-block holders still fail through Alpha's classic V2 route. The deployed V2 vault also uses the classic router sell path, and exact historical replay needs a vault deploy/code overlay because the vault did not exist at the affected blocks. | Add tx-index-aware observed-route replay/classification, add historical V2 vault rehearsal, and do not treat observed helper-route sells as Alpha-executable sellability until the exact executable route passes. |
-| 2 | P1 | `mechanism_classification` | confirmed | [SSS creator transferFrom pair drain](sss_creator_transfer_from_pair_drain_25041123/) | Exact chain truth shows creator `transferFrom(pair, drain_wallet, ...)` at tx `197`, creator `sync()` at tx `198`, and WETH drain sell at tx `200`; Alpha's current deployed V2 vault route fails even before tx `197`, so this is avoid-only evidence for our route. | Decide whether the live detector should key on mempool calldata, token transfer logs, or both; then run a corpus false-positive pass before promotion. |
+| 1 | P1 | `source_simulator_parity` | confirmed | [helper-route V2 sell parity](cases/compass_v2_vault_helper_route_chain_parity_25122982/) | `Compass` has meaningful WETH reserves and non-dust same-block helper-route sells, while actual pre-block holders still fail through Alpha's classic V2 route. The deployed V2 vault also uses the classic router sell path, and exact historical replay needs a vault deploy/code overlay because the vault did not exist at the affected blocks. | Add tx-index-aware observed-route replay/classification, add historical V2 vault rehearsal, and do not treat observed helper-route sells as Alpha-executable sellability until the exact executable route passes. |
+| 2 | P1 | `mechanism_classification` | confirmed | [SSS creator transferFrom pair drain](cases/sss_creator_transfer_from_pair_drain_25041123/) | Exact chain truth shows creator `transferFrom(pair, drain_wallet, ...)` at tx `197`, creator `sync()` at tx `198`, and WETH drain sell at tx `200`; Alpha's current deployed V2 vault route fails even before tx `197`, so this is avoid-only evidence for our route. | Decide whether the live detector should key on mempool calldata, token transfer logs, or both; then run a corpus false-positive pass before promotion. |
 
 ## Fresh Parity Recheck Backlog
 
@@ -93,8 +107,8 @@ evidence has token/pool coordinates or reproduces on current code.
 | `backtest_result_validity` | explained | `worst_loser_position_checks_25073543` | Representative losses match dead-pool and full-size failed-exit behavior. |
 | `mechanism_classification` | explained | `vyp_burned_lp_reserve_drain_25077324` | LP was locked; WETH was drained by backdoored pair-balance transfer plus sell, not normal LP removal. |
 | `mechanism_classification` | explained | `transfer_from_failed_exit_classification_25065694` | Failed exits are bucketed into address restriction, chunking, no observed sell, Pancake V2 unsellable, and V3 drained liquidity. |
-| `strategy_policy_research` | fixed | `stable_denom_execution_scope_25065694` | Stable-denom pools stay in research, but are excluded from ETH-denominated executable baseline until quote conversion exists. |
-| `strategy_policy_research` | explained | `weth_buy_size_sensitivity_25065694` | Fixed `0.01 ETH` entries fail while smaller orders execute; adaptive sizing is a separate strategy. |
+| `alpha_strategy_input` | fixed | `stable_denom_execution_scope_25065694` | Stable-denom pools stay in research, but are excluded from ETH-denominated executable baseline until quote conversion exists. |
+| `alpha_strategy_input` | explained | `weth_buy_size_sensitivity_25065694` | Fixed `0.01 ETH` entries fail while smaller orders execute; adaptive sizing is a separate Alpha lab question. |
 
 ## Resolved Parity/Infrastructure Notes
 

@@ -37,6 +37,8 @@ src/
   position_lab.rs
   strategy_lab.rs
   render.rs
+strategy_analysis/
+  README.md
 ```
 
 ## Strategy Lab
@@ -97,7 +99,14 @@ The scan groups repeated timing signals across losing trades, including:
 
 Use `--json` when the scan output should feed another tool or a UI page.
 
-## Token Lab
+## Strategy Analysis
+
+`strategy_analysis/` captures research contracts for launch cohorts, winner
+windows, eligibility thresholds, scam/risk rates, liquidity quality, and other
+questions used to design Alpha strategies. Risk Atlas supplies chain and risk
+facts; Alpha lab owns the strategy-facing interpretation.
+
+## Position Lab
 
 Single position/token checks for entry report consistency, observation joins,
 latest valuation, and first/last mark-to-market trajectory.
@@ -338,18 +347,18 @@ Run facts from Strategy Lab:
   quote conversion and ETH-equivalent PnL. This removed the two USDC/USDT
   empty-router buy failures and the one confirmed USDT-denom position from the
   previous run; the current run has only WETH-denominated confirmed positions.
-- Source replay rows for this 15k range have `payload.pool.runtime_state`,
-  but only with `last_sync_block` / `last_update_block`; none preserve
-  `runtime_state.can_buy` or `runtime_state.can_sell`.
+- The old source replay rows for this 15k range had `payload.pool.runtime_state`
+  with only `last_sync_block` / `last_update_block`; current Risk Atlas rows and
+  current strategy observations preserve effective/runtime trading flags, and
+  Alpha treats V4 rows missing runtime flags as non-tradeable.
 - Strategy Lab now prints `Buy Failed Entries` and `Open Failed Exits` tables
   so failed entries and retryable failed exits are visible without ad hoc SQL.
 
 Keep this ledger focused on strategy work. Token/pool parity investigations
-belong in `token_lab/investigations/README.md`.
+belong in `risk_atlas/investigations/README.md`.
 
 | Priority | Status | Issue | Evidence | Fix / Next Check |
 | --- | --- | --- | --- | --- |
-| P0 | confirmed | V4 observed-flow-only entries polluted strategy eligibility | 6 V4 Universal Router buy failures were selected from observed third-party flow even though same-route probes failed at entry block and `block-1` for `0.01`, `0.001`, and `0.0001 ETH`; all six stored observations say top-level `can_buy=true` / `can_sell=true`, but lack `runtime_state.can_buy/can_sell`. | Rebuild source observations with runtime trading flags, then rerun the 15k baseline. These should become skipped eligibility decisions rather than failed buys. |
 | P1 | explained | Failed sells remain open, retryable exposure | BCB2 failed at block `25,074,899` and sold successfully at block `25,074,918`; the 8 still-open failed exits have zero-value snapshots and remain `sell_failed`. | Keep lifecycle behavior. Strategy policy work is retry cadence, max retries, chunked exits, and address-specific/no-observed-sell exposure treatment. |
 | P1 | explained | Fixed entry size fails on thin WETH pools | The 3 V2 `TRANSFER_FAILED` and 2 V3 `TF` WETH buy failures fail at `0.01 ETH`, but representative probes succeed at `0.001 ETH` on both `block-1` and the entry block. | Current baseline remains fixed-size. Adaptive sizing or pre-entry size guards are separate strategy variants. |
 | P2 | investigating | PnL is too concentrated for strategy conclusions | Total PnL is positive, but excluding the top five positions is `-0.219822746621256746 ETH`; excluding the top ten is `-2.606516897707689237 ETH`. | Add concentration-aware reporting to the strategy table and use it as a baseline gate before treating `Snipe All v1` as profitable. |

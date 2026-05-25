@@ -124,6 +124,7 @@ Start with the near-future horizon set we can inspect and model first:
 | `labels/` | Human-auditable scammed-pool label schema and review rules. |
 | `features/` | Model-row contract and leakage rules. Source feature families live in `eth_token::token_analytics`. |
 | `clusters/` | Human-readable scam mechanism taxonomy and detector attributes. |
+| `detector_prototypes/` | Scam-analysis prototype scripts before promotion into Rust owner modules. |
 | `artifacts/` | Generated extracts, raw API responses, and local notebooks. |
 
 ## Data Ownership
@@ -285,10 +286,10 @@ Feature rows must declare an `as_of_block`.
 
 ## First Data Sources
 
-Start with already reviewed token-lab investigations, then expand to
+Start with already reviewed Risk Atlas investigations, then expand to
 token-server and indexed chain-observation outputs:
 
-- `token_lab/investigations/*/investigation.toml`
+- `risk_atlas/investigations/*/investigation.toml`
 - token server pool summaries with `scam_mechanism`
 - source observation rows with first bad block and sell failures
 - network analytics timeline features for suspicious graph/fund-flow behavior

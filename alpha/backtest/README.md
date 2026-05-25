@@ -103,8 +103,11 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader -- \
   --min-liquidity-usd 1000
 ```
 
-The backtest reads `databases.alpha.url` from `blockchains/eth/config.toml`
-and `RETH_DATADIR` from `blockchains/eth/config.env` by default.
+The backtest reads `databases.alpha.url` and `databases.risk_atlas.url` from
+`blockchains/eth/config.toml`, and `RETH_DATADIR` from
+`blockchains/eth/config.env` by default. Risk Atlas replay inputs are loaded
+from the Risk Atlas database key, while backtest results are written through
+the Alpha database key.
 
 Backtest persistence goes through `alpha/store/` and writes the
 `alpha_trading` schema: `trader_runs`, `order_intents`, `execution_reports`,

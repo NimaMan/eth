@@ -1,0 +1,34 @@
+title = "Worst-loser position checks"
+status = "explained"
+category = "backtest_result_validity"
+run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "worst loser chain parity"
+classification = "zero_value_or_full_size_exit_failure"
+
+[[tokens]]
+token = "0x0000001897b916600Df47f6fB695853E68AC846E"
+pool = "0x000000000004444c5dc75cb358380d2e3de08a90#0x5d241ff1fe05ea9877846269d04d14751ac6ab00bc8a798364842d9077db8e2d"
+entry_block = 25080028
+latest_block = 25080077
+state = "buy_confirmed"
+result = "V4 pool becomes zero reserve / not tradeable before max-hold exit"
+
+[[tokens]]
+token = "0x022bC1A0560D88Dd537AD51522B1cF63CD46E0c7"
+pool = "0xbc26c4cf418d63f107fe7554c6716538293770ec"
+entry_block = 25075629
+latest_block = 25075665
+state = "buy_confirmed"
+drain_tx_hash = "0x68a3e22b47cccc6e830adb1f04f3d4863efa0b2d9a3d0b72f3eb1cb7190f72c3"
+result = "recorded amount sells before collapse and fails after collapse"
+
+[[tokens]]
+token = "0x11aEE4BE385E1f9437f9AaC38287A3052BE80F3F"
+pool = "0xecce2302b424b7e4c0c941d367878e6cb6d79e7d"
+entry_block = 25077762
+sell_block = 25077989
+state = "sell_failed"
+result = "full-size exit fails; 5%, 2%, and 1% chunks sell"

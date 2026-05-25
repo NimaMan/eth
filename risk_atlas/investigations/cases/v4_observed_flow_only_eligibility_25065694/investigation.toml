@@ -1,0 +1,45 @@
+title = "V4 observed-flow-only eligibility in 15k historical baseline"
+status = "fixed"
+category = "source_simulator_parity"
+run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "source eligibility parity"
+classification = "source_observed_flow_not_same_route_tradeable"
+resolution = "current Risk Atlas rows persist effective_can_buy/effective_can_sell, current strategy observations persist runtime_state.can_buy/can_sell, and Alpha treats V4 rows missing runtime trading flags as non-tradeable"
+evidence_checked_at = "2026-05-24"
+risk_atlas_v4_rows_checked = 1316533
+strategy_v4_observation_rows_checked = 6306
+v4_buy_failed_execution_reports = 0
+follow_up = "rerun the exact 15k source-observation baseline only when an exact-window evidence artifact is needed"
+
+[[tokens]]
+token = "0xA27a750fAB2Fd9D5794b5B756E5a35fe0792cD5D"
+block = 25074555
+pool_id = "0x3480ec8fe2acb76785ba9edd81d3e1f73f1df1e496a3cab90737c38d56d9135e"
+
+[[tokens]]
+token = "0x1030ad4c5De76e4d9860b9220265C25a3dE0d37a"
+block = 25074863
+pool_id = "0x07f60cb6d3a6e8d56033654319da72bf66aa1f840499f84c532d65900d6fd1f9"
+
+[[tokens]]
+token = "0xB52DB3fC0481DeA2AAf8713Ad0d8d937ad1F3281"
+block = 25075194
+pool_id = "0x86549909dda8c46965ec41bec710ca21acd11c01fa3a5c292834422b7f6feb77"
+
+[[tokens]]
+token = "0x4a80CD82F828Fc3fF2243a1C5D67F26c9888e498"
+block = 25075942
+pool_id = "0xfc697be83d693326014f09e59c7952acd617e075e42fe9a491de9d475cb988b8"
+
+[[tokens]]
+token = "0x8ae93F80EcfA0D5D9F718b4E69DC3F940dA0E485"
+block = 25076752
+pool_id = "0x45d57c5c9621553d3e94ae605cbac5826c5610cfc2f6beca5871112f419b3722"
+
+[[tokens]]
+token = "0x1699A66119fF5A6c894A1bfC9cBB6B27432c2d17"
+block = 25077133
+pool_id = "0x4968a299f60bcb998056df8dd302ad468c4a47ad371910eb58bd3b090c9b8b17"

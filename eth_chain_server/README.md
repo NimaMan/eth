@@ -373,7 +373,7 @@ crates and exposes API read models over them.
 | Processed-block disk cache | `PROCESSED_BLOCK_DISK_CACHE_DIR`, `PROCESSED_BLOCK_DISK_CACHE_BLOCKS` | Live warmup, historical range reads, and processed-block replay writes. | `tx_processor/src/processed_tx_provider/block/` |
 | Mempool signals | `databases.mempool.url` | Reads `live_trading.signal_events` and typed detail tables for mempool signal API routes. | `mempool_processor/src/db_writers/` |
 | Alpha trading | `databases.alpha.url` | Reads and resets `alpha_trading.*` strategy/run/trade tables for alpha pages and APIs. | `alpha/store/` |
-| Risk Atlas | `databases.alpha.url` | Reads/writes `risk_atlas_*` tables for Risk Atlas pages and range exports. | `risk_atlas/` |
+| Risk Atlas | `databases.risk_atlas.url` | Reads/writes `risk_atlas_*` tables for Risk Atlas pages and range exports. | `risk_atlas/` |
 
 The server should not compute these stores' business semantics in HTTP routes.
 Routes should call the owner crate/read model and return backend-provided fields
@@ -398,6 +398,9 @@ PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed-
 url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 
 [databases.alpha]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
+
+[databases.risk_atlas]
 url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 ```
 

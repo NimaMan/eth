@@ -83,7 +83,7 @@ impl ServerState {
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?
                 .with_arrival_provider(provider.clone());
         let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
-        let risk_atlas = RiskAtlasReader::connect_lazy(&config.alpha_database_url)?;
+        let risk_atlas = RiskAtlasReader::connect_lazy(&config.risk_atlas_database_url)?;
         let price_service = ChainPriceService::new(provider.provider_factory().clone())?;
 
         Ok(Self {

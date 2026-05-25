@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from .. import db
-from ..run_config import MODELING_ROOT, RunConfig
-
-
-SQL_ROOT = MODELING_ROOT / "sql"
+from ..queries import EVENT_EVIDENCE_SQL, OBSERVATIONS_SQL, SCAM_LABELS_SQL
+from ..run_config import RunConfig
 
 
 def extract_raw_frames(config: RunConfig) -> dict[str, pd.DataFrame]:
     params = {"run_id": config.run_id, "protocol": config.protocol}
     return {
-        "observations": db.read_sql_file(SQL_ROOT / "observations.sql", params),
-        "scam_labels": db.read_sql_file(SQL_ROOT / "scam_labels.sql", params),
-        "event_evidence": db.read_sql_file(SQL_ROOT / "event_evidence.sql", params),
+        "observations": db.read_sql(OBSERVATIONS_SQL, params),
+        "scam_labels": db.read_sql(SCAM_LABELS_SQL, params),
+        "event_evidence": db.read_sql(EVENT_EVIDENCE_SQL, params),
     }
 
 

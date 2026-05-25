@@ -23,6 +23,7 @@ const LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG: &str =
     "LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS";
 const MEMPOOL_DATABASE_CONFIG_KEY: &str = "databases.mempool.url";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
+const RISK_ATLAS_DATABASE_CONFIG_KEY: &str = "databases.risk_atlas.url";
 const MEMPOOL_SIGNAL_LIMIT_CONFIG: &str = "MEMPOOL_SIGNAL_LIMIT";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
@@ -55,6 +56,7 @@ pub struct ChainServerConfig {
     pub live_block_apply_timeout_ms: u64,
     pub mempool_database_url: String,
     pub alpha_database_url: String,
+    pub risk_atlas_database_url: String,
     pub mempool_signal_limit: i64,
 }
 
@@ -112,6 +114,8 @@ impl ChainServerConfig {
         )?;
         let mempool_database_url = required_config_string(config, MEMPOOL_DATABASE_CONFIG_KEY)?;
         let alpha_database_url = required_config_string(config, ALPHA_DATABASE_CONFIG_KEY)?;
+        let risk_atlas_database_url =
+            required_config_string(config, RISK_ATLAS_DATABASE_CONFIG_KEY)?;
         let mempool_signal_limit = config_parse(
             config,
             MEMPOOL_SIGNAL_LIMIT_CONFIG,
@@ -155,6 +159,9 @@ impl ChainServerConfig {
         if alpha_database_url.trim().is_empty() {
             return Err(eyre!("{ALPHA_DATABASE_CONFIG_KEY} must not be empty"));
         }
+        if risk_atlas_database_url.trim().is_empty() {
+            return Err(eyre!("{RISK_ATLAS_DATABASE_CONFIG_KEY} must not be empty"));
+        }
         if mempool_signal_limit <= 0 {
             return Err(eyre!(
                 "{MEMPOOL_SIGNAL_LIMIT_CONFIG} must be greater than zero"
@@ -176,6 +183,7 @@ impl ChainServerConfig {
             live_block_apply_timeout_ms,
             mempool_database_url,
             alpha_database_url,
+            risk_atlas_database_url,
             mempool_signal_limit,
         })
     }
@@ -262,6 +270,7 @@ fn merge_toml_database_config(values: &mut HashMap<String, String>, path: &Path)
     })?;
     insert_toml_database_url(values, &root, "mempool", MEMPOOL_DATABASE_CONFIG_KEY);
     insert_toml_database_url(values, &root, "alpha", ALPHA_DATABASE_CONFIG_KEY);
+    insert_toml_database_url(values, &root, "risk_atlas", RISK_ATLAS_DATABASE_CONFIG_KEY);
     Ok(())
 }
 
@@ -372,6 +381,7 @@ mod tests {
             RETH_WS_RPC=ws://127.0.0.1:8546
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -389,6 +399,7 @@ mod tests {
             CHAIN_SERVER_LIVE_WARMUP_BLOCKS=2000
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -405,6 +416,7 @@ mod tests {
             LIVE_TOKEN_TRACKER_WARMUP_BLOCKS='123'
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -421,6 +433,7 @@ mod tests {
             CHAIN_SERVER_AUTO_START_LIVE=false
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 

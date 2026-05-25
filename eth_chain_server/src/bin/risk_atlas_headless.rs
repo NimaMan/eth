@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
         import.active_targets.len()
     );
     if args.write_db {
-        let writer = RiskAtlasWriter::connect(&config.alpha_database_url)
+        let writer = RiskAtlasWriter::connect(&config.risk_atlas_database_url)
             .await
             .wrap_err("failed to connect Risk Atlas database")?;
         migrate::apply(writer.pool()).await?;

@@ -1,0 +1,21 @@
+title = "DBB top winner scam-after-exit review"
+status = "explained"
+category = "backtest_result_validity"
+run_id = "hist-snipe-all-poolonly-15k-recipient-net-20260513-145954"
+source_run_id = "snipe-all-v1-chain-sim-live-v4"
+range_start_block = 25065694
+range_end_block = 25080693
+area = "top winner chain parity"
+classification = "realized_before_scam"
+
+[[tokens]]
+token = "0xDBb77651dF8A633A4E9D8c858E46878845878B20"
+pool = "0x97cddc3607198b137b37bc68af11c2eba8868f3f"
+entry_block = 25077629
+sell_block = 25077831
+scam_block = 25077998
+sell_proceeds_wei = "2006753067216354612"
+realized_pnl_eth = "1.996753067216354612"
+drain_tx_hash = "0xbf27f0a617e80ba2c51540a7861dc6017be5f725540767592e4f979c1d6ce85b"
+pre_drain_transfer_tx_hash = "0xf8e6927fd1a9a27f7778de42d0f4ec601f9c25d7e92505a4274ddec2df371a02"
+result = "backtest exited 167 blocks before first scam observation; post-scam same-amount sell fails down to 1%"

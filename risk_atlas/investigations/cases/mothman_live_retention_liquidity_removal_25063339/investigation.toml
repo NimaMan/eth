@@ -1,0 +1,36 @@
+name = "mothman_live_retention_liquidity_removal_25063339"
+title = "MOTH live retention liquidity-removal pool retention"
+status = "fixed"
+category = "display_read_model"
+area = "live token retention"
+classification = "evidence_bearing_depleted_pool_pruned_too_early"
+token = "0xec402ba62e9d67650359ba859ddc1ae22a84840f"
+pool = "0x43cc493e758bfb50ff0f84ca188e2555145bef2d"
+denom = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+denom_symbol = "WETH"
+creator = "0x6c5d2bdf75268108469f1a8659a1db7ac85bad51"
+start_block = 25063339
+end_block = 25063350
+
+[key_txs]
+token_creation = "0x50399c5e562a5ef8d5943acfb034d6a7f42a97f4af4770449f02322f99f870a0"
+liquidity_removal = "0x84b4c5eca672c72363048b0b49f47cdfb15bda3953e69138b0252e0c76437510"
+
+[observed_live_detail_before_fix]
+lifecycle_status = "PAIR_CREATION"
+pool_count = 0
+risk = "clear"
+latest_activity_block = 25063389
+
+[observed_mempool_signal]
+signal_id = "1724"
+risk = "DRAINING"
+removed_eth = "1.246518636309431600"
+remaining_eth = "0.019610863690568303"
+removal_percentage = "98.45"
+
+[fix]
+retain_dropped_liquidity_removal_pool = true
+retain_liquidity_removal_pools_for_blocks = 15000
+refresh_lifecycle_after_retention = true
+token_risk_includes_pool_liquidity_removal = true

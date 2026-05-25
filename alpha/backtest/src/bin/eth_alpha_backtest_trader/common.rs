@@ -19,6 +19,7 @@ use eyre::{Result, WrapErr};
 use rust_decimal::Decimal;
 
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
+const RISK_ATLAS_DATABASE_CONFIG_KEY: &str = "databases.risk_atlas.url";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -99,6 +100,8 @@ pub async fn run() -> Result<()> {
     let args = Args::parse();
     let shared_config = load_shared_config()?;
     let database_url = required_shared_config_value(&shared_config, ALPHA_DATABASE_CONFIG_KEY)?;
+    let risk_atlas_database_url =
+        required_shared_config_value(&shared_config, RISK_ATLAS_DATABASE_CONFIG_KEY)?;
     let reth_datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
 
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
@@ -162,8 +165,11 @@ pub async fn run() -> Result<()> {
         .wrap_err("failed to start backtest run")?;
 
     let events = if args.replay_run_id.starts_with("risk-atlas-") {
+        let risk_atlas_pool = sqlx::PgPool::connect(&risk_atlas_database_url)
+            .await
+            .wrap_err("failed to connect Risk Atlas database")?;
         load_events_from_risk_atlas(
-            store.pool(),
+            &risk_atlas_pool,
             &args.replay_run_id,
             args.from_block,
             args.to_block,
@@ -279,6 +285,16 @@ fn merge_toml_database_config(values: &mut HashMap<String, String>) -> Result<()
         .filter(|value| !value.is_empty())
     {
         values.insert(ALPHA_DATABASE_CONFIG_KEY.to_string(), url.to_string());
+    }
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get("risk_atlas"))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(RISK_ATLAS_DATABASE_CONFIG_KEY.to_string(), url.to_string());
     }
     Ok(())
 }

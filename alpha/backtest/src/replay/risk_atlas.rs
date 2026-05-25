@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 use super::blocks::add_block_completed_events;
 
-/// Load historical events from the token-lab Risk Atlas observation export.
+/// Load historical events from the Risk Atlas observation export.
 ///
 /// This is the mined-chain replay path for token analytics features. It emits
 /// pool update events from `risk_atlas_observations`, plus LP approval and

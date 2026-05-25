@@ -14,18 +14,17 @@ TOML_CONFIG_PATH = ETH_ROOT / "config.toml"
 
 
 def resolve_database_url() -> str:
-    value = _config_value("databases.alpha.url")
+    value = _config_value("databases.risk_atlas.url")
     if value:
         return value
-    raise RuntimeError(f"{TOML_CONFIG_PATH} must define databases.alpha.url")
+    raise RuntimeError(f"{TOML_CONFIG_PATH} must define databases.risk_atlas.url")
 
 
 def connect():
     return psycopg2.connect(resolve_database_url())
 
 
-def read_sql_file(path: Path, params: dict) -> pd.DataFrame:
-    sql = path.read_text(encoding="utf-8")
+def read_sql(sql: str, params: dict) -> pd.DataFrame:
     with connect() as conn:
         return pd.read_sql_query(sql, conn, params=params)
 
