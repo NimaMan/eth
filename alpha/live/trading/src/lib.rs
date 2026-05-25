@@ -5,7 +5,6 @@
 //! sign, reserve nonces, or broadcast transactions locally.
 
 pub mod calibration;
-pub mod flashbots;
 pub mod kartal;
 pub mod kartal_executor;
 pub mod lp_approval_exit;
@@ -19,10 +18,6 @@ pub use calibration::{
     CalibrationSummary, CalibrationVerdictKind, ExpectedCalibrationOutcome,
     PlannerCalibrationFixtureConfig, PlannerCalibrationFixtureError, PlannerCalibrationRoute,
 };
-pub use flashbots::{
-    FlashbotsBundleSubmission, FlashbotsClientError, FlashbotsMevShareClient,
-    FlashbotsMevShareClientConfig, FlashbotsTailBundleRequest, DEFAULT_FLASHBOTS_RELAY_URL,
-};
 pub use kartal::{
     KartalClient, KartalClientConfig, KartalClientError, KartalDailySpendStatus,
     KartalEthTxExecutorStatus, KartalEthTxPolicyStatus, KartalPolicyDecision,
@@ -30,9 +25,9 @@ pub use kartal::{
 };
 pub use kartal_executor::{
     KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalExecutorClientError, KartalSignDirectRawResult, KartalSimulationReference,
-    KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest, LiveTraderTxSignal,
-    LiveTxExecution,
+    KartalExecutorClientError, KartalFlashbotsTailBundleRequest, KartalFlashbotsTailBundleResult,
+    KartalSimulationReference, KartalSubmitDirectRawResult, LiveDirectRawTransactionRequest,
+    LiveTraderTxSignal, LiveTxExecution,
 };
 pub use lp_approval_exit::{
     plan_lp_approval_response, BribeExitConfig, HeldPositionContext, LpApprovalSignal,

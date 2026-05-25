@@ -83,7 +83,6 @@ const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
-const DEFAULT_FLASHBOTS_AUTH_KEY_ENV: &str = "FLASHBOTS_AUTH_PRIVATE_KEY";
 const DEFAULT_FLASHBOTS_TAIL_MAX_BLOCK_SPAN: u64 = 3;
 const LIVE_REAL_VALIDATION_MAX_ENTRY_BANKROLL_ETH: &str = "0.555";
 const MAX_LIVE_TRADER_POLL_INTERVAL_MS: u64 = 1_000;
@@ -248,8 +247,7 @@ async fn run(
                         },
                         "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation,
                         "flashbots_tail_entry_enabled": real_args.flashbots_tail_entry_enabled,
-                        "flashbots_relay_url": &real_args.flashbots_relay_url,
-                        "flashbots_auth_key_env": &real_args.flashbots_auth_key_env,
+                        "flashbots_submission_owner": "kartal",
                         "flashbots_tail_max_block_span": real_args.flashbots_tail_max_block_span
                     })
                 } else {

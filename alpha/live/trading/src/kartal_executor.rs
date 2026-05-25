@@ -20,8 +20,8 @@ impl KartalExecutorClientConfig {
         join_endpoint(&self.base_url, "/eth/tx/direct-raw")
     }
 
-    fn sign_direct_raw_url(&self) -> String {
-        join_endpoint(&self.base_url, "/eth/tx/sign-direct-raw")
+    fn flashbots_tail_bundle_url(&self) -> String {
+        join_endpoint(&self.base_url, "/eth/tx/flashbots/mev-share-tail")
     }
 }
 
@@ -84,10 +84,10 @@ impl KartalExecutorClient {
             .map_err(KartalExecutorClientError::Http)
     }
 
-    pub async fn sign_direct_raw(
+    pub async fn submit_flashbots_tail_bundle(
         &self,
-        request: &LiveDirectRawTransactionRequest,
-    ) -> Result<KartalSignDirectRawResult, KartalExecutorClientError> {
+        request: &KartalFlashbotsTailBundleRequest,
+    ) -> Result<KartalFlashbotsTailBundleResult, KartalExecutorClientError> {
         if self.config.bearer_token.trim().is_empty() {
             return Err(KartalExecutorClientError::Config(
                 "Kartal bearer token is empty".to_string(),
@@ -96,7 +96,7 @@ impl KartalExecutorClient {
 
         let response = self
             .http
-            .post(self.config.sign_direct_raw_url())
+            .post(self.config.flashbots_tail_bundle_url())
             .bearer_auth(self.config.bearer_token.trim())
             .json(request)
             .send()
@@ -112,7 +112,7 @@ impl KartalExecutorClient {
         }
 
         response
-            .json::<KartalSignDirectRawResult>()
+            .json::<KartalFlashbotsTailBundleResult>()
             .await
             .map_err(KartalExecutorClientError::Http)
     }
@@ -258,11 +258,24 @@ pub struct KartalSubmitDirectRawResult {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KartalSignDirectRawResult {
+pub struct KartalFlashbotsTailBundleRequest {
+    pub transaction: LiveDirectRawTransactionRequest,
+    pub tail_after_tx_hash: String,
+    pub target_block: u64,
+    pub max_block: u64,
+    #[serde(default)]
+    pub can_revert: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KartalFlashbotsTailBundleResult {
     pub attempt_id: String,
     pub status: String,
     pub tx_hash: String,
-    pub raw_tx_hex: String,
+    pub bundle_hash: String,
+    pub tail_after_tx_hash: String,
+    pub target_block: u64,
+    pub max_block: u64,
     pub from: String,
     pub to: String,
     pub nonce: Value,

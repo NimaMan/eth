@@ -15,17 +15,17 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, ChainServerGasRankProvider, FlashbotsMevShareClient,
-    FlashbotsMevShareClientConfig, FlashbotsTailBundleRequest, GasEstimateConfig, GasRankPlan,
-    GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
+    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasEstimateConfig,
+    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
     KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
-    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, LiveTxExecution, MempoolRaceGasRankProvider,
-    PlannerTxContext, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
-    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxPrepRequestContext,
-    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
-    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
+    KartalFlashbotsTailBundleRequest, KartalSimulationReference, KartalStatusBroadcastMode,
+    LiveDirectRawTransactionRequest, LivePrioritySellPlanner, LivePrioritySellPlannerConfig,
+    LivePrioritySellPlannerError, LivePrioritySellPlannerInput, LiveTraderTxSignal,
+    LiveTxExecution, MempoolRaceGasRankProvider, PlannerTxContext, PreSubmitSimulation,
+    PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig,
+    TxPrepRequestContext, UniswapV2TradingVaultBuyRouteBuilder,
+    UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
+    VaultInternalAllowanceChecker,
 };
 use eth_strategies::{
     alpha11::{HOLD16_STRATEGY_NAME, INITIAL_ENTRY_BANKROLL_ETH},
@@ -295,7 +295,6 @@ struct KartalRealPlanner<P, G> {
 
 struct KartalFlashbotsSubmitter {
     kartal: KartalExecutorClient,
-    flashbots: Option<FlashbotsMevShareClient>,
     tail_max_block_span: u64,
 }
 
@@ -318,20 +317,6 @@ impl LiveTxSubmitter for KartalFlashbotsSubmitter {
                 max_block,
                 can_revert,
             } => {
-                let flashbots = self.flashbots.as_ref().ok_or_else(|| {
-                    "tail-entry signal requires Flashbots MEV-Share client".to_string()
-                })?;
-                let signed = self
-                    .kartal
-                    .sign_direct_raw(&signal.request_with_strategy_metadata())
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if signed.status.trim().to_ascii_lowercase() != "signed" {
-                    return Err(format!(
-                        "Kartal sign-direct-raw returned unexpected status {}",
-                        signed.status
-                    ));
-                }
                 let target = (*target_block)
                     .or_else(|| signal.observed_block.map(|block| block.saturating_add(1)))
                     .ok_or_else(|| {
@@ -339,10 +324,11 @@ impl LiveTxSubmitter for KartalFlashbotsSubmitter {
                     })?;
                 let span = self.tail_max_block_span.max(1);
                 let max = (*max_block).unwrap_or_else(|| target.saturating_add(span - 1));
-                let submission = flashbots
-                    .send_tail_bundle(FlashbotsTailBundleRequest {
+                let submission = self
+                    .kartal
+                    .submit_flashbots_tail_bundle(&KartalFlashbotsTailBundleRequest {
+                        transaction: signal.request_with_strategy_metadata(),
                         tail_after_tx_hash: tail_after_tx_hash.clone(),
-                        signed_tx: signed.raw_tx_hex,
                         target_block: target,
                         max_block: max,
                         can_revert: *can_revert,
@@ -350,9 +336,9 @@ impl LiveTxSubmitter for KartalFlashbotsSubmitter {
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok(LiveTxSubmissionResult {
-                    attempt_id: signed.attempt_id,
-                    status: "bundle_submitted".to_string(),
-                    tx_hash: Some(signed.tx_hash),
+                    attempt_id: submission.attempt_id,
+                    status: submission.status,
+                    tx_hash: Some(submission.tx_hash),
                     error: None,
                     bundle_hash: Some(submission.bundle_hash),
                     bundle_target_block: Some(submission.target_block),
@@ -468,7 +454,7 @@ where
         let executor_boundary = match &execution {
             LiveTxExecution::DirectRaw => "kartal_eth_tx_executor",
             LiveTxExecution::FlashbotsMevShareTail { .. } => {
-                "kartal_eth_tx_executor_sign_only+flashbots_mev_share"
+                "kartal_eth_tx_executor_flashbots_mev_share"
             }
         };
 
@@ -811,7 +797,6 @@ pub(super) async fn preflight_kartal_real(
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
     if args.flashbots_tail_entry_enabled {
         validate_flashbots_tail_entry_args(args)?;
-        let _ = load_flashbots_auth_key(&args.flashbots_auth_key_env)?;
     }
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
@@ -909,19 +894,8 @@ pub(super) async fn build_kartal_real_adapter(
         &args.kartal_url,
         preflight.token.clone(),
     ));
-    let flashbots = if args.flashbots_tail_entry_enabled {
-        Some(FlashbotsMevShareClient::new(
-            FlashbotsMevShareClientConfig::new(
-                &args.flashbots_relay_url,
-                load_flashbots_auth_key(&args.flashbots_auth_key_env)?,
-            ),
-        )?)
-    } else {
-        None
-    };
     let submitter = KartalFlashbotsSubmitter {
         kartal,
-        flashbots,
         tail_max_block_span: args.flashbots_tail_max_block_span,
     };
     let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id);
@@ -951,9 +925,14 @@ fn validate_kartal_real_status(
             "Kartal ETH tx policy must have non-empty target and selector allowlists"
         ));
     }
-    if args.flashbots_tail_entry_enabled && status.sign_direct_raw_endpoint.is_none() {
+    if args.flashbots_tail_entry_enabled && status.flashbots_tail_bundle_endpoint.is_none() {
         return Err(eyre!(
-            "Flashbots tail-entry execution requires Kartal /eth/tx/sign-direct-raw support"
+            "Flashbots tail-entry execution requires Kartal /eth/tx/flashbots/mev-share-tail support"
+        ));
+    }
+    if args.flashbots_tail_entry_enabled && status.flashbots_auth_configured != Some(true) {
+        return Err(eyre!(
+            "Flashbots tail-entry execution requires Flashbots auth configured in Kartal"
         ));
     }
     match status.broadcast_mode {
@@ -1085,22 +1064,11 @@ fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
     Ok(token)
 }
 
-fn load_flashbots_auth_key(key_env: &str) -> Result<String> {
-    let key = std::env::var(key_env)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| eyre!("missing Flashbots auth private key in {key_env}"))?;
-    Ok(key)
-}
-
 fn validate_flashbots_tail_entry_args(args: &RealExecutionArgs) -> Result<()> {
     if args.flashbots_tail_max_block_span == 0 {
         return Err(eyre!(
             "--flashbots-tail-max-block-span must be greater than zero"
         ));
-    }
-    if args.flashbots_relay_url.trim().is_empty() {
-        return Err(eyre!("--flashbots-relay-url must not be empty"));
     }
     Ok(())
 }

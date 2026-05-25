@@ -34,8 +34,6 @@ fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
         allow_public_mempool_live_validation,
         flashbots_tail_entry_enabled: false,
-        flashbots_relay_url: eth_live_trading::DEFAULT_FLASHBOTS_RELAY_URL.to_string(),
-        flashbots_auth_key_env: "FLASHBOTS_AUTH_PRIVATE_KEY".to_string(),
         flashbots_tail_max_block_span: 3,
     }
 }
@@ -52,7 +50,9 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         rpc_url: "http://172.18.0.1:8545".to_string(),
         journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
         direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
-        sign_direct_raw_endpoint: Some("/eth/tx/sign-direct-raw".to_string()),
+        flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
+        flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
+        flashbots_auth_configured: Some(true),
         policy: KartalEthTxPolicyStatus {
             version: "eth_tx_policy_v1".to_string(),
             allowed_from_count: 1,
