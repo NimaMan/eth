@@ -199,6 +199,16 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(token_analytics::risk_atlas);
 
+    let token_risk_atlas_scammer_analytics =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "scammer-analytics")
+            .and(warp::get())
+            .and_then(token_analytics::scammer_analytics);
+
+    let token_risk_atlas_scammer_analytics_alias =
+        warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "scammer_analytics")
+            .and(warp::get())
+            .and_then(token_analytics::scammer_analytics);
+
     let token_risk_atlas_runs =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "runs")
             .and(warp::get())
@@ -283,6 +293,13 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(warp::body::json())
             .and(with_state(state.clone()))
             .and_then(simulation::vault_uniswap_v2);
+
+    let live_unsigned_simulation =
+        warp::path!("eth" / "tokens" / "api" / "live" / "simulations" / "unsigned")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(with_state(state.clone()))
+            .and_then(simulation::live_unsigned_tx);
 
     let alpha_runs = warp::path!("eth" / "tokens" / "api" / "alpha" / "runs")
         .and(warp::get())
@@ -505,6 +522,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
+        .or(live_unsigned_simulation)
         .or(live_state_stream)
         .or(live_state_latest)
         .boxed();
@@ -515,6 +533,8 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(token_risk_atlas_scammer_analytics)
+        .or(token_risk_atlas_scammer_analytics_alias)
         .or(token_risk_atlas_runs)
         .or(token_risk_atlas_run)
         .or(token_risk_atlas)

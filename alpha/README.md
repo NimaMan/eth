@@ -39,13 +39,25 @@ events, and persists decisions before execution.
 
 ```text
 eth_chain_server LiveChainRuntime
-  -> direct processed-block feed + live token/pool views
-  -> eth_alpha_live_backtest_trader or eth_alpha_live_trader polls /live/status, /live/pools, /mempool/signals
+  -> direct processed-block feed
+  -> fetches prestate diffs for block B
+  -> builds/publishes BlockStateSession B inside chain-server LiveTxSimulator
+  -> updates live token/pool views for block B
+  -> live trader polls /live/status
+  -> live trader polls /live/pools and /mempool/signals
   -> strategies emit StrategyDecision / OrderIntent
   -> chain-sim service or guarded kartal-real service
-  -> real adapter prepares a Kartal direct-raw request through live/trading
+  -> real adapter asks chain-server for exact-block unsigned tx simulation
+  -> real adapter prepares a Kartal eth_unsigned_tx request through live/trading
   -> strategy_observations + orders + reports + positions + risk events
 ```
+
+For real live trading, chain-server owns live state, `LiveTxSimulator`, and
+simulation sessions. Alpha owns strategy decisions, tx planning, gas policy, and
+Kartal submission. Alpha sends small exact-block simulation requests to
+chain-server instead of subscribing to full `/live/state/stream` frames.
+Chain-sim live backtests may still use `/live/state/stream` to publish exact
+block sessions into their local simulator.
 
 `eth_alpha_live_backtest_trader` is the no-capital live runner. It must not
 become decision-active until `/live/status` is `live`; while warming, it records
@@ -58,7 +70,7 @@ refuses to start unless Kartal reports `broadcast_mode = dry_run`, except for
 the explicit Alpha11 hold16 deploy strategy. That exception requires
 `--allow-public-mempool-live-validation`, strategy
 `alpha11-univ2-lp30-pool-update-block-hold16`, no `--replay-current`, no
-`--once`, strategy-spec buy size `0.01 ETH`, and strategy-spec bankroll capped
+`--once`, strategy-spec buy size `0.005 ETH`, and strategy-spec bankroll capped
 at `0.555 ETH`.
 While real entries are otherwise in validation mode, each strategy must resolve
 to a bankroll of at most `0.555 ETH`; Alpha11 carries that default in its

@@ -333,8 +333,14 @@ async fn run(
 
     loop {
         let first_poll = !primed;
-        let poll_result =
-            poll_live_inputs(&client, signal_limit, mempool_since_days, &pool_updates).await;
+        let poll_result = poll_live_inputs(
+            &client,
+            signal_limit,
+            mempool_since_days,
+            &pool_updates,
+            (execution_mode == TraderExecutionMode::ChainSim).then_some(&state_status_adapter),
+        )
+        .await;
         let LivePollBatch {
             status,
             signals,
@@ -668,8 +674,12 @@ async fn run(
         }
         primed = true;
 
-        let chain_state_status = state_status_adapter.state_status().await;
-        if let Err(error) = &chain_state_status {
+        let chain_state_status = if execution_mode == TraderExecutionMode::ChainSim {
+            Some(state_status_adapter.state_status().await)
+        } else {
+            None
+        };
+        if let Some(Err(error)) = &chain_state_status {
             warn!(
                 error = %error,
                 root_cause = %error.root_cause(),
@@ -679,7 +689,7 @@ async fn run(
         }
         let chain_state_payload = chain_state_status
             .as_ref()
-            .ok()
+            .and_then(|status| status.as_ref().ok())
             .map(|state| {
                 json!({
                     "selected_block_number": state.selected_block_number,

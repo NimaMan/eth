@@ -281,6 +281,16 @@ pub(super) fn routes(
         .and(super::with_state(state.clone()))
         .and_then(token_analytics::risk_atlas);
 
+    let risk_atlas_scammer_analytics =
+        warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "scammer-analytics")
+            .and(warp::get())
+            .and_then(token_analytics::scammer_analytics);
+
+    let risk_atlas_scammer_analytics_alias =
+        warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "scammer_analytics")
+            .and(warp::get())
+            .and_then(token_analytics::scammer_analytics);
+
     let risk_atlas_runs = warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "runs")
         .and(warp::get())
         .and(super::with_state(state.clone()))
@@ -359,6 +369,13 @@ pub(super) fn routes(
             .and(warp::body::json())
             .and(super::with_state(state.clone()))
             .and_then(simulation::vault_uniswap_v2);
+
+    let live_unsigned_simulation =
+        warp::path!("api" / "v1" / "eth" / "live" / "simulations" / "unsigned")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(super::with_state(state.clone()))
+            .and_then(simulation::live_unsigned_tx);
 
     let alpha_runs = warp::path!("api" / "v1" / "eth" / "alpha" / "runs")
         .and(warp::get())
@@ -509,6 +526,7 @@ pub(super) fn routes(
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
+        .or(live_unsigned_simulation)
         .or(live_state_stream)
         .or(live_state_latest)
         .boxed();
@@ -550,6 +568,8 @@ pub(super) fn routes(
         .or(mempool_signals_by_type)
         .or(mempool_signals)
         .or(token_activity_blocks)
+        .or(risk_atlas_scammer_analytics)
+        .or(risk_atlas_scammer_analytics_alias)
         .or(risk_atlas_runs)
         .or(risk_atlas_run)
         .or(risk_atlas)

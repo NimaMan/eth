@@ -54,11 +54,14 @@ pub(super) async fn build_execution_stack(
     let live_state_provider = tx_simulator::InMemoryLiveBlockStateProvider::new();
     let live_simulator =
         tx_simulator::LiveTxSimulator::new(tx_simulator.clone(), live_state_provider.clone());
-    super::live_state::spawn_live_state_publisher(
-        TokenServerClient::new(input.token_server_url.to_string()),
-        live_state_provider,
-        tx_simulator.clone(),
-    );
+    let local_live_state_enabled = input.execution_mode == TraderExecutionMode::ChainSim;
+    if local_live_state_enabled {
+        super::live_state::spawn_live_state_publisher(
+            TokenServerClient::new(input.token_server_url.to_string()),
+            live_state_provider,
+            tx_simulator.clone(),
+        );
+    }
     let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
     let next_order_sequence = input
         .store
@@ -74,7 +77,8 @@ pub(super) async fn build_execution_stack(
     .wrap_err("failed to initialize chain-sim execution adapter")?;
     let adapter_current_block = chain_sim_adapter.current_block();
     let pool_updates = chain_sim_adapter.pools();
-    let exact_pre_submit_live_simulator = Some(live_simulator.clone());
+    let exact_pre_submit_live_simulator =
+        local_live_state_enabled.then_some(live_simulator.clone());
     let manual_close_live_simulator = exact_pre_submit_live_simulator.clone();
     let state_status_adapter = chain_sim_adapter.clone();
     let manual_close_vault_address = match (input.execution_mode, input.real_args) {

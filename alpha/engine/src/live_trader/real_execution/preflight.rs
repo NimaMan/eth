@@ -9,7 +9,7 @@ use eth_strategies::{
 use eyre::{eyre, Result, WrapErr};
 
 use super::super::cli::{Args, RealExecutionArgs};
-pub(super) const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
+pub(super) const HOLD16_DEPLOY_BUY_WEI: &str = "5000000000000000";
 
 pub(in crate::live_trader) struct KartalRealPreflight {
     pub(in crate::live_trader) token: String,

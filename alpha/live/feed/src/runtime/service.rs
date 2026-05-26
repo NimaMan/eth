@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use eth_ops_events::{
     emit_bottleneck, emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue,
@@ -20,6 +21,10 @@ use tx_processor::{
     load_processed_block, sealed_header_from_processed_block_header, BlockProcessor,
     BlockStateSession, LivePoolBuySellSimulator, LiveProcessedBlock, LiveStateDiffFrame,
     LoadedProcessedBlock as LiveBlockLoad, ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
+};
+use tx_simulator::{
+    InMemoryLiveBlockStateProvider, LiveBlockState, LiveStateStatus, LiveTxSimulator,
+    UnsignedTxChainSimulation,
 };
 
 use super::apply_report::{apply_report, push_bottleneck, push_issue};
@@ -82,6 +87,7 @@ struct LiveTokenRuntimeInner {
     stop_requested: AtomicBool,
     next_id: AtomicU64,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    live_tx_simulator: LiveTxSimulator,
     direct_live_block_sessions: Mutex<BTreeMap<u64, BlockStateSession>>,
     event_tx: broadcast::Sender<LiveTokenEvent>,
     shutdown_tx: watch::Sender<bool>,
@@ -139,6 +145,10 @@ impl LiveTokenRuntime {
         let history_limit = config.history_limit;
         let (event_tx, _) = broadcast::channel(1024);
         let (shutdown_tx, _) = watch::channel(false);
+        let live_tx_simulator = LiveTxSimulator::new(
+            provider.simulator().clone(),
+            InMemoryLiveBlockStateProvider::new(),
+        );
         Self {
             inner: Arc::new(LiveTokenRuntimeInner {
                 config,
@@ -148,6 +158,7 @@ impl LiveTokenRuntime {
                 stop_requested: AtomicBool::new(false),
                 next_id: AtomicU64::new(1),
                 task: Mutex::new(None),
+                live_tx_simulator,
                 direct_live_block_sessions: Mutex::new(BTreeMap::new()),
                 event_tx,
                 shutdown_tx,
@@ -173,6 +184,7 @@ impl LiveTokenRuntime {
         self.inner.stop_requested.store(false, Ordering::SeqCst);
         let _ = self.inner.shutdown_tx.send(false);
         self.inner.direct_live_block_sessions.lock().await.clear();
+        self.inner.live_tx_simulator.provider().clear()?;
 
         {
             let mut state = self.inner.state.write().await;
@@ -250,6 +262,23 @@ impl LiveTokenRuntime {
 
     pub async fn state(&self) -> RwLockReadGuard<'_, LiveTokenState> {
         self.inner.state.read().await
+    }
+
+    pub async fn live_simulation_chain_at(
+        &self,
+        block_number: u64,
+    ) -> Result<(LiveStateStatus, UnsignedTxChainSimulation)> {
+        let status = self
+            .inner
+            .live_tx_simulator
+            .state_status_at(block_number)
+            .await?;
+        let chain = self
+            .inner
+            .live_tx_simulator
+            .start_chain_at(block_number)
+            .await?;
+        Ok((status, chain))
     }
 
     pub async fn apply_live_block_update(&self, update: LiveBlockUpdate) -> Result<()> {
@@ -526,8 +555,12 @@ impl LiveTokenRuntime {
                                     eyre::eyre!("direct live block session lock poisoned: {err}")
                                 })?
                                 .insert(block_number, session.clone());
-                            self.remember_direct_live_block_session(block_number, session)
-                                .await;
+                            self.remember_direct_live_block_session(
+                                block_number,
+                                loaded.block.header.hash,
+                                session,
+                            )
+                            .await;
                         }
                         Err(error) => {
                             tracing::warn!(
@@ -773,15 +806,29 @@ impl LiveTokenRuntime {
     async fn remember_direct_live_block_session(
         &self,
         block_number: u64,
+        block_hash: B256,
         session: BlockStateSession,
     ) {
         let mut sessions = self.inner.direct_live_block_sessions.lock().await;
-        sessions.insert(block_number, session);
+        sessions.insert(block_number, session.clone());
         while sessions.len() > 16 {
             let Some(oldest) = sessions.keys().next().copied() else {
                 break;
             };
             sessions.remove(&oldest);
+        }
+        if let Err(error) = self
+            .inner
+            .live_tx_simulator
+            .provider()
+            .publish_latest(LiveBlockState::new(session).with_block_hash(block_hash))
+        {
+            tracing::warn!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number,
+                error = %error,
+                "failed to publish direct live block session into LiveTxSimulator"
+            );
         }
     }
 

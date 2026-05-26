@@ -32,10 +32,10 @@ tx.value + gas_limit * max_fee_per_gas
 - Spend reservations must be released for dry-runs, rejects, and broadcast
   failures that did not submit an on-chain transaction.
 
-Example for a `0.01 ETH` buy, `300000` gas limit, and `50 gwei` max fee:
+Example for a `0.005 ETH` buy, `300000` gas limit, and `50 gwei` max fee:
 
 ```text
-0.01 ETH + 300000 * 50 gwei = 0.025 ETH worst-case cost
+0.005 ETH + 300000 * 50 gwei = 0.020 ETH worst-case cost
 ```
 
 ## Dry-Run Gate

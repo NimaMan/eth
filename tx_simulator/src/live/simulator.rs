@@ -6,6 +6,9 @@ use alloy_primitives::B256;
 use eyre::{eyre, Result};
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use tokio::sync::watch;
+use tokio::time;
 
 const DEFAULT_LIVE_STATE_WINDOW_CAPACITY: usize = 16;
 
@@ -87,6 +90,7 @@ impl LiveBlockState {
 #[derive(Clone)]
 pub struct InMemoryLiveBlockStateProvider {
     inner: Arc<RwLock<LiveBlockStateWindow>>,
+    latest_block_tx: watch::Sender<Option<u64>>,
 }
 
 struct LiveBlockStateWindow {
@@ -96,11 +100,13 @@ struct LiveBlockStateWindow {
 
 impl Default for InMemoryLiveBlockStateProvider {
     fn default() -> Self {
+        let (latest_block_tx, _) = watch::channel(None);
         Self {
             inner: Arc::new(RwLock::new(LiveBlockStateWindow {
                 states: VecDeque::with_capacity(DEFAULT_LIVE_STATE_WINDOW_CAPACITY),
                 capacity: DEFAULT_LIVE_STATE_WINDOW_CAPACITY,
             })),
+            latest_block_tx,
         }
     }
 }
@@ -111,6 +117,7 @@ impl InMemoryLiveBlockStateProvider {
     }
 
     pub fn publish_latest(&self, state: LiveBlockState) -> Result<()> {
+        let block_number = state.block_number;
         let mut window = self
             .inner
             .write()
@@ -126,6 +133,8 @@ impl InMemoryLiveBlockStateProvider {
         while window.states.len() > window.capacity {
             window.states.pop_back();
         }
+        drop(window);
+        self.latest_block_tx.send_replace(Some(block_number));
         Ok(())
     }
 
@@ -135,6 +144,8 @@ impl InMemoryLiveBlockStateProvider {
             .write()
             .map_err(|_| eyre!("in-memory live block state lock poisoned"))?;
         window.states.clear();
+        drop(window);
+        self.latest_block_tx.send_replace(None);
         Ok(())
     }
 
@@ -167,6 +178,60 @@ impl InMemoryLiveBlockStateProvider {
             .states
             .iter()
             .any(|state| state.block_number == block_number))
+    }
+
+    /// Wait until the exact live block state is available in the in-memory
+    /// window. This is a synchronization primitive for block-coupled live
+    /// trading, not a historical lookup.
+    pub async fn wait_for_state_at(
+        &self,
+        block_number: u64,
+        timeout: Duration,
+    ) -> Result<LiveBlockState> {
+        if let Ok(state) = self.state_at(block_number) {
+            return Ok(state);
+        }
+
+        let deadline = time::Instant::now() + timeout;
+        let mut latest_block_rx = self.latest_block_tx.subscribe();
+        loop {
+            let now = time::Instant::now();
+            if now >= deadline {
+                return Err(eyre!(
+                    "timed out waiting for in-memory live block state {block_number}"
+                ));
+            }
+            match time::timeout(
+                deadline.saturating_duration_since(now),
+                latest_block_rx.changed(),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {
+                    return Err(eyre!(
+                        "in-memory live block state notifier closed while waiting for {block_number}"
+                    ));
+                }
+                Err(_) => {
+                    return Err(eyre!(
+                        "timed out waiting for in-memory live block state {block_number}"
+                    ));
+                }
+            }
+
+            if let Ok(state) = self.state_at(block_number) {
+                return Ok(state);
+            }
+            if let Ok(latest) = self.latest_state() {
+                if latest.block_number > block_number {
+                    return Err(eyre!(
+                        "missed in-memory live block state {block_number}; latest live state is {}",
+                        latest.block_number
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -220,6 +285,12 @@ impl LiveTxSimulator {
         self.latest_state_status_blocking()
     }
 
+    /// Full diagnostics for an exact in-memory live block session.
+    pub async fn state_status_at(&self, block_number: u64) -> Result<LiveStateStatus> {
+        let state = self.provider.state_at(block_number)?;
+        Ok(live_state_status_from_state(&state))
+    }
+
     /// Full diagnostics, requiring the exact signal dependency block.
     pub async fn latest_state_status_at_or_after(
         &self,
@@ -246,15 +317,21 @@ impl LiveTxSimulator {
     /// hot path.
     pub fn latest_state_status_blocking(&self) -> Result<LiveStateStatus> {
         let latest = self.provider.latest_state()?;
-        Ok(LiveStateStatus {
-            selected_block_number: latest.block_number,
-            selected_block_hash: latest.block_hash,
-            source: LiveStateSource::InMemoryLiveBlockSession,
-            latest_reth_finished_block_number: latest.block_number,
-            latest_historical_context_block_number: latest.block_number,
-            latest_live_block_number: Some(latest.block_number),
-            latest_tracked_state_block_number: Some(latest.block_number),
-        })
+        Ok(live_state_status_from_state(&latest))
+    }
+
+    /// Wait until an exact in-memory live block session exists and return its
+    /// diagnostics.
+    pub async fn wait_for_state_at(
+        &self,
+        block_number: u64,
+        timeout: Duration,
+    ) -> Result<LiveStateStatus> {
+        let state = self
+            .provider
+            .wait_for_state_at(block_number, timeout)
+            .await?;
+        Ok(live_state_status_from_state(&state))
     }
 
     /// Latest block announced by the in-memory live-state source.
@@ -332,6 +409,18 @@ impl LiveTxSimulator {
             results.push(session.step(transaction)?);
         }
         Ok(results)
+    }
+}
+
+fn live_state_status_from_state(state: &LiveBlockState) -> LiveStateStatus {
+    LiveStateStatus {
+        selected_block_number: state.block_number,
+        selected_block_hash: state.block_hash,
+        source: LiveStateSource::InMemoryLiveBlockSession,
+        latest_reth_finished_block_number: state.block_number,
+        latest_historical_context_block_number: state.block_number,
+        latest_live_block_number: Some(state.block_number),
+        latest_tracked_state_block_number: Some(state.block_number),
     }
 }
 

@@ -20,6 +20,7 @@ thiserror = "1.0"
 tokio = { workspace = true }
 tracing = "0.1"
 tx_processor = { path = "../../../tx_processor" }
+tx_simulator = { path = "../../../tx_simulator" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

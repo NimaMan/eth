@@ -25,25 +25,10 @@ tradeable: the shared entry rules still reject unsupported quote assets, hooked
 V4 pools, missing V4 metadata, or any route the simulator cannot execute. This
 variant is a live-backtest probe, not the current live-real deployment target.
 
-The controlled public validation variant is:
-
-`alpha11-univ2-lp30-pool-update-block-hold3-validation`
-
-That variant has the same Uniswap V2, LP30, pool-update-block, and deployed V2
-vault assumptions, but it uses hold3 and a `0.01 ETH` entry bankroll so we can
-prove one mined buy, one mined sell, receipt reconciliation, tx index, actual
-gas cost, and finality recheck before enabling the main hold16 strategy.
-It also carries `max_entry_pools = 1` in the strategy spec. Live runs must not
-pass separate strategy parameters such as buy size, liquidity floors, bankroll,
-entry-pool cap, or hold blocks for Alpha11.
-
-The systematic operator checklist for this one-position mined validation lives
-in `alpha/live/readiness/gates/pre_live_mined_validation/`. Alpha11's concrete
-validation file is
-`alpha/live/readiness/strategies/alpha11/hold3_mined_validation.md`. A failed
-Kartal or signer policy rejection is still useful gate evidence when it records
-the exact rejected request and journal reason; it does not count as a passed
-mined-validation trade.
+Live runs must not pass separate strategy parameters such as buy size,
+liquidity floors, bankroll, entry-pool cap, or hold blocks for Alpha11. Current
+hold16 deploy readiness lives in
+`alpha/live/readiness/strategies/alpha11/hold16_deploy_readiness.md`.
 
 The live-real deploy path carries the shared entry init policy explicitly in
 strategy config. The first concrete Gate 2 setting rejects entries when pool age
@@ -64,7 +49,7 @@ Shared Alpha11 defaults:
   before the approval is mined; in mined-chain/risk-atlas replay it comes from
   confirmed-chain evidence. Reports should preserve the source so `mempool
   lp_approval` is not confused with `mined-chain lp_approval`.
-- Buy size is `0.01 ETH` per entry.
+- Buy size is `0.005 ETH` per entry.
 - Liquidity floors are `0.5 ETH` for ETH/WETH pools and `1000` for USD-stable
   quote pools.
 - `pool-update-block-hold16`: force exit after 16 distinct pool-update blocks

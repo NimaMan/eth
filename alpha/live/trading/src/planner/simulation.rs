@@ -1,9 +1,10 @@
-use alloy_primitives::{hex, keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{hex, keccak256, Address, Bytes, Log as AlloyLog, B256, U256};
 use async_trait::async_trait;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     order::OrderSide,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tx_simulator::{FullSimulationResult, LiveTxSimulator, UnsignedTransaction};
 
@@ -45,10 +46,254 @@ impl PreSubmitSimulator for FixedPreSubmitSimulator {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ChainServerLivePreSubmitSimulator {
+    http: reqwest::Client,
+    base_url: String,
+    vault_address: Address,
+}
+
+impl ChainServerLivePreSubmitSimulator {
+    pub fn new(base_url: impl Into<String>, vault_address: Address) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            base_url: base_url.into(),
+            vault_address,
+        }
+    }
+
+    fn endpoint(&self) -> String {
+        format!(
+            "{}/api/v1/eth/live/simulations/unsigned",
+            self.base_url.trim_end_matches('/')
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct UniswapV2TradingVaultPreSubmitSimulator {
     simulator: LiveTxSimulator,
     vault_address: Address,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChainServerLiveUnsignedTxSimulationRequest {
+    block: u64,
+    transaction: UnsignedTransaction,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChainServerLiveUnsignedTxSimulationResponse {
+    schema: String,
+    block: u64,
+    block_hash: Option<B256>,
+    state_source: String,
+    success: bool,
+    gas_used: u64,
+    effective_gas_price_wei: Option<String>,
+    tx_type: Option<u8>,
+    revert_reason: Option<String>,
+    log_count: usize,
+    logs: Vec<AlloyLog>,
+    base_fee_per_gas_wei: Option<String>,
+}
+
+#[async_trait]
+impl PreSubmitSimulator for ChainServerLivePreSubmitSimulator {
+    async fn simulate(
+        &self,
+        input: &LivePrioritySellPlannerInput,
+        route: &PreparedSellRoute,
+    ) -> Result<PreSubmitSimulation, LivePrioritySellPlannerError> {
+        if route.protocol != "uniswap_v2_trading_vault" {
+            return Err(LivePrioritySellPlannerError::Simulation(format!(
+                "chain-server live simulator received unsupported route protocol {:?}",
+                route.protocol
+            )));
+        }
+        let from = input.context.tx.from.parse::<Address>().map_err(|error| {
+            LivePrioritySellPlannerError::Simulation(format!(
+                "invalid pre-submit simulation from address {:?}: {error}",
+                input.context.tx.from
+            ))
+        })?;
+        let to = route.router_address.parse::<Address>().map_err(|error| {
+            LivePrioritySellPlannerError::Simulation(format!(
+                "invalid pre-submit simulation route target {:?}: {error}",
+                route.router_address
+            ))
+        })?;
+        if to != self.vault_address {
+            return Err(LivePrioritySellPlannerError::Simulation(format!(
+                "chain-server live simulator target mismatch: route target {to} != configured vault {}",
+                self.vault_address
+            )));
+        }
+
+        let required_state_block = input.context.required_state_block(&input.pool);
+        let request = ChainServerLiveUnsignedTxSimulationRequest {
+            block: required_state_block,
+            transaction: UnsignedTransaction {
+                from: Some(from),
+                to: Some(to),
+                gas: Some(route.gas_limit),
+                gas_price: None,
+                max_fee_per_gas: None,
+                max_priority_fee_per_gas: None,
+                value: Some(parse_u256_quantity(&route.value_wei, "route value_wei")?),
+                data: Some(decode_hex_bytes(&route.calldata, "route calldata")?),
+                nonce: None,
+                ..Default::default()
+            },
+        };
+        let response = self
+            .http
+            .post(self.endpoint())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| {
+                LivePrioritySellPlannerError::Simulation(format!(
+                    "chain-server live simulation request failed: {error}"
+                ))
+            })?;
+        let status = response.status();
+        let body = response.text().await.map_err(|error| {
+            LivePrioritySellPlannerError::Simulation(format!(
+                "chain-server live simulation response body read failed: {error}"
+            ))
+        })?;
+        if !status.is_success() {
+            return Err(LivePrioritySellPlannerError::Simulation(format!(
+                "chain-server live simulation returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            )));
+        }
+        let result = serde_json::from_str::<ChainServerLiveUnsignedTxSimulationResponse>(&body)
+            .map_err(|error| {
+                LivePrioritySellPlannerError::Simulation(format!(
+                    "chain-server live simulation JSON decode failed: {error}; body={body}"
+                ))
+            })?;
+        if result.block != required_state_block {
+            return Err(LivePrioritySellPlannerError::Simulation(format!(
+                "chain-server live simulation block mismatch: returned {} required {}",
+                result.block, required_state_block
+            )));
+        }
+
+        let base_metadata = json!({
+            "provider": "chain_server_live_tx_simulator_uniswap_v2_trading_vault",
+            "route_protocol": route.protocol,
+            "vault_address": self.vault_address.to_string(),
+            "from": from.to_string(),
+            "to": to.to_string(),
+            "observed_block": input.context.current_block,
+            "required_state_block": required_state_block,
+            "pool_creation_block": input.pool.creation_block,
+            "pool_latest_block": input.pool.latest_block,
+            "tx_observed_block": input.context.tx.observed_block,
+            "simulation_block": result.block,
+            "simulation_schema": result.schema,
+            "state_source": result.state_source,
+            "gas_limit": route.gas_limit,
+            "gas_used": result.gas_used,
+            "log_count": result.log_count,
+            "effective_gas_price_wei": result.effective_gas_price_wei,
+            "base_fee_per_gas_wei": result.base_fee_per_gas_wei,
+            "tx_type": result.tx_type,
+            "revert_reason": result.revert_reason,
+        });
+
+        if !result.success {
+            return Ok(PreSubmitSimulation {
+                block_number: result.block,
+                block_hash: result.block_hash.map(|hash| hash.to_string()),
+                state_root: None,
+                expected_output_token: Some("ETH".to_string()),
+                expected_output_amount: None,
+                min_output_amount: input.min_output_amount.clone(),
+                expected_recovery_eth: DecimalAmount::ZERO,
+                gas_used: Some(result.gas_used),
+                would_revert: true,
+                metadata: base_metadata,
+            });
+        }
+
+        match input.intent.side {
+            OrderSide::Buy => {
+                let fill = extract_bought_v2_fill_from_logs(
+                    &result.logs,
+                    self.vault_address,
+                    input.intent.token_address,
+                )?
+                .ok_or_else(|| {
+                    LivePrioritySellPlannerError::Simulation(format!(
+                        "chain-server live simulation succeeded but emitted no matching BoughtV2 event for token {}",
+                        input.intent.token_address
+                    ))
+                })?;
+                Ok(PreSubmitSimulation {
+                    block_number: result.block,
+                    block_hash: result.block_hash.map(|hash| hash.to_string()),
+                    state_root: None,
+                    expected_output_token: Some(input.intent.token_address.to_string()),
+                    expected_output_amount: Some(fill.tokens_received.to_string()),
+                    min_output_amount: input.min_output_amount.clone(),
+                    expected_recovery_eth: Amount {
+                        raw: fill.eth_spent,
+                        decimals: 18,
+                    }
+                    .to_decimal(),
+                    gas_used: Some(result.gas_used),
+                    would_revert: false,
+                    metadata: json!({
+                        "provider": "chain_server_live_tx_simulator_uniswap_v2_trading_vault",
+                        "event": "BoughtV2",
+                        "eth_spent_wei": fill.eth_spent.to_string(),
+                        "tokens_received_raw": fill.tokens_received.to_string(),
+                        "base": base_metadata,
+                    }),
+                })
+            }
+            OrderSide::Sell => {
+                let fill = extract_emergency_sold_v2_fill_from_logs(
+                    &result.logs,
+                    self.vault_address,
+                    input.intent.token_address,
+                )?
+                .ok_or_else(|| {
+                    LivePrioritySellPlannerError::Simulation(format!(
+                        "chain-server live simulation succeeded but emitted no matching EmergencySoldV2 event for token {}",
+                        input.intent.token_address
+                    ))
+                })?;
+                Ok(PreSubmitSimulation {
+                    block_number: result.block,
+                    block_hash: result.block_hash.map(|hash| hash.to_string()),
+                    state_root: None,
+                    expected_output_token: Some("ETH".to_string()),
+                    expected_output_amount: Some(fill.eth_received.to_string()),
+                    min_output_amount: input.min_output_amount.clone(),
+                    expected_recovery_eth: Amount {
+                        raw: fill.eth_received,
+                        decimals: 18,
+                    }
+                    .to_decimal(),
+                    gas_used: Some(result.gas_used),
+                    would_revert: false,
+                    metadata: json!({
+                        "provider": "chain_server_live_tx_simulator_uniswap_v2_trading_vault",
+                        "event": "EmergencySoldV2",
+                        "amount_in_raw": fill.amount_in.to_string(),
+                        "eth_received_wei": fill.eth_received.to_string(),
+                        "base": base_metadata,
+                    }),
+                })
+            }
+        }
+    }
 }
 
 impl UniswapV2TradingVaultPreSubmitSimulator {
@@ -93,26 +338,37 @@ impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
             )));
         }
 
-        let status = self
+        let required_state_block = input.context.required_state_block(&input.pool);
+        let latest_status = self
             .simulator
             .latest_state_status()
             .await
             .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
-        let required_state_block = input.context.required_state_block(&input.pool);
-        if !status.is_ready_for_block(required_state_block) {
+        if !self
+            .simulator
+            .has_state_at(required_state_block)
+            .await
+            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?
+        {
             return Err(LivePrioritySellPlannerError::SimulationStateNotReady {
-                selected_block: status.selected_block_number,
+                selected_block: latest_status.selected_block_number,
                 required_block: required_state_block,
                 current_block: input.context.current_block,
-                latest_reth_finished_block: status.latest_reth_finished_block_number,
-                latest_historical_context_block: status.latest_historical_context_block_number,
-                state_source: format!("{:?}", status.source),
+                latest_reth_finished_block: latest_status.latest_reth_finished_block_number,
+                latest_historical_context_block: latest_status
+                    .latest_historical_context_block_number,
+                state_source: format!("{:?}", latest_status.source),
             });
         }
+        let status = self
+            .simulator
+            .state_status_at(required_state_block)
+            .await
+            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
 
         let mut chain = self
             .simulator
-            .start_chain_at(status.selected_block_number)
+            .start_chain_at(required_state_block)
             .await
             .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
         let base_fee = chain.block_base_fee().unwrap_or(1);
@@ -265,9 +521,17 @@ fn extract_bought_v2_fill(
     vault_address: Address,
     token_address: Address,
 ) -> Result<Option<BoughtV2Fill>, LivePrioritySellPlannerError> {
+    extract_bought_v2_fill_from_logs(&result.logs, vault_address, token_address)
+}
+
+fn extract_bought_v2_fill_from_logs(
+    logs: &[AlloyLog],
+    vault_address: Address,
+    token_address: Address,
+) -> Result<Option<BoughtV2Fill>, LivePrioritySellPlannerError> {
     let event_topic = event_signature_topic(BOUGHT_V2_SIGNATURE);
     let expected_token_topic = indexed_address_topic(token_address);
-    for log in &result.logs {
+    for log in logs {
         if log.address != vault_address {
             continue;
         }
@@ -292,9 +556,17 @@ fn extract_emergency_sold_v2_fill(
     vault_address: Address,
     token_address: Address,
 ) -> Result<Option<EmergencySoldV2Fill>, LivePrioritySellPlannerError> {
+    extract_emergency_sold_v2_fill_from_logs(&result.logs, vault_address, token_address)
+}
+
+fn extract_emergency_sold_v2_fill_from_logs(
+    logs: &[AlloyLog],
+    vault_address: Address,
+    token_address: Address,
+) -> Result<Option<EmergencySoldV2Fill>, LivePrioritySellPlannerError> {
     let event_topic = event_signature_topic(EMERGENCY_SOLD_V2_SIGNATURE);
     let expected_token_topic = indexed_address_topic(token_address);
-    for log in &result.logs {
+    for log in logs {
         if log.address != vault_address {
             continue;
         }

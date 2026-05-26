@@ -9,7 +9,7 @@ pub const HOLD16_STRATEGY_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hol
 pub const HOLD16_ALL_POOLS_STRATEGY_NAME: &str = "alpha11-all-pools-lp30-pool-update-block-hold16";
 pub const HOLD3_VALIDATION_STRATEGY_NAME: &str =
     "alpha11-univ2-lp30-pool-update-block-hold3-validation";
-pub const BUY_WEI: &str = "10000000000000000";
+pub const BUY_WEI: &str = "5000000000000000";
 pub const MIN_LIQUIDITY_ETH: &str = "0.5";
 pub const MIN_LIQUIDITY_USD: &str = "1000";
 pub const ENTRY_INIT_MAX_AGE_BLOCKS: u64 = 5;

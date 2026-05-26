@@ -13,6 +13,8 @@ This crate is the live confirmed-chain feed consumed by the trading system. It c
 - Update `eth_token` token and pool state through a `BlockTokenProcessor` boundary.
 - Build token and pool snapshots.
 - Accept block-scoped direct live state sessions when the chain server provides prestate diffs.
+- Publish those sessions into the in-process chain-server `LiveTxSimulator`
+  window used by exact live simulation APIs.
 - Emit `LiveFeedEvent`s for downstream consumers.
 
 ## Non-Responsibilities
@@ -49,6 +51,8 @@ Downstream services can hydrate full state from `eth_live_state`.
 ```text
 eth_chain_server new-head loop
   -> direct LiveBlockUpdate
+  -> build direct BlockStateSession from processed block header + prestate diffs
+  -> publish BlockStateSession into chain-server LiveTxSimulator
   -> block token processor
   -> live-feed event sink
   -> engine / mempool risk / monitoring
@@ -65,6 +69,11 @@ metadata comes from the in-process post-block state. If the in-memory parent
 session is missing during startup, local Reth may bootstrap a live session only
 when the exact parent block state is available; older historical bases are not
 valid for live tail state.
+
+For real live trading, this crate keeps the chain-server `LiveTxSimulator`
+current. Alpha does not own live simulation state in that mode: Alpha owns
+strategy decisions, tx planning, gas policy, and Kartal submission, while
+chain-server owns live state and exact simulation sessions.
 
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, direct live block application, and read-only consumers.
 

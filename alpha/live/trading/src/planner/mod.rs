@@ -37,5 +37,6 @@ pub use route_builder::{
     UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
 };
 pub use simulation::{
-    FixedPreSubmitSimulator, PreSubmitSimulator, UniswapV2TradingVaultPreSubmitSimulator,
+    ChainServerLivePreSubmitSimulator, FixedPreSubmitSimulator, PreSubmitSimulator,
+    UniswapV2TradingVaultPreSubmitSimulator,
 };

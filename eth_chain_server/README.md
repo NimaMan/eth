@@ -111,9 +111,12 @@ The target event flow is:
 
 ```text
 processed block / live block update
-  -> tx_processor facts
+  -> tx_processor facts and prestate diffs for block B
+  -> build BlockStateSession B with the processed header and block context
+  -> publish BlockStateSession B into chain-server LiveTxSimulator
   -> eth_token block apply
   -> TokenBlockUpdateReport
+  -> record live simulation state frame for the processed block
   -> critical state commit
        - restore/update token processor ownership
        - increment cheap progress counters
@@ -128,6 +131,13 @@ processed block / live block update
 The critical state commit is allowed to do only O(block delta) work. It must not
 scan the full token registry, materialize large token/pool DTOs, or rebuild
 strategy/atlas surfaces every block. Those jobs are read-model work.
+
+The live simulation state frame and exact `LiveTxSimulator` state are available
+before `BlockApplied` is published. For real live trading, chain-server owns
+live state, `LiveTxSimulator`, and simulation sessions; Alpha owns strategy
+decisions, tx planning, gas policy, and Kartal submission. Alpha should request
+exact-block simulation results from chain-server instead of rebuilding the live
+state frame locally.
 
 The practical ownership split is:
 

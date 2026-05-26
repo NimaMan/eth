@@ -56,21 +56,32 @@ This is the Rust-side replacement for the legacy Python event-sequence document.
 
 ```text
 processed block arrives
-  -> eth_live_feed updates token/pool read models
-  -> eth_live_feed writes canonical live-state snapshots when it owns the write path
-  -> eth_live_feed emits MarketEvent / LiveFeedEvent
+  -> chain-server fetches prestate diffs for block B
+  -> chain-server builds/publishes BlockStateSession B inside LiveTxSimulator
+  -> chain-server updates token/pool read models for block B
+  -> chain-server emits BlockApplied / LiveFeedEvent
   -> eth_alpha_engine updates its market view
   -> eth_alpha_engine marks open positions to market with chain-sim sell valuation when available
   -> eth_alpha_engine runs strategies
   -> StrategyDecision becomes OrderIntent when actionable
   -> risk policy checks the OrderIntent against active RiskEvents and portfolio state
-  -> EngineExecutionAdapter submits or simulates the order
+  -> EngineExecutionAdapter submits, asks chain-server to simulate, or chain-simulates the order
   -> ExecutionReport returns through the same engine path
   -> engine applies order and position transitions
   -> TradingStore persists order, execution, position, and snapshot data
 ```
 
-Confirmed market state must be updated before strategies run. Strategy decisions should never mutate position state directly; position transitions come from `ExecutionReport`.
+For real live trading, chain-server owns live state, `LiveTxSimulator`, and
+simulation sessions. Alpha owns strategy decisions, tx planning, gas policy, and
+Kartal submission. The real adapter sends small exact-block unsigned transaction
+simulation requests to chain-server when it needs pre-submit evidence; it does
+not subscribe to full live-state frames. Chain-sim live backtests can still use
+the compatibility live-state stream to hydrate a local simulator.
+
+Confirmed market state and exact live simulation state must reference the same
+block before a real transaction is submitted. Strategy decisions should never
+mutate position state directly; position transitions come from
+`ExecutionReport`.
 
 ### Shared Trade Lifecycle
 
@@ -201,7 +212,7 @@ Kartal reports `broadcast`, the CLI includes
 `--allow-broadcast-live-validation`, the strategy set is
 `alpha11-univ2-lp30-pool-update-block-hold16`,
 `--replay-current` is absent, `--once` is absent, and the resolved strategy spec
-has no `max_entry_pools`, buy value capped at `0.01 ETH`, and entry bankroll
+has no `max_entry_pools`, buy value capped at `0.005 ETH`, and entry bankroll
 capped at `0.555 ETH`. The visible
 Alpha11 hold15 strategy name remains
 `alpha11-univ2-lp30-pool-update-block-hold15` for both live-backtest and

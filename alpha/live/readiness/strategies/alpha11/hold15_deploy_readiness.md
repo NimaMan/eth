@@ -13,8 +13,8 @@ to public real capital.
   page.
 - Gate 2 live-backtest spine parity accepted.
 - Gate 3 chain-facing assumptions reviewed.
-- `alpha11-live-univ2-lp30-pool-update-block-hold3-validation` passes the
-  pre-live mined-validation gate.
+- Current-strategy mined-validation evidence passes the pre-live
+  mined-validation gate.
 - Production gas-rank readiness passes:
   `../../gates/production_gas_rank/README.md`.
 - Receipt worker alerting and operator review are in place.
@@ -25,6 +25,6 @@ to public real capital.
 
 ## Promotion Rule
 
-Hold15 cannot use public real capital until the hold3 mined-validation file has
-a passed run with buy and sell receipts, or the operator explicitly records a
-different approved validation path.
+Hold15 cannot use public real capital until current-strategy mined-validation
+evidence has a passed run with buy and sell receipts, or the operator
+explicitly records a different approved validation path.

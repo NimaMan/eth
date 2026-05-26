@@ -26,7 +26,6 @@ use eth_alpha_core::{
     portfolio::PortfolioState,
     position::Position,
 };
-use tokio::time::sleep;
 use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::{LiveTxSimulator, TxSimulator};
 
@@ -47,7 +46,6 @@ use swaps::{
 
 const LIVE_EXECUTION_DELAY_BLOCKS: u64 = 1;
 const LIVE_STATE_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
-const LIVE_STATE_WAIT_INTERVAL: Duration = Duration::from_millis(500);
 
 // ---------------------------------------------------------------------------
 // Historical backtest adapter
@@ -298,42 +296,32 @@ impl LiveChainSimExecutionAdapter {
         self.live_sim.latest_state_status().await
     }
 
+    /// Wait for the exact in-memory live-state block used by block-coupled
+    /// live trading before any strategy-visible state for that block is
+    /// processed.
+    pub async fn wait_for_state_at(
+        &self,
+        block_number: u64,
+        timeout: Duration,
+    ) -> eyre::Result<tx_simulator::LiveStateStatus> {
+        self.live_sim.wait_for_state_at(block_number, timeout).await
+    }
+
     async fn wait_for_execution_block(
         &self,
         target_block: u64,
     ) -> std::result::Result<u64, String> {
         let started = Instant::now();
-        loop {
-            match self.live_sim.latest_state_block_number().await {
-                Ok(selected_block) if selected_block == target_block => return Ok(target_block),
-                Ok(selected_block) if selected_block > target_block => {
-                    if self
-                        .live_sim
-                        .has_state_at(target_block)
-                        .await
-                        .unwrap_or(false)
-                    {
-                        return Ok(target_block);
-                    }
-                    return Err(format!(
-                        "live chain-sim missed required execution block {target_block}; latest live state is {selected_block}"
-                    ));
-                }
-                Ok(selected_block) if started.elapsed() >= LIVE_STATE_WAIT_TIMEOUT => {
-                    return Err(format!(
-                        "live chain-sim state stale: selected block {selected_block} below required execution block {target_block}"
-                    ));
-                }
-                Ok(_) => {}
-                Err(error) if started.elapsed() >= LIVE_STATE_WAIT_TIMEOUT => {
-                    return Err(format!(
-                        "live chain-sim state unavailable before required execution block {target_block}: {error}"
-                    ));
-                }
-                Err(_) => {}
-            }
-            sleep(LIVE_STATE_WAIT_INTERVAL).await;
-        }
+        self.live_sim
+            .wait_for_state_at(target_block, LIVE_STATE_WAIT_TIMEOUT)
+            .await
+            .map(|_| target_block)
+            .map_err(|error| {
+                format!(
+                    "live chain-sim state unavailable before required execution block {target_block} after {} ms: {error}",
+                    started.elapsed().as_millis()
+                )
+            })
     }
 
     pub async fn simulate_submitted_order(

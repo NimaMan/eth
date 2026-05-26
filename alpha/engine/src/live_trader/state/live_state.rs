@@ -10,7 +10,7 @@ use tracing::{info, warn};
 use tx_processor::{sealed_header_from_processed_block_header, LiveBlockStateFrame};
 use tx_simulator::{InMemoryLiveBlockStateProvider, LiveBlockState, TxSimulator};
 
-use super::TokenServerClient;
+use super::{format_error_chain, TokenServerClient};
 
 const LIVE_STATE_STREAM_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
@@ -43,9 +43,12 @@ pub(super) fn spawn_live_state_publisher(
             .await
             {
                 Ok(()) => warn!("chain-server live state stream ended"),
-                Err(error) => {
-                    warn!(error = %error, "chain-server live state stream failed");
-                }
+                Err(error) => warn!(
+                    error = %error,
+                    root_cause = %error.root_cause(),
+                    error_chain = %format_error_chain(&error),
+                    "chain-server live state stream failed"
+                ),
             }
             time::sleep(LIVE_STATE_STREAM_RECONNECT_DELAY).await;
         }
@@ -104,9 +107,17 @@ async fn publish_live_state_response(
     if Some(block_number) == *last_published_block {
         return Ok(None);
     }
+    let block_hash = state.frame.header.hash;
+    let parent_hash = state.frame.header.parent_hash;
+    let transaction_count = state.frame.transaction_count;
+    let state_diff_count = state.frame.state_diffs.as_ref().map(Vec::len);
     let live_state = live_block_state_from_frame(simulator, provider, state.frame)
         .await
-        .wrap_err_with(|| format!("failed to build live block state for {block_number}"))?;
+        .wrap_err_with(|| {
+            format!(
+                "failed to build live block state block_number={block_number} block_hash={block_hash:?} parent_hash={parent_hash:?} transaction_count={transaction_count} state_diff_count={state_diff_count:?} applied_at_unix_ms={applied_at_unix_ms}"
+            )
+        })?;
     provider.publish_latest(live_state)?;
     *last_published_block = Some(block_number);
     tracing::debug!(

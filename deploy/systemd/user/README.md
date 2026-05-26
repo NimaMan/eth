@@ -28,7 +28,7 @@ Mutable run arguments live in `eth-alpha-live-backtest.env` and
 `eth-alpha-live-real-trading.env`; the service files stay stable across restarts.
 For the first public real-executor run, `eth-alpha-live-real-trading.env` targets
 `alpha11-univ2-lp30-pool-update-block-hold16`; the strategy spec sets the
-`0.01 ETH` buy size and `0.555 ETH` initial bankroll. Buys consume that
+`0.005 ETH` buy size and `0.555 ETH` initial bankroll. Buys consume that
 bankroll; confirmed sells replenish it; profits can be redeployed. The service
 does not pass entry-count or bankroll overrides on the command line.
 

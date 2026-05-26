@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub const HOLD_BLOCKS: u64 = 15;
-pub const BUY_WEI: u64 = 10_000_000_000_000_000;
+pub const BUY_WEI: u64 = 5_000_000_000_000_000;
 
 pub fn config() -> Alpha11Config {
     Alpha11Config::new(snipe_all_config())

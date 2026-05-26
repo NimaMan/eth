@@ -25,7 +25,7 @@ only public broadcast exception is the explicit Alpha11 hold16 deploy strategy,
 enabled with `--allow-public-mempool-live-validation` and
 `--strategy-set alpha11-univ2-lp30-pool-update-block-hold16`.
 That strategy spec has no `max_entry_pools`, no `--replay-current`, no `--once`,
-`0.01 ETH` buy size, and a `0.555 ETH` bankroll cap.
+`0.005 ETH` buy size, and a `0.555 ETH` bankroll cap.
 While entry is otherwise in validation mode, live-real startup also requires a
 resolved strategy bankroll of at most `0.555 ETH`; buys consume that starting
 bankroll, confirmed sells replenish it, and profits can be redeployed. The
@@ -44,7 +44,10 @@ real live order.
 
 Exact pre-submit simulation is also the source of gas-used for live tx
 economics. Route builders carry gas limits, not fallback gas-used estimates.
-After the final exact simulation the planner raises `route.estimated_gas_used`
+For real live trading, the exact simulation runs in chain-server against its
+own `LiveTxSimulator` state for the required decision block; Alpha does not
+rebuild or own the live state window. After the final exact simulation the
+planner raises `route.estimated_gas_used`
 to at least the simulated gas used plus the configured buffer, currently 2500
 bps / 25%, before gas-rank lookup, value-cap budgeting, and Kartal request
 metadata are built.
@@ -88,11 +91,12 @@ selected raw sample value before returning a submit candidate. This avoids
 submitting common whole-gwei prices such as exactly `2 gwei`, which would leave
 our tx in the same priority-fee bucket as many other transactions.
 
-Missing before the main hold15 strategy can use this crate for public real
+Missing before the main hold16 strategy can use this crate for public real
 capital:
 
-- Review one complete hold3 public validation trade with mined buy, mined sell,
-  actual fees, tx indexes, and 3-confirmation rechecks persisted in alpha.
+- Review one complete current-strategy public validation trade with mined buy,
+  mined sell, actual fees, tx indexes, and confirmation rechecks persisted in
+  alpha.
 - Keep hold16 entry bounded to a validation bankroll, currently
   `0.555 ETH`, until mined validation evidence and receipt operations are
   reviewed.
@@ -103,9 +107,9 @@ The canonical readiness gate lives outside this crate README:
 
 `../readiness/gates/pre_live_mined_validation/`
 
-Alpha11's concrete hold3 validation instance is:
+Alpha11's current deploy readiness file is:
 
-`../readiness/strategies/alpha11/hold3_mined_validation.md`
+`../readiness/strategies/alpha11/hold16_deploy_readiness.md`
 
 Keep this README focused on the transaction-prep boundary. Gate criteria,
 operator runbooks, evidence requirements, and failed-attempt notes belong in the
@@ -179,9 +183,16 @@ in Kartal's policy journal and spend ledger.
 Current bottleneck: the real-runner boundary exists, and public broadcast is
 limited to `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit
 public-mempool flag. The deployed V2 vault buy and sell paths simulate the exact
-prepared calldata against local Reth state, reject stale simulation state, use
-simulated gas with a buffer for fee economics, and fetch route-specific gas-rank
-recommendations from `eth_chain_server` before building the Kartal request.
+prepared calldata against chain-server-owned exact in-memory live state, reject
+missing simulation state, use simulated gas with a buffer for fee economics, and
+fetch route-specific gas-rank recommendations from `eth_chain_server` before
+building the Kartal request.
+
+Ownership boundary:
+
+- chain-server owns live state, `LiveTxSimulator`, and simulation sessions;
+- Alpha owns strategy decisions, tx planning, gas policy, and Kartal
+  submission.
 
 ## Tx Submission Data Flow
 

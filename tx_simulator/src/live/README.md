@@ -8,6 +8,14 @@ latest-state simulation surface.
 select headers or state from local Reth historical context. If the requested
 block is unavailable in that live window, it fails rather than falling back.
 
+Publishing a live block state also notifies waiters for that block. In the
+chain-server live path, the server publishes the exact `N` session into its
+`LiveTxSimulator` before publishing the corresponding token/pool update for
+block `N`. Real Alpha runners do not subscribe to the full live-state stream;
+they ask chain-server to simulate small exact-block unsigned transactions
+against that server-owned session. Chain-sim live backtests can still use the
+notification path to hydrate a local simulator.
+
 The window exists for block-coupled live trading. A strategy can submit at block
 `N` and settle in block `N+1`; if the main loop reaches `N+2` before settlement
 runs, `LiveTxSimulator` must still select the exact `N+1` live state. This is

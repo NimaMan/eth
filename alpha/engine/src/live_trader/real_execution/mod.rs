@@ -6,26 +6,23 @@ use alloy_primitives::U256;
 use async_trait::async_trait;
 use eth_alpha_core::{
     error::AlphaCoreError,
-    execution::ExecutionReport,
     ids::TokenPoolId,
     market::PoolSnapshot,
     order::{OrderIntent, OrderSide},
-    position::Position,
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
     apply_min_priority_fee_floor_to_candidates, derive_min_output_from_expected_output,
-    ChainServerGasRankProvider, GasEstimateConfig, GasRankPlan, GasRankProvider,
-    KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
+    ChainServerGasRankProvider, ChainServerLivePreSubmitSimulator, GasEstimateConfig, GasRankPlan,
+    GasRankProvider, KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
     KartalSimulationReference, LiveDirectRawTransactionRequest, LivePrioritySellPlanner,
     LivePrioritySellPlannerConfig, LivePrioritySellPlannerError, LiveTraderTxSignal,
     MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
     RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy, TxSubmissionRoute,
-    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
-    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
-    ETH_UNSIGNED_TX_WIRE_PROTOCOL,
+    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
+    VaultInternalAllowanceChecker, ETH_UNSIGNED_TX_WIRE_PROTOCOL,
 };
-use eyre::{eyre, Result};
+use eyre::Result;
 use rust_decimal::Decimal;
 use serde_json::json;
 
@@ -33,7 +30,7 @@ use crate::execution::real::{
     LiveTradingPlannerBridge, LiveTxPlanner, LiveTxSubmissionResult, LiveTxSubmitter,
     TxExecutorAdapter,
 };
-use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
+use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter};
 
 use super::cli::RealExecutionArgs;
 use super::gas_policy::LiveRealGasPolicy;
@@ -53,37 +50,10 @@ use tail_entry::{
     validate_tail_entry_route,
 };
 
-struct RealExecutionWithValuation<E, V> {
-    execution: E,
-    valuation: V,
-}
-
-#[async_trait]
-impl<E, V> EngineExecutionAdapter for RealExecutionWithValuation<E, V>
-where
-    E: EngineExecutionAdapter,
-    V: EngineExecutionAdapter,
-{
-    async fn execute(
-        &self,
-        intent: eth_alpha_core::order::OrderIntent,
-    ) -> eth_alpha_core::error::Result<ExecutionReport> {
-        self.execution.execute(intent).await
-    }
-
-    async fn simulate_position_value(
-        &self,
-        position: &Position,
-        pool: &PoolSnapshot,
-    ) -> eth_alpha_core::error::Result<Option<PositionValueSimulation>> {
-        self.valuation.simulate_position_value(position, pool).await
-    }
-}
-
-struct KartalRealPlanner<P, G> {
+struct KartalRealPlanner<P, S, G> {
     sell_planner: P,
     resolver: LiveRealInputResolver,
-    simulator: UniswapV2TradingVaultPreSubmitSimulator,
+    simulator: S,
     buy_route_builder: UniswapV2TradingVaultBuyRouteBuilder,
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
@@ -109,9 +79,10 @@ impl LiveTxSubmitter for KartalPolicySubmitter {
 }
 
 #[async_trait]
-impl<P, G> LiveTxPlanner for KartalRealPlanner<P, G>
+impl<P, S, G> LiveTxPlanner for KartalRealPlanner<P, S, G>
 where
     P: LiveTxPlanner,
+    S: PreSubmitSimulator,
     G: GasRankProvider,
 {
     async fn prepare_signal(
@@ -125,8 +96,9 @@ where
     }
 }
 
-impl<P, G> KartalRealPlanner<P, G>
+impl<P, S, G> KartalRealPlanner<P, S, G>
 where
+    S: PreSubmitSimulator,
     G: GasRankProvider,
 {
     async fn prepare_buy_signal(
@@ -673,8 +645,8 @@ pub(super) async fn build_kartal_real_adapter(
     chain_server_url: String,
     store: PostgresTradingStore,
     run_id: String,
-    valuation_adapter: LiveChainSimExecutionAdapter,
-    exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
+    _valuation_adapter: LiveChainSimExecutionAdapter,
+    _exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
     gas_policy: LiveRealGasPolicy,
@@ -682,13 +654,8 @@ pub(super) async fn build_kartal_real_adapter(
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
     let vault =
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
-    let Some(exact_pre_submit_live_simulator) = exact_pre_submit_live_simulator else {
-        return Err(eyre!(
-            "kartal-real execution requires a live-only in-memory LiveTxSimulator; Reth historical context is not allowed for real pre-submit"
-        ));
-    };
     let pre_submit_simulator =
-        UniswapV2TradingVaultPreSubmitSimulator::new(exact_pre_submit_live_simulator, vault);
+        ChainServerLivePreSubmitSimulator::new(chain_server_url.clone(), vault);
     let gas_rank_provider = MempoolRaceGasRankProvider::new(
         ChainServerGasRankProvider::new(chain_server_url)
             .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks)
@@ -758,10 +725,7 @@ pub(super) async fn build_kartal_real_adapter(
     ));
     let submitter = KartalPolicySubmitter { kartal };
     let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id);
-    Ok(Box::new(RealExecutionWithValuation {
-        execution: executor,
-        valuation: valuation_adapter,
-    }))
+    Ok(Box::new(executor))
 }
 
 #[cfg(test)]

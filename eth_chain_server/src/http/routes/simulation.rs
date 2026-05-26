@@ -4,6 +4,7 @@ use warp::http::StatusCode;
 
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
+use crate::live_simulation::{self as live_simulation_service, LiveUnsignedTxSimulationRequest};
 use crate::read_models::simulation::{self, VaultSimulationRequest};
 
 pub(super) async fn vault_uniswap_v2(
@@ -24,8 +25,28 @@ pub(super) async fn vault_uniswap_v2(
     }
 }
 
+pub(super) async fn live_unsigned_tx(
+    request: LiveUnsignedTxSimulationRequest,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match live_simulation_service::simulate_live_unsigned_transaction(&state.live_tracker, request)
+        .await
+    {
+        Ok(report) => Ok(json_response(&report, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("live unsigned tx simulation failed: {error}"),
+            simulation_error_status(&error),
+        )),
+    }
+}
+
 fn simulation_error_status(error: &eyre::Report) -> StatusCode {
     let message = error.to_string();
+    if message.contains("exact live simulation state is unavailable")
+        || message.contains("in-memory live block state")
+    {
+        return StatusCode::CONFLICT;
+    }
     if message.contains("invalid ")
         || message.contains("below requested transfer amount")
         || message.contains("must")

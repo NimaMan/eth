@@ -5,8 +5,9 @@ Live trader state is split by responsibility:
 - chain-server owns mined token, pool, gas-rank, and live simulation state;
 - `TokenServerClient` reads live status, latest pool snapshots, mempool signals,
   and block-update notifications;
-- `live_state.rs` subscribes to the live simulation state stream and publishes
-  exact block sessions into `LiveTxSimulator`;
+- `live_state.rs` is the chain-sim compatibility consumer of the live
+  simulation state stream; it publishes exact block sessions into the local
+  `LiveTxSimulator` only for no-capital live backtests;
 - the execution adapter keeps the latest pool snapshots needed to build swap
   parameters for a token/pool;
 - Postgres is the source of truth for order intents, submitted reports,
@@ -23,6 +24,25 @@ The window is not a historical fallback. It only contains live block sessions
 that chain-server has just published through the live-state stream. If a target
 block is missing from the window, settlement stays pending and logs the missing
 state instead of fabricating an execution result from a different block.
+
+The provider also exposes a notification for newly published block state.
+Chain-sim live backtests use it at the polling boundary:
+
+```text
+read live status for block N
+  -> wait until local LiveTxSimulator has exact state N
+  -> read latest pool/token snapshots
+  -> wait until local LiveTxSimulator has the max block referenced by those snapshots
+  -> publish pool snapshots into the execution adapter
+  -> run strategy decisions and chain-sim execution
+```
+
+That wait is local state synchronization, not trade deferral. No pool update is
+marked seen and no order intent is created until the simulator can execute
+against the exact block used by the decision. Real live trading does not use
+this local stream path for pre-submit simulation; it asks chain-server to
+simulate exact-block unsigned transactions against the server-owned
+`LiveTxSimulator`.
 
 Live state construction is strict about parent state:
 

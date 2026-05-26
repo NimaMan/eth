@@ -11,7 +11,6 @@ The reusable gate is split into:
 - `failure_modes.md`: what this gate does and does not prove.
 - `operator_runbook.md`: execution sequence.
 
-For Alpha11, the current concrete instance is:
-
-`../../strategies/alpha11/hold3_mined_validation.md`
-
+Strategy-specific evidence should link back to this gate from the current
+strategy readiness file. Alpha11's current deploy readiness is tracked in
+`../../strategies/alpha11/hold16_deploy_readiness.md`.
