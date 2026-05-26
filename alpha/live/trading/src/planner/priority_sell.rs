@@ -668,7 +668,7 @@ mod tests {
                 assert_eq!(signal.request.max_priority_fee_per_gas, "2000000000");
                 assert_eq!(
                     signal.request.metadata["wire_protocol"],
-                    json!("eth_direct_raw_v1")
+                    json!("eth_unsigned_tx")
                 );
             }
             other => panic!("expected submit, got {other:?}"),

@@ -21,7 +21,7 @@ const DEFAULT_PLANNER_FIXTURE_VAULT: &str = "0x000000000000000000000000000000000
 
 #[derive(Debug, Parser)]
 struct Args {
-    /// JSON file containing either a single eth_direct_raw_v1 request or a
+    /// JSON file containing either a single eth_unsigned_tx request or a
     /// calibration suite with `cases`.
     #[arg(long)]
     request: Option<PathBuf>,

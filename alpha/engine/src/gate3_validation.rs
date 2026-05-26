@@ -98,7 +98,7 @@ fn signal() -> LiveTraderTxSignal {
                 max_fee_per_gas: Some("1000000000".to_string()),
             }),
             simulation: None,
-            metadata: json!({ "wire_protocol": "eth_direct_raw_v1" }),
+            metadata: json!({ "wire_protocol": "eth_unsigned_tx" }),
         },
     }
 }

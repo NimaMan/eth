@@ -22,6 +22,7 @@ use eth_live_trading::{
     PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
+    ETH_UNSIGNED_TX_WIRE_PROTOCOL,
 };
 use eyre::{eyre, Result};
 use rust_decimal::Decimal;
@@ -232,14 +233,8 @@ where
             &tail_entry_ordering,
             input.context.current_block,
         )?;
-        let wire_protocol = match &submission_policy {
-            TxSubmissionPolicy::PublicMempool => "eth_direct_raw_v1",
-            TxSubmissionPolicy::FlashbotsMevShare { .. } => "eth_submission_policy_v1",
-        };
-        let executor_boundary = match &submission_policy {
-            TxSubmissionPolicy::PublicMempool => "kartal_eth_tx_executor",
-            TxSubmissionPolicy::FlashbotsMevShare { .. } => "kartal_eth_tx_executor_policy",
-        };
+        let wire_protocol = transaction_wire_protocol(&submission_policy);
+        let executor_boundary_label = executor_boundary(&submission_policy);
 
         Ok(LiveTraderTxSignal {
             strategy_name: input.context.tx.strategy_name.clone(),
@@ -279,7 +274,7 @@ where
                 metadata: json!({
                     "wire_protocol": wire_protocol,
                     "intent_kind": "entry_buy",
-                    "executor_boundary": executor_boundary,
+                    "executor_boundary": executor_boundary_label,
                     "tx_prep_version": 1,
                     "reason": input.intent.decision_reason.as_ref().map(|reason| reason.code.clone()).unwrap_or_else(|| "entry.live_buy".to_string()),
                     "route": {
@@ -343,6 +338,19 @@ fn planner_error(error: LivePrioritySellPlannerError) -> AlphaCoreError {
         };
     }
     AlphaCoreError::Execution(error.to_string())
+}
+
+// Kartal policy evaluates and signs the inner DirectRawTransactionRequest;
+// submission_policy only selects the transport/order route.
+fn transaction_wire_protocol(_submission_policy: &TxSubmissionPolicy) -> &'static str {
+    ETH_UNSIGNED_TX_WIRE_PROTOCOL
+}
+
+fn executor_boundary(submission_policy: &TxSubmissionPolicy) -> &'static str {
+    match submission_policy {
+        TxSubmissionPolicy::PublicMempool => "kartal_eth_tx_executor",
+        TxSubmissionPolicy::FlashbotsMevShare { .. } => "kartal_eth_tx_executor_policy",
+    }
 }
 
 fn min_output_from_simulation(

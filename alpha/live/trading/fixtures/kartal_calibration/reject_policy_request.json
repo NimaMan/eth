@@ -28,7 +28,7 @@
           }
         },
         "metadata": {
-          "wire_protocol": "eth_direct_raw_v1",
+          "wire_protocol": "eth_unsigned_tx",
           "intent_kind": "calibration",
           "strategy_name": "kartal-calibration",
           "strategy_run_id": "kartal-calibration-local",

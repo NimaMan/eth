@@ -3,7 +3,7 @@
 This module owns repeatable dry-run checks for the alpha -> Kartal execution
 boundary.
 
-The calibration runner submits prepared `eth_direct_raw_v1` requests to Kartal,
+The calibration runner submits prepared `eth_unsigned_tx` requests to Kartal,
 then records:
 
 - authenticated `/eth/tx/status`

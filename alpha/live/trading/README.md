@@ -113,7 +113,7 @@ readiness folder.
 
 ## Kartal Execution Handoff
 
-The wire contract is `eth_direct_raw_v1`, documented in
+The wire contract is `eth_unsigned_tx`, documented in
 `../../../tx_executor/README.md`. Alpha prepares the request and metadata;
 Kartal hosts the HTTP endpoint; `tx_executor` validates, signs, and broadcasts
 or dry-runs.
@@ -249,7 +249,7 @@ The detailed bribe and gas-rank policy lives in `../../block_tx_rank/README.md`.
 This crate consumes that evidence after exact route simulation and before Kartal
 submission.
 
-For `eth_direct_raw_v1`, the selected bribe is the EIP-1559 priority fee in
+For `eth_unsigned_tx`, the selected bribe is the EIP-1559 priority fee in
 `max_priority_fee_per_gas`; the same selected fee is mirrored into the Kartal
 request `bribe` object for auditability. `tx_prep` applies the live gas-rank
 ladder, required source gate, value cap, and request metadata. If no ranked

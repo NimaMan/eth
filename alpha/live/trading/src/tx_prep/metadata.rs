@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 use super::{
     GasPlan, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget, StrategyGasRankPolicy,
 };
-use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
+use crate::{LpSignalSource, PrioritySellPlan, SellUrgency, ETH_UNSIGNED_TX_WIRE_PROTOCOL};
 
 pub fn tx_prep_metadata(
     plan: &PrioritySellPlan,
@@ -17,7 +17,10 @@ pub fn tx_prep_metadata(
     let mut map = Map::new();
     let decision_reason = plan.decision_reason();
 
-    map.insert("wire_protocol".to_string(), json!("eth_direct_raw_v1"));
+    map.insert(
+        "wire_protocol".to_string(),
+        json!(ETH_UNSIGNED_TX_WIRE_PROTOCOL),
+    );
     map.insert("intent_kind".to_string(), json!("priority_sell"));
     map.insert(
         "executor_boundary".to_string(),

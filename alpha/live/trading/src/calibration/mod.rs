@@ -1,6 +1,6 @@
 //! Repeatable Kartal policy-calibration runner.
 //!
-//! Calibration submits already prepared `eth_direct_raw_v1` requests to Kartal
+//! Calibration submits already prepared `eth_unsigned_tx` requests to Kartal
 //! while requiring dry-run mode by default. It records the executor status,
 //! submit result, policy journal entries, and a verdict for each case.
 

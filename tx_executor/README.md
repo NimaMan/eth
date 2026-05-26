@@ -63,7 +63,7 @@ planner/strategy adapter
 `tx_executor` is a library crate. In live operation it is hosted by Kartal's
 existing Polymarket order server, not by a separate ETH-only daemon.
 
-The canonical HTTP/JSON language is `eth_direct_raw_v1`, documented below.
+The canonical HTTP/JSON language is `eth_unsigned_tx`, documented below.
 `tx_executor` owns the Rust request/response structs; Kartal hosts them over
 HTTP; alpha live trading mirrors the JSON client shape and puts
 strategy/rank/value-cap evidence in `metadata`.
@@ -98,9 +98,9 @@ Compose value is `http://172.18.0.1:8545`; a host `reth` process bound only to
 `127.0.0.1:8545` will reject container connections until it is bound or proxied
 onto the Docker bridge.
 
-## Direct Raw Wire Protocol
+## Unsigned Tx Wire Protocol
 
-Protocol name: `eth_direct_raw_v1`.
+Protocol name: `eth_unsigned_tx`.
 
 This is the wire language between alpha live trading, Kartal, and
 `tx_executor`.
@@ -198,7 +198,7 @@ Required for alpha priority exits:
 
 ```json
 {
-  "wire_protocol": "eth_direct_raw_v1",
+  "wire_protocol": "eth_unsigned_tx",
   "intent_kind": "priority_sell",
   "executor_boundary": "kartal_eth_tx_executor",
   "tx_prep_version": 1,
@@ -310,7 +310,7 @@ misconfigured or an authorized caller submits an unexpected transaction.
     }
   },
   "metadata": {
-    "wire_protocol": "eth_direct_raw_v1",
+    "wire_protocol": "eth_unsigned_tx",
     "intent_kind": "priority_sell",
     "executor_boundary": "kartal_eth_tx_executor",
     "tx_prep_version": 1,

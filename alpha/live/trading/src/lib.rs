@@ -4,6 +4,8 @@
 //! It owns live transaction preparation and audit metadata, but it does not
 //! sign, reserve nonces, or broadcast transactions locally.
 
+pub const ETH_UNSIGNED_TX_WIRE_PROTOCOL: &str = "eth_unsigned_tx";
+
 pub mod calibration;
 pub mod kartal;
 pub mod kartal_executor;

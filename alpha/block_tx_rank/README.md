@@ -19,7 +19,7 @@ and value caps before submitting through Kartal.
 For Alpha direct-raw execution, `bribe` means the EIP-1559 priority fee paid
 through `max_priority_fee_per_gas`. The base fee is mandatory execution cost,
 not bribe. Direct `block.coinbase` transfers, bundles, and private relay
-payments are not part of the current `eth_direct_raw_v1` path.
+payments are not part of the current `eth_unsigned_tx` path.
 
 Kartal and `tx_executor` do not discover the bribe. Alpha selects the priority
 fee first, includes it in the transaction request, and also mirrors it in the

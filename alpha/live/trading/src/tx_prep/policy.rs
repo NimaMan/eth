@@ -269,7 +269,7 @@ mod tests {
                 assert_eq!(signal.request.max_fee_per_gas, "50000000000");
                 assert_eq!(
                     signal.request.metadata["wire_protocol"],
-                    json!("eth_direct_raw_v1")
+                    json!("eth_unsigned_tx")
                 );
                 assert_eq!(
                     signal.request.metadata["reason_code"],

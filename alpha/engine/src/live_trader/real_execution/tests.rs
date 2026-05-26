@@ -221,6 +221,21 @@ fn non_tail_entry_uses_public_mempool_policy() {
 }
 
 #[test]
+fn flashbots_tail_entry_keeps_unsigned_transaction_wire_protocol() {
+    let policy = TxSubmissionPolicy::FlashbotsMevShare {
+        ordering: TxOrderingPolicy::TailAfter {
+            tx_hash: format!("0x{}", "11".repeat(32)),
+        },
+        target_block: Some(25_128_247),
+        max_block: Some(25_128_249),
+        can_revert: false,
+    };
+
+    assert_eq!(transaction_wire_protocol(&policy), "eth_unsigned_tx");
+    assert_eq!(executor_boundary(&policy), "kartal_eth_tx_executor_policy");
+}
+
+#[test]
 fn tail_entry_overlay_plan_uses_mempool_exact_vault_evidence() {
     let input = tail_entry_input(tail_entry_evidence_json(json!({})));
 
