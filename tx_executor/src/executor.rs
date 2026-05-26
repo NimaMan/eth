@@ -80,4 +80,8 @@ impl EthTxExecutor {
     ) -> Result<crate::types::SignDirectRawResult> {
         self.service.sign_direct_raw(request).await
     }
+
+    pub async fn invalidate_nonce_cache(&self) {
+        self.service.invalidate_nonce_cache().await;
+    }
 }

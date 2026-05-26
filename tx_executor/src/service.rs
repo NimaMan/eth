@@ -67,7 +67,13 @@ impl EthTxExecutionService {
         let nonce = self.nonce_manager.reserve(prepared.nonce).await?;
         prepared.nonce = Some(nonce);
 
-        let signed = self.signer.sign_direct_raw(&prepared).await?;
+        let signed = match self.signer.sign_direct_raw(&prepared).await {
+            Ok(signed) => signed,
+            Err(error) => {
+                self.nonce_manager.invalidate().await;
+                return Err(error);
+            }
+        };
         self.record(
             &prepared.attempt_id,
             ExecutionStatus::Signed,
@@ -180,7 +186,13 @@ impl EthTxExecutionService {
         let nonce = self.nonce_manager.reserve(prepared.nonce).await?;
         prepared.nonce = Some(nonce);
 
-        let signed = self.signer.sign_direct_raw(&prepared).await?;
+        let signed = match self.signer.sign_direct_raw(&prepared).await {
+            Ok(signed) => signed,
+            Err(error) => {
+                self.nonce_manager.invalidate().await;
+                return Err(error);
+            }
+        };
         self.record(
             &prepared.attempt_id,
             ExecutionStatus::Signed,
@@ -206,6 +218,10 @@ impl EthTxExecutionService {
             max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
             elapsed_ms: started.elapsed().as_millis(),
         })
+    }
+
+    pub async fn invalidate_nonce_cache(&self) {
+        self.nonce_manager.invalidate().await;
     }
 
     fn result(

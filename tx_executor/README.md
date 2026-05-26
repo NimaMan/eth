@@ -266,6 +266,7 @@ Request kinds:
 | --- | --- |
 | `status` | Returns signer address, chain id, and readiness. |
 | `sign_direct_raw` | Carries `PreparedDirectRawTransaction` after validation and nonce reservation. |
+| `sign_flashbots_auth` | Signs the Flashbots relay body hash for `X-Flashbots-Signature`. |
 
 Response kinds:
 
@@ -273,6 +274,7 @@ Response kinds:
 | --- | --- |
 | `status` | `SignerStatus` |
 | `signed` | signer address plus `SignedTransaction` |
+| `signed_flashbots_auth` | signer address plus `SignedFlashbotsAuth` |
 | `error` | signer-side rejection or signing error text |
 
 The signer must enforce its own allowlist and caps before returning a raw
@@ -329,6 +331,8 @@ misconfigured or an authorized caller submits an unexpected transaction.
 - Never add route/slippage/risk policy to `tx_executor`.
 - Never let Kartal mutate `metadata`, except to preserve or wrap it in storage.
 - Use `nonce = null` for normal live flow; manual nonce is for recovery tooling.
+- Private bundle handoff must invalidate the nonce cache after relay handoff or
+  error, because those transactions are not public-pending until inclusion.
 - Every real-capital request must include simulation evidence and value-cap
   metadata.
 - Live broadcast requires explicit Kartal config:
