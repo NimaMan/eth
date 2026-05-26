@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_executor_min_priority_floor_before_request_build() {
+    fn applies_strategy_min_priority_floor_before_request_build() {
         let mut config = config(100);
         config.min_priority_fee_gwei = DecimalAmount::ONE;
         let input = input(0);
@@ -331,7 +331,7 @@ mod tests {
                     signal
                         .request
                         .metadata
-                        .pointer("/gas_plan/metadata/executor_min_priority_fee_floor_applied"),
+                        .pointer("/gas_plan/metadata/strategy_min_priority_fee_floor_applied"),
                     Some(&json!(true))
                 );
             }

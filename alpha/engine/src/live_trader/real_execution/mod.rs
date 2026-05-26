@@ -311,7 +311,7 @@ where
                     },
                     "production_gas_guard": {
                         "required_gas_rank_source": self.gas_policy.required_gas_rank_source.as_str(),
-                        "min_priority_fee_gwei": self.gas_policy.min_priority_fee_gwei(),
+                        "min_priority_fee_gwei": self.gas_policy.min_priority_fee_gwei,
                         "max_priority_fee_gwei": self.gas_policy.max_priority_fee_gwei,
                         "max_estimated_gas_fee_eth": self.gas_policy.entry_max_estimated_gas_fee_eth,
                     },
@@ -439,7 +439,7 @@ fn select_entry_gas_fee(
                 candidate.source.as_deref() == Some(gas_policy.required_gas_rank_source.as_str())
             })
             .cloned(),
-        gas_policy.min_priority_fee_gwei(),
+        gas_policy.min_priority_fee_gwei,
     )
     .into_iter()
     .filter(|candidate| {
@@ -453,7 +453,7 @@ fn select_entry_gas_fee(
         let reason = format!(
             "live real buy planner has no gas fee candidate matching production gas guard: required_source={} min_priority_fee_gwei={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
             gas_policy.required_gas_rank_source,
-            gas_policy.min_priority_fee_gwei(),
+            gas_policy.min_priority_fee_gwei,
             gas_policy.max_priority_fee_gwei,
             gas_policy.entry_max_estimated_gas_fee_eth,
             serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
@@ -550,7 +550,7 @@ pub(super) async fn build_kartal_real_adapter(
     planner_config.require_existing_allowance = false;
     planner_config.tx_prep = TxPrepConfig {
         max_total_fee_eth: gas_policy.exit_max_estimated_gas_fee_eth,
-        min_priority_fee_gwei: gas_policy.min_priority_fee_gwei(),
+        min_priority_fee_gwei: gas_policy.min_priority_fee_gwei,
         max_priority_fee_gwei: gas_policy.max_priority_fee_gwei,
         safety_buffer_eth: gas_policy.safety_buffer_eth,
         gas_rank_policy: gas_policy.normal_exit_gas_rank_policy.clone(),

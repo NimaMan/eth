@@ -8,7 +8,7 @@ const LIVE_GAS_REQUIRED_SOURCE_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_REQUIRED_SOUR
 const LIVE_GAS_LOOKBACK_BLOCKS_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_LOOKBACK_BLOCKS";
 const LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG: &str = "ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI";
 const LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG: &str = "ALPHA_LIVE_GAS_SIMULATED_GAS_BUFFER_BPS";
-const LIVE_GAS_MIN_PRIORITY_FEE_WEI_CONFIG: &str = "ETH_TX_EXECUTOR_MIN_PRIORITY_FEE_WEI";
+const LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG: &str = "ALPHA_LIVE_GAS_MIN_PRIORITY_FEE_GWEI";
 const LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG: &str = "ALPHA_LIVE_GAS_MAX_PRIORITY_FEE_GWEI";
 const LIVE_ENTRY_MAX_GAS_FEE_ETH_CONFIG: &str = "ALPHA_LIVE_ENTRY_MAX_ESTIMATED_GAS_FEE_ETH";
 const LIVE_EXIT_MAX_GAS_FEE_ETH_CONFIG: &str = "ALPHA_LIVE_EXIT_MAX_ESTIMATED_GAS_FEE_ETH";
@@ -31,7 +31,7 @@ pub(super) struct LiveRealGasPolicy {
     pub(super) gas_rank_lookback_blocks: u64,
     pub(super) gas_rank_priority_tie_breaker_gwei: Decimal,
     pub(super) simulated_gas_buffer_bps: u64,
-    pub(super) min_priority_fee_wei: u128,
+    pub(super) min_priority_fee_gwei: Decimal,
     pub(super) max_priority_fee_gwei: Decimal,
     pub(super) entry_max_estimated_gas_fee_eth: Decimal,
     pub(super) exit_max_estimated_gas_fee_eth: Decimal,
@@ -67,7 +67,10 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG,
         )?,
-        min_priority_fee_wei: required_config_u128(config, LIVE_GAS_MIN_PRIORITY_FEE_WEI_CONFIG)?,
+        min_priority_fee_gwei: required_config_decimal(
+            config,
+            LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG,
+        )?,
         max_priority_fee_gwei: required_config_decimal(
             config,
             LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG,
@@ -130,10 +133,15 @@ pub(in crate::live_trader) struct BuyGasPolicyContext<'a> {
 
 impl LiveRealGasPolicy {
     fn validated(self) -> Result<Self> {
-        if self.min_priority_fee_gwei() > self.max_priority_fee_gwei {
+        if self.min_priority_fee_gwei < Decimal::ZERO {
             return Err(eyre!(
-                "{LIVE_GAS_MIN_PRIORITY_FEE_WEI_CONFIG} ({}) must be <= {LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG} ({} gwei)",
-                self.min_priority_fee_wei,
+                "{LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG} must be non-negative"
+            ));
+        }
+        if self.min_priority_fee_gwei > self.max_priority_fee_gwei {
+            return Err(eyre!(
+                "{LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG} ({}) must be <= {LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG} ({})",
+                self.min_priority_fee_gwei,
                 self.max_priority_fee_gwei
             ));
         }
@@ -175,10 +183,6 @@ impl LiveRealGasPolicy {
             guard: "entry_estimated_gas_fee_cap",
         }
     }
-
-    pub(in crate::live_trader) fn min_priority_fee_gwei(&self) -> Decimal {
-        wei_to_gwei_decimal(self.min_priority_fee_wei)
-    }
 }
 
 fn required_config_string(config: &HashMap<String, String>, key: &str) -> Result<String> {
@@ -197,13 +201,6 @@ fn required_config_u64(config: &HashMap<String, String>, key: &str) -> Result<u6
         .wrap_err_with(|| format!("invalid {key} u64 value {value:?}"))
 }
 
-fn required_config_u128(config: &HashMap<String, String>, key: &str) -> Result<u128> {
-    let value = required_config_string(config, key)?;
-    value
-        .parse::<u128>()
-        .wrap_err_with(|| format!("invalid {key} u128 value {value:?}"))
-}
-
 fn required_config_positive_u64(config: &HashMap<String, String>, key: &str) -> Result<u64> {
     let value = required_config_u64(config, key)?;
     if value == 0 {
@@ -217,10 +214,6 @@ fn required_config_decimal(config: &HashMap<String, String>, key: &str) -> Resul
     value
         .parse::<Decimal>()
         .wrap_err_with(|| format!("invalid {key} decimal value {value:?}"))
-}
-
-fn wei_to_gwei_decimal(wei: u128) -> Decimal {
-    Decimal::from(wei) / Decimal::from(1_000_000_000u64)
 }
 
 fn required_config_gas_policy(
@@ -282,7 +275,7 @@ mod tests {
             gas_rank_lookback_blocks: 100,
             gas_rank_priority_tie_breaker_gwei: Decimal::new(1456, 4),
             simulated_gas_buffer_bps: 2500,
-            min_priority_fee_wei: 1_000_000_000,
+            min_priority_fee_gwei: Decimal::ONE,
             max_priority_fee_gwei: Decimal::new(35, 1),
             entry_max_estimated_gas_fee_eth: Decimal::new(12, 4),
             exit_max_estimated_gas_fee_eth: Decimal::new(2, 3),
@@ -328,21 +321,21 @@ mod tests {
     }
 
     #[test]
-    fn converts_executor_min_priority_fee_to_gwei() {
+    fn accepts_strategy_min_priority_fee_floor() {
         let policy = policy();
 
-        assert_eq!(policy.min_priority_fee_gwei(), Decimal::ONE);
+        assert_eq!(policy.min_priority_fee_gwei, Decimal::ONE);
     }
 
     #[test]
-    fn rejects_executor_min_priority_fee_above_strategy_cap() {
+    fn rejects_strategy_min_priority_fee_above_strategy_cap() {
         let mut policy = policy();
-        policy.min_priority_fee_wei = 4_000_000_000;
+        policy.min_priority_fee_gwei = Decimal::from(4);
 
         let error = policy.validated().unwrap_err();
 
         assert!(error
             .to_string()
-            .contains("ETH_TX_EXECUTOR_MIN_PRIORITY_FEE_WEI"));
+            .contains("ALPHA_LIVE_GAS_MIN_PRIORITY_FEE_GWEI"));
     }
 }

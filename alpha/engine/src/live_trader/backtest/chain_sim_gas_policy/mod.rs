@@ -166,7 +166,7 @@ where
         let policy = policy_context.policy;
         let capped = apply_min_priority_fee_floor_to_candidates(
             candidates.iter().cloned(),
-            self.gas_policy.min_priority_fee_gwei(),
+            self.gas_policy.min_priority_fee_gwei,
         )
         .into_iter()
         .filter(|candidate| {
@@ -206,7 +206,7 @@ where
         let policy_context = sell_policy_context(intent, &self.gas_policy);
         let candidates = apply_min_priority_fee_floor_to_candidates(
             self.allowed_gas_candidates(candidates, policy_context.policy),
-            self.gas_policy.min_priority_fee_gwei(),
+            self.gas_policy.min_priority_fee_gwei,
         );
         let protected_exit_value_eth = report
             .filled_amount

@@ -66,7 +66,6 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
         flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
         flashbots_auth_configured: Some(true),
-        min_priority_fee_per_gas_wei: Some("1000000000".to_string()),
         policy: KartalEthTxPolicyStatus {
             version: "eth_tx_policy_v1".to_string(),
             allowed_from_count: 1,
@@ -105,7 +104,7 @@ fn gas_policy() -> LiveRealGasPolicy {
         gas_rank_lookback_blocks: 100,
         gas_rank_priority_tie_breaker_gwei: Decimal::new(1456, 4),
         simulated_gas_buffer_bps: 2500,
-        min_priority_fee_wei: 1_000_000_000,
+        min_priority_fee_gwei: Decimal::ONE,
         max_priority_fee_gwei: Decimal::new(35, 1),
         entry_max_estimated_gas_fee_eth: Decimal::new(12, 4),
         exit_max_estimated_gas_fee_eth: Decimal::new(2, 3),
@@ -129,27 +128,8 @@ fn dry_run_status_is_allowed_without_public_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        None,
     )
     .unwrap();
-}
-
-#[test]
-fn preflight_rejects_executor_min_priority_fee_above_alpha_floor() {
-    let mut status = status(KartalStatusBroadcastMode::DryRun);
-    status.min_priority_fee_per_gas_wei = Some("2000000000".to_string());
-    let policy = gas_policy();
-
-    let error = validate_kartal_real_status(
-        &status,
-        &real_args(false),
-        &live_args(),
-        &specs(&live_args()),
-        Some(&policy),
-    )
-    .unwrap_err();
-
-    assert!(error.to_string().contains("min_priority_fee_per_gas_wei"));
 }
 
 #[test]
@@ -159,7 +139,6 @@ fn public_mempool_requires_explicit_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        None,
     )
     .unwrap_err();
 
@@ -181,7 +160,6 @@ fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
             &real_args(true),
             &args,
             &specs(&args),
-            None,
         )
         .unwrap_err();
 
@@ -196,7 +174,6 @@ fn public_mempool_hold16_deploy_accepts_hold16_scope() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        None,
     )
     .unwrap();
 }
@@ -213,7 +190,6 @@ fn public_mempool_hold16_deploy_accepts_disabled_daily_budget() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        None,
     )
     .unwrap();
 }
@@ -228,7 +204,6 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        None,
     )
     .unwrap_err();
 
@@ -319,7 +294,7 @@ fn tail_entry_overlay_plan_rejects_wrong_owner() {
 }
 
 #[test]
-fn entry_gas_fee_applies_executor_min_priority_floor() {
+fn entry_gas_fee_applies_strategy_min_priority_floor() {
     let policy = gas_policy();
     let route = PreparedSellRoute {
         protocol: "UniswapV2".to_string(),
@@ -358,7 +333,7 @@ fn entry_gas_fee_applies_executor_min_priority_floor() {
     assert_eq!(
         fee.metadata
             .as_ref()
-            .and_then(|metadata| metadata["executor_min_priority_fee_floor_applied"].as_bool()),
+            .and_then(|metadata| metadata["strategy_min_priority_fee_floor_applied"].as_bool()),
         Some(true)
     );
 }

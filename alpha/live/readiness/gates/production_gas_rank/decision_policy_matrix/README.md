@@ -12,7 +12,7 @@ tests.
 | Gas-rank source | `ALPHA_LIVE_GAS_RANK_REQUIRED_SOURCE` | `eth_chain_server_gas_rank` |
 | Lookback blocks | `ALPHA_LIVE_GAS_RANK_LOOKBACK_BLOCKS` | `100` |
 | Tie breaker | `ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI` | `0.1456 gwei` |
-| Executor priority floor | `ETH_TX_EXECUTOR_MIN_PRIORITY_FEE_WEI` | `1 gwei` |
+| Strategy priority floor | `ALPHA_LIVE_GAS_MIN_PRIORITY_FEE_GWEI` | `1 gwei` |
 | Max priority cap | `ALPHA_LIVE_GAS_MAX_PRIORITY_FEE_GWEI` | `3.5 gwei` |
 | Entry estimated fee cap | `ALPHA_LIVE_ENTRY_MAX_ESTIMATED_GAS_FEE_ETH` | `0.0012 ETH` |
 | Exit estimated fee cap | `ALPHA_LIVE_EXIT_MAX_ESTIMATED_GAS_FEE_ETH` | `0.002 ETH` |

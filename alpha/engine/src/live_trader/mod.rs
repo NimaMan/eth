@@ -170,7 +170,6 @@ async fn run(
                     &args,
                     &strategy_specs,
                     flashbots_tail_max_block_span,
-                    &live_gas_policy,
                 )
                 .await?,
             )

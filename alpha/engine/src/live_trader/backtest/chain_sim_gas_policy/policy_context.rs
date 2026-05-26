@@ -147,7 +147,7 @@ mod tests {
             gas_rank_lookback_blocks: 20,
             gas_rank_priority_tie_breaker_gwei: Decimal::ZERO,
             simulated_gas_buffer_bps: 0,
-            min_priority_fee_wei: 1_000_000_000,
+            min_priority_fee_gwei: Decimal::ONE,
             max_priority_fee_gwei: Decimal::new(5, 0),
             entry_max_estimated_gas_fee_eth: Decimal::new(1, 1),
             exit_max_estimated_gas_fee_eth: Decimal::new(1, 1),

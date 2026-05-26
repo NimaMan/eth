@@ -51,13 +51,6 @@ pub fn prepare_direct_raw_request(
             "max_fee_per_gas must be greater than zero".to_string(),
         ));
     }
-    if max_priority_fee_per_gas < U256::from(config.min_priority_fee_per_gas_wei) {
-        return Err(EthTxExecutorError::Validation(format!(
-            "max_priority_fee_per_gas {} is below configured minimum {}",
-            max_priority_fee_per_gas, config.min_priority_fee_per_gas_wei
-        )));
-    }
-
     if let Some(bribe) = request.bribe.as_ref() {
         let requested_priority =
             parse_u256(&bribe.priority_fee_per_gas, "bribe.priority_fee_per_gas")?;
@@ -154,5 +147,31 @@ mod tests {
     fn parse_hex_or_decimal_u256() {
         assert_eq!(parse_u256("10", "value").unwrap(), U256::from(10));
         assert_eq!(parse_u256("0x10", "value").unwrap(), U256::from(16));
+    }
+
+    #[test]
+    fn accepts_low_priority_fee_below_strategy_floor() {
+        let signer_address =
+            Address::from_str("0x0000000000000000000000000000000000000001").unwrap();
+        let request = DirectRawTransactionRequest {
+            attempt_id: Some("attempt-1".to_string()),
+            chain_id: 1,
+            from: format!("{signer_address:?}"),
+            to: "0x0000000000000000000000000000000000000002".to_string(),
+            value: "0".to_string(),
+            data: "0x".to_string(),
+            gas_limit: "21000".to_string(),
+            max_fee_per_gas: "1000000000".to_string(),
+            max_priority_fee_per_gas: "1".to_string(),
+            nonce: None,
+            bribe: None,
+            simulation: None,
+            metadata: serde_json::Value::Null,
+        };
+        let config = EthTxExecutorConfig::mainnet_local_reth("http://127.0.0.1:8545");
+
+        let prepared = prepare_direct_raw_request(&config, request, signer_address).unwrap();
+
+        assert_eq!(prepared.max_priority_fee_per_gas, U256::from(1));
     }
 }

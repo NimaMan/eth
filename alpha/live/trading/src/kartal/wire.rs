@@ -41,8 +41,6 @@ pub struct KartalEthTxExecutorStatus {
     pub flashbots_relay_url: Option<String>,
     #[serde(default)]
     pub flashbots_auth_configured: Option<bool>,
-    #[serde(default)]
-    pub min_priority_fee_per_gas_wei: Option<String>,
     pub policy: KartalEthTxPolicyStatus,
 }
 

@@ -118,8 +118,8 @@ pub fn apply_min_priority_fee_floor(
     candidate.metadata = Some(merge_floor_metadata(
         candidate.metadata.take(),
         json!({
-            "executor_min_priority_fee_floor_applied": true,
-            "executor_min_priority_fee_gwei": min_priority_fee_gwei,
+            "strategy_min_priority_fee_floor_applied": true,
+            "strategy_min_priority_fee_gwei": min_priority_fee_gwei,
             "original_priority_fee_gwei": original_priority_fee_gwei,
             "original_max_fee_per_gas_gwei": original_max_fee_per_gas_gwei,
         }),
@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_min_priority_fee_floor_preserving_base_fee_cushion() {
+    fn applies_strategy_min_priority_fee_floor_preserving_base_fee_cushion() {
         let candidate = RankedFeeCandidate {
             label: "p85".to_string(),
             priority_fee_gwei: DecimalAmount::new(5, 1),
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(floored.max_fee_per_gas_gwei, DecimalAmount::new(11, 1));
         let metadata = floored.metadata.expect("floor metadata");
         assert_eq!(
-            metadata["executor_min_priority_fee_floor_applied"],
+            metadata["strategy_min_priority_fee_floor_applied"],
             json!(true)
         );
         assert_eq!(metadata["existing"], json!(true));
