@@ -281,6 +281,9 @@ The signer must enforce its own allowlist and caps before returning a raw
 signed transaction. That gives us a second policy boundary if Kartal is
 misconfigured or an authorized caller submits an unexpected transaction.
 
+Flashbots auth signatures are encoded as `r || s || v`, with the recovery byte
+normalized to `0` or `1` for relay compatibility.
+
 ### Example Priority Sell
 
 ```json
