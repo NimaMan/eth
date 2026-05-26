@@ -185,8 +185,6 @@ fn tail_entry_receipt_records_dependency_ordering() {
     );
     let mut submitted = submitted(OrderSide::Buy, token);
     submitted.gas_policy_action = Some("tail_entry_buy".to_string());
-    submitted.private_execution_transport = Some("flashbots_mev_share_v0.1".to_string());
-    submitted.bundle_hash = Some(format!("0x{}", "44".repeat(32)));
     submitted.gas_policy_tail_after_tx_hash = Some(format!("0x{}", "33".repeat(32)));
 
     let report =

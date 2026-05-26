@@ -8,8 +8,8 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     KartalDailySpendStatus, KartalEthTxExecutorStatus, KartalEthTxPolicyStatus,
-    KartalStatusBroadcastMode, LivePrioritySellPlannerInput, PlannerTxContext, TxOrderingPolicy,
-    TxPrepRequestContext, TxSubmissionRoute,
+    KartalStatusBroadcastMode, LivePrioritySellPlannerInput, PlannerTxContext,
+    TxPrepRequestContext, TxSubmissionPolicy, TxSubmissionRoute,
 };
 use eth_strategies::{
     alpha11::HOLD16_STRATEGY_NAME,
@@ -64,9 +64,6 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
         direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
         submit_endpoint: Some("/eth/tx/submit".to_string()),
-        flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
-        flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
-        flashbots_auth_configured: Some(true),
         policy: KartalEthTxPolicyStatus {
             version: "eth_tx_policy_v1".to_string(),
             allowed_from_count: 1,
@@ -114,9 +111,11 @@ fn gas_policy() -> LiveRealGasPolicy {
         v2_vault_sell_gas_limit: 300_000,
         mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
         mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
+        tail_entry_priority_undercut_wei: 500,
+        tail_entry_max_fee_buffer_bps: 1250,
         entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
         tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first()
-            .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
+            .with_submission_route(TxSubmissionRoute::PublicMempoolTail),
         normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
         mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
         lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
@@ -130,7 +129,6 @@ fn dry_run_status_is_allowed_without_public_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        true,
     )
     .unwrap();
 }
@@ -142,7 +140,6 @@ fn broadcast_requires_explicit_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        true,
     )
     .unwrap_err();
 
@@ -164,7 +161,6 @@ fn broadcast_hold16_deploy_rejects_other_strategy_scopes() {
             &real_args(true),
             &args,
             &specs(&args),
-            true,
         )
         .unwrap_err();
 
@@ -179,7 +175,6 @@ fn broadcast_hold16_deploy_accepts_hold16_scope() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        true,
     )
     .unwrap();
 }
@@ -196,7 +191,6 @@ fn broadcast_hold16_deploy_accepts_disabled_daily_budget() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        true,
     )
     .unwrap();
 }
@@ -211,7 +205,6 @@ fn broadcast_hold16_deploy_requires_value_cap_for_buy() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        true,
     )
     .unwrap_err();
 
@@ -219,50 +212,67 @@ fn broadcast_hold16_deploy_requires_value_cap_for_buy() {
 }
 
 #[test]
-fn tail_entry_buy_uses_flashbots_submission_policy() {
+fn tail_entry_buy_uses_public_submission_policy() {
     let tail_hash = format!("0x{}", "11".repeat(32));
     let gas_rank_policy = StrategyGasRankPolicy::p85_first()
-        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail);
+        .with_submission_route(TxSubmissionRoute::PublicMempoolTail);
     let policy = buy_submission_policy(
         &gas_rank_policy,
-        Some(3),
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
             tail_after_tx_hash: Some(tail_hash.clone()),
             dependency_priority_fee_wei: Some("100".to_string()),
+            dependency_max_fee_per_gas_wei: Some("1000".to_string()),
             dependency_gas_price_wei: None,
+            signal_source: Some("mempool".to_string()),
+            evidence_source: Some("mempool_processor".to_string()),
         }),
         25_128_246,
     )
     .unwrap();
 
-    assert_eq!(
-        policy,
-        TxSubmissionPolicy::FlashbotsMevShare {
-            ordering: TxOrderingPolicy::TailAfter { tx_hash: tail_hash },
-            target_block: Some(25_128_247),
-            max_block: Some(25_128_249),
-            can_revert: false,
-        }
-    );
+    assert_eq!(policy, TxSubmissionPolicy::PublicRpcBroadcast);
+}
+
+#[test]
+fn public_tail_entry_rejects_non_mempool_source() {
+    let gas_rank_policy = StrategyGasRankPolicy::p85_first()
+        .with_submission_route(TxSubmissionRoute::PublicMempoolTail);
+    let error = buy_submission_policy(
+        &gas_rank_policy,
+        "tail_entry_buy",
+        &Some(TailEntryOrderingEvidence {
+            tail_after_tx_hash: Some(format!("0x{}", "11".repeat(32))),
+            dependency_priority_fee_wei: Some("100".to_string()),
+            dependency_max_fee_per_gas_wei: Some("1000".to_string()),
+            dependency_gas_price_wei: None,
+            signal_source: Some("unknown".to_string()),
+            evidence_source: Some("unknown".to_string()),
+        }),
+        25_128_246,
+    )
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("public_mempool_tail requires public mempool processor source evidence"));
 }
 
 #[test]
 fn non_tail_entry_uses_broadcast_policy() {
     let gas_rank_policy = StrategyGasRankPolicy::p85_first()
         .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast);
-    let policy =
-        buy_submission_policy(&gas_rank_policy, Some(3), "entry_buy", &None, 25_128_246).unwrap();
+    let policy = buy_submission_policy(&gas_rank_policy, "entry_buy", &None, 25_128_246).unwrap();
 
     assert_eq!(policy, TxSubmissionPolicy::PublicRpcBroadcast);
 }
 
 #[test]
-fn non_tail_entry_rejects_flashbots_tail_submission_route() {
+fn non_tail_entry_rejects_public_mempool_tail_submission_route() {
     let gas_rank_policy = StrategyGasRankPolicy::p85_first()
-        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail);
-    let error = buy_submission_policy(&gas_rank_policy, Some(3), "entry_buy", &None, 25_128_246)
-        .unwrap_err();
+        .with_submission_route(TxSubmissionRoute::PublicMempoolTail);
+    let error =
+        buy_submission_policy(&gas_rank_policy, "entry_buy", &None, 25_128_246).unwrap_err();
 
     assert!(error.to_string().contains("requires tail_entry_buy action"));
 }
@@ -273,12 +283,14 @@ fn tail_entry_buy_can_use_broadcast_policy() {
         .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast);
     let policy = buy_submission_policy(
         &gas_rank_policy,
-        None,
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
             tail_after_tx_hash: Some(format!("0x{}", "11".repeat(32))),
             dependency_priority_fee_wei: Some("100".to_string()),
+            dependency_max_fee_per_gas_wei: Some("1000".to_string()),
             dependency_gas_price_wei: None,
+            signal_source: Some("mempool".to_string()),
+            evidence_source: Some("mempool_processor".to_string()),
         }),
         25_128_246,
     )
@@ -288,18 +300,11 @@ fn tail_entry_buy_can_use_broadcast_policy() {
 }
 
 #[test]
-fn flashbots_tail_entry_keeps_unsigned_transaction_wire_protocol() {
-    let policy = TxSubmissionPolicy::FlashbotsMevShare {
-        ordering: TxOrderingPolicy::TailAfter {
-            tx_hash: format!("0x{}", "11".repeat(32)),
-        },
-        target_block: Some(25_128_247),
-        max_block: Some(25_128_249),
-        can_revert: false,
-    };
+fn public_submission_keeps_unsigned_transaction_wire_protocol() {
+    let policy = TxSubmissionPolicy::PublicRpcBroadcast;
 
     assert_eq!(transaction_wire_protocol(&policy), "eth_unsigned_tx");
-    assert_eq!(executor_boundary(&policy), "kartal_eth_tx_executor_policy");
+    assert_eq!(executor_boundary(&policy), "kartal_eth_tx_executor");
 }
 
 #[test]
@@ -368,6 +373,7 @@ fn entry_gas_fee_applies_strategy_min_priority_floor() {
         &StrategyGasRankPolicy::p85_first(),
         &route,
         &policy,
+        &None,
         25_128_246,
     )
     .unwrap();
@@ -379,6 +385,61 @@ fn entry_gas_fee_applies_strategy_min_priority_floor() {
             .as_ref()
             .and_then(|metadata| metadata["strategy_min_priority_fee_floor_applied"].as_bool()),
         Some(true)
+    );
+}
+
+#[test]
+fn tail_entry_gas_fee_undercuts_dependency_without_min_floor() {
+    let policy = gas_policy();
+    let route = PreparedSellRoute {
+        protocol: "UniswapV2".to_string(),
+        router_address: "0x0000000000000000000000000000000000000002".to_string(),
+        calldata: "0x1234".to_string(),
+        value_wei: "0".to_string(),
+        gas_limit: 120_000,
+        estimated_gas_used: Some(100_000),
+        max_slippage_bps: Some(500),
+    };
+    let plan = GasRankPlan {
+        predicted_base_fee_gwei: Decimal::new(38695358, 8),
+        candidates: vec![RankedFeeCandidate {
+            label: "p85".to_string(),
+            priority_fee_gwei: Decimal::new(5, 1),
+            max_fee_per_gas_gwei: Decimal::new(88695358, 8),
+            rank_position_p50: Some(8),
+            gas_before_p50: Some(210_000),
+            likely_fits_at_p50: Some(true),
+            source: Some(policy.required_gas_rank_source.clone()),
+            metadata: None,
+        }],
+    };
+    let ordering = Some(TailEntryOrderingEvidence {
+        tail_after_tx_hash: Some(format!("0x{}", "11".repeat(32))),
+        dependency_priority_fee_wei: Some("150000".to_string()),
+        dependency_max_fee_per_gas_wei: Some("783964148".to_string()),
+        dependency_gas_price_wei: None,
+        signal_source: Some("mempool".to_string()),
+        evidence_source: Some("mempool_processor".to_string()),
+    });
+
+    let fee = select_entry_gas_fee(
+        &plan,
+        &policy.tail_entry_buy_gas_rank_policy,
+        &route,
+        &policy,
+        &ordering,
+        25_128_246,
+    )
+    .unwrap();
+
+    assert_eq!(fee.label, "public_tail_after_dependency");
+    assert_eq!(fee.priority_fee_gwei, Decimal::new(1495, 7));
+    assert!(fee.priority_fee_gwei < policy.min_priority_fee_gwei);
+    assert_eq!(
+        fee.metadata
+            .as_ref()
+            .and_then(|metadata| metadata["strategy_min_priority_fee_floor_applied"].as_bool()),
+        Some(false)
     );
 }
 

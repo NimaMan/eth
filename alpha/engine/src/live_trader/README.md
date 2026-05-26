@@ -87,8 +87,10 @@ The normal live trader service path reads live settings from the shared root
 - `ALPHA_LIVE_MEMPOOL_SINCE_DAYS`: lookback window used when fetching stored
   mempool signals from the chain server.
 - `ALPHA_LIVE_SIGNAL_LIMIT`: max signal rows fetched per trader loop.
-- `ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN`: inclusive target-block window
-  length for policy-driven tail-entry MEV-Share bundles.
+- `ALPHA_LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI`: wei amount subtracted from
+  the observed dependency tx priority fee for public tail-entry buys.
+- `ALPHA_LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS`: base-fee buffer added to the
+  selected public tail-entry max fee.
 
 The CLI flags `--mempool-since-days` and `--signal-limit` are explicit operator
 overrides only. The checked-in systemd services do not set separate copies of

@@ -20,7 +20,7 @@ use eth_alpha_core::{
 use eth_live_trading::{
     KartalExecutorClient, KartalSubmitDirectRawResult, KartalSubmitTransactionResult,
     LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
-    PrioritySellPlannerOutcome, TxOrderingPolicy, TxSubmissionPolicy,
+    PrioritySellPlannerOutcome,
 };
 use serde_json::Value;
 
@@ -291,7 +291,7 @@ fn execution_report_from_kartal_result(
 fn submission_evidence(
     observed_block: Option<BlockNumber>,
     signal: &LiveTraderTxSignal,
-    result: &LiveTxSubmissionResult,
+    _result: &LiveTxSubmissionResult,
 ) -> MinedExecutionEvidence {
     let request = &signal.request;
     let bribe = request.bribe.as_ref();
@@ -344,24 +344,6 @@ fn submission_evidence(
         &["tail_entry_ordering", "dependency_gas_price_wei"],
     );
 
-    if let TxSubmissionPolicy::FlashbotsMevShare {
-        ordering: TxOrderingPolicy::TailAfter {
-            tx_hash: tail_after_tx_hash,
-        },
-        target_block,
-        max_block,
-        ..
-    } = &signal.submission_policy
-    {
-        evidence.private_execution_transport = Some("flashbots_mev_share_v0.1".to_string());
-        evidence.bundle_hash = result.bundle_hash.clone();
-        evidence.bundle_target_block = result.bundle_target_block.or(*target_block);
-        evidence.bundle_max_block = result.bundle_max_block.or(*max_block);
-        evidence.gas_policy_tail_after_tx_hash = result
-            .bundle_tail_after_tx_hash
-            .clone()
-            .or_else(|| non_empty_string(tail_after_tx_hash));
-    }
     evidence
 }
 

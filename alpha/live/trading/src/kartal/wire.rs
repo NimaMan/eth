@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::{
     KartalBribeRequest, KartalSimulationReference, KartalSubmitDirectRawResult,
     KartalSubmitTransactionRequest, KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, LiveTxExecution, TxOrderingPolicy, TxSubmissionPolicy,
+    LiveTraderTxSignal, LiveTxExecution, TxSubmissionPolicy,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -37,12 +37,6 @@ pub struct KartalEthTxExecutorStatus {
     pub direct_raw_endpoint: String,
     #[serde(default)]
     pub submit_endpoint: Option<String>,
-    #[serde(default)]
-    pub flashbots_tail_bundle_endpoint: Option<String>,
-    #[serde(default)]
-    pub flashbots_relay_url: Option<String>,
-    #[serde(default)]
-    pub flashbots_auth_configured: Option<bool>,
     pub policy: KartalEthTxPolicyStatus,
 }
 
@@ -93,9 +87,6 @@ mod tests {
             "journal_path": null,
             "direct_raw_endpoint": "/eth/tx/direct-raw",
             "submit_endpoint": "/eth/tx/submit",
-            "flashbots_tail_bundle_endpoint": "/eth/tx/flashbots/mev-share-tail",
-            "flashbots_relay_url": "https://relay.flashbots.net",
-            "flashbots_auth_configured": true,
             "policy": {
                 "version": "eth_tx_policy_v1",
                 "allowed_from_count": 0,
@@ -122,10 +113,5 @@ mod tests {
 
         assert!(status.broadcast_mode.is_dry_run());
         assert_eq!(status.policy.allowed_target_count, 0);
-        assert_eq!(
-            status.flashbots_tail_bundle_endpoint.as_deref(),
-            Some("/eth/tx/flashbots/mev-share-tail")
-        );
-        assert_eq!(status.flashbots_auth_configured, Some(true));
     }
 }

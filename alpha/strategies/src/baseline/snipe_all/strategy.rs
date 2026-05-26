@@ -409,12 +409,8 @@ impl SnipeAllStrategy {
             }
         }
 
-        if self.only_retryable_noncapital_buy_attempts_for_pool(ctx, &pool.address) {
-            return Ok(self.buy_pool(
-                pool,
-                submit_reason
-                    .unwrap_or("entry.buy_eligible_pool_once:retry_after_noncapital_execution"),
-            ));
+        if let Some(retry_reason) = self.retryable_buy_attempt_reason_for_pool(ctx, &pool.address) {
+            return Ok(self.buy_pool(pool, submit_reason.unwrap_or(retry_reason)));
         }
 
         Ok(match entry::evaluate(&self.state, pool) {
@@ -430,30 +426,41 @@ impl SnipeAllStrategy {
         self.state
             .bought_pools()
             .iter()
-            .filter(|pool| !self.only_retryable_noncapital_buy_attempts_for_pool(ctx, pool))
+            .filter(|pool| {
+                self.retryable_buy_attempt_reason_for_pool(ctx, pool)
+                    .is_none()
+            })
             .count()
     }
 
-    fn only_retryable_noncapital_buy_attempts_for_pool(
+    fn retryable_buy_attempt_reason_for_pool(
         &self,
         ctx: &StrategyContext<'_>,
         pool: &PoolAddress,
-    ) -> bool {
-        let mut saw_retryable_noncapital = false;
+    ) -> Option<&'static str> {
+        let mut retry_reason = None;
         for position in ctx.portfolio.positions.values().filter(|position| {
             position.key.strategy_name == self.name() && &position.key.pool_address == pool
         }) {
-            if matches!(
-                position.state,
-                PositionState::BuyDeferred | PositionState::BuyCancelled
-            ) {
-                saw_retryable_noncapital = true;
-            } else {
-                return false;
+            match position.state {
+                PositionState::BuyDeferred | PositionState::BuyCancelled => {
+                    retry_reason =
+                        Some("entry.buy_eligible_pool_once:retry_after_noncapital_execution");
+                }
+                PositionState::BuyFailed if is_retryable_tail_entry_buy_failure(position) => {
+                    retry_reason =
+                        Some("entry.buy_eligible_pool_once:retry_after_tail_entry_failure");
+                }
+                _ => return None,
             }
         }
-        saw_retryable_noncapital
+        retry_reason
     }
+}
+
+fn is_retryable_tail_entry_buy_failure(position: &Position) -> bool {
+    position.entry_failure_count == 1
+        && position.entry_failure_gas_policy_action.as_deref() == Some("tail_entry_buy")
 }
 
 fn sell_amount_from_position(position: &Position, sell_fraction: DecimalAmount) -> Option<Amount> {

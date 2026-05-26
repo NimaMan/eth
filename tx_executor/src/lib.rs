@@ -20,4 +20,4 @@ pub use config::{BroadcastMode, EthTxExecutorConfig};
 pub use error::{EthTxExecutorError, Result};
 pub use executor::EthTxExecutor;
 pub use request::{BribeRequest, DirectRawTransactionRequest, SimulationReference};
-pub use types::{ExecutionStatus, SignDirectRawResult, SignedFlashbotsAuth, SubmitDirectRawResult};
+pub use types::{ExecutionStatus, SignDirectRawResult, SubmitDirectRawResult};

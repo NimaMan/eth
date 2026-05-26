@@ -333,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_flashbots_tail_route_for_priority_sell() {
+    fn rejects_public_mempool_tail_route_for_priority_sell() {
         let mut input = input(40);
         input.gas_rank_policy = Some(
             StrategyGasRankPolicy::p90_first()
-                .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
+                .with_submission_route(TxSubmissionRoute::PublicMempoolTail),
         );
 
         let outcome = prepare_priority_sell(&config(100), input);
@@ -350,7 +350,7 @@ mod tests {
                 );
                 assert_eq!(
                     reject.metadata["submission_route"],
-                    json!("flashbots_mev_share_tail")
+                    json!("public_mempool_tail")
                 );
             }
             other => panic!("expected reject, got {other:?}"),

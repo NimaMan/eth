@@ -28,7 +28,6 @@ pub(super) struct RunStartRecord<'a> {
     pub(super) single_min_liquidity_eth: &'a Option<String>,
     pub(super) single_min_liquidity_usd: &'a Option<String>,
     pub(super) gas_policy_metadata: Value,
-    pub(super) flashbots_tail_max_block_span: Option<u64>,
 }
 
 pub(super) async fn record_alpha_trader_run_start(
@@ -74,8 +73,7 @@ pub(super) async fn record_alpha_trader_run_start(
                             "dry_run"
                         },
                         "allow_broadcast_live_validation": real_args.allow_broadcast_live_validation,
-                        "flashbots_submission_owner": "kartal",
-                        "flashbots_tail_max_block_span": record.flashbots_tail_max_block_span
+                        "tail_entry_submission": "public_mempool_priority_undercut"
                     })
                 } else {
                     Value::Null

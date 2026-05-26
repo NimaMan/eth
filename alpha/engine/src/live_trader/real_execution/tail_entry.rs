@@ -7,8 +7,7 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     derive_min_output_from_expected_output, LivePrioritySellPlannerInput, PreSubmitSimulation,
-    PreparedSellRoute, StrategyGasRankPolicy, TxOrderingPolicy, TxSubmissionPolicy,
-    TxSubmissionRoute,
+    PreparedSellRoute, StrategyGasRankPolicy, TxSubmissionPolicy, TxSubmissionRoute,
 };
 use serde_json::{json, Value};
 
@@ -18,7 +17,17 @@ use super::{cancelled_execution_at, parse_u256_quantity, planner_error};
 pub(super) struct TailEntryOrderingEvidence {
     pub(super) tail_after_tx_hash: Option<String>,
     pub(super) dependency_priority_fee_wei: Option<String>,
+    pub(super) dependency_max_fee_per_gas_wei: Option<String>,
     pub(super) dependency_gas_price_wei: Option<String>,
+    pub(super) signal_source: Option<String>,
+    pub(super) evidence_source: Option<String>,
+}
+
+impl TailEntryOrderingEvidence {
+    fn is_public_mempool_source(&self) -> bool {
+        source_contains(self.signal_source.as_deref(), "mempool")
+            || source_contains(self.evidence_source.as_deref(), "mempool_processor")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -231,7 +240,6 @@ pub(super) fn validate_tail_entry_route(
 
 pub(super) fn buy_submission_policy(
     gas_rank_policy: &StrategyGasRankPolicy,
-    flashbots_tail_max_block_span: Option<u64>,
     gas_policy_action: &str,
     tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
     current_block: u64,
@@ -239,7 +247,7 @@ pub(super) fn buy_submission_policy(
     let submission_route = gas_rank_policy.submission_route;
     match submission_route {
         TxSubmissionRoute::PublicRpcBroadcast => return Ok(TxSubmissionPolicy::PublicRpcBroadcast),
-        TxSubmissionRoute::FlashbotsMevShareTail => {}
+        TxSubmissionRoute::PublicMempoolTail => {}
     }
     if gas_policy_action != "tail_entry_buy" {
         return Err(AlphaCoreError::ExecutionCancelled {
@@ -250,30 +258,31 @@ pub(super) fn buy_submission_policy(
             block_number: Some(current_block),
         });
     }
-    let tail_after_tx_hash = tail_entry_ordering
-        .as_ref()
-        .and_then(|evidence| evidence.tail_after_tx_hash.clone())
+    let tail_entry_ordering =
+        tail_entry_ordering
+            .as_ref()
+            .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
+                reason: "public mempool tail-entry buy requires tail-entry ordering evidence"
+                    .to_string(),
+                block_number: Some(current_block),
+            })?;
+    if !tail_entry_ordering.is_public_mempool_source() {
+        return Err(AlphaCoreError::ExecutionCancelled {
+            reason: "public_mempool_tail requires public mempool processor source evidence"
+                .to_string(),
+            block_number: Some(current_block),
+        });
+    }
+    let _tail_after_tx_hash = tail_entry_ordering
+        .tail_after_tx_hash
+        .clone()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
-            reason: "Flashbots tail-entry buy requires dependency tail_after_tx_hash".to_string(),
-            block_number: Some(current_block),
-        })?;
-    let flashbots_tail_max_block_span =
-        flashbots_tail_max_block_span.ok_or_else(|| AlphaCoreError::ExecutionCancelled {
-            reason: "Flashbots tail-entry buy requires ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN"
+            reason: "public mempool tail-entry buy requires dependency tail_after_tx_hash"
                 .to_string(),
             block_number: Some(current_block),
         })?;
-    let target_block = current_block.saturating_add(1);
-    let max_block = target_block.saturating_add(flashbots_tail_max_block_span.max(1) - 1);
-    Ok(TxSubmissionPolicy::FlashbotsMevShare {
-        ordering: TxOrderingPolicy::TailAfter {
-            tx_hash: tail_after_tx_hash,
-        },
-        target_block: Some(target_block),
-        max_block: Some(max_block),
-        can_revert: false,
-    })
+    Ok(TxSubmissionPolicy::PublicRpcBroadcast)
 }
 
 pub(super) fn tail_entry_ordering_evidence(
@@ -296,11 +305,44 @@ pub(super) fn tail_entry_ordering_evidence(
             dependency_fee_metadata,
             "dependency_priority_fee_wei",
         ),
+        dependency_max_fee_per_gas_wei: json_string_field(
+            dependency_fee_metadata,
+            "dependency_max_fee_per_gas_wei",
+        ),
         dependency_gas_price_wei: json_string_field(
             dependency_fee_metadata,
             "dependency_gas_price_wei",
         ),
+        signal_source: intent
+            .decision_reason
+            .as_ref()
+            .and_then(|reason| {
+                reason
+                    .details
+                    .get("risk_event_evidence")
+                    .and_then(|evidence| json_string_field(evidence, "signal_source"))
+            })
+            .or_else(|| {
+                intent
+                    .decision_reason
+                    .as_ref()
+                    .and_then(|reason| reason.source.clone())
+            }),
+        evidence_source: intent.decision_reason.as_ref().and_then(|reason| {
+            reason
+                .details
+                .get("risk_event_evidence")
+                .and_then(|evidence| evidence.get("mempool_entry_evidence"))
+                .and_then(|entry| entry.get("audit"))
+                .and_then(|audit| json_string_field(audit, "source"))
+        }),
     })
+}
+
+fn source_contains(value: Option<&str>, needle: &str) -> bool {
+    value
+        .map(|value| value.to_ascii_lowercase().contains(needle))
+        .unwrap_or(false)
 }
 
 fn mempool_entry_evidence_from_intent(

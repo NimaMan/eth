@@ -30,7 +30,6 @@ pub(super) struct ExecutionStackInput<'a> {
     pub(super) live_gas_policy: LiveRealGasPolicy,
     pub(super) live_real_gas_policy: Option<LiveRealGasPolicy>,
     pub(super) kartal_real_preflight: Option<KartalRealPreflight>,
-    pub(super) flashbots_tail_max_block_span: Option<u64>,
 }
 
 pub(super) struct ExecutionStack {
@@ -135,7 +134,6 @@ pub(super) async fn build_execution_stack(
                 exact_pre_submit_live_simulator,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
-                input.flashbots_tail_max_block_span,
                 input
                     .live_real_gas_policy
                     .expect("kartal-real gas policy must exist"),

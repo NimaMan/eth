@@ -1,7 +1,7 @@
 use ethers_core::types::Address;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{PreparedDirectRawTransaction, SignedFlashbotsAuth, SignedTransaction};
+use crate::types::{PreparedDirectRawTransaction, SignedTransaction};
 
 pub const ETH_SIGNER_WIRE_SCHEMA: &str = "kartal_eth_signer_v1";
 
@@ -14,10 +14,6 @@ pub enum SignerWireRequest {
     SignDirectRaw {
         schema: String,
         transaction: PreparedDirectRawTransaction,
-    },
-    SignFlashbotsAuth {
-        schema: String,
-        body_hash: String,
     },
 }
 
@@ -35,12 +31,6 @@ impl SignerWireRequest {
         }
     }
 
-    pub fn sign_flashbots_auth(body_hash: impl Into<String>) -> Self {
-        Self::SignFlashbotsAuth {
-            schema: ETH_SIGNER_WIRE_SCHEMA.to_string(),
-            body_hash: body_hash.into(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,11 +44,6 @@ pub enum SignerWireResponse {
         schema: String,
         signer: Address,
         signed: SignedTransaction,
-    },
-    SignedFlashbotsAuth {
-        schema: String,
-        signer: Address,
-        signed: SignedFlashbotsAuth,
     },
     Error {
         schema: String,
@@ -76,14 +61,6 @@ impl SignerWireResponse {
 
     pub fn signed(signer: Address, signed: SignedTransaction) -> Self {
         Self::Signed {
-            schema: ETH_SIGNER_WIRE_SCHEMA.to_string(),
-            signer,
-            signed,
-        }
-    }
-
-    pub fn signed_flashbots_auth(signer: Address, signed: SignedFlashbotsAuth) -> Self {
-        Self::SignedFlashbotsAuth {
             schema: ETH_SIGNER_WIRE_SCHEMA.to_string(),
             signer,
             signed,

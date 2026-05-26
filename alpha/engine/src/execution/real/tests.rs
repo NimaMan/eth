@@ -12,7 +12,7 @@ use eth_alpha_core::{
 use eth_live_trading::{
     LiveDirectRawTransactionRequest, LivePrioritySellPlannerError, LivePrioritySellPlannerInput,
     PlannerTxContext, PriorityFeeBudget, PriorityFeeBudgetInput, PrioritySellPlannerOutcome,
-    TxOrderingPolicy, TxPrepRequestContext, TxSubmissionPolicy,
+    TxPrepRequestContext, TxSubmissionPolicy,
 };
 use serde_json::{json, Value};
 
@@ -343,17 +343,10 @@ async fn broadcast_result_becomes_submitted_report() {
 }
 
 #[tokio::test]
-async fn flashbots_bundle_result_becomes_submitted_report_with_bundle_evidence() {
+async fn public_tail_result_records_dependency_evidence() {
     let tail_hash = format!("0x{}", "33".repeat(32));
     let mut signal = signal(Some("attempt-1"));
-    signal.submission_policy = TxSubmissionPolicy::FlashbotsMevShare {
-        ordering: TxOrderingPolicy::TailAfter {
-            tx_hash: tail_hash.clone(),
-        },
-        target_block: Some(25_128_247),
-        max_block: Some(25_128_249),
-        can_revert: false,
-    };
+    signal.submission_policy = TxSubmissionPolicy::PublicRpcBroadcast;
     signal.request.metadata["gas_policy"]["action"] = json!("tail_entry_buy");
     signal.request.metadata["tail_entry_ordering"] = json!({
         "tail_after_tx_hash": tail_hash.clone(),
@@ -364,13 +357,13 @@ async fn flashbots_bundle_result_becomes_submitted_report_with_bundle_evidence()
         FixedSubmitter {
             result: Mutex::new(Some(Ok(LiveTxSubmissionResult {
                 attempt_id: "attempt-1".to_string(),
-                status: "bundle_submitted".to_string(),
+                status: "broadcast".to_string(),
                 tx_hash: Some(format!("0x{}", "11".repeat(32))),
                 error: None,
-                bundle_hash: Some(format!("0x{}", "44".repeat(32))),
-                bundle_target_block: Some(25_128_247),
-                bundle_max_block: Some(25_128_249),
-                bundle_tail_after_tx_hash: Some(tail_hash.clone()),
+                bundle_hash: None,
+                bundle_target_block: None,
+                bundle_max_block: None,
+                bundle_tail_after_tx_hash: None,
             }))),
         },
     );
@@ -379,12 +372,9 @@ async fn flashbots_bundle_result_becomes_submitted_report_with_bundle_evidence()
     let evidence = report.mined_evidence.expect("submitted evidence");
 
     assert_eq!(report.status, ExecutionStatus::Submitted);
-    assert_eq!(
-        evidence.private_execution_transport.as_deref(),
-        Some("flashbots_mev_share_v0.1")
-    );
-    assert_eq!(evidence.bundle_target_block, Some(25_128_247));
-    assert_eq!(evidence.bundle_max_block, Some(25_128_249));
+    assert_eq!(evidence.private_execution_transport, None);
+    assert_eq!(evidence.bundle_target_block, None);
+    assert_eq!(evidence.bundle_max_block, None);
     assert_eq!(
         evidence.gas_policy_tail_after_tx_hash.as_deref(),
         Some(tail_hash.as_str())

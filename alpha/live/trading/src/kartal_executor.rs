@@ -195,15 +195,6 @@ impl LiveTraderTxSignal {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TxSubmissionPolicy {
     PublicRpcBroadcast,
-    FlashbotsMevShare {
-        ordering: TxOrderingPolicy,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        target_block: Option<BlockNumber>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        max_block: Option<BlockNumber>,
-        #[serde(default)]
-        can_revert: bool,
-    },
 }
 
 impl Default for TxSubmissionPolicy {
@@ -213,12 +204,6 @@ impl Default for TxSubmissionPolicy {
 }
 
 pub type LiveTxExecution = TxSubmissionPolicy;
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TxOrderingPolicy {
-    TailAfter { tx_hash: String },
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LiveDirectRawTransactionRequest {
@@ -407,33 +392,17 @@ mod tests {
     }
 
     #[test]
-    fn flashbots_submission_policy_serializes_as_kartal_policy() {
+    fn public_submission_policy_serializes_as_kartal_policy() {
         let request = KartalSubmitTransactionRequest {
             transaction: request(),
-            submission_policy: TxSubmissionPolicy::FlashbotsMevShare {
-                ordering: TxOrderingPolicy::TailAfter {
-                    tx_hash: format!("0x{}", "11".repeat(32)),
-                },
-                target_block: Some(25_128_247),
-                max_block: Some(25_128_249),
-                can_revert: false,
-            },
+            submission_policy: TxSubmissionPolicy::PublicRpcBroadcast,
         };
 
         let value = serde_json::to_value(request).unwrap();
 
         assert_eq!(
             value["submission_policy"],
-            json!({
-                "kind": "flashbots_mev_share",
-                "ordering": {
-                    "kind": "tail_after",
-                    "tx_hash": format!("0x{}", "11".repeat(32))
-                },
-                "target_block": 25_128_247,
-                "max_block": 25_128_249,
-                "can_revert": false
-            })
+            json!({"kind": "public_rpc_broadcast"})
         );
     }
 

@@ -29,7 +29,7 @@ pub use kartal_executor::{
     KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
     KartalExecutorClientError, KartalSimulationReference, KartalSubmitDirectRawResult,
     KartalSubmitTransactionRequest, KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, LiveTxExecution, TxOrderingPolicy, TxSubmissionPolicy,
+    LiveTraderTxSignal, LiveTxExecution, TxSubmissionPolicy,
 };
 pub use lp_approval_exit::{
     plan_lp_approval_response, BribeExitConfig, HeldPositionContext, LpApprovalSignal,

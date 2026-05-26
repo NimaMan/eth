@@ -20,7 +20,7 @@ use eth_live_trading::{
     KartalSimulationReference, LiveDirectRawTransactionRequest, LivePrioritySellPlanner,
     LivePrioritySellPlannerConfig, LivePrioritySellPlannerError, LiveTraderTxSignal,
     MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
-    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
+    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy, TxSubmissionRoute,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
     ETH_UNSIGNED_TX_WIRE_PROTOCOL,
@@ -43,11 +43,10 @@ mod preflight;
 mod tail_entry;
 use input_resolver::LiveRealInputResolver;
 use preflight::parse_live_real_address;
+pub(super) use preflight::preflight_kartal_real;
 pub(in crate::live_trader) use preflight::KartalRealPreflight;
-pub(super) use preflight::{preflight_kartal_real, validate_flashbots_tail_max_block_span};
 #[cfg(test)]
 use preflight::{validate_kartal_real_status, HOLD16_DEPLOY_BUY_WEI};
-#[cfg(test)]
 use tail_entry::TailEntryOrderingEvidence;
 use tail_entry::{
     buy_submission_policy, tail_entry_ordering_evidence, tail_entry_overlay_plan,
@@ -89,7 +88,6 @@ struct KartalRealPlanner<P, G> {
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
     gas_policy: LiveRealGasPolicy,
-    flashbots_tail_max_block_span: Option<u64>,
 }
 
 struct KartalPolicySubmitter {
@@ -220,6 +218,7 @@ where
             &gas_rank_policy,
             &route,
             &self.gas_policy,
+            &tail_entry_ordering,
             input.context.current_block,
         )?;
         let estimated_gas_used = route
@@ -230,7 +229,6 @@ where
         })?;
         let submission_policy = buy_submission_policy(
             &gas_rank_policy,
-            self.flashbots_tail_max_block_span,
             gas_policy_action,
             &tail_entry_ordering,
             input.context.current_block,
@@ -309,6 +307,7 @@ where
                     "tail_entry_ordering": {
                         "tail_after_tx_hash": tail_entry_ordering.as_ref().and_then(|evidence| evidence.tail_after_tx_hash.clone()),
                         "dependency_priority_fee_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_priority_fee_wei.clone()),
+                        "dependency_max_fee_per_gas_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_max_fee_per_gas_wei.clone()),
                         "dependency_gas_price_wei": tail_entry_ordering.as_ref().and_then(|evidence| evidence.dependency_gas_price_wei.clone()),
                     },
                     "production_gas_guard": {
@@ -353,7 +352,6 @@ fn transaction_wire_protocol(_submission_policy: &TxSubmissionPolicy) -> &'stati
 fn executor_boundary(submission_policy: &TxSubmissionPolicy) -> &'static str {
     match submission_policy {
         TxSubmissionPolicy::PublicRpcBroadcast => "kartal_eth_tx_executor",
-        TxSubmissionPolicy::FlashbotsMevShare { .. } => "kartal_eth_tx_executor_policy",
     }
 }
 
@@ -429,8 +427,20 @@ fn select_entry_gas_fee(
     policy: &StrategyGasRankPolicy,
     route: &PreparedSellRoute,
     gas_policy: &LiveRealGasPolicy,
+    tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
     current_block: u64,
 ) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
+    if policy.submission_route == TxSubmissionRoute::PublicMempoolTail {
+        return select_public_tail_entry_gas_fee(
+            plan,
+            policy,
+            route,
+            gas_policy,
+            tail_entry_ordering,
+            current_block,
+        );
+    }
+
     let estimated_gas_used = route
         .require_estimated_gas_used()
         .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
@@ -465,6 +475,149 @@ fn select_entry_gas_fee(
             block_number: Some(current_block),
         }
     })
+}
+
+fn select_public_tail_entry_gas_fee(
+    plan: &GasRankPlan,
+    policy: &StrategyGasRankPolicy,
+    route: &PreparedSellRoute,
+    gas_policy: &LiveRealGasPolicy,
+    tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
+    current_block: u64,
+) -> eth_alpha_core::error::Result<RankedFeeCandidate> {
+    let estimated_gas_used = route
+        .require_estimated_gas_used()
+        .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+    let base_candidates = plan
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.source.as_deref() == Some(gas_policy.required_gas_rank_source.as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let base_candidate = policy.choose_candidate(&base_candidates).ok_or_else(|| {
+        AlphaCoreError::ExecutionCancelled {
+            reason: format!(
+                "public mempool tail-entry buy has no gas-rank profile matching required_source={} candidates={}",
+                gas_policy.required_gas_rank_source,
+                serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
+            ),
+            block_number: Some(current_block),
+        }
+    })?;
+    let ordering =
+        tail_entry_ordering
+            .as_ref()
+            .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
+                reason:
+                    "public mempool tail-entry fee selection requires dependency ordering evidence"
+                        .to_string(),
+                block_number: Some(current_block),
+            })?;
+    let dependency_priority_fee_wei_text = ordering
+        .dependency_priority_fee_wei
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
+            reason: "public mempool tail-entry fee selection requires dependency_priority_fee_wei"
+                .to_string(),
+            block_number: Some(current_block),
+        })?;
+    let dependency_priority_fee_wei = parse_u256_quantity(
+        dependency_priority_fee_wei_text,
+        "tail-entry dependency_priority_fee_wei",
+    )?;
+    let undercut_wei = U256::from(gas_policy.tail_entry_priority_undercut_wei);
+    if dependency_priority_fee_wei <= undercut_wei {
+        return Err(AlphaCoreError::ExecutionCancelled {
+            reason: format!(
+                "public mempool tail-entry dependency priority fee {dependency_priority_fee_wei} wei is not above undercut {} wei",
+                gas_policy.tail_entry_priority_undercut_wei
+            ),
+            block_number: Some(current_block),
+        });
+    }
+    let priority_fee_wei = dependency_priority_fee_wei - undercut_wei;
+    let priority_fee_gwei =
+        u256_wei_to_decimal_gwei(priority_fee_wei, "tail-entry selected priority fee")?;
+    let max_fee_per_gas_gwei = buffered_max_fee_gwei(
+        plan.predicted_base_fee_gwei,
+        priority_fee_gwei,
+        gas_policy.tail_entry_max_fee_buffer_bps,
+    );
+    let mut candidate = RankedFeeCandidate {
+        label: "public_tail_after_dependency".to_string(),
+        priority_fee_gwei,
+        max_fee_per_gas_gwei,
+        rank_position_p50: base_candidate.rank_position_p50,
+        gas_before_p50: base_candidate.gas_before_p50,
+        likely_fits_at_p50: base_candidate.likely_fits_at_p50,
+        source: Some(gas_policy.required_gas_rank_source.clone()),
+        metadata: Some(json!({
+            "public_tail_fee_policy": "priority_fee_dependency_undercut",
+            "base_candidate_label": base_candidate.label,
+            "base_candidate_priority_fee_gwei": base_candidate.priority_fee_gwei,
+            "base_candidate_max_fee_per_gas_gwei": base_candidate.max_fee_per_gas_gwei,
+            "dependency_tail_after_tx_hash": ordering.tail_after_tx_hash.clone(),
+            "dependency_priority_fee_wei": dependency_priority_fee_wei.to_string(),
+            "dependency_max_fee_per_gas_wei": ordering.dependency_max_fee_per_gas_wei.clone(),
+            "dependency_gas_price_wei": ordering.dependency_gas_price_wei.clone(),
+            "priority_undercut_wei": gas_policy.tail_entry_priority_undercut_wei,
+            "selected_priority_fee_wei": priority_fee_wei.to_string(),
+            "predicted_base_fee_gwei": plan.predicted_base_fee_gwei,
+            "max_fee_buffer_bps": gas_policy.tail_entry_max_fee_buffer_bps,
+            "strategy_min_priority_fee_floor_applied": false,
+        })),
+    };
+
+    if candidate.priority_fee_gwei > gas_policy.max_priority_fee_gwei {
+        return Err(AlphaCoreError::ExecutionCancelled {
+            reason: format!(
+                "public mempool tail-entry selected priority {} gwei exceeds max_priority_fee_gwei {}",
+                candidate.priority_fee_gwei, gas_policy.max_priority_fee_gwei
+            ),
+            block_number: Some(current_block),
+        });
+    }
+    if candidate.estimated_max_cost_eth(estimated_gas_used)
+        > gas_policy.entry_max_estimated_gas_fee_eth
+    {
+        return Err(AlphaCoreError::ExecutionCancelled {
+            reason: format!(
+                "public mempool tail-entry selected max cost {} ETH exceeds entry cap {} ETH",
+                candidate.estimated_max_cost_eth(estimated_gas_used),
+                gas_policy.entry_max_estimated_gas_fee_eth
+            ),
+            block_number: Some(current_block),
+        });
+    }
+    if let Some(mut metadata) = candidate.metadata.take() {
+        metadata["estimated_max_cost_eth"] =
+            json!(candidate.estimated_max_cost_eth(estimated_gas_used));
+        metadata["estimated_priority_spend_eth"] =
+            json!(candidate.estimated_priority_spend_eth(estimated_gas_used));
+        candidate.metadata = Some(metadata);
+    }
+    Ok(candidate)
+}
+
+fn buffered_max_fee_gwei(
+    predicted_base_fee_gwei: Decimal,
+    priority_fee_gwei: Decimal,
+    buffer_bps: u64,
+) -> Decimal {
+    let numerator = Decimal::from(10_000u64 + buffer_bps);
+    (predicted_base_fee_gwei * numerator / Decimal::from(10_000u64)) + priority_fee_gwei
+}
+
+fn u256_wei_to_decimal_gwei(value: U256, label: &str) -> eth_alpha_core::error::Result<Decimal> {
+    let value = value.to_string().parse::<Decimal>().map_err(|error| {
+        AlphaCoreError::Execution(format!(
+            "invalid {label} decimal wei value {value}: {error}"
+        ))
+    })?;
+    Ok(value / Decimal::from(1_000_000_000u64))
 }
 
 fn gas_policy_profile_labels(policy: &StrategyGasRankPolicy) -> Vec<&'static str> {
@@ -524,7 +677,6 @@ pub(super) async fn build_kartal_real_adapter(
     exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
-    flashbots_tail_max_block_span: Option<u64>,
     gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
@@ -599,7 +751,6 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
-        flashbots_tail_max_block_span,
     };
     let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(
         &args.kartal_url,

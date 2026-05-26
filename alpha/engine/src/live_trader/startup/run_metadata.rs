@@ -21,6 +21,8 @@ pub(super) fn live_gas_policy_run_metadata_json(
         "v2_vault_sell_gas_limit": policy.v2_vault_sell_gas_limit,
         "mempool_race_priority_buffer_min_gwei": policy.mempool_race_priority_buffer_min_gwei.to_string(),
         "mempool_race_priority_buffer_max_gwei": policy.mempool_race_priority_buffer_max_gwei.to_string(),
+        "tail_entry_priority_undercut_wei": policy.tail_entry_priority_undercut_wei,
+        "tail_entry_max_fee_buffer_bps": policy.tail_entry_max_fee_buffer_bps,
         "entry_buy_profiles": &policy.entry_buy_gas_rank_policy,
         "tail_entry_buy_profiles": &policy.tail_entry_buy_gas_rank_policy,
         "normal_exit_profiles": &policy.normal_exit_gas_rank_policy,

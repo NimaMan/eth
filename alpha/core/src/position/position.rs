@@ -60,6 +60,18 @@ pub struct Position {
     /// Used for honest baseline PnL even when no exit is attempted.
     #[serde(default)]
     pub drained: bool,
+    /// Last buy failure seen for this position, if any.
+    #[serde(default)]
+    pub entry_failure_reason: Option<String>,
+    /// Number of failed buy reports seen for this position.
+    #[serde(default)]
+    pub entry_failure_count: u32,
+    /// Block number of the latest failed buy report, if known.
+    #[serde(default)]
+    pub last_entry_failure_block: Option<BlockNumber>,
+    /// Gas-policy action from the latest failed buy report, if known.
+    #[serde(default)]
+    pub entry_failure_gas_policy_action: Option<String>,
     /// Last sell failure seen for this position, if any.
     #[serde(default)]
     pub exit_failure_reason: Option<String>,
@@ -98,6 +110,10 @@ impl Position {
             exit_block: None,
             gas_cost_eth: DecimalAmount::ZERO,
             drained: false,
+            entry_failure_reason: None,
+            entry_failure_count: 0,
+            last_entry_failure_block: None,
+            entry_failure_gas_policy_action: None,
             exit_failure_reason: None,
             exit_failure_count: 0,
             last_exit_failure_block: None,
@@ -201,6 +217,13 @@ impl Position {
             && self.state == PositionState::BuySubmitted
         {
             self.state = PositionState::BuyFailed;
+            self.entry_failure_reason = report.error.clone();
+            self.entry_failure_count = self.entry_failure_count.saturating_add(1);
+            self.last_entry_failure_block = report.block_number;
+            self.entry_failure_gas_policy_action = report
+                .mined_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.gas_policy_action.clone());
             return Ok(());
         }
 
@@ -271,6 +294,10 @@ impl Position {
                 .map(|amount| amount.to_decimal());
             self.entry_token_raw_amount = report.token_amount.clone();
             self.entry_block = report.block_number;
+            self.entry_failure_reason = None;
+            self.entry_failure_count = 0;
+            self.last_entry_failure_block = None;
+            self.entry_failure_gas_policy_action = None;
             self.exit_failure_reason = None;
             self.exit_retryable = true;
             return Ok(());

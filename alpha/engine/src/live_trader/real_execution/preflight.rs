@@ -20,26 +20,13 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
-    requires_flashbots_auth: bool,
-    flashbots_tail_max_block_span: Option<u64>,
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    if requires_flashbots_auth {
-        validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span.ok_or_else(|| {
-            eyre!("ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN is required for Flashbots tail-entry submission")
-        })?)?;
-    }
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
         .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(
-        &status,
-        args,
-        live_args,
-        strategy_specs,
-        requires_flashbots_auth,
-    )?;
+    validate_kartal_real_status(&status, args, live_args, strategy_specs)?;
     Ok(KartalRealPreflight { token, status })
 }
 
@@ -48,7 +35,6 @@ pub(super) fn validate_kartal_real_status(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
-    requires_flashbots_auth: bool,
 ) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
@@ -67,11 +53,6 @@ pub(super) fn validate_kartal_real_status(
     if status.submit_endpoint.is_none() {
         return Err(eyre!(
             "kartal-real trader requires Kartal /eth/tx/submit support"
-        ));
-    }
-    if requires_flashbots_auth && status.flashbots_auth_configured != Some(true) {
-        return Err(eyre!(
-            "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
         ));
     }
     match status.broadcast_mode {
@@ -200,15 +181,6 @@ fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env}"))?;
     Ok(token)
-}
-
-pub(in crate::live_trader) fn validate_flashbots_tail_max_block_span(span: u64) -> Result<()> {
-    if span == 0 {
-        return Err(eyre!(
-            "ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN must be greater than zero"
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn parse_live_real_address(value: &str, label: &str) -> Result<Address> {

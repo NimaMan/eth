@@ -24,6 +24,9 @@ const LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG: &str =
     "ALPHA_LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI";
 const LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG: &str =
     "ALPHA_LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI";
+const LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI_CONFIG: &str =
+    "ALPHA_LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI";
+const LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS_CONFIG: &str = "ALPHA_LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS";
 
 #[derive(Clone, Debug)]
 pub(super) struct LiveRealGasPolicy {
@@ -40,6 +43,8 @@ pub(super) struct LiveRealGasPolicy {
     pub(super) v2_vault_sell_gas_limit: u64,
     pub(super) mempool_race_priority_buffer_min_gwei: Decimal,
     pub(super) mempool_race_priority_buffer_max_gwei: Decimal,
+    pub(super) tail_entry_priority_undercut_wei: u64,
+    pub(super) tail_entry_max_fee_buffer_bps: u64,
     pub(super) entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy,
     pub(super) normal_exit_gas_rank_policy: StrategyGasRankPolicy,
@@ -100,6 +105,14 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG,
         )?,
+        tail_entry_priority_undercut_wei: required_config_u64(
+            config,
+            LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI_CONFIG,
+        )?,
+        tail_entry_max_fee_buffer_bps: required_config_u64(
+            config,
+            LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS_CONFIG,
+        )?,
         entry_buy_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG,
@@ -109,7 +122,7 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG,
         )?
-        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
+        .with_submission_route(TxSubmissionRoute::PublicMempoolTail),
         normal_exit_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG,
@@ -165,6 +178,16 @@ impl LiveRealGasPolicy {
                 "{LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG} must be >= {LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG}"
             ));
         }
+        if self.tail_entry_priority_undercut_wei == 0 {
+            return Err(eyre!(
+                "{LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI_CONFIG} must be greater than zero"
+            ));
+        }
+        if self.tail_entry_max_fee_buffer_bps > 10_000 {
+            return Err(eyre!(
+                "{LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS_CONFIG} must be <= 10000"
+            ));
+        }
         Ok(self)
     }
 
@@ -187,18 +210,6 @@ impl LiveRealGasPolicy {
             signal: signal.to_string(),
             guard: "entry_estimated_gas_fee_cap",
         }
-    }
-
-    pub(in crate::live_trader) fn requires_flashbots_auth(&self) -> bool {
-        [
-            &self.entry_buy_gas_rank_policy,
-            &self.tail_entry_buy_gas_rank_policy,
-            &self.normal_exit_gas_rank_policy,
-            &self.mempool_pre_mine_gas_rank_policy,
-            &self.lp_approval_exit_gas_rank_policy,
-        ]
-        .iter()
-        .any(|policy| policy.submission_route.requires_flashbots_auth())
     }
 }
 
@@ -303,9 +314,11 @@ mod tests {
             v2_vault_sell_gas_limit: 300_000,
             mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
             mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
+            tail_entry_priority_undercut_wei: 500,
+            tail_entry_max_fee_buffer_bps: 1250,
             entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
             tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first()
-                .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
+                .with_submission_route(TxSubmissionRoute::PublicMempoolTail),
             normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
             mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
             lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
@@ -338,6 +351,8 @@ mod tests {
             ),
             (LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG, "0.1"),
             (LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG, "0.2"),
+            (LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI_CONFIG, "500"),
+            (LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS_CONFIG, "1250"),
         ]
         .into_iter()
         .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -358,7 +373,7 @@ mod tests {
         );
         assert_eq!(
             context.policy.submission_route,
-            TxSubmissionRoute::FlashbotsMevShareTail
+            TxSubmissionRoute::PublicMempoolTail
         );
     }
 
@@ -390,7 +405,7 @@ mod tests {
         );
         assert_eq!(
             policy.tail_entry_buy_gas_rank_policy.submission_route,
-            TxSubmissionRoute::FlashbotsMevShareTail
+            TxSubmissionRoute::PublicMempoolTail
         );
         assert_eq!(
             policy.normal_exit_gas_rank_policy.submission_route,
@@ -404,7 +419,8 @@ mod tests {
             policy.lp_approval_exit_gas_rank_policy.submission_route,
             TxSubmissionRoute::PublicRpcBroadcast
         );
-        assert!(policy.requires_flashbots_auth());
+        assert_eq!(policy.tail_entry_priority_undercut_wei, 500);
+        assert_eq!(policy.tail_entry_max_fee_buffer_bps, 1250);
     }
 
     #[test]

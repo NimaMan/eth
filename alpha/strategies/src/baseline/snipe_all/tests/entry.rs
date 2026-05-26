@@ -3,7 +3,7 @@ use crate::shared_rules::entry::init_policy::EntryInitPolicyConfig;
 use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
     amount::Amount,
-    execution::{ExecutionReport, ExecutionStatus},
+    execution::{ExecutionReport, ExecutionStatus, MinedExecutionEvidence},
     ids::{OrderId, PositionId, TokenPoolId},
     mempool_entry::{MEMPOOL_ENTRY_EVIDENCE_KEY, MEMPOOL_ENTRY_EVIDENCE_VERSION},
     position::{Position, PositionKey},
@@ -705,6 +705,88 @@ fn cancelled_buy_attempt_can_retry_same_pool() {
     assert_eq!(
         retry.reason(),
         Some("entry.buy_eligible_pool_once:retry_after_noncapital_execution")
+    );
+}
+
+#[test]
+fn failed_tail_entry_buy_can_retry_same_pool_as_regular_entry() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 1,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let empty_portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let empty_ctx = ctx(&market, &empty_portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+
+    assert!(strategy
+        .on_market_event(
+            &empty_ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: pool.clone(),
+            },
+        )
+        .unwrap()
+        .order_intent()
+        .is_some());
+
+    let mut failed_tail = Position::new(
+        PositionId("failed-tail-buy".to_string()),
+        PositionKey {
+            portfolio_id: strategy.config.portfolio_id.clone(),
+            wallet_id: strategy.config.wallet_id.clone(),
+            strategy_name: strategy.name(),
+            token_address: pool.token_address,
+            pool_address: pool.address.clone(),
+            protocol: pool.protocol.clone(),
+        },
+    );
+    failed_tail.mark_intent_created(OrderSide::Buy).unwrap();
+    failed_tail
+        .mark_order_submitted(OrderId("buy-1".to_string()), OrderSide::Buy)
+        .unwrap();
+    failed_tail
+        .apply_execution_report(&ExecutionReport {
+            order_id: OrderId("buy-1".to_string()),
+            status: ExecutionStatus::Failed,
+            tx_hash: None,
+            block_number: Some(1),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: Some(MinedExecutionEvidence {
+                gas_policy_action: Some("tail_entry_buy".to_string()),
+                ..MinedExecutionEvidence::default()
+            }),
+            error: Some("receipt status failed before dependency".to_string()),
+        })
+        .unwrap();
+
+    let mut portfolio = PortfolioState::default();
+    portfolio
+        .positions
+        .insert(failed_tail.id.clone(), failed_tail);
+    let retry_ctx = ctx(&market, &portfolio, &risks);
+    let retry = strategy
+        .on_market_event(
+            &retry_ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 2,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(retry.order_intent().is_some());
+    assert_eq!(
+        retry.reason(),
+        Some("entry.buy_eligible_pool_once:retry_after_tail_entry_failure")
     );
 }
 

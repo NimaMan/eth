@@ -6,7 +6,7 @@ use chrono::Utc;
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::StrategyGasRankPolicy;
 use eth_strategies::shared_rules::live::observation_strategy_name;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{eyre, Report, Result, WrapErr};
 use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
@@ -68,7 +68,7 @@ use bankroll::{
     validate_live_real_entry_bankrolls,
 };
 use cli::{Args, RealExecutionArgs};
-use config_resolution::{resolve_cli_or_config_i64, resolve_cli_or_config_u64};
+use config_resolution::resolve_cli_or_config_i64;
 use constants::*;
 use event_processing::{
     poll_live_inputs, process_pool_updates, process_position_monitor, reconcile_real_receipts,
@@ -83,7 +83,7 @@ use loop_control::{
 };
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use poll_error::handle_poll_error;
-use real_execution::{preflight_kartal_real, validate_flashbots_tail_max_block_span};
+use real_execution::preflight_kartal_real;
 use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
 use run_metadata::live_gas_policy_run_metadata_json;
@@ -95,6 +95,15 @@ use support::*;
 use token_server::TokenServerClient;
 
 pub use entrypoints::{run_live_backtest, run_live_real};
+
+fn format_error_chain(error: &Report) -> String {
+    error
+        .chain()
+        .enumerate()
+        .map(|(index, cause)| format!("{index}: {cause}"))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
 
 async fn run(
     runner_name: &'static str,
@@ -143,19 +152,6 @@ async fn run(
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
     let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
     live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
-    let requires_flashbots_auth =
-        execution_mode.uses_kartal() && live_gas_policy.requires_flashbots_auth();
-    let flashbots_tail_max_block_span = if requires_flashbots_auth {
-        let span = resolve_cli_or_config_u64(
-            None,
-            &shared_config,
-            ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN_CONFIG,
-        )?;
-        validate_flashbots_tail_max_block_span(span)?;
-        Some(span)
-    } else {
-        None
-    };
     let live_real_gas_policy = if execution_mode.uses_kartal() {
         Some(live_gas_policy.clone())
     } else {
@@ -163,16 +159,7 @@ async fn run(
     };
     let kartal_real_preflight = match real_args.as_ref() {
         None => None,
-        Some(real_args) => Some(
-            preflight_kartal_real(
-                real_args,
-                &args,
-                &strategy_specs,
-                requires_flashbots_auth,
-                flashbots_tail_max_block_span,
-            )
-            .await?,
-        ),
+        Some(real_args) => Some(preflight_kartal_real(real_args, &args, &strategy_specs).await?),
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let preflight_client = TokenServerClient::new(token_server_url.clone());
@@ -249,7 +236,6 @@ async fn run(
             single_min_liquidity_eth: &single_min_liquidity_eth,
             single_min_liquidity_usd: &single_min_liquidity_usd,
             gas_policy_metadata,
-            flashbots_tail_max_block_span,
         },
     )
     .await?;
@@ -281,7 +267,6 @@ async fn run(
         live_gas_policy: live_gas_policy.clone(),
         live_real_gas_policy: live_real_gas_policy.clone(),
         kartal_real_preflight,
-        flashbots_tail_max_block_span,
     })
     .await?;
     let adapter_current_block = execution_stack.adapter_current_block.clone();
@@ -685,7 +670,12 @@ async fn run(
 
         let chain_state_status = state_status_adapter.state_status().await;
         if let Err(error) = &chain_state_status {
-            warn!(error = %error, "chain-sim state status unavailable");
+            warn!(
+                error = %error,
+                root_cause = %error.root_cause(),
+                error_chain = %format_error_chain(error),
+                "chain-sim state status unavailable"
+            );
         }
         let chain_state_payload = chain_state_status
             .as_ref()

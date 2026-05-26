@@ -7,7 +7,7 @@ use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 #[serde(rename_all = "snake_case")]
 pub enum TxSubmissionRoute {
     PublicRpcBroadcast,
-    FlashbotsMevShareTail,
+    PublicMempoolTail,
 }
 
 impl Default for TxSubmissionRoute {
@@ -17,14 +17,10 @@ impl Default for TxSubmissionRoute {
 }
 
 impl TxSubmissionRoute {
-    pub fn requires_flashbots_auth(self) -> bool {
-        matches!(self, Self::FlashbotsMevShareTail)
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             Self::PublicRpcBroadcast => "public_rpc_broadcast",
-            Self::FlashbotsMevShareTail => "flashbots_mev_share_tail",
+            Self::PublicMempoolTail => "public_mempool_tail",
         }
     }
 }

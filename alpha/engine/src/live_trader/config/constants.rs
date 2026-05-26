@@ -7,8 +7,6 @@ pub(super) const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 pub(super) const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
 pub(super) const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
 pub(super) const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
-pub(super) const ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN_CONFIG: &str =
-    "ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN";
 pub(super) const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
 pub(super) const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 pub(super) const RETH_HTTP_RPC_CONFIG: &str = "RETH_HTTP_RPC";

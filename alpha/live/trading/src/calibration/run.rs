@@ -287,9 +287,6 @@ mod tests {
             journal_path: None,
             direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
             submit_endpoint: Some("/eth/tx/submit".to_string()),
-            flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
-            flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
-            flashbots_auth_configured: Some(false),
             policy: KartalEthTxPolicyStatus {
                 version: "test".to_string(),
                 allowed_from_count: 0,

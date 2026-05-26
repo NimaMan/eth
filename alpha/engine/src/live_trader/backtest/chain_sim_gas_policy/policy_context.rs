@@ -156,6 +156,8 @@ mod tests {
             v2_vault_sell_gas_limit: 1,
             mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
             mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
+            tail_entry_priority_undercut_wei: 500,
+            tail_entry_max_fee_buffer_bps: 1250,
             entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
             tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
             normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),

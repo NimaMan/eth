@@ -90,6 +90,8 @@ pub(super) fn build_mempool_entry_evidence(
         "dependency_tx_hashes": dependency_hashes,
         "dependency_fee_metadata": {
             "tail_after_tx_hash": result.request.tx.hash,
+            "dependency_max_fee_per_gas_wei": tx_fee_field_decimal_string(&result.request.tx.data, "maxFeePerGas"),
+            "dependency_priority_fee_wei": tx_fee_field_decimal_string(&result.request.tx.data, "maxPriorityFeePerGas"),
             "dependency_gas_price_wei": result.request.tx.gas_price.as_ref().map(|value| value.to_string()),
             "dependency_value_wei": result.request.tx.value.to_string()
         },
@@ -300,6 +302,23 @@ fn dependency_tx_hashes(
         hashes.push(fallback_hash.to_string());
     }
     hashes
+}
+
+fn tx_fee_field_decimal_string(tx_data: &Value, key: &str) -> Option<String> {
+    let value = tx_data.get(key)?.as_str()?;
+    parse_rpc_quantity(value).map(|value| value.to_string())
+}
+
+fn parse_rpc_quantity(value: &str) -> Option<U256> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(hex) = trimmed.strip_prefix("0x") {
+        U256::from_str_radix(hex, 16).ok()
+    } else {
+        U256::from_str_radix(trimmed, 10).ok()
+    }
 }
 
 #[cfg(test)]

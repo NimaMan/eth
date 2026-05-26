@@ -36,12 +36,6 @@ pub struct SignedTransaction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignedFlashbotsAuth {
-    pub body_hash: String,
-    pub signature: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitDirectRawResult {
     pub attempt_id: String,
     pub status: ExecutionStatus,

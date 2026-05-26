@@ -14,5 +14,5 @@ terminal fill/failure is produced against post-block `N+1` state.
 Mempool `trading_enabled` signals are observed but not routed into the
 chain-sim strategy as buy triggers. Chain-sim live backtests enter from the
 normal mined pool-update path once trading-enabled state is available. Same-block
-dependency ordering is a real-live Flashbots/Kartal policy, not a live-backtest
-assumption.
+dependency ordering is a real-live public-tail gas/submission policy, not a
+live-backtest assumption.
