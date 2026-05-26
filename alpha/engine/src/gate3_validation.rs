@@ -81,7 +81,7 @@ fn signal() -> LiveTraderTxSignal {
             Address::repeat_byte(0x22).to_string(),
         )),
         observed_block: Some(25_128_246),
-        submission_policy: TxSubmissionPolicy::PublicMempool,
+        submission_policy: TxSubmissionPolicy::PublicRpcBroadcast,
         request: LiveDirectRawTransactionRequest {
             attempt_id: Some("gate3-attempt-1".to_string()),
             chain_id: 1,

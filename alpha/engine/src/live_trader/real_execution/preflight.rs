@@ -9,8 +9,6 @@ use eth_strategies::{
 use eyre::{eyre, Result, WrapErr};
 
 use super::super::cli::{Args, RealExecutionArgs};
-use super::TailEntrySubmissionRoute;
-
 pub(super) const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
 
 pub(in crate::live_trader) struct KartalRealPreflight {
@@ -22,11 +20,11 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
-    tail_entry_submission_route: TailEntrySubmissionRoute,
+    requires_flashbots_auth: bool,
     flashbots_tail_max_block_span: Option<u64>,
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    if tail_entry_submission_route.requires_flashbots_auth() {
+    if requires_flashbots_auth {
         validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span.ok_or_else(|| {
             eyre!("ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN is required for Flashbots tail-entry submission")
         })?)?;
@@ -40,7 +38,7 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
         args,
         live_args,
         strategy_specs,
-        tail_entry_submission_route,
+        requires_flashbots_auth,
     )?;
     Ok(KartalRealPreflight { token, status })
 }
@@ -50,7 +48,7 @@ pub(super) fn validate_kartal_real_status(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
-    tail_entry_submission_route: TailEntrySubmissionRoute,
+    requires_flashbots_auth: bool,
 ) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
@@ -71,20 +69,18 @@ pub(super) fn validate_kartal_real_status(
             "kartal-real trader requires Kartal /eth/tx/submit support"
         ));
     }
-    if tail_entry_submission_route.requires_flashbots_auth()
-        && status.flashbots_auth_configured != Some(true)
-    {
+    if requires_flashbots_auth && status.flashbots_auth_configured != Some(true) {
         return Err(eyre!(
             "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
         ));
     }
     match status.broadcast_mode {
         KartalStatusBroadcastMode::DryRun => Ok(()),
-        KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
-            validate_public_mempool_hold16_deploy(status, live_args, strategy_specs)
+        KartalStatusBroadcastMode::Broadcast if args.allow_broadcast_live_validation => {
+            validate_broadcast_hold16_deploy(status, live_args, strategy_specs)
         }
-        KartalStatusBroadcastMode::PublicMempool => Err(eyre!(
-            "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold16 deploy strategy"
+        KartalStatusBroadcastMode::Broadcast => Err(eyre!(
+            "kartal-real trader requires broadcast_mode=dry_run unless --allow-broadcast-live-validation is set for the hold16 deploy strategy"
         )),
         KartalStatusBroadcastMode::Unknown => Err(eyre!(
             "kartal-real trader cannot run with unknown Kartal broadcast_mode"
@@ -92,40 +88,38 @@ pub(super) fn validate_kartal_real_status(
     }
 }
 
-fn validate_public_mempool_hold16_deploy(
+fn validate_broadcast_hold16_deploy(
     status: &KartalEthTxExecutorStatus,
     args: &Args,
     strategy_specs: &[LiveStrategySpec],
 ) -> Result<()> {
     if args.strategy_set.as_deref() != Some(HOLD16_STRATEGY_NAME) {
         return Err(eyre!(
-            "public mempool hold16 deploy requires --strategy-set {HOLD16_STRATEGY_NAME}"
+            "broadcast hold16 deploy requires --strategy-set {HOLD16_STRATEGY_NAME}"
         ));
     }
     if strategy_specs.len() != 1 || strategy_specs[0].strategy_name != HOLD16_STRATEGY_NAME {
         return Err(eyre!(
-            "public mempool hold16 deploy requires exactly one resolved strategy spec named {HOLD16_STRATEGY_NAME}"
+            "broadcast hold16 deploy requires exactly one resolved strategy spec named {HOLD16_STRATEGY_NAME}"
         ));
     }
     let spec = &strategy_specs[0];
     if spec.max_entry_pools.is_some() {
         return Err(eyre!(
-            "public mempool hold16 deploy requires strategy spec max_entry_pools unset; bankroll governs entry capacity"
+            "broadcast hold16 deploy requires strategy spec max_entry_pools unset; bankroll governs entry capacity"
         ));
     }
     if args.disable_entry {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires entries enabled"
-        ));
+        return Err(eyre!("broadcast hold16 deploy requires entries enabled"));
     }
     if args.once {
         return Err(eyre!(
-            "public mempool hold16 deploy must keep running so receipt reconciliation and hold16 exits can complete"
+            "broadcast hold16 deploy must keep running so receipt reconciliation and hold16 exits can complete"
         ));
     }
     if args.replay_current {
         return Err(eyre!(
-            "public mempool hold16 deploy must not use --replay-current; start from fresh live observations only"
+            "broadcast hold16 deploy must not use --replay-current; start from fresh live observations only"
         ));
     }
 
@@ -133,14 +127,15 @@ fn validate_public_mempool_hold16_deploy(
     let max_buy_wei = parse_policy_wei(HOLD16_DEPLOY_BUY_WEI, "hold16 deploy buy cap")?;
     if buy_wei.is_zero() || buy_wei > max_buy_wei {
         return Err(eyre!(
-            "public mempool hold16 deploy requires 0 < strategy buy_wei <= {HOLD16_DEPLOY_BUY_WEI}; got {}",
+            "broadcast hold16 deploy requires 0 < strategy buy_wei <= {HOLD16_DEPLOY_BUY_WEI}; got {}",
             spec.buy_wei
         ));
     }
 
-    let entry_bankroll_eth = spec.entry_bankroll_eth.as_deref().ok_or_else(|| {
-        eyre!("public mempool hold16 deploy requires strategy entry_bankroll_eth")
-    })?;
+    let entry_bankroll_eth = spec
+        .entry_bankroll_eth
+        .as_deref()
+        .ok_or_else(|| eyre!("broadcast hold16 deploy requires strategy entry_bankroll_eth"))?;
     let entry_bankroll_wei = super::super::support::parse_eth_decimal_to_wei(
         entry_bankroll_eth,
         "strategy entry_bankroll_eth",
@@ -151,7 +146,7 @@ fn validate_public_mempool_hold16_deploy(
     )?;
     if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_entry_bankroll_wei {
         return Err(eyre!(
-            "public mempool hold16 deploy requires entry bankroll in (0, {INITIAL_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
+            "broadcast hold16 deploy requires entry bankroll in (0, {INITIAL_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
         ));
     }
 
@@ -168,7 +163,7 @@ fn validate_public_mempool_hold16_deploy(
     )?;
     if max_transaction_cost_wei.is_zero() {
         return Err(eyre!(
-            "Kartal max_transaction_cost_wei must be nonzero for public mempool hold16 deploy"
+            "Kartal max_transaction_cost_wei must be nonzero for broadcast hold16 deploy"
         ));
     }
     let max_daily_cost_wei = parse_policy_wei(
@@ -188,7 +183,7 @@ fn validate_public_mempool_hold16_deploy(
     }
     if !status.policy.require_simulation || status.policy.max_simulation_age_blocks > 2 {
         return Err(eyre!(
-            "public mempool hold16 deploy requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
+            "broadcast hold16 deploy requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
         ));
     }
     Ok(())

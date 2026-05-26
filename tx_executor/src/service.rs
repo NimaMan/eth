@@ -107,7 +107,7 @@ impl EthTxExecutionService {
                     started,
                 ))
             }
-            BroadcastMode::PublicMempool => match self
+            BroadcastMode::Broadcast => match self
                 .broadcaster
                 .send_raw_transaction(&signed.raw_tx_hex)
                 .await

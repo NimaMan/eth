@@ -83,10 +83,7 @@ use loop_control::{
 };
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use poll_error::handle_poll_error;
-use real_execution::{
-    parse_tail_entry_submission_route, preflight_kartal_real,
-    validate_flashbots_tail_max_block_span, TailEntrySubmissionRoute,
-};
+use real_execution::{preflight_kartal_real, validate_flashbots_tail_max_block_span};
 use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
 use run_metadata::live_gas_policy_run_metadata_json;
@@ -143,18 +140,12 @@ async fn run(
             execution_mode.label()
         ));
     }
-    let tail_entry_submission_route = if execution_mode.uses_kartal() {
-        let raw = shared_config
-            .get(ALPHA_LIVE_TAIL_ENTRY_SUBMISSION_ROUTE_CONFIG)
-            .map(String::as_str)
-            .unwrap_or("flashbots_mev_share");
-        Some(parse_tail_entry_submission_route(raw)?)
-    } else {
-        None
-    };
-    let flashbots_tail_max_block_span = if execution_mode.uses_kartal()
-        && tail_entry_submission_route == Some(TailEntrySubmissionRoute::FlashbotsMevShare)
-    {
+    let strategy_specs = build_strategy_specs(&args, execution_mode)?;
+    let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
+    live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
+    let requires_flashbots_auth =
+        execution_mode.uses_kartal() && live_gas_policy.requires_flashbots_auth();
+    let flashbots_tail_max_block_span = if requires_flashbots_auth {
         let span = resolve_cli_or_config_u64(
             None,
             &shared_config,
@@ -165,9 +156,6 @@ async fn run(
     } else {
         None
     };
-    let strategy_specs = build_strategy_specs(&args, execution_mode)?;
-    let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
-    live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
     let live_real_gas_policy = if execution_mode.uses_kartal() {
         Some(live_gas_policy.clone())
     } else {
@@ -180,8 +168,7 @@ async fn run(
                 real_args,
                 &args,
                 &strategy_specs,
-                tail_entry_submission_route
-                    .expect("kartal-real execution requires tail-entry submission route"),
+                requires_flashbots_auth,
                 flashbots_tail_max_block_span,
             )
             .await?,
@@ -294,7 +281,6 @@ async fn run(
         live_gas_policy: live_gas_policy.clone(),
         live_real_gas_policy: live_real_gas_policy.clone(),
         kartal_real_preflight,
-        tail_entry_submission_route,
         flashbots_tail_max_block_span,
     })
     .await?;

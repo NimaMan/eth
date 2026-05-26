@@ -194,7 +194,7 @@ impl LiveTraderTxSignal {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TxSubmissionPolicy {
-    PublicMempool,
+    PublicRpcBroadcast,
     FlashbotsMevShare {
         ordering: TxOrderingPolicy,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,7 +208,7 @@ pub enum TxSubmissionPolicy {
 
 impl Default for TxSubmissionPolicy {
     fn default() -> Self {
-        Self::PublicMempool
+        Self::PublicRpcBroadcast
     }
 }
 
@@ -386,7 +386,7 @@ mod tests {
             token_address: Some(Address::with_last_byte(0x11)),
             pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
             observed_block: Some(25_110_001),
-            submission_policy: TxSubmissionPolicy::PublicMempool,
+            submission_policy: TxSubmissionPolicy::PublicRpcBroadcast,
             request: request(),
         };
 
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(request.metadata["observed_block"], json!(25_110_001));
         assert_eq!(
             request.metadata["submission_policy"],
-            json!({"kind": "public_mempool"})
+            json!({"kind": "public_rpc_broadcast"})
         );
     }
 

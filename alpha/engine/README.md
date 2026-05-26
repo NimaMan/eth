@@ -182,7 +182,7 @@ Alpha has separate trader entrypoints for each runtime boundary:
 | Binary | Adapter | Broadcast capability |
 | --- | --- | --- |
 | `eth_alpha_live_backtest_trader` | `LiveChainSimExecutionAdapter` | None; never contacts Kartal. |
-| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run by default. `public_mempool` is only accepted for `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit public-mempool flag. |
+| `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | Kartal dry-run by default. `broadcast` is only accepted for `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit broadcast validation flag. |
 | `eth_alpha_backtest_trader` | `ChainSimExecutionAdapter` | None; historical replay only. |
 
 The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
@@ -197,8 +197,8 @@ non-zero min-output from provisional exact-calldata simulation, and simulates
 the final exact vault buy or sell calldata against local Reth state before
 Kartal submission. Entry-enabled live-real runs must resolve to a bankroll of
 at most `0.555 ETH`. Public broadcast is rejected unless all of these are true:
-Kartal reports `public_mempool`, the CLI includes
-`--allow-public-mempool-live-validation`, the strategy set is
+Kartal reports `broadcast`, the CLI includes
+`--allow-broadcast-live-validation`, the strategy set is
 `alpha11-univ2-lp30-pool-update-block-hold16`,
 `--replay-current` is absent, `--once` is absent, and the resolved strategy spec
 has no `max_entry_pools`, buy value capped at `0.01 ETH`, and entry bankroll

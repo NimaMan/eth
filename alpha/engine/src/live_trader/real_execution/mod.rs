@@ -54,30 +54,6 @@ use tail_entry::{
     validate_tail_entry_route,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::live_trader) enum TailEntrySubmissionRoute {
-    PublicMempool,
-    FlashbotsMevShare,
-}
-
-impl TailEntrySubmissionRoute {
-    fn requires_flashbots_auth(self) -> bool {
-        matches!(self, Self::FlashbotsMevShare)
-    }
-}
-
-pub(in crate::live_trader) fn parse_tail_entry_submission_route(
-    value: &str,
-) -> Result<TailEntrySubmissionRoute> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "public_mempool" | "public" => Ok(TailEntrySubmissionRoute::PublicMempool),
-        "flashbots_mev_share" | "flashbots" => Ok(TailEntrySubmissionRoute::FlashbotsMevShare),
-        other => Err(eyre!(
-            "invalid ALPHA_LIVE_TAIL_ENTRY_SUBMISSION_ROUTE {other:?}; expected public_mempool or flashbots_mev_share"
-        )),
-    }
-}
-
 struct RealExecutionWithValuation<E, V> {
     execution: E,
     valuation: V,
@@ -113,7 +89,6 @@ struct KartalRealPlanner<P, G> {
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
     gas_policy: LiveRealGasPolicy,
-    tail_entry_submission_route: TailEntrySubmissionRoute,
     flashbots_tail_max_block_span: Option<u64>,
 }
 
@@ -254,7 +229,7 @@ where
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
         let submission_policy = buy_submission_policy(
-            self.tail_entry_submission_route,
+            &gas_rank_policy,
             self.flashbots_tail_max_block_span,
             gas_policy_action,
             &tail_entry_ordering,
@@ -324,6 +299,7 @@ where
                         "signal": gas_policy_signal,
                         "status": "selected",
                         "profiles": gas_policy_profile_labels(&gas_rank_policy),
+                        "submission_route": gas_rank_policy.submission_route.label(),
                         "selected_profile": fee.label,
                         "gas_rank_source": fee.source,
                         "guard": gas_policy_guard,
@@ -376,7 +352,7 @@ fn transaction_wire_protocol(_submission_policy: &TxSubmissionPolicy) -> &'stati
 
 fn executor_boundary(submission_policy: &TxSubmissionPolicy) -> &'static str {
     match submission_policy {
-        TxSubmissionPolicy::PublicMempool => "kartal_eth_tx_executor",
+        TxSubmissionPolicy::PublicRpcBroadcast => "kartal_eth_tx_executor",
         TxSubmissionPolicy::FlashbotsMevShare { .. } => "kartal_eth_tx_executor_policy",
     }
 }
@@ -548,7 +524,6 @@ pub(super) async fn build_kartal_real_adapter(
     exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
-    tail_entry_submission_route: TailEntrySubmissionRoute,
     flashbots_tail_max_block_span: Option<u64>,
     gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
@@ -624,7 +599,6 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
-        tail_entry_submission_route,
         flashbots_tail_max_block_span,
     };
     let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(

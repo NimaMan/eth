@@ -62,7 +62,7 @@ Runtime evidence observed after restart:
 | Real live trader | `eth_alpha_live_trader` running `alpha11-univ2-lp30-pool-update-block-hold16-live-real-public-20260523-152925Z` |
 | Live-backtest status | `live`, no last error |
 | Hold16 validation | Current `0.555 ETH` live-backtest validation passes `50 / 50` checks with `5` trades, `4` closed, `1` open |
-| Kartal broadcast mode | `public_mempool` |
+| Kartal broadcast mode | `broadcast` |
 | Kartal signer | Available through `unix_socket` |
 | Kartal caps | max value `0.01 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0125 ETH`; Kartal daily cap disabled |
 | Cap/signing preflight | `alpha11-hold16-cap-signing-preflight-20260523T125653Z` returned `dry_run` and tx hash `0x31b17a0d96a93d9a6209a665d67052a0b5d1ed79a3206bf6a40bb0b031d11829` |
@@ -73,7 +73,7 @@ Runtime evidence observed after restart:
 
 ## Public Hold16 State
 
-Hold16 has been promoted to the guarded public-mempool runner. The active
+Hold16 has been promoted to the guarded broadcast runner. The active
 strategy limiter is the strategy-owned `0.555 ETH` initial bankroll. Kartal
 continues to enforce signer, target, selector, value, gas, fee, simulation
 freshness, and per-transaction cost safety rails.

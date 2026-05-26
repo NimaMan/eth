@@ -68,12 +68,12 @@ pub(super) async fn record_alpha_trader_run_start(
                         "token_env": &real_args.kartal_token_env,
                         "from": &real_args.live_real_from,
                         "vault_address": &real_args.live_real_vault_address,
-                        "broadcast_requirement": if real_args.allow_public_mempool_live_validation {
-                            "dry_run_or_explicit_hold16_deploy_public_mempool"
+                        "broadcast_requirement": if real_args.allow_broadcast_live_validation {
+                            "dry_run_or_explicit_hold16_deploy_broadcast"
                         } else {
                             "dry_run"
                         },
-                        "allow_public_mempool_live_validation": real_args.allow_public_mempool_live_validation,
+                        "allow_broadcast_live_validation": real_args.allow_broadcast_live_validation,
                         "flashbots_submission_owner": "kartal",
                         "flashbots_tail_max_block_span": record.flashbots_tail_max_block_span
                     })

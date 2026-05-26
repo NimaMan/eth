@@ -9,7 +9,7 @@ use eth_alpha_core::{
 use eth_live_trading::{
     KartalDailySpendStatus, KartalEthTxExecutorStatus, KartalEthTxPolicyStatus,
     KartalStatusBroadcastMode, LivePrioritySellPlannerInput, PlannerTxContext, TxOrderingPolicy,
-    TxPrepRequestContext,
+    TxPrepRequestContext, TxSubmissionRoute,
 };
 use eth_strategies::{
     alpha11::HOLD16_STRATEGY_NAME,
@@ -40,13 +40,13 @@ fn specs(args: &Args) -> Vec<LiveStrategySpec> {
     .expect("test strategy specs")
 }
 
-fn real_args(allow_public_mempool_live_validation: bool) -> RealExecutionArgs {
+fn real_args(allow_broadcast_live_validation: bool) -> RealExecutionArgs {
     RealExecutionArgs {
         kartal_url: "http://127.0.0.1:5004".to_string(),
         kartal_token_env: "ETH_TX_EXECUTOR_API_TOKEN".to_string(),
         live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
-        allow_public_mempool_live_validation,
+        allow_broadcast_live_validation,
     }
 }
 
@@ -58,6 +58,7 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         signer_available: true,
         execution_disabled: false,
         broadcast_mode: mode,
+        submission_policy_kinds: vec!["public_rpc_broadcast".to_string()],
         chain_id: 1,
         rpc_url: "http://172.18.0.1:8545".to_string(),
         journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
@@ -114,7 +115,8 @@ fn gas_policy() -> LiveRealGasPolicy {
         mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
         mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
         entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
-        tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
+        tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first()
+            .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
         normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
         mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
         lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
@@ -128,29 +130,29 @@ fn dry_run_status_is_allowed_without_public_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        true,
     )
     .unwrap();
 }
 
 #[test]
-fn public_mempool_requires_explicit_validation_flag() {
+fn broadcast_requires_explicit_validation_flag() {
     let error = validate_kartal_real_status(
-        &status(KartalStatusBroadcastMode::PublicMempool),
+        &status(KartalStatusBroadcastMode::Broadcast),
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        true,
     )
     .unwrap_err();
 
     assert!(error
         .to_string()
-        .contains("--allow-public-mempool-live-validation"));
+        .contains("--allow-broadcast-live-validation"));
 }
 
 #[test]
-fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
+fn broadcast_hold16_deploy_rejects_other_strategy_scopes() {
     use eth_strategies::alpha11::{HOLD15_STRATEGY_NAME, HOLD3_VALIDATION_STRATEGY_NAME};
 
     for disallowed_strategy_set in [HOLD3_VALIDATION_STRATEGY_NAME, HOLD15_STRATEGY_NAME] {
@@ -158,11 +160,11 @@ fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
         args.strategy_set = Some(disallowed_strategy_set.to_string());
 
         let error = validate_kartal_real_status(
-            &status(KartalStatusBroadcastMode::PublicMempool),
+            &status(KartalStatusBroadcastMode::Broadcast),
             &real_args(true),
             &args,
             &specs(&args),
-            TailEntrySubmissionRoute::FlashbotsMevShare,
+            true,
         )
         .unwrap_err();
 
@@ -171,20 +173,20 @@ fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
 }
 
 #[test]
-fn public_mempool_hold16_deploy_accepts_hold16_scope() {
+fn broadcast_hold16_deploy_accepts_hold16_scope() {
     validate_kartal_real_status(
-        &status(KartalStatusBroadcastMode::PublicMempool),
+        &status(KartalStatusBroadcastMode::Broadcast),
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        true,
     )
     .unwrap();
 }
 
 #[test]
-fn public_mempool_hold16_deploy_accepts_disabled_daily_budget() {
-    let mut status = status(KartalStatusBroadcastMode::PublicMempool);
+fn broadcast_hold16_deploy_accepts_disabled_daily_budget() {
+    let mut status = status(KartalStatusBroadcastMode::Broadcast);
     status.policy.max_daily_cost_wei = "0".to_string();
     status.policy.daily_spend_cap_enabled = Some(false);
     status.policy.daily_spend.remaining_daily_cost_wei = None;
@@ -194,14 +196,14 @@ fn public_mempool_hold16_deploy_accepts_disabled_daily_budget() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        true,
     )
     .unwrap();
 }
 
 #[test]
-fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
-    let mut status = status(KartalStatusBroadcastMode::PublicMempool);
+fn broadcast_hold16_deploy_requires_value_cap_for_buy() {
+    let mut status = status(KartalStatusBroadcastMode::Broadcast);
     status.policy.max_value_wei = "0".to_string();
 
     let error = validate_kartal_real_status(
@@ -209,7 +211,7 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        true,
     )
     .unwrap_err();
 
@@ -219,8 +221,10 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
 #[test]
 fn tail_entry_buy_uses_flashbots_submission_policy() {
     let tail_hash = format!("0x{}", "11".repeat(32));
+    let gas_rank_policy = StrategyGasRankPolicy::p85_first()
+        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail);
     let policy = buy_submission_policy(
-        TailEntrySubmissionRoute::FlashbotsMevShare,
+        &gas_rank_policy,
         Some(3),
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
@@ -244,23 +248,31 @@ fn tail_entry_buy_uses_flashbots_submission_policy() {
 }
 
 #[test]
-fn non_tail_entry_uses_public_mempool_policy() {
-    let policy = buy_submission_policy(
-        TailEntrySubmissionRoute::FlashbotsMevShare,
-        Some(3),
-        "entry_buy",
-        &None,
-        25_128_246,
-    )
-    .unwrap();
+fn non_tail_entry_uses_broadcast_policy() {
+    let gas_rank_policy = StrategyGasRankPolicy::p85_first()
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast);
+    let policy =
+        buy_submission_policy(&gas_rank_policy, Some(3), "entry_buy", &None, 25_128_246).unwrap();
 
-    assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
+    assert_eq!(policy, TxSubmissionPolicy::PublicRpcBroadcast);
 }
 
 #[test]
-fn tail_entry_buy_can_use_public_mempool_policy() {
+fn non_tail_entry_rejects_flashbots_tail_submission_route() {
+    let gas_rank_policy = StrategyGasRankPolicy::p85_first()
+        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail);
+    let error = buy_submission_policy(&gas_rank_policy, Some(3), "entry_buy", &None, 25_128_246)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("requires tail_entry_buy action"));
+}
+
+#[test]
+fn tail_entry_buy_can_use_broadcast_policy() {
+    let gas_rank_policy = StrategyGasRankPolicy::p85_first()
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast);
     let policy = buy_submission_policy(
-        TailEntrySubmissionRoute::PublicMempool,
+        &gas_rank_policy,
         None,
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
@@ -272,7 +284,7 @@ fn tail_entry_buy_can_use_public_mempool_policy() {
     )
     .unwrap();
 
-    assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
+    assert_eq!(policy, TxSubmissionPolicy::PublicRpcBroadcast);
 }
 
 #[test]

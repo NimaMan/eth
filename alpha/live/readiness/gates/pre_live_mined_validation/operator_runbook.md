@@ -13,8 +13,8 @@ Run this sequence for a one-position mined-validation attempt.
    and sell; confirm Alpha's strategy bankroll is the active budget limiter.
 7. Run dry-run calibration and archive the report.
 8. Run one final dry-run signing check after cap changes.
-9. Switch only Kartal broadcast mode to `public_mempool`.
-10. Start the validation strategy by name with the explicit public-mempool
+9. Switch only Kartal broadcast mode to `broadcast`.
+10. Start the validation strategy by name with the explicit broadcast
     validation guard.
 11. Watch for either a complete buy/sell lifecycle or a documented failure.
 12. Stop the validation run.

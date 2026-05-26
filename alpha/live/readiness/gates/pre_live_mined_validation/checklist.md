@@ -46,11 +46,11 @@ Example for a `0.01 ETH` buy, `300000` gas limit, and `50 gwei` max fee:
   and journal reason are recorded.
 - Dry-run signing does not count as mined validation.
 
-## Public Mempool Gate
+## Public Broadcast Gate
 
-- Switch only Kartal broadcast mode to `public_mempool`.
+- Switch only Kartal broadcast mode to `broadcast`.
 - Do not change strategy parameters by CLI flags.
-- Run the validation strategy by name with the explicit public-mempool guard.
+- Run the validation strategy by name with the explicit broadcast guard.
 - Stop the validation run after one complete buy/sell lifecycle or after a
   documented rejection/failure.
 

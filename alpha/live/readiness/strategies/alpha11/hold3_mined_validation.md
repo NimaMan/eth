@@ -73,8 +73,8 @@ reconciled.
 - Align Kartal executor caps with the validation tx shape.
 - Align signer caps with the validation tx shape.
 - Run final dry-run signing check.
-- Switch only Kartal broadcast mode to `public_mempool`.
-- Run this strategy by name with the public-mempool validation guard.
+- Switch only Kartal broadcast mode to `broadcast`.
+- Run this strategy by name with the broadcast validation guard.
 - Collect buy and sell receipt evidence.
 - Review Asena, alpha DB, Kartal journal, signer journal, RPC receipts, and
   deployed-vault events.

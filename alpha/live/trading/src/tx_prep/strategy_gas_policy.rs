@@ -5,6 +5,32 @@ use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum TxSubmissionRoute {
+    PublicRpcBroadcast,
+    FlashbotsMevShareTail,
+}
+
+impl Default for TxSubmissionRoute {
+    fn default() -> Self {
+        Self::PublicRpcBroadcast
+    }
+}
+
+impl TxSubmissionRoute {
+    pub fn requires_flashbots_auth(self) -> bool {
+        matches!(self, Self::FlashbotsMevShareTail)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PublicRpcBroadcast => "public_rpc_broadcast",
+            Self::FlashbotsMevShareTail => "flashbots_mev_share_tail",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GasRankProfile {
     MempoolRace,
     Normal,
@@ -55,17 +81,22 @@ impl GasRankProfile {
     }
 }
 
-/// Orders named gas-rank profiles for one strategy decision.
+/// Orders named gas-rank profiles and owns the submission route for one
+/// strategy decision.
 ///
 /// Candidate labels must normalize to one of the explicit profile names:
 /// `normal` or an explicit fee-percentile profile such as `p50`, `p85`, or
 /// `p95`. Unprofiled candidates are
 /// intentionally ignored so live execution cannot silently fall back to an
-/// old fixed/shadow gas value.
+/// old fixed/shadow gas value. `submission_route` is part of the policy so the
+/// fee-rank choice and transaction transport cannot drift through a separate
+/// runtime switch.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StrategyGasRankPolicy {
     pub allowed_profiles: Vec<GasRankProfile>,
     pub preference_order: Vec<GasRankProfile>,
+    #[serde(default)]
+    pub submission_route: TxSubmissionRoute,
 }
 
 impl Default for StrategyGasRankPolicy {
@@ -127,7 +158,13 @@ impl StrategyGasRankPolicy {
         Self {
             allowed_profiles: profiles.clone(),
             preference_order: profiles,
+            submission_route: TxSubmissionRoute::PublicRpcBroadcast,
         }
+    }
+
+    pub fn with_submission_route(mut self, route: TxSubmissionRoute) -> Self {
+        self.submission_route = route;
+        self
     }
 
     pub fn choose_candidate(
@@ -350,6 +387,7 @@ mod tests {
         let policy = StrategyGasRankPolicy {
             allowed_profiles: vec![GasRankProfile::P95, GasRankProfile::P90],
             preference_order: vec![GasRankProfile::P95, GasRankProfile::P90],
+            submission_route: TxSubmissionRoute::PublicRpcBroadcast,
         };
         let decision = policy.choose_ranked_fee(
             &budget(3),

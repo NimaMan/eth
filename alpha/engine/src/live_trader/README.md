@@ -6,7 +6,7 @@ real Kartal execution.
 - `run_live_backtest()` uses live chain-state simulation and never contacts
   Kartal.
 - `run_live_real()` uses the crate-private real execution boundary. It defaults
-  to dry-run-only Kartal status and permits public mempool only for the explicit
+  to dry-run-only Kartal status and permits broadcast only for the explicit
   Alpha11 hold16 validation service flag. Each entry-enabled strategy must
   resolve to a bankroll of at most `0.555 ETH` during validation. Strategy specs
   provide buy size, liquidity floors, bankroll, entry-pool caps, and hold

@@ -14,9 +14,7 @@ use super::backtest::ChainSimGasPolicyBacktestAdapter;
 use super::cli::RealExecutionArgs;
 use super::execution_lifecycle::ChainSimSettlement;
 use super::gas_policy::LiveRealGasPolicy;
-use super::real_execution::{
-    build_kartal_real_adapter, KartalRealPreflight, TailEntrySubmissionRoute,
-};
+use super::real_execution::{build_kartal_real_adapter, KartalRealPreflight};
 use super::receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
 use super::support::TraderExecutionMode;
 use super::token_server::TokenServerClient;
@@ -32,7 +30,6 @@ pub(super) struct ExecutionStackInput<'a> {
     pub(super) live_gas_policy: LiveRealGasPolicy,
     pub(super) live_real_gas_policy: Option<LiveRealGasPolicy>,
     pub(super) kartal_real_preflight: Option<KartalRealPreflight>,
-    pub(super) tail_entry_submission_route: Option<TailEntrySubmissionRoute>,
     pub(super) flashbots_tail_max_block_span: Option<u64>,
 }
 
@@ -138,13 +135,7 @@ pub(super) async fn build_execution_stack(
                 exact_pre_submit_live_simulator,
                 pool_updates.clone(),
                 adapter_current_block.clone(),
-                input
-                    .tail_entry_submission_route
-                    .expect("kartal-real execution requires tail-entry submission route config"),
-                input.flashbots_tail_max_block_span.filter(|_| {
-                    input.tail_entry_submission_route
-                        == Some(TailEntrySubmissionRoute::FlashbotsMevShare)
-                }),
+                input.flashbots_tail_max_block_span,
                 input
                     .live_real_gas_policy
                     .expect("kartal-real gas policy must exist"),

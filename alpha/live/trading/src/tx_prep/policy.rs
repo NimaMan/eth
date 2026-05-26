@@ -6,7 +6,7 @@ use super::{
     apply_min_priority_fee_floor_to_candidates, build_priority_sell_request, GasPlanDecision,
     PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget, PriorityFeeBudgetInput,
     RankedFeeCandidate, StrategyGasRankPolicy, TxPrepRequestContext, TxPrepRouteError,
-    TxPrepSimulationError, MEMPOOL_RACE_GAS_LABEL, MEMPOOL_RACE_GAS_SOURCE,
+    TxPrepSimulationError, TxSubmissionRoute, MEMPOOL_RACE_GAS_LABEL, MEMPOOL_RACE_GAS_SOURCE,
 };
 use crate::LiveTraderTxSignal;
 use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
@@ -79,6 +79,15 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
         .gas_rank_policy
         .clone()
         .unwrap_or_else(|| config.gas_rank_policy.clone());
+    if gas_rank_policy.submission_route != TxSubmissionRoute::PublicRpcBroadcast {
+        return TxPrepOutcome::Reject(TxPrepReject {
+            reason: "submission_route_not_supported_for_priority_sell".to_string(),
+            metadata: json!({
+                "submission_route": gas_rank_policy.submission_route.label(),
+                "strategy_gas_rank_policy": gas_rank_policy,
+            }),
+        });
+    }
 
     let ranked_fee_candidates = apply_min_priority_fee_floor_to_candidates(
         filter_ranked_fee_candidates(
@@ -185,7 +194,7 @@ mod tests {
     use eth_alpha_core::ids::{PoolAddress, TradeId};
 
     use super::*;
-    use crate::{LpSignalSource, PriorityRoute, SellUrgency};
+    use crate::{LpSignalSource, PriorityRoute, SellUrgency, TxSubmissionPolicy};
 
     fn plan() -> PrioritySellPlan {
         PrioritySellPlan {
@@ -280,6 +289,14 @@ mod tests {
                     json!("eth_unsigned_tx")
                 );
                 assert_eq!(
+                    signal.submission_policy,
+                    TxSubmissionPolicy::PublicRpcBroadcast
+                );
+                assert_eq!(
+                    signal.request.metadata["gas_policy"]["submission_route"],
+                    json!("public_rpc_broadcast")
+                );
+                assert_eq!(
                     signal.request.metadata["reason_code"],
                     json!("exit.mempool_liquidity_removal_signal")
                 );
@@ -310,6 +327,31 @@ mod tests {
         match outcome {
             TxPrepOutcome::Reject(reject) => {
                 assert_eq!(reject.reason, "gas_rank_exceeds_value_cap");
+            }
+            other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_flashbots_tail_route_for_priority_sell() {
+        let mut input = input(40);
+        input.gas_rank_policy = Some(
+            StrategyGasRankPolicy::p90_first()
+                .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
+        );
+
+        let outcome = prepare_priority_sell(&config(100), input);
+
+        match outcome {
+            TxPrepOutcome::Reject(reject) => {
+                assert_eq!(
+                    reject.reason,
+                    "submission_route_not_supported_for_priority_sell"
+                );
+                assert_eq!(
+                    reject.metadata["submission_route"],
+                    json!("flashbots_mev_share_tail")
+                );
             }
             other => panic!("expected reject, got {other:?}"),
         }

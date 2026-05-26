@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     KartalBribeRequest, KartalSimulationReference, LiveDirectRawTransactionRequest,
-    LiveTraderTxSignal, PrioritySellPlan,
+    LiveTraderTxSignal, PrioritySellPlan, TxSubmissionPolicy,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,7 +90,7 @@ pub fn build_priority_sell_request(
         token_address: Some(plan.token_address),
         pool_address: Some(plan.pool_address.clone()),
         observed_block: context.observed_block.or(Some(plan.observed_block)),
-        submission_policy: crate::TxSubmissionPolicy::PublicMempool,
+        submission_policy: TxSubmissionPolicy::PublicRpcBroadcast,
         request,
     }
 }

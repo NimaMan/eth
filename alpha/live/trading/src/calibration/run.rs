@@ -281,6 +281,7 @@ mod tests {
             signer_available: false,
             execution_disabled: false,
             broadcast_mode: mode,
+            submission_policy_kinds: vec!["public_rpc_broadcast".to_string()],
             chain_id: 1,
             rpc_url: "http://127.0.0.1:8545".to_string(),
             journal_path: None,
@@ -346,7 +347,7 @@ mod tests {
 
     #[test]
     fn preflight_rejects_non_dry_run_by_default() {
-        let issues = preflight_issues(&status(KartalStatusBroadcastMode::PublicMempool), true);
+        let issues = preflight_issues(&status(KartalStatusBroadcastMode::Broadcast), true);
         assert!(issues.iter().any(|issue| issue.contains("dry_run")));
     }
 

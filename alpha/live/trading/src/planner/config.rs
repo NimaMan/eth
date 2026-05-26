@@ -28,7 +28,7 @@ impl Default for LivePrioritySellPlannerConfig {
                 gas_rank_policy: StrategyGasRankPolicy::p95_first(),
                 required_gas_rank_source: None,
             },
-            priority_route: PriorityRoute::PublicMempool,
+            priority_route: PriorityRoute::Broadcast,
             max_priority_fee_per_gas_gwei: DecimalAmount::from(100),
             max_total_fee_eth: DecimalAmount::new(2, 2),
             expected_late_recovery_eth: DecimalAmount::ZERO,

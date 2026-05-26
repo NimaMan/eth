@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[serde(rename_all = "snake_case")]
 pub enum BroadcastMode {
     DryRun,
-    PublicMempool,
+    Broadcast,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

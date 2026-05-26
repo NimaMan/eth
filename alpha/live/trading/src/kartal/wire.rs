@@ -10,7 +10,7 @@ pub use crate::{
 #[serde(rename_all = "snake_case")]
 pub enum KartalStatusBroadcastMode {
     DryRun,
-    PublicMempool,
+    Broadcast,
     #[serde(other)]
     Unknown,
 }
@@ -29,6 +29,8 @@ pub struct KartalEthTxExecutorStatus {
     pub signer_available: bool,
     pub execution_disabled: bool,
     pub broadcast_mode: KartalStatusBroadcastMode,
+    #[serde(default)]
+    pub submission_policy_kinds: Vec<String>,
     pub chain_id: u64,
     pub rpc_url: String,
     pub journal_path: Option<String>,

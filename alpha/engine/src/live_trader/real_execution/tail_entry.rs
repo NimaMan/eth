@@ -7,11 +7,12 @@ use eth_alpha_core::{
 };
 use eth_live_trading::{
     derive_min_output_from_expected_output, LivePrioritySellPlannerInput, PreSubmitSimulation,
-    PreparedSellRoute, TxOrderingPolicy, TxSubmissionPolicy,
+    PreparedSellRoute, StrategyGasRankPolicy, TxOrderingPolicy, TxSubmissionPolicy,
+    TxSubmissionRoute,
 };
 use serde_json::{json, Value};
 
-use super::{cancelled_execution_at, parse_u256_quantity, planner_error, TailEntrySubmissionRoute};
+use super::{cancelled_execution_at, parse_u256_quantity, planner_error};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct TailEntryOrderingEvidence {
@@ -229,17 +230,25 @@ pub(super) fn validate_tail_entry_route(
 }
 
 pub(super) fn buy_submission_policy(
-    tail_entry_submission_route: TailEntrySubmissionRoute,
+    gas_rank_policy: &StrategyGasRankPolicy,
     flashbots_tail_max_block_span: Option<u64>,
     gas_policy_action: &str,
     tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
     current_block: u64,
 ) -> eth_alpha_core::error::Result<TxSubmissionPolicy> {
-    if gas_policy_action != "tail_entry_buy" {
-        return Ok(TxSubmissionPolicy::PublicMempool);
+    let submission_route = gas_rank_policy.submission_route;
+    match submission_route {
+        TxSubmissionRoute::PublicRpcBroadcast => return Ok(TxSubmissionPolicy::PublicRpcBroadcast),
+        TxSubmissionRoute::FlashbotsMevShareTail => {}
     }
-    if tail_entry_submission_route == TailEntrySubmissionRoute::PublicMempool {
-        return Ok(TxSubmissionPolicy::PublicMempool);
+    if gas_policy_action != "tail_entry_buy" {
+        return Err(AlphaCoreError::ExecutionCancelled {
+            reason: format!(
+                "gas policy submission_route={} requires tail_entry_buy action; got {gas_policy_action}",
+                submission_route.label()
+            ),
+            block_number: Some(current_block),
+        });
     }
     let tail_after_tx_hash = tail_entry_ordering
         .as_ref()

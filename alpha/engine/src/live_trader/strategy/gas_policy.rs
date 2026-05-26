@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use eth_live_trading::{GasRankProfile, StrategyGasRankPolicy};
+use eth_live_trading::{GasRankProfile, StrategyGasRankPolicy, TxSubmissionRoute};
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 
@@ -103,23 +103,28 @@ pub(super) fn load_live_real_gas_policy(
         entry_buy_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG,
-        )?,
+        )?
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast),
         tail_entry_buy_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG,
-        )?,
+        )?
+        .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
         normal_exit_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG,
-        )?,
+        )?
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast),
         mempool_pre_mine_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG,
-        )?,
+        )?
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast),
         lp_approval_exit_gas_rank_policy: required_config_gas_policy(
             config,
             LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG,
-        )?,
+        )?
+        .with_submission_route(TxSubmissionRoute::PublicRpcBroadcast),
     }
     .validated()
 }
@@ -182,6 +187,18 @@ impl LiveRealGasPolicy {
             signal: signal.to_string(),
             guard: "entry_estimated_gas_fee_cap",
         }
+    }
+
+    pub(in crate::live_trader) fn requires_flashbots_auth(&self) -> bool {
+        [
+            &self.entry_buy_gas_rank_policy,
+            &self.tail_entry_buy_gas_rank_policy,
+            &self.normal_exit_gas_rank_policy,
+            &self.mempool_pre_mine_gas_rank_policy,
+            &self.lp_approval_exit_gas_rank_policy,
+        ]
+        .iter()
+        .any(|policy| policy.submission_route.requires_flashbots_auth())
     }
 }
 
@@ -264,10 +281,12 @@ fn parse_gas_rank_profile(value: &str) -> Result<GasRankProfile> {
 
 #[cfg(test)]
 mod tests {
-    use eth_live_trading::StrategyGasRankPolicy;
+    use std::collections::HashMap;
+
+    use eth_live_trading::{StrategyGasRankPolicy, TxSubmissionRoute};
     use rust_decimal::Decimal;
 
-    use super::LiveRealGasPolicy;
+    use super::*;
 
     fn policy() -> LiveRealGasPolicy {
         LiveRealGasPolicy {
@@ -285,11 +304,44 @@ mod tests {
             mempool_race_priority_buffer_min_gwei: Decimal::new(1, 1),
             mempool_race_priority_buffer_max_gwei: Decimal::new(2, 1),
             entry_buy_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
-            tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first(),
+            tail_entry_buy_gas_rank_policy: StrategyGasRankPolicy::p85_first()
+                .with_submission_route(TxSubmissionRoute::FlashbotsMevShareTail),
             normal_exit_gas_rank_policy: StrategyGasRankPolicy::p75_first(),
             mempool_pre_mine_gas_rank_policy: StrategyGasRankPolicy::p95_first(),
             lp_approval_exit_gas_rank_policy: StrategyGasRankPolicy::p90_first(),
         }
+    }
+
+    fn config() -> HashMap<String, String> {
+        [
+            (LIVE_GAS_REQUIRED_SOURCE_CONFIG, "eth_chain_server_gas_rank"),
+            (LIVE_GAS_LOOKBACK_BLOCKS_CONFIG, "100"),
+            (LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG, "0.1456"),
+            (LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG, "2500"),
+            (LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG, "1"),
+            (LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG, "3.5"),
+            (LIVE_ENTRY_MAX_GAS_FEE_ETH_CONFIG, "0.0012"),
+            (LIVE_EXIT_MAX_GAS_FEE_ETH_CONFIG, "0.002"),
+            (LIVE_GAS_SAFETY_BUFFER_ETH_CONFIG, "0.001"),
+            (LIVE_V2_VAULT_BUY_GAS_LIMIT_CONFIG, "300000"),
+            (LIVE_V2_VAULT_SELL_GAS_LIMIT_CONFIG, "300000"),
+            (LIVE_ENTRY_BUY_GAS_PROFILES_CONFIG, "p75,p50,normal"),
+            (
+                LIVE_TAIL_ENTRY_BUY_GAS_PROFILES_CONFIG,
+                "p85,p75,p50,normal",
+            ),
+            (LIVE_NORMAL_EXIT_GAS_PROFILES_CONFIG, "p75,p50,normal"),
+            (LIVE_MEMPOOL_RACE_GAS_PROFILES_CONFIG, "mempool_race"),
+            (
+                LIVE_LP_APPROVAL_EXIT_GAS_PROFILES_CONFIG,
+                "p90,p75,p50,normal",
+            ),
+            (LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MIN_GWEI_CONFIG, "0.1"),
+            (LIVE_MEMPOOL_RACE_PRIORITY_BUFFER_MAX_GWEI_CONFIG, "0.2"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
     }
 
     #[test]
@@ -303,6 +355,10 @@ mod tests {
         assert_eq!(
             context.policy.preference_order,
             StrategyGasRankPolicy::p85_first().preference_order
+        );
+        assert_eq!(
+            context.policy.submission_route,
+            TxSubmissionRoute::FlashbotsMevShareTail
         );
     }
 
@@ -318,6 +374,37 @@ mod tests {
             context.policy.preference_order,
             StrategyGasRankPolicy::p75_first().preference_order
         );
+        assert_eq!(
+            context.policy.submission_route,
+            TxSubmissionRoute::PublicRpcBroadcast
+        );
+    }
+
+    #[test]
+    fn live_real_gas_policy_owns_submission_routes() {
+        let policy = load_live_real_gas_policy(&config()).unwrap();
+
+        assert_eq!(
+            policy.entry_buy_gas_rank_policy.submission_route,
+            TxSubmissionRoute::PublicRpcBroadcast
+        );
+        assert_eq!(
+            policy.tail_entry_buy_gas_rank_policy.submission_route,
+            TxSubmissionRoute::FlashbotsMevShareTail
+        );
+        assert_eq!(
+            policy.normal_exit_gas_rank_policy.submission_route,
+            TxSubmissionRoute::PublicRpcBroadcast
+        );
+        assert_eq!(
+            policy.mempool_pre_mine_gas_rank_policy.submission_route,
+            TxSubmissionRoute::PublicRpcBroadcast
+        );
+        assert_eq!(
+            policy.lp_approval_exit_gas_rank_policy.submission_route,
+            TxSubmissionRoute::PublicRpcBroadcast
+        );
+        assert!(policy.requires_flashbots_auth());
     }
 
     #[test]

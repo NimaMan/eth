@@ -29,6 +29,7 @@ pub use route::{PreparedSellRoute, TxPrepRouteError};
 pub use simulation::{PreSubmitSimulation, TxPrepSimulationError};
 pub use strategy_gas_policy::{
     GasRankProfile, StrategyGasRankDefaults, StrategyGasRankPolicy, StrategyTxKind,
+    TxSubmissionRoute,
 };
 
 pub(crate) fn gwei_to_wei_string(gwei: eth_alpha_core::amount::DecimalAmount) -> String {

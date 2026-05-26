@@ -76,7 +76,7 @@ pub struct HeldPositionContext {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PriorityRoute {
     PrivateRelay,
-    PublicMempool,
+    Broadcast,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -224,7 +224,7 @@ fn approval_exceeds_threshold(signal: &LpApprovalSignal, min_pct: DecimalAmount)
 fn priority_route(config: &BribeExitConfig) -> PriorityRoute {
     match config.prefer_private_relay {
         true => PriorityRoute::PrivateRelay,
-        false => PriorityRoute::PublicMempool,
+        false => PriorityRoute::Broadcast,
     }
 }
 

@@ -53,6 +53,6 @@ pub use tx_prep::{
     GasEstimateConfig, GasRankProfile, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget,
     PriorityFeeBudgetInput, PrioritySellTxPrep, RankedFeeCandidate, StrategyGasRankDefaults,
     StrategyGasRankPolicy, StrategyTxKind, TxPrepConfig, TxPrepOutcome, TxPrepReject,
-    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError,
+    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError, TxSubmissionRoute,
     DEFAULT_SIMULATED_GAS_ESTIMATE_BUFFER_BPS,
 };

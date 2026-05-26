@@ -12,7 +12,7 @@ async fn main() -> tx_executor::Result<()> {
     let args = Args::parse();
     let mut config = EthTxExecutorConfig::mainnet_local_reth(args.rpc_url);
     config.broadcast_mode = if args.broadcast {
-        BroadcastMode::PublicMempool
+        BroadcastMode::Broadcast
     } else {
         BroadcastMode::DryRun
     };

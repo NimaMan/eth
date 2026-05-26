@@ -22,7 +22,7 @@ pub(super) struct RealExecutionArgs {
     pub(super) kartal_token_env: String,
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
-    pub(super) allow_public_mempool_live_validation: bool,
+    pub(super) allow_broadcast_live_validation: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -83,11 +83,11 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value = DEFAULT_UNISWAP_V2_TRADING_VAULT)]
     live_real_vault_address: String,
 
-    /// Allow Kartal public_mempool only for the explicit Alpha11 hold16
+    /// Allow Kartal broadcast only for the explicit Alpha11 hold16
     /// deploy strategy. Without this flag the live trader refuses
     /// any non-dry-run Kartal status.
     #[arg(long, default_value_t = false)]
-    allow_public_mempool_live_validation: bool,
+    allow_broadcast_live_validation: bool,
 }
 
 pub(super) fn parse_live_backtest_args() -> Args {
@@ -120,7 +120,7 @@ impl From<LiveRealOnlyCli> for RealExecutionArgs {
             kartal_token_env: real.kartal_token_env,
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
-            allow_public_mempool_live_validation: real.allow_public_mempool_live_validation,
+            allow_broadcast_live_validation: real.allow_broadcast_live_validation,
         }
     }
 }

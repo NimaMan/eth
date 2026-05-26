@@ -153,7 +153,7 @@ fn signal(attempt_id: Option<&str>) -> LiveTraderTxSignal {
         token_address: Some(Address::with_last_byte(0x11)),
         pool_address: Some(PoolAddress::from("0xtoken:0xpool")),
         observed_block: Some(25_128_246),
-        submission_policy: TxSubmissionPolicy::PublicMempool,
+        submission_policy: TxSubmissionPolicy::PublicRpcBroadcast,
         request: LiveDirectRawTransactionRequest {
             attempt_id: attempt_id.map(str::to_string),
             chain_id: 1,
