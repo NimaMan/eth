@@ -54,6 +54,30 @@ use tail_entry::{
     validate_tail_entry_route,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::live_trader) enum TailEntrySubmissionRoute {
+    PublicMempool,
+    FlashbotsMevShare,
+}
+
+impl TailEntrySubmissionRoute {
+    fn requires_flashbots_auth(self) -> bool {
+        matches!(self, Self::FlashbotsMevShare)
+    }
+}
+
+pub(in crate::live_trader) fn parse_tail_entry_submission_route(
+    value: &str,
+) -> Result<TailEntrySubmissionRoute> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "public_mempool" | "public" => Ok(TailEntrySubmissionRoute::PublicMempool),
+        "flashbots_mev_share" | "flashbots" => Ok(TailEntrySubmissionRoute::FlashbotsMevShare),
+        other => Err(eyre!(
+            "invalid ALPHA_LIVE_TAIL_ENTRY_SUBMISSION_ROUTE {other:?}; expected public_mempool or flashbots_mev_share"
+        )),
+    }
+}
+
 struct RealExecutionWithValuation<E, V> {
     execution: E,
     valuation: V,
@@ -89,7 +113,8 @@ struct KartalRealPlanner<P, G> {
     gas_rank: G,
     gas_estimate: GasEstimateConfig,
     gas_policy: LiveRealGasPolicy,
-    flashbots_tail_max_block_span: u64,
+    tail_entry_submission_route: TailEntrySubmissionRoute,
+    flashbots_tail_max_block_span: Option<u64>,
 }
 
 struct KartalPolicySubmitter {
@@ -229,6 +254,7 @@ where
             AlphaCoreError::Execution("live real buy signal requires trade_id".to_string())
         })?;
         let submission_policy = buy_submission_policy(
+            self.tail_entry_submission_route,
             self.flashbots_tail_max_block_span,
             gas_policy_action,
             &tail_entry_ordering,
@@ -522,7 +548,8 @@ pub(super) async fn build_kartal_real_adapter(
     exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
-    flashbots_tail_max_block_span: u64,
+    tail_entry_submission_route: TailEntrySubmissionRoute,
+    flashbots_tail_max_block_span: Option<u64>,
     gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
@@ -597,6 +624,7 @@ pub(super) async fn build_kartal_real_adapter(
         gas_rank: gas_rank_provider,
         gas_estimate,
         gas_policy,
+        tail_entry_submission_route,
         flashbots_tail_max_block_span,
     };
     let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(

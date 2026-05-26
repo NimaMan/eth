@@ -128,6 +128,7 @@ fn dry_run_status_is_allowed_without_public_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
+        TailEntrySubmissionRoute::FlashbotsMevShare,
     )
     .unwrap();
 }
@@ -139,6 +140,7 @@ fn public_mempool_requires_explicit_validation_flag() {
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
+        TailEntrySubmissionRoute::FlashbotsMevShare,
     )
     .unwrap_err();
 
@@ -160,6 +162,7 @@ fn public_mempool_hold16_deploy_rejects_other_strategy_scopes() {
             &real_args(true),
             &args,
             &specs(&args),
+            TailEntrySubmissionRoute::FlashbotsMevShare,
         )
         .unwrap_err();
 
@@ -174,6 +177,7 @@ fn public_mempool_hold16_deploy_accepts_hold16_scope() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
+        TailEntrySubmissionRoute::FlashbotsMevShare,
     )
     .unwrap();
 }
@@ -190,6 +194,7 @@ fn public_mempool_hold16_deploy_accepts_disabled_daily_budget() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
+        TailEntrySubmissionRoute::FlashbotsMevShare,
     )
     .unwrap();
 }
@@ -204,6 +209,7 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
+        TailEntrySubmissionRoute::FlashbotsMevShare,
     )
     .unwrap_err();
 
@@ -214,7 +220,8 @@ fn public_mempool_hold16_deploy_requires_value_cap_for_buy() {
 fn tail_entry_buy_uses_flashbots_submission_policy() {
     let tail_hash = format!("0x{}", "11".repeat(32));
     let policy = buy_submission_policy(
-        3,
+        TailEntrySubmissionRoute::FlashbotsMevShare,
+        Some(3),
         "tail_entry_buy",
         &Some(TailEntryOrderingEvidence {
             tail_after_tx_hash: Some(tail_hash.clone()),
@@ -238,7 +245,32 @@ fn tail_entry_buy_uses_flashbots_submission_policy() {
 
 #[test]
 fn non_tail_entry_uses_public_mempool_policy() {
-    let policy = buy_submission_policy(3, "entry_buy", &None, 25_128_246).unwrap();
+    let policy = buy_submission_policy(
+        TailEntrySubmissionRoute::FlashbotsMevShare,
+        Some(3),
+        "entry_buy",
+        &None,
+        25_128_246,
+    )
+    .unwrap();
+
+    assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
+}
+
+#[test]
+fn tail_entry_buy_can_use_public_mempool_policy() {
+    let policy = buy_submission_policy(
+        TailEntrySubmissionRoute::PublicMempool,
+        None,
+        "tail_entry_buy",
+        &Some(TailEntryOrderingEvidence {
+            tail_after_tx_hash: Some(format!("0x{}", "11".repeat(32))),
+            dependency_priority_fee_wei: Some("100".to_string()),
+            dependency_gas_price_wei: None,
+        }),
+        25_128_246,
+    )
+    .unwrap();
 
     assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
 }

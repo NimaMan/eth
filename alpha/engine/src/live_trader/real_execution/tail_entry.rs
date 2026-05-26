@@ -11,7 +11,7 @@ use eth_live_trading::{
 };
 use serde_json::{json, Value};
 
-use super::{cancelled_execution_at, parse_u256_quantity, planner_error};
+use super::{cancelled_execution_at, parse_u256_quantity, planner_error, TailEntrySubmissionRoute};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct TailEntryOrderingEvidence {
@@ -229,12 +229,16 @@ pub(super) fn validate_tail_entry_route(
 }
 
 pub(super) fn buy_submission_policy(
-    flashbots_tail_max_block_span: u64,
+    tail_entry_submission_route: TailEntrySubmissionRoute,
+    flashbots_tail_max_block_span: Option<u64>,
     gas_policy_action: &str,
     tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
     current_block: u64,
 ) -> eth_alpha_core::error::Result<TxSubmissionPolicy> {
     if gas_policy_action != "tail_entry_buy" {
+        return Ok(TxSubmissionPolicy::PublicMempool);
+    }
+    if tail_entry_submission_route == TailEntrySubmissionRoute::PublicMempool {
         return Ok(TxSubmissionPolicy::PublicMempool);
     }
     let tail_after_tx_hash = tail_entry_ordering
@@ -243,6 +247,12 @@ pub(super) fn buy_submission_policy(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
             reason: "Flashbots tail-entry buy requires dependency tail_after_tx_hash".to_string(),
+            block_number: Some(current_block),
+        })?;
+    let flashbots_tail_max_block_span =
+        flashbots_tail_max_block_span.ok_or_else(|| AlphaCoreError::ExecutionCancelled {
+            reason: "Flashbots tail-entry buy requires ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN"
+                .to_string(),
             block_number: Some(current_block),
         })?;
     let target_block = current_block.saturating_add(1);

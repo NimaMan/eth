@@ -9,6 +9,7 @@ use eth_strategies::{
 use eyre::{eyre, Result, WrapErr};
 
 use super::super::cli::{Args, RealExecutionArgs};
+use super::TailEntrySubmissionRoute;
 
 pub(super) const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
 
@@ -21,15 +22,26 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
-    flashbots_tail_max_block_span: u64,
+    tail_entry_submission_route: TailEntrySubmissionRoute,
+    flashbots_tail_max_block_span: Option<u64>,
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span)?;
+    if tail_entry_submission_route.requires_flashbots_auth() {
+        validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span.ok_or_else(|| {
+            eyre!("ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN is required for Flashbots tail-entry submission")
+        })?)?;
+    }
     let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
         .eth_tx_status()
         .await
         .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(&status, args, live_args, strategy_specs)?;
+    validate_kartal_real_status(
+        &status,
+        args,
+        live_args,
+        strategy_specs,
+        tail_entry_submission_route,
+    )?;
     Ok(KartalRealPreflight { token, status })
 }
 
@@ -38,6 +50,7 @@ pub(super) fn validate_kartal_real_status(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
+    tail_entry_submission_route: TailEntrySubmissionRoute,
 ) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
@@ -58,7 +71,9 @@ pub(super) fn validate_kartal_real_status(
             "kartal-real trader requires Kartal /eth/tx/submit support"
         ));
     }
-    if status.flashbots_auth_configured != Some(true) {
+    if tail_entry_submission_route.requires_flashbots_auth()
+        && status.flashbots_auth_configured != Some(true)
+    {
         return Err(eyre!(
             "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
         ));

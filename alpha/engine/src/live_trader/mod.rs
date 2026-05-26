@@ -83,7 +83,10 @@ use loop_control::{
 };
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use poll_error::handle_poll_error;
-use real_execution::{preflight_kartal_real, validate_flashbots_tail_max_block_span};
+use real_execution::{
+    parse_tail_entry_submission_route, preflight_kartal_real,
+    validate_flashbots_tail_max_block_span, TailEntrySubmissionRoute,
+};
 use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
 use run_metadata::live_gas_policy_run_metadata_json;
@@ -140,7 +143,18 @@ async fn run(
             execution_mode.label()
         ));
     }
-    let flashbots_tail_max_block_span = if execution_mode.uses_kartal() {
+    let tail_entry_submission_route = if execution_mode.uses_kartal() {
+        let raw = shared_config
+            .get(ALPHA_LIVE_TAIL_ENTRY_SUBMISSION_ROUTE_CONFIG)
+            .map(String::as_str)
+            .unwrap_or("flashbots_mev_share");
+        Some(parse_tail_entry_submission_route(raw)?)
+    } else {
+        None
+    };
+    let flashbots_tail_max_block_span = if execution_mode.uses_kartal()
+        && tail_entry_submission_route == Some(TailEntrySubmissionRoute::FlashbotsMevShare)
+    {
         let span = resolve_cli_or_config_u64(
             None,
             &shared_config,
@@ -161,19 +175,17 @@ async fn run(
     };
     let kartal_real_preflight = match real_args.as_ref() {
         None => None,
-        Some(real_args) => {
-            let flashbots_tail_max_block_span = flashbots_tail_max_block_span
-                .expect("kartal-real execution requires Flashbots tail span config");
-            Some(
-                preflight_kartal_real(
-                    real_args,
-                    &args,
-                    &strategy_specs,
-                    flashbots_tail_max_block_span,
-                )
-                .await?,
+        Some(real_args) => Some(
+            preflight_kartal_real(
+                real_args,
+                &args,
+                &strategy_specs,
+                tail_entry_submission_route
+                    .expect("kartal-real execution requires tail-entry submission route"),
+                flashbots_tail_max_block_span,
             )
-        }
+            .await?,
+        ),
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let preflight_client = TokenServerClient::new(token_server_url.clone());
@@ -282,6 +294,7 @@ async fn run(
         live_gas_policy: live_gas_policy.clone(),
         live_real_gas_policy: live_real_gas_policy.clone(),
         kartal_real_preflight,
+        tail_entry_submission_route,
         flashbots_tail_max_block_span,
     })
     .await?;
