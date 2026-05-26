@@ -3,7 +3,7 @@ use crate::render;
 use super::model::{PoolObservation, PositionReport};
 
 pub fn print_position_report(report: &PositionReport) {
-    println!("# Token Lab: {}", report.position.token_address);
+    println!("# Position Lab: {}", report.position.token_address);
     println!();
     println!("- run: `{}`", report.position.run_id);
     println!(

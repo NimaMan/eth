@@ -113,7 +113,7 @@ before this policy can support real execution.
 
 Spot check: rank 1 entered a buyable/sellable Uniswap V2 WETH pool at block
 `25,077,695`, sold after the max-hold monitor at block `25,077,746`, and
-Token Lab checks passed for replay join, entry confirmation, raw/decimal
+Risk Atlas investigation checks passed for replay join, entry confirmation, raw/decimal
 consistency, snapshot presence, and liquidity threshold.
 
 ## Worst 10 Losers
@@ -133,7 +133,7 @@ consistency, snapshot presence, and liquidity threshold.
 
 Spot check: worst rank 1 entered a buyable/sellable Uniswap V2 WETH pool at
 block `25,075,193`, then the max-hold exit failed and the position remained
-`sell_failed`. Token Lab shows the pool later fell to near-zero reserve and
+`sell_failed`. Risk Atlas investigation evidence shows the pool later fell to near-zero reserve and
 became non-buyable/non-sellable by block `25,075,239`.
 
 ## Read

@@ -409,11 +409,11 @@ impl SnipeAllStrategy {
             }
         }
 
-        if self.only_deferred_buy_attempts_for_pool(ctx, &pool.address) {
+        if self.only_retryable_noncapital_buy_attempts_for_pool(ctx, &pool.address) {
             return Ok(self.buy_pool(
                 pool,
                 submit_reason
-                    .unwrap_or("entry.buy_eligible_pool_once:retry_after_deferred_execution"),
+                    .unwrap_or("entry.buy_eligible_pool_once:retry_after_noncapital_execution"),
             ));
         }
 
@@ -430,26 +430,29 @@ impl SnipeAllStrategy {
         self.state
             .bought_pools()
             .iter()
-            .filter(|pool| !self.only_deferred_buy_attempts_for_pool(ctx, pool))
+            .filter(|pool| !self.only_retryable_noncapital_buy_attempts_for_pool(ctx, pool))
             .count()
     }
 
-    fn only_deferred_buy_attempts_for_pool(
+    fn only_retryable_noncapital_buy_attempts_for_pool(
         &self,
         ctx: &StrategyContext<'_>,
         pool: &PoolAddress,
     ) -> bool {
-        let mut saw_deferred = false;
+        let mut saw_retryable_noncapital = false;
         for position in ctx.portfolio.positions.values().filter(|position| {
             position.key.strategy_name == self.name() && &position.key.pool_address == pool
         }) {
-            if position.state == PositionState::BuyDeferred {
-                saw_deferred = true;
+            if matches!(
+                position.state,
+                PositionState::BuyDeferred | PositionState::BuyCancelled
+            ) {
+                saw_retryable_noncapital = true;
             } else {
                 return false;
             }
         }
-        saw_deferred
+        saw_retryable_noncapital
     }
 }
 

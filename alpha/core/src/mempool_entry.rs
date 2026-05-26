@@ -81,7 +81,11 @@ pub struct MempoolEntryViability {
 pub struct MempoolVaultBuySimulation {
     pub route: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault_address: Option<TokenAddress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_address: Option<TokenAddress>,
     #[serde(default)]
     pub would_revert: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -22,7 +22,7 @@ pub fn strategy_set_specs(
         crate::alpha11::HOLD16_STRATEGY_NAME => Ok(vec![alpha11_specs::hold16_spec(options)]),
         crate::alpha11::HOLD16_ALL_POOLS_STRATEGY_NAME => {
             Ok(vec![alpha11_specs::hold16_all_pools_spec(options)])
-        },
+        }
         crate::alpha11::HOLD3_VALIDATION_STRATEGY_NAME => {
             Ok(vec![alpha11_specs::hold3_validation_spec(options)])
         }

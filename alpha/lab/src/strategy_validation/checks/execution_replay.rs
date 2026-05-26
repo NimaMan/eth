@@ -48,6 +48,73 @@ pub(super) async fn execution_delay_check(
     .await
 }
 
+pub(super) async fn live_chain_sim_block_alignment_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "live_chain_sim_execution_blocks_align",
+        Verdict::Fail,
+        "live chain-sim terminal reports use the expected simulation block with no stale state",
+        "live chain-sim terminal reports whose decision, expected, simulation, receipt, or event blocks do not align",
+        r#"
+        WITH cfg AS (
+            SELECT COALESCE(NULLIF(config->>'execution_delay_blocks', '')::bigint, 1) AS delay_blocks
+            FROM alpha_trading.backtest_result_sets
+            WHERE result_set_id = $1
+        ),
+        terminal_events AS (
+            SELECT te.id,
+                   te.trade_id,
+                   te.order_id,
+                   te.order_side,
+                   te.block_number AS event_block,
+                   NULLIF(te.payload#>>'{mined_evidence,submitted_block_number}', '')::bigint AS decision_block,
+                   NULLIF(te.payload#>>'{mined_evidence,expected_confirmation_block}', '')::bigint AS expected_block,
+                   NULLIF(te.payload#>>'{mined_evidence,simulation_block_number}', '')::bigint AS simulation_block,
+                   NULLIF(te.payload#>>'{mined_evidence,receipt_block_number}', '')::bigint AS receipt_block,
+                   NULLIF(te.payload#>>'{mined_evidence,receipt_status}', '') AS receipt_status,
+                   (
+                       SELECT MIN(sub.block_number)
+                       FROM alpha_trading.trade_events sub
+                       WHERE sub.trade_id = te.trade_id
+                         AND sub.order_id = te.order_id
+                         AND sub.order_side = te.order_side
+                         AND sub.status = 'submitted'
+                   ) AS submitted_event_block
+            FROM alpha_trading.trade_events te
+            JOIN alpha_trading.trades t ON t.trade_id = te.trade_id
+            JOIN alpha_trading.trader_runs tr ON tr.run_id = te.run_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND tr.mode = 'chain-sim'
+              AND te.status IN ('confirmed', 'failed', 'cancelled')
+        )
+        SELECT count(*)
+        FROM terminal_events, cfg
+        WHERE decision_block IS NULL
+           OR expected_block IS NULL
+           OR simulation_block IS NULL
+           OR receipt_block IS NULL
+           OR receipt_status IS NULL
+           OR event_block IS NULL
+           OR submitted_event_block IS NULL
+           OR receipt_status <> 'live_backtest_chain_sim'
+           OR submitted_event_block <> decision_block
+           OR expected_block <> decision_block + cfg.delay_blocks
+           OR simulation_block <> expected_block
+           OR receipt_block <> simulation_block
+           OR event_block <> simulation_block
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn terminal_report_presence_check(
     pool: &PgPool,
     result_set: &ResultSetRecord,

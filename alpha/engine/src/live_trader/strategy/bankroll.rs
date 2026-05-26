@@ -40,6 +40,36 @@ pub(super) fn entry_bankroll_summary_json(
         .collect()
 }
 
+pub(super) fn validate_live_real_entry_bankrolls(
+    runner_name: &str,
+    specs: &[LiveStrategySpec],
+    bankrolls_wei: &[Option<U256>],
+    validation_limit_eth: &str,
+) -> Result<()> {
+    let validation_limit =
+        parse_eth_decimal_to_wei(validation_limit_eth, "live-real validation entry bankroll")?;
+    for (spec, bankroll) in specs.iter().zip(bankrolls_wei.iter()) {
+        let bankroll = bankroll.ok_or_else(|| {
+            eyre::eyre!(
+                "{} requires an entry bankroll <= {} for strategy {} while live-real entries are in validation mode",
+                runner_name,
+                validation_limit_eth,
+                spec.strategy_name
+            )
+        })?;
+        if bankroll.is_zero() || bankroll > validation_limit {
+            return Err(eyre::eyre!(
+                "{} requires entry bankroll in the range (0, {}] for strategy {}; got spec {:?}",
+                runner_name,
+                validation_limit_eth,
+                spec.strategy_name,
+                &spec.entry_bankroll_eth
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn position_entry_spend_wei(position: &Position, fallback_buy_wei: U256) -> U256 {
     position
         .entry_cost_basis
@@ -61,9 +91,10 @@ pub(super) fn restored_entry_bankroll_from_terminal_positions(
     let mut bankroll = RestoredEntryBankroll::default();
     for position in positions {
         match position.state {
-            PositionState::BuyFailed | PositionState::BuyCancelled | PositionState::Cancelled => {
+            PositionState::BuyFailed | PositionState::Cancelled => {
                 bankroll.record_accounted_pool(position.key.pool_address.clone());
             }
+            PositionState::BuyCancelled => {}
             PositionState::SellConfirmed => {
                 bankroll.record_position_result(
                     position.key.pool_address.clone(),

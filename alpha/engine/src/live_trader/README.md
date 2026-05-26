@@ -12,22 +12,29 @@ real Kartal execution.
   provide buy size, liquidity floors, bankroll, entry-pool caps, and hold
   windows; live runs select those parameters by strategy name.
 
-Real tx wiring belongs in `real_execution/`; common live polling stays in
-`mod.rs`. Supporting code is split by responsibility:
+Real tx wiring belongs in `real_execution/`; the top-level `mod.rs` keeps the
+main orchestration loop. Supporting code is grouped by responsibility:
 
-- `entrypoints.rs`: public binary entrypoints.
-- `support.rs`: shared config, watermarks, observation persistence, and
-  heartbeat helpers.
-- `restored_state.rs`: persisted position, seen-pool, hold-counter, and
-  bankroll restoration.
-- `strategy_setup.rs`: strategy construction from live strategy specs.
-- `poll_error.rs`: token-server poll failure handling.
-- `risk_annotation.rs`: mempool-signal evidence enrichment.
+- `config/`: CLI structs, shared-config key resolution, and live-trader
+  constants.
+- `startup/`: binary entrypoints, run-start persistence, startup logs, and run
+  metadata.
+- `runtime/`: token-server client, loop wait/readiness control, poll-error
+  handling, heartbeat emission, and execution-stack assembly.
+- `state/`: live simulation-state stream, restored runtime state, and position
+  state helpers.
+- `strategy/`: live strategy spec resolution, strategy installation, bankroll
+  accounting, and gas-policy construction.
+- `risk/`: mined pool-risk extraction and mempool-signal evidence enrichment.
+- `operator/`: manual close request handling.
+- `shared/`: cross-cutting helpers for shared config, watermarks, observation
+  persistence, parsing, and shutdown signals.
 - `block_frame/`: block-boundary contract between chain-server and alpha.
 - `event_processing/`: per-tick event ordering and persistence rules.
 - `execution_lifecycle/`: submitted execution settlement for chain-sim
   live-backtests.
-- `state/`: live pool, DB, and exact simulation-state responsibilities.
+- `receipt_reconciliation/`: real receipt RPC reads, vault-event decoding, and
+  mined execution evidence.
 
 ## Live Event Sequence
 
@@ -89,7 +96,7 @@ these values.
 
 ## Real Receipt Reconciliation
 
-`receipt_reconciliation.rs` owns the first real-live settlement worker. On each
+`receipt_reconciliation/` owns the first real-live settlement worker. On each
 live trader tick it:
 
 1. loads submitted execution reports with tx hashes from `alpha_store`;
@@ -120,7 +127,7 @@ at `3` confirmations during the first live validation trades.
 ## Gate 3 Validation
 
 The live-readiness Gate 3 tests live in `src/gate3_validation.rs` and
-`src/live_trader/receipt_reconciliation.rs`. Run them with:
+`src/live_trader/receipt_reconciliation/`. Run them with:
 
 ```bash
 cargo test -p eth_alpha_engine gate3 --lib

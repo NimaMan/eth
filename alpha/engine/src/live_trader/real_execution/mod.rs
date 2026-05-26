@@ -1,63 +1,60 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use async_trait::async_trait;
-use chrono::Utc;
 use eth_alpha_core::{
     error::AlphaCoreError,
     execution::ExecutionReport,
-    ids::{PositionId, TokenPoolId},
+    ids::TokenPoolId,
     market::PoolSnapshot,
     order::{OrderIntent, OrderSide},
-    position::{Position, PositionKey},
+    position::Position,
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
     derive_min_output_from_expected_output, ChainServerGasRankProvider, GasEstimateConfig,
-    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalClient, KartalClientConfig,
-    KartalEthTxExecutorStatus, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalSimulationReference, KartalStatusBroadcastMode, LiveDirectRawTransactionRequest,
+    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalExecutorClient,
+    KartalExecutorClientConfig, KartalSimulationReference, LiveDirectRawTransactionRequest,
     LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LivePrioritySellPlannerInput, LiveTraderTxSignal, MempoolRaceGasRankProvider, PlannerTxContext,
-    PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute, RankedFeeCandidate,
-    StrategyGasRankPolicy, TxOrderingPolicy, TxPrepConfig, TxPrepRequestContext,
-    TxSubmissionPolicy, UniswapV2TradingVaultBuyRouteBuilder,
-    UniswapV2TradingVaultPreSubmitSimulator, UniswapV2TradingVaultSellRouteBuilder,
-    VaultInternalAllowanceChecker,
+    LiveTraderTxSignal, MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator,
+    PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
+    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
+    UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
 };
-use eth_strategies::{
-    alpha11::{HOLD16_STRATEGY_NAME, INITIAL_ENTRY_BANKROLL_ETH},
-    shared_rules::live::LiveStrategySpec,
-};
-use eyre::{eyre, Result, WrapErr};
+use eyre::{eyre, Result};
 use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::execution::real::{
-    LiveTradingPlannerBridge, LiveTxPlanner, LiveTxPlanningInputResolver, LiveTxSubmissionResult,
-    LiveTxSubmitter, TxExecutorAdapter,
+    LiveTradingPlannerBridge, LiveTxPlanner, LiveTxSubmissionResult, LiveTxSubmitter,
+    TxExecutorAdapter,
 };
 use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter, PositionValueSimulation};
 
-use super::cli::{Args, RealExecutionArgs};
+use super::cli::RealExecutionArgs;
 use super::gas_policy::LiveRealGasPolicy;
 
-const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
+mod input_resolver;
+mod preflight;
+mod tail_entry;
+use input_resolver::LiveRealInputResolver;
+use preflight::parse_live_real_address;
+pub(in crate::live_trader) use preflight::KartalRealPreflight;
+pub(super) use preflight::{preflight_kartal_real, validate_flashbots_tail_max_block_span};
+#[cfg(test)]
+use preflight::{validate_kartal_real_status, HOLD16_DEPLOY_BUY_WEI};
+#[cfg(test)]
+use tail_entry::TailEntryOrderingEvidence;
+use tail_entry::{
+    buy_submission_policy, tail_entry_ordering_evidence, tail_entry_overlay_plan,
+    validate_tail_entry_route,
+};
 
 struct RealExecutionWithValuation<E, V> {
     execution: E,
     valuation: V,
-}
-
-impl<E, V> RealExecutionWithValuation<E, V> {
-    fn new(execution: E, valuation: V) -> Self {
-        Self {
-            execution,
-            valuation,
-        }
-    }
 }
 
 #[async_trait]
@@ -80,206 +77,6 @@ where
     ) -> eth_alpha_core::error::Result<Option<PositionValueSimulation>> {
         self.valuation.simulate_position_value(position, pool).await
     }
-}
-
-#[derive(Clone)]
-struct LiveRealInputResolver {
-    store: PostgresTradingStore,
-    pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
-    current_block: Arc<AtomicU64>,
-    from: String,
-    run_id: String,
-    chain_id: u64,
-}
-
-#[async_trait]
-impl LiveTxPlanningInputResolver for LiveRealInputResolver {
-    async fn resolve_priority_sell_input(
-        &self,
-        intent: &eth_alpha_core::order::OrderIntent,
-    ) -> eth_alpha_core::error::Result<LivePrioritySellPlannerInput> {
-        let position = self.resolve_position(intent).await?;
-        let pool = {
-            let pools = self
-                .pools
-                .lock()
-                .map_err(|_| AlphaCoreError::Execution("pool cache lock poisoned".to_string()))?;
-            pools.get(&intent.pool_address).cloned()
-        }
-        .ok_or_else(|| {
-            AlphaCoreError::Execution(format!(
-                "live real planner has no pool snapshot for {}",
-                intent.pool_address
-            ))
-        })?;
-
-        let current_block = match self.current_block.load(Ordering::Relaxed) {
-            0 => pool.latest_block,
-            block => block,
-        };
-        let required_state_block = required_state_block(current_block, &pool);
-        let now = Utc::now().timestamp().max(0) as u64;
-
-        Ok(LivePrioritySellPlannerInput {
-            context: PlannerTxContext {
-                tx: TxPrepRequestContext {
-                    chain_id: self.chain_id,
-                    from: self.from.clone(),
-                    strategy_name: intent.strategy_name.0.clone(),
-                    strategy_run_id: Some(self.run_id.clone()),
-                    observed_block: Some(current_block),
-                    required_state_block,
-                    source_metadata: json!({
-                        "resolver": "eth_alpha_live_trader_real_execution",
-                        "execution_mode": "kartal-real",
-                        "route": "uniswap_v2_trading_vault",
-                        "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
-                        "gas_rank_provider": "eth_chain_server_gas_rank",
-                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps",
-                        "decision_block": current_block,
-                        "required_state_block": required_state_block,
-                        "pool_creation_block": pool.creation_block,
-                        "pool_latest_block": pool.latest_block
-                    }),
-                },
-                current_block,
-                deadline_unix_secs: now.saturating_add(intent.deadline_secs),
-            },
-            intent: intent.clone(),
-            position,
-            pool,
-            min_output_amount: None,
-            source_metadata: json!({
-                "decision_reason": intent.decision_reason.clone(),
-                "trade_id": intent.trade_id.clone(),
-            }),
-        })
-    }
-}
-
-impl LiveRealInputResolver {
-    async fn resolve_buy_input(
-        &self,
-        intent: &OrderIntent,
-    ) -> eth_alpha_core::error::Result<LivePrioritySellPlannerInput> {
-        let pool = self.resolve_pool(intent).await?;
-        let current_block = match self.current_block.load(Ordering::Relaxed) {
-            0 => pool.latest_block,
-            block => block,
-        };
-        let required_state_block = required_state_block(current_block, &pool);
-        let now = Utc::now().timestamp().max(0) as u64;
-        let trade_id = intent.trade_id.clone().ok_or_else(|| {
-            AlphaCoreError::Execution(
-                "live real buy planner requires engine-assigned trade_id".to_string(),
-            )
-        })?;
-        let position = Position::with_trade_id(
-            PositionId(trade_id.0.clone()),
-            trade_id,
-            PositionKey {
-                portfolio_id: intent.portfolio_id.clone(),
-                wallet_id: intent.wallet_id.clone(),
-                strategy_name: intent.strategy_name.clone(),
-                token_address: intent.token_address,
-                pool_address: intent.pool_address.clone(),
-                protocol: intent.protocol.clone(),
-            },
-        );
-
-        Ok(LivePrioritySellPlannerInput {
-            context: PlannerTxContext {
-                tx: TxPrepRequestContext {
-                    chain_id: self.chain_id,
-                    from: self.from.clone(),
-                    strategy_name: intent.strategy_name.0.clone(),
-                    strategy_run_id: Some(self.run_id.clone()),
-                    observed_block: Some(current_block),
-                    required_state_block,
-                    source_metadata: json!({
-                        "resolver": "eth_alpha_live_trader_real_execution",
-                        "execution_mode": "kartal-real",
-                        "route": "uniswap_v2_trading_vault",
-                        "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
-                        "gas_rank_provider": "eth_chain_server_gas_rank",
-                        "min_output_policy": "exact_pre_submit_simulation_slippage_bps",
-                        "decision_block": current_block,
-                        "required_state_block": required_state_block,
-                        "pool_creation_block": pool.creation_block,
-                        "pool_latest_block": pool.latest_block
-                    }),
-                },
-                current_block,
-                deadline_unix_secs: now.saturating_add(intent.deadline_secs),
-            },
-            intent: intent.clone(),
-            position,
-            pool,
-            min_output_amount: None,
-            source_metadata: json!({
-                "decision_reason": intent.decision_reason.clone(),
-                "trade_id": intent.trade_id.clone(),
-            }),
-        })
-    }
-
-    async fn resolve_pool(
-        &self,
-        intent: &OrderIntent,
-    ) -> eth_alpha_core::error::Result<PoolSnapshot> {
-        let pool = {
-            let pools = self
-                .pools
-                .lock()
-                .map_err(|_| AlphaCoreError::Execution("pool cache lock poisoned".to_string()))?;
-            pools.get(&intent.pool_address).cloned()
-        };
-        pool.ok_or_else(|| {
-            AlphaCoreError::Execution(format!(
-                "live real planner has no pool snapshot for {}",
-                intent.pool_address
-            ))
-        })
-    }
-
-    async fn resolve_position(
-        &self,
-        intent: &eth_alpha_core::order::OrderIntent,
-    ) -> eth_alpha_core::error::Result<Position> {
-        let positions = self
-            .store
-            .load_active_positions(&intent.strategy_name.0)
-            .await
-            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
-
-        positions
-            .into_iter()
-            .find(|position| {
-                intent
-                    .trade_id
-                    .as_ref()
-                    .map(|trade_id| &position.trade_id == trade_id)
-                    .unwrap_or(true)
-                    && position.key.strategy_name == intent.strategy_name
-                    && position.key.token_address == intent.token_address
-                    && position.key.pool_address == intent.pool_address
-                    && position.can_submit_exit()
-            })
-            .ok_or_else(|| {
-                AlphaCoreError::Execution(format!(
-                    "no active sellable position found for strategy={} token={} pool={}",
-                    intent.strategy_name.0, intent.token_address, intent.pool_address
-                ))
-            })
-    }
-}
-
-fn required_state_block(current_block: u64, pool: &PoolSnapshot) -> u64 {
-    let mut required = current_block.max(pool.latest_block);
-    if let Some(creation_block) = pool.creation_block {
-        required = required.max(creation_block);
-    }
-    required
 }
 
 struct KartalRealPlanner<P, G> {
@@ -337,46 +134,6 @@ where
         intent: &OrderIntent,
     ) -> eth_alpha_core::error::Result<LiveTraderTxSignal> {
         let mut input = self.resolver.resolve_buy_input(intent).await?;
-        let provisional_route = self
-            .buy_route_builder
-            .build_route(&input, U256::ZERO)
-            .map_err(planner_error)?;
-        let quote_simulation = self
-            .simulator
-            .simulate(&input, &provisional_route)
-            .await
-            .map_err(planner_error)?;
-        let min_output =
-            min_output_from_simulation(&quote_simulation, input.intent.max_slippage_bps)?;
-        input.min_output_amount = Some(min_output.to_string());
-        input.context.tx.source_metadata = json!({
-            "planner_source": input.context.tx.source_metadata,
-            "input_source": input.source_metadata,
-            "min_output_quote": {
-                "provider": "exact_pre_submit_simulation",
-                "simulation_block": quote_simulation.block_number,
-                "expected_output_token": quote_simulation.expected_output_token.clone(),
-                "expected_output_amount": quote_simulation.expected_output_amount.clone(),
-                "min_output_amount": min_output.to_string(),
-                "max_slippage_bps": input.intent.max_slippage_bps,
-            }
-        });
-        let mut route = self
-            .buy_route_builder
-            .build_route(&input, min_output)
-            .map_err(planner_error)?;
-        let simulation = self
-            .simulator
-            .simulate(&input, &route)
-            .await
-            .map_err(planner_error)?;
-        ensure_simulation_ok(&simulation)?;
-        apply_simulated_gas_used(&mut route, &simulation, &self.gas_estimate)?;
-        let gas_rank = self
-            .gas_rank
-            .ranked_fee_candidates(&input, &route)
-            .await
-            .map_err(planner_error)?;
         let buy_policy_context = self.gas_policy.buy_policy_context(
             input
                 .intent
@@ -389,6 +146,73 @@ where
         let gas_policy_guard = buy_policy_context.guard;
         let gas_rank_policy = buy_policy_context.policy.clone();
         let tail_entry_ordering = tail_entry_ordering_evidence(&input.intent, gas_policy_action);
+        let tail_entry_overlay = tail_entry_overlay_plan(&input, gas_policy_action)?;
+        let (min_output, simulation, tail_entry_evidence) = if let Some(plan) = tail_entry_overlay {
+            input.min_output_amount = Some(plan.min_output.to_string());
+            input.context.tx.source_metadata = json!({
+                "planner_source": input.context.tx.source_metadata,
+                "input_source": input.source_metadata,
+                "min_output_quote": {
+                    "provider": "mempool_entry_exact_vault_overlay",
+                    "simulation_block": plan.simulation.block_number,
+                    "expected_output_token": plan.simulation.expected_output_token.clone(),
+                    "expected_output_amount": plan.simulation.expected_output_amount.clone(),
+                    "min_output_amount": plan.min_output.to_string(),
+                    "max_slippage_bps": input.intent.max_slippage_bps,
+                    "dependency_tx_hashes": plan.evidence.dependency_tx_hashes.clone(),
+                }
+            });
+            (plan.min_output, plan.simulation, Some(plan.evidence))
+        } else {
+            let provisional_route = self
+                .buy_route_builder
+                .build_route(&input, U256::ZERO)
+                .map_err(planner_error)?;
+            let quote_simulation = self
+                .simulator
+                .simulate(&input, &provisional_route)
+                .await
+                .map_err(planner_error)?;
+            let min_output =
+                min_output_from_simulation(&quote_simulation, input.intent.max_slippage_bps)?;
+            input.min_output_amount = Some(min_output.to_string());
+            input.context.tx.source_metadata = json!({
+                "planner_source": input.context.tx.source_metadata,
+                "input_source": input.source_metadata,
+                "min_output_quote": {
+                    "provider": "exact_pre_submit_simulation",
+                    "simulation_block": quote_simulation.block_number,
+                    "expected_output_token": quote_simulation.expected_output_token.clone(),
+                    "expected_output_amount": quote_simulation.expected_output_amount.clone(),
+                    "min_output_amount": min_output.to_string(),
+                    "max_slippage_bps": input.intent.max_slippage_bps,
+                }
+            });
+            let route = self
+                .buy_route_builder
+                .build_route(&input, min_output)
+                .map_err(planner_error)?;
+            let simulation = self
+                .simulator
+                .simulate(&input, &route)
+                .await
+                .map_err(planner_error)?;
+            (min_output, simulation, None)
+        };
+        let mut route = self
+            .buy_route_builder
+            .build_route(&input, min_output)
+            .map_err(planner_error)?;
+        if let Some(evidence) = tail_entry_evidence.as_ref() {
+            validate_tail_entry_route(&input, &route, evidence)?;
+        }
+        ensure_simulation_ok(&simulation)?;
+        apply_simulated_gas_used(&mut route, &simulation, &self.gas_estimate)?;
+        let gas_rank = self
+            .gas_rank
+            .ranked_fee_candidates(&input, &route)
+            .await
+            .map_err(planner_error)?;
         let fee = select_entry_gas_fee(
             &gas_rank,
             &gas_rank_policy,
@@ -509,80 +333,6 @@ where
             },
         })
     }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct TailEntryOrderingEvidence {
-    tail_after_tx_hash: Option<String>,
-    dependency_priority_fee_wei: Option<String>,
-    dependency_gas_price_wei: Option<String>,
-}
-
-fn buy_submission_policy(
-    flashbots_tail_max_block_span: u64,
-    gas_policy_action: &str,
-    tail_entry_ordering: &Option<TailEntryOrderingEvidence>,
-    current_block: u64,
-) -> eth_alpha_core::error::Result<TxSubmissionPolicy> {
-    if gas_policy_action != "tail_entry_buy" {
-        return Ok(TxSubmissionPolicy::PublicMempool);
-    }
-    let tail_after_tx_hash = tail_entry_ordering
-        .as_ref()
-        .and_then(|evidence| evidence.tail_after_tx_hash.clone())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| AlphaCoreError::ExecutionCancelled {
-            reason: "Flashbots tail-entry buy requires dependency tail_after_tx_hash".to_string(),
-            block_number: Some(current_block),
-        })?;
-    let target_block = current_block.saturating_add(1);
-    let max_block = target_block.saturating_add(flashbots_tail_max_block_span.max(1) - 1);
-    Ok(TxSubmissionPolicy::FlashbotsMevShare {
-        ordering: TxOrderingPolicy::TailAfter {
-            tx_hash: tail_after_tx_hash,
-        },
-        target_block: Some(target_block),
-        max_block: Some(max_block),
-        can_revert: false,
-    })
-}
-
-fn tail_entry_ordering_evidence(
-    intent: &OrderIntent,
-    gas_policy_action: &str,
-) -> Option<TailEntryOrderingEvidence> {
-    if intent.side != OrderSide::Buy || gas_policy_action != "tail_entry_buy" {
-        return None;
-    }
-    let dependency_fee_metadata = intent
-        .decision_reason
-        .as_ref()?
-        .details
-        .get("risk_event_evidence")?
-        .get("mempool_entry_evidence")?
-        .get("dependency_fee_metadata")?;
-    Some(TailEntryOrderingEvidence {
-        tail_after_tx_hash: json_string_field(dependency_fee_metadata, "tail_after_tx_hash"),
-        dependency_priority_fee_wei: json_string_field(
-            dependency_fee_metadata,
-            "dependency_priority_fee_wei",
-        ),
-        dependency_gas_price_wei: json_string_field(
-            dependency_fee_metadata,
-            "dependency_gas_price_wei",
-        ),
-    })
-}
-
-fn json_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    let value = value.get(key)?;
-    if value.is_null() {
-        return None;
-    }
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .or_else(|| Some(value.to_string()))
 }
 
 fn planner_error(error: LivePrioritySellPlannerError) -> AlphaCoreError {
@@ -746,27 +496,6 @@ fn parse_u256_quantity(value: &str, label: &str) -> eth_alpha_core::error::Resul
     }
 }
 
-pub(super) struct KartalRealPreflight {
-    pub(super) token: String,
-    pub(super) status: KartalEthTxExecutorStatus,
-}
-
-pub(super) async fn preflight_kartal_real(
-    args: &RealExecutionArgs,
-    live_args: &Args,
-    strategy_specs: &[LiveStrategySpec],
-    flashbots_tail_max_block_span: u64,
-) -> Result<KartalRealPreflight> {
-    let token = load_kartal_bearer_token(&args.kartal_token_env)?;
-    validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span)?;
-    let status = KartalClient::new(KartalClientConfig::new(&args.kartal_url, token.clone()))
-        .eth_tx_status()
-        .await
-        .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(&status, args, live_args, strategy_specs)?;
-    Ok(KartalRealPreflight { token, status })
-}
-
 pub(super) async fn build_kartal_real_adapter(
     args: &RealExecutionArgs,
     preflight: KartalRealPreflight,
@@ -859,184 +588,10 @@ pub(super) async fn build_kartal_real_adapter(
     ));
     let submitter = KartalPolicySubmitter { kartal };
     let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id);
-    Ok(Box::new(RealExecutionWithValuation::new(
-        executor,
-        valuation_adapter,
-    )))
-}
-
-fn validate_kartal_real_status(
-    status: &KartalEthTxExecutorStatus,
-    args: &RealExecutionArgs,
-    live_args: &Args,
-    strategy_specs: &[LiveStrategySpec],
-) -> Result<()> {
-    if status.execution_disabled {
-        return Err(eyre!("Kartal ETH tx executor kill switch is active"));
-    }
-    if !status.enabled {
-        return Err(eyre!("Kartal ETH tx executor is disabled"));
-    }
-    if !status.signer_available {
-        return Err(eyre!("Kartal ETH signer is not available"));
-    }
-    if status.policy.allowed_target_count == 0 || status.policy.allowed_selector_count == 0 {
-        return Err(eyre!(
-            "Kartal ETH tx policy must have non-empty target and selector allowlists"
-        ));
-    }
-    if status.submit_endpoint.is_none() {
-        return Err(eyre!(
-            "kartal-real trader requires Kartal /eth/tx/submit support"
-        ));
-    }
-    if status.flashbots_auth_configured != Some(true) {
-        return Err(eyre!(
-            "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
-        ));
-    }
-    match status.broadcast_mode {
-        KartalStatusBroadcastMode::DryRun => Ok(()),
-        KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
-            validate_public_mempool_hold16_deploy(status, live_args, strategy_specs)
-        }
-        KartalStatusBroadcastMode::PublicMempool => Err(eyre!(
-            "kartal-real trader requires broadcast_mode=dry_run unless --allow-public-mempool-live-validation is set for the hold16 deploy strategy"
-        )),
-        KartalStatusBroadcastMode::Unknown => Err(eyre!(
-            "kartal-real trader cannot run with unknown Kartal broadcast_mode"
-        )),
-    }
-}
-
-fn validate_public_mempool_hold16_deploy(
-    status: &KartalEthTxExecutorStatus,
-    args: &Args,
-    strategy_specs: &[LiveStrategySpec],
-) -> Result<()> {
-    if args.strategy_set.as_deref() != Some(HOLD16_STRATEGY_NAME) {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires --strategy-set {HOLD16_STRATEGY_NAME}"
-        ));
-    }
-    if strategy_specs.len() != 1 || strategy_specs[0].strategy_name != HOLD16_STRATEGY_NAME {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires exactly one resolved strategy spec named {HOLD16_STRATEGY_NAME}"
-        ));
-    }
-    let spec = &strategy_specs[0];
-    if spec.max_entry_pools.is_some() {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires strategy spec max_entry_pools unset; bankroll governs entry capacity"
-        ));
-    }
-    if args.disable_entry {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires entries enabled"
-        ));
-    }
-    if args.once {
-        return Err(eyre!(
-            "public mempool hold16 deploy must keep running so receipt reconciliation and hold16 exits can complete"
-        ));
-    }
-    if args.replay_current {
-        return Err(eyre!(
-            "public mempool hold16 deploy must not use --replay-current; start from fresh live observations only"
-        ));
-    }
-
-    let buy_wei = parse_policy_wei(&spec.buy_wei, "strategy buy_wei")?;
-    let max_buy_wei = parse_policy_wei(HOLD16_DEPLOY_BUY_WEI, "hold16 deploy buy cap")?;
-    if buy_wei.is_zero() || buy_wei > max_buy_wei {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires 0 < strategy buy_wei <= {HOLD16_DEPLOY_BUY_WEI}; got {}",
-            spec.buy_wei
-        ));
-    }
-
-    let entry_bankroll_eth = spec.entry_bankroll_eth.as_deref().ok_or_else(|| {
-        eyre!("public mempool hold16 deploy requires strategy entry_bankroll_eth")
-    })?;
-    let entry_bankroll_wei = super::support::parse_eth_decimal_to_wei(
-        entry_bankroll_eth,
-        "strategy entry_bankroll_eth",
-    )?;
-    let max_entry_bankroll_wei = super::support::parse_eth_decimal_to_wei(
-        INITIAL_ENTRY_BANKROLL_ETH,
-        "hold16 deploy entry bankroll cap",
-    )?;
-    if entry_bankroll_wei.is_zero() || entry_bankroll_wei > max_entry_bankroll_wei {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires entry bankroll in (0, {INITIAL_ENTRY_BANKROLL_ETH}] ETH; got {entry_bankroll_eth}"
-        ));
-    }
-
-    let max_value_wei = parse_policy_wei(&status.policy.max_value_wei, "policy max_value_wei")?;
-    if max_value_wei < buy_wei {
-        return Err(eyre!(
-            "Kartal max_value_wei {} is below hold16 deploy buy value {buy_wei}",
-            status.policy.max_value_wei
-        ));
-    }
-    let max_transaction_cost_wei = parse_policy_wei(
-        &status.policy.max_transaction_cost_wei,
-        "policy max_transaction_cost_wei",
-    )?;
-    if max_transaction_cost_wei.is_zero() {
-        return Err(eyre!(
-            "Kartal max_transaction_cost_wei must be nonzero for public mempool hold16 deploy"
-        ));
-    }
-    let max_daily_cost_wei = parse_policy_wei(
-        &status.policy.max_daily_cost_wei,
-        "policy max_daily_cost_wei",
-    )?;
-    let daily_spend_cap_enabled = status
-        .policy
-        .daily_spend_cap_enabled
-        .unwrap_or_else(|| !max_daily_cost_wei.is_zero());
-    if daily_spend_cap_enabled && max_daily_cost_wei < max_transaction_cost_wei {
-        return Err(eyre!(
-            "Kartal max_daily_cost_wei {} is below max_transaction_cost_wei {}",
-            status.policy.max_daily_cost_wei,
-            status.policy.max_transaction_cost_wei
-        ));
-    }
-    if !status.policy.require_simulation || status.policy.max_simulation_age_blocks > 2 {
-        return Err(eyre!(
-            "public mempool hold16 deploy requires fresh simulation policy: require_simulation=true and max_simulation_age_blocks <= 2"
-        ));
-    }
-    Ok(())
-}
-
-fn parse_policy_wei(value: &str, label: &str) -> Result<U256> {
-    U256::from_str_radix(value.trim(), 10)
-        .wrap_err_with(|| format!("invalid {label} decimal wei value {value:?}"))
-}
-
-fn load_kartal_bearer_token(token_env: &str) -> Result<String> {
-    let token = std::env::var(token_env)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| eyre!("missing Kartal bearer token in {token_env}"))?;
-    Ok(token)
-}
-
-pub(super) fn validate_flashbots_tail_max_block_span(span: u64) -> Result<()> {
-    if span == 0 {
-        return Err(eyre!(
-            "ALPHA_LIVE_FLASHBOTS_TAIL_MAX_BLOCK_SPAN must be greater than zero"
-        ));
-    }
-    Ok(())
-}
-
-fn parse_live_real_address(value: &str, label: &str) -> Result<Address> {
-    value
-        .parse::<Address>()
-        .wrap_err_with(|| format!("invalid {label} address {value:?}"))
+    Ok(Box::new(RealExecutionWithValuation {
+        execution: executor,
+        valuation: valuation_adapter,
+    }))
 }
 
 #[cfg(test)]

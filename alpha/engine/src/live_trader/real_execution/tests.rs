@@ -1,8 +1,23 @@
-use eth_live_trading::{
-    KartalDailySpendStatus, KartalEthTxPolicyStatus, KartalStatusBroadcastMode,
+use eth_alpha_core::{
+    amount::Amount,
+    decision_rationale::{DecisionReason, ReasonCategory},
+    ids::{PortfolioId, PositionId, StrategyName, TokenPoolId, TradeId, WalletId},
+    market::{PoolProtocol, PoolSnapshot},
+    mempool_entry::MEMPOOL_ENTRY_EVIDENCE_VERSION,
+    position::{Position, PositionKey},
 };
-use eth_strategies::shared_rules::live::{strategy_set_specs, LiveStrategySpecOptions};
+use eth_live_trading::{
+    KartalDailySpendStatus, KartalEthTxExecutorStatus, KartalEthTxPolicyStatus,
+    KartalStatusBroadcastMode, LivePrioritySellPlannerInput, PlannerTxContext, TxOrderingPolicy,
+    TxPrepRequestContext,
+};
+use eth_strategies::{
+    alpha11::HOLD16_STRATEGY_NAME,
+    shared_rules::live::{strategy_set_specs, LiveStrategySpec, LiveStrategySpecOptions},
+};
+use rust_decimal::Decimal;
 
+use super::super::cli::{Args, RealExecutionArgs};
 use super::*;
 
 fn live_args() -> Args {
@@ -203,4 +218,190 @@ fn non_tail_entry_uses_public_mempool_policy() {
     let policy = buy_submission_policy(3, "entry_buy", &None, 25_128_246).unwrap();
 
     assert_eq!(policy, TxSubmissionPolicy::PublicMempool);
+}
+
+#[test]
+fn tail_entry_overlay_plan_uses_mempool_exact_vault_evidence() {
+    let input = tail_entry_input(tail_entry_evidence_json(json!({})));
+
+    let plan = tail_entry_overlay_plan(&input, "tail_entry_buy")
+        .unwrap()
+        .expect("tail-entry overlay plan");
+
+    assert_eq!(plan.min_output, U256::from(950_000u64));
+    assert_eq!(plan.simulation.block_number, 25_174_725);
+    assert_eq!(plan.simulation.gas_used, Some(136_389));
+    assert_eq!(
+        plan.simulation.expected_output_amount.as_deref(),
+        Some("1000000")
+    );
+    assert_eq!(
+        plan.simulation
+            .metadata
+            .get("provider")
+            .and_then(|value| value.as_str()),
+        Some("mempool_entry_exact_vault_overlay")
+    );
+}
+
+#[test]
+fn tail_entry_overlay_plan_rejects_wrong_owner() {
+    let input = tail_entry_input(tail_entry_evidence_json(json!({
+        "owner_address": "0x0000000000000000000000000000000000000001"
+    })));
+
+    let error = tail_entry_overlay_plan(&input, "tail_entry_buy").unwrap_err();
+
+    assert!(error.to_string().contains("does not match configured from"));
+}
+
+fn tail_entry_input(vault_buy_overrides: serde_json::Value) -> LivePrioritySellPlannerInput {
+    let token = "0x57CA3bfB51FF4085f9afe662Bba9DECea79de79f"
+        .parse()
+        .unwrap();
+    let vault = "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";
+    let from = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
+    let pool_address = TokenPoolId::new(token, "0x047b4653e2089792443235ad6b8fdb1f1a73e35c");
+    let strategy_name = StrategyName(HOLD16_STRATEGY_NAME.to_string());
+    let trade_id = TradeId("trd_tail_entry_test".to_string());
+    let portfolio_id = PortfolioId("chain-sim".to_string());
+    let wallet_id = WalletId("chain-sim-wallet".to_string());
+    let decision_reason = DecisionReason {
+        code: "entry.tail_after_enabling_tx".to_string(),
+        category: ReasonCategory::Entry,
+        label: "Entry: tail after enabling tx".to_string(),
+        source: Some("mempool_signal".to_string()),
+        raw: Some("entry.tail_after_enabling_tx".to_string()),
+        details: json!({
+            "risk_event_evidence": {
+                "mempool_entry_evidence": {
+                    "evidence_version": MEMPOOL_ENTRY_EVIDENCE_VERSION,
+                    "base_block": 25_174_725,
+                    "simulated_block": 25_174_725,
+                    "dependency_tx_hashes": [format!("0x{}", "11".repeat(32))],
+                    "projected_pool": {
+                        "protocol": "UNISWAP-V2",
+                        "denom_reserve": "1.1",
+                        "token_reserve": "74000000000",
+                        "pool_creation_block": 25_174_725,
+                        "latest_block": 25_174_725,
+                        "can_buy": true,
+                        "can_sell": true
+                    },
+                    "viability": {
+                        "can_buy": true,
+                        "can_approve": true,
+                        "can_sell": true
+                    },
+                    "vault_buy_simulation": merge_json(
+                        json!({
+                            "route": "uniswap_v2_trading_vault",
+                            "chain_id": 1,
+                            "vault_address": vault,
+                            "owner_address": from,
+                            "would_revert": false,
+                            "gas_used": 136389,
+                            "eth_spent_wei": HOLD16_DEPLOY_BUY_WEI,
+                            "tokens_received_raw": "1000000",
+                            "metadata": {
+                                "exact_vault_calldata": true,
+                                "expected_tokens_raw": "1000000",
+                                "min_tokens_out": "950000"
+                            }
+                        }),
+                        vault_buy_overrides
+                    ),
+                    "dependency_fee_metadata": {
+                        "tail_after_tx_hash": format!("0x{}", "11".repeat(32))
+                    }
+                }
+            }
+        }),
+    };
+    let intent = OrderIntent {
+        trade_id: Some(trade_id.clone()),
+        portfolio_id: portfolio_id.clone(),
+        wallet_id: wallet_id.clone(),
+        strategy_name: strategy_name.clone(),
+        side: OrderSide::Buy,
+        token_address: token,
+        pool_address: pool_address.clone(),
+        protocol: PoolProtocol::UniswapV2,
+        amount: Amount {
+            raw: U256::from_str_radix(HOLD16_DEPLOY_BUY_WEI, 10).unwrap(),
+            decimals: 18,
+        },
+        route: None,
+        max_slippage_bps: 500,
+        deadline_secs: 30,
+        decision_reason: Some(decision_reason),
+    };
+    let position = Position::with_trade_id(
+        PositionId(trade_id.0.clone()),
+        trade_id,
+        PositionKey {
+            portfolio_id,
+            wallet_id,
+            strategy_name,
+            token_address: token,
+            pool_address: pool_address.clone(),
+            protocol: PoolProtocol::UniswapV2,
+        },
+    );
+    LivePrioritySellPlannerInput {
+        context: PlannerTxContext {
+            tx: TxPrepRequestContext {
+                chain_id: 1,
+                from: from.to_string(),
+                strategy_name: HOLD16_STRATEGY_NAME.to_string(),
+                strategy_run_id: Some("tail-entry-test-run".to_string()),
+                observed_block: Some(25_174_726),
+                required_state_block: 25_174_726,
+                source_metadata: json!({ "test": "tail_entry" }),
+            },
+            current_block: 25_174_726,
+            deadline_unix_secs: 1_800_000_000,
+        },
+        intent,
+        position,
+        pool: PoolSnapshot {
+            address: pool_address,
+            token_address: token,
+            protocol: PoolProtocol::UniswapV2,
+            denom_address: Some(
+                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+                    .parse()
+                    .unwrap(),
+            ),
+            denom_symbol: Some("WETH".to_string()),
+            denom_reserve: Decimal::from_str_exact("1.1").unwrap(),
+            token_reserve: Decimal::from(74_000_000_000u64),
+            price_denom_per_token: None,
+            initial_price_denom_per_token: None,
+            price_ratio_to_initial: None,
+            creation_block: Some(25_174_725),
+            token_decimals: Some(18),
+            fee_tier: None,
+            uniswap_v4: None,
+            latest_block: 25_174_726,
+            can_buy: true,
+            can_sell: true,
+            is_scam: false,
+        },
+        min_output_amount: None,
+        source_metadata: json!({ "test": "tail_entry" }),
+    }
+}
+
+fn tail_entry_evidence_json(vault_buy_overrides: serde_json::Value) -> serde_json::Value {
+    vault_buy_overrides
+}
+
+fn merge_json(mut base: serde_json::Value, overrides: serde_json::Value) -> serde_json::Value {
+    if let (Some(base), Some(overrides)) = (base.as_object_mut(), overrides.as_object()) {
+        for (key, value) in overrides {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+    base
 }

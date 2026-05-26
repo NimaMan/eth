@@ -92,6 +92,10 @@ pub async fn run_checks(
         )
         .await?,
     );
+    checks.push(
+        signal_scope::deferred_mempool_signals_have_reason_check(pool, result_set_id, strategy)
+            .await?,
+    );
     checks.push(signal_scope::submit_decisions_in_range_check(pool, result_set, strategy).await?);
     checks.push(
         signal_scope::trades_match_allowed_protocols_check(pool, result_set_id, strategy).await?,
@@ -99,6 +103,10 @@ pub async fn run_checks(
     checks.push(execution_replay::execution_delay_check(pool, result_set, strategy).await?);
     checks
         .push(execution_replay::terminal_report_presence_check(pool, result_set, strategy).await?);
+    checks.push(
+        execution_replay::live_chain_sim_block_alignment_check(pool, result_set_id, strategy)
+            .await?,
+    );
     checks.push(
         execution_replay::confirmed_reports_have_simulated_outputs_check(
             pool,
@@ -139,6 +147,12 @@ pub async fn run_checks(
         lifecycle::no_exit_block_before_terminal_sell_check(pool, result_set_id, strategy).await?,
     );
     checks.push(lifecycle::trade_position_rollup_check(pool, result_set_id, strategy).await?);
+    checks.push(
+        lifecycle::execution_report_trade_event_mirror_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        lifecycle::single_submitted_event_per_order_check(pool, result_set_id, strategy).await?,
+    );
     checks
         .push(lifecycle::no_duplicate_terminal_events_check(pool, result_set_id, strategy).await?);
     checks.push(lifecycle::lifecycle_order_check(pool, result_set_id, strategy).await?);
@@ -165,6 +179,10 @@ pub async fn run_checks(
     );
     checks.push(
         snapshots::no_future_valued_open_snapshots_after_sell_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        snapshots::no_snapshots_before_buy_confirmation_check(pool, result_set_id, strategy)
             .await?,
     );
     checks.push(snapshots::latest_snapshot_block_check(pool, result_set_id, strategy).await?);

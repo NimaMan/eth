@@ -131,6 +131,120 @@ pub(super) async fn trade_position_rollup_check(
     .await
 }
 
+pub(super) async fn execution_report_trade_event_mirror_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "lifecycle",
+        "execution_reports_mirror_trade_events",
+        Verdict::Fail,
+        "execution report rows have matching trade event rows",
+        "execution report/trade event lifecycle rows with mismatched counts",
+        r#"
+        WITH scoped_trades AS (
+            SELECT run_id, trade_id
+            FROM alpha_trading.trades
+            WHERE result_set_id = $1
+              AND ($2::text IS NULL OR strategy_name = $2)
+        ),
+        reports AS (
+            SELECT er.run_id,
+                   er.trade_id,
+                   er.order_id,
+                   er.order_side,
+                   er.status,
+                   er.block_number,
+                   count(*) AS report_count
+            FROM alpha_trading.execution_reports er
+            JOIN scoped_trades scoped
+              ON scoped.run_id = er.run_id
+             AND scoped.trade_id = er.trade_id
+            WHERE er.order_side IN ('buy', 'sell')
+            GROUP BY er.run_id, er.trade_id, er.order_id, er.order_side,
+                     er.status, er.block_number
+        ),
+        events AS (
+            SELECT te.run_id,
+                   te.trade_id,
+                   te.order_id,
+                   te.order_side,
+                   te.status,
+                   te.block_number,
+                   count(*) AS event_count
+            FROM alpha_trading.trade_events te
+            JOIN scoped_trades scoped
+              ON scoped.run_id = te.run_id
+             AND scoped.trade_id = te.trade_id
+            WHERE te.order_side IN ('buy', 'sell')
+            GROUP BY te.run_id, te.trade_id, te.order_id, te.order_side,
+                     te.status, te.block_number
+        ),
+        mismatches AS (
+            SELECT COALESCE(reports.report_count, 0) AS report_count,
+                   COALESCE(events.event_count, 0) AS event_count
+            FROM reports
+            FULL OUTER JOIN events
+              ON events.run_id = reports.run_id
+             AND events.trade_id = reports.trade_id
+             AND events.order_id = reports.order_id
+             AND events.order_side = reports.order_side
+             AND events.status = reports.status
+             AND events.block_number IS NOT DISTINCT FROM reports.block_number
+            WHERE COALESCE(reports.report_count, 0)
+               <> COALESCE(events.event_count, 0)
+        )
+        SELECT count(*)
+        FROM mismatches
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn single_submitted_event_per_order_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "lifecycle",
+        "single_submitted_event_per_order",
+        Verdict::Fail,
+        "each buy/sell order has exactly one submitted event and at most one terminal event",
+        "orders with missing/duplicate submitted events or duplicate terminal events",
+        r#"
+        WITH order_events AS (
+            SELECT te.run_id,
+                   te.trade_id,
+                   te.order_id,
+                   te.order_side,
+                   count(*) FILTER (WHERE te.status = 'submitted') AS submitted_count,
+                   count(*) FILTER (WHERE te.status IN ('confirmed', 'failed', 'cancelled')) AS terminal_count
+            FROM alpha_trading.trade_events te
+            JOIN alpha_trading.trades t
+              ON t.run_id = te.run_id
+             AND t.trade_id = te.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND te.order_side IN ('buy', 'sell')
+            GROUP BY te.run_id, te.trade_id, te.order_id, te.order_side
+        )
+        SELECT count(*)
+        FROM order_events
+        WHERE submitted_count <> 1
+           OR terminal_count > 1
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn no_duplicate_terminal_events_check(
     pool: &PgPool,
     result_set_id: &str,

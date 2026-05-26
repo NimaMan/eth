@@ -1,11 +1,15 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use alloy_primitives::U256;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{BlockNumber, PoolAddress, PositionId, StrategyName},
+    risk::RiskPolicy,
+    store::TradingStore,
     Strategy,
 };
+use eth_alpha_store::ActiveHoldCounterRecord;
 use eth_strategies::{
     shared_rules::{entry::init_policy::EntryInitPolicyConfig, live::LiveStrategySpec},
     Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
@@ -15,11 +19,67 @@ use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
 
 use super::support::parse_u256_decimal;
+use crate::{AlphaEngine, EngineExecutionAdapter};
 
 pub(super) struct LiveStrategyRestore {
     pub(super) seen_pools: Vec<PoolAddress>,
     pub(super) active_hold_counters: Vec<(PositionId, u64, Option<BlockNumber>)>,
     pub(super) entry_bankroll: RestoredEntryBankroll,
+}
+
+pub(super) fn install_live_strategies<E, R, S>(
+    engine: &mut AlphaEngine<E, R, S>,
+    runner_name: &str,
+    strategy_specs: &[LiveStrategySpec],
+    entry_bankrolls_wei: &[Option<U256>],
+    entry_enabled: bool,
+    seen_pools_by_strategy: &HashMap<String, Vec<PoolAddress>>,
+    active_hold_counters_by_strategy: &HashMap<String, Vec<ActiveHoldCounterRecord>>,
+    entry_bankrolls_by_strategy: &HashMap<String, RestoredEntryBankroll>,
+) -> Result<()>
+where
+    E: EngineExecutionAdapter,
+    R: RiskPolicy,
+    S: TradingStore,
+{
+    for (spec, entry_bankroll_wei) in strategy_specs
+        .iter()
+        .zip(entry_bankrolls_wei.iter().copied())
+    {
+        let seen_pools = seen_pools_by_strategy
+            .get(&spec.strategy_name)
+            .cloned()
+            .unwrap_or_default();
+        let active_hold_counters = active_hold_counters_by_strategy
+            .get(&spec.strategy_name)
+            .into_iter()
+            .flat_map(|counters| counters.iter())
+            .map(|counter| {
+                (
+                    counter.position_id.clone(),
+                    counter.count,
+                    counter.last_block,
+                )
+            })
+            .collect::<Vec<_>>();
+        let restored_entry_bankroll = entry_bankrolls_by_strategy
+            .get(&spec.strategy_name)
+            .cloned()
+            .unwrap_or_default();
+        let strategy = build_live_strategy(
+            runner_name,
+            spec,
+            entry_bankroll_wei,
+            entry_enabled,
+            LiveStrategyRestore {
+                seen_pools,
+                active_hold_counters,
+                entry_bankroll: restored_entry_bankroll,
+            },
+        )?;
+        engine.add_strategy(strategy);
+    }
+    Ok(())
 }
 
 pub(super) fn build_live_strategy(

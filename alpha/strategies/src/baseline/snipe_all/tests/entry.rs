@@ -627,7 +627,84 @@ fn deferred_buy_attempt_can_retry_same_pool() {
     assert!(retry.order_intent().is_some());
     assert_eq!(
         retry.reason(),
-        Some("entry.buy_eligible_pool_once:retry_after_deferred_execution")
+        Some("entry.buy_eligible_pool_once:retry_after_noncapital_execution")
+    );
+}
+
+#[test]
+fn cancelled_buy_attempt_can_retry_same_pool() {
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 1,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let empty_portfolio = PortfolioState::default();
+    let risks = Vec::new();
+    let empty_ctx = ctx(&market, &empty_portfolio, &risks);
+    let mut strategy = SnipeAllStrategy::new(SnipeAllConfig::default());
+
+    assert!(strategy
+        .on_market_event(
+            &empty_ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 1,
+                pool: pool.clone(),
+            },
+        )
+        .unwrap()
+        .order_intent()
+        .is_some());
+
+    let mut cancelled = Position::new(
+        PositionId("cancelled-buy".to_string()),
+        PositionKey {
+            portfolio_id: strategy.config.portfolio_id.clone(),
+            wallet_id: strategy.config.wallet_id.clone(),
+            strategy_name: strategy.name(),
+            token_address: pool.token_address,
+            pool_address: pool.address.clone(),
+            protocol: pool.protocol.clone(),
+        },
+    );
+    cancelled.mark_intent_created(OrderSide::Buy).unwrap();
+    cancelled
+        .mark_order_submitted(OrderId("buy-1".to_string()), OrderSide::Buy)
+        .unwrap();
+    cancelled
+        .apply_execution_report(&ExecutionReport {
+            order_id: OrderId("buy-1".to_string()),
+            status: ExecutionStatus::Cancelled,
+            tx_hash: None,
+            block_number: Some(1),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("simulation reverted before broadcast".to_string()),
+        })
+        .unwrap();
+
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(cancelled.id.clone(), cancelled);
+    let retry_ctx = ctx(&market, &portfolio, &risks);
+    let retry = strategy
+        .on_market_event(
+            &retry_ctx,
+            &MarketEvent::PoolUpdated {
+                block_number: 2,
+                pool,
+            },
+        )
+        .unwrap();
+
+    assert!(retry.order_intent().is_some());
+    assert_eq!(
+        retry.reason(),
+        Some("entry.buy_eligible_pool_once:retry_after_noncapital_execution")
     );
 }
 

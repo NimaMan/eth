@@ -1,4 +1,9 @@
-use super::*;
+use clap::Parser;
+
+use super::{
+    DEFAULT_KARTAL_TOKEN_ENV, DEFAULT_KARTAL_URL, DEFAULT_LIVE_REAL_FROM,
+    DEFAULT_UNISWAP_V2_TRADING_VAULT,
+};
 
 #[derive(Debug)]
 pub(super) struct Args {

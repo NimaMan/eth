@@ -1,4 +1,10 @@
-use super::*;
+use eyre::{Result, WrapErr};
+use serde::Deserialize;
+
+use crate::wire::{
+    GasRankSamplesResponse, LivePoolListResponse, LiveStatusResponse, LiveUpdatesResponse,
+    MempoolSignalsResponse,
+};
 
 #[derive(Clone)]
 pub(super) struct TokenServerClient {

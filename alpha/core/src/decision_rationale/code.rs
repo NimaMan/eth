@@ -48,6 +48,12 @@ fn canonical_code(base: &str, detail: Option<&str>, value: Option<&str>) -> Stri
         ("entry.buy_eligible_pool_once", Some("pool already bought")) => {
             "entry.buy_eligible_pool_once.already_bought".to_string()
         }
+        ("entry.buy_eligible_pool_once", Some("retry_after_deferred_execution")) => {
+            "entry.buy_eligible_pool_once.retry_after_deferred_execution".to_string()
+        }
+        ("entry.buy_eligible_pool_once", Some("retry_after_noncapital_execution")) => {
+            "entry.buy_eligible_pool_once.retry_after_noncapital_execution".to_string()
+        }
         ("entry.eligibility", Some(detail)) => {
             format!("entry.eligibility.{}", sanitize_code_part(detail))
         }
@@ -95,6 +101,12 @@ fn label_for(code: &str, raw: &str) -> String {
         "entry.buy_eligible_pool_once" => "Entry: eligible pool".to_string(),
         "entry.buy_eligible_pool_once.already_bought" => {
             "Entry hold: pool already bought".to_string()
+        }
+        "entry.buy_eligible_pool_once.retry_after_deferred_execution" => {
+            "Entry: retry after deferred execution".to_string()
+        }
+        "entry.buy_eligible_pool_once.retry_after_noncapital_execution" => {
+            "Entry: retry after non-capital execution".to_string()
         }
         "entry.tail_after_enabling_tx" => "Entry: tail after enabling tx".to_string(),
         "entry.blocked_by_active_risk" => "Entry hold: blocked by active risk".to_string(),

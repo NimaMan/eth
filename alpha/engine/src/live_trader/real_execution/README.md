@@ -16,8 +16,8 @@ AlphaEngine OrderIntent
   -> exact deployed V2 vault simulation and gas-rank policy
   -> Kartal /eth/tx/direct-raw
   -> tx_executor validation/sign/dry-run-or-broadcast
-  -> receipt_reconciliation.rs mined receipt and vault-event settlement
+  -> receipt_reconciliation/ mined receipt and vault-event settlement
 ```
 
 The tests in `tests.rs` cover preflight and launch guards. Receipt settlement
-lives one level up in `receipt_reconciliation.rs`.
+lives one level up in `receipt_reconciliation/`.
