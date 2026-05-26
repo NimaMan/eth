@@ -60,7 +60,7 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
 mod tests {
     use eth_strategies::{
         alpha11::{
-            ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
+            BUY_WEI, ENTRY_INIT_MAX_AGE_BLOCKS, ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL,
             INITIAL_ENTRY_BANKROLL_ETH, LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
         },
         ALPHA11_HOLD15_STRATEGY_NAME, ALPHA11_HOLD16_ALL_POOLS_STRATEGY_NAME,
@@ -151,7 +151,7 @@ mod tests {
             Some(LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
         );
         assert_eq!(spec.min_sell_pool_denom_reserve.as_deref(), Some("0"));
-        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.min_liquidity_eth, "0.5");
         assert_eq!(spec.min_liquidity_usd, "1000");
         assert_eq!(spec.max_entry_pools, None);
@@ -187,7 +187,7 @@ mod tests {
                 "defer_buy_confirm_block_lp_approval_to_max_hold": true,
                 "lp_approval_exit_defer_max_trading_enabled_age_blocks": LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
                 "min_sell_pool_denom_reserve": "0",
-                "buy_wei": "10000000000000000",
+                "buy_wei": BUY_WEI,
                 "min_liquidity_eth": "0.5",
                 "min_liquidity_usd": "1000",
                 "max_entry_pools": null,
@@ -239,7 +239,7 @@ mod tests {
             spec.entry_bankroll_eth.as_deref(),
             Some(INITIAL_ENTRY_BANKROLL_ETH)
         );
-        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.max_entry_pools, None);
     }
 
@@ -261,7 +261,7 @@ mod tests {
             spec.entry_bankroll_eth.as_deref(),
             Some(INITIAL_ENTRY_BANKROLL_ETH)
         );
-        assert_eq!(spec.buy_wei, "10000000000000000");
+        assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.max_entry_pools, None);
         assert_eq!(
             live_strategy_spec_config_json(spec)["allowed_protocols"],

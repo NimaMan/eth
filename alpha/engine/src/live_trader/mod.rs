@@ -338,7 +338,7 @@ async fn run(
             signal_limit,
             mempool_since_days,
             &pool_updates,
-            (execution_mode == TraderExecutionMode::ChainSim).then_some(&state_status_adapter),
+            state_status_adapter.as_ref(),
         )
         .await;
         let LivePollBatch {
@@ -674,7 +674,7 @@ async fn run(
         }
         primed = true;
 
-        let chain_state_status = if execution_mode == TraderExecutionMode::ChainSim {
+        let chain_state_status = if let Some(state_status_adapter) = state_status_adapter.as_ref() {
             Some(state_status_adapter.state_status().await)
         } else {
             None

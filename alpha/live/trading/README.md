@@ -201,7 +201,7 @@ Canonical implemented live-capital flow:
 ```text
 Alpha strategy/engine
   -> LiveTradingPlannerBridge
-  -> exact deployed V2 vault simulation
+  -> chain-server exact deployed V2 vault simulation
   -> gas-rank policy
   -> Kartal direct-raw request
   -> tx_executor validation/sign/dry-run-or-broadcast
@@ -237,9 +237,9 @@ mempool/confirmed risk signal
      configured treasury.
   -> AllowanceChecker proves the sell token can be spent, or marks the trading
      vault route as internally approved by the emergency-sell call
-  -> PreSubmitSimulator simulates the exact calldata against current state
-       for the deployed V2 vault and extracts tokens from BoughtV2 or recovered
-       ETH from EmergencySoldV2
+  -> PreSubmitSimulator requests chain-server exact-block simulation for the
+       deployed V2 vault calldata and extracts tokens from BoughtV2 or
+       recovered ETH from EmergencySoldV2
   -> GasRankProvider converts recent block-rank evidence into fee candidates
   -> tx_prep computes the value cap and chooses/rejects the gas plan
   -> LiveTraderTxSignal carries LiveDirectRawTransactionRequest to Kartal

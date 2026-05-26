@@ -6,7 +6,7 @@ use eth_alpha_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tx_simulator::{FullSimulationResult, LiveTxSimulator, UnsignedTransaction};
+use tx_simulator::UnsignedTransaction;
 
 use crate::{PreSubmitSimulation, PreparedSellRoute};
 
@@ -68,12 +68,6 @@ impl ChainServerLivePreSubmitSimulator {
             self.base_url.trim_end_matches('/')
         )
     }
-}
-
-#[derive(Clone)]
-pub struct UniswapV2TradingVaultPreSubmitSimulator {
-    simulator: LiveTxSimulator,
-    vault_address: Address,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -296,214 +290,6 @@ impl PreSubmitSimulator for ChainServerLivePreSubmitSimulator {
     }
 }
 
-impl UniswapV2TradingVaultPreSubmitSimulator {
-    pub fn new(simulator: LiveTxSimulator, vault_address: Address) -> Self {
-        Self {
-            simulator,
-            vault_address,
-        }
-    }
-}
-
-#[async_trait]
-impl PreSubmitSimulator for UniswapV2TradingVaultPreSubmitSimulator {
-    async fn simulate(
-        &self,
-        input: &LivePrioritySellPlannerInput,
-        route: &PreparedSellRoute,
-    ) -> Result<PreSubmitSimulation, LivePrioritySellPlannerError> {
-        if route.protocol != "uniswap_v2_trading_vault" {
-            return Err(LivePrioritySellPlannerError::Simulation(format!(
-                "exact V2 vault simulator received unsupported route protocol {:?}",
-                route.protocol
-            )));
-        }
-
-        let from = input.context.tx.from.parse::<Address>().map_err(|error| {
-            LivePrioritySellPlannerError::Simulation(format!(
-                "invalid pre-submit simulation from address {:?}: {error}",
-                input.context.tx.from
-            ))
-        })?;
-        let to = route.router_address.parse::<Address>().map_err(|error| {
-            LivePrioritySellPlannerError::Simulation(format!(
-                "invalid pre-submit simulation route target {:?}: {error}",
-                route.router_address
-            ))
-        })?;
-        if to != self.vault_address {
-            return Err(LivePrioritySellPlannerError::Simulation(format!(
-                "exact V2 vault simulator target mismatch: route target {to} != configured vault {}",
-                self.vault_address
-            )));
-        }
-
-        let required_state_block = input.context.required_state_block(&input.pool);
-        let latest_status = self
-            .simulator
-            .latest_state_status()
-            .await
-            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
-        if !self
-            .simulator
-            .has_state_at(required_state_block)
-            .await
-            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?
-        {
-            return Err(LivePrioritySellPlannerError::SimulationStateNotReady {
-                selected_block: latest_status.selected_block_number,
-                required_block: required_state_block,
-                current_block: input.context.current_block,
-                latest_reth_finished_block: latest_status.latest_reth_finished_block_number,
-                latest_historical_context_block: latest_status
-                    .latest_historical_context_block_number,
-                state_source: format!("{:?}", latest_status.source),
-            });
-        }
-        let status = self
-            .simulator
-            .state_status_at(required_state_block)
-            .await
-            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
-
-        let mut chain = self
-            .simulator
-            .start_chain_at(required_state_block)
-            .await
-            .map_err(|error| LivePrioritySellPlannerError::Simulation(error.to_string()))?;
-        let base_fee = chain.block_base_fee().unwrap_or(1);
-        let tx = UnsignedTransaction {
-            from: Some(from),
-            to: Some(to),
-            gas: Some(route.gas_limit),
-            gas_price: None,
-            max_fee_per_gas: Some(base_fee),
-            max_priority_fee_per_gas: Some(0),
-            value: Some(parse_u256_quantity(&route.value_wei, "route value_wei")?),
-            data: Some(decode_hex_bytes(&route.calldata, "route calldata")?),
-            nonce: None,
-            ..Default::default()
-        };
-
-        let result = chain.step_with_trace(tx).await.map_err(|error| {
-            LivePrioritySellPlannerError::Simulation(format!(
-                "exact V2 vault calldata simulation failed at block {}: {error}",
-                status.selected_block_number
-            ))
-        })?;
-
-        let base_metadata = json!({
-            "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
-            "route_protocol": route.protocol,
-            "vault_address": self.vault_address.to_string(),
-            "from": from.to_string(),
-            "to": to.to_string(),
-            "observed_block": input.context.current_block,
-            "required_state_block": required_state_block,
-            "pool_creation_block": input.pool.creation_block,
-            "pool_latest_block": input.pool.latest_block,
-            "tx_observed_block": input.context.tx.observed_block,
-            "simulation_block": status.selected_block_number,
-            "latest_reth_finished_block": status.latest_reth_finished_block_number,
-            "latest_historical_context_block": status.latest_historical_context_block_number,
-            "state_source": format!("{:?}", status.source),
-            "gas_limit": route.gas_limit,
-            "gas_used": result.gas_used,
-            "log_count": result.logs.len(),
-            "effective_gas_price_wei": result.effective_gas_price.map(|value| value.to_string()),
-            "base_fee_per_gas_wei": base_fee.to_string(),
-            "revert_reason": result.revert_reason,
-        });
-
-        if !result.success {
-            return Ok(PreSubmitSimulation {
-                block_number: status.selected_block_number,
-                block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
-                state_root: None,
-                expected_output_token: Some("ETH".to_string()),
-                expected_output_amount: None,
-                min_output_amount: input.min_output_amount.clone(),
-                expected_recovery_eth: DecimalAmount::ZERO,
-                gas_used: Some(result.gas_used),
-                would_revert: true,
-                metadata: base_metadata,
-            });
-        }
-
-        match input.intent.side {
-            OrderSide::Buy => {
-                let fill =
-                    extract_bought_v2_fill(&result, self.vault_address, input.intent.token_address)?
-                        .ok_or_else(|| {
-                            LivePrioritySellPlannerError::Simulation(format!(
-                                "exact V2 vault simulation succeeded but emitted no matching BoughtV2 event for token {}",
-                                input.intent.token_address
-                            ))
-                        })?;
-
-                Ok(PreSubmitSimulation {
-                    block_number: status.selected_block_number,
-                    block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
-                    state_root: None,
-                    expected_output_token: Some(input.intent.token_address.to_string()),
-                    expected_output_amount: Some(fill.tokens_received.to_string()),
-                    min_output_amount: input.min_output_amount.clone(),
-                    expected_recovery_eth: Amount {
-                        raw: fill.eth_spent,
-                        decimals: 18,
-                    }
-                    .to_decimal(),
-                    gas_used: Some(result.gas_used),
-                    would_revert: false,
-                    metadata: json!({
-                        "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
-                        "event": "BoughtV2",
-                        "eth_spent_wei": fill.eth_spent.to_string(),
-                        "tokens_received_raw": fill.tokens_received.to_string(),
-                        "base": base_metadata,
-                    }),
-                })
-            }
-            OrderSide::Sell => {
-                let fill = extract_emergency_sold_v2_fill(
-                    &result,
-                    self.vault_address,
-                    input.intent.token_address,
-                )?
-                .ok_or_else(|| {
-                    LivePrioritySellPlannerError::Simulation(format!(
-                        "exact V2 vault simulation succeeded but emitted no matching EmergencySoldV2 event for token {}",
-                        input.intent.token_address
-                    ))
-                })?;
-
-                Ok(PreSubmitSimulation {
-                    block_number: status.selected_block_number,
-                    block_hash: status.selected_block_hash.map(|hash| hash.to_string()),
-                    state_root: None,
-                    expected_output_token: Some("ETH".to_string()),
-                    expected_output_amount: Some(fill.eth_received.to_string()),
-                    min_output_amount: input.min_output_amount.clone(),
-                    expected_recovery_eth: Amount {
-                        raw: fill.eth_received,
-                        decimals: 18,
-                    }
-                    .to_decimal(),
-                    gas_used: Some(result.gas_used),
-                    would_revert: false,
-                    metadata: json!({
-                        "provider": "live_in_memory_exact_calldata_uniswap_v2_trading_vault",
-                        "event": "EmergencySoldV2",
-                        "amount_in_raw": fill.amount_in.to_string(),
-                        "eth_received_wei": fill.eth_received.to_string(),
-                        "base": base_metadata,
-                    }),
-                })
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct BoughtV2Fill {
     eth_spent: U256,
@@ -514,14 +300,6 @@ struct BoughtV2Fill {
 struct EmergencySoldV2Fill {
     amount_in: U256,
     eth_received: U256,
-}
-
-fn extract_bought_v2_fill(
-    result: &FullSimulationResult,
-    vault_address: Address,
-    token_address: Address,
-) -> Result<Option<BoughtV2Fill>, LivePrioritySellPlannerError> {
-    extract_bought_v2_fill_from_logs(&result.logs, vault_address, token_address)
 }
 
 fn extract_bought_v2_fill_from_logs(
@@ -549,14 +327,6 @@ fn extract_bought_v2_fill_from_logs(
         }));
     }
     Ok(None)
-}
-
-fn extract_emergency_sold_v2_fill(
-    result: &FullSimulationResult,
-    vault_address: Address,
-    token_address: Address,
-) -> Result<Option<EmergencySoldV2Fill>, LivePrioritySellPlannerError> {
-    extract_emergency_sold_v2_fill_from_logs(&result.logs, vault_address, token_address)
 }
 
 fn extract_emergency_sold_v2_fill_from_logs(
@@ -665,28 +435,18 @@ mod tests {
         data.extend_from_slice(&amount_in.to_be_bytes::<32>());
         data.extend_from_slice(&eth_received.to_be_bytes::<32>());
         data.extend_from_slice(&min_out.to_be_bytes::<32>());
-        let result = FullSimulationResult {
-            success: true,
-            gas_used: 120_000,
-            effective_gas_price: Some(1),
-            tx_type: Some(2),
-            revert_reason: None,
-            revert_context: None,
-            call_trace: Default::default(),
-            struct_logs: None,
-            logs: vec![Log {
-                address: vault,
-                data: LogData::new_unchecked(
-                    vec![
-                        event_signature_topic(EMERGENCY_SOLD_V2_SIGNATURE),
-                        indexed_address_topic(token),
-                    ],
-                    Bytes::from(data),
-                ),
-            }],
-        };
+        let logs = vec![Log {
+            address: vault,
+            data: LogData::new_unchecked(
+                vec![
+                    event_signature_topic(EMERGENCY_SOLD_V2_SIGNATURE),
+                    indexed_address_topic(token),
+                ],
+                Bytes::from(data),
+            ),
+        }];
 
-        let extracted = extract_emergency_sold_v2_fill(&result, vault, token).unwrap();
+        let extracted = extract_emergency_sold_v2_fill_from_logs(&logs, vault, token).unwrap();
 
         assert_eq!(
             extracted,
@@ -708,28 +468,18 @@ mod tests {
         data.extend_from_slice(&eth_spent.to_be_bytes::<32>());
         data.extend_from_slice(&tokens_received.to_be_bytes::<32>());
         data.extend_from_slice(&min_out.to_be_bytes::<32>());
-        let result = FullSimulationResult {
-            success: true,
-            gas_used: 120_000,
-            effective_gas_price: Some(1),
-            tx_type: Some(2),
-            revert_reason: None,
-            revert_context: None,
-            call_trace: Default::default(),
-            struct_logs: None,
-            logs: vec![Log {
-                address: vault,
-                data: LogData::new_unchecked(
-                    vec![
-                        event_signature_topic(BOUGHT_V2_SIGNATURE),
-                        indexed_address_topic(token),
-                    ],
-                    Bytes::from(data),
-                ),
-            }],
-        };
+        let logs = vec![Log {
+            address: vault,
+            data: LogData::new_unchecked(
+                vec![
+                    event_signature_topic(BOUGHT_V2_SIGNATURE),
+                    indexed_address_topic(token),
+                ],
+                Bytes::from(data),
+            ),
+        }];
 
-        let extracted = extract_bought_v2_fill(&result, vault, token).unwrap();
+        let extracted = extract_bought_v2_fill_from_logs(&logs, vault, token).unwrap();
 
         assert_eq!(
             extracted,

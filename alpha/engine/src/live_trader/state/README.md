@@ -26,7 +26,11 @@ block is missing from the window, settlement stays pending and logs the missing
 state instead of fabricating an execution result from a different block.
 
 The provider also exposes a notification for newly published block state.
-Chain-sim live backtests use it at the polling boundary:
+This is a chain-sim live-backtest path only. Kartal-real runners do not build
+or wait on a local `LiveTxSimulator`; they request exact-block pre-submit
+simulation from chain-server.
+
+Chain-sim live backtests use the notification at the polling boundary:
 
 ```text
 read live status for block N

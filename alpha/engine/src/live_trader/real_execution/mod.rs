@@ -30,7 +30,7 @@ use crate::execution::real::{
     LiveTradingPlannerBridge, LiveTxPlanner, LiveTxSubmissionResult, LiveTxSubmitter,
     TxExecutorAdapter,
 };
-use crate::{EngineExecutionAdapter, LiveChainSimExecutionAdapter};
+use crate::EngineExecutionAdapter;
 
 use super::cli::RealExecutionArgs;
 use super::gas_policy::LiveRealGasPolicy;
@@ -645,8 +645,6 @@ pub(super) async fn build_kartal_real_adapter(
     chain_server_url: String,
     store: PostgresTradingStore,
     run_id: String,
-    _valuation_adapter: LiveChainSimExecutionAdapter,
-    _exact_pre_submit_live_simulator: Option<tx_simulator::LiveTxSimulator>,
     pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
     gas_policy: LiveRealGasPolicy,

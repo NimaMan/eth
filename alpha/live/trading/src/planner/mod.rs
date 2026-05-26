@@ -38,5 +38,4 @@ pub use route_builder::{
 };
 pub use simulation::{
     ChainServerLivePreSubmitSimulator, FixedPreSubmitSimulator, PreSubmitSimulator,
-    UniswapV2TradingVaultPreSubmitSimulator,
 };
