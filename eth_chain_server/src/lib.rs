@@ -10,6 +10,7 @@ pub mod prices;
 pub mod ranges;
 pub mod read_models;
 pub mod recent_blocks;
+pub mod simulation;
 pub mod stores;
 pub mod token_analytics;
 
@@ -41,8 +42,8 @@ pub mod server {
 
 pub mod views {
     pub use crate::read_models::{
-        activity, cache, error, live, ops, pool, price, run, strategy, surface, token,
-        token_analytics,
+        activity, cache, error, gas_rank, live, ops, pool, price, risk_atlas, run,
+        scammer_analytics, simulation, strategy, surface, token, token_analytics,
     };
 }
 

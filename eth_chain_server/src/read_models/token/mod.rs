@@ -15,6 +15,8 @@ use serde::Serialize;
 use crate::ranges::{RangeIndexJob, RangeIndexState};
 use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
 
+pub mod activity;
+
 const TOKEN_PNL_TOP_POSITION_LIMIT: usize = 25;
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 
