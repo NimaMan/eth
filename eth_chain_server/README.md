@@ -139,6 +139,14 @@ decisions, tx planning, gas policy, and Kartal submission. Alpha should request
 exact-block simulation results from chain-server instead of rebuilding the live
 state frame locally.
 
+For live-tail blocks, the `LiveTxSimulator` update is immediate within the
+processed-block apply path: after chain-server has the processed block header,
+block context, and prestate diffs for block `B`, it builds and publishes
+`BlockStateSession B` into the chain-server `LiveTxSimulator` before token/pool
+state is updated and before the `BlockApplied` event is visible to Alpha. If the
+exact session cannot be built, chain-server does not silently fall back to an
+older historical state; exact-block simulation requests for that block fail.
+
 The practical ownership split is:
 
 - `eth_token` owns canonical token/pool state and emits compact per-block
