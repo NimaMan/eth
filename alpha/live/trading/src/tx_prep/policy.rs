@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    build_priority_sell_request, GasPlanDecision, PreSubmitSimulation, PreparedSellRoute,
-    PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy,
-    TxPrepRequestContext, TxPrepRouteError, TxPrepSimulationError, MEMPOOL_RACE_GAS_LABEL,
-    MEMPOOL_RACE_GAS_SOURCE,
+    apply_min_priority_fee_floor_to_candidates, build_priority_sell_request, GasPlanDecision,
+    PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget, PriorityFeeBudgetInput,
+    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepRequestContext, TxPrepRouteError,
+    TxPrepSimulationError, MEMPOOL_RACE_GAS_LABEL, MEMPOOL_RACE_GAS_SOURCE,
 };
 use crate::LiveTraderTxSignal;
 use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
@@ -14,6 +14,8 @@ use crate::{LpSignalSource, PrioritySellPlan, SellUrgency};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TxPrepConfig {
     pub max_total_fee_eth: DecimalAmount,
+    #[serde(default)]
+    pub min_priority_fee_gwei: DecimalAmount,
     pub max_priority_fee_gwei: DecimalAmount,
     pub safety_buffer_eth: DecimalAmount,
     pub gas_rank_policy: StrategyGasRankPolicy,
@@ -78,16 +80,20 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
         .clone()
         .unwrap_or_else(|| config.gas_rank_policy.clone());
 
-    let ranked_fee_candidates = filter_ranked_fee_candidates(
-        &input.ranked_fee_candidates,
-        &config.required_gas_rank_source,
-        &input.plan,
+    let ranked_fee_candidates = apply_min_priority_fee_floor_to_candidates(
+        filter_ranked_fee_candidates(
+            &input.ranked_fee_candidates,
+            &config.required_gas_rank_source,
+            &input.plan,
+        ),
+        config.min_priority_fee_gwei,
     );
     if ranked_fee_candidates.is_empty() && config.required_gas_rank_source.is_some() {
         return TxPrepOutcome::Reject(TxPrepReject {
             reason: "gas_rank_source_not_allowed".to_string(),
             metadata: json!({
                 "required_gas_rank_source": config.required_gas_rank_source,
+                "min_priority_fee_gwei": config.min_priority_fee_gwei,
                 "ranked_fee_candidates": input.ranked_fee_candidates,
                 "strategy_gas_rank_policy": gas_rank_policy,
                 "budget": budget,
@@ -117,6 +123,7 @@ pub fn prepare_priority_sell(config: &TxPrepConfig, input: PrioritySellTxPrep) -
             reason,
             metadata: json!({
                 "required_priority_fee_gwei": required_priority_fee_gwei,
+                "min_priority_fee_gwei": config.min_priority_fee_gwei,
                 "max_priority_fee_gwei": max_priority_fee_gwei,
                 "max_priority_spend_eth": max_priority_spend_eth,
                 "required_gas_rank_source": config.required_gas_rank_source,
@@ -247,6 +254,7 @@ mod tests {
     fn config(max_priority_gwei: i64) -> TxPrepConfig {
         TxPrepConfig {
             max_total_fee_eth: DecimalAmount::new(2, 2),
+            min_priority_fee_gwei: DecimalAmount::ZERO,
             max_priority_fee_gwei: DecimalAmount::from(max_priority_gwei),
             safety_buffer_eth: DecimalAmount::new(1, 3),
             gas_rank_policy: StrategyGasRankPolicy::p90_first(),
@@ -304,6 +312,30 @@ mod tests {
                 assert_eq!(reject.reason, "gas_rank_exceeds_value_cap");
             }
             other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn applies_executor_min_priority_floor_before_request_build() {
+        let mut config = config(100);
+        config.min_priority_fee_gwei = DecimalAmount::ONE;
+        let input = input(0);
+
+        let outcome = prepare_priority_sell(&config, input);
+
+        match outcome {
+            TxPrepOutcome::Submit { signal, .. } => {
+                assert_eq!(signal.request.max_priority_fee_per_gas, "1000000000");
+                assert_eq!(signal.request.max_fee_per_gas, "11000000000");
+                assert_eq!(
+                    signal
+                        .request
+                        .metadata
+                        .pointer("/gas_plan/metadata/executor_min_priority_fee_floor_applied"),
+                    Some(&json!(true))
+                );
+            }
+            other => panic!("expected submit, got {other:?}"),
         }
     }
 

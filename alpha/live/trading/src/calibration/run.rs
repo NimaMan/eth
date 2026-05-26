@@ -289,6 +289,7 @@ mod tests {
             flashbots_tail_bundle_endpoint: Some("/eth/tx/flashbots/mev-share-tail".to_string()),
             flashbots_relay_url: Some("https://relay.flashbots.net".to_string()),
             flashbots_auth_configured: Some(false),
+            min_priority_fee_per_gas_wei: Some("0".to_string()),
             policy: KartalEthTxPolicyStatus {
                 version: "test".to_string(),
                 allowed_from_count: 0,

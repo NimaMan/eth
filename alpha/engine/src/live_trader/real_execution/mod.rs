@@ -14,12 +14,13 @@ use eth_alpha_core::{
 };
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
-    derive_min_output_from_expected_output, ChainServerGasRankProvider, GasEstimateConfig,
-    GasRankPlan, GasRankProvider, KartalBribeRequest, KartalExecutorClient,
-    KartalExecutorClientConfig, KartalSimulationReference, LiveDirectRawTransactionRequest,
-    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
-    LiveTraderTxSignal, MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator,
-    PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
+    apply_min_priority_fee_floor_to_candidates, derive_min_output_from_expected_output,
+    ChainServerGasRankProvider, GasEstimateConfig, GasRankPlan, GasRankProvider,
+    KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
+    KartalSimulationReference, LiveDirectRawTransactionRequest, LivePrioritySellPlanner,
+    LivePrioritySellPlannerConfig, LivePrioritySellPlannerError, LiveTraderTxSignal,
+    MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
+    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
     UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultPreSubmitSimulator,
     UniswapV2TradingVaultSellRouteBuilder, VaultInternalAllowanceChecker,
     ETH_UNSIGNED_TX_WIRE_PROTOCOL,
@@ -310,6 +311,7 @@ where
                     },
                     "production_gas_guard": {
                         "required_gas_rank_source": self.gas_policy.required_gas_rank_source.as_str(),
+                        "min_priority_fee_gwei": self.gas_policy.min_priority_fee_gwei(),
                         "max_priority_fee_gwei": self.gas_policy.max_priority_fee_gwei,
                         "max_estimated_gas_fee_eth": self.gas_policy.entry_max_estimated_gas_fee_eth,
                     },
@@ -430,22 +432,28 @@ fn select_entry_gas_fee(
     let estimated_gas_used = route
         .require_estimated_gas_used()
         .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
-    let candidates = plan
-        .candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.source.as_deref() == Some(gas_policy.required_gas_rank_source.as_str())
-                && candidate.priority_fee_gwei <= gas_policy.max_priority_fee_gwei
-                && candidate.estimated_max_cost_eth(estimated_gas_used)
-                    <= gas_policy.entry_max_estimated_gas_fee_eth
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let candidates = apply_min_priority_fee_floor_to_candidates(
+        plan.candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.source.as_deref() == Some(gas_policy.required_gas_rank_source.as_str())
+            })
+            .cloned(),
+        gas_policy.min_priority_fee_gwei(),
+    )
+    .into_iter()
+    .filter(|candidate| {
+        candidate.priority_fee_gwei <= gas_policy.max_priority_fee_gwei
+            && candidate.estimated_max_cost_eth(estimated_gas_used)
+                <= gas_policy.entry_max_estimated_gas_fee_eth
+    })
+    .collect::<Vec<_>>();
 
     policy.choose_candidate(&candidates).ok_or_else(|| {
         let reason = format!(
-            "live real buy planner has no gas fee candidate matching production gas guard: required_source={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
+            "live real buy planner has no gas fee candidate matching production gas guard: required_source={} min_priority_fee_gwei={} max_priority_fee_gwei={} max_estimated_gas_fee_eth={} candidates={}",
             gas_policy.required_gas_rank_source,
+            gas_policy.min_priority_fee_gwei(),
             gas_policy.max_priority_fee_gwei,
             gas_policy.entry_max_estimated_gas_fee_eth,
             serde_json::to_string(&plan.candidates).unwrap_or_else(|_| "[]".to_string())
@@ -542,6 +550,7 @@ pub(super) async fn build_kartal_real_adapter(
     planner_config.require_existing_allowance = false;
     planner_config.tx_prep = TxPrepConfig {
         max_total_fee_eth: gas_policy.exit_max_estimated_gas_fee_eth,
+        min_priority_fee_gwei: gas_policy.min_priority_fee_gwei(),
         max_priority_fee_gwei: gas_policy.max_priority_fee_gwei,
         safety_buffer_eth: gas_policy.safety_buffer_eth,
         gas_rank_policy: gas_policy.normal_exit_gas_rank_policy.clone(),

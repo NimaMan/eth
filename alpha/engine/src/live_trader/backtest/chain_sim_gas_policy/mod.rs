@@ -8,9 +8,9 @@ use eth_alpha_core::{
     position::Position,
 };
 use eth_live_trading::{
-    tx_prep::GasPlanDecision, ChainServerGasRankProvider, GasEstimateConfig, GasRankProvider,
-    MempoolRaceGasRankProvider, PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate,
-    StrategyGasRankPolicy,
+    apply_min_priority_fee_floor_to_candidates, tx_prep::GasPlanDecision,
+    ChainServerGasRankProvider, GasEstimateConfig, GasRankProvider, MempoolRaceGasRankProvider,
+    PriorityFeeBudget, PriorityFeeBudgetInput, RankedFeeCandidate, StrategyGasRankPolicy,
 };
 
 use crate::{EngineExecutionAdapter, PositionValueSimulation};
@@ -164,15 +164,17 @@ where
                 .map(|reason| reason.code.as_str()),
         );
         let policy = policy_context.policy;
-        let capped = candidates
-            .iter()
-            .filter(|candidate| {
-                candidate.priority_fee_gwei <= self.gas_policy.max_priority_fee_gwei
-                    && candidate.estimated_max_cost_eth(estimated_gas_used)
-                        <= self.gas_policy.entry_max_estimated_gas_fee_eth
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let capped = apply_min_priority_fee_floor_to_candidates(
+            candidates.iter().cloned(),
+            self.gas_policy.min_priority_fee_gwei(),
+        )
+        .into_iter()
+        .filter(|candidate| {
+            candidate.priority_fee_gwei <= self.gas_policy.max_priority_fee_gwei
+                && candidate.estimated_max_cost_eth(estimated_gas_used)
+                    <= self.gas_policy.entry_max_estimated_gas_fee_eth
+        })
+        .collect::<Vec<_>>();
 
         match policy.choose_candidate(&capped) {
             Some(candidate) => ShadowGasSelection::selected(
@@ -202,7 +204,10 @@ where
         estimated_gas_used: u64,
     ) -> ShadowGasSelection {
         let policy_context = sell_policy_context(intent, &self.gas_policy);
-        let candidates = self.allowed_gas_candidates(candidates, policy_context.policy);
+        let candidates = apply_min_priority_fee_floor_to_candidates(
+            self.allowed_gas_candidates(candidates, policy_context.policy),
+            self.gas_policy.min_priority_fee_gwei(),
+        );
         let protected_exit_value_eth = report
             .filled_amount
             .as_ref()

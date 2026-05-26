@@ -1,6 +1,6 @@
 use eth_alpha_core::amount::DecimalAmount;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use super::budget::{estimate_eth_cost_from_gwei, PriorityFeeBudget};
 
@@ -89,6 +89,64 @@ pub fn choose_ranked_fee(
     }
 }
 
+pub fn apply_min_priority_fee_floor_to_candidates(
+    candidates: impl IntoIterator<Item = RankedFeeCandidate>,
+    min_priority_fee_gwei: DecimalAmount,
+) -> Vec<RankedFeeCandidate> {
+    candidates
+        .into_iter()
+        .map(|candidate| apply_min_priority_fee_floor(candidate, min_priority_fee_gwei))
+        .collect()
+}
+
+pub fn apply_min_priority_fee_floor(
+    mut candidate: RankedFeeCandidate,
+    min_priority_fee_gwei: DecimalAmount,
+) -> RankedFeeCandidate {
+    if min_priority_fee_gwei <= DecimalAmount::ZERO
+        || candidate.priority_fee_gwei >= min_priority_fee_gwei
+    {
+        return candidate;
+    }
+
+    let original_priority_fee_gwei = candidate.priority_fee_gwei;
+    let original_max_fee_per_gas_gwei = candidate.max_fee_per_gas_gwei;
+    let priority_delta_gwei = min_priority_fee_gwei - original_priority_fee_gwei;
+
+    candidate.priority_fee_gwei = min_priority_fee_gwei;
+    candidate.max_fee_per_gas_gwei += priority_delta_gwei;
+    candidate.metadata = Some(merge_floor_metadata(
+        candidate.metadata.take(),
+        json!({
+            "executor_min_priority_fee_floor_applied": true,
+            "executor_min_priority_fee_gwei": min_priority_fee_gwei,
+            "original_priority_fee_gwei": original_priority_fee_gwei,
+            "original_max_fee_per_gas_gwei": original_max_fee_per_gas_gwei,
+        }),
+    ));
+    candidate
+}
+
+fn merge_floor_metadata(existing: Option<Value>, floor_metadata: Value) -> Value {
+    let mut map = match existing {
+        Some(Value::Object(map)) => map,
+        Some(value) => {
+            let mut map = Map::new();
+            map.insert("original_metadata".to_string(), value);
+            map
+        }
+        None => Map::new(),
+    };
+
+    if let Value::Object(floor_metadata) = floor_metadata {
+        for (key, value) in floor_metadata {
+            map.insert(key, value);
+        }
+    }
+
+    Value::Object(map)
+}
+
 fn compare_candidates(left: &RankedFeeCandidate, right: &RankedFeeCandidate) -> std::cmp::Ordering {
     let left_rank = left.rank_position_p50.unwrap_or(u64::MAX);
     let right_rank = right.rank_position_p50.unwrap_or(u64::MAX);
@@ -161,5 +219,34 @@ mod tests {
         let decision = choose_ranked_fee(&budget(40), &[candidate("p90", 50, 10)]);
 
         assert!(matches!(decision, GasPlanDecision::Reject { .. }));
+    }
+
+    #[test]
+    fn applies_min_priority_fee_floor_preserving_base_fee_cushion() {
+        let candidate = RankedFeeCandidate {
+            label: "p85".to_string(),
+            priority_fee_gwei: DecimalAmount::new(5, 1),
+            max_fee_per_gas_gwei: DecimalAmount::new(6, 1),
+            rank_position_p50: Some(10),
+            gas_before_p50: Some(210_000),
+            likely_fits_at_p50: Some(true),
+            source: Some("test".to_string()),
+            metadata: Some(json!({ "existing": true })),
+        };
+
+        let floored = apply_min_priority_fee_floor(candidate, DecimalAmount::ONE);
+
+        assert_eq!(floored.priority_fee_gwei, DecimalAmount::ONE);
+        assert_eq!(floored.max_fee_per_gas_gwei, DecimalAmount::new(11, 1));
+        let metadata = floored.metadata.expect("floor metadata");
+        assert_eq!(
+            metadata["executor_min_priority_fee_floor_applied"],
+            json!(true)
+        );
+        assert_eq!(metadata["existing"], json!(true));
+        assert_eq!(
+            metadata["original_priority_fee_gwei"],
+            json!(DecimalAmount::new(5, 1))
+        );
     }
 }

@@ -12,6 +12,8 @@ pub(super) fn live_gas_policy_run_metadata_json(
         "gas_rank_lookback_blocks": policy.gas_rank_lookback_blocks,
         "gas_rank_priority_tie_breaker_gwei": policy.gas_rank_priority_tie_breaker_gwei.to_string(),
         "simulated_gas_buffer_bps": policy.simulated_gas_buffer_bps,
+        "min_priority_fee_wei": policy.min_priority_fee_wei.to_string(),
+        "min_priority_fee_gwei": policy.min_priority_fee_gwei().to_string(),
         "max_priority_fee_gwei": policy.max_priority_fee_gwei.to_string(),
         "entry_max_estimated_gas_fee_eth": policy.entry_max_estimated_gas_fee_eth.to_string(),
         "exit_max_estimated_gas_fee_eth": policy.exit_max_estimated_gas_fee_eth.to_string(),

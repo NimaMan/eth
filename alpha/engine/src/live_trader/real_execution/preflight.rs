@@ -9,6 +9,7 @@ use eth_strategies::{
 use eyre::{eyre, Result, WrapErr};
 
 use super::super::cli::{Args, RealExecutionArgs};
+use super::super::gas_policy::LiveRealGasPolicy;
 
 pub(super) const HOLD16_DEPLOY_BUY_WEI: &str = "10000000000000000";
 
@@ -22,6 +23,7 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
     flashbots_tail_max_block_span: u64,
+    gas_policy: &LiveRealGasPolicy,
 ) -> Result<KartalRealPreflight> {
     let token = load_kartal_bearer_token(&args.kartal_token_env)?;
     validate_flashbots_tail_max_block_span(flashbots_tail_max_block_span)?;
@@ -29,7 +31,7 @@ pub(in crate::live_trader) async fn preflight_kartal_real(
         .eth_tx_status()
         .await
         .wrap_err("failed to read Kartal ETH tx executor status")?;
-    validate_kartal_real_status(&status, args, live_args, strategy_specs)?;
+    validate_kartal_real_status(&status, args, live_args, strategy_specs, Some(gas_policy))?;
     Ok(KartalRealPreflight { token, status })
 }
 
@@ -38,6 +40,7 @@ pub(super) fn validate_kartal_real_status(
     args: &RealExecutionArgs,
     live_args: &Args,
     strategy_specs: &[LiveStrategySpec],
+    gas_policy: Option<&LiveRealGasPolicy>,
 ) -> Result<()> {
     if status.execution_disabled {
         return Err(eyre!("Kartal ETH tx executor kill switch is active"));
@@ -63,6 +66,9 @@ pub(super) fn validate_kartal_real_status(
             "kartal-real trader requires Flashbots auth configured in Kartal for policy-driven tail-entry submission"
         ));
     }
+    if let Some(gas_policy) = gas_policy {
+        validate_executor_priority_fee_floor(status, gas_policy)?;
+    }
     match status.broadcast_mode {
         KartalStatusBroadcastMode::DryRun => Ok(()),
         KartalStatusBroadcastMode::PublicMempool if args.allow_public_mempool_live_validation => {
@@ -75,6 +81,27 @@ pub(super) fn validate_kartal_real_status(
             "kartal-real trader cannot run with unknown Kartal broadcast_mode"
         )),
     }
+}
+
+fn validate_executor_priority_fee_floor(
+    status: &KartalEthTxExecutorStatus,
+    gas_policy: &LiveRealGasPolicy,
+) -> Result<()> {
+    let Some(min_priority_fee_per_gas_wei) = status.min_priority_fee_per_gas_wei.as_deref() else {
+        return Ok(());
+    };
+    let executor_min_priority_fee = parse_policy_wei(
+        min_priority_fee_per_gas_wei,
+        "executor min_priority_fee_per_gas_wei",
+    )?;
+    let alpha_min_priority_fee = U256::from(gas_policy.min_priority_fee_wei);
+    if executor_min_priority_fee > alpha_min_priority_fee {
+        return Err(eyre!(
+            "Kartal min_priority_fee_per_gas_wei {executor_min_priority_fee} is above Alpha configured ETH_TX_EXECUTOR_MIN_PRIORITY_FEE_WEI {}",
+            gas_policy.min_priority_fee_wei
+        ));
+    }
+    Ok(())
 }
 
 fn validate_public_mempool_hold16_deploy(

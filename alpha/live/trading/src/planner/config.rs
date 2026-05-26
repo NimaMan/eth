@@ -22,6 +22,7 @@ impl Default for LivePrioritySellPlannerConfig {
         Self {
             tx_prep: TxPrepConfig {
                 max_total_fee_eth: DecimalAmount::new(2, 2),
+                min_priority_fee_gwei: DecimalAmount::ZERO,
                 max_priority_fee_gwei: DecimalAmount::from(100),
                 safety_buffer_eth: DecimalAmount::new(1, 3),
                 gas_rank_policy: StrategyGasRankPolicy::p95_first(),

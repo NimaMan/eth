@@ -48,6 +48,7 @@ pub use planner::{
     UNISWAP_V2_TRADING_VAULT_SELL_GAS_LIMIT,
 };
 pub use tx_prep::{
+    apply_min_priority_fee_floor, apply_min_priority_fee_floor_to_candidates,
     build_priority_sell_request, estimate_eth_cost_from_gwei, prepare_priority_sell,
     GasEstimateConfig, GasRankProfile, PreSubmitSimulation, PreparedSellRoute, PriorityFeeBudget,
     PriorityFeeBudgetInput, PrioritySellTxPrep, RankedFeeCandidate, StrategyGasRankDefaults,
