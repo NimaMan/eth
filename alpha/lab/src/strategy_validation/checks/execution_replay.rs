@@ -115,6 +115,35 @@ pub(super) async fn live_chain_sim_block_alignment_check(
     .await
 }
 
+pub(super) async fn pre_submit_simulation_state_ready_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "pre_submit_simulation_state_ready",
+        Verdict::Fail,
+        "pre-submit simulation had the exact required state for every attempted order",
+        "execution reports deferred because pre-submit simulation state lagged behind the decision block",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.execution_reports er
+        JOIN alpha_trading.trades t
+          ON t.run_id = er.run_id
+         AND t.trade_id = er.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND er.status = 'deferred'
+          AND er.error LIKE 'pre-submit simulation state not ready:%'
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn terminal_report_presence_check(
     pool: &PgPool,
     result_set: &ResultSetRecord,

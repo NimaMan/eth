@@ -147,6 +147,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Did live chain-sim use the exact expected simulation block?",
             "For live backtests, requires submitted block N, expected/simulation/receipt/event block N + execution_delay_blocks, and rejects stale simulator state.",
         ),
+        "pre_submit_simulation_state_ready" => (
+            "Was pre-submit simulation state ready for every attempted order?",
+            "Fails any run with deferred execution reports caused by the simulator lagging behind the decision block.",
+        ),
         "confirmed_reports_have_simulation_outputs" => (
             "Are confirmed fills backed by persisted EVM simulation output?",
             "Requires filled amount, gas, gas cost, and buy token output on confirmed trade events.",

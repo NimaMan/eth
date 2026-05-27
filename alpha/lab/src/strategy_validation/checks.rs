@@ -108,6 +108,10 @@ pub async fn run_checks(
             .await?,
     );
     checks.push(
+        execution_replay::pre_submit_simulation_state_ready_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
         execution_replay::confirmed_reports_have_simulated_outputs_check(
             pool,
             result_set_id,
