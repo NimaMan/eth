@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, U256};
 use eth_alpha_core::{
     amount::Amount,
     decision_rationale::source,
@@ -12,7 +12,6 @@ use eth_alpha_store::{ManualCloseRequest, PostgresTradingStore};
 use eth_strategies::SnipeAllConfig;
 use eyre::{eyre, Result, WrapErr};
 use serde_json::json;
-use tx_simulator::LiveTxSimulator;
 
 use crate::{
     decision::strategy_decision_record, AlphaEngine, BlockCriticalRiskPolicy,
@@ -37,7 +36,6 @@ pub(super) const fn default_manual_close_limit() -> usize {
 pub(super) async fn process_manual_close_requests<E>(
     store: &PostgresTradingStore,
     engine: &mut AlphaEngine<E, BlockCriticalRiskPolicy, PostgresTradingStore>,
-    simulator: &LiveTxSimulator,
     vault_address: Option<Address>,
     current_block: Option<u64>,
     limit: usize,
@@ -55,15 +53,7 @@ where
     };
 
     for request in requests {
-        match process_one_manual_close(
-            store,
-            engine,
-            simulator,
-            vault_address,
-            current_block,
-            &request,
-        )
-        .await
+        match process_one_manual_close(store, engine, vault_address, current_block, &request).await
         {
             Ok(reports) => {
                 summary.reports += reports.len();
@@ -102,7 +92,6 @@ where
 async fn process_one_manual_close<E>(
     store: &PostgresTradingStore,
     engine: &mut AlphaEngine<E, BlockCriticalRiskPolicy, PostgresTradingStore>,
-    simulator: &LiveTxSimulator,
     vault_address: Option<Address>,
     current_block: Option<u64>,
     request: &ManualCloseRequest,
@@ -139,26 +128,10 @@ where
         })?;
 
     let (available_tokens, decimals, balance_block, balance_source) = match vault_address {
-        Some(vault_address) => {
-            let (vault_balance, balance_block) =
-                current_vault_token_balance(simulator, position.key.token_address, vault_address)
-                    .await?;
-            let decimals = position
-                .entry_token_raw_amount
-                .as_ref()
-                .map(|amount| amount.decimals)
-                .ok_or_else(|| {
-                    eyre!(
-                        "manual close request {} cannot resolve token decimals from position",
-                        request.request_id
-                    )
-                })?;
-            (
-                vault_balance,
-                decimals,
-                balance_block,
-                "live_state_erc20_balanceOf_vault",
-            )
+        Some(_) => {
+            return Err(eyre!(
+                "manual close vault balance lookup is not supported in chain-sim execution mode"
+            ));
         }
         None => chain_sim_position_token_balance(&position, request)?,
     };
@@ -237,49 +210,6 @@ fn chain_sim_position_token_balance(
         position.entry_block.unwrap_or_default(),
         "chain_sim_position_entry_token_amount",
     ))
-}
-
-async fn current_vault_token_balance(
-    simulator: &LiveTxSimulator,
-    token_address: Address,
-    vault_address: Address,
-) -> Result<(U256, u64)> {
-    let status = simulator
-        .latest_state_status()
-        .await
-        .wrap_err("failed to resolve latest live simulation state")?;
-    let mut chain = simulator
-        .start_chain_at(status.selected_block_number)
-        .await
-        .wrap_err("failed to open live simulation chain for vault balance")?;
-    let result = chain
-        .simulate_view_call(token_address, balance_of_calldata(vault_address))
-        .wrap_err("vault token balanceOf view call failed")?;
-    if !result.success {
-        return Err(eyre!(
-            "vault token balanceOf returned unsuccessful view result at block {}",
-            status.selected_block_number
-        ));
-    }
-    if result.output.len() < 32 {
-        return Err(eyre!(
-            "vault token balanceOf returned {} bytes, expected at least 32",
-            result.output.len()
-        ));
-    }
-    Ok((
-        U256::from_be_slice(&result.output.as_ref()[..32]),
-        status.selected_block_number,
-    ))
-}
-
-fn balance_of_calldata(owner: Address) -> Bytes {
-    let mut data = Vec::with_capacity(36);
-    data.extend_from_slice(&[0x70, 0xa0, 0x82, 0x31]);
-    let mut padded = [0u8; 32];
-    padded[12..].copy_from_slice(owner.as_slice());
-    data.extend_from_slice(&padded);
-    Bytes::from(data)
 }
 
 fn requested_close_amount(request: &ManualCloseRequest, vault_balance: U256) -> Result<U256> {

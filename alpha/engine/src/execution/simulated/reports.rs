@@ -1,4 +1,4 @@
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use eth_alpha_core::{
     amount::Amount,
     execution::{ExecutionReport, ExecutionStatus},
@@ -76,6 +76,7 @@ pub(super) fn submitted_live_chain_sim_report(
     order_id: OrderId,
     submitted_block: u64,
     expected_confirmation_block: u64,
+    submitted_block_hash: Option<B256>,
 ) -> ExecutionReport {
     let mut report = ExecutionReport {
         order_id,
@@ -92,26 +93,8 @@ pub(super) fn submitted_live_chain_sim_report(
     let mut evidence = report.mined_evidence.unwrap_or_default();
     evidence.submitted_block_number = Some(submitted_block);
     evidence.expected_confirmation_block = Some(expected_confirmation_block);
+    evidence.block_hash = submitted_block_hash;
     evidence.receipt_status = Some("live_backtest_chain_sim_submitted".to_string());
-    report.mined_evidence = Some(evidence);
-    report
-}
-
-pub(super) fn with_live_chain_sim_evidence(
-    mut report: ExecutionReport,
-    decision_block: u64,
-    expected_confirmation_block: u64,
-    simulation_block: Option<u64>,
-) -> ExecutionReport {
-    let receipt_block = report.block_number;
-    let mut evidence = report.mined_evidence.unwrap_or_default();
-    evidence.submitted_block_number = Some(decision_block);
-    evidence.expected_confirmation_block = Some(expected_confirmation_block);
-    evidence.receipt_block_number = receipt_block;
-    evidence.simulation_block_number = simulation_block;
-    evidence.confirmation_lag_blocks =
-        receipt_block.map(|block| block as i64 - expected_confirmation_block as i64);
-    evidence.receipt_status = Some("live_backtest_chain_sim".to_string());
     report.mined_evidence = Some(evidence);
     report
 }

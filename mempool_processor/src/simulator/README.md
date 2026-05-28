@@ -5,8 +5,10 @@ detection.
 
 ## Purpose
 
-- Simulate pending transactions and per-pool buy/sell probes using a shared
-  `TxSimulator`.
+- Delegate live pending transactions and per-pool buy/sell probes to the
+  chain-server-owned `LiveTxSimulator`.
+- Keep a shared local `TxSimulator` only for Reth-provider utilities and
+  explicit offline/local fallback runs.
 - Convert routed mempool jobs into `SimulationResult` values consumed by
   `SignalManager`.
 - Preserve short creator/token pending sequences when launch helpers depend on
@@ -19,8 +21,8 @@ detection.
 
 - `SimulationManager`: queueing, per-pool orchestration, and handoff to signal
   detection.
-- `MempoolSimulator`: shared simulator wrapper, nonce retry, and pool buy/sell
-  delegation.
+- `MempoolSimulator`: chain-server live-simulator client, local fallback
+  wrapper, nonce retry, and pool buy/sell delegation.
 - `LiquidityRemovalSimulator`: focused liquidity-removal replay.
 - `SimulationQueue`: priority and bounded job management.
 - Pending creator history used as `prior_txs` for viability probes.
@@ -30,6 +32,8 @@ detection.
 - Function classification; use `function_detector` and `tx_router`.
 - Tax/decoded transaction logic; use `tx_processor`.
 - Canonical token/pool state; fetch context from `eth_chain_server`.
+- Exact live block simulation state; chain-server owns and publishes
+  `LiveTxSimulator` sessions.
 - Signal threshold decisions; use `signal_detector`.
 
 ## Data Flow
@@ -39,6 +43,7 @@ TxSimulationJob from tx_router
   -> SimulationQueue
   -> SimulationManager
   -> MempoolSimulator / LiquidityRemovalSimulator
+  -> chain-server live-tx-simulator endpoints for live runs
   -> tx_processor pool viability or processed tx facts
   -> SignalManager::process_simulation_result
 ```
@@ -48,8 +53,8 @@ Creator transactions are expanded per pool:
 ```text
 creator tx
   -> resolve token and pools from token context
-  -> replay bounded prior creator/token sequence
-  -> run buy/approve/sell probe per pool
+  -> send bounded prior creator/token sequence to chain-server for exact replay
+  -> run buy/approve/sell probe per pool through chain-server
   -> emit one SimulationResult per pool
 ```
 
@@ -59,6 +64,7 @@ creator tx
 | --- | --- |
 | Queue/orchestration | `simulation_manager/` |
 | Shared tx simulator wrapper | `mempool_simulator.rs` |
+| Chain-server live simulator client | `chain_server_live_tx_simulator.rs` |
 | Liquidity removal path | `liquidity_removal_simulator.rs` |
 | Job/result types | `types.rs` |
 | Downstream detectors | `../signal_detector/README.md` |
@@ -69,8 +75,8 @@ creator tx
 - Same-block deployment, approval, and liquidity helpers can be truncated if
   they are classified as not requiring simulation and never enter pending
   sequences.
-- Historical replays may succeed while live pending replay fails because the
-  canonical DB already contains pair/allowance/reserve writes.
+- `MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL=none` falls back to local historical
+  Reth context and should only be used for diagnostics/offline examples.
 - The pending sequence buffer is bounded per `(creator, token)`; old helpers can
   be dropped under flood conditions.
 - When at-block historical state is pruned, liquidity-removal simulation falls

@@ -54,7 +54,7 @@ Reth IPC pending tx
        |
        ` ordinary tx
            -> drop after arrival accounting
-  -> simulator uses TxSimulator + token context + tx_processor viability
+  -> simulator delegates exact live replay and pool probes to chain-server LiveTxSimulator
   -> signal_detector emits semantic signal only after required context/checks pass
   -> Postgres rows + semantic signal logs + ZMQ tcp://127.0.0.1:5556
 ```
@@ -73,7 +73,7 @@ signals.
 | `MempoolFetcherIPCClient` | Maintains the local Reth IPC subscription and delivers full pending tx data without per-tx RPC fetches. |
 | `function_detector` | Adds selector/function facts used by routing and diagnostics. |
 | `tx_router` | Classifies txs against `TokenTrackingCache` as known critical, unresolved critical, or ordinary. |
-| `SimulationManager` | Replays txs with nonce/funding dependencies, dispatches per-pool simulations, and emits `SimulationResult` values. |
+| `SimulationManager` | Assembles tx/dependency sequences, asks chain-server for exact live replay and per-pool simulations, and emits `SimulationResult` values. |
 | `SignalManager` | Converts mapped decoder/simulation facts into semantic per-pool signals. |
 | `SignalPublisher` | Writes the public Postgres signal rows and diagnostic logs/ZMQ topics. |
 | `MempoolArrivalRecorder` | Records first-seen pending tx timing and writes resolved mined tx timing to RethIndex. |
@@ -102,8 +102,9 @@ Live runtime contracts:
 
 - `eth_chain_server` processes confirmed blocks, applies `eth_token`, persists
   processed blocks, and exposes live token/pool context over HTTP.
-- `mempool_signal_detector` consumes Reth pending tx, token-server context, and
-  local Reth-backed simulation state, then writes semantic signals to Postgres.
+- `mempool_signal_detector` consumes Reth pending tx and token-server context,
+  delegates exact live simulation to chain-server, then writes semantic signals
+  to Postgres.
 - `eth_alpha_trader` consumes token-server APIs and persisted mempool signals.
 - ASENA reads token-server/trade APIs only; it should not consume ZMQ/logs
   directly.
@@ -112,13 +113,14 @@ Failure isolation rules:
 
 - Pending-tx bursts or simulation failures must not stop token-server live
   block tracking.
-- Live simulations use local Reth historical state or direct live state sessions
-  supplied by the live chain runtime. If the needed block/state is unavailable,
-  fail with a source-specific error.
-- Mempool token context comes only from token-server `/live/tokens` and
-  `/live/pools`. `/live/updates` is a notification-only long-poll wakeup: when
+- Live simulations use chain-server `/api/v1/eth/live-tx-simulator/...` endpoints. The
+  local Reth `TxSimulator` is retained for provider utilities and explicit
+  diagnostic fallback only. If the needed block/state is unavailable, fail with
+  a source-specific error.
+- Mempool token context comes only from token-server `/api/v1/eth/live-token-tracker/tokens` and
+  `/api/v1/eth/live-token-tracker/pools`. `/api/v1/eth/live-token-tracker/block-applied-updates` is a notification-only long-poll wakeup: when
   token-server broadcasts `BlockApplied`, the request returns and mempool
-  immediately reloads `/live/tokens` and `/live/pools`.
+  immediately reloads `/api/v1/eth/live-token-tracker/tokens` and `/api/v1/eth/live-token-tracker/pools`.
 - Live token-server snapshots are accepted while `status=warming` until the
   first live context is accepted. After that, only `status=live` snapshots are
   accepted, and lower-block snapshots are rejected and counted.
@@ -200,9 +202,10 @@ Required or primary live settings:
 | Setting | Purpose |
 | --- | --- |
 | `MEMPOOL_IPC_PATH` / `RETH_IPC_PATH` | Local Reth IPC socket used for pending tx ingestion. |
-| `MEMPOOL_RETH_DATADIR` / `RETH_DATADIR` | Reth data directory used for simulations and the `<datadir>/reth_index` arrival sidecar. |
+| `MEMPOOL_RETH_DATADIR` / `RETH_DATADIR` | Reth data directory used by provider utilities and the `<datadir>/reth_index` arrival sidecar. |
 | `databases.mempool.url` | Required Postgres URL for live semantic signal persistence. |
-| `MEMPOOL_LIVE_TOKEN_SERVER_URL` | Token-server base URL for `/live/tokens`, `/live/pools`, and `/live/updates`. |
+| `MEMPOOL_LIVE_TOKEN_SERVER_URL` | Token-server base URL for `/live-token-tracker/tokens`, `/live-token-tracker/pools`, and `/live-token-tracker/block-applied-updates`. |
+| `MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL` | Chain-server base URL for `/live-tx-simulator/status`, `/live-tx-simulator/simulations/unsigned-transaction-sequence`, and `/live-tx-simulator/simulations/pool-buy-sell`. Set to `none` only for local diagnostic fallback. |
 | `MEMPOOL_LOG_DIR` / `ETH_LOG_DIR` | Run log directory. |
 | `MEMPOOL_SIM_WORKERS` | Simulation worker count; default is 4. |
 | `MEMPOOL_ZMQ_SIGNAL_ENDPOINT` | Diagnostic ZMQ publisher endpoint; default is `tcp://127.0.0.1:5556`. |
@@ -227,7 +230,7 @@ Latest-code checks:
 
 - token-server/chain-server signal API must expose `signal_source`,
   `signal_created_at`, `mempool_first_seen_at`, and `mempool_first_seen_ms` on
-  `/eth/tokens/api/mempool/signals`. If those fields are missing, the running
+  `/eth/tokens/api/mempool/pending-transaction-signals`. If those fields are missing, the running
   server has not picked up the timing-field commit.
 - `eth_alpha_trader` must create a `strategy_observations` row with decision
   `received` before `engine.handle_event` updates the same row to `submitted`,

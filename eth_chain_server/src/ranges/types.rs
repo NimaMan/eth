@@ -42,9 +42,12 @@ impl ResolvedRangeIndexRequest {
             RangeIndexRetentionMode::KeepAll => {
                 BlockTokenProcessor::new_unbounded_token_index(self.history_limit)
             }
-            RangeIndexRetentionMode::BoundedIndex => BlockTokenProcessor::new(self.history_limit),
-            RangeIndexRetentionMode::EphemeralTerminalScam => {
-                BlockTokenProcessor::new_with_ephemeral_terminal_scam_retention(self.history_limit)
+            RangeIndexRetentionMode::LruCache => BlockTokenProcessor::new(self.history_limit),
+            RangeIndexRetentionMode::TerminalScamImmediate => {
+                BlockTokenProcessor::new_with_terminal_scam_immediate_retention(self.history_limit)
+            }
+            RangeIndexRetentionMode::TerminalOrIdle50k => {
+                BlockTokenProcessor::new_with_terminal_or_idle_50k_retention(self.history_limit)
             }
         };
         processor.disable_network_graphs();
@@ -57,13 +60,17 @@ impl ResolvedRangeIndexRequest {
 pub enum RangeIndexRetentionMode {
     #[default]
     KeepAll,
-    BoundedIndex,
-    EphemeralTerminalScam,
+    #[serde(rename = "lru_cache", alias = "bounded_index")]
+    LruCache,
+    #[serde(rename = "terminal_scam_immediate", alias = "ephemeral_terminal_scam")]
+    TerminalScamImmediate,
+    #[serde(rename = "terminal_or_idle_50k")]
+    TerminalOrIdle50k,
 }
 
 impl RangeIndexRetentionMode {
     pub fn applies_after_observations(self) -> bool {
-        matches!(self, Self::EphemeralTerminalScam)
+        matches!(self, Self::TerminalScamImmediate | Self::TerminalOrIdle50k)
     }
 }
 
@@ -201,12 +208,12 @@ mod tests {
     }
 
     #[test]
-    fn bounded_index_retention_uses_capped_token_index() {
+    fn lru_cache_retention_uses_capped_token_index() {
         let request = ResolvedRangeIndexRequest {
             start_block: 100,
             end_block: 101,
             history_limit: 10,
-            retention_mode: RangeIndexRetentionMode::BoundedIndex,
+            retention_mode: RangeIndexRetentionMode::LruCache,
         };
 
         let processor = request.block_token_processor();
@@ -215,12 +222,12 @@ mod tests {
     }
 
     #[test]
-    fn ephemeral_terminal_scam_retention_uses_unbounded_index_with_policy() {
+    fn terminal_scam_immediate_retention_uses_unbounded_index_with_policy() {
         let request = ResolvedRangeIndexRequest {
             start_block: 100,
             end_block: 101,
             history_limit: 10,
-            retention_mode: RangeIndexRetentionMode::EphemeralTerminalScam,
+            retention_mode: RangeIndexRetentionMode::TerminalScamImmediate,
         };
 
         let processor = request.block_token_processor();
@@ -228,6 +235,32 @@ mod tests {
         assert_eq!(processor.token_index.max_size, None);
         assert!(processor.token_index.live_retention_policy().is_some());
         assert!(request.retention_mode.applies_after_observations());
+    }
+
+    #[test]
+    fn terminal_or_idle_50k_retention_uses_unbounded_index_with_policy() {
+        let request = ResolvedRangeIndexRequest {
+            start_block: 100,
+            end_block: 101,
+            history_limit: 10,
+            retention_mode: RangeIndexRetentionMode::TerminalOrIdle50k,
+        };
+
+        let processor = request.block_token_processor();
+
+        assert_eq!(processor.token_index.max_size, None);
+        assert!(processor.token_index.live_retention_policy().is_some());
+        assert!(request.retention_mode.applies_after_observations());
+    }
+
+    #[test]
+    fn legacy_retention_mode_names_deserialize_as_aliases() {
+        let lru: RangeIndexRetentionMode = serde_json::from_str(r#""bounded_index""#).unwrap();
+        let terminal: RangeIndexRetentionMode =
+            serde_json::from_str(r#""ephemeral_terminal_scam""#).unwrap();
+
+        assert_eq!(lru, RangeIndexRetentionMode::LruCache);
+        assert_eq!(terminal, RangeIndexRetentionMode::TerminalScamImmediate);
     }
 
     #[test]

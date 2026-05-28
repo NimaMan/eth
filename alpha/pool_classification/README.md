@@ -7,7 +7,7 @@ This crate owns the shared category contract used by:
 - token-server pool views and table buckets;
 - historical launch-strategy stats;
 - Snipe All entry rules;
-- token-lab detector parity checks.
+- Risk Atlas detector parity checks.
 
 The first split is `eligible` versus `ineligible`. Eligible pools can then be
 classified as `eligible_active` or `eligible_risk` based on the current outcome.

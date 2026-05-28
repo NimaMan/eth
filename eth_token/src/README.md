@@ -77,4 +77,4 @@ for individual pool checks.
   move core pool lifecycle logic there.
 - `token_analytics` owns the stable feature vocabulary for one token-pool
   observation. It should not compute future labels; historical labels and target
-  joins belong in `token_lab`.
+  joins belong in `risk_atlas`.

@@ -228,7 +228,7 @@ fn mined_evidence(
         bundle_ordering_status: dependency_ordering.status,
         bundle_dependency_block_number: dependency_ordering.block_number,
         bundle_dependency_transaction_index: dependency_ordering.transaction_index,
-        gas_policy_tail_after_tx_hash: record.gas_policy_tail_after_tx_hash.clone(),
+        gas_policy_tail_after_tx_hash: normalized_tail_after_tx_hash(record).map(str::to_string),
         gas_policy_dependency_priority_fee_wei: record
             .gas_policy_dependency_priority_fee_wei
             .clone(),
@@ -246,17 +246,21 @@ struct DependencyOrderingEvidence {
 }
 
 fn dependency_tx_hash(record: &SubmittedExecutionRecord) -> Result<Option<TxHash>> {
-    let Some(value) = record.gas_policy_tail_after_tx_hash.as_deref() else {
+    let Some(trimmed) = normalized_tail_after_tx_hash(record) else {
         return Ok(None);
     };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
     trimmed
         .parse::<TxHash>()
         .map(Some)
         .wrap_err_with(|| format!("invalid tail dependency tx hash {trimmed:?}"))
+}
+
+fn normalized_tail_after_tx_hash(record: &SubmittedExecutionRecord) -> Option<&str> {
+    let trimmed = record.gas_policy_tail_after_tx_hash.as_deref()?.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+        return None;
+    }
+    Some(trimmed)
 }
 
 fn dependency_ordering_evidence(
@@ -264,7 +268,7 @@ fn dependency_ordering_evidence(
     receipt: &RpcTransactionReceipt,
     dependency_receipt: Option<&RpcTransactionReceipt>,
 ) -> Result<DependencyOrderingEvidence> {
-    if record.gas_policy_tail_after_tx_hash.is_none() {
+    if normalized_tail_after_tx_hash(record).is_none() {
         return Ok(DependencyOrderingEvidence::default());
     }
     let Some(dependency_receipt) = dependency_receipt else {

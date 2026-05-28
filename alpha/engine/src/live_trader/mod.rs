@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 use crate::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent};
@@ -6,7 +5,7 @@ use chrono::Utc;
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::StrategyGasRankPolicy;
 use eth_strategies::shared_rules::live::observation_strategy_name;
-use eyre::{eyre, Report, Result, WrapErr};
+use eyre::{eyre, Result, WrapErr};
 use serde_json::{json, Value};
 use tokio::time;
 use tracing::{info, warn};
@@ -30,8 +29,6 @@ mod execution_stack;
 mod gas_policy;
 #[path = "runtime/heartbeat.rs"]
 mod heartbeat;
-#[path = "state/live_state.rs"]
-mod live_state;
 #[path = "runtime/loop_control.rs"]
 mod loop_control;
 #[path = "operator/manual_close.rs"]
@@ -95,15 +92,6 @@ use support::*;
 use token_server::TokenServerClient;
 
 pub use entrypoints::{run_live_backtest, run_live_real};
-
-fn format_error_chain(error: &Report) -> String {
-    error
-        .chain()
-        .enumerate()
-        .map(|(index, cause)| format!("{index}: {cause}"))
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
 
 async fn run(
     runner_name: &'static str,
@@ -260,7 +248,6 @@ async fn run(
         execution_mode,
         real_args: real_args.as_ref(),
         token_server_url: &token_server_url,
-        reth_datadir: &reth_datadir,
         reth_http_rpc: &reth_http_rpc,
         store: store.clone(),
         run_id: run_id.clone(),
@@ -271,8 +258,7 @@ async fn run(
     .await?;
     let adapter_current_block = execution_stack.adapter_current_block.clone();
     let pool_updates = execution_stack.pool_updates.clone();
-    let manual_close_live_simulator = execution_stack.manual_close_live_simulator.clone();
-    let state_status_adapter = execution_stack.state_status_adapter.clone();
+    let chain_sim_adapter = execution_stack.chain_sim_adapter.clone();
     let manual_close_vault_address = execution_stack.manual_close_vault_address;
     let chain_sim_settlement = execution_stack.chain_sim_settlement;
     let receipt_reconciler = execution_stack.receipt_reconciler;
@@ -295,7 +281,6 @@ async fn run(
     let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids, mut seen_mined_pool_risk_keys) =
         load_persisted_watermarks(&store, &observation_strategy_name).await?;
-    let mut deferred_signal_wires = HashMap::new();
     let mut primed = false;
     let mut last_position_monitor_block: Option<u64> = None;
     let mut shutdown = ShutdownSignals::new()?;
@@ -333,14 +318,8 @@ async fn run(
 
     loop {
         let first_poll = !primed;
-        let poll_result = poll_live_inputs(
-            &client,
-            signal_limit,
-            mempool_since_days,
-            &pool_updates,
-            state_status_adapter.as_ref(),
-        )
-        .await;
+        let poll_result =
+            poll_live_inputs(&client, signal_limit, mempool_since_days, &pool_updates).await;
         let LivePollBatch {
             status,
             signals,
@@ -370,6 +349,14 @@ async fn run(
                 continue;
             }
         };
+        if let Some(chain_sim_adapter) = chain_sim_adapter.as_ref() {
+            let current_hash = status
+                .progress
+                .current_block_hash
+                .as_deref()
+                .and_then(|hash| hash.parse().ok());
+            chain_sim_adapter.set_current_block_hash(status.progress.current_block, current_hash);
+        }
         let live_ready = status.progress.status == "live";
         let suppress_events = !args.replay_current && !live_ready;
 
@@ -407,45 +394,8 @@ async fn run(
         let receipt_reports = receipt_summary.reports;
         let receipt_unresolved = receipt_summary.unresolved;
 
-        let defer_event_processing = !suppress_events && chain_sim_settlement_waiting_state > 0;
-        if defer_event_processing {
-            let mut deferred_signals = 0usize;
-            for signal in signals.signals {
-                if seen_signal_ids.contains(&signal.signal_id) {
-                    continue;
-                }
-                deferred_signal_wires.insert(signal.signal_id.clone(), signal.clone());
-                record_deferred_signal_observation(
-                    &store,
-                    &observation_strategy_name,
-                    &signal,
-                    "deferred",
-                    first_poll,
-                    suppress_events,
-                    &status,
-                    json!({
-                        "reason_code": CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE,
-                        "chain_sim_settlement_waiting_state": chain_sim_settlement_waiting_state,
-                        "chain_sim_settlement_loaded": chain_sim_settlement_loaded,
-                        "live_current_block": status.progress.current_block,
-                    }),
-                )
-                .await?;
-                deferred_signals += 1;
-            }
-            warn!(
-                chain_sim_settlement_waiting_state,
-                chain_sim_settlement_loaded,
-                deferred_signals,
-                live_current_block = ?status.progress.current_block,
-                reason_code = CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE,
-                "deferring live-backtest strategy events until exact chain-sim settlement state is available"
-            );
-        } else {
+        {
             let mut signal_wires = signals.signals;
-            if !deferred_signal_wires.is_empty() {
-                signal_wires.extend(deferred_signal_wires.drain().map(|(_, signal)| signal));
-            }
             signal_wires.sort_by_key(|signal| signal.signal_id.parse::<u64>().unwrap_or(u64::MAX));
             for signal in signal_wires {
                 let is_new = seen_signal_ids.insert(signal.signal_id.clone());
@@ -598,34 +548,31 @@ async fn run(
                 }
             }
         }
-        if !defer_event_processing {
-            let pool_summary = process_pool_updates(
-                PoolUpdateProcessingInput {
-                    store: &store,
-                    observation_strategy_name: &observation_strategy_name,
-                    status: &status,
-                    first_poll,
-                    suppress_events,
-                    replay_current: args.replay_current,
-                    adapter_current_block: &adapter_current_block,
-                },
-                &mut engine,
-                polled_pools,
-                &mut seen_pool_blocks,
-                &mut seen_mined_pool_risk_keys,
-            )
-            .await?;
-            market_events += pool_summary.market_events;
-            risk_events += pool_summary.risk_events;
-            reports += pool_summary.reports;
-        }
+        let pool_summary = process_pool_updates(
+            PoolUpdateProcessingInput {
+                store: &store,
+                observation_strategy_name: &observation_strategy_name,
+                status: &status,
+                first_poll,
+                suppress_events,
+                replay_current: args.replay_current,
+                adapter_current_block: &adapter_current_block,
+            },
+            &mut engine,
+            polled_pools,
+            &mut seen_pool_blocks,
+            &mut seen_mined_pool_risk_keys,
+        )
+        .await?;
+        market_events += pool_summary.market_events;
+        risk_events += pool_summary.risk_events;
+        reports += pool_summary.reports;
 
-        if let Some(manual_close_live_simulator) = manual_close_live_simulator.as_ref() {
-            if !defer_event_processing && !suppress_events && (!first_poll || args.replay_current) {
+        if execution_mode == TraderExecutionMode::ChainSim {
+            if !suppress_events && (!first_poll || args.replay_current) {
                 match process_manual_close_requests(
                     &store,
                     &mut engine,
-                    manual_close_live_simulator,
                     manual_close_vault_address,
                     status.progress.current_block,
                     default_manual_close_limit(),
@@ -645,25 +592,23 @@ async fn run(
             }
         }
 
-        if !defer_event_processing {
-            let monitor_summary = process_position_monitor(
-                PositionMonitorInput {
-                    store: &store,
-                    observation_strategy_name: &observation_strategy_name,
-                    status: &status,
-                    first_poll,
-                    suppress_events,
-                    replay_current: args.replay_current,
-                    market_events,
-                    adapter_current_block: &adapter_current_block,
-                },
-                &mut engine,
-                &mut last_position_monitor_block,
-            )
-            .await?;
-            position_monitor_events += monitor_summary.position_monitor_events;
-            reports += monitor_summary.reports;
-        }
+        let monitor_summary = process_position_monitor(
+            PositionMonitorInput {
+                store: &store,
+                observation_strategy_name: &observation_strategy_name,
+                status: &status,
+                first_poll,
+                suppress_events,
+                replay_current: args.replay_current,
+                market_events,
+                adapter_current_block: &adapter_current_block,
+            },
+            &mut engine,
+            &mut last_position_monitor_block,
+        )
+        .await?;
+        position_monitor_events += monitor_summary.position_monitor_events;
+        reports += monitor_summary.reports;
 
         if first_poll && !args.replay_current {
             info!(
@@ -674,32 +619,13 @@ async fn run(
         }
         primed = true;
 
-        let chain_state_status = if let Some(state_status_adapter) = state_status_adapter.as_ref() {
-            Some(state_status_adapter.state_status().await)
-        } else {
-            None
-        };
-        if let Some(Err(error)) = &chain_state_status {
-            warn!(
-                error = %error,
-                root_cause = %error.root_cause(),
-                error_chain = %format_error_chain(error),
-                "chain-sim state status unavailable"
-            );
-        }
-        let chain_state_payload = chain_state_status
-            .as_ref()
-            .and_then(|status| status.as_ref().ok())
-            .map(|state| {
-                json!({
-                    "selected_block_number": state.selected_block_number,
-                    "source": format!("{:?}", state.source),
-                    "latest_reth_finished_block_number": state.latest_reth_finished_block_number,
-                    "latest_historical_context_block_number": state.latest_historical_context_block_number,
-                    "latest_live_block_number": state.latest_live_block_number,
-                    "latest_tracked_state_block_number": state.latest_tracked_state_block_number,
-                })
-            });
+        let chain_state_payload = (execution_mode == TraderExecutionMode::ChainSim).then(|| {
+            json!({
+                "selected_block_number": status.progress.current_block,
+                "selected_block_hash": status.progress.current_block_hash,
+                "source": "chain_server_live_tx_simulator",
+            })
+        });
 
         let heartbeat_metadata = emit_tick_heartbeat(HeartbeatInput {
             runner_name,

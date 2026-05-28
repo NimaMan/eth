@@ -32,9 +32,9 @@ Reth pending tx stream
        ordinary tx
          -> ignored after accounting
   -> SimulationManager
-       replays tx against live state
+       asks chain-server LiveTxSimulator to replay txs against exact live state
        replays visible sender-nonce and inbound-funding dependencies first
-       runs per-pool buy/approve/sell checks where supported
+       asks chain-server to run per-pool buy/approve/sell checks where supported
        builds SimulationResult
   -> SignalManager
        emits trading_enabled / tax_change / sell_blocked /
@@ -49,14 +49,33 @@ The service hydrates and refreshes `TokenTrackingCache` from token-server live
 HTTP endpoints. The refresh loop is:
 
 ```text
-fetch /live/tokens + /live/pools
-wait on /live/updates?after_block=<accepted_block>
+fetch /live-token-tracker/tokens + /live-token-tracker/pools
+wait on /live-token-tracker/block-applied-updates?after_block=<accepted_block>
 token-server BlockApplied wakes the long-poll
-fetch /live/tokens + /live/pools again
+fetch /live-token-tracker/tokens + /live-token-tracker/pools again
 ```
 
-`/live/updates` carries wakeup metadata only; it is not an authoritative token
+`/live-token-tracker/block-applied-updates` carries wakeup metadata only; it is not an authoritative token
 payload.
+
+## Live Simulation Contract
+
+`mempool_signal_detector` does not own an exact live `LiveTxSimulator` session.
+The live simulation source is chain-server:
+
+```text
+pending tx classified as actionable
+  -> resolve current exact block with /live-tx-simulator/status
+  -> direct tx processing uses /live-tx-simulator/simulations/unsigned-transaction-sequence
+  -> nonce/funding dependency replay sends the whole pending sequence to chain-server
+  -> per-pool buy/approve/sell uses /live-tx-simulator/simulations/pool-buy-sell
+  -> mempool processor interprets ProcessedTransaction / pool viability outputs
+```
+
+The local `TxSimulator` handle remains for Reth-provider utilities such as the
+arrival recorder and fallback/offline examples. In live service mode,
+`MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL` should point at chain-server; setting it
+to `none` is a diagnostic fallback to local historical Reth context.
 
 Cache acceptance is monotonic:
 
@@ -133,9 +152,9 @@ Unsupported paths:
 ## Simulation And Signals
 
 `SimulationManager` owns the simulation queue and worker tasks. It consumes
-`TxSimulationJob` values, replays transactions with `TxSimulator`, uses
-`tx_processor` for rich decoded facts and viability, then sends
-`SimulationResult` values to `SignalManager`.
+`TxSimulationJob` values, assembles dependency sequences, delegates exact live
+execution to chain-server, then sends `SimulationResult` values to
+`SignalManager`.
 
 Signal semantics:
 

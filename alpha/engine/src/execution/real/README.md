@@ -102,8 +102,8 @@ must stay outside the engine in `alpha/live/trading`.
 - Exact pre-submit simulation must run at or after the signal's
   `required_state_block`. For launch buys this is the max of the decision block,
   observed tx block, pool creation block, and latest pool snapshot block. If the
-  local simulator is behind that block, alpha records a deferred execution, not
-  a failed buy.
+  chain-server live simulator cannot serve that block, alpha records a deferred
+  execution, not a failed buy.
 - Gas-rank selection must happen before Kartal. Kartal should receive the chosen
   EIP-1559 fee caps and audit metadata, not a request to pick a bribe.
 - The resolver must prove the `OrderIntent`, open `Position`, and

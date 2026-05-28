@@ -371,7 +371,7 @@ mod tests {
 
     use crate::erc20::ERC20TokenMetadata;
     use crate::pools::{BasePoolConfig, UniswapV2Pool};
-    use crate::tracking::retention::{ephemeral_terminal_scam_retention_policy, WETH_ADDRESS};
+    use crate::tracking::retention::{terminal_scam_immediate_retention_policy, WETH_ADDRESS};
 
     const TOKEN_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
     const SECOND_TOKEN_ADDRESS: &str = "0x2222222222222222222222222222222222222222";
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn ephemeral_terminal_scam_policy_removes_scam_token_from_registry() {
+    fn terminal_scam_immediate_policy_removes_scam_token_from_registry() {
         let mut registry = TokenRegistry::new();
         registry.add_token_with_live_mode(metadata(TOKEN_ADDRESS), true);
         let token = registry.token_mut(TOKEN_ADDRESS).unwrap();
@@ -483,7 +483,7 @@ mod tests {
 
         let mut index = TrackedTokenIndex::with_live_retention_policy(
             10,
-            ephemeral_terminal_scam_retention_policy(),
+            terminal_scam_immediate_retention_policy(),
         );
         index.index_token(
             registry.token(TOKEN_ADDRESS).unwrap(),

@@ -36,23 +36,23 @@ strategy decision itself remains a block `N` decision.
 
 The current API split is:
 
-- `/eth/tokens/api/live/updates`: block-applied notification. This is the loop
+- `/api/v1/eth/live-token-tracker/block-applied-updates`: block-applied notification. This is the loop
   wake-up source for chain-sim live backtests.
-- `/eth/tokens/api/live/pools`: latest live pool surface. This is not a block
+- `/api/v1/eth/live-token-tracker/pools`: latest live pool surface. This is not a block
   delta and can include newer state than the block that woke the loop.
-- `/eth/tokens/api/live/state/stream`: compatibility live simulation state
-  stream. Chain-sim live backtests can use it to publish exact in-memory block
-  sessions into their local `LiveTxSimulator`.
-- `/api/v1/eth/live/simulations/unsigned`: exact-block live simulation owned by
-  chain-server. Real live trading uses this boundary instead of rebuilding live
-  state inside Alpha.
+- `/api/v1/eth/live-tx-simulator/simulations/unsigned-transaction`: exact-block live simulation owned by
+  chain-server. Real live trading uses this boundary for pre-submit checks.
+- `/api/v1/eth/live-tx-simulator/simulations/alpha-order`: exact-block order simulation owned by
+  chain-server. Chain-sim live backtests use this for submitted buy/sell
+  settlement.
 
-For real trading, chain-server owns live state, `LiveTxSimulator`, and
-simulation sessions; Alpha owns strategy decisions, tx planning, gas policy, and
-Kartal submission. Alpha sends small exact-block unsigned transaction
-simulation requests and receives gas/log/revert evidence.
+For both real trading and chain-sim live backtesting, chain-server owns live
+state, `LiveTxSimulator`, and simulation sessions; Alpha owns strategy
+decisions, tx planning, gas policy, and submission lifecycle. Alpha sends small
+exact-block simulation requests and receives gas/log/revert or execution-report
+evidence.
 
 The desired end state is a single chain-server block-frame payload containing
 the updated token and pool snapshots for block `N`. Until that API exists,
-real trading uses chain-server simulation as the ordering fence, while
-chain-sim live backtests may still use the live-state stream.
+Alpha still reads the latest pool surface, but all live EVM simulation is
+delegated to chain-server.

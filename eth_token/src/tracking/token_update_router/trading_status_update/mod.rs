@@ -210,7 +210,6 @@ pub(super) async fn simulate_updated_v2_pools(
                     }
                 }
             }
-            #[cfg(test)]
             PoolTradingSimulationMode::Noop => Ok(None),
         };
 
@@ -462,7 +461,6 @@ pub(super) async fn simulate_updated_v3_pools(
                     }
                 }
             }
-            #[cfg(test)]
             PoolTradingSimulationMode::Noop => Ok(None),
         };
 
@@ -564,7 +562,6 @@ pub(super) async fn simulate_updated_v4_pools(
         if !should_simulate {
             continue;
         }
-        #[cfg(test)]
         if matches!(trading_simulation, PoolTradingSimulationMode::Noop) {
             continue;
         }
@@ -710,7 +707,6 @@ pub(super) async fn simulate_updated_v4_pools(
                     }
                 }
             }
-            #[cfg(test)]
             PoolTradingSimulationMode::Noop => Ok(None),
         };
 

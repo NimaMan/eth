@@ -21,6 +21,10 @@ pub struct LiveTokenRetentionPolicy {
     pub stablecoin_denoms: BTreeSet<String>,
     #[serde(default)]
     pub drop_scam_tokens_immediately: bool,
+    #[serde(default)]
+    pub retain_terminal_scam_tokens_for_blocks: Option<u64>,
+    #[serde(default)]
+    pub drop_tokens_after_inactivity_blocks: Option<u64>,
     pub drop_tokens_without_pools_after_blocks: Option<u64>,
     pub drop_tokens_without_retained_pools_after_blocks: Option<u64>,
     #[serde(default = "default_liquidity_removal_retention_blocks")]
@@ -36,6 +40,8 @@ impl Default for LiveTokenRetentionPolicy {
             weth_denoms: address_set([WETH_ADDRESS]),
             stablecoin_denoms: address_set([USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS]),
             drop_scam_tokens_immediately: false,
+            retain_terminal_scam_tokens_for_blocks: None,
+            drop_tokens_after_inactivity_blocks: None,
             drop_tokens_without_pools_after_blocks: None,
             drop_tokens_without_retained_pools_after_blocks: None,
             retain_liquidity_removal_pools_for_blocks: default_liquidity_removal_retention_blocks(),
@@ -119,12 +125,16 @@ impl LiveTokenRetentionPolicy {
             .filter(|decision| !decision.retain)
             .collect::<Vec<_>>();
 
-        let terminal_scam_reason = self
-            .drop_scam_tokens_immediately
-            .then(|| terminal_scam_drop_reason(token, current_block))
-            .flatten();
+        let terminal_scam_reason = if self.drop_scam_tokens_immediately {
+            terminal_scam_drop_reason(token, current_block)
+        } else {
+            self.terminal_scam_retention_expiry_reason(token, current_block)
+        };
+        let inactivity_reason = self.inactivity_drop_reason(token, current_block);
 
         let reason = if let Some(reason) = terminal_scam_reason {
+            Some(reason)
+        } else if let Some(reason) = inactivity_reason {
             Some(reason)
         } else if !retained_v2_pools.is_empty() {
             None
@@ -171,6 +181,43 @@ impl LiveTokenRetentionPolicy {
         }
         token.refresh_lifecycle_status();
         decision
+    }
+
+    fn terminal_scam_retention_expiry_reason(
+        &self,
+        token: &ERC20Token,
+        current_block: u64,
+    ) -> Option<TokenDropReason> {
+        let retention_blocks = self.retain_terminal_scam_tokens_for_blocks?;
+        if !token.is_scam() {
+            return None;
+        }
+        let scam_block = terminal_scam_block(token)?;
+        if current_block.saturating_sub(scam_block) < retention_blocks {
+            return None;
+        }
+        Some(TokenDropReason::TerminalScam {
+            scam_block: Some(scam_block),
+            current_block,
+            label: token.scam_mechanism().or_else(|| token.scam_label()),
+        })
+    }
+
+    fn inactivity_drop_reason(
+        &self,
+        token: &ERC20Token,
+        current_block: u64,
+    ) -> Option<TokenDropReason> {
+        let retention_blocks = self.drop_tokens_after_inactivity_blocks?;
+        let reference_block = latest_pool_reference_block(token)?;
+        if current_block.saturating_sub(reference_block) < retention_blocks {
+            return None;
+        }
+        Some(TokenDropReason::InactivePastRetentionBlocks {
+            reference_block,
+            current_block,
+            retention_blocks,
+        })
     }
 
     fn liquidity_removal_token_expiry_reason(
@@ -383,6 +430,11 @@ pub enum TokenDropReason {
         retention_blocks: u64,
     },
     NoRetainedPoolsPastRetentionBlocks {
+        reference_block: u64,
+        current_block: u64,
+        retention_blocks: u64,
+    },
+    InactivePastRetentionBlocks {
         reference_block: u64,
         current_block: u64,
         retention_blocks: u64,
@@ -673,6 +725,56 @@ mod tests {
                 scam_block: Some(101),
                 current_block: 101,
                 ..
+            })
+        ));
+    }
+
+    #[test]
+    fn terminal_scam_token_can_be_dropped_after_configured_window() {
+        let policy = LiveTokenRetentionPolicy {
+            retain_terminal_scam_tokens_for_blocks: Some(10),
+            retain_liquidity_removal_pools_for_blocks: Some(10),
+            ..LiveTokenRetentionPolicy::default()
+        };
+        let mut token = token();
+        token.add_uniswap_v2_pool(drained_v2_pool(POOL_ADDRESS, WETH_ADDRESS));
+        policy.apply_to_token(&mut token, 101);
+
+        let retained = policy.apply_to_token(&mut token, 110);
+        let dropped = policy.apply_to_token(&mut token, 111);
+
+        assert!(retained.retain);
+        assert!(!dropped.retain);
+        assert!(matches!(
+            dropped.reason,
+            Some(TokenDropReason::TerminalScam {
+                scam_block: Some(101),
+                current_block: 111,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn active_token_can_be_dropped_after_inactivity_window() {
+        let policy = LiveTokenRetentionPolicy {
+            drop_tokens_after_inactivity_blocks: Some(10),
+            ..LiveTokenRetentionPolicy::default()
+        };
+        let mut token = token();
+        token.add_uniswap_v2_pool(v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.2));
+
+        let retained = policy.evaluate_token(&token, 109);
+        let dropped = policy.evaluate_token(&token, 110);
+
+        assert!(retained.retain);
+        assert!(!dropped.retain);
+        assert!(matches!(
+            dropped.reason,
+            Some(TokenDropReason::InactivePastRetentionBlocks {
+                reference_block: 100,
+                current_block: 110,
+                retention_blocks: 10,
             })
         ));
     }

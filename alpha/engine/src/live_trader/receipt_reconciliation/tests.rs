@@ -207,6 +207,34 @@ fn tail_entry_receipt_records_dependency_ordering() {
 }
 
 #[test]
+fn regular_receipt_ignores_legacy_null_tail_dependency_hash() {
+    let vault = Address::repeat_byte(0x22);
+    let token = Address::repeat_byte(0x33);
+    let receipt = receipt_at(
+        "0x1",
+        vault,
+        token,
+        BOUGHT_V2_SIGNATURE,
+        [U256::from(10u64), U256::from(20u64), U256::from(1u64)],
+        100,
+        7,
+    );
+    let mut submitted = submitted(OrderSide::Buy, token);
+    submitted.gas_policy_action = Some("entry_buy".to_string());
+    submitted.gas_policy_tail_after_tx_hash = Some("null".to_string());
+
+    let report = match reconcile_receipt(&submitted, &receipt, None, vault).unwrap() {
+        ReceiptReconciliation::Final(report) => report,
+        ReceiptReconciliation::Unresolved(issue) => panic!("{issue:?}"),
+    };
+    let evidence = report.mined_evidence.expect("mined evidence");
+
+    assert_eq!(report.status, ExecutionStatus::Confirmed);
+    assert_eq!(evidence.bundle_ordering_status, None);
+    assert_eq!(evidence.gas_policy_tail_after_tx_hash, None);
+}
+
+#[test]
 fn gate3_a6_receipt_evidence_records_actual_paid_gas_cost() {
     let vault = Address::repeat_byte(0x22);
     let token = Address::repeat_byte(0x33);

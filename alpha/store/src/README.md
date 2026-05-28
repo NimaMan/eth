@@ -19,9 +19,9 @@ with transaction hashes for receipt reconciliation.
 For chain-sim live backtesting, `load_chain_sim_submitted_executions()` loads
 submitted reports with `mined_evidence.receipt_status =
 live_backtest_chain_sim_submitted`. It joins back to the recorded
-`OrderIntent`, requires the position to still be in a submitted state, and
-excludes orders that already have a final confirmed, failed, deferred, or
-cancelled report.
+`OrderIntent`, carries the submitted block hash when it was recorded, requires
+the position to still be in a submitted state, and excludes orders that already
+have a final confirmed, failed, deferred, or cancelled report.
 
 That means chain-sim settlement is restart-safe: the database submitted report,
 not an in-memory queue, determines what still needs final simulation.

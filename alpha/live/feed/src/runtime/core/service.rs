@@ -192,6 +192,10 @@ impl LiveTokenRuntime {
         Ok((status, chain))
     }
 
+    pub fn live_tx_simulator(&self) -> LiveTxSimulator {
+        self.inner.live_tx_simulator.clone()
+    }
+
     pub async fn fail_runtime(&self, message: impl Into<String>, phase: impl Into<String>) {
         self.fail_runtime_error(
             LiveTokenError::new(None, None, None, message.into())

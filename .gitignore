@@ -18,6 +18,7 @@ build/
 
 # Logs
 logs/
+.state/
 
 # Token safety lab generated artifacts
 token_safety_lab/cases/*/artifacts/*

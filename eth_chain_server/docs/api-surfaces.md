@@ -8,7 +8,7 @@ now, but they should not share the same contract.
 | Surface | Path / Boundary | Transport | Primary Client | Contract |
 | --- | --- | --- | --- | --- |
 | Frontend/lab | `/api/v1/eth/...` | HTTP JSON + SSE | Asena, browser pages, lab tools | Read-model views and operator actions. Endpoints may return page DTOs and can be stale by a bounded interval during active builds. |
-| Trading | in-process events now; `/api/v1/eth/trading/...` as a narrow facade | Rust event/state boundary now, gRPC later if out of process | Live strategy runtime | Only committed-chain state after block apply. No frontend table scans, Risk Atlas rendering, or analytics exports on this path. |
+| Trading | in-process events now; `/api/v1/eth/live-trading/...` as a narrow facade | Rust event/state boundary now, gRPC later if out of process | Live strategy runtime | Only committed-chain state after block apply. No frontend table scans, Risk Atlas rendering, or analytics exports on this path. |
 | Agents | `/api/v1/eth/agents/...` | HTTP JSON | Coding/research agents and automation | Stable orientation and tool-friendly status. Agents use versioned HTTP resources, not internal trading state. |
 
 Agents should not use the internal trading boundary directly. The internal
@@ -22,18 +22,33 @@ the agent/automation API.
 The existing `/eth/tokens/api/...` routes remain compatibility routes. New
 clients should use `/api/v1/eth/...`.
 
+Naming rule: a route must name the owner of the data before naming the action.
+Use `live-token-tracker` for confirmed token/pool read models,
+`live-tx-simulator` for exact in-memory EVM simulation state, `live-trading`
+for committed trading wakeups, and `mempool/pending-transaction-signals` for
+speculative public-mempool signals. Avoid generic names such as `live/state`,
+`live/updates`, or `mempool/signals` in new code.
+
 Core frontend/lab routes:
 
 ```text
 GET  /api/v1/eth/health
-GET  /api/v1/eth/live/status
-POST /api/v1/eth/live/start
-POST /api/v1/eth/live/stop
-GET  /api/v1/eth/live/updates?after_block=<block>
-GET  /api/v1/eth/live/tokens
-GET  /api/v1/eth/live/tokens/<token>
-GET  /api/v1/eth/live/pools?status=<active|scam|eligible|ineligible>
-GET  /api/v1/eth/live/surface
+GET  /api/v1/eth/live-token-tracker/status
+POST /api/v1/eth/live-token-tracker/start
+POST /api/v1/eth/live-token-tracker/stop
+GET  /api/v1/eth/live-token-tracker/block-applied-updates?after_block=<block>
+GET  /api/v1/eth/live-token-tracker/tokens
+GET  /api/v1/eth/live-token-tracker/tokens/<token>
+GET  /api/v1/eth/live-token-tracker/pools?status=<active|scam|eligible|ineligible>
+GET  /api/v1/eth/live-token-tracker/token-pool-surface
+GET  /api/v1/eth/live-tx-simulator/status
+GET  /api/v1/eth/live-tx-simulator/latest-block-state
+POST /api/v1/eth/live-tx-simulator/simulations/unsigned-transaction
+POST /api/v1/eth/live-tx-simulator/simulations/unsigned-transaction-sequence
+POST /api/v1/eth/live-tx-simulator/simulations/pool-buy-sell
+POST /api/v1/eth/live-tx-simulator/simulations/alpha-order
+GET  /api/v1/eth/mempool/pending-transaction-signals
+GET  /api/v1/eth/mempool/pending-transaction-signals/<signal_type>
 
 GET  /api/v1/eth/ranges
 POST /api/v1/eth/ranges
@@ -44,7 +59,7 @@ GET  /api/v1/eth/ranges/<run>/tokens
 GET  /api/v1/eth/ranges/<run>/pools
 GET  /api/v1/eth/ranges/<run>/surface
 GET  /api/v1/eth/ranges/<run>/errors
-GET  /api/v1/eth/ranges/<run>/stream
+GET  /api/v1/eth/ranges/<run>/progress-stream
 POST /api/v1/eth/ranges/<run>/risk-atlas/export
 
 GET  /api/v1/eth/prices/spot?pair=ETH/USDC&venue=uniswap_v2
@@ -60,9 +75,9 @@ GET  /api/v1/eth/analytics/risk-atlas/runs/<atlas_run>
 Trading-safe HTTP facade:
 
 ```text
-GET /api/v1/eth/trading/live/status
-GET /api/v1/eth/trading/live/updates?after_block=<block>
-GET /api/v1/eth/trading/live/processed-blocks
+GET /api/v1/eth/live-trading/status
+GET /api/v1/eth/live-trading/block-applied-updates?after_block=<block>
+GET /api/v1/eth/live-trading/processed-blocks
 ```
 
 This facade exists for smoke tests, external supervision, and a future

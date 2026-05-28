@@ -5,12 +5,11 @@ use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use warp::http::StatusCode;
-use warp::Reply;
 
 use crate::http::reply::{error_response, json_response};
-use crate::http::sse;
 use crate::http::ServerState;
 use crate::live::StartLiveTrackerRequest;
+use crate::live_simulation::LiveTxSimulatorStatusResponse;
 use crate::read_models as views;
 
 const DEFAULT_UPDATE_WAIT_MS: u64 = 30_000;
@@ -244,13 +243,60 @@ pub(super) async fn latest_state_frame(
     Ok(json_response(&response, status))
 }
 
-pub(super) async fn state_frame_stream(
+pub(super) async fn live_tx_simulator_status(
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    Ok(
-        warp::sse::reply(warp::sse::keep_alive().stream(sse::live_state_frame_stream(state)))
-            .into_response(),
-    )
+    match state
+        .live_tracker
+        .live_tx_simulator()
+        .latest_state_status()
+        .await
+    {
+        Ok(status) => {
+            let base_fee_per_gas_wei = state
+                .recent_live_state_frames
+                .latest()
+                .filter(|frame| frame.frame.header.number == status.selected_block_number)
+                .and_then(|frame| frame.frame.header.base_fee_per_gas)
+                .map(|fee| fee.to_string());
+            Ok(json_response(
+                &LiveTxSimulatorStatusResponse {
+                    schema: "eth_live_tx_simulator_status_v1",
+                    available: true,
+                    unavailable_reason: None,
+                    selected_block_number: Some(status.selected_block_number),
+                    selected_block_hash: status.selected_block_hash,
+                    state_source: "chain_server_live_tx_simulator",
+                    latest_reth_finished_block_number: Some(
+                        status.latest_reth_finished_block_number,
+                    ),
+                    latest_historical_context_block_number: Some(
+                        status.latest_historical_context_block_number,
+                    ),
+                    latest_live_block_number: status.latest_live_block_number,
+                    latest_tracked_state_block_number: status.latest_tracked_state_block_number,
+                    base_fee_per_gas_wei,
+                },
+                StatusCode::OK,
+            ))
+        }
+        Err(error) => Ok(json_response(
+            &LiveTxSimulatorStatusResponse {
+                schema: "eth_live_tx_simulator_status_v1",
+                available: false,
+                unavailable_reason: Some(error.to_string()),
+                selected_block_number: None,
+                selected_block_hash: None,
+                state_source: "chain_server_live_tx_simulator",
+                latest_reth_finished_block_number: None,
+                latest_historical_context_block_number: None,
+                latest_live_block_number: None,
+                latest_tracked_state_block_number: None,
+                base_fee_per_gas_wei: None,
+            },
+            StatusCode::SERVICE_UNAVAILABLE,
+        )),
+    }
 }
 
 async fn event_response(

@@ -45,6 +45,11 @@ exact post-block `BlockStateSession`.
 Both paths validate block number, block hash, and parent hash before accepting
 the session. Applying the diffs mutates the forked REVM overlay with account
 balance, nonce, code, storage, created-account, and deleted-account changes.
+If a cached parent session exists but its hash does not equal block `B`'s
+`parent_hash`, chain-server clears stale direct live sessions and the
+`LiveTxSimulator` live-state window, then rebuilds `B` from exact local Reth
+parent state. If that exact parent is not available yet, the live simulation
+API reports unavailable/reorg state instead of using stale state.
 
 The handoff into the simulator is:
 
@@ -67,3 +72,21 @@ the same block boundary.
 
 The API must reject missing or stale exact block state. It must not silently
 fall back to historical Reth state for real live pre-submit simulation.
+
+APIs:
+
+- `GET /api/v1/eth/live-tx-simulator/status` returns a lightweight exact live
+  state selection summary for clients that only need the current block/hash.
+- `POST /api/v1/eth/live-tx-simulator/simulations/unsigned-transaction` simulates one unsigned
+  transaction at exact block `B` and returns gas, logs, and revert evidence.
+- `POST /api/v1/eth/live-tx-simulator/simulations/unsigned-transaction-sequence`
+  simulates a pending dependency sequence at exact block `B` and returns
+  `ProcessedTransaction` facts for mempool routing.
+- `POST /api/v1/eth/live-tx-simulator/simulations/pool-buy-sell` simulates a
+  mempool per-pool buy/approve/sell probe at exact block `B`.
+- `POST /api/v1/eth/live-tx-simulator/simulations/alpha-order` simulates an Alpha `OrderIntent`
+  against a supplied `PoolSnapshot` at exact block `B` and returns an
+  `ExecutionReport`. If Alpha supplies the submitted block hash, chain-server
+  verifies it as the parent hash of the execution block before simulating. A
+  missing state block or parent-hash mismatch returns `state_available=false`
+  instead of a fabricated failed trade.

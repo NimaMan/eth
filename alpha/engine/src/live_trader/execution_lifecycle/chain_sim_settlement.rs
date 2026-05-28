@@ -1,8 +1,5 @@
 use crate::LiveChainSimExecutionAdapter;
-use eth_alpha_core::{
-    error::{AlphaCoreError, Result},
-    execution::ExecutionReport,
-};
+use eth_alpha_core::{error::Result, execution::ExecutionReport};
 use eth_alpha_store::PostgresTradingStore;
 use tracing::warn;
 
@@ -88,35 +85,29 @@ impl ChainSimSettlement {
                 batch.pending_future_block += 1;
                 continue;
             }
-            if !self
-                .simulator
-                .live_simulator()
-                .has_state_at(execution_block)
-                .await
-                .map_err(|error| AlphaCoreError::Execution(error.to_string()))?
-            {
-                batch.waiting_for_live_state += 1;
-                warn!(
-                    order_id = %record.order_id.0,
-                    position_id = %record.position_id.0,
-                    order_side = ?record.order_side,
-                    submitted_block,
-                    execution_block,
-                    current_block,
-                    "chain-sim submitted execution is due but exact live state block is not available yet"
-                );
-                continue;
-            }
-
-            let mut report = self
+            let Some(mut report) = self
                 .simulator
                 .simulate_submitted_order(
                     record.order_id,
                     record.intent.clone(),
                     submitted_block,
                     execution_block,
+                    record.submitted_block_hash,
                 )
-                .await?;
+                .await?
+            else {
+                batch.waiting_for_live_state += 1;
+                warn!(
+                    position_id = %record.position_id.0,
+                    order_side = ?record.order_side,
+                    submitted_block,
+                    submitted_block_hash = ?record.submitted_block_hash,
+                    execution_block,
+                    current_block,
+                    "chain-sim submitted execution is due but chain-server exact simulation state is unavailable"
+                );
+                continue;
+            };
             if let Some(gas_shadow) = &self.gas_shadow {
                 gas_shadow
                     .apply_shadow_if_applicable(&record.intent, &mut report)

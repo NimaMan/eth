@@ -229,8 +229,12 @@ impl Args {
                 "--no-db-write" => {
                     args.write_db = false;
                 }
-                "--ephemeral-terminal-scam" => {
-                    args.retention_mode = RangeIndexRetentionMode::EphemeralTerminalScam;
+                "--terminal-scam-immediate" | "--ephemeral-terminal-scam" => {
+                    args.retention_mode = RangeIndexRetentionMode::TerminalScamImmediate;
+                    args.write_db = false;
+                }
+                "--terminal-or-idle-50k" => {
+                    args.retention_mode = RangeIndexRetentionMode::TerminalOrIdle50k;
                     args.write_db = false;
                 }
                 "--retention-mode" => {
@@ -380,9 +384,14 @@ fn print_progress(progress: &eth_chain_server::ranges::RangeIndexProgress, start
 fn parse_retention_mode(value: &str) -> Result<RangeIndexRetentionMode> {
     match value {
         "keep_all" => Ok(RangeIndexRetentionMode::KeepAll),
-        "bounded_index" => Ok(RangeIndexRetentionMode::BoundedIndex),
-        "ephemeral_terminal_scam" => Ok(RangeIndexRetentionMode::EphemeralTerminalScam),
-        _ => bail!("--retention-mode must be keep_all, bounded_index, or ephemeral_terminal_scam"),
+        "lru_cache" | "bounded_index" => Ok(RangeIndexRetentionMode::LruCache),
+        "terminal_scam_immediate" | "ephemeral_terminal_scam" => {
+            Ok(RangeIndexRetentionMode::TerminalScamImmediate)
+        }
+        "terminal_or_idle_50k" => Ok(RangeIndexRetentionMode::TerminalOrIdle50k),
+        _ => bail!(
+            "--retention-mode must be keep_all, lru_cache, terminal_scam_immediate, or terminal_or_idle_50k"
+        ),
     }
 }
 
@@ -418,8 +427,9 @@ Options:
   --end <block>                   End block
   --blocks <count>                Block count, default 200000
   --history-limit <count>         Token history limit, default 64
-  --retention-mode <mode>         keep_all, bounded_index, or ephemeral_terminal_scam; default keep_all
-  --ephemeral-terminal-scam       Shortcut for --retention-mode ephemeral_terminal_scam --no-db-write
+  --retention-mode <mode>         keep_all, lru_cache, terminal_scam_immediate, or terminal_or_idle_50k; default keep_all
+  --terminal-scam-immediate       Shortcut for --retention-mode terminal_scam_immediate --no-db-write
+  --terminal-or-idle-50k          Shortcut for --retention-mode terminal_or_idle_50k --no-db-write
   --chunk-blocks <count>          Processed-block range chunk size, default 250
   --fill-batch-blocks <count>     Processed-block fill batch, default 250
   --fill-concurrency <count>      Processed-block fill concurrency, default 4

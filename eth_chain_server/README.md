@@ -16,7 +16,7 @@ The server now has three explicit client surfaces:
 
 - Frontend/lab: versioned HTTP JSON/SSE under `/api/v1/eth/...`.
 - Trading: committed-state events inside the runtime, with a narrow HTTP facade
-  under `/api/v1/eth/trading/...` for supervision and future bridges.
+  under `/api/v1/eth/live-trading/...` for supervision and future bridges.
 - Agents: stable automation/orientation routes under `/api/v1/eth/agents/...`.
 
 Agents should use the agent HTTP surface, not the internal trading boundary. The
@@ -56,7 +56,7 @@ processed-block disk cache + live execution RPC/WS
   -> LiveTokenEvent::BlockApplied broadcast
   -> RecentLiveBlocks ring
   -> in-memory token/pool views
-  -> /live/updates, /live/processed-blocks, /live/tokens, /live/pools
+  -> /live-token-tracker/block-applied-updates, /live-token-tracker/processed-blocks, /live-token-tracker/tokens, /live-token-tracker/pools
   -> HTTP/SSE clients, mempool context, alpha polling
 ```
 
@@ -73,9 +73,13 @@ Live runtime contracts:
 - `eth_chain_server` applies `eth_token`, keeps the live token/pool registry and
   recent processed block ring in memory, and exposes chain/token context over
   HTTP.
-- `mempool_signal_detector` consumes `/live/tokens` and `/live/pools` for
-  token context. `/live/updates` is a notification-only wakeup so it can refresh
-  that context immediately after chain-server applies a block.
+- `mempool_signal_detector` consumes `/live-token-tracker/tokens` and `/live-token-tracker/pools` for
+  token context. `/live-token-tracker/block-applied-updates` is a notification-only wakeup so it can refresh
+  that context immediately after chain-server applies a block. It also consumes
+  `/live-tx-simulator/status`,
+  `/live-tx-simulator/simulations/unsigned-transaction-sequence`, and
+  `/live-tx-simulator/simulations/pool-buy-sell` so live pending-tx replay uses
+  the chain-server-owned exact `LiveTxSimulator` state.
 - `eth_alpha_trader` consumes chain-server APIs and persisted mempool signals.
 - ASENA reads chain-server/trade APIs only.
 
@@ -87,13 +91,12 @@ diagnostics; they are not the chain-server or ASENA source of truth.
 
 Live pool API shape:
 
-- `GET /eth/tokens/api/live/pools` remains backward-compatible and returns all
-  retained pools.
-- `GET /eth/tokens/api/live/pools?status=active` returns non-scam pools.
-- `GET /eth/tokens/api/live/pools?status=scam` returns scam/liquidity-removal
+- `GET /eth/tokens/api/live-token-tracker/pools` returns all retained pools.
+- `GET /eth/tokens/api/live-token-tracker/pools?status=active` returns non-scam pools.
+- `GET /eth/tokens/api/live-token-tracker/pools?status=scam` returns scam/liquidity-removal
   pools.
-- `GET /eth/tokens/api/live/pools/active` and
-  `GET /eth/tokens/api/live/pools/scam` are explicit aliases for clients that
+- `GET /eth/tokens/api/live-token-tracker/pools/active` and
+  `GET /eth/tokens/api/live-token-tracker/pools/scam` are explicit aliases for clients that
   should not depend on query strings.
 
 Pool-list responses include `count` for the returned set plus `total_count`,
@@ -134,8 +137,9 @@ strategy/atlas surfaces every block. Those jobs are read-model work.
 
 The live simulation state frame and exact `LiveTxSimulator` state are available
 before `BlockApplied` is published. For real live trading, chain-server owns
-live state, `LiveTxSimulator`, and simulation sessions; Alpha owns strategy
-decisions, tx planning, gas policy, and Kartal submission. Alpha should request
+live state, `LiveTxSimulator`, and simulation sessions. Alpha owns strategy
+decisions, tx planning, gas policy, and Kartal submission. The mempool detector
+owns pending-tx routing and signal interpretation. Both clients should request
 exact-block simulation results from chain-server instead of rebuilding the live
 state frame locally.
 
@@ -173,8 +177,8 @@ new confirmed block
   -> UI/read-model snapshots refresh after the trading state is committed
 ```
 
-This means the trading path should never wait for `/live/tokens`,
-`/live/pools`, Risk Atlas page rendering, or any full-registry statistics. It
+This means the trading path should never wait for `/live-token-tracker/tokens`,
+`/live-token-tracker/pools`, Risk Atlas page rendering, or any full-registry statistics. It
 should consume the committed state/event stream directly, while the frontend uses
 snapshot/read-model endpoints.
 
@@ -371,7 +375,7 @@ folders above.
 cargo run -p eth_chain_server
 cargo run -p eth_chain_server -- --config /home/nima/code/crypto/blockchains/eth/config.env
 curl -s http://127.0.0.1:8765/health
-curl -s http://127.0.0.1:8765/live/status
+curl -s http://127.0.0.1:8765/api/v1/eth/live-token-tracker/status
 cargo run -p eth_chain_server --example processed_block_disk_cache_size -- --fill-missing-then-read
 ```
 

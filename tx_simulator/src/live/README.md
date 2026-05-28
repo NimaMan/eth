@@ -10,11 +10,10 @@ block is unavailable in that live window, it fails rather than falling back.
 
 Publishing a live block state also notifies waiters for that block. In the
 chain-server live path, the server publishes the exact `N` session into its
-`LiveTxSimulator` before publishing the corresponding token/pool update for
-block `N`. Real Alpha runners do not subscribe to the full live-state stream;
-they ask chain-server to simulate small exact-block unsigned transactions
-against that server-owned session. Chain-sim live backtests can still use the
-notification path to hydrate a local simulator.
+`LiveTxSimulator` before publishing the corresponding token/pool update for block
+`N`. Alpha runners do not subscribe to live-state stream frames; they ask
+chain-server to simulate small exact-block unsigned transactions or submitted
+orders against that server-owned session.
 
 The window exists for block-coupled live trading. A strategy can submit at block
 `N` and settle in block `N+1`; if the main loop reaches `N+2` before settlement
@@ -55,3 +54,10 @@ requires the exact parent block state from local Reth; it must not construct a
 live frame from an older historical base. When a caller already has the parent
 live session, `block_state_session_from_parent_prestate_diffs` is the preferred
 path.
+
+`block_state_session_from_parent_prestate_diffs` asserts that the supplied
+parent session is exactly block `N-1` and that its hash equals the incoming
+block's `parent_hash`. That is a safety assertion, not reorg recovery. The
+chain-server runtime owns recovery: if the cached parent hash does not match,
+it must clear stale direct sessions and rebuild from exact canonical parent
+state before publishing a new live session.

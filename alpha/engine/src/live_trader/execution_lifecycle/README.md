@@ -14,9 +14,9 @@ Real live trading and chain-sim live backtesting share the same lifecycle shape:
 The backend-specific difference is the source of step 5:
 
 - real live trading waits for mined transaction receipts and vault events;
-- chain-sim live backtesting waits for the exact in-memory simulation state for
-  the expected execution block and simulates our transaction as the last
-  transaction in that block.
+- chain-sim live backtesting asks chain-server to simulate our transaction as
+  the last transaction at the expected execution block using the server-owned
+  `LiveTxSimulator`.
 
 For chain-sim live backtesting, `LiveChainSimExecutionAdapter::execute()` only
 records submission. It does not wait for the next block and it does not simulate
@@ -30,9 +30,12 @@ reports from `alpha_trading.execution_reports`, joins back to the recorded
 - the position is still in a submitted state;
 - no final report exists for the order id;
 - the expected execution block is at or behind the current live block;
-- `LiveTxSimulator` still has the exact block state for that execution block.
+- chain-server can serve exact live simulation state for that execution block;
+- when Alpha recorded the submitted block hash, chain-server verifies that the
+  execution block parent still matches it.
 
-Only then does it simulate and apply the final execution event. If the exact
-live state block is not available, the position remains submitted and the trader
-logs an infrastructure wait. It must not turn that case into `buy_failed`,
-because that is not an on-chain failure.
+Only then does it apply the final execution event returned by chain-server. If
+the exact live state block is unavailable or the parent hash indicates a reorg,
+the position remains submitted and the trader logs an infrastructure wait. It
+must not turn that case into `buy_failed`, because that is not an on-chain
+failure.

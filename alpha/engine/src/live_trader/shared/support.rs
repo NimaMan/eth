@@ -275,32 +275,6 @@ pub(super) async fn record_signal_observation(
     .await
 }
 
-pub(super) async fn record_deferred_signal_observation(
-    store: &PostgresTradingStore,
-    strategy_name: &str,
-    signal: &MempoolSignalWire,
-    decision: &str,
-    first_poll: bool,
-    suppress_events: bool,
-    status: &LiveStatusResponse,
-    extra: Value,
-) -> Result<()> {
-    record_signal_observation_with_source(
-        store,
-        strategy_name,
-        MEMPOOL_SIGNAL_SOURCE,
-        &format!("deferred:{}", signal.signal_id),
-        signal,
-        decision,
-        0,
-        first_poll,
-        suppress_events,
-        status,
-        extra,
-    )
-    .await
-}
-
 async fn record_signal_observation_with_source(
     store: &PostgresTradingStore,
     strategy_name: &str,

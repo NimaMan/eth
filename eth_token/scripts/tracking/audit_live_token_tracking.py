@@ -239,7 +239,10 @@ def print_examples(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--live-api", default="http://127.0.0.1:8765/eth/tokens/api/live")
+    parser.add_argument(
+        "--live-api",
+        default="http://127.0.0.1:8765/eth/tokens/api/live-token-tracker",
+    )
     parser.add_argument("--rpc-url", default="http://127.0.0.1:8545")
     parser.add_argument("--start-block", type=int)
     parser.add_argument("--end-block", type=int)

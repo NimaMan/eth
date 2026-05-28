@@ -12,8 +12,8 @@ Primary live source:
 ```text
 eth_token live tracker
   -> eth_chain_server live HTTP APIs
-  -> GET /eth/tokens/api/live/tokens
-  -> GET /eth/tokens/api/live/pools
+  -> GET /api/v1/eth/live-token-tracker/tokens
+  -> GET /api/v1/eth/live-token-tracker/pools
   -> TokenTrackingCache
 ```
 
@@ -22,21 +22,21 @@ Update notification:
 ```text
 eth_chain_server applies confirmed block
   -> broadcasts LiveTokenEvent::BlockApplied in process
-  -> /eth/tokens/api/live/updates long-poll returns
-  -> mempool refreshes /live/tokens + /live/pools
+  -> /api/v1/eth/live-token-tracker/block-applied-updates long-poll returns
+  -> mempool refreshes /api/v1/eth/live-token-tracker/tokens + /api/v1/eth/live-token-tracker/pools
 ```
 
 The update endpoint is only a wakeup path. Token and pool context always comes
-from `/live/tokens` and `/live/pools`.
+from `/api/v1/eth/live-token-tracker/tokens` and `/api/v1/eth/live-token-tracker/pools`.
 
 Refresh sequence:
 
-1. `mempool_signal_detector` fetches `/live/tokens` and `/live/pools`.
+1. `mempool_signal_detector` fetches `/api/v1/eth/live-token-tracker/tokens` and `/api/v1/eth/live-token-tracker/pools`.
 2. It records the accepted token-context block in `TokenTrackingCache`.
-3. It opens `/live/updates?after_block=<accepted_block>&timeout_ms=30000`.
+3. It opens `/api/v1/eth/live-token-tracker/block-applied-updates?after_block=<accepted_block>&timeout_ms=30000`.
 4. token-server returns immediately when a newer block is already applied or
    when the next `BlockApplied` runtime event fires.
-5. mempool reloads `/live/tokens` and `/live/pools` and repeats the wait.
+5. mempool reloads `/api/v1/eth/live-token-tracker/tokens` and `/api/v1/eth/live-token-tracker/pools` and repeats the wait.
 
 ## Cache Context Rules
 

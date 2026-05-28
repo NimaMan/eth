@@ -79,6 +79,13 @@ pub(super) async fn risk_atlas_run(
     }
 }
 
+pub(super) async fn scammer_analytics() -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::scammer_analytics::payload(),
+        StatusCode::OK,
+    ))
+}
+
 pub(super) async fn get(
     job_id: String,
     state: ServerState,

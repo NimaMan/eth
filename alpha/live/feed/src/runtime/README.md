@@ -66,6 +66,21 @@ The normal fast path advances cached direct parent session `B-1` with the
 prestate diffs for block `B`. The fallback path builds from the canonical parent
 state in local Reth and applies the same block `B` diffs.
 
+Before the fast path is used, `direct_live_state.rs` compares the cached parent
+session hash with the incoming block parent hash:
+
+```text
+incoming block B: number=N hash=H parent=P
+cached parent session: number=N-1 hash=H_parent
+required: H_parent == P
+```
+
+If this check fails, the runtime treats the cached direct sessions as stale
+reorg state. It clears the direct session map and the `LiveTxSimulator`
+live-state window, then rebuilds block `B` through
+`block_state_session_from_prestate_diffs`, which loads exact parent state
+`N-1` from local Reth and verifies that the parent header hash equals `P`.
+
 This state is stored in the `LiveTxSimulator` in-memory window. Exact simulation
 calls later use `LiveTxSimulator.start_chain_at(B)` through
 `LiveTokenRuntime::live_simulation_chain_at(B)`.
@@ -86,8 +101,10 @@ Required behavior for reorg-safe ownership:
 - if exact state cannot be proven for a block, the simulator API must return an
   unavailable/reorg result rather than falling back to a different block.
 
-Until those reorg rules are fully implemented, a caller should treat missing
-exact state as infrastructure evidence, not as an on-chain failed trade.
+If local Reth cannot provide the exact canonical parent after stale sessions are
+cleared, exact live simulation state for `B` remains unavailable. A caller
+should treat that as infrastructure/reorg evidence, not as an on-chain failed
+trade.
 
 ## Warmup Data Flow
 

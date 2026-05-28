@@ -169,7 +169,6 @@ pub(crate) enum PoolTradingSimulationMode<'a> {
         direct_state_only: bool,
         profile_run_id: Option<&'a str>,
     },
-    #[cfg(test)]
     Noop,
 }
 
@@ -190,7 +189,6 @@ impl<'a> PoolTradingSimulationMode<'a> {
             | Self::HistoricalPostBlockSession { profile_run_id, .. }
             | Self::LiveBlockSession { profile_run_id, .. } => profile_run_id,
             Self::Historical(_) => None,
-            #[cfg(test)]
             Self::Noop => None,
         }
     }

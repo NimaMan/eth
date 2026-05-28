@@ -74,6 +74,14 @@ impl BlockStateSession {
         self.block_number
     }
 
+    pub fn block_hash(&self) -> B256 {
+        self.forked_state.block_header.hash()
+    }
+
+    pub fn parent_hash(&self) -> B256 {
+        self.forked_state.block_header.parent_hash
+    }
+
     pub fn simulator(&self) -> Arc<TxSimulator> {
         Arc::clone(&self.simulator)
     }

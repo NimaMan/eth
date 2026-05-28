@@ -77,6 +77,8 @@ impl SimulationManager {
         // Create liquidity removal simulator with the same underlying simulator
         let mut liquidity_removal_simulator =
             LiquidityRemovalSimulator::new(mempool_simulator.get_tx_simulator());
+        liquidity_removal_simulator
+            .set_chain_server_live_tx_simulator(mempool_simulator.chain_server_live_tx_simulator());
         liquidity_removal_simulator.set_token_cache(token_cache.clone());
 
         let pending_sequences = PendingSequences::new();

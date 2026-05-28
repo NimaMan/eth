@@ -58,6 +58,7 @@ const MEMPOOL_ALLOW_DATABASE_DISABLED_ENV: &str = "MEMPOOL_ALLOW_DATABASE_DISABL
 const UNRESOLVED_INTENT_MAX_ENTRIES: usize = 20_000;
 const UNRESOLVED_INTENT_MAX_LIFETIME: Duration = Duration::from_secs(2);
 const UNRESOLVED_INTENT_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+const LIVE_TX_SIMULATOR_READY_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -207,7 +208,14 @@ async fn main() -> Result<()> {
     );
 
     info!("  Report Interval: {}s", cfg_report_interval);
-    info!("  Live state source: local Reth historical context or direct live session");
+    info!(
+        "  Live tx simulator: {}",
+        base_config
+            .simulation
+            .live_tx_simulator_server_url
+            .as_deref()
+            .unwrap_or("local Reth historical context")
+    );
     info!("================================");
 
     let allow_database_disabled =
@@ -298,7 +306,13 @@ async fn main() -> Result<()> {
 
     // 5. Mempool Simulator (single database connection)
     info!("🧪 Initializing mempool simulator...");
-    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path)?);
+    let mempool_simulator = Arc::new(MempoolSimulator::new_with_chain_server_live_tx_simulator(
+        &cfg_reth_db_path,
+        base_config
+            .simulation
+            .live_tx_simulator_server_url
+            .as_deref(),
+    )?);
     info!("✅ Mempool simulator initialized");
 
     // Initialize arrival recorder only after simulator (to reuse provider).
@@ -426,6 +440,14 @@ async fn main() -> Result<()> {
         worker_count,
         simulation_timeout.as_millis()
     );
+
+    if mempool_simulator.chain_server_live_tx_simulator().is_some() {
+        wait_for_live_tx_simulator_ready(
+            mempool_simulator.as_ref(),
+            LIVE_TX_SIMULATOR_READY_TIMEOUT,
+        )
+        .await?;
+    }
 
     // Start IPC after simulator, arrival recorder, signal publisher, and
     // simulation workers are ready so ingress timestamps are captured and the
@@ -794,4 +816,49 @@ async fn main() -> Result<()> {
 
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())
+}
+
+async fn wait_for_live_tx_simulator_ready(
+    mempool_simulator: &MempoolSimulator,
+    timeout: Duration,
+) -> Result<()> {
+    let started = Instant::now();
+    let mut last_log = Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .unwrap_or_else(Instant::now);
+
+    loop {
+        match mempool_simulator.latest_simulation_status().await {
+            Ok(status) if status.uses_tracked_live_state() => {
+                info!(
+                    "✅ Chain-server live tx simulator ready: block={} hash={:?} source={:?}",
+                    status.selected_block_number, status.selected_block_hash, status.source
+                );
+                return Ok(());
+            }
+            Ok(status) => {
+                if last_log.elapsed() >= Duration::from_secs(5) {
+                    info!(
+                        "⏳ Waiting for chain-server live tx simulator: selected_block={} source={:?}",
+                        status.selected_block_number, status.source
+                    );
+                    last_log = Instant::now();
+                }
+            }
+            Err(err) => {
+                if last_log.elapsed() >= Duration::from_secs(5) {
+                    info!("⏳ Waiting for chain-server live tx simulator: {}", err);
+                    last_log = Instant::now();
+                }
+            }
+        }
+
+        if started.elapsed() >= timeout {
+            bail!(
+                "chain-server live tx simulator was not ready after {}s",
+                timeout.as_secs()
+            );
+        }
+        time::sleep(Duration::from_secs(1)).await;
+    }
 }

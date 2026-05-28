@@ -1,5 +1,5 @@
 use eth_alpha_core::{
-    ids::{OrderId, PositionId, TokenAddress, TradeId, TxHash},
+    ids::{BlockHash, OrderId, PositionId, TokenAddress, TradeId, TxHash},
     order::{OrderIntent, OrderSide},
 };
 use serde_json::Value;
@@ -80,6 +80,7 @@ pub struct ChainSimSubmittedExecutionRecord {
     pub order_id: OrderId,
     pub submitted_block_number: Option<u64>,
     pub expected_confirmation_block: Option<u64>,
+    pub submitted_block_hash: Option<BlockHash>,
     pub position_id: PositionId,
     pub trade_id: Option<TradeId>,
     pub order_side: OrderSide,

@@ -46,6 +46,20 @@ impl SimulationManager {
         if !matches!(config.pool_type, PoolType::UniswapV2) {
             return None;
         }
+        if self
+            .mempool_simulator
+            .chain_server_live_tx_simulator()
+            .is_some()
+        {
+            tracing::debug!(
+                target: "mempool_exact_vault_entry",
+                tx_hash = %request.tx.hash,
+                token = %config.token_address,
+                pool = %config.pool_address,
+                "skipping local exact vault entry probe; live mempool simulations are delegated to chain-server"
+            );
+            return None;
+        }
 
         match self
             .simulate_exact_vault_entry_buy_inner(request, config, replay_sequence)

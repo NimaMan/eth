@@ -17,13 +17,11 @@ use super::gas_policy::LiveRealGasPolicy;
 use super::real_execution::{build_kartal_real_adapter, KartalRealPreflight};
 use super::receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
 use super::support::TraderExecutionMode;
-use super::token_server::TokenServerClient;
 
 pub(super) struct ExecutionStackInput<'a> {
     pub(super) execution_mode: TraderExecutionMode,
     pub(super) real_args: Option<&'a RealExecutionArgs>,
     pub(super) token_server_url: &'a str,
-    pub(super) reth_datadir: &'a str,
     pub(super) reth_http_rpc: &'a str,
     pub(super) store: PostgresTradingStore,
     pub(super) run_id: String,
@@ -36,8 +34,7 @@ pub(super) struct ExecutionStack {
     pub(super) adapter: Box<dyn EngineExecutionAdapter>,
     pub(super) adapter_current_block: Arc<AtomicU64>,
     pub(super) pool_updates: Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
-    pub(super) manual_close_live_simulator: Option<tx_simulator::LiveTxSimulator>,
-    pub(super) state_status_adapter: Option<LiveChainSimExecutionAdapter>,
+    pub(super) chain_sim_adapter: Option<LiveChainSimExecutionAdapter>,
     pub(super) manual_close_vault_address: Option<Address>,
     pub(super) chain_sim_settlement: Option<ChainSimSettlement>,
     pub(super) receipt_reconciler: Option<VaultReceiptReconciler<JsonRpcReceiptProvider>>,
@@ -73,42 +70,17 @@ pub(super) async fn build_execution_stack(
         _ => None,
     };
 
-    let (
-        adapter,
-        adapter_current_block,
-        pool_updates,
-        manual_close_live_simulator,
-        state_status_adapter,
-        chain_sim_settlement,
-    ): (
+    let (adapter, adapter_current_block, pool_updates, chain_sim_adapter, chain_sim_settlement): (
         Box<dyn EngineExecutionAdapter>,
         Arc<AtomicU64>,
         Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
-        Option<tx_simulator::LiveTxSimulator>,
         Option<LiveChainSimExecutionAdapter>,
         Option<ChainSimSettlement>,
     ) = match input.execution_mode {
         TraderExecutionMode::ChainSim => {
-            let tx_simulator = Arc::new(
-                tx_simulator::TxSimulator::new(input.reth_datadir)
-                    .wrap_err("failed to initialize tx simulator")?,
-            );
-            let live_state_provider = tx_simulator::InMemoryLiveBlockStateProvider::new();
-            let live_simulator = tx_simulator::LiveTxSimulator::new(
-                tx_simulator.clone(),
-                live_state_provider.clone(),
-            );
-            super::live_state::spawn_live_state_publisher(
-                TokenServerClient::new(input.token_server_url.to_string()),
-                live_state_provider,
-                tx_simulator.clone(),
-            );
-
-            let tx_processor = Arc::new(tx_processor::tx_processor::TxProcessor::new());
             let chain_sim_adapter =
                 LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
-                    live_simulator.clone(),
-                    tx_processor,
+                    input.token_server_url.to_string(),
                     input.run_id.clone(),
                     next_order_sequence,
                 )
@@ -135,7 +107,6 @@ pub(super) async fn build_execution_stack(
                 adapter,
                 adapter_current_block,
                 pool_updates,
-                Some(live_simulator),
                 Some(chain_sim_adapter),
                 chain_sim_settlement,
             )
@@ -161,16 +132,7 @@ pub(super) async fn build_execution_stack(
                     .expect("kartal-real gas policy must exist"),
             )
             .await
-            .map(|adapter| {
-                (
-                    adapter,
-                    adapter_current_block,
-                    pool_updates,
-                    None,
-                    None,
-                    None,
-                )
-            })?
+            .map(|adapter| (adapter, adapter_current_block, pool_updates, None, None))?
         }
     };
 
@@ -178,8 +140,7 @@ pub(super) async fn build_execution_stack(
         adapter,
         adapter_current_block,
         pool_updates,
-        manual_close_live_simulator,
-        state_status_adapter,
+        chain_sim_adapter,
         manual_close_vault_address,
         chain_sim_settlement,
         receipt_reconciler,

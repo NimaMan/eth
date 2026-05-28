@@ -134,8 +134,8 @@ async fn fetch_live_token_server_snapshot(
     base_url: &str,
 ) -> Result<LiveTokenServerSnapshot> {
     let started = Instant::now();
-    let token_url = endpoint(base_url, "eth/tokens/api/live/tokens");
-    let pool_url = endpoint(base_url, "eth/tokens/api/live/pools");
+    let token_url = endpoint(base_url, "api/v1/eth/live-token-tracker/tokens");
+    let pool_url = endpoint(base_url, "api/v1/eth/live-token-tracker/pools");
 
     let (tokens_response, pools_response) = tokio::try_join!(
         fetch_json::<LiveTokenListResponse>(client, &token_url),
@@ -214,7 +214,10 @@ async fn wait_for_live_token_server_update(
 ) -> Result<LiveTokenServerUpdateNotification> {
     let update_url = format!(
         "{}?after_block={}&timeout_ms={}",
-        endpoint(base_url, "eth/tokens/api/live/updates"),
+        endpoint(
+            base_url,
+            "api/v1/eth/live-token-tracker/block-applied-updates"
+        ),
         after_block,
         max_wait.as_millis()
     );
@@ -575,8 +578,11 @@ mod tests {
     #[test]
     fn builds_token_server_endpoint() {
         assert_eq!(
-            endpoint("http://127.0.0.1:8765/", "/eth/tokens/api/live/tokens"),
-            "http://127.0.0.1:8765/eth/tokens/api/live/tokens"
+            endpoint(
+                "http://127.0.0.1:8765/",
+                "/api/v1/eth/live-token-tracker/tokens"
+            ),
+            "http://127.0.0.1:8765/api/v1/eth/live-token-tracker/tokens"
         );
     }
 

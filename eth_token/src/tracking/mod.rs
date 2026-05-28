@@ -24,9 +24,11 @@ pub use builders::TokenStateBuilder;
 pub use registry::TokenRegistry;
 pub use reports::{TokenBlockUpdateReport, TokenStateUpdateReport, TokenTransactionUpdateError};
 pub use retention::{
-    ephemeral_terminal_scam_retention_policy, LivePoolDenomClass, LivePoolRetentionDecision,
-    LiveTokenRetentionDecision, LiveTokenRetentionPolicy, LiveTokenRetentionReport, PoolDropReason,
-    TokenDropReason, EPHEMERAL_TERMINAL_SCAM_RETENTION_MODE,
+    terminal_or_idle_50k_retention_policy, terminal_scam_immediate_retention_policy,
+    LivePoolDenomClass, LivePoolRetentionDecision, LiveTokenRetentionDecision,
+    LiveTokenRetentionPolicy, LiveTokenRetentionReport, PoolDropReason, TokenDropReason,
+    TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS, TERMINAL_OR_IDLE_50K_RETENTION_MODE,
+    TERMINAL_SCAM_IMMEDIATE_RETENTION_MODE,
 };
 pub use token_update_router::ProcessedTokenUpdateRouter;
 pub use tracked_token_index::{

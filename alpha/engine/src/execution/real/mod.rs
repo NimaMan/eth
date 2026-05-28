@@ -354,6 +354,9 @@ fn non_empty_string(value: &str) -> Option<String> {
 
 fn metadata_string(metadata: &Value, path: &[&str]) -> Option<String> {
     let value = metadata_path(metadata, path)?;
+    if value.is_null() {
+        return None;
+    }
     let text = value
         .as_str()
         .map(str::to_string)
@@ -366,6 +369,9 @@ fn metadata_string_array(metadata: &Value, path: &[&str]) -> Option<Vec<String>>
     let strings = values
         .iter()
         .filter_map(|value| {
+            if value.is_null() {
+                return None;
+            }
             value
                 .as_str()
                 .map(str::to_string)

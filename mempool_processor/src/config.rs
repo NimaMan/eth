@@ -42,7 +42,9 @@ pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the shared Ethereum workspace.
 pub const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/mempool_processor";
 pub const MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV: &str = "MEMPOOL_LIVE_TOKEN_SERVER_URL";
+pub const MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL_ENV: &str = "MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL";
 pub const DEFAULT_LIVE_TOKEN_SERVER_URL: &str = "http://127.0.0.1:8765";
+pub const DEFAULT_LIVE_TX_SIMULATOR_SERVER_URL: &str = "http://127.0.0.1:8765";
 
 /// Path to the shared Ethereum workspace config.
 pub fn eth_config_path() -> PathBuf {
@@ -244,6 +246,13 @@ fn default_live_token_server_url() -> Option<String> {
     Some(DEFAULT_LIVE_TOKEN_SERVER_URL.to_string())
 }
 
+fn default_live_tx_simulator_server_url() -> Option<String> {
+    Some(
+        config_value(&[MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL_ENV])
+            .unwrap_or_else(|| DEFAULT_LIVE_TX_SIMULATOR_SERVER_URL.to_string()),
+    )
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MempoolProcessorConfig {
@@ -374,6 +383,10 @@ pub struct SimulationConfig {
     /// Reth data directory path
     pub reth_datadir: String,
 
+    /// HTTP base URL for the chain-server-owned LiveTxSimulator.
+    #[serde(default = "default_live_tx_simulator_server_url")]
+    pub live_tx_simulator_server_url: Option<String>,
+
     /// Number of simulation worker threads
     #[serde(default = "default_simulation_workers")]
     pub worker_threads: usize,
@@ -502,6 +515,7 @@ impl Default for MempoolProcessorConfig {
             simulation: SimulationConfig {
                 enabled: true,
                 reth_datadir: reth_datadir_from_env(),
+                live_tx_simulator_server_url: default_live_tx_simulator_server_url(),
                 worker_threads: DEFAULT_SIM_WORKERS,
                 batch_size: 50,
                 batch_timeout: Duration::from_millis(100),
@@ -579,6 +593,16 @@ impl MempoolProcessorConfig {
         if let Some(url) = config_value(&[MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV]) {
             let url = url.trim();
             config.token_cache_source.live_token_server_url =
+                if url.is_empty() || url.eq_ignore_ascii_case("none") || url == "0" {
+                    None
+                } else {
+                    Some(url.to_string())
+                };
+        }
+
+        if let Some(url) = config_value(&[MEMPOOL_LIVE_TX_SIMULATOR_SERVER_URL_ENV]) {
+            let url = url.trim();
+            config.simulation.live_tx_simulator_server_url =
                 if url.is_empty() || url.eq_ignore_ascii_case("none") || url == "0" {
                     None
                 } else {

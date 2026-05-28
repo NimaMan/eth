@@ -33,7 +33,7 @@ pub(super) async fn manifest(state: ServerState) -> Result<warp::reply::Response
                 {
                     "name": "trading",
                     "transport": "in_process_events_now_grpc_later",
-                    "base_path": "/api/v1/eth/trading",
+                    "base_path": "/api/v1/eth/live-trading",
                     "purpose": "Committed-chain trading state and low-latency block-applied events.",
                     "use_for": [
                         "reading committed live status",
@@ -66,10 +66,16 @@ pub(super) async fn manifest(state: ServerState) -> Result<warp::reply::Response
                 "agent_manifest": "/api/v1/eth/agents/manifest",
                 "agent_status": "/api/v1/eth/agents/status",
                 "health": "/api/v1/eth/health",
-                "live_status": "/api/v1/eth/live/status",
-                "live_updates": "/api/v1/eth/live/updates?after_block=<block>",
-                "trading_live_status": "/api/v1/eth/trading/live/status",
-                "trading_live_updates": "/api/v1/eth/trading/live/updates?after_block=<block>",
+                "live_token_tracker_status": "/api/v1/eth/live-token-tracker/status",
+                "live_token_tracker_block_applied_updates": "/api/v1/eth/live-token-tracker/block-applied-updates?after_block=<block>",
+                "live_token_tracker_tokens": "/api/v1/eth/live-token-tracker/tokens",
+                "live_token_tracker_pools": "/api/v1/eth/live-token-tracker/pools",
+                "live_tx_simulator_status": "/api/v1/eth/live-tx-simulator/status",
+                "live_tx_simulator_latest_block_state": "/api/v1/eth/live-tx-simulator/latest-block-state",
+                "live_tx_simulator_unsigned_sequence": "/api/v1/eth/live-tx-simulator/simulations/unsigned-transaction-sequence",
+                "live_tx_simulator_pool_buy_sell": "/api/v1/eth/live-tx-simulator/simulations/pool-buy-sell",
+                "trading_live_status": "/api/v1/eth/live-trading/status",
+                "trading_live_block_applied_updates": "/api/v1/eth/live-trading/block-applied-updates?after_block=<block>",
                 "ranges": "/api/v1/eth/ranges",
                 "active_range": "/api/v1/eth/ranges/active",
                 "risk_atlas": "/api/v1/eth/analytics/risk-atlas"
@@ -162,8 +168,8 @@ pub(super) async fn status(state: ServerState) -> Result<warp::reply::Response, 
             "active_range": active_range,
             "risk_atlas": risk_atlas,
             "recommended_next": [
-                "Use /api/v1/eth/live/status for frontend live status.",
-                "Use /api/v1/eth/trading/live/updates for committed block wakeups.",
+                "Use /api/v1/eth/live-token-tracker/status for frontend live-token-tracker status.",
+                "Use /api/v1/eth/live-trading/block-applied-updates for committed block wakeups.",
                 "Use /api/v1/eth/analytics/risk-atlas for DB-backed atlas pages."
             ]
         }),

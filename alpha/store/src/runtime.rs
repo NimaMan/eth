@@ -696,6 +696,7 @@ impl PostgresTradingStore {
                    er.order_side,
                    positions.token_address,
                    er.payload #>> '{mined_evidence,expected_confirmation_block}' AS expected_confirmation_block,
+                   er.payload #>> '{mined_evidence,block_hash}' AS submitted_block_hash,
                    oi.payload::text AS intent_payload
             FROM alpha_trading.execution_reports er
             JOIN alpha_trading.positions positions
@@ -748,6 +749,10 @@ impl PostgresTradingStore {
                     .try_get::<Option<String>, _>("expected_confirmation_block")
                     .map_err(store_error)?
                     .and_then(|value| value.parse::<u64>().ok());
+                let submitted_block_hash = row
+                    .try_get::<Option<String>, _>("submitted_block_hash")
+                    .map_err(store_error)?
+                    .and_then(|value| value.parse().ok());
                 let position_id = PositionId(
                     row.try_get::<String, _>("position_id")
                         .map_err(store_error)?,
@@ -774,6 +779,7 @@ impl PostgresTradingStore {
                     order_id,
                     submitted_block_number,
                     expected_confirmation_block,
+                    submitted_block_hash,
                     position_id,
                     trade_id,
                     order_side,
@@ -853,7 +859,7 @@ impl PostgresTradingStore {
             WHERE run_id = $1
               AND strategy_name = $2
               AND pool_address IS NOT NULL
-              AND state <> 'buy_deferred'
+              AND state NOT IN ('buy_deferred', 'buy_cancelled')
             ORDER BY pool_address
             "#,
         )

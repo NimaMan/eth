@@ -58,9 +58,9 @@ This contract is meant to be the same for live backtest and real live trading.
 The execution backend differs, but strategy event ordering and block context
 must not.
 
-Current important implementation detail: `/eth/tokens/api/live/updates` is the
+Current important implementation detail: `/api/v1/eth/live-token-tracker/block-applied-updates` is the
 block-applied signal and includes updated token/pool ids for the block.
-`/eth/tokens/api/live/pools` is a latest live pool surface, not a block delta.
+`/api/v1/eth/live-token-tracker/pools` is a latest live pool surface, not a block delta.
 If alpha handles a block event and then reads the latest pool surface, the
 surface can include state newer than the block that triggered the loop. That is
 the block-coupling gap to remove: alpha should either consume a chain-server
@@ -75,12 +75,15 @@ latest live state is when execution happens.
 Chain-sim live backtests now mirror real live trading lifecycle. Submission at
 block `N` persists a submitted execution report with
 `receipt_status = live_backtest_chain_sim_submitted` and
-`expected_confirmation_block = N+1`. When a later tick sees the exact live
-simulation state for `N+1`, `execution_lifecycle/ChainSimSettlement` loads that
-submitted report from Postgres, reconstructs the stored order intent, simulates
-the swap as the last transaction in block `N+1`, and persists the final
-execution report. If the exact state for `N+1` is unavailable, settlement stays
-pending and logs an infrastructure wait rather than writing `buy_failed`.
+`expected_confirmation_block = N+1`. If the live status includes block `N`'s
+hash, Alpha stores it in the submitted evidence. When a later tick reaches
+`N+1`, `execution_lifecycle/ChainSimSettlement` loads that submitted report from
+Postgres, reconstructs the stored order intent, and asks chain-server to
+simulate the swap as the last transaction in block `N+1`. Chain-server owns the
+only live `LiveTxSimulator`; Alpha does not subscribe to live-state stream
+frames or rebuild live state locally. If exact state for `N+1` is unavailable or the
+submitted block hash no longer matches the execution block parent, settlement
+stays pending and logs an infrastructure wait rather than writing `buy_failed`.
 
 ## Runtime Config
 

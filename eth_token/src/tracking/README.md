@@ -92,7 +92,7 @@ entries by both token-index generation and registry token count.
 ## Live Retention
 
 Live retention is owned by `tracked_token_index.rs` and
-`live_token_retention.rs`. Its job is to keep the live registry and token index
+`retention/live.rs`. Its job is to keep the live registry and token index
 bounded without deleting newly discovered launch surfaces before the tracker has
 enough pool state to classify them.
 
@@ -117,6 +117,8 @@ The default live policy is:
 min WETH-denom reserve:   0.1 WETH
 min stable-denom reserve: 1000 stable units
 min other-denom reserve:  0
+retain terminal scam tokens for blocks:          disabled
+drop tokens after inactivity blocks:             disabled
 drop tokens without pools after blocks:          disabled
 drop tokens without retained pools after blocks: disabled
 retain liquidity-removal pools for blocks:       15000
@@ -165,6 +167,13 @@ the token can also be dropped for the same reason.
 
 Token retention is derived from pool retention:
 
+- If immediate terminal-scam dropping is enabled, a terminal scam token can be
+  dropped in the same retention pass after the block's observations are
+  collected.
+- If delayed terminal-scam retention is configured, a terminal scam token can be
+  dropped after that many blocks from its terminal evidence block.
+- If general inactivity retention is configured, any token can be dropped after
+  that many blocks from its latest token/pool activity reference block.
 - If any pool is retained, the token is retained.
 - If the token has no pools and `drop_tokens_without_pools_after_blocks` is
   configured, the token can be dropped after that many blocks from its latest
@@ -175,9 +184,10 @@ Token retention is derived from pool retention:
 - If a liquidity-removal retention window expired and no pool remains retained,
   the token can be dropped with `LiquidityRemovalRetentionExpired`.
 
-By default, the two "drop tokens without ..." windows are disabled. That means a
-live token is not dropped merely because it has no pools or no retained pools
-unless the configured policy explicitly enables that behavior.
+By default, terminal-scam, inactivity, and the two "drop tokens without ..."
+windows are disabled. That means a live token is not dropped merely because it
+is terminal, idle, has no pools, or has no retained pools unless the configured
+policy explicitly enables that behavior.
 
 ### Applying Drops
 

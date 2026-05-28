@@ -43,8 +43,8 @@ eth_chain_server LiveChainRuntime
   -> fetches prestate diffs for block B
   -> builds/publishes BlockStateSession B inside chain-server LiveTxSimulator
   -> updates live token/pool views for block B
-  -> live trader polls /live/status
-  -> live trader polls /live/pools and /mempool/signals
+  -> live trader polls /live-token-tracker/status
+  -> live trader polls /live-token-tracker/pools and /mempool/pending-transaction-signals
   -> strategies emit StrategyDecision / OrderIntent
   -> chain-sim service or guarded kartal-real service
   -> real adapter asks chain-server for exact-block unsigned tx simulation
@@ -55,12 +55,11 @@ eth_chain_server LiveChainRuntime
 For real live trading, chain-server owns live state, `LiveTxSimulator`, and
 simulation sessions. Alpha owns strategy decisions, tx planning, gas policy, and
 Kartal submission. Alpha sends small exact-block simulation requests to
-chain-server instead of subscribing to full `/live/state/stream` frames.
-Chain-sim live backtests may still use `/live/state/stream` to publish exact
-block sessions into their local simulator.
+chain-server. Chain-sim live backtests use the same boundary for order
+settlement and do not hydrate a local simulator from live-state stream frames.
 
 `eth_alpha_live_backtest_trader` is the no-capital live runner. It must not
-become decision-active until `/live/status` is `live`; while warming, it records
+become decision-active until `/live-token-tracker/status` is `live`; while warming, it records
 heartbeats and primes watermarks only. It always uses live chain-state EVM
 simulation and has no Kartal execution path.
 

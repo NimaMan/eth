@@ -283,7 +283,7 @@ fn is_event_metadata(metadata: &Metadata<'_>) -> bool {
 fn is_simulator_target(metadata: &Metadata<'_>) -> bool {
     matches!(
         metadata.target(),
-        POOL_BUY_SELL_SIM_LOG_TARGET | "replay_parity_sim" | "token_lab"
+        POOL_BUY_SELL_SIM_LOG_TARGET | "replay_parity_sim" | "risk_atlas_tools"
     )
 }
 

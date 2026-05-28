@@ -6,6 +6,7 @@ license.workspace = true
 workspace = ".."
 
 [dependencies]
+eth_alpha_core = { path = "../alpha/core" }
 eth_alpha_store = { path = "../alpha/store" }
 eth_alpha_lab = { path = "../alpha/lab" }
 eth_block_tx_rank = { path = "../alpha/block_tx_rank" }

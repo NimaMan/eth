@@ -95,7 +95,7 @@ tx_processor facts
   -> eth_token tracking/pools/state/token_activity/network
   -> eth_token token_analytics features as-of observation O
   -> health consumes latest features for current risk assessment
-  -> token_lab joins future labels for historical training rows
+  -> risk_atlas joins future labels for historical training rows
   -> Asena renders observations and labeled overlays
 ```
 

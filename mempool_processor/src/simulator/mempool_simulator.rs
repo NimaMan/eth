@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
-use super::pool_buy_sell_simulator::{PoolBuySellSimulator, PoolSimulationResult};
+use super::{
+    chain_server_live_tx_simulator::ChainServerLiveTxSimulatorClient,
+    pool_buy_sell_simulator::{PoolBuySellSimulator, PoolSimulationResult},
+};
 use crate::common::convert::ipc_to_unsigned_tx;
 use crate::mempool_fetcher::MempoolTransaction;
 use tx_processor::PoolBuySellParameters;
@@ -27,7 +30,9 @@ pub struct MempoolSimulator {
     /// The underlying TxSimulator for direct simulation
     tx_simulator: Arc<TxSimulator>,
     /// Latest locally-readable Reth context selector for mempool simulations.
-    live_tx_simulator: LatestHistoricalTxSimulator,
+    latest_historical_simulator: LatestHistoricalTxSimulator,
+    /// Chain-server-owned exact live simulator client for live mempool paths.
+    chain_server_live_tx_simulator: Option<ChainServerLiveTxSimulatorClient>,
     /// The pool buy/sell simulator
     pool_simulator: PoolBuySellSimulator,
 }
@@ -60,19 +65,42 @@ pub struct AddressStateChange {
 impl MempoolSimulator {
     /// Create a new mempool simulator
     pub fn new(datadir: &str) -> Result<Self> {
+        Self::new_with_chain_server_live_tx_simulator(datadir, None)
+    }
+
+    /// Create a new mempool simulator, optionally delegating live simulation to
+    /// chain-server's server-owned LiveTxSimulator.
+    pub fn new_with_chain_server_live_tx_simulator(
+        datadir: &str,
+        chain_server_base_url: Option<&str>,
+    ) -> Result<Self> {
         info!("Initializing mempool simulator...");
 
         let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
-        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
+        let latest_historical_simulator =
+            LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
+        let chain_server_live_tx_simulator = chain_server_base_url
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .filter(|url| !url.eq_ignore_ascii_case("none") && *url != "0")
+            .map(ChainServerLiveTxSimulatorClient::new);
 
         // Create pool simulator with the same TxSimulator
         let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())?;
 
-        info!("✅ Mempool simulator initialized");
+        info!(
+            "✅ Mempool simulator initialized (live_state_source={})",
+            if chain_server_live_tx_simulator.is_some() {
+                "chain_server_live_tx_simulator"
+            } else {
+                "local_reth_historical_context"
+            }
+        );
 
         Ok(Self {
             tx_simulator,
-            live_tx_simulator,
+            latest_historical_simulator,
+            chain_server_live_tx_simulator,
             pool_simulator,
         })
     }
@@ -84,14 +112,16 @@ impl MempoolSimulator {
         info!("Initializing mempool simulator from shared TxSimulator...");
 
         // Reuse the provided TxSimulator for both single and pool simulations
-        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
+        let latest_historical_simulator =
+            LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
         let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())?;
 
         info!("✅ Mempool simulator initialized with shared TxSimulator");
 
         Ok(Self {
             tx_simulator,
-            live_tx_simulator,
+            latest_historical_simulator,
+            chain_server_live_tx_simulator: None,
             pool_simulator,
         })
     }
@@ -101,7 +131,8 @@ impl MempoolSimulator {
         info!("Initializing mempool simulator with custom buyer...");
 
         let tx_simulator = Arc::new(TxSimulator::new(datadir)?);
-        let live_tx_simulator = LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
+        let latest_historical_simulator =
+            LatestHistoricalTxSimulator::from_simulator(tx_simulator.clone());
 
         // Create pool simulator with custom buyer and default amount
         let default_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
@@ -115,7 +146,8 @@ impl MempoolSimulator {
 
         Ok(Self {
             tx_simulator,
-            live_tx_simulator,
+            latest_historical_simulator,
+            chain_server_live_tx_simulator: None,
             pool_simulator,
         })
     }
@@ -193,8 +225,16 @@ impl MempoolSimulator {
     /// Simulate buy/sell for a specific pool using configuration
     pub async fn simulate_pool_buy_sell(
         &self,
-        config: PoolBuySellParameters,
+        mut config: PoolBuySellParameters,
     ) -> Result<PoolSimulationResult> {
+        if let Some(client) = &self.chain_server_live_tx_simulator {
+            let block = match config.block_number {
+                Some(block) => block,
+                None => self.resolve_simulation_block_number().await?,
+            };
+            config.block_number = Some(block);
+            return client.simulate_pool_buy_sell(block, config).await;
+        }
         self.pool_simulator.simulate_pool_with_config(config).await
     }
 
@@ -208,20 +248,35 @@ impl MempoolSimulator {
         Arc::clone(&self.tx_simulator)
     }
 
+    pub fn chain_server_live_tx_simulator(&self) -> Option<ChainServerLiveTxSimulatorClient> {
+        self.chain_server_live_tx_simulator.clone()
+    }
+
     async fn simulate_single_attempt(
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<TxSimResult> {
+        if let Some(client) = &self.chain_server_live_tx_simulator {
+            return client
+                .simulate_unsigned_transaction(block_number, unsigned_tx)
+                .await;
+        }
+
         let mut session = self
-            .live_tx_simulator
+            .latest_historical_simulator
             .start_session_at(block_number)
             .await?;
         session.step_unsigned(unsigned_tx)
     }
 
     async fn resolve_simulation_block_number(&self) -> Result<u64> {
-        self.live_tx_simulator.latest_state_block_number().await
+        if let Some(client) = &self.chain_server_live_tx_simulator {
+            return Ok(client.latest_state_status().await?.selected_block_number);
+        }
+        self.latest_historical_simulator
+            .latest_state_block_number()
+            .await
     }
 
     /// Expose the current block number the simulator will target.
@@ -231,13 +286,22 @@ impl MempoolSimulator {
 
     /// Expose full state-selection diagnostics for live simulation.
     pub async fn latest_simulation_status(&self) -> Result<LiveStateStatus> {
-        self.live_tx_simulator.latest_state_status().await
+        if let Some(client) = &self.chain_server_live_tx_simulator {
+            return client.latest_state_status().await;
+        }
+        self.latest_historical_simulator.latest_state_status().await
     }
 
     /// Blocking variant for status diagnostics that must not run on the async
     /// mempool drain loop.
     pub fn latest_simulation_status_blocking(&self) -> Result<LiveStateStatus> {
-        self.live_tx_simulator.latest_state_status_blocking()
+        if self.chain_server_live_tx_simulator.is_some() {
+            return Err(eyre::eyre!(
+                "chain-server live tx simulator status is async-only"
+            ));
+        }
+        self.latest_historical_simulator
+            .latest_state_status_blocking()
     }
 }
 

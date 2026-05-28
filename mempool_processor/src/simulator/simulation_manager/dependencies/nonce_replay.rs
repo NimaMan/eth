@@ -158,6 +158,80 @@ impl SimulationManager {
         let block = block_number.ok_or_else(|| {
             eyre!("pending_nonce_dependency_gap: simulation block is unavailable")
         })?;
+        if let Some(client) = self.mempool_simulator.chain_server_live_tx_simulator() {
+            let mut sequence = Vec::with_capacity(dependency_txs.len() + 1);
+            for (idx, dependency_tx) in dependency_txs.iter().enumerate() {
+                let (dependency_sender, dependency_nonce) =
+                    sender_nonce(dependency_tx).ok_or_else(|| {
+                        eyre!(
+                            "pending_nonce_dependency_replay_failed: dependency {} has no sender/nonce",
+                            dependency_tx.hash
+                        )
+                    })?;
+                if dependency_sender != sender {
+                    return Err(eyre!(
+                        "pending_nonce_dependency_replay_failed: dependency {} sender {dependency_sender:#x} does not match {sender:#x}",
+                        dependency_tx.hash
+                    ));
+                }
+                let expected_dependency_nonce = expected_nonce + idx as u64;
+                if dependency_nonce != expected_dependency_nonce {
+                    return Err(eyre!(
+                        "pending_nonce_dependency_replay_failed: dependency {} nonce {} does not match expected {}",
+                        dependency_tx.hash,
+                        dependency_nonce,
+                        expected_dependency_nonce
+                    ));
+                }
+                sequence.push(mempool_tx_to_unsigned_tx(dependency_tx)?);
+            }
+            sequence.push(current_unsigned);
+
+            let mut processed = client
+                .process_unsigned_transaction_sequence(block, sequence, true)
+                .await
+                .wrap_err_with(|| {
+                    format!(
+                        "pending_nonce_dependency_replay_failed: chain-server replay failed for target tx={} sender={sender:#x} block={block}",
+                        request.tx.hash
+                    )
+                })?;
+            if processed.len() != dependency_txs.len() + 1 {
+                return Err(eyre!(
+                    "pending_nonce_dependency_replay_failed: chain-server returned {} processed txs, expected {}",
+                    processed.len(),
+                    dependency_txs.len() + 1
+                ));
+            }
+            let current = processed
+                .pop()
+                .ok_or_else(|| eyre!("pending_nonce_dependency_replay_failed: missing target"))?;
+            if let Some(failed) = processed.iter().find(|tx| !tx.status) {
+                return Err(eyre!(
+                    "pending_nonce_dependency_replay_failed: dependency tx={:#x} reverted before target tx={} target_nonce={}",
+                    failed.hash,
+                    request.tx.hash,
+                    target_nonce
+                ));
+            }
+
+            tracing::info!(
+                tx_hash = %request.tx.hash,
+                source_hash = ?source_hash(&request.tx),
+                sender = %format!("{sender:#x}"),
+                expected_nonce,
+                target_nonce,
+                dependency_count = processed.len(),
+                block,
+                "replayed pending nonce dependencies before target transaction via chain-server live tx simulator"
+            );
+
+            return Ok(ProcessedWithNonceDependencies {
+                transaction: current,
+                dependencies: processed,
+            });
+        }
+
         let mut chain = self
             .mempool_simulator
             .get_tx_simulator()
@@ -310,6 +384,59 @@ impl SimulationManager {
 
         let block = block_number
             .ok_or_else(|| eyre!("funding_dependency_gap: simulation block is unavailable"))?;
+        if let Some(client) = self.mempool_simulator.chain_server_live_tx_simulator() {
+            let mut sequence = Vec::with_capacity(lookup.transactions.len() + 1);
+            for funding_tx in &lookup.transactions {
+                sequence.push(mempool_tx_to_unsigned_tx(funding_tx)?);
+            }
+            sequence.push(current_unsigned);
+
+            let mut processed = client
+                .process_unsigned_transaction_sequence(block, sequence, true)
+                .await
+                .wrap_err_with(|| {
+                    format!(
+                        "funding_dependency_gap: chain-server replay failed for target tx={} block={block}",
+                        request.tx.hash
+                    )
+                })?;
+            if processed.len() != lookup.transactions.len() + 1 {
+                return Err(eyre!(
+                    "funding_dependency_gap: chain-server returned {} processed txs, expected {}",
+                    processed.len(),
+                    lookup.transactions.len() + 1
+                ));
+            }
+            let current = processed
+                .pop()
+                .ok_or_else(|| eyre!("funding_dependency_gap: missing target"))?;
+            if let Some(failed) = processed.iter().find(|tx| !tx.status) {
+                return Err(eyre!(
+                    "funding_dependency_gap: funding tx={:#x} reverted before target={}",
+                    failed.hash,
+                    request.tx.hash
+                ));
+            }
+
+            tracing::info!(
+                tx_hash = %request.tx.hash,
+                sender = %format!("{sender:#x}"),
+                block,
+                funding_tx_count = lookup.transactions.len(),
+                visible_funding_value = %lookup.total_value,
+                required_value = %lookup
+                    .required_value
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                "replayed visible inbound funding before target transaction via chain-server live tx simulator"
+            );
+
+            return Ok(ProcessedWithNonceDependencies {
+                transaction: current,
+                dependencies: processed,
+            });
+        }
+
         let mut chain = self
             .mempool_simulator
             .get_tx_simulator()

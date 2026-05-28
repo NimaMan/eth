@@ -25,5 +25,3 @@ pub(super) const CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS: u64 = 240;
 pub(super) const CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS: u64 = 2_000;
 pub(super) const CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE: &str =
     "chain_sim.live_backtest.skip_mempool_trading_enabled";
-pub(super) const CHAIN_SIM_DEFER_EVENT_PROCESSING_REASON_CODE: &str =
-    "chain_sim.live_backtest.waiting_for_exact_settlement_state";

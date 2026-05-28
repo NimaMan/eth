@@ -5,48 +5,40 @@ Live trader state is split by responsibility:
 - chain-server owns mined token, pool, gas-rank, and live simulation state;
 - `TokenServerClient` reads live status, latest pool snapshots, mempool signals,
   and block-update notifications;
-- `live_state.rs` is the chain-sim compatibility consumer of the live
-  simulation state stream; it publishes exact block sessions into the local
-  `LiveTxSimulator` only for no-capital live backtests;
 - the execution adapter keeps the latest pool snapshots needed to build swap
   parameters for a token/pool;
 - Postgres is the source of truth for order intents, submitted reports,
   position state, strategy decisions, and final execution reports.
 
-The in-memory live simulation provider keeps a small exact-block window, not
-only a single global latest block. This is required because chain-sim settlement
-targets a specific block: if a strategy submitted at block `N`, the live
-backtest normally settles against block `N+1`. If the main loop observes
-`N+2` before settlement code runs, the simulator must still be able to select
-the exact `N+1` state from the window.
+Alpha does not run a local `LiveTxSimulator`. The in-memory live simulation
+window lives inside chain-server. Chain-sim settlement targets a specific
+block: if a strategy submitted at block `N`, the live backtest normally settles
+against block `N+1`. Alpha asks chain-server to simulate the stored order at
+that exact block and includes the submitted block hash when available so
+chain-server can reject reorged parent state.
 
-The window is not a historical fallback. It only contains live block sessions
-that chain-server has just published through the live-state stream. If a target
-block is missing from the window, settlement stays pending and logs the missing
-state instead of fabricating an execution result from a different block.
+The chain-server simulator window is not a historical fallback. It only
+contains exact live block sessions produced by the live block processor. If a
+target block is missing or its parent hash no longer matches the submitted
+block hash, chain-server returns an explicit unavailable/reorg response. Alpha
+keeps the submitted execution pending and logs the infrastructure gap instead
+of fabricating a fill from a different block.
 
-The provider also exposes a notification for newly published block state.
-This is a chain-sim live-backtest path only. Kartal-real runners do not build
-or wait on a local `LiveTxSimulator`; they request exact-block pre-submit
-simulation from chain-server.
-
-Chain-sim live backtests use the notification at the polling boundary:
+Chain-sim live backtests use the chain-server block-applied boundary:
 
 ```text
 read live status for block N
-  -> wait until local LiveTxSimulator has exact state N
   -> read latest pool/token snapshots
-  -> wait until local LiveTxSimulator has the max block referenced by those snapshots
   -> publish pool snapshots into the execution adapter
   -> run strategy decisions and chain-sim execution
+  -> persist submitted reports with submitted block/hash and expected block N+1
+  -> settlement asks chain-server to simulate the order at exact block N+1
 ```
 
-That wait is local state synchronization, not trade deferral. No pool update is
-marked seen and no order intent is created until the simulator can execute
-against the exact block used by the decision. Real live trading does not use
-this local stream path for pre-submit simulation; it asks chain-server to
-simulate exact-block unsigned transactions against the server-owned
-`LiveTxSimulator`.
+No Alpha component subscribes to live-state stream frames or waits on a local
+simulation provider. Real live trading uses the same ownership boundary for
+pre-submit unsigned transaction simulation: chain-server owns
+`LiveTxSimulator`; Alpha owns decisions, tx planning, gas policy, and submission.
 
 Live state construction is strict about parent state:
 

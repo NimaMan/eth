@@ -72,7 +72,7 @@ eth_chain_server
 
 mempool_processor
   <- Reth pending transactions
-  <- eth_chain_server /live/updates wakeup + /live/tokens and /live/pools context
+  <- eth_chain_server /live-token-tracker/block-applied-updates wakeup + /live-token-tracker/tokens and /live-token-tracker/pools context
   <- tx_simulator / tx_processor for simulation and tax/tradability checks
   -> Postgres signal rows, signal logs, ZMQ notifications
 
@@ -229,7 +229,7 @@ Use focused tests/examples near the owner crate:
 | Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/processing/*`, `tx_processor/examples/blocks/*` |
 | Trade simulation examples | `tx_processor/examples/trade_simulation/*` |
 | Token/pool state | `eth_token/tests/`, `eth_token/examples/tracking/token_tracking_range.rs`, `eth_token/examples/validation/*` |
-| Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live/status`, `GET /live/pools` |
+| Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live-token-tracker/status`, `GET /live-token-tracker/pools` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
 | Risk Atlas investigations and strategy cohorts | `risk_atlas/README.md`, one case folder under `risk_atlas/token_lab/cases/`, and `alpha/lab/strategy_analysis/README.md` |

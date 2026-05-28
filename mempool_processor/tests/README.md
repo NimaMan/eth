@@ -134,7 +134,7 @@ From `VALIDATION_CHECKLIST.md`, the alert system must:
 ### No alerts in E2E test
 - Run during active trading hours (9am-5pm EST best)
 - Verify Reth node is synced: `curl http://localhost:8545`
-- Check token-server live context is reachable: `curl http://127.0.0.1:8765/eth/tokens/api/live/status`
+- Check token-server live context is reachable: `curl http://127.0.0.1:8765/eth/tokens/api/live-token-tracker/status`
 - Lower thresholds: `--percentage-threshold 0.2`
 
 ### Throughput test fails

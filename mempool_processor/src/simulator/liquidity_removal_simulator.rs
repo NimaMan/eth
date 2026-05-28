@@ -1,3 +1,4 @@
+use super::chain_server_live_tx_simulator::ChainServerLiveTxSimulatorClient;
 /// Liquidity Removal Simulator
 /// A wrapper over `tx_processor::process_unsigned_tx` that returns a
 /// `LiquidityRemovalResult` by deriving pool-drain metrics from the
@@ -125,6 +126,7 @@ struct ProtocolRemovalInfo {
 pub struct LiquidityRemovalSimulator {
     simulator: Arc<TxSimulator>,
     live_tx_simulator: LatestHistoricalTxSimulator,
+    chain_server_live_tx_simulator: Option<ChainServerLiveTxSimulatorClient>,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
@@ -134,8 +136,16 @@ impl LiquidityRemovalSimulator {
         Self {
             simulator,
             live_tx_simulator,
+            chain_server_live_tx_simulator: None,
             token_cache: None,
         }
+    }
+
+    pub fn set_chain_server_live_tx_simulator(
+        &mut self,
+        client: Option<ChainServerLiveTxSimulatorClient>,
+    ) {
+        self.chain_server_live_tx_simulator = client;
     }
 
     pub fn set_token_cache(&mut self, cache: Arc<TokenTrackingCache>) {
@@ -629,12 +639,18 @@ impl LiquidityRemovalSimulator {
         let mut adjusted_for_base_fee = false;
 
         loop {
-            let result = Self::process_unsigned_tx_blocking(
-                self.simulator.clone(),
-                unsigned_tx.clone(),
-                resolved_block,
-            )
-            .await;
+            let result = if let Some(client) = &self.chain_server_live_tx_simulator {
+                client
+                    .process_unsigned_transaction(resolved_block, unsigned_tx.clone())
+                    .await
+            } else {
+                Self::process_unsigned_tx_blocking(
+                    self.simulator.clone(),
+                    unsigned_tx.clone(),
+                    resolved_block,
+                )
+                .await
+            };
 
             match result {
                 Ok(processed) => return Ok(processed),
@@ -699,7 +715,12 @@ impl LiquidityRemovalSimulator {
     async fn resolve_simulation_block_number(&self, block_number: Option<u64>) -> Result<u64> {
         match block_number {
             Some(number) => Ok(number),
-            None => self.live_tx_simulator.latest_state_block_number().await,
+            None => {
+                if let Some(client) = &self.chain_server_live_tx_simulator {
+                    return Ok(client.latest_state_status().await?.selected_block_number);
+                }
+                self.live_tx_simulator.latest_state_block_number().await
+            }
         }
     }
 

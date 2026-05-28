@@ -75,8 +75,9 @@ For real live trading, chain-server owns live state, `LiveTxSimulator`, and
 simulation sessions. Alpha owns strategy decisions, tx planning, gas policy, and
 Kartal submission. The real adapter sends small exact-block unsigned transaction
 simulation requests to chain-server when it needs pre-submit evidence; it does
-not subscribe to full live-state frames. Chain-sim live backtests can still use
-the compatibility live-state stream to hydrate a local simulator.
+not subscribe to full live-state frames. Chain-sim live backtests use
+chain-server order simulation for settlement rather than hydrating a local
+simulator.
 
 Confirmed market state and exact live simulation state must reference the same
 block before a real transaction is submitted. Strategy decisions should never
@@ -245,8 +246,8 @@ API; they should remain on `ChainSimExecutionAdapter` only.
 
 `eth_alpha_live_backtest_trader` polls the Rust token server and consumes:
 
-- `/live/pools` as confirmed market updates.
-- `/mempool/signals?since_days=14` as speculative risk events.
+- `/live-token-tracker/pools` as confirmed market updates.
+- `/mempool/pending-transaction-signals?since_days=14` as speculative risk events.
 
 The trader registers strategy wrappers from each strategy's `live/` module. For
 Snipe All that is `LiveSnipeAllStrategy`, which composes the regular

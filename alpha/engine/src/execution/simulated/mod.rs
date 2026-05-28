@@ -14,11 +14,11 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use eth_alpha_core::{
-    error::Result,
+    error::{AlphaCoreError, Result},
     execution::ExecutionReport,
     ids::{OrderId, PoolAddress},
     market::PoolSnapshot,
@@ -26,8 +26,9 @@ use eth_alpha_core::{
     portfolio::PortfolioState,
     position::Position,
 };
+use serde::{Deserialize, Serialize};
 use tx_processor::tx_processor::TxProcessor;
-use tx_simulator::{LiveTxSimulator, TxSimulator};
+use tx_simulator::TxSimulator;
 
 use crate::{EngineExecutionAdapter, PositionValueSimulation};
 
@@ -37,15 +38,11 @@ mod swaps;
 
 use reports::{
     failed_report, failed_report_at, position_value_from_report, sell_intent_for_position,
-    submitted_live_chain_sim_report, unique_order_prefix, with_live_chain_sim_evidence,
+    submitted_live_chain_sim_report, unique_order_prefix,
 };
-use swaps::{
-    simulate_buy_at_block, simulate_live_buy_at_block, simulate_live_sell_at_block,
-    simulate_sell_at_block,
-};
+use swaps::{simulate_buy_at_block, simulate_sell_at_block};
 
 const LIVE_EXECUTION_DELAY_BLOCKS: u64 = 1;
-const LIVE_STATE_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
 
 // ---------------------------------------------------------------------------
 // Historical backtest adapter
@@ -215,55 +212,35 @@ impl EngineExecutionAdapter for ChainSimExecutionAdapter {
 
 /// Live chain simulation adapter.
 ///
-/// Uses only the live block session published from the chain-server state
-/// frame. It does not select a "latest" block from local Reth historical
-/// context.
+/// Delegates exact-block simulation to chain-server. Alpha keeps the order,
+/// pool, and portfolio context needed for strategy decisions, but it does not
+/// own or rebuild live EVM state.
 #[derive(Clone)]
 pub struct LiveChainSimExecutionAdapter {
-    live_sim: LiveTxSimulator,
-    tx_processor: Arc<TxProcessor>,
+    chain_server_url: Arc<str>,
+    http: reqwest::Client,
     order_prefix: Arc<str>,
     next_order_id: Arc<AtomicU64>,
     current_block: Arc<AtomicU64>,
+    current_block_hash: Arc<Mutex<Option<(u64, B256)>>>,
     pools: Arc<Mutex<HashMap<PoolAddress, PoolSnapshot>>>,
     portfolio: Arc<Mutex<PortfolioState>>,
     execution_delay_blocks: u64,
 }
 
 impl LiveChainSimExecutionAdapter {
-    pub fn new(live_sim: LiveTxSimulator, tx_processor: Arc<TxProcessor>) -> Result<Self> {
-        Ok(Self {
-            live_sim,
-            tx_processor,
-            order_prefix: Arc::<str>::from(unique_order_prefix()),
-            next_order_id: Arc::new(AtomicU64::new(0)),
-            current_block: Arc::new(AtomicU64::new(0)),
-            pools: Arc::new(Mutex::new(HashMap::new())),
-            portfolio: Arc::new(Mutex::new(PortfolioState::default())),
-            execution_delay_blocks: LIVE_EXECUTION_DELAY_BLOCKS,
-        })
-    }
-
-    pub fn with_prefix(
-        live_sim: LiveTxSimulator,
-        tx_processor: Arc<TxProcessor>,
-        prefix: impl Into<String>,
-    ) -> Result<Self> {
-        Self::with_prefix_and_next_order_sequence(live_sim, tx_processor, prefix, 0)
-    }
-
     pub fn with_prefix_and_next_order_sequence(
-        live_sim: LiveTxSimulator,
-        tx_processor: Arc<TxProcessor>,
+        chain_server_url: impl Into<String>,
         prefix: impl Into<String>,
         next_order_sequence: u64,
     ) -> Result<Self> {
         Ok(Self {
-            live_sim,
-            tx_processor,
+            chain_server_url: Arc::<str>::from(chain_server_url.into().trim_end_matches('/')),
+            http: reqwest::Client::new(),
             order_prefix: Arc::<str>::from(prefix.into()),
             next_order_id: Arc::new(AtomicU64::new(next_order_sequence)),
             current_block: Arc::new(AtomicU64::new(0)),
+            current_block_hash: Arc::new(Mutex::new(None)),
             pools: Arc::new(Mutex::new(HashMap::new())),
             portfolio: Arc::new(Mutex::new(PortfolioState::default())),
             execution_delay_blocks: LIVE_EXECUTION_DELAY_BLOCKS,
@@ -274,8 +251,8 @@ impl LiveChainSimExecutionAdapter {
         self.current_block.clone()
     }
 
-    pub fn live_simulator(&self) -> LiveTxSimulator {
-        self.live_sim.clone()
+    pub fn set_current_block_hash(&self, block: Option<u64>, hash: Option<B256>) {
+        *self.current_block_hash.lock().expect("block hash lock") = block.zip(hash);
     }
 
     pub fn with_execution_delay_blocks(mut self, delay_blocks: u64) -> Self {
@@ -291,37 +268,11 @@ impl LiveChainSimExecutionAdapter {
         self.portfolio.clone()
     }
 
-    /// Expose diagnostics about which state source is being used.
-    pub async fn state_status(&self) -> eyre::Result<tx_simulator::LiveStateStatus> {
-        self.live_sim.latest_state_status().await
-    }
-
-    /// Wait for the exact in-memory live-state block used by block-coupled
-    /// live trading before any strategy-visible state for that block is
-    /// processed.
-    pub async fn wait_for_state_at(
-        &self,
-        block_number: u64,
-        timeout: Duration,
-    ) -> eyre::Result<tx_simulator::LiveStateStatus> {
-        self.live_sim.wait_for_state_at(block_number, timeout).await
-    }
-
-    async fn wait_for_execution_block(
-        &self,
-        target_block: u64,
-    ) -> std::result::Result<u64, String> {
-        let started = Instant::now();
-        self.live_sim
-            .wait_for_state_at(target_block, LIVE_STATE_WAIT_TIMEOUT)
-            .await
-            .map(|_| target_block)
-            .map_err(|error| {
-                format!(
-                    "live chain-sim state unavailable before required execution block {target_block} after {} ms: {error}",
-                    started.elapsed().as_millis()
-                )
-            })
+    fn current_hash_for_observed_block(&self, observed_block: u64) -> Option<B256> {
+        self.current_block_hash
+            .lock()
+            .expect("block hash lock")
+            .and_then(|(block, hash)| (block == observed_block).then_some(hash))
     }
 
     pub async fn simulate_submitted_order(
@@ -330,52 +281,91 @@ impl LiveChainSimExecutionAdapter {
         intent: OrderIntent,
         submitted_block: u64,
         execution_block: u64,
-    ) -> Result<ExecutionReport> {
+        submitted_block_hash: Option<B256>,
+    ) -> Result<Option<ExecutionReport>> {
         let pool = {
             let pools = self.pools.lock().expect("pool lock");
             let Some(pool) = pools.get(&intent.pool_address).cloned() else {
-                return Ok(with_live_chain_sim_evidence(
-                    failed_report_at(order_id, "pool not in simulation state", execution_block),
-                    submitted_block,
+                return Ok(Some(failed_report_at(
+                    order_id,
+                    "pool not in simulation state",
                     execution_block,
-                    None,
-                ));
+                )));
             };
             pool
         };
-
-        let report = match intent.side {
-            OrderSide::Buy => {
-                simulate_live_buy_at_block(
-                    &self.live_sim,
-                    &self.tx_processor,
-                    order_id,
-                    intent,
-                    &pool,
-                    execution_block,
-                )
-                .await
-            }
-            OrderSide::Sell => {
-                simulate_live_sell_at_block(
-                    &self.live_sim,
-                    &self.tx_processor,
-                    order_id,
-                    intent,
-                    &pool,
-                    execution_block,
-                    &self.portfolio,
-                    true,
-                )
-                .await
-            }
-        }?;
-        Ok(with_live_chain_sim_evidence(
-            report,
+        self.simulate_order_request(
+            order_id,
+            intent,
+            pool,
             submitted_block,
             execution_block,
-            Some(execution_block),
-        ))
+            submitted_block_hash,
+            true,
+        )
+        .await
+    }
+
+    async fn simulate_order_request(
+        &self,
+        order_id: OrderId,
+        intent: OrderIntent,
+        pool: PoolSnapshot,
+        submitted_block: u64,
+        execution_block: u64,
+        expected_parent_hash: Option<B256>,
+        skip_uneconomic_sell: bool,
+    ) -> Result<Option<ExecutionReport>> {
+        let request = LiveOrderSimulationRequest {
+            order_id,
+            intent,
+            pool,
+            submitted_block,
+            execution_block,
+            expected_block_hash: None,
+            expected_parent_hash,
+            skip_uneconomic_sell,
+        };
+        let response = self
+            .http
+            .post(format!(
+                "{}/api/v1/eth/live-tx-simulator/simulations/alpha-order",
+                self.chain_server_url
+            ))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+        if !status.is_success() {
+            return Err(AlphaCoreError::Execution(format!(
+                "chain-server live order simulation returned HTTP {status}: {body}"
+            )));
+        }
+        let response: LiveOrderSimulationResponse = serde_json::from_str(&body)
+            .map_err(|error| AlphaCoreError::Execution(error.to_string()))?;
+        if !response.state_available {
+            tracing::warn!(
+                submitted_block,
+                execution_block,
+                unavailable_reason = ?response.unavailable_reason,
+                selected_block = response.block,
+                selected_hash = ?response.block_hash,
+                parent_block = ?response.parent_block,
+                parent_hash = ?response.parent_block_hash,
+                "chain-server live order simulation state unavailable"
+            );
+            return Ok(None);
+        }
+        response.report.map(Some).ok_or_else(|| {
+            AlphaCoreError::Execution(
+                "chain-server live order simulation returned no report".to_string(),
+            )
+        })
     }
 }
 
@@ -410,6 +400,7 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
             order_id,
             observed_block,
             target_block,
+            self.current_hash_for_observed_block(observed_block),
         ))
     }
 
@@ -427,32 +418,51 @@ impl EngineExecutionAdapter for LiveChainSimExecutionAdapter {
         } else {
             pool.latest_block
         };
-        let block = match self.wait_for_execution_block(observed_block).await {
-            Ok(block) => block,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    observed_block,
-                    "chain-sim position valuation skipped because required state block is unavailable"
-                );
-                return Ok(None);
-            }
-        };
         let order_seq = self.next_order_id.fetch_add(1, Ordering::Relaxed) + 1;
         let order_id = OrderId(format!("{}-value-{order_seq}", self.order_prefix));
-        let report = simulate_live_sell_at_block(
-            &self.live_sim,
-            &self.tx_processor,
-            order_id,
-            intent,
-            pool,
-            block,
-            &self.portfolio,
-            false,
-        )
-        .await?;
-        Ok(position_value_from_report(report, block))
+        let Some(report) = self
+            .simulate_order_request(
+                order_id,
+                intent,
+                pool.clone(),
+                observed_block,
+                observed_block,
+                None,
+                false,
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(position_value_from_report(report, observed_block))
     }
+}
+
+#[derive(Debug, Serialize)]
+struct LiveOrderSimulationRequest {
+    order_id: OrderId,
+    intent: OrderIntent,
+    pool: PoolSnapshot,
+    submitted_block: u64,
+    execution_block: u64,
+    expected_block_hash: Option<B256>,
+    expected_parent_hash: Option<B256>,
+    skip_uneconomic_sell: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct LiveOrderSimulationResponse {
+    #[allow(dead_code)]
+    schema: String,
+    state_available: bool,
+    unavailable_reason: Option<String>,
+    block: u64,
+    block_hash: Option<B256>,
+    parent_block: Option<u64>,
+    parent_block_hash: Option<B256>,
+    #[allow(dead_code)]
+    state_source: String,
+    report: Option<ExecutionReport>,
 }
 
 // ---------------------------------------------------------------------------

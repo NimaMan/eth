@@ -7,7 +7,7 @@ use eth_alpha_core::{
     market::{PoolProtocol, PoolSnapshot},
 };
 use tx_processor::{PoolBuySellParameters, PoolType, UniswapV4PoolConfig as TxUniswapV4PoolConfig};
-use tx_simulator::{TxSimulator, UnsignedTxChainSimulation};
+use tx_simulator::TxSimulator;
 
 const ERC20_DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67];
 const WETH_ADDRESS: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
@@ -62,53 +62,6 @@ pub(super) async fn pool_simulation_parameters(
     Ok(params)
 }
 
-pub(super) fn pool_simulation_parameters_live(
-    chain: &mut UnsignedTxChainSimulation,
-    pool: &PoolSnapshot,
-    token_address: Address,
-    amount: U256,
-    block: u64,
-) -> std::result::Result<PoolBuySellParameters, String> {
-    let pool_contract_address = parse_pool_address(&pool.address)
-        .map_err(|error| format!("invalid pool address for chain simulation: {error}"))?;
-    let pool_type = pool_type_for_pool(pool).ok_or_else(|| {
-        format!(
-            "protocol {:?} not supported by chain simulator",
-            pool.protocol
-        )
-    })?;
-    let token_decimals = match pool.token_decimals {
-        Some(decimals) => decimals,
-        None => query_erc20_decimals_on_live_chain(chain, token_address)?,
-    };
-    let denom_address = pool
-        .denom_address
-        .ok_or_else(|| format!("pool {} has no denomination address", pool.address))?;
-    let denom_decimals = denom_decimals_live(chain, denom_address)?;
-
-    let mut params = PoolBuySellParameters::new(token_address, pool_contract_address, pool_type)
-        .with_test_amount(amount)
-        .with_block(block)
-        .with_denom_address(denom_address)
-        .with_denom_decimals(denom_decimals)
-        .with_token_decimals(token_decimals);
-
-    if let Some(v4) = &pool.uniswap_v4 {
-        params = params.with_uniswap_v4_config(TxUniswapV4PoolConfig {
-            pool_manager: v4.pool_manager,
-            pool_id: v4.pool_id,
-            currency0: v4.currency0,
-            currency1: v4.currency1,
-            fee: v4.fee,
-            tick_spacing: v4.tick_spacing,
-            hooks: v4.hooks,
-            hook_data: Vec::new(),
-        });
-    }
-
-    Ok(params)
-}
-
 fn pool_type_for_pool(pool: &PoolSnapshot) -> Option<PoolType> {
     match &pool.protocol {
         PoolProtocol::UniswapV2 => Some(PoolType::UniswapV2),
@@ -138,19 +91,6 @@ async fn denom_decimals(
     query_erc20_decimals(simulator, denom_address, block).await
 }
 
-fn denom_decimals_live(
-    chain: &mut UnsignedTxChainSimulation,
-    denom_address: Address,
-) -> std::result::Result<u8, String> {
-    if denom_address.is_zero() || denom_address == WETH_ADDRESS || denom_address == DAI_ADDRESS {
-        return Ok(18);
-    }
-    if denom_address == USDC_ADDRESS || denom_address == USDT_ADDRESS {
-        return Ok(6);
-    }
-    query_erc20_decimals_on_live_chain(chain, denom_address)
-}
-
 async fn query_erc20_decimals(
     simulator: &Arc<TxSimulator>,
     token_address: Address,
@@ -170,25 +110,6 @@ async fn query_erc20_decimals(
     if result.output.len() < 32 {
         return Err(format!(
             "token decimals simulation returned short output: {} bytes",
-            result.output.len()
-        ));
-    }
-    Ok(result.decode_uint8())
-}
-
-fn query_erc20_decimals_on_live_chain(
-    chain: &mut UnsignedTxChainSimulation,
-    token_address: Address,
-) -> std::result::Result<u8, String> {
-    let result = chain
-        .simulate_view_call(token_address, Bytes::from_static(&ERC20_DECIMALS_SELECTOR))
-        .map_err(|error| format!("token decimals live view simulation failed: {error}"))?;
-    if !result.success {
-        return Err("token decimals live view simulation reverted".to_string());
-    }
-    if result.output.len() < 32 {
-        return Err(format!(
-            "token decimals live view simulation returned short output: {} bytes",
             result.output.len()
         ));
     }

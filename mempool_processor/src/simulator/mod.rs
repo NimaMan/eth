@@ -1,3 +1,4 @@
+pub mod chain_server_live_tx_simulator;
 pub mod liquidity_removal_simulator;
 pub mod mempool_simulator;
 pub mod pool_buy_sell_simulator;
@@ -26,6 +27,7 @@ pub mod pool_buy_sell_simulator;
 pub mod simulation_manager;
 pub mod simulation_queue;
 
+pub use chain_server_live_tx_simulator::ChainServerLiveTxSimulatorClient;
 pub use liquidity_removal_simulator::{LiquidityRemovalResult, LiquidityRemovalSimulator};
 pub use mempool_simulator::{
     mempool_tx_to_unsigned_tx, AddressStateChange, MempoolSimulator,

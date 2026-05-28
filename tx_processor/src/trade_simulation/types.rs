@@ -37,7 +37,7 @@ pub struct PoolBuySellParameters {
     pub uniswap_v4_config: Option<UniswapV4PoolConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniswapV4PoolConfig {
     pub pool_manager: Address,
     pub pool_id: B256,
@@ -249,7 +249,7 @@ impl PoolType {
 }
 
 /// Aggregated outcome from the pool buy/sell simulation pipeline
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolBuySellSimulationResult {
     pub pool_type: PoolType,
     pub pool_address: Address,

@@ -74,90 +74,99 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(range::processed_block_disk_cache_coverage);
 
-    let live_status = warp::path!("eth" / "tokens" / "api" / "live" / "status")
+    let live_status = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "status")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::status);
 
-    let live_start = warp::path!("eth" / "tokens" / "api" / "live" / "start")
+    let live_start = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "start")
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(live::start);
 
-    let live_stop = warp::path!("eth" / "tokens" / "api" / "live" / "stop")
+    let live_stop = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "stop")
         .and(warp::post())
         .and(with_state(state.clone()))
         .and_then(live::stop);
 
-    let live_tokens = warp::path!("eth" / "tokens" / "api" / "live" / "tokens")
+    let live_tokens = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "tokens")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::tokens);
 
-    let live_surface = warp::path!("eth" / "tokens" / "api" / "live" / "surface")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::surface);
+    let live_surface =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "token-pool-surface")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::surface);
 
-    let live_active_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "active")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::active_pools);
+    let live_active_pools =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "pools" / "active")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::active_pools);
 
-    let live_scam_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "scam")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::scam_pools);
+    let live_scam_pools =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "pools" / "scam")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::scam_pools);
 
-    let live_eligible_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "eligible")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::eligible_pools);
+    let live_eligible_pools =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "pools" / "eligible")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::eligible_pools);
 
     let live_ineligible_pools =
-        warp::path!("eth" / "tokens" / "api" / "live" / "pools" / "ineligible")
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "pools" / "ineligible")
             .and(warp::get())
             .and(with_state(state.clone()))
             .and_then(live::ineligible_pools);
 
-    let live_pools = warp::path!("eth" / "tokens" / "api" / "live" / "pools")
+    let live_pools = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "pools")
         .and(warp::get())
         .and(warp::query::<live::LivePoolsQuery>())
         .and(with_state(state.clone()))
         .and_then(live::pools);
 
-    let live_updates = warp::path!("eth" / "tokens" / "api" / "live" / "updates")
-        .and(warp::get())
-        .and(warp::query::<live::LiveUpdatesQuery>())
-        .and(with_state(state.clone()))
-        .and_then(live::updates);
+    let live_updates =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "block-applied-updates")
+            .and(warp::get())
+            .and(warp::query::<live::LiveUpdatesQuery>())
+            .and(with_state(state.clone()))
+            .and_then(live::updates);
 
-    let live_token_detail = warp::path!("eth" / "tokens" / "api" / "live" / "tokens" / String)
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::token_detail);
+    let live_token_detail =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "tokens" / String)
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::token_detail);
 
-    let live_retention = warp::path!("eth" / "tokens" / "api" / "live" / "retention")
+    let live_retention = warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "retention")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(live::retention);
 
-    let live_processed_blocks = warp::path!("eth" / "tokens" / "api" / "live" / "processed-blocks")
-        .and(warp::get())
-        .and(warp::query::<live::RecentProcessedBlocksQuery>())
-        .and(with_state(state.clone()))
-        .and_then(live::processed_blocks);
+    let live_processed_blocks =
+        warp::path!("eth" / "tokens" / "api" / "live-token-tracker" / "processed-blocks")
+            .and(warp::get())
+            .and(warp::query::<live::RecentProcessedBlocksQuery>())
+            .and(with_state(state.clone()))
+            .and_then(live::processed_blocks);
 
-    let live_state_latest = warp::path!("eth" / "tokens" / "api" / "live" / "state" / "latest")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::latest_state_frame);
+    let live_state_latest =
+        warp::path!("eth" / "tokens" / "api" / "live-tx-simulator" / "latest-block-state")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::latest_state_frame);
 
-    let live_state_stream = warp::path!("eth" / "tokens" / "api" / "live" / "state" / "stream")
-        .and(warp::get())
-        .and(with_state(state.clone()))
-        .and_then(live::state_frame_stream);
+    let live_tx_simulator_status =
+        warp::path!("eth" / "tokens" / "api" / "live-tx-simulator" / "status")
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(live::live_tx_simulator_status);
 
     let ops_health = warp::path!("eth" / "tokens" / "api" / "ops" / "health")
         .and(warp::get())
@@ -174,14 +183,15 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(ops::bottlenecks);
 
-    let mempool_signals = warp::path!("eth" / "tokens" / "api" / "mempool" / "signals")
-        .and(warp::get())
-        .and(warp::query::<MempoolSignalQuery>())
-        .and(with_state(state.clone()))
-        .and_then(mempool::signals);
+    let mempool_signals =
+        warp::path!("eth" / "tokens" / "api" / "mempool" / "pending-transaction-signals")
+            .and(warp::get())
+            .and(warp::query::<MempoolSignalQuery>())
+            .and(with_state(state.clone()))
+            .and_then(mempool::signals);
 
     let mempool_signals_by_type =
-        warp::path!("eth" / "tokens" / "api" / "mempool" / "signals" / String)
+        warp::path!("eth" / "tokens" / "api" / "mempool" / "pending-transaction-signals" / String)
             .and(warp::get())
             .and(warp::query::<MempoolSignalQuery>())
             .and(with_state(state.clone()))
@@ -294,12 +304,41 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(with_state(state.clone()))
             .and_then(simulation::vault_uniswap_v2);
 
-    let live_unsigned_simulation =
-        warp::path!("eth" / "tokens" / "api" / "live" / "simulations" / "unsigned")
+    let live_unsigned_simulation = warp::path!(
+        "eth" / "tokens" / "api" / "live-tx-simulator" / "simulations" / "unsigned-transaction"
+    )
+    .and(warp::post())
+    .and(warp::body::json())
+    .and(with_state(state.clone()))
+    .and_then(simulation::live_unsigned_tx);
+
+    let live_unsigned_sequence_simulation = warp::path!(
+        "eth"
+            / "tokens"
+            / "api"
+            / "live-tx-simulator"
+            / "simulations"
+            / "unsigned-transaction-sequence"
+    )
+    .and(warp::post())
+    .and(warp::body::json())
+    .and(with_state(state.clone()))
+    .and_then(simulation::live_unsigned_tx_sequence);
+
+    let live_pool_buy_sell_simulation = warp::path!(
+        "eth" / "tokens" / "api" / "live-tx-simulator" / "simulations" / "pool-buy-sell"
+    )
+    .and(warp::post())
+    .and(warp::body::json())
+    .and(with_state(state.clone()))
+    .and_then(simulation::live_pool_buy_sell);
+
+    let live_order_simulation =
+        warp::path!("eth" / "tokens" / "api" / "live-tx-simulator" / "simulations" / "alpha-order")
             .and(warp::post())
             .and(warp::body::json())
             .and(with_state(state.clone()))
-            .and_then(simulation::live_unsigned_tx);
+            .and_then(simulation::live_order);
 
     let alpha_runs = warp::path!("eth" / "tokens" / "api" / "alpha" / "runs")
         .and(warp::get())
@@ -479,7 +518,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(range::errors);
 
-    let stream = warp::path!("eth" / "tokens" / "api" / "runs" / String / "stream")
+    let stream = warp::path!("eth" / "tokens" / "api" / "runs" / String / "progress-stream")
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(range::stream);
@@ -522,8 +561,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_updates)
         .or(live_retention)
         .or(live_processed_blocks)
+        .or(live_tx_simulator_status)
         .or(live_unsigned_simulation)
-        .or(live_state_stream)
+        .or(live_unsigned_sequence_simulation)
+        .or(live_pool_buy_sell_simulation)
+        .or(live_order_simulation)
         .or(live_state_latest)
         .boxed();
 

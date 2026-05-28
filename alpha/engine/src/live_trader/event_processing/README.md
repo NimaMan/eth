@@ -51,14 +51,14 @@ uses `pool_update`.
 | Pending public mempool signal | `mempool_signal` | `lp_approval`, `mempool_liquidity_removal`, `trading_enabled` | `exit.lp_approval`, `exit.mempool_liquidity_removal_signal`, `entry.tail_after_enabling_tx` | `mempool_race_exit` for exits, `tail_entry_buy` for tail entries |
 | Manual operator close | `manual_close` | manual close request | `manual.close_position` | `normal_exit` |
 
-Deferred pending mempool signals are not a separate source. They are persisted
-as `event_source = mempool_signal` with `decision = deferred` and the settlement
-wait `reason_code` in the payload. Their observation key is prefixed with
-`deferred:` so a process restart does not mark the original mempool signal id as
-already consumed.
+Chain-sim settlement unavailability is not used to defer unrelated mempool
+signals. If chain-server cannot serve exact state for a submitted order's
+execution block, that submitted order remains pending and the next live tick
+continues processing new strategy events.
 
 For chain-sim live backtests, a submitted report has
 `mined_evidence.receipt_status = live_backtest_chain_sim_submitted`. A final
 settlement report has `receipt_status = live_backtest_chain_sim`,
 `submitted_block_number`, `expected_confirmation_block`,
-`simulation_block_number`, and `confirmation_lag_blocks`.
+`simulation_block_number`, `confirmation_lag_blocks`, and the chain-server
+simulation block hash when available.

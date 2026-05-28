@@ -386,6 +386,41 @@ async fn public_tail_result_records_dependency_evidence() {
 }
 
 #[tokio::test]
+async fn regular_broadcast_does_not_record_null_tail_dependency_evidence() {
+    let mut signal = signal(Some("attempt-1"));
+    signal.submission_policy = TxSubmissionPolicy::PublicRpcBroadcast;
+    signal.request.metadata["gas_policy"]["action"] = json!("entry_buy");
+    signal.request.metadata["tail_entry_ordering"] = json!({
+        "tail_after_tx_hash": null,
+        "dependency_priority_fee_wei": null,
+        "dependency_gas_price_wei": null
+    });
+    let adapter = TxExecutorAdapter::new(
+        FixedPlanner { signal },
+        FixedSubmitter {
+            result: Mutex::new(Some(Ok(LiveTxSubmissionResult {
+                attempt_id: "attempt-1".to_string(),
+                status: "broadcast".to_string(),
+                tx_hash: Some(format!("0x{}", "11".repeat(32))),
+                error: None,
+                bundle_hash: None,
+                bundle_target_block: None,
+                bundle_max_block: None,
+                bundle_tail_after_tx_hash: None,
+            }))),
+        },
+    );
+
+    let report = adapter.execute(intent()).await.unwrap();
+    let evidence = report.mined_evidence.expect("submitted evidence");
+
+    assert_eq!(report.status, ExecutionStatus::Submitted);
+    assert_eq!(evidence.gas_policy_tail_after_tx_hash, None);
+    assert_eq!(evidence.gas_policy_dependency_priority_fee_wei, None);
+    assert_eq!(evidence.gas_policy_dependency_gas_price_wei, None);
+}
+
+#[tokio::test]
 async fn dry_run_result_is_cancelled_because_nothing_was_broadcast() {
     let adapter = TxExecutorAdapter::new(
         FixedPlanner {

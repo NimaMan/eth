@@ -9,5 +9,7 @@ pub use live::{
     WETH_ADDRESS,
 };
 pub use policy_types::{
-    ephemeral_terminal_scam_retention_policy, EPHEMERAL_TERMINAL_SCAM_RETENTION_MODE,
+    terminal_or_idle_50k_retention_policy, terminal_scam_immediate_retention_policy,
+    TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS, TERMINAL_OR_IDLE_50K_RETENTION_MODE,
+    TERMINAL_SCAM_IMMEDIATE_RETENTION_MODE,
 };

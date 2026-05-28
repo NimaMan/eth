@@ -583,12 +583,13 @@ pub(crate) fn schedule_latest_simulation_status_log(
 
     tokio::spawn(async move {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let status_task = tokio::task::spawn_blocking(move || {
-            mempool_simulator.latest_simulation_status_blocking()
-        });
-
-        match time::timeout(Duration::from_secs(2), status_task).await {
-            Ok(Ok(Ok(status))) => {
+        match time::timeout(
+            Duration::from_secs(2),
+            mempool_simulator.latest_simulation_status(),
+        )
+        .await
+        {
+            Ok(Ok(status)) => {
                 let line = format!(
                     "[{}]  INFO 📡 Latest simulation block target: {} source={:?} reth_finished={} historical_context={} live_head={:?} tracked_state={:?}",
                     timestamp,
@@ -602,17 +603,9 @@ pub(crate) fn schedule_latest_simulation_status_log(
                 append_line_to_file(&external_data_log_path, &line);
                 probe_in_flight.store(false, Ordering::Relaxed);
             }
-            Ok(Ok(Err(err))) => {
-                let line = format!(
-                    "[{}]  WARN 📡 Unable to determine latest simulation block: {}",
-                    timestamp, err
-                );
-                append_line_to_file(&external_data_log_path, &line);
-                probe_in_flight.store(false, Ordering::Relaxed);
-            }
             Ok(Err(err)) => {
                 let line = format!(
-                    "[{}]  WARN 📡 Latest simulation block probe task failed: {}",
+                    "[{}]  WARN 📡 Unable to determine latest simulation block: {}",
                     timestamp, err
                 );
                 append_line_to_file(&external_data_log_path, &line);

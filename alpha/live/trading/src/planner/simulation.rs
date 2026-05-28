@@ -64,7 +64,7 @@ impl ChainServerLivePreSubmitSimulator {
 
     fn endpoint(&self) -> String {
         format!(
-            "{}/api/v1/eth/live/simulations/unsigned",
+            "{}/api/v1/eth/live-tx-simulator/simulations/unsigned-transaction",
             self.base_url.trim_end_matches('/')
         )
     }

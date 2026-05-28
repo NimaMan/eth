@@ -28,16 +28,27 @@ impl LiveTokenRuntime {
         };
 
         if let Some(parent_session) = parent_session {
-            return simulator
-                .block_state_session_from_parent_prestate_diffs(
-                    &parent_session,
+            let cached_parent_hash = parent_session.block_hash();
+            if cached_parent_hash != parent_hash {
+                self.prune_stale_direct_live_state(
                     block_number,
                     block_hash,
                     parent_hash,
-                    block_header,
-                    state_diffs,
+                    cached_parent_hash,
                 )
                 .await;
+            } else {
+                return simulator
+                    .block_state_session_from_parent_prestate_diffs(
+                        &parent_session,
+                        block_number,
+                        block_hash,
+                        parent_hash,
+                        block_header,
+                        state_diffs,
+                    )
+                    .await;
+            }
         }
 
         simulator
@@ -49,6 +60,43 @@ impl LiveTokenRuntime {
                 state_diffs,
             )
             .await
+    }
+
+    async fn prune_stale_direct_live_state(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        expected_parent_hash: B256,
+        cached_parent_hash: B256,
+    ) {
+        let removed_sessions = {
+            let mut sessions = self.inner.direct_live_block_sessions.lock().await;
+            let removed_sessions = sessions.len();
+            sessions.clear();
+            removed_sessions
+        };
+        if let Err(error) = self.inner.live_tx_simulator.provider().clear() {
+            tracing::warn!(
+                target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+                block_number,
+                block_hash = %block_hash,
+                expected_parent_hash = %expected_parent_hash,
+                cached_parent_hash = %cached_parent_hash,
+                removed_sessions,
+                error = %error,
+                "failed to clear stale LiveTxSimulator state after direct live parent mismatch"
+            );
+            return;
+        }
+        tracing::warn!(
+            target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+            block_number,
+            block_hash = %block_hash,
+            expected_parent_hash = %expected_parent_hash,
+            cached_parent_hash = %cached_parent_hash,
+            removed_sessions,
+            "cleared stale direct live state after parent hash mismatch; rebuilding from exact Reth parent state"
+        );
     }
 
     pub(super) async fn remember_direct_live_block_session(

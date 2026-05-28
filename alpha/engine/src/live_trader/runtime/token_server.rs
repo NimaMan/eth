@@ -21,11 +21,11 @@ impl TokenServerClient {
     }
 
     pub(super) async fn status(&self) -> Result<LiveStatusResponse> {
-        self.get_json("/eth/tokens/api/live/status").await
+        self.get_json("/api/v1/eth/live-token-tracker/status").await
     }
 
     pub(super) async fn versioned_status(&self) -> Result<LiveStatusResponse> {
-        self.get_json("/api/v1/eth/live/status").await
+        self.status().await
     }
 
     pub(super) async fn gas_rank_samples(&self, limit: usize) -> Result<GasRankSamplesResponse> {
@@ -34,7 +34,7 @@ impl TokenServerClient {
     }
 
     pub(super) async fn pools(&self) -> Result<LivePoolListResponse> {
-        self.get_json("/eth/tokens/api/live/pools").await
+        self.get_json("/api/v1/eth/live-token-tracker/pools").await
     }
 
     pub(super) async fn live_updates(
@@ -43,7 +43,7 @@ impl TokenServerClient {
         timeout_ms: u64,
     ) -> Result<LiveUpdatesResponse> {
         let path = format!(
-            "/eth/tokens/api/live/updates?after_block={after_block}&timeout_ms={timeout_ms}"
+            "/api/v1/eth/live-token-tracker/block-applied-updates?after_block={after_block}&timeout_ms={timeout_ms}"
         );
         self.get_json(&path).await
     }
@@ -53,19 +53,8 @@ impl TokenServerClient {
         limit: i64,
         since_days: i64,
     ) -> Result<MempoolSignalsResponse> {
-        let path = format!("/eth/tokens/api/mempool/signals?limit={limit}&since_days={since_days}");
+        let path = format!("/api/v1/eth/mempool/pending-transaction-signals?limit={limit}&since_days={since_days}");
         self.get_json(&path).await
-    }
-
-    pub(super) async fn live_state_stream(&self) -> Result<reqwest::Response> {
-        let url = format!("{}/eth/tokens/api/live/state/stream", self.base_url);
-        self.http
-            .get(&url)
-            .send()
-            .await
-            .wrap_err_with(|| format!("request failed: {url}"))?
-            .error_for_status()
-            .wrap_err_with(|| format!("token server returned an error: {url}"))
     }
 
     async fn get_json<T>(&self, path: &str) -> Result<T>

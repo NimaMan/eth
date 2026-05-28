@@ -57,6 +57,8 @@ pub struct LiveUpdatesResponse {
 pub struct LiveProgressWire {
     pub status: String,
     pub current_block: Option<u64>,
+    #[serde(default)]
+    pub current_block_hash: Option<String>,
     pub blocks_processed: u64,
     pub warmup_total_blocks: u64,
     pub tracked_tokens: usize,
