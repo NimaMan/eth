@@ -256,7 +256,7 @@ impl BlockProcessor {
         self.process_raw_block(raw).await
     }
 
-    /// Fetch exact per-transaction post-state diffs for a block through RPC.
+    /// Fetch exact per-transaction prestate diffs for a block number through RPC.
     pub async fn fetch_rpc_state_diffs_by_number(
         &self,
         block_number: u64,
@@ -264,6 +264,14 @@ impl BlockProcessor {
         self.fetcher
             .fetch_rpc_state_diffs_by_number(block_number)
             .await
+    }
+
+    /// Fetch exact per-transaction prestate diffs for a block hash through RPC.
+    pub async fn fetch_rpc_state_diffs_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> Result<Vec<PreStateFrame>> {
+        self.fetcher.fetch_rpc_state_diffs_by_hash(block_hash).await
     }
 
     /// Process a batch of block numbers in parallel.

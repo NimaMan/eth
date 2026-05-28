@@ -107,6 +107,18 @@ impl RpcBlockDataFetcher {
         Ok(traces)
     }
 
+    pub async fn trace_block_by_hash(&self, block_hash: B256) -> Result<Vec<Value>> {
+        let params = rpc_params![
+            format!("{block_hash:#x}"),
+            serde_json::json!({"tracer": "callTracer", "timeout": "60s"})
+        ];
+        let traces = self
+            .debug
+            .request::<Vec<Value>, _>("debug_traceBlockByHash", params)
+            .await?;
+        Ok(traces)
+    }
+
     pub async fn trace_block_state_diffs_by_number(
         &self,
         block_number: u64,
@@ -126,6 +138,25 @@ impl RpcBlockDataFetcher {
         parse_prestate_diff_frames(traces)
     }
 
+    pub async fn trace_block_state_diffs_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> Result<Vec<PreStateFrame>> {
+        let params = rpc_params![
+            format!("{block_hash:#x}"),
+            serde_json::json!({
+                "tracer": "prestateTracer",
+                "tracerConfig": {"diffMode": true},
+                "timeout": "60s"
+            })
+        ];
+        let traces = self
+            .debug
+            .request::<Vec<Value>, _>("debug_traceBlockByHash", params)
+            .await?;
+        parse_prestate_diff_frames(traces)
+    }
+
     pub async fn fetch_raw_block_data(
         &self,
         block_hash: B256,
@@ -137,6 +168,13 @@ impl RpcBlockDataFetcher {
             .await?
             .ok_or_else(|| eyre::eyre!("block {:?} missing from RPC", block_hash))?;
         let header = parse_block_header(&block_value)?;
+        if block_number != 0 && header.number != block_number {
+            return Err(eyre::eyre!(
+                "RPC block hash/number mismatch: hash {block_hash:#x} returned block {}, expected {}",
+                header.number,
+                block_number
+            ));
+        }
         let transactions = parse_transactions(&block_value, &header)?;
         let receipts_value = self
             .fetch_receipts(block_hash)
@@ -145,7 +183,7 @@ impl RpcBlockDataFetcher {
         let receipts = parse_receipts(&receipts_value, header.number)?;
 
         let traces = if include_traces {
-            let trace_entries = self.trace_block_by_number(block_number).await?;
+            let trace_entries = self.trace_block_by_hash(block_hash).await?;
             Some(parse_block_traces(trace_entries)?)
         } else {
             None

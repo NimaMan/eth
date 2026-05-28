@@ -198,6 +198,7 @@ impl LiveBlockProcessor {
         processed: &ProcessedBlock,
     ) -> Option<Vec<PreStateFrame>> {
         let block_number = processed.header.number;
+        let block_hash = processed.header.hash;
         let tx_count = processed.transactions.len();
         if tx_count == 0 {
             return Some(Vec::new());
@@ -205,13 +206,14 @@ impl LiveBlockProcessor {
 
         match self
             .block_processor
-            .fetch_rpc_state_diffs_by_number(block_number)
+            .fetch_rpc_state_diffs_by_hash(block_hash)
             .await
         {
             Ok(state_diffs) if state_diffs.len() == tx_count => Some(state_diffs),
             Ok(state_diffs) => {
                 tracing::warn!(
                     block_number,
+                    block_hash = %format!("{block_hash:#x}"),
                     tx_count,
                     state_diff_count = state_diffs.len(),
                     "prestate diff trace count did not match block transaction count"
@@ -221,6 +223,7 @@ impl LiveBlockProcessor {
             Err(err) => {
                 tracing::warn!(
                     block_number,
+                    block_hash = %format!("{block_hash:#x}"),
                     "failed to fetch exact prestate diff traces: {}",
                     err
                 );

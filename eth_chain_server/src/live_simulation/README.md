@@ -26,9 +26,10 @@ chain-server processes block B
 
 The live block processor does not pass a full serialized state blob to the
 simulator. It fetches exact per-transaction prestate diffs for the mined block
-with `debug_traceBlockByNumber` using `prestateTracer` in `diffMode`. Those
-frames, together with the processed block header and the parent state/session,
-are enough to build the exact post-block `BlockStateSession`.
+with `debug_traceBlockByHash` using `prestateTracer` in `diffMode`, keyed by
+the same block hash used to process the block. Those frames, together with the
+processed block header and the parent state/session, are enough to build the
+exact post-block `BlockStateSession`.
 
 `LiveTokenRuntime` builds the direct live session in one of two ways:
 

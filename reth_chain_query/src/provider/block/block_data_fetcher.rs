@@ -136,7 +136,7 @@ impl BlockDataFetcher {
             .await
     }
 
-    /// Fetch exact per-transaction post-state diffs for a block from RPC.
+    /// Fetch exact per-transaction prestate diffs for a block number from RPC.
     pub async fn fetch_rpc_state_diffs_by_number(
         &self,
         block_number: u64,
@@ -146,5 +146,17 @@ impl BlockDataFetcher {
             .as_ref()
             .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
         rpc.trace_block_state_diffs_by_number(block_number).await
+    }
+
+    /// Fetch exact per-transaction prestate diffs for a block hash from RPC.
+    pub async fn fetch_rpc_state_diffs_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> Result<Vec<PreStateFrame>> {
+        let rpc = self
+            .rpc_fetcher
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
+        rpc.trace_block_state_diffs_by_hash(block_hash).await
     }
 }
