@@ -34,7 +34,7 @@ Boundary:
 ```text
 chain-server receives execution head B
   -> LiveBlockProcessor fetches/processes block B by block hash
-  -> LiveBlockProcessor fetches prestate diff frames for B
+  -> LiveBlockProcessor fetches prestate diff frames for B by the same block hash
   -> LiveChainRuntime writes processed-block cache if needed
   -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate B)
   -> block_apply.rs calls direct_live_state.rs first

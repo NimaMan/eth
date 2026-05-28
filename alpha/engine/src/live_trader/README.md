@@ -40,16 +40,19 @@ main orchestration loop. Supporting code is grouped by responsibility:
 
 The intended live behavior is block-coupled:
 
-1. Chain server processes block `N`.
-2. Chain server updates live token, pool, gas-rank, and live simulation state
-   for block `N`.
-3. Chain server publishes a block-applied event for `N`.
-4. Alpha consumes that block event and builds strategy inputs for the updates
-   from block `N`.
-5. Strategies process those inputs and persist decisions, observations, order
-   intents, execution reports, and position updates with explicit block context.
-6. Alpha finishes block `N` before moving its strategy-processing cursor to
-   block `N+1`.
+```text
+chain-server receives execution head N
+  -> LiveBlockProcessor fetches/processes block N by block hash
+  -> LiveBlockProcessor fetches prestate diff frames for N by the same block hash
+  -> LiveChainRuntime writes processed-block cache if needed
+  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate N)
+  -> direct_live_state.rs publishes LiveBlockState N into LiveTxSimulator
+  -> block_apply.rs processes token/pool updates for N
+  -> apply_report.rs emits BlockApplied event N
+  -> Alpha consumes block N as one strategy-processing frame
+  -> strategies persist decisions, observations, intents, reports, and positions
+  -> Alpha finishes block N before moving its strategy cursor to N+1
+```
 
 This contract is meant to be the same for live backtest and real live trading.
 The execution backend differs, but strategy event ordering and block context

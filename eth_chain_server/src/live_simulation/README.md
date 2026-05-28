@@ -10,17 +10,21 @@ Boundary:
 - Alpha owns strategy decisions, tx planning, gas policy, and Kartal
   submission.
 
-Flow:
+Live-tail data flow:
 
 ```text
-chain-server processes block B
-  -> LiveBlockProcessor fetches/processes the mined block into ProcessedBlock B
-  -> LiveBlockProcessor fetches prestateTracer diffMode frames for B
-  -> LiveTokenRuntime receives LiveProcessedBlock { ProcessedBlock B, state_diffs }
-  -> builds BlockStateSession B from the processed header, block context, and diffs
-  -> publishes BlockStateSession B into chain-server LiveTxSimulator
-  -> updates token/pool state for B
-  -> Alpha sends small exact-block unsigned tx simulation requests when needed
+chain-server receives execution head B
+  -> LiveBlockProcessor fetches/processes block B by block hash
+  -> LiveBlockProcessor fetches prestate diff frames for B by the same block hash
+  -> LiveChainRuntime writes processed-block cache if needed
+  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate B)
+  -> block_apply.rs calls direct_live_state.rs first
+  -> direct_live_state.rs builds BlockStateSession B
+  -> direct_live_state.rs publishes LiveBlockState B into LiveTxSimulator
+  -> block_apply.rs processes token/pool updates for B
+  -> apply_report.rs updates progress and creates BlockApplied event B
+  -> event subscribers are notified that block B is ready
+  -> Alpha sends small exact-block simulation requests when needed
   -> chain-server branches from LiveTxSimulator state B and returns the result
 ```
 

@@ -22,6 +22,25 @@ runs, `LiveTxSimulator` must still select the exact `N+1` live state. This is
 not a historical query path. Only state frames published by the live block
 processor are eligible.
 
+## Live-Tail Data Flow
+
+```text
+chain-server receives execution head B
+  -> LiveBlockProcessor fetches/processes block B by block hash
+  -> LiveBlockProcessor fetches prestate diff frames for B by the same block hash
+  -> LiveChainRuntime writes processed-block cache if needed
+  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate B)
+  -> direct_live_state.rs builds BlockStateSession B
+  -> direct_live_state.rs publishes LiveBlockState B into LiveTxSimulator
+  -> LiveTxSimulator stores B in the in-memory live-state window
+  -> LiveTxSimulator notifies waiters for block B
+  -> later exact-block calls use LiveTxSimulator.start_chain_at(B)
+```
+
+`LiveTxSimulator` is only the storage and branching surface for the exact live
+sessions. It does not fetch or repair chain state by itself; the chain-server
+runtime must publish canonical block sessions in the right order.
+
 Historical/latest-Reth callers should use `TxSimulator` directly or the explicit
 `LatestHistoricalTxSimulator` adapter.
 

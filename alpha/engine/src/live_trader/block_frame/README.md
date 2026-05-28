@@ -10,6 +10,25 @@ At that point chain-server has already updated:
 - gas-rank samples derived from processed block data;
 - the chain-server `LiveTxSimulator` state for block `N`.
 
+## Upstream Live-Tail Data Flow
+
+```text
+chain-server receives execution head N
+  -> LiveBlockProcessor fetches/processes block N by block hash
+  -> LiveBlockProcessor fetches prestate diff frames for N by the same block hash
+  -> LiveChainRuntime writes processed-block cache if needed
+  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate N)
+  -> direct_live_state.rs builds BlockStateSession N
+  -> direct_live_state.rs publishes LiveBlockState N into LiveTxSimulator
+  -> block_apply.rs processes token/pool updates for N
+  -> apply_report.rs updates progress and creates BlockApplied event N
+  -> Alpha sees block N through the live updates/block-frame boundary
+```
+
+Alpha must only treat block `N` as strategy-visible after that upstream sequence
+has finished. The key ordering is simulator state first, token/pool updates
+second, block-applied notification last.
+
 Alpha must treat the block frame as the unit of work. Strategy decisions for a
 pool update from block `N` must carry block `N` as their observed block. The
 live backtest simulator may later settle a submitted execution at `N+1`, but the
