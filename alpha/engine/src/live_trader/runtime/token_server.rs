@@ -2,8 +2,7 @@ use eyre::{Result, WrapErr};
 use serde::Deserialize;
 
 use crate::wire::{
-    GasRankSamplesResponse, LivePoolListResponse, LiveStatusResponse, LiveUpdatesResponse,
-    MempoolSignalsResponse,
+    GasRankSamplesResponse, LiveBlockFrameResponse, LiveStatusResponse, MempoolSignalsResponse,
 };
 
 #[derive(Clone)]
@@ -33,17 +32,13 @@ impl TokenServerClient {
         self.get_json(&path).await
     }
 
-    pub(super) async fn pools(&self) -> Result<LivePoolListResponse> {
-        self.get_json("/api/v1/eth/live-token-tracker/pools").await
-    }
-
-    pub(super) async fn live_updates(
+    pub(super) async fn next_block_frame(
         &self,
         after_block: u64,
         timeout_ms: u64,
-    ) -> Result<LiveUpdatesResponse> {
+    ) -> Result<LiveBlockFrameResponse> {
         let path = format!(
-            "/api/v1/eth/live-token-tracker/block-applied-updates?after_block={after_block}&timeout_ms={timeout_ms}"
+            "/api/v1/eth/live-trading/block-frames/next?after_block={after_block}&timeout_ms={timeout_ms}"
         );
         self.get_json(&path).await
     }
@@ -53,7 +48,9 @@ impl TokenServerClient {
         limit: i64,
         since_days: i64,
     ) -> Result<MempoolSignalsResponse> {
-        let path = format!("/api/v1/eth/mempool/pending-transaction-signals?limit={limit}&since_days={since_days}");
+        let path = format!(
+            "/api/v1/eth/mempool/pending-transaction-signals?limit={limit}&since_days={since_days}"
+        );
         self.get_json(&path).await
     }
 

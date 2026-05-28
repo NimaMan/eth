@@ -68,7 +68,7 @@ eth_token
 
 eth_chain_server
   <- eth_token + eth_live_feed + processed-block disk cache + execution RPC/WS
-  -> HTTP live/range views for tokens, pools, mempool signals, alpha strategy input
+  -> HTTP live/range views for tokens, pools, mempool signals, exact simulation, alpha block frames
 
 mempool_processor
   <- Reth pending transactions
@@ -77,8 +77,9 @@ mempool_processor
   -> Postgres signal rows, signal logs, ZMQ notifications
 
 alpha
-  <- eth_chain_server live pools/status
+  <- eth_chain_server /live-trading/block-frames/next for confirmed-chain updates
   <- mempool signal rows
+  <- eth_chain_server exact live simulation endpoints
   <- recent mined block fee samples for block-rank evidence
   -> strategy observations, chain-sim orders, positions, risk events in Postgres
   -> prepared direct-raw tx requests only after real planner wiring exists
@@ -177,6 +178,9 @@ url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 
 [databases.token_pnl]
 url = "postgresql://<user>:<password>@<host>:<port>/<database>"
+
+[databases.token_state]
+url = "postgresql://<user>:<password>@<host>:<port>/<database>"
 ```
 
 Prefer direct DB access for performance-sensitive paths. RPC is acceptable for
@@ -194,6 +198,7 @@ Do not add a new DB or schema until this table and the owner README are updated.
 | RethIndex | Sidecar MDBX directory at `RETH_INDEX_DIR`, defaulting to `<RETH_DATADIR>/reth_index`. | `reth_chain_query/src/reth_index/README.md`, `reth_chain_query/src/reth_index/tables/README.md` | Custom low-latency indexes missing from canonical Reth. Current active tables are `address_to_blocks` and `mempool_tx_arrival_times`. |
 | Fund-flow `eth_db` | PostgreSQL schema `eth_db`, read with `DATABASE_URL`. | `reth_chain_query/src/postgres_db/README.md`, `tx_fund_flow/README.md` | Legacy/curated relational chain analytics: addresses, transactions, tx participants, related addresses, token metadata, pool metadata, and trade aggregates used by fund-flow graph discovery and analytics. |
 | Token PnL store | PostgreSQL schema `token_pnl`, configured by `databases.token_pnl.url`. | `eth_token_pnl_store/README.md` | Pool-scoped address PnL ledger and rollups: calculation runs, pool conservation totals, address-level PnL, and movement rows. |
+| Token state store | PostgreSQL schema `token_state`, configured by `databases.token_state.url`. | `eth_token_state_store/README.md` | Latest token and token-pool read model: activity blocks, reserves, lifecycle, trading flags, valuation status, and liquidity-removal state. Historical runs write isolated scopes instead of overwriting live state. |
 | Mempool signal store | PostgreSQL schema `live_trading`, configured by `databases.mempool.url`. | `mempool_processor/README.md`, `mempool_processor/src/db_writers/README.md` | Source of truth for public pending-transaction signals. Core row table is `live_trading.signal_events`; typed detail tables hang off `signal_id`. |
 | Alpha trading store | PostgreSQL schema `alpha_trading`, configured by `databases.alpha.url`. | `alpha/store/README.md`, `alpha/README.md` | Durable decision ledger for runs, observations, orders, execution reports, positions, position snapshots, trades, trade events/snapshots, risk events, decisions, result sets, performance views, and validation reports. |
 | Risk Atlas read model | PostgreSQL tables `risk_atlas_*` in the same database used by `databases.alpha.url` in `eth_chain_server`. | `risk_atlas/README.md` | Durable scam/risk analytics read model for Risk Atlas pages: runs, eligibility, observations, distributions, active targets, decision questions, review examples, model readiness, and page snapshots. |
@@ -229,7 +234,7 @@ Use focused tests/examples near the owner crate:
 | Tx decoding and processed blocks | `tx_processor/tests/`, `tx_processor/examples/processing/*`, `tx_processor/examples/blocks/*` |
 | Trade simulation examples | `tx_processor/examples/trade_simulation/*` |
 | Token/pool state | `eth_token/tests/`, `eth_token/examples/tracking/token_tracking_range.rs`, `eth_token/examples/validation/*` |
-| Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live-token-tracker/status`, `GET /live-token-tracker/pools` |
+| Live chain server | `eth_chain_server/README.md`, `logs/eth_chain_server/`, `GET /live-token-tracker/status`, `GET /live-trading/block-frames/latest` |
 | Mempool signal behavior | `mempool_processor/examples/signal_detector/*`, `mempool_processor/src/signal_detector/README.md`, `logs/mempool_processor/` |
 | Alpha decision loop | `alpha/README.md`, `alpha/store/README.md`, Postgres `alpha_trading.*` tables |
 | Risk Atlas investigations and strategy cohorts | `risk_atlas/README.md`, one case folder under `risk_atlas/token_lab/cases/`, and `alpha/lab/strategy_analysis/README.md` |

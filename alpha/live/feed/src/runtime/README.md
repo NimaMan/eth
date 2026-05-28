@@ -44,6 +44,7 @@ chain-server receives execution head B
   -> apply/direct_live_state.rs publishes LiveBlockState B into LiveTxSimulator
   -> apply/block_apply.rs processes token/pool updates for B
   -> apply/apply_report.rs updates progress and creates BlockApplied event B
+     with compact updated token/pool snapshots
   -> event subscribers are notified that block B is ready
 ```
 
@@ -51,6 +52,8 @@ The direct live simulation state is intentionally published before token/pool
 updates and before the `BlockApplied` event is sent. That ordering gives callers
 one clear block boundary: when block `B` is visible to strategy processing, the
 server-owned simulator should already be able to simulate exact state for `B`.
+The `BlockApplied` event carries only the updated token snapshots for that
+block; chain-server turns those into the replayable alpha block-frame API.
 
 ## Direct Live State
 

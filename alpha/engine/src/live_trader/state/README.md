@@ -3,10 +3,10 @@
 Live trader state is split by responsibility:
 
 - chain-server owns mined token, pool, gas-rank, and live simulation state;
-- `TokenServerClient` reads live status, latest pool snapshots, mempool signals,
-  and block-update notifications;
-- the execution adapter keeps the latest pool snapshots needed to build swap
-  parameters for a token/pool;
+- `TokenServerClient` reads block-pinned live trading frames, live status,
+  exact simulation responses, and mempool signals;
+- the execution adapter keeps the latest block-frame pool snapshots needed to
+  build swap parameters for a token/pool;
 - Postgres is the source of truth for order intents, submitted reports,
   position state, strategy decisions, and final execution reports.
 
@@ -24,11 +24,10 @@ block hash, chain-server returns an explicit unavailable/reorg response. Alpha
 keeps the submitted execution pending and logs the infrastructure gap instead
 of fabricating a fill from a different block.
 
-Chain-sim live backtests use the chain-server block-applied boundary:
+Chain-sim live backtests use the chain-server block-frame boundary:
 
 ```text
-read live status for block N
-  -> read latest pool/token snapshots
+read LiveBlockFrame N from /api/v1/eth/live-trading/block-frames/next
   -> publish pool snapshots into the execution adapter
   -> run strategy decisions and chain-sim execution
   -> persist submitted reports with submitted block/hash and expected block N+1

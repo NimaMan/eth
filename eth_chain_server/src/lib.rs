@@ -4,6 +4,7 @@ pub mod app;
 pub mod error;
 pub mod http;
 pub mod live;
+pub mod live_frames;
 pub mod live_simulation;
 pub mod memory;
 pub mod prices;

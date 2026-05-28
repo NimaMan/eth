@@ -11,7 +11,9 @@ Route names must describe the owner of the data:
 - `live-token-tracker`: confirmed token/pool registry and read-model surfaces.
 - `live-tx-simulator`: chain-server-owned exact live `LiveTxSimulator` state
   and simulation requests.
-- `live-trading`: committed block-applied trading wakeups and supervision.
+- `live-trading`: committed block-applied trading frames and supervision.
+  Alpha consumes `/live-trading/block-frames/next` for block-pinned
+  confirmed-chain strategy input.
 - `mempool/pending-transaction-signals`: speculative public-mempool signal rows.
 
 Do not add new generic `live/state`, `live/updates`, `live/simulations`, or

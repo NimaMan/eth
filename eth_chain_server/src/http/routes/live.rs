@@ -9,6 +9,7 @@ use warp::http::StatusCode;
 use crate::http::reply::{error_response, json_response};
 use crate::http::ServerState;
 use crate::live::StartLiveTrackerRequest;
+use crate::live_frames::LiveBlockFrame;
 use crate::live_simulation::LiveTxSimulatorStatusResponse;
 use crate::read_models as views;
 
@@ -32,6 +33,14 @@ pub(super) struct RecentProcessedBlocksQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct LiveBlockFrameQuery {
+    #[serde(default)]
+    after_block: Option<u64>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct LivePoolsQuery {
     #[serde(default)]
     status: views::surface::PoolSurfaceFilter,
@@ -50,6 +59,15 @@ struct LiveUpdatesResponse {
     updated_v3_pools: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     updated_v4_pools: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveBlockFrameResponse {
+    event: &'static str,
+    status: &'static str,
+    after_block: Option<u64>,
+    block_number: Option<u64>,
+    frame: Option<LiveBlockFrame>,
 }
 
 pub(super) async fn status(state: ServerState) -> Result<warp::reply::Response, Infallible> {
@@ -231,6 +249,90 @@ pub(super) async fn processed_blocks(
     ))
 }
 
+pub(super) async fn latest_block_frame(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.live_block_frames.latest() {
+        Some(frame) => Ok(json_response(
+            &LiveBlockFrameResponse::from_frame("latest", None, frame),
+            StatusCode::OK,
+        )),
+        None => Ok(json_response(
+            &LiveBlockFrameResponse::unavailable("unavailable", None),
+            StatusCode::SERVICE_UNAVAILABLE,
+        )),
+    }
+}
+
+pub(super) async fn block_frame(
+    block_number: u64,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.live_block_frames.get(block_number) {
+        Some(frame) => Ok(json_response(
+            &LiveBlockFrameResponse::from_frame("block_frame", None, frame),
+            StatusCode::OK,
+        )),
+        None => Ok(error_response(
+            format!("live block frame {block_number} not found"),
+            StatusCode::NOT_FOUND,
+        )),
+    }
+}
+
+pub(super) async fn next_block_frame(
+    query: LiveBlockFrameQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    let after_block = query.after_block.unwrap_or_default();
+    if let Some(frame) = state.live_block_frames.next_after(after_block) {
+        return Ok(json_response(
+            &LiveBlockFrameResponse::from_frame("already_ahead", Some(after_block), frame),
+            StatusCode::OK,
+        ));
+    }
+
+    let wait_ms = query
+        .timeout_ms
+        .unwrap_or(DEFAULT_UPDATE_WAIT_MS)
+        .clamp(1, MAX_UPDATE_WAIT_MS);
+    let mut frames = state.live_block_frames.subscribe();
+    let store = state.live_block_frames.clone();
+    let response = match tokio::time::timeout(Duration::from_millis(wait_ms), async move {
+        loop {
+            match frames.recv().await {
+                Ok(frame) if frame.block_number > after_block => {
+                    return LiveBlockFrameResponse::from_frame(
+                        "block_frame",
+                        Some(after_block),
+                        frame,
+                    );
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if let Some(frame) = store.next_after(after_block) {
+                        return LiveBlockFrameResponse::from_frame(
+                            "lag_refresh",
+                            Some(after_block),
+                            frame,
+                        );
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    return LiveBlockFrameResponse::unavailable("closed", Some(after_block));
+                }
+            }
+        }
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => LiveBlockFrameResponse::unavailable("timeout", Some(after_block)),
+    };
+
+    Ok(json_response(&response, StatusCode::OK))
+}
+
 pub(super) async fn latest_state_frame(
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
@@ -371,6 +473,28 @@ impl LiveUpdatesResponse {
             updated_v2_pools: Vec::new(),
             updated_v3_pools: Vec::new(),
             updated_v4_pools: Vec::new(),
+        }
+    }
+}
+
+impl LiveBlockFrameResponse {
+    fn from_frame(event: &'static str, after_block: Option<u64>, frame: LiveBlockFrame) -> Self {
+        Self {
+            event,
+            status: "ok",
+            after_block,
+            block_number: Some(frame.block_number),
+            frame: Some(frame),
+        }
+    }
+
+    fn unavailable(event: &'static str, after_block: Option<u64>) -> Self {
+        Self {
+            event,
+            status: "unavailable",
+            after_block,
+            block_number: None,
+            frame: None,
         }
     }
 }

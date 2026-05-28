@@ -58,14 +58,12 @@ This contract is meant to be the same for live backtest and real live trading.
 The execution backend differs, but strategy event ordering and block context
 must not.
 
-Current important implementation detail: `/api/v1/eth/live-token-tracker/block-applied-updates` is the
-block-applied signal and includes updated token/pool ids for the block.
-`/api/v1/eth/live-token-tracker/pools` is a latest live pool surface, not a block delta.
-If alpha handles a block event and then reads the latest pool surface, the
-surface can include state newer than the block that triggered the loop. That is
-the block-coupling gap to remove: alpha should either consume a chain-server
-block frame containing the updated snapshots for block `N`, or fetch snapshots
-by the updated ids from a view pinned to block `N`.
+Current important implementation detail:
+`/api/v1/eth/live-trading/block-frames/next` is the confirmed-chain strategy
+input. It returns the updated pool snapshots for one applied block and the
+status/progress pinned to that block. Alpha does not read
+`/api/v1/eth/live-token-tracker/pools` in the live decision path; that endpoint
+is a latest read-model surface for UI/context clients.
 
 Live chain simulation has a second block-coupling requirement. A strategy
 decision observed at block `N` may target execution in block `N+1`; the

@@ -11,28 +11,16 @@ use super::token_server::TokenServerClient;
 use super::{
     CHAIN_SERVER_PREFLIGHT_POLL_INTERVAL_MS, CHAIN_SERVER_PREFLIGHT_TIMEOUT_SECS,
     CHAIN_SIM_SKIP_MEMPOOL_TRADING_ENABLED_REASON_CODE, LIVE_POLL_ERROR_RETRY_MS,
-    LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS, LIVE_UPDATE_WAIT_TIMEOUT_MS,
+    LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS,
 };
 
 pub(super) async fn wait_for_next_loop_event(
-    client: &TokenServerClient,
+    _client: &TokenServerClient,
     execution_mode: TraderExecutionMode,
-    current_block: Option<u64>,
+    _current_block: Option<u64>,
 ) -> Result<()> {
     match execution_mode {
-        TraderExecutionMode::ChainSim => {
-            let after_block = current_block.unwrap_or_default();
-            let update = client
-                .live_updates(after_block, LIVE_UPDATE_WAIT_TIMEOUT_MS)
-                .await?;
-            tracing::debug!(
-                event = %update.event,
-                status = %update.status,
-                after_block,
-                update_block = ?update.block_number,
-                "alpha trader live update wait completed"
-            );
-        }
+        TraderExecutionMode::ChainSim => {}
         TraderExecutionMode::KartalReal => {
             time::sleep(Duration::from_millis(
                 LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS,

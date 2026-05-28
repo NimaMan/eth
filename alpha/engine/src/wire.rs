@@ -18,7 +18,7 @@ use rust_decimal::{prelude::FromPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LiveStatusResponse {
     pub progress: LiveProgressWire,
 }
@@ -33,16 +33,22 @@ pub struct GasRankSamplesResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct LivePoolListResponse {
-    pub count: usize,
-    pub pools: Vec<PoolWire>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct LiveUpdatesResponse {
+pub struct LiveBlockFrameResponse {
     pub event: String,
     pub status: String,
+    pub after_block: Option<u64>,
     pub block_number: Option<u64>,
+    pub frame: Option<LiveBlockFrameWire>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LiveBlockFrameWire {
+    pub schema: String,
+    pub block_number: u64,
+    pub block_hash: String,
+    #[serde(default)]
+    pub published_at_unix_ms: Option<u64>,
+    pub status: LiveStatusResponse,
     #[serde(default)]
     pub updated_tokens: Vec<String>,
     #[serde(default)]
@@ -51,9 +57,11 @@ pub struct LiveUpdatesResponse {
     pub updated_v3_pools: Vec<String>,
     #[serde(default)]
     pub updated_v4_pools: Vec<String>,
+    #[serde(default)]
+    pub pools: Vec<PoolWire>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LiveProgressWire {
     pub status: String,
     pub current_block: Option<u64>,

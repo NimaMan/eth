@@ -143,6 +143,25 @@ pub(super) fn routes(
             .and(super::with_state(state.clone()))
             .and_then(live::processed_blocks);
 
+    let trading_latest_block_frame =
+        warp::path!("api" / "v1" / "eth" / "live-trading" / "block-frames" / "latest")
+            .and(warp::get())
+            .and(super::with_state(state.clone()))
+            .and_then(live::latest_block_frame);
+
+    let trading_next_block_frame =
+        warp::path!("api" / "v1" / "eth" / "live-trading" / "block-frames" / "next")
+            .and(warp::get())
+            .and(warp::query::<live::LiveBlockFrameQuery>())
+            .and(super::with_state(state.clone()))
+            .and_then(live::next_block_frame);
+
+    let trading_block_frame =
+        warp::path!("api" / "v1" / "eth" / "live-trading" / "block-frames" / u64)
+            .and(warp::get())
+            .and(super::with_state(state.clone()))
+            .and_then(live::block_frame);
+
     let list_ranges = warp::path!("api" / "v1" / "eth" / "ranges")
         .and(warp::get())
         .and(super::with_state(state.clone()))
@@ -577,6 +596,9 @@ pub(super) fn routes(
     let trading_routes = trading_live_status
         .or(trading_live_updates)
         .or(trading_processed_blocks)
+        .or(trading_latest_block_frame)
+        .or(trading_next_block_frame)
+        .or(trading_block_frame)
         .boxed();
 
     let range_root_routes = list_ranges

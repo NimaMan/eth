@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 use crate::{AlphaEngine, BlockCriticalRiskPolicy, EngineEvent};
@@ -68,8 +69,8 @@ use cli::{Args, RealExecutionArgs};
 use config_resolution::resolve_cli_or_config_i64;
 use constants::*;
 use event_processing::{
-    poll_live_inputs, process_pool_updates, process_position_monitor, reconcile_real_receipts,
-    settle_chain_sim_executions, LivePollBatch, PoolUpdateProcessingInput, PositionMonitorInput,
+    process_pool_updates, process_position_monitor, read_live_inputs, reconcile_real_receipts,
+    settle_chain_sim_executions, LiveInputBatch, PoolUpdateProcessingInput, PositionMonitorInput,
 };
 use execution_stack::{build_execution_stack, ExecutionStackInput};
 use gas_policy::load_live_real_gas_policy;
@@ -157,6 +158,7 @@ async fn run(
         live_gas_policy.gas_rank_lookback_blocks as usize,
     )
     .await?;
+    let startup_status = preflight_client.versioned_status().await?;
     let reth_datadir = required_shared_config_value(&shared_config, RETH_DATADIR_CONFIG)?;
     let reth_http_rpc = required_shared_config_value(&shared_config, RETH_HTTP_RPC_CONFIG)?;
     let entry_bankrolls_wei = strategy_specs
@@ -281,6 +283,18 @@ async fn run(
     let client = TokenServerClient::new(token_server_url.clone());
     let (mut seen_pool_blocks, mut seen_signal_ids, mut seen_mined_pool_risk_keys) =
         load_persisted_watermarks(&store, &observation_strategy_name).await?;
+    let mut last_frame_block = startup_status
+        .progress
+        .current_block
+        .map(|block| {
+            if args.replay_current {
+                block.saturating_sub(1)
+            } else {
+                block
+            }
+        })
+        .unwrap_or_default();
+    let mut pool_wire_cache = HashMap::new();
     let mut primed = false;
     let mut last_position_monitor_block: Option<u64> = None;
     let mut shutdown = ShutdownSignals::new()?;
@@ -318,15 +332,25 @@ async fn run(
 
     loop {
         let first_poll = !primed;
-        let poll_result =
-            poll_live_inputs(&client, signal_limit, mempool_since_days, &pool_updates).await;
-        let LivePollBatch {
+        let input_result = read_live_inputs(
+            &client,
+            execution_mode,
+            last_frame_block,
+            signal_limit,
+            mempool_since_days,
+            &pool_updates,
+            &mut pool_wire_cache,
+        )
+        .await;
+        let LiveInputBatch {
             status,
             signals,
-            pool_response_count,
+            frame_event,
+            frame_block,
+            frame_pool_count,
             polled_pools,
             polled_pool_wires,
-        } = match poll_result {
+        } = match input_result {
             Ok(result) => result,
             Err(error) => {
                 let should_stop = handle_poll_error(
@@ -349,6 +373,16 @@ async fn run(
                 continue;
             }
         };
+        if let Some(frame_block) = frame_block {
+            last_frame_block = last_frame_block.max(frame_block);
+        }
+        tracing::debug!(
+            event = %frame_event,
+            frame_block = ?frame_block,
+            frame_pool_count,
+            last_frame_block,
+            "alpha trader consumed live block frame"
+        );
         if let Some(chain_sim_adapter) = chain_sim_adapter.as_ref() {
             let current_hash = status
                 .progress
@@ -637,7 +671,7 @@ async fn run(
             live_ready,
             suppress_events,
             seen_pool_count: seen_pool_blocks.len(),
-            pool_response_count,
+            frame_pool_count,
             signal_count: signals.count,
             market_events,
             risk_events,

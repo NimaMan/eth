@@ -19,7 +19,7 @@ pub(super) struct HeartbeatInput<'a> {
     pub(super) live_ready: bool,
     pub(super) suppress_events: bool,
     pub(super) seen_pool_count: usize,
-    pub(super) pool_response_count: usize,
+    pub(super) frame_pool_count: usize,
     pub(super) signal_count: usize,
     pub(super) market_events: usize,
     pub(super) risk_events: usize,
@@ -61,7 +61,7 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         live_last_error = ?input.status.progress.last_error,
         trading_enabled = !input.suppress_events,
         pools_seen = input.seen_pool_count,
-        token_server_pool_count = input.pool_response_count,
+        block_frame_pool_count = input.frame_pool_count,
         signal_count = input.signal_count,
         market_events = input.market_events,
         risk_events = input.risk_events,
@@ -101,7 +101,7 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         "live_last_error": input.status.progress.last_error,
         "trading_enabled": !input.suppress_events,
         "pools_seen": input.seen_pool_count,
-        "token_server_pool_count": input.pool_response_count,
+        "block_frame_pool_count": input.frame_pool_count,
         "signal_count": input.signal_count,
         "market_events": input.market_events,
         "risk_events": input.risk_events,
@@ -149,8 +149,8 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         json!(input.status.progress.blocks_processed),
     );
     health.metrics.insert(
-        "token_server_pool_count".to_string(),
-        json!(input.pool_response_count),
+        "block_frame_pool_count".to_string(),
+        json!(input.frame_pool_count),
     );
     health
         .metrics

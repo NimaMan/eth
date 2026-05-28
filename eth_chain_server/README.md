@@ -55,9 +55,10 @@ processed-block disk cache + live execution RPC/WS
   -> eth_token block application
   -> LiveTokenEvent::BlockApplied broadcast
   -> RecentLiveBlocks ring
+  -> LiveBlockFrame ring for alpha block-pinned inputs
   -> in-memory token/pool views
-  -> /live-token-tracker/block-applied-updates, /live-token-tracker/processed-blocks, /live-token-tracker/tokens, /live-token-tracker/pools
-  -> HTTP/SSE clients, mempool context, alpha polling
+  -> /live-trading/block-frames/next, /live-token-tracker/processed-blocks, /live-token-tracker/tokens, /live-token-tracker/pools
+  -> HTTP/SSE clients, mempool context, alpha block-frame consumption
 ```
 
 ## Live Pipeline Boundary
@@ -80,7 +81,10 @@ Live runtime contracts:
   `/live-tx-simulator/simulations/unsigned-transaction-sequence`, and
   `/live-tx-simulator/simulations/pool-buy-sell` so live pending-tx replay uses
   the chain-server-owned exact `LiveTxSimulator` state.
-- `eth_alpha_trader` consumes chain-server APIs and persisted mempool signals.
+- `eth_alpha_trader` consumes `/api/v1/eth/live-trading/block-frames/next`
+  for block-pinned updated pool inputs, exact live simulation APIs for
+  execution checks, and persisted mempool signals. It must not use the latest
+  pool list as its confirmed-chain strategy input.
 - ASENA reads chain-server/trade APIs only.
 
 The mempool signal endpoints read `live_trading.signal_events` plus typed detail
@@ -124,6 +128,7 @@ processed block / live block update
        - restore/update token processor ownership
        - increment cheap progress counters
        - publish BlockApplied/RangeBlockApplied event
+       - record replayable alpha LiveBlockFrame for block B
   -> async/durable sinks
        - Risk Atlas observation writer
        - token/pool page snapshot refresher
@@ -172,8 +177,9 @@ For a live trading system, the event order must be explicit:
 new confirmed block
   -> process complete block
   -> update token/pool state for that block
-  -> publish chain-state-applied event
-  -> trading/risk gates read the committed state for that block
+  -> publish chain-state-applied event with compact updated token snapshots
+  -> chain-server records LiveBlockFrame N for the updated pools/tokens
+  -> trading/risk gates consume LiveBlockFrame N, not the latest pool surface
   -> UI/read-model snapshots refresh after the trading state is committed
 ```
 

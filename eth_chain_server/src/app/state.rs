@@ -7,6 +7,7 @@ use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
 
 use crate::app::config::ChainServerConfig;
 use crate::live::{LiveChainRuntime, LiveChainRuntimeConfig, LiveTracker};
+use crate::live_frames::{LiveBlockFrame, LiveBlockFrameInput, LiveBlockFrameStore};
 use crate::prices::ChainPriceService;
 use crate::ranges::RangeIndexManager;
 use crate::recent_blocks::{
@@ -28,6 +29,7 @@ pub struct ServerState {
     pub live_chain_runtime: LiveChainRuntime,
     pub token_network_analytics: TokenNetworkAnalysisManager,
     pub recent_live_blocks: RecentLiveBlocks,
+    pub live_block_frames: LiveBlockFrameStore,
     pub recent_live_fee_samples: RecentLiveFeeSamples,
     pub recent_live_state_frames: RecentLiveStateFrames,
     pub processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
@@ -88,6 +90,7 @@ impl ServerState {
             processed_block_replay_store.clone(),
         );
         let recent_live_blocks = RecentLiveBlocks::new(config.history_limit.max(128));
+        let live_block_frames = LiveBlockFrameStore::new(config.history_limit.max(128));
         let mempool_signals =
             MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?
                 .with_arrival_provider(provider.clone());
@@ -103,6 +106,7 @@ impl ServerState {
             live_chain_runtime,
             token_network_analytics,
             recent_live_blocks,
+            live_block_frames,
             recent_live_fee_samples,
             recent_live_state_frames,
             processed_block_disk_cache,
@@ -129,6 +133,56 @@ impl ServerState {
                     }
                     Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    pub fn spawn_live_block_frame_recorder(&self) {
+        let mut events = self.live_tracker.subscribe();
+        let tracker = self.live_tracker.clone();
+        let live_block_frames = self.live_block_frames.clone();
+        tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(LiveTokenEvent::BlockApplied {
+                        block_number,
+                        block_hash,
+                        updated_tokens,
+                        updated_v2_pools,
+                        updated_v3_pools,
+                        updated_v4_pools,
+                        token_snapshots,
+                    }) => {
+                        let progress = tracker.progress().await;
+                        let frame = LiveBlockFrame::from_input(LiveBlockFrameInput {
+                            block_number,
+                            block_hash,
+                            progress,
+                            updated_tokens,
+                            updated_v2_pools,
+                            updated_v3_pools,
+                            updated_v4_pools,
+                            token_snapshots,
+                        });
+                        tracing::debug!(
+                            block_number = frame.block_number,
+                            block_hash = %frame.block_hash,
+                            pools = frame.pools.len(),
+                            tokens = frame.tokens.len(),
+                            "recorded alpha live block frame"
+                        );
+                        live_block_frames.record(frame);
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "alpha live block frame recorder lagged behind live tracker events"
+                        );
+                        continue;
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }

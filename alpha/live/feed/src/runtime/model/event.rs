@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+use super::snapshot::LiveTokenSnapshot;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LiveTokenEvent {
     WarmupStarted {
@@ -15,6 +17,7 @@ pub enum LiveTokenEvent {
         updated_v2_pools: Vec<String>,
         updated_v3_pools: Vec<String>,
         updated_v4_pools: Vec<String>,
+        token_snapshots: Vec<LiveTokenSnapshot>,
     },
     RuntimeLive {
         id: String,

@@ -3,7 +3,9 @@ use eth_pool_classification::{
     PoolClassificationInput,
 };
 use eth_token::erc20::ERC20Token;
-use eth_token::pools::{BasePool, PoolLifecycle, UniswapV2Pool};
+use eth_token::pools::{
+    BasePool, PoolLifecycle, PoolRuntimeState, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -41,11 +43,20 @@ pub struct LiveTokenPoolSnapshot {
     pub pool_address: String,
     pub token_address: String,
     pub protocol: String,
+    pub pool_id: Option<String>,
+    pub pool_manager_address: Option<String>,
+    pub currency0: Option<String>,
+    pub currency1: Option<String>,
+    pub fee_tier: Option<u32>,
+    pub tick_spacing: Option<i32>,
+    pub hooks: Option<String>,
     pub denom_address: String,
     pub denom_symbol: String,
     pub token_reserve: f64,
     pub denom_reserve: f64,
     pub price: f64,
+    pub initial_price: Option<f64>,
+    pub price_ratio_to_initial: Option<f64>,
     pub total_liquidity: f64,
     pub can_buy: bool,
     pub can_sell: bool,
@@ -70,8 +81,12 @@ pub struct LiveTokenPoolSnapshot {
     pub creation_block: Option<u64>,
     pub latest_block_number: Option<u64>,
     pub lifecycle: String,
+    pub runtime_state: PoolRuntimeState,
     pub control_addresses: Vec<String>,
     pub lp_tokens_approved_percentage: Option<f64>,
+    pub lp_last_approval_block: Option<u64>,
+    pub lp_last_approval: Option<Value>,
+    pub lp_approval_count: u64,
 }
 
 impl LiveTokenSnapshot {
@@ -83,17 +98,31 @@ impl LiveTokenSnapshot {
                 .values()
                 .map(|pool| LiveTokenPoolSnapshot::from_pool(&token.contract_address, pool)),
         );
-        pools.extend(token.v3_pools.values().map(|pool| {
-            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
-        }));
-        pools.extend(token.v4_pools.values().map(|pool| {
-            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
-        }));
+        pools.extend(
+            token
+                .v3_pools
+                .values()
+                .map(|pool| LiveTokenPoolSnapshot::from_v3_pool(&token.contract_address, pool)),
+        );
+        pools.extend(
+            token
+                .v4_pools
+                .values()
+                .map(|pool| LiveTokenPoolSnapshot::from_v4_pool(&token.contract_address, pool)),
+        );
         pools.extend(token.curve_pools.values().map(|pool| {
-            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+            LiveTokenPoolSnapshot::from_base(
+                &token.contract_address,
+                &pool.base,
+                LiveTokenPoolLpSnapshot::default(),
+            )
         }));
         pools.extend(token.balancer_pools.values().map(|pool| {
-            LiveTokenPoolSnapshot::from_base(&token.contract_address, &pool.base, None)
+            LiveTokenPoolSnapshot::from_base(
+                &token.contract_address,
+                &pool.base,
+                LiveTokenPoolLpSnapshot::default(),
+            )
         }));
         pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
 
@@ -149,15 +178,50 @@ impl LiveTokenPoolSnapshot {
         Self::from_base(
             token_address,
             &pool.base,
-            Some(pool.lp_approved_percentage()),
+            LiveTokenPoolLpSnapshot {
+                approved_percentage: Some(pool.lp_approved_percentage()),
+                last_approval_block: pool.last_lp_approval_block(),
+                last_approval: pool.last_lp_approval_event(),
+                approval_count: pool.lp_tracker.approval_events.len() as u64,
+            },
         )
     }
 
-    pub fn from_base(
-        token_address: &str,
-        pool: &BasePool,
-        lp_tokens_approved_percentage: Option<f64>,
-    ) -> Self {
+    pub fn from_v4_pool(token_address: &str, pool: &UniswapV4Pool) -> Self {
+        let mut snapshot = Self::from_base(
+            token_address,
+            &pool.base,
+            LiveTokenPoolLpSnapshot {
+                approved_percentage: Some(pool.lp_approved_percentage()),
+                last_approval_block: pool.last_lp_approval_block(),
+                last_approval: pool.last_lp_approval_event(),
+                approval_count: pool.lp_approval_events.len() as u64,
+            },
+        );
+        snapshot.pool_id = Some(pool.pool_id.clone());
+        snapshot.pool_manager_address = Some(pool.pool_manager_address.clone());
+        snapshot.currency0 = Some(pool.pool_key.currency0.clone());
+        snapshot.currency1 = Some(pool.pool_key.currency1.clone());
+        snapshot.fee_tier = Some(pool.pool_key.fee);
+        snapshot.tick_spacing = Some(pool.pool_key.tick_spacing);
+        snapshot.hooks = Some(pool.pool_key.hooks.clone());
+        snapshot
+    }
+
+    pub fn from_v3_pool(token_address: &str, pool: &UniswapV3Pool) -> Self {
+        let mut snapshot = Self::from_base(
+            token_address,
+            &pool.base,
+            LiveTokenPoolLpSnapshot::default(),
+        );
+        snapshot.currency0 = Some(pool.token0.clone());
+        snapshot.currency1 = Some(pool.token1.clone());
+        snapshot.fee_tier = Some(pool.fee_tier);
+        snapshot.tick_spacing = Some(pool.tick_spacing);
+        snapshot
+    }
+
+    pub fn from_base(token_address: &str, pool: &BasePool, lp: LiveTokenPoolLpSnapshot) -> Self {
         let explicit_liquidity_removal = pool.has_liquidity_removal();
         let max_denom_reserve = max_denom_reserve(pool);
         let classification = classify_pool_with_config(
@@ -219,11 +283,22 @@ impl LiveTokenPoolSnapshot {
             pool_address: pool.identity.pool_address.clone(),
             token_address: token_address.to_string(),
             protocol: pool.identity.protocol.clone(),
+            pool_id: None,
+            pool_manager_address: None,
+            currency0: None,
+            currency1: None,
+            fee_tier: None,
+            tick_spacing: None,
+            hooks: None,
             denom_address: pool.identity.denom_address.clone(),
-            denom_symbol: pool.identity.denom_address.clone(),
+            denom_symbol: denom_symbol(&pool.identity.denom_address)
+                .unwrap_or(pool.identity.denom_address.as_str())
+                .to_string(),
             token_reserve: pool.token_reserve(),
             denom_reserve: pool.denom_reserve(),
             price: pool.price(),
+            initial_price: pool.initial_price(),
+            price_ratio_to_initial: pool.price_ratio_to_initial(),
             total_liquidity: pool.state.total_liquidity,
             can_buy: pool.state.can_buy,
             can_sell: pool.state.can_sell,
@@ -254,10 +329,22 @@ impl LiveTokenPoolSnapshot {
             creation_block: pool.creation_block,
             latest_block_number: pool.latest_block_number,
             lifecycle: lifecycle_label(lifecycle),
+            runtime_state: pool.state.clone(),
             control_addresses: sorted_strings(pool.token_control_addresses.iter().cloned()),
-            lp_tokens_approved_percentage,
+            lp_tokens_approved_percentage: lp.approved_percentage,
+            lp_last_approval_block: lp.last_approval_block,
+            lp_last_approval: lp.last_approval,
+            lp_approval_count: lp.approval_count,
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LiveTokenPoolLpSnapshot {
+    pub approved_percentage: Option<f64>,
+    pub last_approval_block: Option<u64>,
+    pub last_approval: Option<Value>,
+    pub approval_count: u64,
 }
 
 fn max_denom_reserve(pool: &BasePool) -> f64 {

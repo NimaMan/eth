@@ -4,7 +4,9 @@ use eth_token::tracking::{LiveTokenRetentionReport, TokenBlockUpdateReport};
 use tx_processor::LoadedProcessedBlock as LiveBlockLoad;
 
 use super::event::LiveTokenEvent;
+use super::helpers::normalize_address;
 use super::progress::LiveTokenError;
+use super::snapshot::LiveTokenSnapshot;
 use super::state::LiveTokenState;
 use super::time::now_unix_secs;
 
@@ -121,6 +123,7 @@ pub(super) fn apply_report(
     }
 
     refresh_progress_counts(state);
+    let token_snapshots = token_snapshots_for_update(state, &updated_tokens);
 
     LiveTokenEvent::BlockApplied {
         block_number,
@@ -129,7 +132,26 @@ pub(super) fn apply_report(
         updated_v2_pools,
         updated_v3_pools,
         updated_v4_pools,
+        token_snapshots,
     }
+}
+
+fn token_snapshots_for_update(
+    state: &LiveTokenState,
+    updated_tokens: &[String],
+) -> Vec<LiveTokenSnapshot> {
+    let registry = state.processor.registry();
+    let mut snapshots = updated_tokens
+        .iter()
+        .filter_map(|address| {
+            registry
+                .tokens
+                .get(&normalize_address(address))
+                .map(LiveTokenSnapshot::from_token)
+        })
+        .collect::<Vec<_>>();
+    snapshots.sort_by(|left, right| left.contract_address.cmp(&right.contract_address));
+    snapshots
 }
 
 pub(super) fn push_issue(state: &mut LiveTokenState, issue: PipelineIssue) {

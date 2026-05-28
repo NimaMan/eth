@@ -82,38 +82,45 @@ Current deployed evidence:
   `chain_sim_settlement_pending=0`, `chain_sim_settlement_waiting_state=0`, and
   `chain_sim_settlement_missing_block=0`.
 
-## Tier One Issue - Block-Pinned Alpha Inputs 2026-05-28
+## Block-Pinned Alpha Inputs 2026-05-28
 
-Status: active blocker for final evidence quality, not for simulator safety.
+Status: implemented for the live decision path; follow-up evidence metadata
+remains.
 
 Problem:
 
-- Alpha currently uses the block-applied update as a wakeup, then reads the
-  latest pool/token surface.
-- That surface is live state, not a block-pinned frame. If block `N` wakes the
-  loop but block `N+1` is already applied before Alpha reads pools, a decision
-  can be recorded against block `N` while using newer pool state.
-- EVM simulation is now exact-block and chain-server-owned, but strategy inputs
-  still need the same block-frame boundary.
+- Alpha used the block-applied update as a wakeup, then read the latest
+  pool/token surface.
+- That surface was live state, not a block-pinned frame. If block `N` woke the
+  loop but block `N+1` was already applied before Alpha read pools, a decision
+  could be recorded against block `N` while using newer pool state.
+- EVM simulation was already exact-block and chain-server-owned, but strategy
+  inputs needed the same block-frame boundary.
 
 Required behavior:
 
-- Chain-server should expose a block-frame payload for block `N` after this
-  ordered sequence finishes: live simulator session updated, token/pool updates
-  applied, progress updated, block-applied event emitted.
-- Alpha should consume either that full block frame or block-pinned token/pool
-  snapshots by updated ids. It should not make a block `N` strategy decision
-  from an unpinned "latest" pool surface.
+- Chain-server exposes a replayable block-frame payload for block `N` after
+  this ordered sequence finishes: live simulator session updated, token/pool
+  updates applied, progress updated, block-applied event emitted.
+- Alpha consumes that block frame for confirmed-chain pool updates. It does not
+  make a block `N` strategy decision from an unpinned "latest" pool surface.
 
-Next action:
+Implemented:
 
-1. Add a chain-server block-frame/read-model endpoint keyed by block number and
-   hash, containing the updated token and pool snapshots Alpha needs for that
-   block.
-2. Change Alpha polling to consume that block frame instead of reading the
-   latest pool list after the wakeup.
-3. Persist decision block hash and input-frame hash/source in strategy
-   decisions and execution reports.
+1. `eth_live_feed::LiveTokenEvent::BlockApplied` carries compact updated token
+   snapshots.
+2. `eth_chain_server` records `LiveBlockFrame` entries and serves
+   `/api/v1/eth/live-trading/block-frames/next`, `latest`, and `{block}`.
+3. Alpha live traders consume block frames and removed the live decision path
+   that fetched `/live-token-tracker/pools`.
+
+Remaining follow-up:
+
+1. Persist input-frame source/hash metadata in strategy observations and
+   execution reports so the UI can display the exact block-frame source without
+   reading nested payloads.
+2. Add an operational alert if Alpha sees a gap larger than the retained
+   live-block-frame ring.
 
 ## Tier One Issue - Evidence Sufficiency Before Real Capital 2026-05-28
 

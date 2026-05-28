@@ -2,8 +2,9 @@
 
 The live trader processes one loop tick in this order:
 
-1. Read chain-server live status, latest pool surface, and mempool signals.
-2. Publish every fetched pool snapshot into the execution adapter pool cache.
+1. Read the next chain-server live block frame and mempool signals.
+2. Publish every block-frame pool snapshot into the execution adapter pool
+   cache.
 3. Settle already-submitted executions:
    - chain-sim live backtests simulate due submissions against the exact target
      block state;
@@ -54,7 +55,7 @@ uses `pool_update`.
 Chain-sim settlement unavailability is not used to defer unrelated mempool
 signals. If chain-server cannot serve exact state for a submitted order's
 execution block, that submitted order remains pending and the next live tick
-continues processing new strategy events.
+continues processing new strategy events from the next retained block frame.
 
 For chain-sim live backtests, a submitted report has
 `mined_evidence.receipt_status = live_backtest_chain_sim_submitted`. A final
