@@ -926,6 +926,21 @@ async fn block_processor_sorts_transactions_and_tracks_block_report() {
     let duplicate = processor.process_block_with_test_simulator(&block).await;
     assert!(duplicate.already_processed);
     assert_eq!(duplicate.processed_transaction_count, 0);
+
+    let mut replacement = block.clone();
+    replacement.header.hash =
+        b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    let replacement_report = processor
+        .process_block_with_test_simulator(&replacement)
+        .await;
+    assert!(!replacement_report.already_processed);
+    assert_eq!(
+        processor
+            .processed_block_hashes
+            .get(&replacement.header.number)
+            .map(String::as_str),
+        Some("0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+    );
 }
 
 #[test]

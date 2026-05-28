@@ -13,9 +13,9 @@ use crate::chain_metadata::{
 use crate::network::graph::RawTokenNetworkGraph;
 use crate::tracking::token_update_router::{PoolTradingSimulationMode, V2PoolCandidateCache};
 use crate::tracking::{
-    ephemeral_terminal_scam_retention_policy, hash_string, LiveTokenRetentionPolicy,
-    ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry, TokenTransactionUpdateError,
-    TrackedTokenIndex,
+    hash_string, terminal_or_idle_50k_retention_policy, terminal_scam_immediate_retention_policy,
+    LiveTokenRetentionPolicy, ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
+    TokenTransactionUpdateError, TrackedTokenIndex,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
@@ -38,6 +38,8 @@ pub struct BlockTokenProcessor {
     #[serde(default)]
     pub network_graphs: BTreeMap<String, RawTokenNetworkGraph>,
     pub processed_blocks: BTreeMap<u64, bool>,
+    #[serde(default)]
+    pub processed_block_hashes: BTreeMap<u64, String>,
     pub latest_processed_block: Option<u64>,
     pub start_block: Option<u64>,
     pub updated_token_addresses: Vec<String>,
@@ -53,11 +55,19 @@ impl BlockTokenProcessor {
         Self::new_with_token_index_limit(history_limit, None)
     }
 
-    pub fn new_with_ephemeral_terminal_scam_retention(history_limit: usize) -> Self {
+    pub fn new_with_terminal_scam_immediate_retention(history_limit: usize) -> Self {
         let mut processor = Self::new_unbounded_token_index(history_limit);
         processor
             .token_index
-            .set_live_retention_policy(Some(ephemeral_terminal_scam_retention_policy()));
+            .set_live_retention_policy(Some(terminal_scam_immediate_retention_policy()));
+        processor
+    }
+
+    pub fn new_with_terminal_or_idle_50k_retention(history_limit: usize) -> Self {
+        let mut processor = Self::new_unbounded_token_index(history_limit);
+        processor
+            .token_index
+            .set_live_retention_policy(Some(terminal_or_idle_50k_retention_policy()));
         processor
     }
 
@@ -74,6 +84,7 @@ impl BlockTokenProcessor {
             network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
+            processed_block_hashes: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
             updated_token_addresses: Vec::new(),
@@ -101,6 +112,7 @@ impl BlockTokenProcessor {
             network_graphs_enabled: true,
             network_graphs: BTreeMap::new(),
             processed_blocks: BTreeMap::new(),
+            processed_block_hashes: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
             updated_token_addresses: Vec::new(),
@@ -124,6 +136,36 @@ impl BlockTokenProcessor {
     pub fn disable_network_graphs(&mut self) {
         self.network_graphs_enabled = false;
         self.network_graphs.clear();
+    }
+
+    pub(in crate::tracking::block_processor) fn block_already_processed(
+        &self,
+        block: &ProcessedBlock,
+    ) -> bool {
+        let block_number = block.header.number;
+        let block_hash = hash_string(&block.header.hash);
+        match self.processed_block_hashes.get(&block_number) {
+            Some(existing_hash) if same_hash_string(existing_hash, &block_hash) => true,
+            Some(existing_hash) => {
+                tracing::warn!(
+                    block_number,
+                    current_block_hash = %existing_hash,
+                    incoming_block_hash = %block_hash,
+                    "processing same-height token block replacement"
+                );
+                false
+            }
+            None => self.processed_blocks.contains_key(&block_number),
+        }
+    }
+
+    pub(in crate::tracking::block_processor) fn mark_block_processed(
+        &mut self,
+        block: &ProcessedBlock,
+    ) {
+        self.processed_blocks.insert(block.header.number, true);
+        self.processed_block_hashes
+            .insert(block.header.number, hash_string(&block.header.hash));
     }
 
     pub async fn process_block(
@@ -257,6 +299,30 @@ impl BlockTokenProcessor {
             discovery_provider,
             pool_simulator,
             None,
+        )
+        .await
+    }
+
+    pub async fn process_block_with_discovery_provider_without_trading_simulation<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
+        if self.is_live_mode {
+            return self.live_mode_historical_simulator_report(
+                block,
+                "process_block_with_discovery_provider_without_trading_simulation",
+            );
+        }
+
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
+            block,
+            discovery_provider,
+            discovery_provider,
+            PoolTradingSimulationMode::Noop,
         )
         .await
     }
@@ -458,4 +524,12 @@ fn token_index_with_limit(limit: Option<usize>) -> TrackedTokenIndex {
         Some(limit) => TrackedTokenIndex::new(limit),
         None => TrackedTokenIndex::unbounded(),
     }
+}
+
+fn same_hash_string(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    left.strip_prefix("0x")
+        .unwrap_or(left)
+        .eq_ignore_ascii_case(right.strip_prefix("0x").unwrap_or(right))
 }

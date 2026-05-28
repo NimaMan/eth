@@ -7,10 +7,10 @@ use crate::chain_metadata::{
     TokenMetadataProvider, UniswapV2PoolIdentityProvider, UniswapV2PoolMetadataProvider,
 };
 use crate::tracking::token_update_router::{PendingPoolSimulationMap, PoolTradingSimulationMode};
-use crate::tracking::{TokenBlockUpdateReport, TokenTransactionUpdateError, hash_string};
+use crate::tracking::{hash_string, TokenBlockUpdateReport, TokenTransactionUpdateError};
 
 use super::block_update_profile::{
-    BlockTokenProcessorProfile, elapsed_micros, log_block_token_processor_profile,
+    elapsed_micros, log_block_token_processor_profile, BlockTokenProcessorProfile,
 };
 use super::processor::BlockTokenProcessor;
 use super::token_creation_update::{
@@ -24,7 +24,7 @@ impl BlockTokenProcessor {
         trading_simulation: PoolTradingSimulationMode<'_>,
     ) -> TokenBlockUpdateReport {
         let block_number = block.header.number;
-        if self.processed_blocks.contains_key(&block_number) {
+        if self.block_already_processed(block) {
             return TokenBlockUpdateReport {
                 block_number,
                 block_hash: hash_string(&block.header.hash),
@@ -154,7 +154,7 @@ impl BlockTokenProcessor {
             self.start_block = Some(block_number);
         }
         self.latest_processed_block = Some(block_number);
-        self.processed_blocks.insert(block_number, true);
+        self.mark_block_processed(block);
 
         self.updated_token_addresses = updated_token_addresses.into_iter().collect();
 
@@ -185,7 +185,7 @@ impl BlockTokenProcessor {
         P: TokenMetadataProvider,
     {
         let block_number = block.header.number;
-        if self.processed_blocks.contains_key(&block_number) {
+        if self.block_already_processed(block) {
             return TokenBlockUpdateReport {
                 block_number,
                 block_hash: hash_string(&block.header.hash),
@@ -335,7 +335,7 @@ impl BlockTokenProcessor {
             self.start_block = Some(block_number);
         }
         self.latest_processed_block = Some(block_number);
-        self.processed_blocks.insert(block_number, true);
+        self.mark_block_processed(block);
 
         self.updated_token_addresses = updated_token_addresses.into_iter().collect();
 
@@ -371,7 +371,7 @@ impl BlockTokenProcessor {
     {
         let block_started = Instant::now();
         let block_number = block.header.number;
-        if self.processed_blocks.contains_key(&block_number) {
+        if self.block_already_processed(block) {
             return TokenBlockUpdateReport {
                 block_number,
                 block_hash: hash_string(&block.header.hash),
@@ -540,7 +540,7 @@ impl BlockTokenProcessor {
             self.start_block = Some(block_number);
         }
         self.latest_processed_block = Some(block_number);
-        self.processed_blocks.insert(block_number, true);
+        self.mark_block_processed(block);
 
         self.updated_token_addresses = updated_token_addresses.into_iter().collect();
         profile.finalize_us = elapsed_micros(finalize_started);

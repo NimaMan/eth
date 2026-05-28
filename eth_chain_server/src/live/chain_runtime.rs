@@ -211,12 +211,46 @@ impl LiveChainRuntime {
         processed: LiveProcessedBlock,
     ) -> Result<()> {
         let block_number = processed.execution_info.block_number;
-        let current_block = self.inner.live_tracker.progress().await.current_block;
-        if current_block.is_some_and(|current| block_number <= current) {
-            return Ok(());
-        }
+        let block_hash = format!("{:#x}", processed.execution_info.block_hash);
+        let progress = self.inner.live_tracker.progress().await;
+        let current_block = progress.current_block;
 
         if let Some(current) = current_block {
+            if block_number < current {
+                tracing::debug!(
+                    target: "live_chain_runtime",
+                    block_number,
+                    block_hash = %block_hash,
+                    current_block = current,
+                    current_block_hash = ?progress.current_block_hash,
+                    "skipping older live head"
+                );
+                return Ok(());
+            }
+
+            if block_number == current {
+                match progress.current_block_hash.as_deref() {
+                    Some(current_hash) if same_block_hash(current_hash, &block_hash) => {
+                        tracing::debug!(
+                            target: "live_chain_runtime",
+                            block_number,
+                            block_hash = %block_hash,
+                            "skipping duplicate live head"
+                        );
+                        return Ok(());
+                    }
+                    current_hash => {
+                        tracing::warn!(
+                            target: "live_chain_runtime",
+                            block_number,
+                            incoming_block_hash = %block_hash,
+                            current_block_hash = ?current_hash,
+                            "applying same-height live head replacement"
+                        );
+                    }
+                }
+            }
+
             if block_number > current.saturating_add(1) {
                 for missing_block in current.saturating_add(1)..block_number {
                     let missing = processor
@@ -321,6 +355,18 @@ fn live_apply_error_block_number(error: &eyre::Report) -> Option<u64> {
         .find_map(|source| parse_live_apply_block_number(&source.to_string()))
 }
 
+fn same_block_hash(left: &str, right: &str) -> bool {
+    normalize_hash_for_compare(left) == normalize_hash_for_compare(right)
+}
+
+fn normalize_hash_for_compare(hash: &str) -> String {
+    let trimmed = hash.trim();
+    trimmed
+        .strip_prefix("0x")
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase()
+}
+
 fn parse_live_apply_block_number(message: &str) -> Option<u64> {
     message
         .strip_prefix(LIVE_BLOCK_APPLY_ERROR_PREFIX)?
@@ -340,6 +386,13 @@ mod tests {
             parse_live_apply_block_number("failed to apply live block update 25106480"),
             Some(25106480)
         );
+    }
+
+    #[test]
+    fn compares_block_hashes_with_normalized_prefix_and_case() {
+        assert!(same_block_hash("0xAbC123", "abc123"));
+        assert!(same_block_hash("  ABC123  ", "0xabc123"));
+        assert!(!same_block_hash("0xabc123", "0xabc124"));
     }
 
     #[test]

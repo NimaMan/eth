@@ -26,6 +26,7 @@ pub(super) fn apply_report(
     let block_number = report.block_number;
 
     state.progress.current_block = Some(report.block_number);
+    state.progress.current_block_hash = Some(block_hash.clone());
     state.progress.blocks_processed += 1;
     if is_live_tail {
         state.progress.live_blocks_processed += 1;
