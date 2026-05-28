@@ -1,17 +1,35 @@
+#[path = "apply/apply_report.rs"]
 mod apply_report;
+#[path = "apply/block_apply.rs"]
 mod block_apply;
+#[path = "apply/block_update.rs"]
 mod block_update;
-mod config;
+#[path = "apply/direct_live_state.rs"]
 mod direct_live_state;
-mod errors;
-mod event;
-mod helpers;
+
+#[path = "core/lifecycle.rs"]
 mod lifecycle;
-mod progress;
+#[path = "core/reader.rs"]
 mod reader;
+#[path = "core/service.rs"]
 mod service;
+
+#[path = "model/config.rs"]
+mod config;
+#[path = "model/errors.rs"]
+mod errors;
+#[path = "model/event.rs"]
+mod event;
+#[path = "model/progress.rs"]
+mod progress;
+#[path = "model/snapshot.rs"]
 mod snapshot;
+#[path = "model/state.rs"]
 mod state;
+
+#[path = "support/helpers.rs"]
+mod helpers;
+#[path = "support/time.rs"]
 mod time;
 
 pub use block_update::LiveBlockUpdate;

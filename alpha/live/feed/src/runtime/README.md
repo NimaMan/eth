@@ -13,21 +13,23 @@ Boundary:
 
 ## Module Map
 
-- `service.rs`: runtime construction, start/stop, warmup loop, public progress,
-  state, and exact simulation access.
-- `block_update.rs`: `LiveBlockUpdate`, the live-tail handoff object from
-  chain-server block processing into this runtime.
-- `block_apply.rs`: block application, token/pool processing, bottleneck logs,
-  and block-applied event emission.
-- `direct_live_state.rs`: builds and publishes direct live
+- `core/service.rs`: runtime construction, start/stop, warmup loop, public
+  progress, state, and exact simulation access.
+- `core/lifecycle.rs`: runtime live/stopped/failed state transitions.
+- `core/reader.rs`: `LiveTokenReader` trait and snapshot reader
+  implementation.
+- `apply/block_update.rs`: `LiveBlockUpdate`, the live-tail handoff object
+  from chain-server block processing into this runtime.
+- `apply/block_apply.rs`: block application, token/pool processing,
+  bottleneck logs, and block-applied event emission.
+- `apply/direct_live_state.rs`: builds and publishes direct live
   `BlockStateSession`s into the server-owned `LiveTxSimulator`.
-- `lifecycle.rs`: runtime live/stopped/failed state transitions.
-- `reader.rs`: `LiveTokenReader` trait and snapshot reader implementation.
-- `apply_report.rs`: translates token processor reports into progress counters
-  and block events.
-- `progress.rs`, `state.rs`, `snapshot.rs`, `event.rs`, `config.rs`: runtime
-  data types.
-- `errors.rs`, `helpers.rs`, `time.rs`: local support helpers.
+- `apply/apply_report.rs`: translates token processor reports into progress
+  counters and block events.
+- `model/progress.rs`, `model/state.rs`, `model/snapshot.rs`,
+  `model/event.rs`, `model/config.rs`, `model/errors.rs`: runtime data
+  types.
+- `support/helpers.rs`, `support/time.rs`: local support helpers.
 
 ## Live-Tail Data Flow
 
@@ -37,11 +39,11 @@ chain-server receives execution head B
   -> LiveBlockProcessor fetches prestate diff frames for B by the same block hash
   -> LiveChainRuntime writes processed-block cache if needed
   -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate B)
-  -> block_apply.rs calls direct_live_state.rs first
-  -> direct_live_state.rs builds BlockStateSession B
-  -> direct_live_state.rs publishes LiveBlockState B into LiveTxSimulator
-  -> block_apply.rs processes token/pool updates for B
-  -> apply_report.rs updates progress and creates BlockApplied event B
+  -> apply/block_apply.rs calls apply/direct_live_state.rs first
+  -> apply/direct_live_state.rs builds BlockStateSession B
+  -> apply/direct_live_state.rs publishes LiveBlockState B into LiveTxSimulator
+  -> apply/block_apply.rs processes token/pool updates for B
+  -> apply/apply_report.rs updates progress and creates BlockApplied event B
   -> event subscribers are notified that block B is ready
 ```
 
@@ -52,7 +54,7 @@ server-owned simulator should already be able to simulate exact state for `B`.
 
 ## Direct Live State
 
-`direct_live_state.rs` builds the exact post-block simulation state from:
+`apply/direct_live_state.rs` builds the exact post-block simulation state from:
 
 - the processed block header and hash;
 - the processed block parent hash;
