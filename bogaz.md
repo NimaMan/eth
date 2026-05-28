@@ -31,6 +31,117 @@ Finished means:
   sizing, retry cadence, exit restrictions, stale-data thresholds, simulation
   freshness, and kill switch behavior.
 
+## Tier One Issue - Live Backtest Settlement Still Uses Alpha-Local Simulator 2026-05-28
+
+Status: active blocker. Do not treat live-backtest evidence after block
+`25188709` in run
+`alpha11-univ2-lp30-pool-update-block-hold-sweep-chain-sim-server-sim-20260526-201930Z`
+as valid until this is fixed.
+
+Problem:
+
+- The current live-backtest run is heartbeating, but it is wedged on `10`
+  submitted buys from block `25188709`.
+- Those buys expected chain-sim settlement at block `25188710`; the run is now
+  thousands of blocks ahead and repeatedly logs
+  `chain-sim submitted execution is due but exact live state block is not
+  available yet`.
+- Strategy processing is deferred with
+  `chain_sim.live_backtest.waiting_for_exact_settlement_state`, so the run is
+  live but no longer producing trustworthy post-block evidence.
+
+Evidence:
+
+- Source audit:
+  - real pre-submit simulation uses
+    `ChainServerLivePreSubmitSimulator` and calls
+    `/api/v1/eth/live/simulations/unsigned`;
+  - live-backtest chain-sim settlement still constructs an Alpha-local
+    `LiveTxSimulator` in `live_trader/runtime/execution_stack.rs`;
+  - `ChainSimSettlement` calls
+    `LiveChainSimExecutionAdapter.live_simulator().has_state_at(...)` and then
+    `simulate_submitted_order(...)`.
+- Chain-server owner-path audit:
+  - `LiveTokenRuntime` already owns a server-side `LiveTxSimulator`;
+  - `apply_loaded_block` builds and publishes the direct live block session
+    before token/pool state is updated and before block-applied events are sent;
+  - `build_direct_live_block_session` first tries to advance cached parent
+    session `B-1`, but if that cached parent hash is stale after a reorg it
+    returns an error instead of falling back to rebuild from prestate diffs;
+  - `LiveChainRuntime::apply_processed_with_gap_fill` ignores incoming processed
+    heads whose block number is `<= current`, so same-height replacement heads
+    from a reorg can be skipped;
+  - `LiveBlockProcessor` processes the block by hash but fetches prestate diffs
+    by block number, so the hash-fetched block and number-fetched diffs can
+    diverge around a reorg unless we add hash-based diff tracing or explicit
+    hash validation.
+- Running binary audit:
+  - `target/release/eth_alpha_live_backtest_trader` was built at
+    `2026-05-26 22:18:48+02`;
+  - the process for the affected run started at
+    `2026-05-26 22:19:29+02`, before the current simulator-boundary audit.
+- Reorg evidence:
+  - the canonical Reth block `25188709` hash is
+    `0x0ff1d72aacd22fea261a38491c2cc433af478b0a55306cca3559791f58f6e763`;
+  - canonical block `25188710` parents that hash;
+  - Alpha had published a local live-state frame for block `25188709` with
+    hash `0x83611fc00bb19d3f7b62deb6f16e43625c76c8ae1fc859a29b9788159a174cf9`;
+  - the local simulator rejected block `25188710` with a parent-hash mismatch
+    and never recovered the exact settlement block.
+
+Root cause:
+
+- We delegated real-live pre-submit simulation to chain-server, but not
+  live-backtest settlement.
+- Live-backtest settlement still depends on Alpha's in-process live state
+  window. A reorg or stale frame can make one exact settlement block
+  permanently unavailable, leaving submitted orders unresolved and blocking
+  later strategy processing.
+- Rebuilding/restarting the current source alone is not sufficient: the latest
+  source still contains this Alpha-local live-backtest settlement path.
+
+Required behavior:
+
+- Chain-server owns live state and `LiveTxSimulator` sessions.
+- Alpha owns strategy decisions, order intent, gas policy, and reporting.
+- Chain-server must accept canonical replacement heads and either rebuild the
+  affected exact sessions or return a structured unavailable/reorg result.
+- For live backtests, Alpha should submit a small settlement simulation request
+  to chain-server for the exact execution block. It should not maintain a
+  separate live-state simulator for normal settlement.
+- If chain-server cannot serve an exact settlement block because of a reorg,
+  Alpha must record an infrastructure settlement result with the affected order,
+  canonical block hash, local/stale hash, and retry/skip status. It must not
+  wedge the whole run indefinitely.
+
+Plan:
+
+1. Stop the affected run and mark the result set as invalid after block
+   `25188709` for review purposes.
+2. Fix chain-server live-state ownership first:
+   - do not skip same-height replacement heads;
+   - prune/rebuild direct live sessions on parent-hash mismatch;
+   - fetch prestate diffs by block hash when supported, or validate that
+     number-fetched diffs match the processed block hash before publishing.
+3. Add a chain-server live-backtest settlement endpoint that accepts the order
+   intent, submitted block, expected execution block, and route context, then
+   simulates against chain-server-owned exact state.
+4. Replace `ChainSimSettlement`'s direct
+   `LiveChainSimExecutionAdapter.live_simulator()` dependency with a
+   chain-server settlement client.
+5. Remove Alpha's normal live-backtest `LiveTxSimulator` dependency:
+   - stop spawning the live-state stream publisher in the live-backtest stack;
+   - remove local simulator wait gates from polling;
+   - move position valuation and manual-close balance checks to chain-server
+     simulation/view endpoints.
+6. Add reorg/stale-frame handling: if the requested exact block is gone or its
+   parent hash changed, settle with an explicit infrastructure state outcome
+   instead of waiting forever.
+7. Add a validation check for stale submitted reports older than a small block
+   threshold with no terminal settlement report.
+8. Rebuild and restart the live backtester only after the settlement path no
+   longer depends on Alpha-local live simulator state.
+
 ## Tier One Issue - Exact Parent Live Simulation State 2026-05-25
 
 Status: fixed in code and deployed to the current live-backtest run, but keep it
