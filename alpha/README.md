@@ -35,21 +35,21 @@ events, and persists decisions before execution.
   `tx_executor`.
 - Mempool ingestion or signal persistence; use `mempool_processor`.
 
-## Data Flow
+## Current Intended Flow
 
 ```text
-eth_chain_server LiveChainRuntime
-  -> direct processed-block feed
-  -> fetches prestate diffs for block B
-  -> builds/publishes BlockStateSession B inside chain-server LiveTxSimulator
-  -> updates live token/pool views for block B
-  -> live trader consumes /live-trading/block-frames/next for block B
-  -> live trader polls /mempool/pending-transaction-signals
-  -> strategies emit StrategyDecision / OrderIntent
-  -> chain-sim service or guarded kartal-real service
-  -> real adapter asks chain-server for exact-block unsigned tx simulation
-  -> real adapter prepares a Kartal eth_unsigned_tx request through live/trading
-  -> strategy_observations + orders + reports + positions + risk events
+reth/node publishes new execution head B
+  -> chain-server receives it
+  -> chain-server fetches block B by hash
+  -> chain-server fetches prestate diffs for the same hash
+  -> chain-server updates LiveTxSimulator session for B
+  -> chain-server updates token/pool state for B
+  -> chain-server builds/publishes LiveBlockFrame B
+  -> Alpha live backtest / Alpha real consume next frame B
+  -> strategies make decisions pinned to B/hash
+  -> chain-sim mode settles via chain-server simulation
+  -> real mode builds tx plan and submits through Kartal
+  -> Kartal validates/signs/broadcasts according to policy
 ```
 
 For real live trading, chain-server owns live state, `LiveTxSimulator`, and
@@ -58,7 +58,9 @@ Kartal submission. Alpha sends small exact-block simulation requests to
 chain-server. Chain-sim live backtests use the same boundary for order
 settlement and do not hydrate a local simulator from live-state stream frames.
 Confirmed-chain strategy inputs come from chain-server block frames, not from
-the latest pool list.
+the latest pool list. The block-frame endpoint is replayable push/long-poll,
+not a blind stream: Alpha asks for the next frame after its last processed
+block, and chain-server waits until that frame exists.
 
 `eth_alpha_live_backtest_trader` is the no-capital live runner. It must not
 become decision-active until `/live-token-tracker/status` is `live`; while warming, it records

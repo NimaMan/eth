@@ -2,7 +2,9 @@
 
 The live trader processes one loop tick in this order:
 
-1. Read the next chain-server live block frame and mempool signals.
+1. Read the next chain-server live block frame and mempool signals. The block
+   frame comes from `/api/v1/eth/live-trading/block-frames/next`, which waits
+   for or returns the next retained frame after Alpha's last processed block.
 2. Publish every block-frame pool snapshot into the execution adapter pool
    cache.
 3. Settle already-submitted executions:
@@ -56,6 +58,12 @@ Chain-sim settlement unavailability is not used to defer unrelated mempool
 signals. If chain-server cannot serve exact state for a submitted order's
 execution block, that submitted order remains pending and the next live tick
 continues processing new strategy events from the next retained block frame.
+
+The live tick is block-pinned. Chain-server has already updated its
+`LiveTxSimulator`, token state, and pool state before the frame is visible to
+Alpha. Alpha real mode may turn strategy decisions into Kartal submissions;
+chain-sim mode asks chain-server to simulate submitted orders at their exact
+target block.
 
 For chain-sim live backtests, a submitted report has
 `mined_evidence.receipt_status = live_backtest_chain_sim_submitted`. A final

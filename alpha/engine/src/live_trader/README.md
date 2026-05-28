@@ -41,17 +41,18 @@ main orchestration loop. Supporting code is grouped by responsibility:
 The intended live behavior is block-coupled:
 
 ```text
-chain-server receives execution head N
-  -> LiveBlockProcessor fetches/processes block N by block hash
-  -> LiveBlockProcessor fetches prestate diff frames for N by the same block hash
-  -> LiveChainRuntime writes processed-block cache if needed
-  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate N)
-  -> direct_live_state.rs publishes LiveBlockState N into LiveTxSimulator
-  -> block_apply.rs processes token/pool updates for N
-  -> apply_report.rs emits BlockApplied event N
-  -> Alpha consumes block N as one strategy-processing frame
-  -> strategies persist decisions, observations, intents, reports, and positions
-  -> Alpha finishes block N before moving its strategy cursor to N+1
+reth/node publishes new execution head N
+  -> chain-server receives it
+  -> chain-server fetches block N by hash
+  -> chain-server fetches prestate diffs for the same hash
+  -> chain-server updates LiveTxSimulator session for N
+  -> chain-server updates token/pool state for N
+  -> chain-server builds/publishes LiveBlockFrame N
+  -> Alpha live backtest / Alpha real consume next frame N
+  -> strategies make decisions pinned to N/hash
+  -> chain-sim mode settles via chain-server simulation
+  -> real mode builds tx plan and submits through Kartal
+  -> Kartal validates/signs/broadcasts according to policy
 ```
 
 This contract is meant to be the same for live backtest and real live trading.
@@ -63,7 +64,9 @@ Current important implementation detail:
 input. It returns the updated pool snapshots for one applied block and the
 status/progress pinned to that block. Alpha does not read
 `/api/v1/eth/live-token-tracker/pools` in the live decision path; that endpoint
-is a latest read-model surface for UI/context clients.
+is a latest read-model surface for UI/context clients. The `next` endpoint is a
+replayable push/long-poll boundary: Alpha sends its last processed block and
+chain-server returns, or waits for, the next retained frame.
 
 Live chain simulation has a second block-coupling requirement. A strategy
 decision observed at block `N` may target execution in block `N+1`; the
@@ -82,6 +85,40 @@ only live `LiveTxSimulator`; Alpha does not subscribe to live-state stream
 frames or rebuild live state locally. If exact state for `N+1` is unavailable or the
 submitted block hash no longer matches the execution block parent, settlement
 stays pending and logs an infrastructure wait rather than writing `buy_failed`.
+
+## Per-Block Logs
+
+For each live block frame consumed by Alpha at info level:
+
+- `alpha trader tick`: human-readable per-block summary. It includes
+  `live_current_block`, tracked token/pool counts, `pools_seen`,
+  `block_frame_pool_count`, mempool `signal_count`, emitted `market_events`,
+  `risk_events`, `position_monitor_events`, execution report counts, position
+  count, and `chain_sim_state_source`.
+- `pipeline_health`: structured health event for the same tick. It carries the
+  same counts in a machine-readable metrics map.
+
+At debug level:
+
+- chain-server logs `recorded alpha live block frame` with block number, block
+  hash, pool count, and token count when the frame is stored.
+- Alpha logs `alpha trader consumed live block frame` with frame event, frame
+  block, frame pool count, and last processed frame block.
+
+Upstream chain-server/live-feed logs at info level:
+
+- `block token processor profile`: per-block token processor counts and
+  timings, including transaction counts, updated/created token counts,
+  candidate routing work, pool update work, and simulation candidate counts.
+- `live token apply profile`: per-block timing for block processing, retention,
+  token apply, state update, disk cache read/write, and wall time.
+- `live token runtime applied block`: progress for each live-tail block,
+  including current block, processed counts, tracked token/pool counts, failures,
+  disk cache counts, and last token apply timing.
+
+Execution-specific logs are emitted only when work happens: chain-sim
+submission/settlement reports, real receipt reconciliation, skipped mempool
+signals, manual closes, and warnings for unavailable exact simulation state.
 
 ## Runtime Config
 

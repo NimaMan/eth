@@ -13,18 +13,18 @@ At that point chain-server has already updated:
 ## Upstream Live-Tail Data Flow
 
 ```text
-chain-server receives execution head N
-  -> LiveBlockProcessor fetches/processes block N by block hash
-  -> LiveBlockProcessor fetches prestate diff frames for N by the same block hash
-  -> LiveChainRuntime writes processed-block cache if needed
-  -> LiveTokenRuntime::apply_live_block_update(LiveBlockUpdate N)
-  -> direct_live_state.rs builds BlockStateSession N
-  -> direct_live_state.rs publishes LiveBlockState N into LiveTxSimulator
-  -> block_apply.rs processes token/pool updates for N
-  -> apply_report.rs updates progress and creates BlockApplied event N
-     with updated token/pool snapshots
-  -> chain-server records LiveBlockFrame N
-  -> Alpha sees block N through /api/v1/eth/live-trading/block-frames/next
+reth/node publishes new execution head N
+  -> chain-server receives it
+  -> chain-server fetches block N by hash
+  -> chain-server fetches prestate diffs for the same hash
+  -> chain-server updates LiveTxSimulator session for N
+  -> chain-server updates token/pool state for N
+  -> chain-server builds/publishes LiveBlockFrame N
+  -> Alpha live backtest / Alpha real consume next frame N
+  -> strategies make decisions pinned to N/hash
+  -> chain-sim mode settles via chain-server simulation
+  -> real mode builds tx plan and submits through Kartal
+  -> Kartal validates/signs/broadcasts according to policy
 ```
 
 Alpha must only treat block `N` as strategy-visible after that upstream sequence
@@ -40,6 +40,8 @@ The current API split is:
 
 - `/api/v1/eth/live-trading/block-frames/next`: alpha strategy input. This
   waits for or returns the next replayable block frame after `after_block`.
+  This is the push/long-poll boundary; Alpha does not fetch an unpinned latest
+  pool surface to discover confirmed-chain strategy events.
 - `/api/v1/eth/live-trading/block-frames/latest`: latest recorded block frame
   for supervision/debugging.
 - `/api/v1/eth/live-trading/block-frames/{block}`: replay a retained block
