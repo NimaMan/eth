@@ -3,10 +3,11 @@ use eth_alpha_store::PostgresTradingStore;
 use eth_ops_events::{emit_health, PipelineHealth, PipelineHealthStatus};
 use eyre::{Result, WrapErr};
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::wire::LiveStatusResponse;
 
+use super::constants::ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS;
 use super::support::TraderExecutionMode;
 
 pub(super) struct HeartbeatInput<'a> {
@@ -223,5 +224,26 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         .heartbeat(heartbeat_metadata.clone())
         .await
         .wrap_err("failed to write alpha trader heartbeat")?;
+    match input
+        .store
+        .mark_stale_runs(ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS)
+        .await
+    {
+        Ok(stale_runs) if stale_runs > 0 => {
+            info!(
+                stale_runs,
+                max_age_secs = ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS,
+                "marked stale alpha trader runs during heartbeat"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            warn!(
+                error = %error,
+                max_age_secs = ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS,
+                "failed to mark stale alpha trader runs during heartbeat"
+            );
+        }
+    }
     Ok(heartbeat_metadata)
 }

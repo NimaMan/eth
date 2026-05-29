@@ -242,7 +242,7 @@ async fn run(
     )
     .await?;
     let stale_runs = store
-        .mark_stale_runs(60)
+        .mark_stale_runs(ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS)
         .await
         .wrap_err("failed to mark stale alpha trader runs")?;
     let restored_runtime = restore_runtime_state(&store, &strategy_specs).await?;
