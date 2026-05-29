@@ -6,6 +6,7 @@ use eth_token::contract_analysis::{
 };
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::pnl::{AddressPoolPnlSummary, PoolPnlConservationSummary};
+use rust_decimal::Decimal;
 use eth_token::token_analytics::{
     build_historical_observations_for_token, TokenPoolCurrentObservation,
 };
@@ -13,6 +14,10 @@ use eth_token::tracking::TrackedTokenStatus;
 use serde::Serialize;
 
 use crate::ranges::{RangeIndexJob, RangeIndexState};
+
+fn decimal_to_f64(d: Decimal) -> f64 {
+    d.to_string().parse().unwrap_or(0.0)
+}
 use crate::read_models::{pool::PoolView, token_analytics::TokenNetworkView};
 
 pub mod activity;
@@ -400,7 +405,7 @@ impl TokenPoolPnlAddressView {
     ) -> Self {
         let realized_pnl_denom = summary
             .pnl_proxy_denom
-            .map(|pnl| pnl - summary.marked_token_value_denom.unwrap_or(0.0));
+            .map(|pnl| pnl - summary.marked_token_value_denom.unwrap_or_default());
         Self {
             address: summary.address,
             token_in: scale_raw_decimal(&summary.token_in_raw, token_decimals),
@@ -411,13 +416,13 @@ impl TokenPoolPnlAddressView {
             denom_cashflow_raw: summary.denom_cashflow_raw,
             native_fee_raw: summary.native_fee_raw,
             native_bribe_raw: summary.native_bribe_raw,
-            token_balance: summary.token_balance,
-            denom_cashflow: summary.denom_cashflow,
-            native_fee: summary.native_fee,
-            native_bribe: summary.native_bribe,
-            realized_pnl_denom,
-            marked_token_value_denom: summary.marked_token_value_denom,
-            pnl_proxy_denom: summary.pnl_proxy_denom,
+            token_balance: decimal_to_f64(summary.token_balance),
+            denom_cashflow: decimal_to_f64(summary.denom_cashflow),
+            native_fee: decimal_to_f64(summary.native_fee),
+            native_bribe: decimal_to_f64(summary.native_bribe),
+            realized_pnl_denom: realized_pnl_denom.map(decimal_to_f64),
+            marked_token_value_denom: summary.marked_token_value_denom.map(decimal_to_f64),
+            pnl_proxy_denom: summary.pnl_proxy_denom.map(decimal_to_f64),
             token_in_raw: summary.token_in_raw,
             token_out_raw: summary.token_out_raw,
             denom_in_raw: summary.denom_in_raw,

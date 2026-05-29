@@ -71,6 +71,19 @@ impl TokenPnlStore {
         tx.commit().await?;
         Ok(())
     }
+
+    pub async fn write_pool_aggregate_export(
+        &self,
+        run_id: &str,
+        export: &PnlPoolExport,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        upsert_pool_state(&mut tx, run_id, export).await?;
+        replace_address_positions(&mut tx, run_id, export).await?;
+        clear_movements(&mut tx, run_id, export).await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 async fn upsert_pool_state(
@@ -230,15 +243,24 @@ async fn replace_movements(
     run_id: &str,
     export: &PnlPoolExport,
 ) -> Result<()> {
+    clear_movements(tx, run_id, export).await?;
+
+    for movement in &export.movements {
+        insert_movement(tx, run_id, &export.pool_id, movement).await?;
+    }
+    Ok(())
+}
+
+async fn clear_movements(
+    tx: &mut Transaction<'_, Postgres>,
+    run_id: &str,
+    export: &PnlPoolExport,
+) -> Result<()> {
     sqlx::query("DELETE FROM token_pnl.pool_pnl_movements WHERE run_id = $1 AND pool_id = $2")
         .bind(run_id)
         .bind(&export.pool_id)
         .execute(&mut **tx)
         .await?;
-
-    for movement in &export.movements {
-        insert_movement(tx, run_id, &export.pool_id, movement).await?;
-    }
     Ok(())
 }
 

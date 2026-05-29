@@ -195,7 +195,11 @@ pub async fn launch_stats(run: &RangeIndexJob) -> LaunchStatsResponse {
 fn build_launch_stats(run_id: &str, records: &[PoolStatsRecord]) -> LaunchStatsResponse {
     let mut non_eligible_counts = BTreeMap::new();
     let mut eligible_records = Vec::new();
-    let classification_config = PoolClassificationConfig::strategy_stats();
+    let classification_config = PoolClassificationConfig {
+        require_creation_data: true,
+        require_price_history: true,
+        ..PoolClassificationConfig::default()
+    };
 
     for record in records {
         match record.strategy_classification.cohort {
@@ -541,7 +545,11 @@ mod tests {
         )
         .with_creation_data(Some(100), Some(1_700_000_000))
         .with_price_history(true);
-        classify_pool_with_config(&input, &PoolClassificationConfig::strategy_stats())
+        classify_pool_with_config(&input, &PoolClassificationConfig {
+            require_creation_data: true,
+            require_price_history: true,
+            ..PoolClassificationConfig::default()
+        })
     }
 
     fn refresh_classification(record: &mut PoolStatsRecord) {

@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -75,12 +76,12 @@ pub struct AddressPnlRow {
     pub native_bribe_raw: String,
     pub token_balance_raw: String,
     pub denom_cashflow_raw: String,
-    pub token_balance: Option<f64>,
-    pub denom_cashflow: Option<f64>,
-    pub native_fee: Option<f64>,
-    pub native_bribe: Option<f64>,
-    pub marked_token_value_denom: Option<f64>,
-    pub pnl_proxy_denom: Option<f64>,
+    pub token_balance: Option<Decimal>,
+    pub denom_cashflow: Option<Decimal>,
+    pub native_fee: Option<Decimal>,
+    pub native_bribe: Option<Decimal>,
+    pub marked_token_value_denom: Option<Decimal>,
+    pub pnl_proxy_denom: Option<Decimal>,
     pub first_block: Option<i64>,
     pub latest_block: Option<i64>,
     pub movement_count: i64,

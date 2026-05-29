@@ -601,7 +601,11 @@ impl PoolView {
             classify_pool_with_config(&classification_input, &PoolClassificationConfig::default());
         let strategy_classification = classify_pool_with_config(
             &classification_input,
-            &PoolClassificationConfig::strategy_stats(),
+            &PoolClassificationConfig {
+                require_creation_data: true,
+                require_price_history: true,
+                ..PoolClassificationConfig::default()
+            },
         );
         let derived_liquidity_removal = matches!(
             pool_classification.eligible_outcome,

@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,12 +47,12 @@ pub struct PnlAddressPositionExport {
     pub movement_count: u64,
     pub token_balance_raw: String,
     pub denom_cashflow_raw: String,
-    pub token_balance: f64,
-    pub denom_cashflow: f64,
-    pub native_fee: f64,
-    pub native_bribe: f64,
-    pub marked_token_value_denom: Option<f64>,
-    pub pnl_proxy_denom: Option<f64>,
+    pub token_balance: Decimal,
+    pub denom_cashflow: Decimal,
+    pub native_fee: Decimal,
+    pub native_bribe: Decimal,
+    pub marked_token_value_denom: Option<Decimal>,
+    pub pnl_proxy_denom: Option<Decimal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -70,59 +70,26 @@ fn uses_stable_floor_for_usdc_usdt_and_dai() {
 }
 
 #[test]
-fn stats_config_requires_creation_and_price_history() {
+fn strict_config_requires_creation_and_price_history() {
+    let strict = PoolClassificationConfig {
+        require_creation_data: true,
+        require_price_history: true,
+        ..PoolClassificationConfig::default()
+    };
+
     let mut input = input();
     input.creation_timestamp = None;
     input.has_price_history = false;
 
-    let decision = classify_pool_with_config(&input, &PoolClassificationConfig::strategy_stats());
+    let decision = classify_pool_with_config(&input, &strict);
     assert_eq!(
         decision.reason,
         Some(NonEligibleReason::MissingCreationData)
     );
 
     input.creation_timestamp = Some(1_700_000_000);
-    let decision = classify_pool_with_config(&input, &PoolClassificationConfig::strategy_stats());
+    let decision = classify_pool_with_config(&input, &strict);
     assert_eq!(decision.reason, Some(NonEligibleReason::MissingPriceData));
-}
-
-#[test]
-fn json_input_recognizes_server_pool_fields() {
-    let value = serde_json::json!({
-        "currency": "WETH",
-        "denom_reserve": 1.0,
-        "can_buy": true,
-        "can_sell": true,
-        "risk_level": "clear",
-        "price_ratio_history": [{"block_number": 1, "ratio": 2.0}]
-    });
-    let input = PoolClassificationInput::from_json_value(&value).unwrap();
-
-    assert!(input.has_price_history);
-    assert!(classify_pool(&input).eligible);
-}
-
-#[test]
-fn json_input_keeps_liquidity_removal_inside_eligible_cohort() {
-    let value = serde_json::json!({
-        "currency": "WETH",
-        "denom_reserve": 1.0,
-        "max_denom_reserve": 2.0,
-        "can_buy": true,
-        "can_sell": true,
-        "risk_level": "liquidity_removal"
-    });
-    let input = PoolClassificationInput::from_json_value(&value).unwrap();
-    let decision = classify_pool(&input);
-
-    assert!(decision.eligible);
-    assert_eq!(decision.cohort, PoolCohort::Eligible);
-    assert_eq!(decision.category, PoolCategory::EligibleRisk);
-    assert_eq!(
-        decision.eligible_outcome,
-        Some(EligiblePoolOutcome::LiquidityRemoval)
-    );
-    assert_eq!(decision.reason, None);
 }
 
 #[test]

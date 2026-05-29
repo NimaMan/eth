@@ -15,6 +15,7 @@ eth_ops_events = { path = "../eth_ops_events" }
 eth_pool_classification = { path = "../alpha/pool_classification" }
 eth_price = { path = "../eth_price" }
 eth_token = { path = "../eth_token" }
+rust_decimal.workspace = true
 reth_chain_query = { path = "../reth_chain_query" }
 eth_risk_atlas = { path = "../risk_atlas" }
 tx_processor = { path = "../tx_processor" }

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use alloy_primitives::{Address, B256, U256};
+use rust_decimal::{Decimal, MathematicalOps};
 use serde::{Deserialize, Serialize};
 use tx_processor::ProcessedTransaction;
 
@@ -589,12 +590,13 @@ impl PoolPnlTracker {
         );
         let native_fee = scaled_units(position.native_fee_raw, 18);
         let native_bribe = scaled_units(position.native_bribe_raw, 18);
-        let marked_token_value_denom =
-            mark_price_denom_per_token.map(|price| token_balance * price);
+        let marked_token_value_denom = mark_price_denom_per_token
+            .and_then(|price| Decimal::try_from(price).ok())
+            .map(|price| token_balance * price);
         let native_costs = if self.denom_tracks_native_eth() {
             native_fee + native_bribe
         } else {
-            0.0
+            Decimal::ZERO
         };
         let pnl_proxy_denom =
             marked_token_value_denom.map(|marked| denom_cashflow + marked - native_costs);
@@ -642,16 +644,16 @@ pub struct PoolPnlConservationTotals {
 pub struct PoolPnlConservationSummary {
     pub token_delta_raw: String,
     pub denom_delta_raw: String,
-    pub token_delta: f64,
-    pub denom_delta: f64,
+    pub token_delta: Decimal,
+    pub denom_delta: Decimal,
     pub token_is_conserved: bool,
     pub denom_is_conserved: bool,
     pub token_transfer_count: u64,
     pub denom_transfer_count: u64,
     pub pool_token_delta_raw: String,
     pub pool_denom_delta_raw: String,
-    pub pool_token_delta: f64,
-    pub pool_denom_delta: f64,
+    pub pool_token_delta: Decimal,
+    pub pool_denom_delta: Decimal,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -730,12 +732,12 @@ pub struct AddressPoolPnlSummary {
     pub denom_cashflow_raw: String,
     pub native_fee_raw: String,
     pub native_bribe_raw: String,
-    pub token_balance: f64,
-    pub denom_cashflow: f64,
-    pub native_fee: f64,
-    pub native_bribe: f64,
-    pub marked_token_value_denom: Option<f64>,
-    pub pnl_proxy_denom: Option<f64>,
+    pub token_balance: Decimal,
+    pub denom_cashflow: Decimal,
+    pub native_fee: Decimal,
+    pub native_bribe: Decimal,
+    pub marked_token_value_denom: Option<Decimal>,
+    pub pnl_proxy_denom: Option<Decimal>,
     pub token_in_raw: String,
     pub token_out_raw: String,
     pub denom_in_raw: String,
@@ -832,21 +834,20 @@ fn signed_raw_string(incoming: U256, outgoing: U256) -> String {
     }
 }
 
-fn scaled_signed_balance(incoming: U256, outgoing: U256, decimals: u8) -> f64 {
-    let amount = if incoming >= outgoing {
+fn scaled_signed_balance(incoming: U256, outgoing: U256, decimals: u8) -> Decimal {
+    if incoming >= outgoing {
         scaled_units(incoming - outgoing, decimals)
     } else {
         -scaled_units(outgoing - incoming, decimals)
-    };
-    if amount == -0.0 {
-        0.0
-    } else {
-        amount
     }
 }
 
-fn scaled_units(value: U256, decimals: u8) -> f64 {
-    value.to_string().parse::<f64>().unwrap_or(0.0) / 10_f64.powi(i32::from(decimals))
+fn scaled_units(value: U256, decimals: u8) -> Decimal {
+    let raw = value.to_string().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let divisor = Decimal::TEN
+        .checked_powu(u64::from(decimals))
+        .unwrap_or(Decimal::MAX);
+    raw.checked_div(divisor).unwrap_or(Decimal::ZERO)
 }
 
 fn normalize_address(value: impl AsRef<str>) -> String {
@@ -868,6 +869,8 @@ fn hash_string(hash: &B256) -> String {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{address, b256};
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
     use tx_processor::tx_processor::data_models::trace_models::InternalTransaction;
     use tx_processor::tx_processor::data_models::ERC20TransferEvent;
     use tx_processor::tx_processor::data_models::TransactionFees;
@@ -1093,10 +1096,13 @@ mod tests {
             .find(|summary| summary.address == address_string(&FEE_PAYER))
             .expect("fee payer summary");
 
-        assert_eq!(summary.denom_cashflow, -1.0);
-        assert!((summary.native_fee - 0.00000000000021).abs() < 1e-18);
-        assert!((summary.native_bribe - 0.000000000000000007).abs() < 1e-21);
-        assert!((summary.pnl_proxy_denom.expect("pnl proxy") - -1.00000000000021).abs() < 1e-15);
+        assert_eq!(summary.denom_cashflow, Decimal::from(-1));
+        assert_eq!(summary.native_fee, Decimal::from_str("0.00000000000021").unwrap());
+        assert_eq!(summary.native_bribe, Decimal::from_str("0.000000000000000007").unwrap());
+        assert_eq!(
+            summary.pnl_proxy_denom.expect("pnl proxy"),
+            Decimal::from_str("-1.000000000000210007").unwrap()
+        );
     }
 
     fn tx() -> ProcessedTransaction {

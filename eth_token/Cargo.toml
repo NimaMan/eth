@@ -8,6 +8,7 @@ workspace = ".."
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }
 eyre.workspace = true
+rust_decimal.workspace = true
 indexmap = "2"
 reth_chain_query = { path = "../reth_chain_query" }
 serde.workspace = true

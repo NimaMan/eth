@@ -2,6 +2,7 @@
 
 pub mod balancer;
 pub mod base;
+pub mod classification;
 pub mod curve;
 pub mod data_models;
 pub mod pancakeswap;
