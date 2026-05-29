@@ -5,6 +5,7 @@ pub(super) const LEGACY_MINED_POOL_RISK_SOURCE: &str = "mined_pool_update";
 pub(super) const LEGACY_RETH_MINED_POOL_RISK_SOURCE: &str = "reth_mined_pool_update";
 pub(super) const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 pub(super) const ALPHA_TRADER_LOG_DIR_CONFIG: &str = "ALPHA_TRADER_LOG_DIR";
+pub(super) const ALPHA_TRADER_SESSION_DIR_CONFIG: &str = "ALPHA_TRADER_SESSION_DIR";
 pub(super) const ALPHA_LIVE_MEMPOOL_SINCE_DAYS_CONFIG: &str = "ALPHA_LIVE_MEMPOOL_SINCE_DAYS";
 pub(super) const ALPHA_LIVE_SIGNAL_LIMIT_CONFIG: &str = "ALPHA_LIVE_SIGNAL_LIMIT";
 pub(super) const CHAIN_SERVER_BIND_CONFIG: &str = "CHAIN_SERVER_BIND";
@@ -12,6 +13,8 @@ pub(super) const RETH_DATADIR_CONFIG: &str = "RETH_DATADIR";
 pub(super) const RETH_HTTP_RPC_CONFIG: &str = "RETH_HTTP_RPC";
 pub(super) const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/logs/alpha_trader";
+pub(super) const DEFAULT_ALPHA_TRADER_SESSION_DIR: &str =
+    "/home/nima/code/crypto/blockchains/eth/.state/alpha_trader_sessions";
 pub(super) const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5004";
 pub(super) const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 pub(super) const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";

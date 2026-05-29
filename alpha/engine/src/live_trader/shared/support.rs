@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use alloy_primitives::U256;
-use chrono::Utc;
 use eth_alpha_core::{
     amount::Amount, execution::ExecutionReport, ids::TokenPoolId, market::PoolSnapshot,
     risk::RiskEvent,
@@ -47,7 +46,7 @@ pub(super) fn init_alpha_trader_ops_events(
     Ok(())
 }
 
-fn sanitize_path_segment(value: &str) -> String {
+pub(super) fn sanitize_path_segment(value: &str) -> String {
     let sanitized = value
         .trim()
         .chars()
@@ -413,7 +412,10 @@ fn parse_shared_config(contents: &str) -> HashMap<String, String> {
     values
 }
 
-fn optional_shared_config_value(config: &HashMap<String, String>, key: &str) -> Option<String> {
+pub(super) fn optional_shared_config_value(
+    config: &HashMap<String, String>,
+    key: &str,
+) -> Option<String> {
     config
         .get(key)
         .map(|value| value.trim())
@@ -471,11 +473,6 @@ pub(super) fn parse_eth_decimal_to_wei(value: &str, label: &str) -> Result<U256>
 
 pub(super) fn resolve_database_url(config: &HashMap<String, String>) -> Result<String> {
     required_shared_config_value(config, ALPHA_DATABASE_CONFIG_KEY)
-}
-
-pub(super) fn default_run_id() -> String {
-    let stamp = Utc::now().format("%Y%m%d-%H%M%SZ");
-    format!("alpha-trader-{stamp}-pid-{}", std::process::id())
 }
 
 #[cfg(unix)]

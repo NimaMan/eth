@@ -50,6 +50,8 @@ mod risk_annotation;
 mod run_metadata;
 #[path = "startup/run_record.rs"]
 mod run_record;
+#[path = "startup/run_session.rs"]
+mod run_session;
 #[path = "startup/startup_log.rs"]
 mod startup_log;
 #[path = "strategy/definition.rs"]
@@ -86,6 +88,7 @@ use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
 use run_metadata::live_gas_policy_run_metadata_json;
 use run_record::{record_alpha_trader_run_start, RunStartRecord};
+use run_session::{resolve_alpha_trader_run_session, RunSessionInput};
 use startup_log::{log_alpha_trader_start, StartupLogInput};
 use strategy::build_strategy_specs;
 use strategy_setup::install_live_strategies;
@@ -191,8 +194,15 @@ async fn run(
         None
     };
     let observation_strategy_name = observation_strategy_name(&strategy_specs);
+    let run_session = resolve_alpha_trader_run_session(RunSessionInput {
+        explicit_run_id: args.run_id.as_deref(),
+        shared_config: &shared_config,
+        execution_mode,
+        strategy_set: args.strategy_set.as_deref(),
+        observation_strategy_name: &observation_strategy_name,
+    })?;
     let database_url = resolve_database_url(&shared_config)?;
-    let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
+    let run_id = run_session.run_id().to_string();
     let process_started_at = Utc::now();
     let process_started_at_text = process_started_at.to_rfc3339();
     let process_started_at_unix_secs = process_started_at.timestamp();
@@ -226,6 +236,8 @@ async fn run(
             single_min_liquidity_eth: &single_min_liquidity_eth,
             single_min_liquidity_usd: &single_min_liquidity_usd,
             gas_policy_metadata,
+            run_session_source: run_session.source().label(),
+            run_session_path: run_session.path().map(|path| path.display().to_string()),
         },
     )
     .await?;
@@ -371,6 +383,9 @@ async fn run(
                 )
                 .await?;
                 if should_stop {
+                    if let Err(error) = run_session.mark_finished("stopped") {
+                        warn!(error = %error, "failed to mark alpha trader run session stopped");
+                    }
                     break;
                 }
                 continue;
@@ -741,6 +756,9 @@ async fn run(
                 .mark_stopped("completed", heartbeat_metadata)
                 .await
                 .wrap_err("failed to mark alpha trader run completed")?;
+            if let Err(error) = run_session.mark_finished("completed") {
+                warn!(error = %error, "failed to mark alpha trader run session completed");
+            }
             break;
         }
         tokio::select! {
@@ -764,6 +782,9 @@ async fn run(
                     )
                     .await
                     .wrap_err("failed to mark alpha trader run stopped")?;
+                if let Err(error) = run_session.mark_finished("stopped") {
+                    warn!(error = %error, "failed to mark alpha trader run session stopped");
+                }
                 break;
             }
         }

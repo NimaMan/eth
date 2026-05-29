@@ -28,6 +28,8 @@ pub(super) struct RunStartRecord<'a> {
     pub(super) single_min_liquidity_eth: &'a Option<String>,
     pub(super) single_min_liquidity_usd: &'a Option<String>,
     pub(super) gas_policy_metadata: Value,
+    pub(super) run_session_source: &'a str,
+    pub(super) run_session_path: Option<String>,
 }
 
 pub(super) async fn record_alpha_trader_run_start(
@@ -60,6 +62,10 @@ pub(super) async fn record_alpha_trader_run_start(
                 "strategy_runtime": STRATEGY_RUNTIME,
                 "observation_strategy_name": record.observation_strategy_name,
                 "execution_model": record.execution_mode.execution_model(),
+                "run_session": {
+                    "source": record.run_session_source,
+                    "path": record.run_session_path,
+                },
                 "entry_enabled": !record.args.disable_entry,
                 "kartal": if let Some(real_args) = record.real_args {
                     json!({

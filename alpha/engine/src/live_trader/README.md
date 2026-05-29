@@ -138,10 +138,18 @@ The normal live trader service path reads live settings from the shared root
   the observed dependency tx priority fee for public tail-entry buys.
 - `ALPHA_LIVE_TAIL_ENTRY_MAX_FEE_BUFFER_BPS`: base-fee buffer added to the
   selected public tail-entry max fee.
+- `ALPHA_TRADER_SESSION_DIR`: optional directory for code-owned live run
+  session files. Defaults to
+  `/home/nima/code/crypto/blockchains/eth/.state/alpha_trader_sessions`.
 
-The CLI flags `--mempool-since-days` and `--signal-limit` are explicit operator
-overrides only. The checked-in systemd services do not set separate copies of
-these values.
+The CLI flags `--mempool-since-days`, `--signal-limit`, and `--run-id` are
+explicit operator overrides only. The checked-in systemd services do not pass
+`--run-id`. When no run id is provided, Alpha creates a semantic run id from the
+execution mode and strategy, writes it to the session directory, and reuses it
+only while the session remains active. A clean stop marks the session stopped so
+the next service start creates a fresh run id. A crash leaves the session active,
+so systemd auto-restart continues the same run instead of splitting positions,
+receipts, and reports across multiple dashboard runs.
 
 ## Real Receipt Reconciliation
 

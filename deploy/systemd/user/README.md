@@ -24,13 +24,21 @@ against the chain-server API instead of starting a second chain-server process.
 Backtests are intentionally not systemd services here. They are on-demand
 historical jobs from `alpha/backtest` and must stay simulator-only.
 
-Mutable run arguments live in `eth-alpha-live-backtest.env` and
-`eth-alpha-live-real-trading.env`; the service files stay stable across restarts.
+Mutable strategy and execution arguments live in `eth-alpha-live-backtest.env`
+and `eth-alpha-live-real-trading.env`; the service files stay stable across
+restarts.
 For the first public real-executor run, `eth-alpha-live-real-trading.env` targets
 `alpha11-univ2-lp30-pool-update-block-hold16`; the strategy spec sets the
 `0.005 ETH` buy size and `0.555 ETH` initial bankroll. Buys consume that
 bankroll; confirmed sells replenish it; profits can be redeployed. The service
 does not pass entry-count or bankroll overrides on the command line.
+
+The user units do not set `ALPHA_RUN_ID` and do not pass `--run-id`. Live
+backtest and real-trading run ids are owned by the trader binaries. Each process
+creates a semantic run id from mode and strategy, stores the active session under
+`ALPHA_TRADER_SESSION_DIR` or the default `.state/alpha_trader_sessions`, and
+reuses that id only for crash auto-restarts. A clean stop or restart marks the
+session stopped, so the next service start becomes a new live run.
 
 Kartal still enforces infrastructure safety rails: signer address, target
 address, selector allowlist, per-transaction value, gas, fee, simulation
