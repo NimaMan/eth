@@ -63,6 +63,10 @@ pub struct LpApprovalSignal {
     pub previous_allowance: Option<f64>,
     pub approver_address: String,
     pub creator_address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
 }
 
 pub struct LpApprovalDetector {
@@ -126,6 +130,8 @@ impl LpApprovalDetector {
             previous_allowance: None,
             approver_address: approver.clone(),
             creator_address: approver.clone(),
+            detected_at_head_block_number: None,
+            detected_at_head_block_hash: None,
         };
 
         Some(signal)

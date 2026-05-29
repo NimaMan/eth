@@ -43,12 +43,14 @@ It reads these backend tables:
 
 - `alpha_trading.backtest_result_sets`
 - `alpha_trading.backtest_result_set_runs`
+- `alpha_trading.trader_runs`
 - `alpha_trading.trades`
 - `alpha_trading.trade_events`
 - `alpha_trading.trade_snapshots`
 - `alpha_trading.positions`
 - `alpha_trading.order_intents`
 - `alpha_trading.strategy_decisions`
+- `alpha_trading.strategy_observations`
 - `alpha_trading.risk_events`
 - `risk_atlas_observations` for historical market-buy provenance checks.
 
@@ -85,7 +87,9 @@ The validator runs in this order:
 
 1. Load result-set metadata, scoped strategy summaries, and trade samples.
 2. Validate result-set identity and signal scope before treating PnL as usable.
-3. Validate strategy decision timing and signal provenance.
+3. Validate strategy decision timing and signal provenance, including the rule
+   that live mempool risks use detector-time head blocks rather than Alpha
+   block-frame fallbacks.
 4. Validate execution replay assumptions and persisted simulation outputs.
 5. Validate lifecycle ordering and trade/position rollups.
 6. Validate accounting from backend persisted fills and gas.
@@ -146,5 +150,12 @@ cargo check -p eth_alpha_lab
 - Snapshot checks should detect stale aggregate rollups and impossible timeline
   ordering.
 - A known-bad historical result should fail in a specific, explainable way.
+- Live chain-sim results must prove they used block-frame inputs and the
+  chain-server-owned `LiveTxSimulator`; Alpha-local simulator or old
+  settlement-wait deferral artifacts are validation failures.
+- Chain-sim live backtests intentionally do not model real mempool tail-entry
+  submission. `trading_enabled` mempool signals may be primed or explicitly
+  ignored with the documented pool-update entry-path reason; real tail-entry
+  ordering is validated only when tail-entry rows exist.
 - Do not add strategy-quality, distribution, or profitability attractiveness
   checks here. Add those to `strategy_assessment` instead.

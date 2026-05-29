@@ -77,6 +77,8 @@ pub async fn build_position_approval_signals(
                 previous_allowance: None,
                 approver_address: approver.clone(),
                 creator_address: context.owner,
+                detected_at_head_block_number: None,
+                detected_at_head_block_hash: None,
             }))
         })
         .collect()

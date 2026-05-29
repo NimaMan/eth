@@ -15,6 +15,10 @@ Route names must describe the owner of the data:
   Alpha consumes `/live-trading/block-frames/next` for block-pinned
   confirmed-chain strategy input.
 - `mempool/pending-transaction-signals`: speculative public-mempool signal rows.
+  These rows expose detector-time chain-head fields
+  (`detected_at_head_block_number` and optional hash); consumers must use those fields for
+  pending-signal observed-block semantics instead of substituting the current
+  live-trading block frame.
 
 Do not add new generic `live/state`, `live/updates`, `live/simulations`, or
 `mempool/signals` routes. Those names hide whether the caller is reading token

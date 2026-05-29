@@ -56,6 +56,8 @@ Reth IPC pending tx
            -> drop after arrival accounting
   -> simulator delegates exact live replay and pool probes to chain-server LiveTxSimulator
   -> signal_detector emits semantic signal only after required context/checks pass
+     and stamps the detector-time chain head block, plus hash when available,
+     on the signal
   -> Postgres rows + semantic signal logs + ZMQ tcp://127.0.0.1:5556
 ```
 
@@ -127,6 +129,11 @@ Failure isolation rules:
 - ZMQ/log output is diagnostic; persisted `live_trading.signal_events` rows are
   the source of truth for token-server, ASENA, and alpha. Typed detail tables
   hang off `signal_id` for analytics.
+- Every public pending-tx signal must persist `detected_at_head_block_number`.
+  When the detector has the matching state hash it also persists
+  `detected_at_head_block_hash`. Downstream strategies use
+  that detector-time chain head as the risk `observed_block`; they must not
+  replace it with the later block frame they happen to be consuming.
 
 ## Live Persistence Rule
 

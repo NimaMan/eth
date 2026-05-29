@@ -15,7 +15,8 @@ Overview
 
 Tables
 - `live_trading.signal_events`: common public fields, payload JSON, dedupe key,
-  token, pool identifier, protocol, actor/subject, timestamps, and severity.
+  token, pool identifier, protocol, actor/subject, timestamps, detector-time
+  chain head (`detected_at_head_block_number` and optional hash), and severity.
 - `live_trading.trading_enabled_details`: buy/sell tax at signal time.
 - `live_trading.sell_blocked_details`: can-buy/can-sell, tax values, failure
   reason, and confidence.
@@ -31,6 +32,11 @@ Tables
 
 `signal_events` is the source of truth. Logs and ZMQ notifications are
 diagnostic mirrors.
+
+The detector-time chain head fields are part of the public wire contract. Alpha
+uses them as pending-signal observed-block evidence; the current live block
+frame is not a valid substitute because the signal may have been detected
+before the frame currently being consumed.
 
 ## Mempool Arrival Time Writing
 

@@ -115,6 +115,88 @@ pub(super) async fn live_chain_sim_block_alignment_check(
     .await
 }
 
+pub(super) async fn live_chain_sim_block_hash_evidence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "live_chain_sim_block_hash_evidence",
+        Verdict::Fail,
+        "live chain-sim execution events retain exact block hashes",
+        "live chain-sim execution events missing valid mined-evidence block hash",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_events te
+        JOIN alpha_trading.trades t ON t.trade_id = te.trade_id
+        JOIN alpha_trading.trader_runs tr ON tr.run_id = te.run_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND tr.mode = 'chain-sim'
+          AND te.status IN ('submitted', 'confirmed', 'failed', 'cancelled')
+          AND COALESCE(te.payload#>>'{mined_evidence,receipt_status}', '') IN (
+              'live_backtest_chain_sim_submitted',
+              'live_backtest_chain_sim'
+          )
+          AND COALESCE(te.payload#>>'{mined_evidence,block_hash}', '') !~ '^0x[0-9a-fA-F]{64}$'
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn chain_sim_real_execution_artifacts_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "chain_sim_has_no_real_execution_artifacts",
+        Verdict::Fail,
+        "chain-sim backtests contain no real tx hashes or Kartal submission artifacts",
+        "chain-sim backtest execution rows with real tx/Kartal artifacts",
+        r#"
+        WITH chain_sim_trades AS (
+            SELECT t.trade_id, t.run_id
+            FROM alpha_trading.trades t
+            JOIN alpha_trading.trader_runs tr ON tr.run_id = t.run_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND tr.mode = 'chain-sim'
+        ),
+        violations AS (
+            SELECT 1
+            FROM alpha_trading.trade_events te
+            JOIN chain_sim_trades t
+              ON t.trade_id = te.trade_id
+             AND t.run_id = te.run_id
+            WHERE NULLIF(te.tx_hash, '') IS NOT NULL
+               OR NULLIF(te.payload->>'tx_hash', '') IS NOT NULL
+               OR lower(COALESCE(te.error, '')) LIKE '%kartal%'
+            UNION ALL
+            SELECT 1
+            FROM alpha_trading.execution_reports er
+            JOIN chain_sim_trades t
+              ON t.trade_id = er.trade_id
+             AND t.run_id = er.run_id
+            WHERE NULLIF(er.tx_hash, '') IS NOT NULL
+               OR NULLIF(er.payload->>'tx_hash', '') IS NOT NULL
+               OR lower(COALESCE(er.error, '')) LIKE '%kartal%'
+        )
+        SELECT count(*)
+        FROM violations
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn pre_submit_simulation_state_ready_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -188,6 +270,52 @@ pub(super) async fn terminal_report_presence_check(
     .await
 }
 
+pub(super) async fn terminal_gas_policy_fee_evidence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "terminal_reports_have_gas_policy_fee_evidence",
+        Verdict::Fail,
+        "terminal execution reports retain gas-policy fee or rejection evidence",
+        "terminal execution reports missing selected fee evidence or rejection guard evidence",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_events te
+        JOIN alpha_trading.trades t ON t.trade_id = te.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND te.status IN ('confirmed', 'failed', 'cancelled')
+          AND te.gas_policy_action IS NOT NULL
+          AND (
+              NULLIF(te.gas_policy_status, '') IS NULL
+              OR (
+                  te.gas_policy_status = 'selected'
+                  AND (
+                      NULLIF(te.payload#>>'{mined_evidence,selected_max_fee_per_gas_wei}', '') IS NULL
+                      OR NULLIF(te.payload#>>'{mined_evidence,selected_max_priority_fee_per_gas_wei}', '') IS NULL
+                      OR NULLIF(te.gas_policy_profile, '') IS NULL
+                      OR NULLIF(te.gas_rank_source, '') IS NULL
+                  )
+              )
+              OR (
+                  te.gas_policy_status LIKE 'rejected:%'
+                  AND (
+                      NULLIF(te.gas_policy_guard, '') IS NULL
+                      OR COALESCE(jsonb_array_length(te.gas_policy_profiles), 0) = 0
+                  )
+              )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn confirmed_reports_have_simulated_outputs_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -224,6 +352,50 @@ pub(super) async fn confirmed_reports_have_simulated_outputs_check(
     .await
 }
 
+pub(super) async fn chain_sim_tail_entry_absence_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "chain_sim_has_no_mempool_tail_entry_orders",
+        Verdict::Fail,
+        "chain-sim live backtests do not submit mempool tail-entry orders",
+        "chain-sim backtest rows still using the mempool tail-entry order path",
+        r#"
+        WITH chain_sim_runs AS (
+            SELECT rsr.run_id
+            FROM alpha_trading.backtest_result_set_runs rsr
+            JOIN alpha_trading.trader_runs tr ON tr.run_id = rsr.run_id
+            WHERE rsr.result_set_id = $1
+              AND tr.mode = 'chain-sim'
+        ),
+        violations AS (
+            SELECT 1
+            FROM alpha_trading.order_intents oi
+            JOIN chain_sim_runs csr ON csr.run_id = oi.run_id
+            WHERE ($2::text IS NULL OR oi.strategy_name = $2)
+              AND oi.side = 'buy'
+              AND oi.reason_code LIKE 'entry.tail_after_enabling_tx%'
+            UNION ALL
+            SELECT 1
+            FROM alpha_trading.trade_events te
+            JOIN chain_sim_runs csr ON csr.run_id = te.run_id
+            JOIN alpha_trading.trades t ON t.trade_id = te.trade_id
+            WHERE ($2::text IS NULL OR t.strategy_name = $2)
+              AND te.gas_policy_action = 'tail_entry_buy'
+        )
+        SELECT count(*)
+        FROM violations
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn tail_entry_ordering_evidence_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -251,6 +423,61 @@ pub(super) async fn tail_entry_ordering_evidence_check(
               OR (
                   NULLIF(te.payload#>>'{mined_evidence,gas_policy_dependency_priority_fee_wei}', '') IS NULL
                   AND NULLIF(te.payload#>>'{mined_evidence,gas_policy_dependency_gas_price_wei}', '') IS NULL
+              )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn tail_entry_priority_undercut_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "execution_replay",
+        "tail_entry_buy_priority_undercuts_dependency",
+        Verdict::Fail,
+        "tail-entry buy priority fee is below the dependency priority fee by policy",
+        "tail-entry buy events whose selected priority fee does not undercut the dependency",
+        r#"
+        WITH cfg AS (
+            SELECT COALESCE(
+                       NULLIF(config#>>'{gas_policy,tail_entry_priority_undercut_wei}', '')::numeric,
+                       0
+                   ) AS undercut_wei
+            FROM alpha_trading.backtest_result_sets
+            WHERE result_set_id = $1
+        ),
+        tail_events AS (
+            SELECT NULLIF(te.payload#>>'{mined_evidence,selected_max_priority_fee_per_gas_wei}', '')::numeric AS selected_priority_wei,
+                   NULLIF(te.payload#>>'{mined_evidence,gas_policy_dependency_priority_fee_wei}', '')::numeric AS dependency_priority_wei
+            FROM alpha_trading.trade_events te
+            JOIN alpha_trading.backtest_result_set_runs rsr
+              ON rsr.run_id = te.run_id
+             AND rsr.result_set_id = $1
+            JOIN alpha_trading.trades t
+              ON t.trade_id = te.trade_id
+            WHERE ($2::text IS NULL OR t.strategy_name = $2)
+              AND te.gas_policy_action = 'tail_entry_buy'
+        )
+        SELECT count(*)
+        FROM tail_events, cfg
+        WHERE dependency_priority_wei IS NOT NULL
+          AND (
+              selected_priority_wei IS NULL
+              OR (
+                  cfg.undercut_wei > 0
+                  AND dependency_priority_wei >= cfg.undercut_wei
+                  AND selected_priority_wei > dependency_priority_wei - cfg.undercut_wei
+              )
+              OR (
+                  cfg.undercut_wei <= 0
+                  AND selected_priority_wei >= dependency_priority_wei
               )
           )
         "#,
@@ -331,7 +558,10 @@ pub(super) async fn tail_entry_intents_have_exact_vault_evidence_check(
 
 #[derive(Clone, Copy, Debug, Default)]
 struct TailEntryCoverage {
+    chain_sim_runs: i64,
     trading_enabled_signals: i64,
+    ignored_trading_enabled_observations: i64,
+    ignored_trading_enabled_with_skip_reason: i64,
     with_mempool_entry_evidence: i64,
     exact_vault_eligible_signals: i64,
     tail_entry_intents: i64,
@@ -354,11 +584,35 @@ pub(super) async fn tail_entry_coverage_check(
             FROM alpha_trading.backtest_result_set_runs
             WHERE result_set_id = $1
         ),
+        chain_sim_runs AS (
+            SELECT sr.run_id
+            FROM scoped_runs sr
+            JOIN alpha_trading.trader_runs tr ON tr.run_id = sr.run_id
+            WHERE tr.mode = 'chain-sim'
+        ),
         trading_signals AS (
             SELECT re.*
             FROM alpha_trading.risk_events re
             JOIN scoped_runs sr ON sr.run_id = re.run_id
             WHERE re.kind = 'trading_enabled'
+        ),
+        ignored_trading_observations AS (
+            SELECT so.*
+            FROM alpha_trading.strategy_observations so
+            JOIN chain_sim_runs csr ON csr.run_id = so.run_id
+            WHERE so.event_source = 'mempool_signal'
+              AND so.decision = 'ignored'
+              AND COALESCE(so.payload#>>'{extra,signal_type}', so.payload#>>'{signal,signal_type}', '') = 'trading_enabled'
+              AND (
+                  $2::text IS NULL
+                  OR EXISTS (
+                      SELECT 1
+                      FROM alpha_trading.trades t
+                      WHERE t.result_set_id = $1
+                        AND t.run_id = so.run_id
+                        AND t.strategy_name = $2
+                  )
+              )
         ),
         tail_intents AS (
             SELECT oi.*
@@ -378,7 +632,16 @@ pub(super) async fn tail_entry_coverage_check(
               AND te.gas_policy_action = 'tail_entry_buy'
         )
         SELECT
+            (SELECT count(*) FROM chain_sim_runs) AS chain_sim_runs,
             (SELECT count(*) FROM trading_signals) AS trading_enabled_signals,
+            (SELECT count(*) FROM ignored_trading_observations) AS ignored_trading_enabled_observations,
+            (
+                SELECT count(*)
+                FROM ignored_trading_observations
+                WHERE COALESCE(payload#>>'{extra,reason_code}', '') = 'chain_sim.live_backtest.skip_mempool_trading_enabled'
+                  AND COALESCE(payload#>>'{extra,execution_mode}', '') = 'chain-sim'
+                  AND COALESCE(payload#>>'{extra,entry_path}', '') = 'pool_update'
+            ) AS ignored_trading_enabled_with_skip_reason,
             (
                 SELECT count(*)
                 FROM trading_signals
@@ -408,7 +671,12 @@ pub(super) async fn tail_entry_coverage_check(
     .await?;
 
     let coverage = TailEntryCoverage {
+        chain_sim_runs: row.try_get("chain_sim_runs")?,
         trading_enabled_signals: row.try_get("trading_enabled_signals")?,
+        ignored_trading_enabled_observations: row
+            .try_get("ignored_trading_enabled_observations")?,
+        ignored_trading_enabled_with_skip_reason: row
+            .try_get("ignored_trading_enabled_with_skip_reason")?,
         with_mempool_entry_evidence: row.try_get("with_mempool_entry_evidence")?,
         exact_vault_eligible_signals: row.try_get("exact_vault_eligible_signals")?,
         tail_entry_intents: row.try_get("tail_entry_intents")?,
@@ -434,7 +702,10 @@ pub(super) async fn tail_entry_coverage_check(
                 "strategy_suite": result_set.strategy_suite.as_deref(),
             },
             "counts": {
+                "chain_sim_runs": coverage.chain_sim_runs,
                 "trading_enabled_signals": coverage.trading_enabled_signals,
+                "ignored_trading_enabled_observations": coverage.ignored_trading_enabled_observations,
+                "ignored_trading_enabled_with_skip_reason": coverage.ignored_trading_enabled_with_skip_reason,
                 "with_mempool_entry_evidence": coverage.with_mempool_entry_evidence,
                 "exact_vault_eligible_signals": coverage.exact_vault_eligible_signals,
                 "tail_entry_intents": coverage.tail_entry_intents,
@@ -467,6 +738,20 @@ fn tail_entry_coverage_verdict(coverage: TailEntryCoverage, enforced: bool) -> (
         return (
             Verdict::Pass,
             "tail-entry coverage recorded but not enforced for this strategy scope".to_string(),
+        );
+    }
+    if coverage.chain_sim_runs > 0
+        && coverage.tail_entry_intents == 0
+        && coverage.submitted
+            + coverage.confirmed
+            + coverage.deferred
+            + coverage.failed
+            + coverage.cancelled
+            == 0
+    {
+        return (
+            Verdict::Pass,
+            "tail-entry coverage is not enforced for chain-sim live backtests; trading_enabled mempool signals use the mined pool-update entry path".to_string(),
         );
     }
     if coverage.trading_enabled_signals == 0 {
@@ -610,6 +895,19 @@ mod tests {
         };
         let (verdict, _) = tail_entry_coverage_verdict(coverage, true);
         assert_eq!(verdict, Verdict::Pass);
+    }
+
+    #[test]
+    fn tail_entry_coverage_passes_for_chain_sim_pool_update_contract() {
+        let coverage = TailEntryCoverage {
+            chain_sim_runs: 1,
+            ignored_trading_enabled_observations: 3,
+            ignored_trading_enabled_with_skip_reason: 3,
+            ..TailEntryCoverage::default()
+        };
+        let (verdict, message) = tail_entry_coverage_verdict(coverage, true);
+        assert_eq!(verdict, Verdict::Pass);
+        assert!(message.contains("chain-sim live backtests"));
     }
 
     #[test]

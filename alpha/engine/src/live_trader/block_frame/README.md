@@ -62,4 +62,8 @@ evidence.
 
 The live decision path now uses the block-frame payload. Mempool signals remain
 their own speculative input; they are annotated from Alpha's block-frame pool
-cache rather than by fetching the latest pool list every loop.
+cache rather than by fetching the latest pool list every loop. A mempool signal
+must carry `detected_at_head_block_number`; Alpha uses that detector-time chain
+head as the risk observed block and ignores signals that lack it. Once a block
+frame is available, mined pool updates from that frame are applied before
+pending mempool signals so confirmed evidence wins over stale speculative rows.

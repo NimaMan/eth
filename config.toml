@@ -38,6 +38,9 @@ url = "postgresql://postgres:postgres@localhost:5432/eth_db"
 [databases.token_pnl]
 url = "postgresql://postgres:postgres@localhost:5432/eth_db"
 
+[databases.token_state]
+url = "postgresql://postgres:postgres@localhost:5432/eth_db"
+
 [ethereum.mainnet.contracts]
 weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 uniswap_v2_router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"

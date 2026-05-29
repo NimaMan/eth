@@ -167,6 +167,10 @@ pub struct MempoolSignalWire {
     #[serde(default)]
     pub mempool_first_seen_ms: Option<i64>,
     pub detection_timestamp: Option<String>,
+    #[serde(default)]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default)]
+    pub detected_at_head_block_hash: Option<String>,
     pub detection_tx_hash: Option<String>,
     pub token_address: Option<String>,
     pub pool_address: Option<String>,
@@ -356,7 +360,7 @@ impl MempoolSignalWire {
             token_address,
             pool_address,
             pending_tx_hash,
-            observed_block: None,
+            observed_block: self.detected_at_head_block_number,
             message: self.message(),
             evidence: Some(self.risk_evidence()),
         }))
@@ -380,6 +384,12 @@ impl MempoolSignalWire {
         }
         if let Some(value) = self.detection_timestamp.as_ref() {
             evidence.insert("detection_timestamp".to_string(), json!(value));
+        }
+        if let Some(value) = self.detected_at_head_block_number {
+            evidence.insert("detected_at_head_block_number".to_string(), json!(value));
+        }
+        if let Some(value) = self.detected_at_head_block_hash.as_ref() {
+            evidence.insert("detected_at_head_block_hash".to_string(), json!(value));
         }
         if let Some(value) = self.detection_tx_hash.as_ref() {
             evidence.insert("detection_tx_hash".to_string(), json!(value));

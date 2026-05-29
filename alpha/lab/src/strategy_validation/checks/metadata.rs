@@ -94,6 +94,73 @@ pub(super) fn live_runtime_status_check(result_set: &ResultSetRecord) -> CheckRe
     )
 }
 
+pub(super) async fn live_chain_sim_source_check(
+    pool: &PgPool,
+    result_set_id: &str,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "metadata",
+        "live_chain_sim_uses_chain_server_simulator",
+        Verdict::Fail,
+        "live chain-sim result sets use the chain-server LiveTxSimulator state source",
+        "live chain-sim result-set/run rows without chain-server simulator source metadata",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.backtest_result_sets rs
+        JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.result_set_id = rs.result_set_id
+        JOIN alpha_trading.trader_runs tr
+          ON tr.run_id = rsr.run_id
+        WHERE rs.result_set_id = $1
+          AND ($2::text IS NULL OR $2::text IS NOT NULL)
+          AND rs.mode = 'live'
+          AND tr.mode = 'chain-sim'
+          AND (
+              COALESCE(rs.metadata#>>'{chain_sim_state,source}', '') <> 'chain_server_live_tx_simulator'
+              OR COALESCE(tr.metadata#>>'{chain_sim_state,source}', '') <> 'chain_server_live_tx_simulator'
+          )
+        "#,
+        result_set_id,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn live_block_frame_runtime_metadata_check(
+    pool: &PgPool,
+    result_set_id: &str,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "metadata",
+        "live_block_frame_runtime_metadata",
+        Verdict::Fail,
+        "live chain-sim runs record block-frame input metadata",
+        "live chain-sim result-set/run rows missing block-frame runtime metadata",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.backtest_result_sets rs
+        JOIN alpha_trading.backtest_result_set_runs rsr
+          ON rsr.result_set_id = rs.result_set_id
+        JOIN alpha_trading.trader_runs tr
+          ON tr.run_id = rsr.run_id
+        WHERE rs.result_set_id = $1
+          AND ($2::text IS NULL OR $2::text IS NOT NULL)
+          AND rs.mode = 'live'
+          AND tr.mode = 'chain-sim'
+          AND (
+              COALESCE(rs.config->>'loop_wait', '') <> 'chain_server_live_updates'
+              OR NOT (rs.metadata ? 'block_frame_pool_count')
+              OR NOT (tr.metadata ? 'block_frame_pool_count')
+          )
+        "#,
+        result_set_id,
+        None,
+    )
+    .await
+}
+
 pub(super) async fn result_set_running_state_consistency_check(
     pool: &PgPool,
     result_set_id: &str,

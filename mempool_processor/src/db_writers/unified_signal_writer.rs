@@ -73,6 +73,8 @@ impl UnifiedSignalWriter {
             denom_currency: signal.denom_currency.clone(),
             denom_decimals: signal.denom_decimals,
             detection_timestamp: timestamp_from_unix(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: Some(signal.tx_hash.clone()),
             actor_address: Some(signal.creator_address.clone()),
             subject_address: Some(signal.creator_address.clone()),
@@ -153,6 +155,8 @@ impl UnifiedSignalWriter {
             denom_currency: signal.denom_currency.clone(),
             denom_decimals: signal.denom_decimals,
             detection_timestamp: timestamp_from_unix(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: Some(signal.tx_hash.clone()),
             actor_address: Some(signal.creator_address.clone()),
             subject_address: Some(signal.creator_address.clone()),
@@ -246,6 +250,8 @@ impl UnifiedSignalWriter {
             denom_currency: signal.denom_currency.clone(),
             denom_decimals: signal.denom_decimals,
             detection_timestamp: timestamp_from_unix(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: Some(signal.tx_hash.clone()),
             actor_address: Some(signal.creator_address.clone()),
             subject_address: Some(signal.creator_address.clone()),
@@ -315,6 +321,8 @@ impl UnifiedSignalWriter {
             denom_currency: signal.denom_currency.clone(),
             denom_decimals: signal.denom_decimals,
             detection_timestamp: timestamp_from_unix(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: Some(signal.tx_hash.clone()),
             actor_address: Some(signal.remover_address.clone()),
             subject_address: Some(signal.remover_address.clone()),
@@ -402,6 +410,8 @@ impl UnifiedSignalWriter {
             denom_currency: signal.denom_currency.clone(),
             denom_decimals: signal.denom_decimals,
             detection_timestamp: timestamp_from_unix_i64(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: Some(signal.tx_hash.clone()),
             actor_address: Some(signal.approver_address.clone()),
             subject_address: Some(signal.spender_address.clone()),
@@ -484,6 +494,8 @@ impl UnifiedSignalWriter {
             denom_currency: None,
             denom_decimals: None,
             detection_timestamp: timestamp_from_unix(signal.timestamp),
+            detected_at_head_block_number: signal.detected_at_head_block_number,
+            detected_at_head_block_hash: signal.detected_at_head_block_hash.clone(),
             pending_tx_hash: signal.tx_hash.clone(),
             actor_address: signal.actor_address.clone(),
             subject_address: signal.actor_address.clone(),
@@ -539,6 +551,8 @@ struct SignalEventInsert {
     denom_currency: Option<String>,
     denom_decimals: Option<u8>,
     detection_timestamp: DateTime<Utc>,
+    detected_at_head_block_number: Option<u64>,
+    detected_at_head_block_hash: Option<String>,
     pending_tx_hash: Option<String>,
     actor_address: Option<String>,
     subject_address: Option<String>,
@@ -558,13 +572,14 @@ async fn insert_event(pool: &PgPool, event: SignalEventInsert) -> Result<i64> {
                 event_kind, public_signal_type, severity,
                 token_address, pool_identifier, pool_protocol,
                 denom_address, denom_currency, denom_decimals,
-                detection_timestamp, pending_tx_hash,
+                detection_timestamp, detected_at_head_block_number,
+                detected_at_head_block_hash, pending_tx_hash,
                 actor_address, subject_address, headline,
                 value_1, value_2, flag, payload, dedupe_key
             )
         VALUES
             ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-             $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+             $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         ON CONFLICT (dedupe_key) DO UPDATE SET
             public_signal_type = EXCLUDED.public_signal_type,
             severity = EXCLUDED.severity,
@@ -573,6 +588,9 @@ async fn insert_event(pool: &PgPool, event: SignalEventInsert) -> Result<i64> {
             denom_currency = EXCLUDED.denom_currency,
             denom_decimals = EXCLUDED.denom_decimals,
             detection_timestamp = EXCLUDED.detection_timestamp,
+            detected_at_head_block_number = EXCLUDED.detected_at_head_block_number,
+            detected_at_head_block_hash = EXCLUDED.detected_at_head_block_hash,
+            pending_tx_hash = EXCLUDED.pending_tx_hash,
             actor_address = EXCLUDED.actor_address,
             subject_address = EXCLUDED.subject_address,
             headline = EXCLUDED.headline,
@@ -593,6 +611,12 @@ async fn insert_event(pool: &PgPool, event: SignalEventInsert) -> Result<i64> {
     .bind(event.denom_currency)
     .bind(event.denom_decimals.map(i32::from))
     .bind(event.detection_timestamp)
+    .bind(
+        event
+            .detected_at_head_block_number
+            .map(|value| value as i64),
+    )
+    .bind(event.detected_at_head_block_hash)
     .bind(event.pending_tx_hash)
     .bind(event.actor_address)
     .bind(event.subject_address)
@@ -647,6 +671,8 @@ async fn ensure_schema(pool: &PgPool) -> Result<()> {
             denom_currency TEXT,
             denom_decimals INTEGER,
             detection_timestamp TIMESTAMPTZ NOT NULL,
+            detected_at_head_block_number BIGINT,
+            detected_at_head_block_hash TEXT,
             pending_tx_hash TEXT,
             actor_address TEXT,
             subject_address TEXT,
@@ -659,6 +685,14 @@ async fn ensure_schema(pool: &PgPool) -> Result<()> {
             signal_source TEXT NOT NULL DEFAULT 'mempool',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+        "#,
+        r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS detected_at_head_block_number BIGINT
+        "#,
+        r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS detected_at_head_block_hash TEXT
         "#,
         r#"
         CREATE UNIQUE INDEX IF NOT EXISTS signal_events_dedupe_key_uidx

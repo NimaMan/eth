@@ -61,6 +61,11 @@ impl TokenSupplyRiskDetector {
                 .pool_viability_result
                 .as_ref()
                 .map(|pool_result| pool_result.block_number),
+            detected_at_head_block_number: result
+                .pool_viability_result
+                .as_ref()
+                .map(|pool_result| pool_result.block_number),
+            detected_at_head_block_hash: None,
             confidence: 0.75,
             timestamp: chrono::Utc::now().timestamp() as u64,
         }))

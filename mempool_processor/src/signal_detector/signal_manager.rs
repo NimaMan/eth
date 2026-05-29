@@ -17,7 +17,7 @@ mod evidence;
 mod formatting;
 mod simulation_result;
 
-use context::pool_context_for_address;
+use context::{pool_context_for_address, SignalPoolContext};
 use evidence::build_mempool_entry_evidence;
 use simulation_result::{
     creator_address_from_simulation_result, format_buy_sell_error, is_replay_context_mismatch,
@@ -29,6 +29,41 @@ use super::{
     trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
     TaxDetector, TaxSignalType, TokenSupplyRiskDetector, TradingStatusDetector,
 };
+
+#[derive(Clone, Debug)]
+struct DetectionHeadContext {
+    block_number: Option<u64>,
+    block_hash: Option<String>,
+}
+
+fn detection_head_context(
+    result: &SimulationResult,
+    pool_context: Option<&SignalPoolContext>,
+) -> DetectionHeadContext {
+    let block_number = result
+        .pool_viability_result
+        .as_ref()
+        .map(|pool_result| pool_result.block_number)
+        .or_else(|| {
+            result
+                .exact_vault_buy_result
+                .as_ref()
+                .map(|exact| exact.simulated_block)
+        })
+        .or_else(|| {
+            result
+                .liquidity_removal_result
+                .as_ref()
+                .and_then(|removal| removal.simulation_block_number)
+        })
+        .or_else(|| pool_context.map(|context| context.latest_block))
+        .filter(|block| *block > 0);
+
+    DetectionHeadContext {
+        block_number,
+        block_hash: None,
+    }
+}
 
 /// Configuration for signal detection
 #[derive(Debug, Clone)]
@@ -301,6 +336,7 @@ impl SignalManager {
         let result_pool_address = result.pool_address.map(|addr| to_checksum_address(&addr));
         let pool_context =
             pool_context_for_address(&self.token_cache, result_pool_address.as_deref()).await;
+        let detection_head = detection_head_context(result, pool_context.as_ref());
 
         let buy_sell_result = result.buy_sell_result();
         let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &buy_sell_result {
@@ -362,6 +398,8 @@ impl SignalManager {
                                 sell_tax: buy_sell.sell_tax,
                                 failure_reason,
                                 confidence: 0.95,
+                                detected_at_head_block_number: detection_head.block_number,
+                                detected_at_head_block_hash: detection_head.block_hash.clone(),
                                 timestamp: chrono::Utc::now().timestamp() as u64,
                             },
                         ));
@@ -468,13 +506,24 @@ impl SignalManager {
                         buy_tax_exceeds_threshold,
                         sell_tax_exceeds_threshold,
                         cant_sell: false,
+                        detected_at_head_block_number: detection_head.block_number,
+                        detected_at_head_block_hash: detection_head.block_hash.clone(),
                         timestamp: chrono::Utc::now().timestamp() as u64,
                     },
                 ));
             }
         }
 
-        if let Some(signal) = self.token_supply_risk_detector.detect(result) {
+        if let Some(mut signal) = self.token_supply_risk_detector.detect(result) {
+            if let Signal::TokenSupplyRisk(risk_signal) = &mut signal {
+                risk_signal.detected_at_head_block_number = risk_signal
+                    .detected_at_head_block_number
+                    .or(detection_head.block_number);
+                risk_signal.detected_at_head_block_hash = risk_signal
+                    .detected_at_head_block_hash
+                    .clone()
+                    .or_else(|| detection_head.block_hash.clone());
+            }
             signals.push(signal);
         }
 
@@ -536,6 +585,8 @@ impl SignalManager {
                                 result,
                                 pool_context.as_ref(),
                             ),
+                            detected_at_head_block_number: detection_head.block_number,
+                            detected_at_head_block_hash: detection_head.block_hash.clone(),
                             timestamp: chrono::Utc::now().timestamp() as u64,
                         },
                     ));
@@ -708,6 +759,8 @@ impl SignalManager {
                             None
                         }
                     }),
+                    detected_at_head_block_number: detection_head.block_number,
+                    detected_at_head_block_hash: detection_head.block_hash.clone(),
                     timestamp: chrono::Utc::now().timestamp() as u64,
                 };
                 self.log_activity(
@@ -795,7 +848,18 @@ impl SignalManager {
                 };
                 let mut published = 0usize;
                 let mut pub_guard = publisher.lock().await;
-                for signal in signals {
+                for mut signal in signals {
+                    if let Signal::LpApproval(lp_signal) = &mut signal {
+                        if lp_signal.detected_at_head_block_number.is_none() {
+                            if let Some(pool) = token_cache.get_pool(&lp_signal.pool_address).await
+                            {
+                                if pool.last_updated_block > 0 {
+                                    lp_signal.detected_at_head_block_number =
+                                        Some(pool.last_updated_block);
+                                }
+                            }
+                        }
+                    }
                     if let Err(e) = pub_guard.publish(signal).await {
                         error!("Failed to publish position approval signal: {}", e);
                     } else {

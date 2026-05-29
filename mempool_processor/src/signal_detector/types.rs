@@ -41,6 +41,10 @@ pub struct TradingEnabledSignal {
     pub sell_tax: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mempool_entry_evidence: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
     pub timestamp: u64,
 }
 
@@ -92,6 +96,10 @@ pub struct HoneypotSignal {
     pub sell_tax: Option<f64>,
     pub failure_reason: Option<String>,
     pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
     pub timestamp: u64,
 }
 
@@ -116,6 +124,10 @@ pub struct LiquidityRemovalSignal {
     pub estimated_eth_removed: Option<f64>,
     pub remaining_eth: Option<f64>,
     pub removal_percentage: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
     pub timestamp: u64,
 }
 
@@ -150,6 +162,10 @@ pub struct TaxSignalRecord {
     pub buy_tax_exceeds_threshold: bool,
     pub sell_tax_exceeds_threshold: bool,
     pub cant_sell: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
     pub timestamp: u64,
 }
 
@@ -162,6 +178,10 @@ pub struct TokenSupplyRiskSignal {
     pub risk_details: String,
     pub actor_address: Option<String>,
     pub block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_at_head_block_hash: Option<String>,
     pub confidence: f64,
     pub timestamp: u64,
 }

@@ -71,6 +71,14 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Does the live runtime health match the result-set state?",
             "Fails when a live result set is marked running while live runtime metadata reports a failed chain/trader status.",
         ),
+        "live_chain_sim_uses_chain_server_simulator" => (
+            "Does live chain-sim use the chain-server LiveTxSimulator?",
+            "Requires live chain-sim result-set and trader-run metadata to prove simulations came from the chain-server-owned LiveTxSimulator, not an Alpha-local simulator.",
+        ),
+        "live_block_frame_runtime_metadata" => (
+            "Does live chain-sim use block-frame inputs?",
+            "Requires live chain-sim runs to record block-frame runtime metadata so decisions are coupled to a specific pushed block frame.",
+        ),
         "running_result_set_has_no_stop_marker" => (
             "Is a running live result free of stopped-run markers?",
             "Rejects running result sets or trader runs that still carry stopped_at or shutdown/stale metadata from a prior process lifetime.",
@@ -86,6 +94,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "historical_mempool_rows" => (
             "Did a historical backtest avoid pending mempool evidence?",
             "Checks joined risk events for pending transaction hashes; pure historical results must use mined local evidence only.",
+        ),
+        "historical_mempool_observations" => (
+            "Did a historical backtest avoid mempool strategy observations?",
+            "Rejects strategy observations sourced from live mempool signals in historical result sets.",
         ),
         "buy_submitted_has_decision" => (
             "Can every buy submission be explained by a strategy decision?",
@@ -119,6 +131,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Do mempool liquidity-removal signals avoid marking exposure as drained?",
             "Fails if a pending mempool liquidity-removal signal creates a same-block zero-value exposure snapshot before mined evidence exists.",
         ),
+        "mempool_risk_uses_detector_head_block" => (
+            "Do mempool risk events use detector-time block evidence?",
+            "Requires live mempool risk rows to copy `detected_at_head_block_number` into `observed_block` instead of using Alpha's current block-frame as a fallback.",
+        ),
         "pool_update_buy_has_historical_observation" => (
             "Can every historical pool-update buy be traced to an input observation?",
             "Joins pool_update-sourced submit_buy decisions to the replay pool observation at the same token, pool, and block.",
@@ -126,6 +142,14 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "deferred_mempool_signal_has_reason" => (
             "Do deferred mempool observations explain why they were deferred?",
             "Requires live-backtest mempool signals buffered behind chain-sim settlement readiness to persist the explicit settlement-wait reason code.",
+        ),
+        "chain_sim_trading_enabled_mempool_skip" => (
+            "Does chain-sim explicitly skip trading-enabled mempool entries?",
+            "Allows first-poll priming but requires processed trading_enabled mempool signals in chain-sim to be ignored with the documented pool-update entry-path reason.",
+        ),
+        "no_settlement_wait_mempool_deferrals" => (
+            "Has the old local settlement-state deferral path been removed?",
+            "Fails if mempool observations are still deferred because Alpha is waiting on local chain-sim settlement state.",
         ),
         "submit_decisions_within_result_range" => (
             "Were submitted decisions made inside the replayed input range?",
@@ -147,13 +171,29 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Did live chain-sim use the exact expected simulation block?",
             "For live backtests, requires submitted block N, expected/simulation/receipt/event block N + execution_delay_blocks, and rejects stale simulator state.",
         ),
+        "live_chain_sim_block_hash_evidence" => (
+            "Did live chain-sim persist exact block hashes?",
+            "Requires submitted and terminal live chain-sim events to carry a valid mined-evidence block hash so reorg/same-height ambiguity is auditable.",
+        ),
+        "chain_sim_has_no_real_execution_artifacts" => (
+            "Did chain-sim avoid real execution artifacts?",
+            "Rejects tx hashes and Kartal submission errors in chain-sim backtests, which should only contain simulated execution reports.",
+        ),
         "pre_submit_simulation_state_ready" => (
             "Was pre-submit simulation state ready for every attempted order?",
             "Fails any run with deferred execution reports caused by the simulator lagging behind the decision block.",
         ),
+        "terminal_reports_have_gas_policy_fee_evidence" => (
+            "Do terminal reports retain gas-policy fee evidence?",
+            "Requires selected gas-policy terminal events to store selected fee/profile/source evidence, and rejected events to store rejection guard evidence.",
+        ),
         "confirmed_reports_have_simulation_outputs" => (
             "Are confirmed fills backed by persisted EVM simulation output?",
             "Requires filled amount, gas, gas cost, and buy token output on confirmed trade events.",
+        ),
+        "chain_sim_has_no_mempool_tail_entry_orders" => (
+            "Did chain-sim avoid mempool tail-entry orders?",
+            "Live chain-sim validates mined pool-update entries and must not submit tail-after-enabling mempool orders.",
         ),
         "tail_entry_intent_has_exact_vault_buy_evidence" => (
             "Are tail-entry buys backed by exact deployed-vault evidence?",
@@ -166,6 +206,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "tail_entry_buy_has_ordering_evidence" => (
             "Do tail-entry buys retain dependency ordering evidence?",
             "Requires tail-entry gas shadow events to include the dependency tx hash plus dependency fee evidence used to place behind the enabling tx.",
+        ),
+        "tail_entry_buy_priority_undercuts_dependency" => (
+            "Do tail-entry buys undercut the dependency priority fee?",
+            "Checks that persisted tail-entry gas evidence selected a priority fee below the enabling transaction by the configured undercut.",
         ),
         "tail_entry_buy_uses_live_backtest_n_plus_1_validation" => (
             "Do tail-entry buys use the live-backtest N+1 execution model?",

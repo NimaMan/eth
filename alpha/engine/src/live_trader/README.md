@@ -68,6 +68,12 @@ is a latest read-model surface for UI/context clients. The `next` endpoint is a
 replayable push/long-poll boundary: Alpha sends its last processed block and
 chain-server returns, or waits for, the next retained frame.
 
+Pending mempool signals are a separate speculative input. They must carry
+`detected_at_head_block_number` from the mempool detector; Alpha uses that
+detector-time head as `observed_block` and never fills it from the current block
+frame. After consuming a frame, Alpha applies that frame's mined pool updates
+and mined risk evidence before acting on eligible pending mempool signals.
+
 Live chain simulation has a second block-coupling requirement. A strategy
 decision observed at block `N` may target execution in block `N+1`; the
 simulator must select state for that required block, not whatever the global

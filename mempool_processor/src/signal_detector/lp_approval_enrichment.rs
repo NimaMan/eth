@@ -22,6 +22,9 @@ pub(crate) fn enrich_erc20_liquidity_approval(
     signal.denom_decimals = None;
     signal.lp_total_supply = pool.lp_total_supply.map(format_lp_supply);
     signal.approval_model = Some(approval_model_for_pool(&pool.pool_type).to_string());
+    if pool.last_updated_block > 0 {
+        signal.detected_at_head_block_number = Some(pool.last_updated_block);
+    }
 
     if let Some(share_pct) = approved_share_pct(signal.amount, pool.lp_total_supply) {
         signal.approval_percentage = Some(share_pct);

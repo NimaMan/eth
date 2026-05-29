@@ -86,6 +86,7 @@ static SIM_WORKER: Lazy<SimWorker> = Lazy::new(|| {
 #[derive(Debug, Clone)]
 pub struct LiquidityRemovalResult {
     pub success: bool,
+    pub simulation_block_number: Option<u64>,
     pub revert_reason: Option<String>,
     pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
     pub pool_address: Option<Address>,
@@ -200,6 +201,7 @@ impl LiquidityRemovalSimulator {
                     ));
                     return Ok(LiquidityRemovalResult {
                         success: false,
+                        simulation_block_number: block_number,
                         revert_reason: Some(format!(
                             "Nonce mismatch: expected nonce {} before liquidity removal",
                             expected_nonce
@@ -326,6 +328,7 @@ impl LiquidityRemovalSimulator {
                 }
                 return Ok(LiquidityRemovalResult {
                     success: false,
+                    simulation_block_number: block_number,
                     revert_reason: Some(msg),
                     address_balance_changes: HashMap::new(),
                     pool_address: None,
@@ -427,6 +430,7 @@ impl LiquidityRemovalSimulator {
 
         Ok(LiquidityRemovalResult {
             success,
+            simulation_block_number: Some(processed.block_number),
             revert_reason,
             address_balance_changes,
             pool_address,

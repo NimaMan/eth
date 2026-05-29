@@ -54,6 +54,8 @@ pub struct MempoolSignalView {
     pub mempool_first_seen_at: Option<String>,
     pub mempool_first_seen_ms: Option<i64>,
     pub detection_timestamp: Option<String>,
+    pub detected_at_head_block_number: Option<i64>,
+    pub detected_at_head_block_hash: Option<String>,
     pub detection_tx_hash: Option<String>,
     pub token_address: Option<String>,
     pub pool_address: Option<String>,
@@ -190,6 +192,8 @@ fn signal_sql(kind: MempoolSignalKind) -> String {
             events.signal_source,
             events.created_at::text AS signal_created_at,
             events.detection_timestamp::text AS detection_timestamp,
+            events.detected_at_head_block_number,
+            events.detected_at_head_block_hash,
             events.pending_tx_hash AS detection_tx_hash,
             events.token_address,
             events.pool_identifier AS pool_address,
@@ -229,6 +233,8 @@ async fn ensure_signal_events_table(pool: &PgPool) -> Result<()> {
             denom_currency TEXT,
             denom_decimals INTEGER,
             detection_timestamp TIMESTAMPTZ NOT NULL,
+            detected_at_head_block_number BIGINT,
+            detected_at_head_block_hash TEXT,
             pending_tx_hash TEXT,
             actor_address TEXT,
             subject_address TEXT,
@@ -248,6 +254,14 @@ async fn ensure_signal_events_table(pool: &PgPool) -> Result<()> {
             evidence JSONB NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+        "#,
+        r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS detected_at_head_block_number BIGINT
+        "#,
+        r#"
+        ALTER TABLE live_trading.signal_events
+            ADD COLUMN IF NOT EXISTS detected_at_head_block_hash TEXT
         "#,
         r#"
         ALTER TABLE live_trading.signal_events
@@ -286,6 +300,8 @@ fn row_to_signal(row: &sqlx::postgres::PgRow) -> Result<MempoolSignalView> {
         mempool_first_seen_at: None,
         mempool_first_seen_ms: None,
         detection_timestamp: optional_text(row, "detection_timestamp")?,
+        detected_at_head_block_number: optional_i64(row, "detected_at_head_block_number")?,
+        detected_at_head_block_hash: optional_text(row, "detected_at_head_block_hash")?,
         detection_tx_hash: optional_text(row, "detection_tx_hash")?,
         token_address: optional_text(row, "token_address")?,
         pool_address: optional_text(row, "pool_address")?,
@@ -337,6 +353,11 @@ fn text(row: &sqlx::postgres::PgRow, column: &str) -> Result<String> {
 
 fn optional_text(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<String>> {
     row.try_get::<Option<String>, _>(column)
+        .map_err(|err| eyre!("failed to read {column}: {err}"))
+}
+
+fn optional_i64(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<i64>> {
+    row.try_get::<Option<i64>, _>(column)
         .map_err(|err| eyre!("failed to read {column}: {err}"))
 }
 

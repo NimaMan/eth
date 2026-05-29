@@ -24,10 +24,15 @@ pub async fn run_checks(
     let mut checks = Vec::new();
     checks.push(metadata::result_set_status_check(result_set));
     checks.push(metadata::live_runtime_status_check(result_set));
+    checks.push(metadata::live_chain_sim_source_check(pool, result_set_id).await?);
+    checks.push(metadata::live_block_frame_runtime_metadata_check(pool, result_set_id).await?);
     checks.push(metadata::result_set_running_state_consistency_check(pool, result_set_id).await?);
     checks.push(metadata::strategy_rows_check(strategy_summaries, strategy));
     checks.push(metadata::trade_id_format_check(pool, result_set_id, strategy).await?);
     checks.push(signal_scope::historical_mempool_scope_check(pool, result_set, strategy).await?);
+    checks.push(
+        signal_scope::historical_mempool_observations_check(pool, result_set, strategy).await?,
+    );
     checks.push(
         decision_timing::submitted_events_have_decisions_check(
             pool,
@@ -79,6 +84,14 @@ pub async fn run_checks(
             .await?,
     );
     checks.push(
+        signal_scope::mempool_risk_events_use_detector_head_block_check(
+            pool,
+            result_set_id,
+            strategy,
+        )
+        .await?,
+    );
+    checks.push(
         risk_policy::mempool_liquidity_removal_does_not_zero_snapshot_check(
             pool,
             result_set_id,
@@ -96,6 +109,14 @@ pub async fn run_checks(
         signal_scope::deferred_mempool_signals_have_reason_check(pool, result_set_id, strategy)
             .await?,
     );
+    checks.push(
+        signal_scope::chain_sim_trading_enabled_mempool_skip_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        signal_scope::no_settlement_wait_mempool_deferrals_check(pool, result_set_id, strategy)
+            .await?,
+    );
     checks.push(signal_scope::submit_decisions_in_range_check(pool, result_set, strategy).await?);
     checks.push(
         signal_scope::trades_match_allowed_protocols_check(pool, result_set_id, strategy).await?,
@@ -108,7 +129,19 @@ pub async fn run_checks(
             .await?,
     );
     checks.push(
+        execution_replay::live_chain_sim_block_hash_evidence_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        execution_replay::chain_sim_real_execution_artifacts_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
         execution_replay::pre_submit_simulation_state_ready_check(pool, result_set_id, strategy)
+            .await?,
+    );
+    checks.push(
+        execution_replay::terminal_gas_policy_fee_evidence_check(pool, result_set_id, strategy)
             .await?,
     );
     checks.push(
@@ -121,6 +154,9 @@ pub async fn run_checks(
     );
     checks.push(execution_replay::tail_entry_coverage_check(pool, result_set, strategy).await?);
     checks.push(
+        execution_replay::chain_sim_tail_entry_absence_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
         execution_replay::tail_entry_intents_have_exact_vault_evidence_check(
             pool,
             result_set_id,
@@ -130,6 +166,9 @@ pub async fn run_checks(
     );
     checks.push(
         execution_replay::tail_entry_ordering_evidence_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        execution_replay::tail_entry_priority_undercut_check(pool, result_set_id, strategy).await?,
     );
     checks.push(
         execution_replay::tail_entry_live_backtest_n_plus_1_validation_check(

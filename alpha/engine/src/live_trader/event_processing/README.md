@@ -16,9 +16,10 @@ The live trader processes one loop tick in this order:
    ready yet, buffer fetched mempool signals and stop this tick before strategy
    event processing. Those buffered signals are processed on the next tick after
    settlement succeeds.
-5. Process eligible mempool risk signals.
-6. Process changed pool updates as `MarketEvent::PoolUpdated`.
-7. Process mined pool-risk candidates discovered from those pool updates.
+5. Process changed pool updates as `MarketEvent::PoolUpdated`.
+6. Process mined pool-risk candidates discovered from those pool updates.
+7. Process eligible mempool risk signals using the signal's
+   `detected_at_head_block_number` as the risk observed block.
 8. Process manual close requests for real trading.
 9. Run the position monitor as `MarketEvent::BlockCompleted`.
 10. Write heartbeat and health metadata.
@@ -35,7 +36,8 @@ from the stale portfolio state.
 Strategy observations are still recorded at their source event:
 
 - pool decisions are persisted against the pool update block;
-- mempool risk decisions are persisted against the signal observed block;
+- mempool risk decisions are persisted against the detector-time head block
+  carried by the signal;
 - position-monitor decisions are persisted as `pool_update` observations with a
   `position_monitor:<block>` key against the completed block;
 - execution settlement is persisted as an execution event with the report block.

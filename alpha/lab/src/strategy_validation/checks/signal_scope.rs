@@ -50,6 +50,50 @@ pub(super) async fn historical_mempool_scope_check(
     .await
 }
 
+pub(super) async fn historical_mempool_observations_check(
+    pool: &PgPool,
+    result_set: &ResultSetRecord,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    if result_set.mode != "historical" {
+        return Ok(check(
+            "signal_scope",
+            "historical_mempool_observations",
+            Verdict::Pass,
+            "non-historical result set is not checked for strategy mempool observations",
+            json!({ "mode": result_set.mode }),
+        ));
+    }
+    count_check(
+        pool,
+        "signal_scope",
+        "historical_mempool_observations",
+        Verdict::Fail,
+        "historical result set contains no mempool strategy observations",
+        "mempool strategy observations joined to historical result set",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_observations so
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = so.run_id
+        WHERE rsr.result_set_id = $1
+          AND so.event_source = 'mempool_signal'
+          AND (
+              $2::text IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trades t
+                  WHERE t.result_set_id = rsr.result_set_id
+                    AND t.run_id = so.run_id
+                    AND t.strategy_name = $2
+              )
+          )
+        "#,
+        &result_set.result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn historical_market_buy_decisions_have_observations_check(
     pool: &PgPool,
     result_set: &ResultSetRecord,
@@ -101,6 +145,103 @@ pub(super) async fn historical_market_buy_decisions_have_observations_check(
     .await
 }
 
+pub(super) async fn mempool_risk_events_use_detector_head_block_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "signal_scope",
+        "mempool_risk_uses_detector_head_block",
+        Verdict::Fail,
+        "mempool risk events use the detector-time chain head as observed_block",
+        "mempool risk events missing detector-time head evidence or using a fallback block",
+        r#"
+        WITH scoped AS (
+            SELECT re.observed_block,
+                   NULLIF(re.payload #>> '{evidence,detected_at_head_block_number}', '') AS detector_head_block
+            FROM alpha_trading.risk_events re
+            JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = re.run_id
+            WHERE rsr.result_set_id = $1
+              AND COALESCE(re.payload->>'source', '') = 'mempool_signal'
+              AND (
+                  $2::text IS NULL
+                  OR EXISTS (
+                      SELECT 1
+                      FROM alpha_trading.trades t
+                      WHERE t.result_set_id = rsr.result_set_id
+                        AND t.run_id = re.run_id
+                        AND t.strategy_name = $2
+                  )
+              )
+        )
+        SELECT count(*)
+        FROM scoped
+        WHERE observed_block IS NULL
+           OR detector_head_block IS NULL
+           OR detector_head_block !~ '^[0-9]+$'
+           OR observed_block <> detector_head_block::bigint
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn chain_sim_trading_enabled_mempool_skip_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "signal_scope",
+        "chain_sim_trading_enabled_mempool_skip",
+        Verdict::Fail,
+        "chain-sim live backtests only prime or explicitly skip trading-enabled mempool signals",
+        "chain-sim trading-enabled mempool observations not explicitly skipped or primed",
+        r#"
+        WITH chain_sim_runs AS (
+            SELECT rsr.result_set_id, rsr.run_id
+            FROM alpha_trading.backtest_result_set_runs rsr
+            JOIN alpha_trading.trader_runs tr ON tr.run_id = rsr.run_id
+            WHERE rsr.result_set_id = $1
+              AND tr.mode = 'chain-sim'
+        )
+        SELECT count(*)
+        FROM alpha_trading.strategy_observations so
+        JOIN chain_sim_runs csr ON csr.run_id = so.run_id
+        WHERE so.event_source = 'mempool_signal'
+          AND COALESCE(so.payload#>>'{extra,signal_type}', so.payload#>>'{signal,signal_type}', '') = 'trading_enabled'
+          AND (
+              $2::text IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trades t
+                  WHERE t.result_set_id = csr.result_set_id
+                    AND t.run_id = so.run_id
+                    AND t.strategy_name = $2
+              )
+          )
+          AND (
+              so.decision NOT IN ('primed', 'ignored')
+              OR (
+                  so.decision = 'ignored'
+                  AND (
+                      COALESCE(so.payload#>>'{extra,reason_code}', '') <> 'chain_sim.live_backtest.skip_mempool_trading_enabled'
+                      OR COALESCE(so.payload#>>'{extra,execution_mode}', '') <> 'chain-sim'
+                      OR COALESCE(so.payload#>>'{extra,entry_path}', '') <> 'pool_update'
+                  )
+              )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
 pub(super) async fn deferred_mempool_signals_have_reason_check(
     pool: &PgPool,
     result_set_id: &str,
@@ -133,6 +274,43 @@ pub(super) async fn deferred_mempool_signals_have_reason_check(
           AND (
               so.event_key NOT LIKE 'deferred:%'
               OR COALESCE(so.payload#>>'{extra,reason_code}', '') <> 'chain_sim.live_backtest.waiting_for_exact_settlement_state'
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+pub(super) async fn no_settlement_wait_mempool_deferrals_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "signal_scope",
+        "no_settlement_wait_mempool_deferrals",
+        Verdict::Fail,
+        "mempool observations are not deferred behind local settlement-state readiness",
+        "mempool observations still using the old settlement-wait deferral path",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.strategy_observations so
+        JOIN alpha_trading.backtest_result_set_runs rsr ON rsr.run_id = so.run_id
+        WHERE rsr.result_set_id = $1
+          AND so.event_source = 'mempool_signal'
+          AND so.decision = 'deferred'
+          AND COALESCE(so.payload#>>'{extra,reason_code}', '') = 'chain_sim.live_backtest.waiting_for_exact_settlement_state'
+          AND (
+              $2::text IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trades t
+                  WHERE t.result_set_id = rsr.result_set_id
+                    AND t.run_id = so.run_id
+                    AND t.strategy_name = $2
+              )
           )
         "#,
         result_set_id,
