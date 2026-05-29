@@ -24,7 +24,7 @@ use super::{
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, U256};
 use eyre::{eyre, Result};
-use reth_chain_query::{function_signatures::FUNCTION_SIGNATURES, FEE_RECIPIENTS};
+use reth_chain_query::function_signatures::FUNCTION_SIGNATURES;
 use std::collections::{HashMap, HashSet};
 
 pub struct TxProcessor {
@@ -321,7 +321,7 @@ impl TxProcessor {
         populate_unique_addresses(&mut processed_tx);
 
         processed_tx.bribe_amount =
-            Self::calculate_bribe_amount(&processed_tx.internal_transactions);
+            Self::calculate_bribe_amount(&processed_tx.fees);
 
         processed_tx.actions = self.identify_actions(&tx_type_label, &processed_tx);
         processed_tx.tx_type = tx_type_label;
@@ -471,7 +471,7 @@ impl TxProcessor {
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
         processed_tx.bribe_amount =
-            Self::calculate_bribe_amount(&processed_tx.internal_transactions);
+            Self::calculate_bribe_amount(&processed_tx.fees);
         processed_tx.eth_transfers = self.extract_eth_transfers(
             from,
             to,
@@ -736,17 +736,10 @@ impl TxProcessor {
         transfers
     }
 
-    pub(crate) fn calculate_bribe_amount(internal_transactions: &[InternalTransaction]) -> U256 {
-        internal_transactions.iter().fold(U256::ZERO, |acc, tx| {
-            if tx
-                .to_address
-                .map_or(false, |addr| FEE_RECIPIENTS.contains(&addr))
-            {
-                acc.saturating_add(tx.value)
-            } else {
-                acc
-            }
-        })
+    pub(crate) fn calculate_bribe_amount(fees: &TransactionFees) -> U256 {
+        fees.max_priority_fee
+            .unwrap_or(U256::ZERO)
+            .saturating_mul(U256::from(fees.gas_used))
     }
 }
 

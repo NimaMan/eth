@@ -70,6 +70,10 @@ path = "examples/providers/token_transactions.rs"
 name = "fetch_processed_tx"
 path = "examples/providers/processed_tx.rs"
 
+[[example]]
+name = "inspect_tx_bribe"
+path = "examples/providers/inspect_tx_bribe.rs"
+
 # Trade simulation examples
 [[example]]
 name = "erc20_pool_tax_demo"

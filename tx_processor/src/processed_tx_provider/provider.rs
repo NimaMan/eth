@@ -381,7 +381,7 @@ impl ProcessedTxProvider {
         processed_tx.internal_transactions =
             trace_processor.extract_internal_transactions_from_call_trace(&call_frame);
         processed_tx.bribe_amount =
-            TxProcessor::calculate_bribe_amount(&processed_tx.internal_transactions);
+            TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         processed_tx.address_balance_changes = balance_calculator

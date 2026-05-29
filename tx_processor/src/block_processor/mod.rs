@@ -492,7 +492,7 @@ impl BlockProcessor {
 
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.bribe_amount =
-            TxProcessor::calculate_bribe_amount(&processed_tx.internal_transactions);
+            TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         let balance_started = Instant::now();
