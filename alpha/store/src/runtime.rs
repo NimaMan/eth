@@ -525,10 +525,8 @@ impl PostgresTradingStore {
                    er.payload #>> '{mined_evidence,gas_policy_dependency_gas_price_wei}' AS gas_policy_dependency_gas_price_wei
             FROM alpha_trading.execution_reports er
             JOIN alpha_trading.positions positions
-              ON positions.run_id = er.run_id
-             AND positions.position_id = er.position_id
-            WHERE er.run_id = $1
-              AND er.status = 'submitted'
+              ON positions.position_id = er.position_id
+            WHERE er.status = 'submitted'
               AND er.tx_hash IS NOT NULL
               AND er.position_id IS NOT NULL
               AND er.order_side IN ('buy', 'sell')
@@ -539,15 +537,13 @@ impl PostgresTradingStore {
               AND NOT EXISTS (
                   SELECT 1
                   FROM alpha_trading.execution_reports final
-                  WHERE final.run_id = er.run_id
-                    AND final.order_id = er.order_id
+                  WHERE final.order_id = er.order_id
                     AND final.status IN ('confirmed', 'deferred', 'failed', 'cancelled')
               )
             ORDER BY er.order_id, er.created_at DESC, er.id DESC
-            LIMIT $2
+            LIMIT $1
             "#,
         )
-        .bind(&self.run_id)
         .bind(usize_to_i32(limit))
         .fetch_all(&self.pool)
         .await

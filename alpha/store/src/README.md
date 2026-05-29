@@ -14,7 +14,12 @@ The live trader writes these records during a normal order lifecycle:
    a market, risk, or position-monitor event.
 
 For real live trading, `load_submitted_executions()` loads submitted reports
-with transaction hashes for receipt reconciliation.
+with transaction hashes for receipt reconciliation. It is intentionally
+cross-run: it finds any position currently in `buy_submitted` or
+`sell_submitted` state with a pending tx hash, regardless of which run
+submitted it. This ensures that transactions submitted by a previous process
+that died before receiving the receipt are reconciled by the next process
+instead of being orphaned permanently.
 
 For chain-sim live backtesting, `load_chain_sim_submitted_executions()` loads
 submitted reports with `mined_evidence.receipt_status =
