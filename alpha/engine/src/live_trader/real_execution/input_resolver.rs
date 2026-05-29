@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::execution::real::LiveTxPlanningInputResolver;
 use async_trait::async_trait;
@@ -19,8 +19,10 @@ use serde_json::json;
 #[derive(Clone)]
 pub(super) struct LiveRealInputResolver {
     pub(super) store: PostgresTradingStore,
-    pub(super) pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+    pub(super) pools: Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     pub(super) current_block: Arc<AtomicU64>,
+    pub(super) last_frame_block: Arc<AtomicU64>,
+    pub(super) last_frame_hash: Arc<Mutex<Option<String>>>,
     pub(super) from: String,
     pub(super) run_id: String,
     pub(super) chain_id: u64,
@@ -181,6 +183,10 @@ impl LiveRealInputResolver {
         }
     }
 
+    fn last_frame_hash_value(&self) -> Option<String> {
+        self.last_frame_hash.lock().ok().and_then(|g| g.clone())
+    }
+
     fn source_metadata(
         &self,
         pool: &PoolSnapshot,
@@ -197,7 +203,9 @@ impl LiveRealInputResolver {
             "decision_block": current_block,
             "required_state_block": required_state_block,
             "pool_creation_block": pool.creation_block,
-            "pool_latest_block": pool.latest_block
+            "pool_latest_block": pool.latest_block,
+            "input_frame_block": self.last_frame_block.load(Ordering::Relaxed),
+            "input_frame_hash": self.last_frame_hash_value(),
         })
     }
 }

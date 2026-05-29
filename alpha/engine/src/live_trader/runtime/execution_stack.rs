@@ -39,6 +39,8 @@ pub(super) struct ExecutionStack {
     pub(super) chain_sim_settlement: Option<ChainSimSettlement>,
     pub(super) receipt_reconciler: Option<VaultReceiptReconciler<JsonRpcReceiptProvider>>,
     pub(super) next_order_sequence: u64,
+    pub(super) last_frame_block: Arc<AtomicU64>,
+    pub(super) last_frame_hash: Arc<Mutex<Option<String>>>,
 }
 
 pub(super) async fn build_execution_stack(
@@ -69,6 +71,9 @@ pub(super) async fn build_execution_stack(
         }
         _ => None,
     };
+
+    let last_frame_block: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    let last_frame_hash: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
     let (adapter, adapter_current_block, pool_updates, chain_sim_adapter, chain_sim_settlement): (
         Box<dyn EngineExecutionAdapter>,
@@ -127,6 +132,8 @@ pub(super) async fn build_execution_stack(
                 input.run_id.clone(),
                 pool_updates.clone(),
                 adapter_current_block.clone(),
+                last_frame_block.clone(),
+                last_frame_hash.clone(),
                 input
                     .live_real_gas_policy
                     .expect("kartal-real gas policy must exist"),
@@ -145,5 +152,7 @@ pub(super) async fn build_execution_stack(
         chain_sim_settlement,
         receipt_reconciler,
         next_order_sequence,
+        last_frame_block,
+        last_frame_hash,
     })
 }

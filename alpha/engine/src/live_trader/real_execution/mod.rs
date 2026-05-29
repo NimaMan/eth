@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alloy_primitives::U256;
 use async_trait::async_trait;
@@ -645,8 +645,10 @@ pub(super) async fn build_kartal_real_adapter(
     chain_server_url: String,
     store: PostgresTradingStore,
     run_id: String,
-    pools: Arc<std::sync::Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+    pools: Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
     current_block: Arc<AtomicU64>,
+    last_frame_block: Arc<AtomicU64>,
+    last_frame_hash: Arc<Mutex<Option<String>>>,
     gas_policy: LiveRealGasPolicy,
 ) -> Result<Box<dyn EngineExecutionAdapter>> {
     let from = parse_live_real_address(&args.live_real_from, "--live-real-from")?;
@@ -700,6 +702,8 @@ pub(super) async fn build_kartal_real_adapter(
         store,
         pools,
         current_block,
+        last_frame_block,
+        last_frame_hash,
         from: from.to_string(),
         run_id: run_id.clone(),
         chain_id: preflight.status.chain_id,

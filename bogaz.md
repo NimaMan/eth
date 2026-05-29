@@ -114,13 +114,7 @@ Implemented:
 3. Alpha live traders consume block frames and removed the live decision path
    that fetched `/live-token-tracker/pools`.
 
-Remaining follow-up:
-
-1. Persist input-frame source/hash metadata in strategy observations and
-   execution reports so the UI can display the exact block-frame source without
-   reading nested payloads.
-2. Add an operational alert if Alpha sees a gap larger than the retained
-   live-block-frame ring.
+Remaining follow-up: implemented — see Third-Tier Implementation Items 4 and 5.
 
 ## Tier One Issue - Evidence Sufficiency Before Real Capital 2026-05-28
 
@@ -379,6 +373,10 @@ validation step or the immediate second-tier cleanup.
 | Order | Item | Owner | Current state | Next action |
 | --- | --- | --- | --- | --- |
 | 1 | **Private relay/builder execution** | `tx_executor`, `kartal` | `BroadcastMode` supports `dry_run` and public RPC/mempool routes; direct coinbase/private bundle bribes are explicitly outside the current `eth_unsigned_tx` wire contract. | Add a new protocol/version for relay or bundle submission when we are ready to route priority exits outside the public mempool. |
+| 2 | **Silent simulator gap on session build failure** | `alpha/live/feed`, `eth_chain_server` | When `build_direct_live_block_session` fails (state diffs invalid or unavailable), the simulator is not updated for that block but `BlockApplied` still fires. Alpha receives the block frame and may attempt a buy; the pre-submit simulation then hard-errors and the order is correctly rejected, but the failure was invisible at the block-frame level. Logging fixed in `block_apply.rs`: both the build-error and the no-diffs case now emit `simulator_state_published=false` and `block_hash` so the gap is queryable. | Monitor for `simulator_state_published=false` log lines during live runs. If they appear repeatedly on the same blocks, investigate why state diffs are missing or invalid for those blocks. |
+| 4 | **Frame source/hash in execution reports** | `alpha/engine/src/live_trader` | Implemented: `LiveRealInputResolver::source_metadata` now includes `input_frame_block` and `input_frame_hash` so every execution report carries the exact block frame that woke the decision loop. The Arcs are updated in the main loop on each advancing frame. | Monitor that `input_frame_block` matches `decision_block` for pool-update entries and that `input_frame_hash` is present. If `input_frame_hash` is null in a report, the loop iterated without a fresh frame before the signal fired. |
+| 5 | **Operational alert for live block frame gap** | `alpha/engine/src/live_trader` | Implemented: the main loop now warns at `LIVE_BLOCK_FRAME_GAP_WARN_THRESHOLD = 3` skipped blocks with `prev_last_frame_block`, `new_frame_block`, and `gap` fields, referenced against `ring_buffer_cap = 16`. | If this warning fires repeatedly, investigate whether chain-server is failing to produce frames or Alpha's loop is stalling between polls. |
+| 3 | **Inconsistent simulator state on reorg clear failure** | `alpha/live/feed`, `eth_chain_server` | On a parent-hash mismatch (reorg), `prune_stale_direct_live_state` clears the local session map then calls `provider().clear()` on the ring buffer. If `provider().clear()` fails, the local map is empty but the ring buffer retains stale entries from the old fork. A new session is then published on top, so the current block simulates correctly, but the stale entries for older blocks linger until naturally evicted. Logging fixed in `direct_live_state.rs`: the clear-failure case is now `error!` level with `simulator_state_consistent=false` instead of a plain `warn!`. | Monitor for `simulator_state_consistent=false` log lines. If observed, investigate what conditions cause `provider().clear()` to fail in the ring buffer implementation. |
 
 ## Mempool Signal Timing Bottleneck 2026-05-22
 

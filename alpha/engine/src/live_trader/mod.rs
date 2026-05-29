@@ -266,6 +266,8 @@ async fn run(
     let receipt_reconciler = execution_stack.receipt_reconciler;
     let next_order_sequence = execution_stack.next_order_sequence;
     let adapter = execution_stack.adapter;
+    let frame_block_tracker = execution_stack.last_frame_block.clone();
+    let frame_hash_tracker = execution_stack.last_frame_hash.clone();
 
     let mut engine =
         AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter).with_portfolio(portfolio);
@@ -347,6 +349,7 @@ async fn run(
             signals,
             frame_event,
             frame_block,
+            frame_hash,
             frame_pool_count,
             polled_pools,
             polled_pool_wires,
@@ -374,11 +377,29 @@ async fn run(
             }
         };
         if let Some(frame_block) = frame_block {
+            let prev_last = last_frame_block;
             last_frame_block = last_frame_block.max(frame_block);
+            if last_frame_block > prev_last {
+                let gap = last_frame_block - prev_last;
+                if gap > LIVE_BLOCK_FRAME_GAP_WARN_THRESHOLD {
+                    tracing::warn!(
+                        prev_last_frame_block = prev_last,
+                        new_frame_block = last_frame_block,
+                        gap,
+                        ring_buffer_cap = LIVE_BLOCK_FRAME_RING_CAP,
+                        "live block frame gap exceeds alert threshold; simulator state for skipped blocks may be unavailable"
+                    );
+                }
+                frame_block_tracker.store(last_frame_block, Ordering::Relaxed);
+                if let Ok(mut guard) = frame_hash_tracker.lock() {
+                    *guard = frame_hash.clone();
+                }
+            }
         }
         tracing::debug!(
             event = %frame_event,
             frame_block = ?frame_block,
+            frame_hash = ?frame_hash,
             frame_pool_count,
             last_frame_block,
             "alpha trader consumed live block frame"
@@ -427,6 +448,26 @@ async fn run(
         reports += receipt_summary.total_reports;
         let receipt_reports = receipt_summary.reports;
         let receipt_unresolved = receipt_summary.unresolved;
+
+        let pool_summary = process_pool_updates(
+            PoolUpdateProcessingInput {
+                store: &store,
+                observation_strategy_name: &observation_strategy_name,
+                status: &status,
+                first_poll,
+                suppress_events,
+                replay_current: args.replay_current,
+                adapter_current_block: &adapter_current_block,
+            },
+            &mut engine,
+            polled_pools,
+            &mut seen_pool_blocks,
+            &mut seen_mined_pool_risk_keys,
+        )
+        .await?;
+        market_events += pool_summary.market_events;
+        risk_events += pool_summary.risk_events;
+        reports += pool_summary.reports;
 
         {
             let mut signal_wires = signals.signals;
@@ -526,16 +567,30 @@ async fn run(
                         continue;
                     }
                 };
-                let signal_block = event
-                    .observed_block
-                    .or(status.progress.current_block)
-                    .unwrap_or_default();
-                if signal_block > 0 {
-                    if event.observed_block.is_none() {
-                        event.observed_block = Some(signal_block);
-                    }
-                    adapter_current_block.store(signal_block, Ordering::Relaxed);
-                }
+                let Some(signal_block) = event.observed_block.filter(|block| *block > 0) else {
+                    record_signal_observation(
+                        &store,
+                        &observation_strategy_name,
+                        &signal,
+                        "ignored",
+                        0,
+                        first_poll,
+                        suppress_events,
+                        &status,
+                        json!({
+                            "reason_code": "missing_detected_at_head_block",
+                            "reason": "mempool signal missing detector-time chain head"
+                        }),
+                    )
+                    .await?;
+                    warn!(
+                        signal_id = %signal.signal_id,
+                        signal_type = %signal.signal_type,
+                        "skipping mempool signal without detector-time chain head"
+                    );
+                    continue;
+                };
+                adapter_current_block.store(signal_block, Ordering::Relaxed);
                 let pool_context = event
                     .pool_address
                     .as_ref()
@@ -582,25 +637,6 @@ async fn run(
                 }
             }
         }
-        let pool_summary = process_pool_updates(
-            PoolUpdateProcessingInput {
-                store: &store,
-                observation_strategy_name: &observation_strategy_name,
-                status: &status,
-                first_poll,
-                suppress_events,
-                replay_current: args.replay_current,
-                adapter_current_block: &adapter_current_block,
-            },
-            &mut engine,
-            polled_pools,
-            &mut seen_pool_blocks,
-            &mut seen_mined_pool_risk_keys,
-        )
-        .await?;
-        market_events += pool_summary.market_events;
-        risk_events += pool_summary.risk_events;
-        reports += pool_summary.reports;
 
         if execution_mode == TraderExecutionMode::ChainSim {
             if !suppress_events && (!first_poll || args.replay_current) {

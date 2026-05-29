@@ -76,15 +76,16 @@ impl LiveTokenRuntime {
             removed_sessions
         };
         if let Err(error) = self.inner.live_tx_simulator.provider().clear() {
-            tracing::warn!(
+            tracing::error!(
                 target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                 block_number,
                 block_hash = %block_hash,
                 expected_parent_hash = %expected_parent_hash,
                 cached_parent_hash = %cached_parent_hash,
-                removed_sessions,
+                removed_local_sessions = removed_sessions,
+                simulator_state_consistent = false,
                 error = %error,
-                "failed to clear stale LiveTxSimulator state after direct live parent mismatch"
+                "failed to clear LiveTxSimulator ring buffer after parent hash mismatch; stale states may remain in simulator until evicted by newer blocks"
             );
             return;
         }

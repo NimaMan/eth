@@ -128,8 +128,10 @@ impl LiveTokenRuntime {
                             tracing::warn!(
                                 target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                                 block_number,
+                                block_hash = %loaded.block.header.hash,
+                                simulator_state_published = false,
                                 error = %error,
-                                "failed to build direct live block state session"
+                                "failed to build direct live block state session; simulation for this block will be unavailable"
                             );
                         }
                     }
@@ -138,7 +140,9 @@ impl LiveTokenRuntime {
                     tracing::warn!(
                         target: LIVE_TOKEN_TRACKER_LOG_TARGET,
                         block_number,
-                        "live block update did not include state diffs for direct state session"
+                        block_hash = %loaded.block.header.hash,
+                        simulator_state_published = false,
+                        "live block update did not include state diffs for direct state session; simulation for this block will be unavailable"
                     );
                 }
             }
