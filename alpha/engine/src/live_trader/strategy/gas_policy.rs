@@ -8,7 +8,7 @@ const LIVE_GAS_REQUIRED_SOURCE_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_REQUIRED_SOUR
 const LIVE_GAS_LOOKBACK_BLOCKS_CONFIG: &str = "ALPHA_LIVE_GAS_RANK_LOOKBACK_BLOCKS";
 const LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG: &str = "ALPHA_GAS_RANK_PRIORITY_TIE_BREAKER_GWEI";
 const LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG: &str = "ALPHA_LIVE_GAS_SIMULATED_GAS_BUFFER_BPS";
-const LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG: &str = "ALPHA_LIVE_GAS_MIN_PRIORITY_FEE_GWEI";
+const DEFAULT_MIN_PRIORITY_FEE_GWEI: &str = "1";
 const LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG: &str = "ALPHA_LIVE_GAS_MAX_PRIORITY_FEE_GWEI";
 const LIVE_ENTRY_MAX_GAS_FEE_ETH_CONFIG: &str = "ALPHA_LIVE_ENTRY_MAX_ESTIMATED_GAS_FEE_ETH";
 const LIVE_EXIT_MAX_GAS_FEE_ETH_CONFIG: &str = "ALPHA_LIVE_EXIT_MAX_ESTIMATED_GAS_FEE_ETH";
@@ -72,10 +72,8 @@ pub(super) fn load_live_real_gas_policy(
             config,
             LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG,
         )?,
-        min_priority_fee_gwei: required_config_decimal(
-            config,
-            LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG,
-        )?,
+        min_priority_fee_gwei: Decimal::from_str_exact(DEFAULT_MIN_PRIORITY_FEE_GWEI)
+            .expect("DEFAULT_MIN_PRIORITY_FEE_GWEI is valid"),
         max_priority_fee_gwei: required_config_decimal(
             config,
             LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG,
@@ -152,13 +150,11 @@ pub(in crate::live_trader) struct BuyGasPolicyContext<'a> {
 impl LiveRealGasPolicy {
     fn validated(self) -> Result<Self> {
         if self.min_priority_fee_gwei < Decimal::ZERO {
-            return Err(eyre!(
-                "{LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG} must be non-negative"
-            ));
+            return Err(eyre!("min_priority_fee_gwei must be non-negative"));
         }
         if self.min_priority_fee_gwei > self.max_priority_fee_gwei {
             return Err(eyre!(
-                "{LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG} ({}) must be <= {LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG} ({})",
+                "min_priority_fee_gwei ({}) must be <= max_priority_fee_gwei ({})",
                 self.min_priority_fee_gwei,
                 self.max_priority_fee_gwei
             ));
@@ -331,7 +327,6 @@ mod tests {
             (LIVE_GAS_LOOKBACK_BLOCKS_CONFIG, "100"),
             (LIVE_GAS_PRIORITY_TIE_BREAKER_GWEI_CONFIG, "0.1456"),
             (LIVE_GAS_SIMULATED_BUFFER_BPS_CONFIG, "2500"),
-            (LIVE_GAS_MIN_PRIORITY_FEE_GWEI_CONFIG, "1"),
             (LIVE_GAS_MAX_PRIORITY_FEE_GWEI_CONFIG, "3.5"),
             (LIVE_ENTRY_MAX_GAS_FEE_ETH_CONFIG, "0.0012"),
             (LIVE_EXIT_MAX_GAS_FEE_ETH_CONFIG, "0.002"),
@@ -437,8 +432,6 @@ mod tests {
 
         let error = policy.validated().unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("ALPHA_LIVE_GAS_MIN_PRIORITY_FEE_GWEI"));
+        assert!(error.to_string().contains("min_priority_fee_gwei"));
     }
 }
