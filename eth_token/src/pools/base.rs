@@ -427,6 +427,34 @@ impl BasePool {
         self.reserve_tracker.is_scam
     }
 
+    pub fn classification_input(&self) -> crate::pools::classification::PoolClassificationInput {
+        use crate::pools::classification::{quote_symbol_for_denom_address, PoolClassificationInput};
+        let max_denom_reserve = self
+            .reserve_tracker
+            .reserve_history
+            .iter()
+            .map(|s| s.denom_reserve)
+            .filter(|v| v.is_finite())
+            .fold(self.denom_reserve(), f64::max);
+        PoolClassificationInput {
+            quote_symbol: quote_symbol_for_denom_address(&self.identity.denom_address)
+                .map(str::to_string),
+            denom_reserve: Some(self.denom_reserve()),
+            max_denom_reserve: Some(max_denom_reserve),
+            token_reserve: Some(self.token_reserve()),
+            can_buy: self.effective_can_buy(),
+            can_sell: self.effective_can_sell(),
+            cohort_can_buy: Some(self.state.can_buy),
+            cohort_can_sell: Some(self.state.can_sell),
+            is_scam: self.is_scam(),
+            liquidity_removed: self.has_liquidity_removal(),
+            creation_block: self.creation_block,
+            creation_timestamp: self.creation_timestamp,
+            has_price_history: !self.price_history.is_empty(),
+            ..PoolClassificationInput::default()
+        }
+    }
+
     fn has_no_economic_price(&self) -> bool {
         matches!(
             self.state.lifecycle,

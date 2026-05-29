@@ -636,6 +636,20 @@ fn finite_positive(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite() && *value >= 0.0)
 }
 
+/// Maps a well-known denom contract address to its canonical quote symbol.
+/// Returns `None` for unknown addresses — the pool will be ineligible.
+pub fn quote_symbol_for_denom_address(address: &str) -> Option<&'static str> {
+    match address.trim().to_ascii_lowercase().as_str() {
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        | "0x0000000000000000000000000000000000000000" => Some("ETH"),
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" => Some("WETH"),
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" => Some("USDC"),
+        "0xdac17f958d2ee523a2206206994597c13d831ec7" => Some("USDT"),
+        "0x6b175474e89094c44da98b954eedeac495271d0f" => Some("DAI"),
+        _ => None,
+    }
+}
+
 fn normalized_tax_bucket(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)

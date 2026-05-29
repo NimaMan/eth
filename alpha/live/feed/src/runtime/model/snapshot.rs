@@ -1,7 +1,7 @@
 use eth_pool_classification::{
     classify_pool_with_config, EligiblePoolOutcome, PoolClassificationConfig,
-    PoolClassificationInput,
 };
+
 use eth_token::erc20::ERC20Token;
 use eth_token::pools::{
     BasePool, PoolLifecycle, PoolRuntimeState, UniswapV2Pool, UniswapV3Pool, UniswapV4Pool,
@@ -223,25 +223,8 @@ impl LiveTokenPoolSnapshot {
 
     pub fn from_base(token_address: &str, pool: &BasePool, lp: LiveTokenPoolLpSnapshot) -> Self {
         let explicit_liquidity_removal = pool.has_liquidity_removal();
-        let max_denom_reserve = max_denom_reserve(pool);
         let classification = classify_pool_with_config(
-            &PoolClassificationInput {
-                quote_symbol: denom_symbol(&pool.identity.denom_address)
-                    .map(str::to_string)
-                    .or_else(|| Some(pool.identity.denom_address.clone())),
-                denom_reserve: Some(pool.denom_reserve()),
-                max_denom_reserve: Some(max_denom_reserve),
-                token_reserve: Some(pool.token_reserve()),
-                can_buy: pool.effective_can_buy(),
-                can_sell: pool.effective_can_sell(),
-                cohort_can_buy: Some(pool.state.can_buy),
-                cohort_can_sell: Some(pool.state.can_sell),
-                liquidity_removed: explicit_liquidity_removal,
-                creation_block: pool.creation_block,
-                creation_timestamp: pool.creation_timestamp,
-                has_price_history: !pool.price_history.is_empty(),
-                ..PoolClassificationInput::default()
-            },
+            &pool.classification_input(),
             &PoolClassificationConfig::default(),
         );
         let derived_liquidity_removal = matches!(
@@ -291,9 +274,11 @@ impl LiveTokenPoolSnapshot {
             tick_spacing: None,
             hooks: None,
             denom_address: pool.identity.denom_address.clone(),
-            denom_symbol: denom_symbol(&pool.identity.denom_address)
-                .unwrap_or(pool.identity.denom_address.as_str())
-                .to_string(),
+            denom_symbol: eth_token::pools::classification::quote_symbol_for_denom_address(
+                &pool.identity.denom_address,
+            )
+            .unwrap_or(pool.identity.denom_address.as_str())
+            .to_string(),
             token_reserve: pool.token_reserve(),
             denom_reserve: pool.denom_reserve(),
             price: pool.price(),
@@ -347,26 +332,6 @@ pub struct LiveTokenPoolLpSnapshot {
     pub approval_count: u64,
 }
 
-fn max_denom_reserve(pool: &BasePool) -> f64 {
-    pool.reserve_tracker
-        .reserve_history
-        .iter()
-        .map(|snapshot| snapshot.denom_reserve)
-        .filter(|value| value.is_finite())
-        .fold(pool.denom_reserve(), f64::max)
-}
-
-fn denom_symbol(denom_address: &str) -> Option<&'static str> {
-    match denom_address.trim().to_ascii_lowercase().as_str() {
-        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-        | "0x0000000000000000000000000000000000000000"
-        | "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" => Some("WETH"),
-        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" => Some("USDC"),
-        "0xdac17f958d2ee523a2206206994597c13d831ec7" => Some("USDT"),
-        "0x6b175474e89094c44da98b954eedeac495271d0f" => Some("DAI"),
-        _ => None,
-    }
-}
 
 fn sorted_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut values = values.into_iter().collect::<Vec<_>>();

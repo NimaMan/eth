@@ -2,12 +2,8 @@ use alloy_primitives::U256;
 use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{PortfolioId, StrategyName, WalletId},
-    market::PoolSnapshot,
 };
-use eth_pool_classification::{
-    classify_pool_with_config, PoolClassification, PoolClassificationConfig,
-    PoolClassificationInput,
-};
+use eth_pool_classification::PoolClassificationConfig;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
 use crate::shared_rules::entry::init_policy::EntryInitPolicyConfig;
@@ -131,28 +127,4 @@ impl SnipeAllConfig {
         }
     }
 
-    pub fn classification_input(&self, pool: &PoolSnapshot) -> PoolClassificationInput {
-        PoolClassificationInput::new(
-            normalized_denom_symbol(pool),
-            pool.denom_reserve.to_f64(),
-            pool.can_buy,
-            pool.can_sell,
-            pool.is_scam,
-        )
-    }
-
-    pub fn classification_decision(&self, pool: &PoolSnapshot) -> PoolClassification {
-        classify_pool_with_config(
-            &self.classification_input(pool),
-            &self.classification_config(),
-        )
-    }
-}
-
-fn normalized_denom_symbol(pool: &PoolSnapshot) -> Option<String> {
-    pool.denom_symbol
-        .as_deref()
-        .map(str::trim)
-        .filter(|symbol| !symbol.is_empty())
-        .map(|symbol| symbol.to_ascii_uppercase())
 }
