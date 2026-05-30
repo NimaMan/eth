@@ -14,7 +14,7 @@ use crate::tx_processor::data_models::{
     AccessControlRoleGrantedEvent, AccessControlRoleRevokedEvent, AddressBalanceChange,
     ApprovalForAllEvent, ContractCreationEvent, DepositEvent, ERC1155TransferEvent,
     ERC20ApprovalEvent, ERC20TransferEvent, ERC721ApprovalEvent, ERC721TransferEvent,
-    InternalErc20Call, InternalTransaction, OwnershipTransferStartedEvent,
+    InternalErc20Call, InternalErc20Transfer, InternalTransaction, OwnershipTransferStartedEvent,
     OwnershipTransferredEvent, Permit2Event,
     ProcessedAccessListItem, ProcessedTransaction, ProxyAdminChangedEvent, TradingDisabledEvent,
     TradingEnabledEvent, TransactionFees, UniswapV2BurnEvent, UniswapV2MintEvent,
@@ -60,6 +60,8 @@ pub struct CompactProcessedTransaction {
     pub internal_transactions: Option<Vec<InternalTransaction>>,
     #[serde(default)]
     pub internal_erc20_calls: Option<Vec<InternalErc20Call>>,
+    #[serde(default)]
+    pub internal_erc20_transfers: Option<Vec<InternalErc20Transfer>>,
     pub uniswap_v2_syncs: Option<Vec<UniswapV2SyncEvent>>,
     pub uniswap_v2_swaps: Option<Vec<UniswapV2SwapEvent>>,
     pub uniswap_v3_pools: Option<Vec<UniswapV3PoolCreatedEvent>>,
@@ -145,6 +147,7 @@ impl CompactProcessedTransaction {
             erc1155_transfers: option_vec(&tx.erc1155_transfers),
             internal_transactions: option_vec(&tx.internal_transactions),
             internal_erc20_calls: option_vec(&tx.internal_erc20_calls),
+            internal_erc20_transfers: option_vec(&tx.internal_erc20_transfers),
             uniswap_v2_syncs: option_vec(&tx.uniswap_v2_syncs),
             uniswap_v2_swaps: option_vec(&tx.uniswap_v2_swaps),
             uniswap_v3_pools: option_vec(&tx.uniswap_v3_pools),
@@ -223,6 +226,7 @@ impl CompactProcessedTransaction {
         tx.erc1155_transfers = self.erc1155_transfers.unwrap_or_default();
         tx.internal_transactions = self.internal_transactions.unwrap_or_default();
         tx.internal_erc20_calls = self.internal_erc20_calls.unwrap_or_default();
+        tx.internal_erc20_transfers = self.internal_erc20_transfers.unwrap_or_default();
         tx.uniswap_v2_syncs = self.uniswap_v2_syncs.unwrap_or_default();
         tx.uniswap_v2_swaps = self.uniswap_v2_swaps.unwrap_or_default();
         tx.uniswap_v3_pools = self.uniswap_v3_pools.unwrap_or_default();

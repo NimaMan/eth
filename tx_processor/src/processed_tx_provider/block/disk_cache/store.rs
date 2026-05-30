@@ -16,6 +16,25 @@ use super::reader::ProcessedBlockDiskCacheReader;
 use super::writer::ProcessedBlockDiskCacheWriter;
 
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
+/// Bincode payload schema version, baked into the cache filename.
+///
+/// The cache payload (`CompactProcessedTransaction` / `ProcessedBlockDiskCacheEntry`)
+/// is bincode-encoded, which is positional and NOT self-describing: adding or
+/// reordering a field changes the byte layout, so an old payload either fails to
+/// deserialize or silently mis-decodes. Without a version in the filename, such a
+/// change makes EVERY existing `.pblock` entry a swallowed deserialize-failure
+/// (silent cache miss), forcing a full fresh re-trace of the whole cache at once.
+///
+/// Bumping this version routes reads/writes to a NEW filename
+/// (`<block>.v<N>.pblock.zst`), so old entries are never read against an
+/// incompatible layout — the cache refreshes cleanly per block on demand instead
+/// of mass-invalidating. BUMP THIS whenever the bincode layout of the cached
+/// types changes (e.g. adding `internal_erc20_calls`), OR whenever a cached
+/// DERIVED field is recomputed differently (e.g. `address_balance_changes` now
+/// folds in event-less `internal_erc20_transfers`) so stale derivations refresh.
+///
+/// v3: add `internal_erc20_transfers` + fold them into `address_balance_changes`.
+const CACHE_SCHEMA_VERSION: u32 = 3;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 const CACHE_ZSTD_LEVEL: i32 = 3;
 const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;
@@ -670,12 +689,20 @@ fn monotonic_nanos() -> u128 {
         .unwrap_or_default()
 }
 
-fn cache_file_name(block_number: u64) -> String {
-    format!("{block_number}{CACHE_FILE_SUFFIX}")
+/// Schema-versioned cache filename for a block (`<block>.v<N>.pblock.zst`).
+/// Exposed so out-of-store readers (e.g. the `dump_pblock` dev tools) build the
+/// SAME name as the store and never read a stale, layout-incompatible version.
+pub fn cache_file_name(block_number: u64) -> String {
+    format!("{block_number}.v{CACHE_SCHEMA_VERSION}{CACHE_FILE_SUFFIX}")
 }
 
 fn block_number_from_cache_file_name(name: &str) -> Option<u64> {
+    // Only recognize files written by the current schema version. Entries from a
+    // previous version (`<block>.pblock.zst` or `<block>.v1.pblock.zst`) are
+    // orphaned: never read against an incompatible layout, and not counted for
+    // coverage/pruning of the current version.
     name.strip_suffix(CACHE_FILE_SUFFIX)
+        .and_then(|value| value.strip_suffix(&format!(".v{CACHE_SCHEMA_VERSION}")))
         .and_then(|value| value.parse::<u64>().ok())
 }
 
@@ -794,7 +821,10 @@ mod tests {
             .expect("write block");
         assert_eq!(write.key.network, "ethereum-mainnet");
         assert_eq!(write.key.block_hash, Some(B256::repeat_byte(0xaa)));
-        assert!(root.join("ethereum-mainnet").join("42.pblock.zst").exists());
+        assert!(root
+            .join("ethereum-mainnet")
+            .join(format!("42.v{CACHE_SCHEMA_VERSION}.pblock.zst"))
+            .exists());
 
         let cached = store
             .get(&write.key)

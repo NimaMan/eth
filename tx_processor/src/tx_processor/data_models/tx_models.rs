@@ -1,7 +1,7 @@
 use super::balance_changes::AddressBalanceChange;
 use super::fees::TransactionFees;
 use super::receipt_models::*;
-use super::trace_models::{InternalErc20Call, InternalTransaction};
+use super::trace_models::{InternalErc20Call, InternalErc20Transfer, InternalTransaction};
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
@@ -73,6 +73,15 @@ pub struct ProcessedTransaction {
     /// `erc20_transfers` to find event-less moves.
     #[serde(default)]
     pub internal_erc20_calls: Vec<InternalErc20Call>,
+
+    /// Event-less ERC-20 transfers — the value-moving subset of
+    /// `internal_erc20_calls` (Transfer/TransferFrom, succeeded, non-zero) that
+    /// emitted NO matching `Transfer` event. `erc20_transfers ∪
+    /// internal_erc20_transfers` is the complete transfer set; both feed
+    /// `address_balance_changes`. Derived via
+    /// `InternalErc20Transfer::event_less_complement`.
+    #[serde(default)]
+    pub internal_erc20_transfers: Vec<InternalErc20Transfer>,
 
     // DEX events
     pub uniswap_v2_syncs: Vec<UniswapV2SyncEvent>,
@@ -188,6 +197,7 @@ impl ProcessedTransaction {
             erc1155_transfers: Vec::new(),
             internal_transactions: Vec::new(),
             internal_erc20_calls: Vec::new(),
+            internal_erc20_transfers: Vec::new(),
             uniswap_v2_syncs: Vec::new(),
             uniswap_v2_swaps: Vec::new(),
             uniswap_v3_pools: Vec::new(),

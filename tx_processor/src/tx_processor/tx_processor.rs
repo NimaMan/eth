@@ -11,8 +11,9 @@
 /// 4. Converts balance changes to proper format
 /// 5. Creates complete ProcessedTransaction object
 use super::data_models::{
-    tx_models::ETHTransfer, ContractCreationEvent, InternalTransaction, ProcessedAccessListItem,
-    ProcessedTransaction, TradingDisabledEvent, TradingEnabledEvent, TransactionFees,
+    tx_models::ETHTransfer, ContractCreationEvent, InternalErc20Transfer, InternalTransaction,
+    ProcessedAccessListItem, ProcessedTransaction, TradingDisabledEvent, TradingEnabledEvent,
+    TransactionFees,
 };
 use super::{
     address_index::{
@@ -417,11 +418,17 @@ impl TxProcessor {
             }
         }
 
-        // Calculate address balance changes from DECODED transfers and internal transactions
+        // Event-less ERC-20 transfers recovered from the trace (deduped vs events).
+        let internal_erc20_transfers =
+            InternalErc20Transfer::event_less_complement(&internal_erc20_calls, &erc20_transfers);
+
+        // Calculate address balance changes from DECODED transfers (events +
+        // event-less) and internal transactions.
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         let address_balance_changes = Some(
             balance_calculator.calculate_balance_changes_from_processed_data(
                 &erc20_transfers,
+                &internal_erc20_transfers,
                 &internal_transactions,
                 block_number,
                 tx_index,
@@ -472,6 +479,7 @@ impl TxProcessor {
         // Set the extracted internal transactions
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.internal_erc20_calls = internal_erc20_calls;
+        processed_tx.internal_erc20_transfers = internal_erc20_transfers;
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
         processed_tx.bribe_amount =
             Self::calculate_bribe_amount(&processed_tx.fees);

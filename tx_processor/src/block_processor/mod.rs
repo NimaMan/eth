@@ -2,7 +2,8 @@ mod conversion;
 pub mod types;
 
 use crate::tx_processor::data_models::{
-    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction, TransactionFees,
+    ContractCreationEvent, InternalErc20Transfer, ProcessedAccessListItem, ProcessedTransaction,
+    TransactionFees,
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
 use crate::{processed_block_trace_config_hash, ProcessedBlockCacheKey, ProcessedBlockCacheStore};
@@ -495,6 +496,10 @@ impl BlockProcessor {
 
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.internal_erc20_calls = internal_erc20_calls;
+        processed_tx.internal_erc20_transfers = InternalErc20Transfer::event_less_complement(
+            &processed_tx.internal_erc20_calls,
+            &processed_tx.erc20_transfers,
+        );
         processed_tx.bribe_amount =
             TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
@@ -502,6 +507,7 @@ impl BlockProcessor {
         let balance_started = Instant::now();
         let balance_changes = balance_calculator.calculate_balance_changes_from_processed_data(
             &processed_tx.erc20_transfers,
+            &processed_tx.internal_erc20_transfers,
             &processed_tx.internal_transactions,
             metadata.block_number,
             metadata.tx_index,

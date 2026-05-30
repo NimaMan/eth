@@ -19,7 +19,7 @@ use super::data_models::balance_changes::{AddressBalanceChange, TokenMovement, T
 /// - Returns token_net with contract addresses only (unknown tokens)
 /// - Returns currency_net with symbols only (tokens in DENOM_ADDRESSES)
 /// - No overlap between token_net and currency_net
-use super::data_models::InternalTransaction;
+use super::data_models::{InternalErc20Transfer, InternalTransaction};
 use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
 use lazy_static::lazy_static;
@@ -146,6 +146,7 @@ impl AddressBalanceChangeCalculator {
     pub fn calculate_balance_changes_from_processed_data(
         &mut self,
         erc20_transfers: &[super::data_models::ERC20TransferEvent],
+        internal_erc20_transfers: &[InternalErc20Transfer],
         internal_transactions: &[InternalTransaction],
         block_number: u64,
         tx_index: u64,
@@ -176,51 +177,40 @@ impl AddressBalanceChangeCalculator {
             }
         }
 
-        // Process ERC20 transfers (already decoded!)
+        // Process ERC20 transfers decoded from emitted Transfer events.
         for transfer in erc20_transfers.iter() {
             let transfer_id =
                 TransferId::new(block_number, tx_index, transfer.log_index.to_string());
+            self.track_erc20_transfer(
+                transfer.token_address,
+                transfer.from_address,
+                transfer.to_address,
+                transfer.amount,
+                transfer_id,
+            );
+        }
 
-            // Check if this is a known currency (USDC, USDT, DAI, etc.)
-            let token_addr = transfer.token_address;
-
-            if let Some(mut currency_symbol) = DENOM_ADDRESSES.get(&token_addr).cloned() {
-                if currency_symbol == "WETH" {
-                    currency_symbol = "ETH";
-                }
-
-                // Keep amounts as U256 - no decimal conversion needed here
-                // The amounts are already in the token's smallest unit
-                let amount = transfer.amount;
-
-                self.track_movement(
-                    MovementType::Currency,
-                    transfer.from_address,
-                    transfer.to_address,
-                    amount,
-                    transfer_id,
-                    None,
-                    Some(currency_symbol.to_string()),
-                );
-            } else {
-                // Unknown token - track with raw amount
-                let amount = transfer.amount;
-
-                self.track_movement(
-                    MovementType::Token,
-                    transfer.from_address,
-                    transfer.to_address,
-                    amount,
-                    transfer_id,
-                    Some(token_addr),
-                    None,
-                );
-            }
+        // Process event-less ERC-20 transfers recovered from the call trace (e.g.
+        // a backdoor custody drain that emits no Transfer event). These are the
+        // deduplicated complement of the events above, so the union is the
+        // complete transfer set with no double-counting.
+        for (i, transfer) in internal_erc20_transfers.iter().enumerate() {
+            let transfer_id =
+                TransferId::new(block_number, tx_index, format!("internal_erc20_{}", i));
+            self.track_erc20_transfer(
+                transfer.token_address,
+                transfer.from_address,
+                transfer.to_address,
+                transfer.amount,
+                transfer_id,
+            );
         }
 
         // Calculate final balances - use the from_address if we have transfers
         let from_addr = if !erc20_transfers.is_empty() {
             erc20_transfers[0].from_address
+        } else if !internal_erc20_transfers.is_empty() {
+            internal_erc20_transfers[0].from_address
         } else if !internal_transactions.is_empty() {
             internal_transactions[0].from_address
         } else {
@@ -228,6 +218,44 @@ impl AddressBalanceChangeCalculator {
         };
 
         self.get_net_balance_changes(from_addr)
+    }
+
+    /// Apply one ERC-20 transfer (from an emitted event OR a recovered
+    /// event-less call) to the movement ledger: known denoms are tracked as
+    /// currencies (USDC/USDT/DAI/WETH→ETH), everything else as a raw token.
+    /// Amounts stay in the token's smallest unit (no decimal conversion here).
+    fn track_erc20_transfer(
+        &mut self,
+        token_addr: Address,
+        from_addr: Address,
+        to_addr: Address,
+        amount: U256,
+        transfer_id: TransferId,
+    ) {
+        if let Some(mut currency_symbol) = DENOM_ADDRESSES.get(&token_addr).cloned() {
+            if currency_symbol == "WETH" {
+                currency_symbol = "ETH";
+            }
+            self.track_movement(
+                MovementType::Currency,
+                from_addr,
+                to_addr,
+                amount,
+                transfer_id,
+                None,
+                Some(currency_symbol.to_string()),
+            );
+        } else {
+            self.track_movement(
+                MovementType::Token,
+                from_addr,
+                to_addr,
+                amount,
+                transfer_id,
+                Some(token_addr),
+                None,
+            );
+        }
     }
 
     /// Track a movement between addresses and handle special cases
