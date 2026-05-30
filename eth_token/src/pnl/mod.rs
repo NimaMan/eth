@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::OnceLock;
 
 use alloy_primitives::{Address, B256, U256};
 use rust_decimal::{Decimal, MathematicalOps};
@@ -75,16 +76,23 @@ pub use model::{
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
-// Known protocol infrastructure addresses that route or settle trades but are
-// not economic actors holding positions. Excluded from address positions.
-const KNOWN_INFRASTRUCTURE: &[&str] = &[
-    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d", // Uniswap V2 Router
-    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45", // Uniswap Universal Router (V2+V3)
-    "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad", // Uniswap Universal Router (V3)
-    "0x000000000004444c5dc75cb358380d2e3de08a90", // Uniswap V4 PoolManager
-    "0x1111111254eeb25477b68fb85ed929f73a960582", // 1inch Router v5
-    "0x111111125421ca6dc452d289314280a0f8842a65", // 1inch Router v6
-];
+// Known protocol infrastructure addresses sourced from reth_chain_query's
+// canonical ROUTERS and POOL_FACTORIES maps. Built once, checked per tx.
+static KNOWN_INFRASTRUCTURE: OnceLock<HashSet<String>> = OnceLock::new();
+
+fn known_infrastructure() -> &'static HashSet<String> {
+    KNOWN_INFRASTRUCTURE.get_or_init(|| {
+        use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
+        let mut set: HashSet<String> = ROUTERS
+            .values()
+            .map(|addr| format!("{addr:#x}"))
+            .collect();
+        if let Some(pool_manager) = POOL_FACTORIES.get("univ4_pool_manager") {
+            set.insert(format!("{pool_manager:#x}"));
+        }
+        set
+    })
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenPnlTracker {
@@ -278,7 +286,7 @@ impl PoolPnlTracker {
                 || address == self.token_address
                 || address == self.denom_address
                 || address == ZERO_ADDRESS
-                || KNOWN_INFRASTRUCTURE.contains(&address.as_str())
+                || known_infrastructure().contains(&address)
             {
                 continue;
             }
