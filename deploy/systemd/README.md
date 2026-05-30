@@ -15,22 +15,12 @@ Current system units:
 - `reth-rpc-kartal-bridge.socket` / `reth-rpc-kartal-bridge.service` - exposes Reth HTTP RPC on the Kartal Docker bridge only.
 - `kartal-eth-signer.service` - host-local Unix-socket signer for Kartal ETH tx execution.
 - `lighthouse-beacon.service`
-- `eth-live-block-processor.service` - Rust `tx_processor` live block processor.
-- `eth-live-token-tracker.service` - Python live token tracker and Redis token snapshot publisher.
-- `eth-chain-server.service` - Rust in-memory chain/token tracking API and live runtime.
-- `eth-mempool-processor.service` - Rust mempool signal detector.
+- `eth-chain-server.service` - Rust in-memory chain/token tracking API and live runtime; performs live block processing in-process.
 
 Current user units are documented in `user/README.md` and are installed by
 `../node/scripts/install-user-services.sh`. Chain-server is not installed as a
 user unit; keep exactly one `eth_chain_server` process, owned by the system
 `eth-chain-server.service`.
-
-Build the live processor before starting the service:
-
-```bash
-cd /home/nima/code/crypto/blockchains/eth
-cargo build --release -p tx_processor --bin live_block_processor
-```
 
 Build the chain server before starting its service:
 
@@ -42,17 +32,6 @@ cargo build --release -p eth_chain_server
 The service reads `/home/nima/code/crypto/blockchains/eth/config.env`, applies
 confirmed blocks through `eth_token`, and serves the live chain/token API from
 the in-process `eth_chain_server` runtime.
-
-The token tracker service also reads the shared config, writes logs under
-`/home/nima/code/crypto/blockchains/eth/logs`, publishes live token update
-notifications on ZMQ port `5557`, and persists token snapshots/indexes in Redis
-for the Rust mempool processor.
-
-The mempool processor reads the same config, consumes live block/state snapshots
-from Redis, subscribes to token updates on ZMQ port `5557`, and publishes
-signals on ZMQ port `5556`. The sidecar `reth_index` database is used for
-mempool first-seen arrival analytics when available, but is not required for the
-live signal path to run.
 
 If migrating from the old user-level Reth/Lighthouse services, remove the stale
 systemd override and stop the user services before starting the system units so
