@@ -6,6 +6,7 @@ mod replay_store;
 
 pub use compact::CompactProcessedTransaction;
 pub use disk_cache::{
+    bench_deserialize_block, bench_serialize_block, CacheFieldSet, CacheSerCodec,
     ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
     ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
     ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,

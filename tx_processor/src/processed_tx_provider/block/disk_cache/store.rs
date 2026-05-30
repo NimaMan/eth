@@ -1,3 +1,25 @@
+//! Processed-block disk cache store (on-disk replay store primitive).
+//!
+//! Algorithm / layout:
+//!   * One file per block at `<root>/<network>/<block>.v<SCHEMA>.pblock.zst`.
+//!     The filename is block-number based so a range read derives every path
+//!     from `start..=end` without fetching headers first. The schema version is
+//!     baked into the name so a payload-layout change routes to a fresh filename
+//!     instead of mass-invalidating (see `CACHE_SCHEMA_VERSION`).
+//!   * Write: `ProcessedBlock` -> `ProcessedBlockDiskCacheEntry`
+//!     (key + header + per-tx `CompactProcessedTransaction`, with
+//!     bincode-hostile fields — struct logs, v3/v4 swaps, signed auths —
+//!     extracted to JSON byte blobs) -> bincode -> zstd(level) -> atomic
+//!     temp-file + rename.
+//!   * Read: zstd-decode -> bincode-decode -> validate key/header -> rebuild
+//!     `ProcessedBlock`. A decode/validation failure is a swallowed cache miss.
+//!   * Pruning is FIFO by block number to a retain target; coverage scans the
+//!     directory and reports per-chain byte/block ranges.
+//!
+//! The `bench_*` items near the bottom expose candidate codecs (Full/Lean field
+//! sets, BincodeJson/Msgpack) used by the format benchmark to compare space and
+//! read time before a format change is committed.
+
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -720,6 +742,151 @@ fn chain_id_for_network(network: &str) -> Option<u64> {
 
 fn average_bytes(total_bytes: u64, blocks: usize) -> Option<f64> {
     (blocks > 0).then(|| total_bytes as f64 / blocks as f64)
+}
+
+// ===========================================================================
+// Cache-format benchmark codecs
+//
+// These items exist so the format benchmark
+// (examples/blocks/cache/benchmark_cache_formats.rs) can compare candidate
+// on-disk encodings against the production codec WITHOUT re-running EVM replay:
+// it decodes existing `.v2.pblock.zst` files into `ProcessedBlock`, then
+// re-encodes each block under a candidate and measures size + decode time.
+//
+// Two orthogonal knobs are exposed; compression (zstd level / trained
+// dictionary) is applied by the caller so it can be swept independently:
+//   * CacheFieldSet  - Full (current payload) vs Lean (drop never-read fields).
+//   * CacheSerCodec  - BincodeJson (production) vs Msgpack (no JSON extraction).
+//
+// The Lean drop-list is the set of fields no ProcessedBlock consumer reads,
+// confirmed by a repo-wide consumer audit (see block/README.md "Stored vs
+// consumed fields"): per-opcode struct logs, ERC-1155 contracts, the EIP-2930
+// access list, and blob versioned hashes. (struct_logs dominates the savings.)
+// ===========================================================================
+
+/// Which fields a benchmark candidate carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheFieldSet {
+    /// Every field the current production payload carries.
+    Full,
+    /// Drop fields no consumer reads (see module note / block/README.md).
+    Lean,
+}
+
+/// Candidate serialization codec. Compression is applied separately by the
+/// caller so zstd level/dictionary can be swept independently of the codec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheSerCodec {
+    /// Production codec: bincode entry, with bincode-hostile fields
+    /// (struct logs, v3/v4 swaps, signed auths) JSON-extracted first.
+    BincodeJson,
+    /// MessagePack over the whole compact entry. MessagePack is map-based and
+    /// handles `serde(flatten)`/maps natively, so no JSON extraction is needed.
+    Msgpack,
+}
+
+/// Drop every field that no `ProcessedBlock` consumer reads, in place.
+///
+/// The drop-list is exactly the four fields a repo-wide consumer audit confirmed
+/// are never read off a cached transaction (see block/README.md). NOTE: fields
+/// that look droppable but ARE read must stay — `erc1155_transfers` (read by
+/// tx_fund_flow), and `uniswap_v4_protocol_fee_updates` /
+/// `uniswap_v4_dynamic_lp_fee_updates` /
+/// `uniswap_v4_protocol_fee_controller_updates` (read by eth_token).
+fn bench_lean_compact(processed: &mut CompactProcessedTransaction) {
+    processed.struct_logs = None;
+    processed.erc1155_contracts = None;
+    processed.access_list = None;
+    processed.blob_versioned_hashes = None;
+}
+
+/// MessagePack benchmark entry: carries the compact transactions whole (no JSON
+/// extraction). Mirrors `ProcessedBlockDiskCacheEntry` minus the validation key,
+/// which is a fixed-size constant overhead irrelevant to the size comparison.
+#[derive(Serialize, Deserialize)]
+struct BenchMsgpackEntry {
+    header: BlockHeader,
+    transactions: Vec<BenchMsgpackTx>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BenchMsgpackTx {
+    processed: CompactProcessedTransaction,
+    processing_error: Option<String>,
+}
+
+impl BenchMsgpackEntry {
+    fn from_block(block: &ProcessedBlock, field_set: CacheFieldSet) -> Self {
+        let transactions = block
+            .transactions
+            .iter()
+            .map(|tx| {
+                let mut processed = CompactProcessedTransaction::from_processed(&tx.processed);
+                if field_set == CacheFieldSet::Lean {
+                    bench_lean_compact(&mut processed);
+                }
+                BenchMsgpackTx {
+                    processed,
+                    processing_error: tx.processing_error.clone(),
+                }
+            })
+            .collect();
+        Self {
+            header: block.header.clone(),
+            transactions,
+        }
+    }
+
+    fn into_processed_block(self) -> ProcessedBlock {
+        ProcessedBlock {
+            header: self.header,
+            transactions: self
+                .transactions
+                .into_iter()
+                .map(|tx| tx.processed.into_block_transaction(tx.processing_error))
+                .collect(),
+        }
+    }
+}
+
+/// Serialize a block to UNCOMPRESSED payload bytes under a candidate field set
+/// and codec. The caller applies compression (plain zstd at some level, or a
+/// trained dictionary) so it can be benchmarked independently.
+pub fn bench_serialize_block(
+    key: &ProcessedBlockDiskCacheKey,
+    block: &ProcessedBlock,
+    field_set: CacheFieldSet,
+    codec: CacheSerCodec,
+) -> Result<Vec<u8>> {
+    match codec {
+        CacheSerCodec::BincodeJson => {
+            let mut entry = ProcessedBlockDiskCacheEntry::from_block(key.clone(), block)?;
+            if field_set == CacheFieldSet::Lean {
+                for tx in &mut entry.transactions {
+                    tx.struct_logs_json = None;
+                    bench_lean_compact(&mut tx.processed);
+                }
+            }
+            encode_cache_entry(&entry)
+        }
+        CacheSerCodec::Msgpack => {
+            let entry = BenchMsgpackEntry::from_block(block, field_set);
+            rmp_serde::to_vec(&entry).wrap_err("failed to msgpack-encode benchmark cache entry")
+        }
+    }
+}
+
+/// Inverse of [`bench_serialize_block`] (post-decompression). Reconstructs a
+/// `ProcessedBlock` so the benchmark can verify round-trip correctness.
+pub fn bench_deserialize_block(bytes: &[u8], codec: CacheSerCodec) -> Result<ProcessedBlock> {
+    match codec {
+        CacheSerCodec::BincodeJson => decode_cache_entry(bytes)?.into_processed_block(),
+        CacheSerCodec::Msgpack => {
+            let entry: BenchMsgpackEntry = rmp_serde::from_slice(bytes)
+                .wrap_err("failed to msgpack-decode benchmark cache entry")?;
+            Ok(entry.into_processed_block())
+        }
+    }
 }
 
 #[cfg(test)]
