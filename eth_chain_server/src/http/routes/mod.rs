@@ -10,6 +10,7 @@ mod range;
 mod simulation;
 mod token_activity;
 mod token_analytics;
+mod tx;
 mod v1;
 
 use std::convert::Infallible;

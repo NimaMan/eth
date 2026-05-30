@@ -2,7 +2,7 @@ use warp::{Filter, Reply};
 
 use super::{
     agent, alpha, backtest, health, live, mempool, ops, price, range, simulation, token_activity,
-    token_analytics,
+    token_analytics, tx,
 };
 use crate::http::ServerState;
 use crate::read_models::activity::TokenActivityBlocksQuery;
@@ -29,6 +29,11 @@ pub(super) fn routes(
         .and(warp::get())
         .and(super::with_state(state.clone()))
         .and_then(health::health);
+
+    let processed_tx = warp::path!("api" / "v1" / "eth" / "tx" / String)
+        .and(warp::get())
+        .and(super::with_state(state.clone()))
+        .and_then(tx::processed_tx);
 
     let live_status = warp::path!("api" / "v1" / "eth" / "live-token-tracker" / "status")
         .and(warp::get())
@@ -673,6 +678,7 @@ pub(super) fn routes(
         .boxed();
 
     health
+        .or(processed_tx)
         .or(agent_routes)
         .or(frontend_live_routes)
         .or(trading_routes)
