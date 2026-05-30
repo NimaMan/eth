@@ -18,6 +18,19 @@ pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS: usize =
 pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
 pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY: usize = 2;
 
+/// Adaptive default for concurrent fresh-block fill (cache misses). Each missing
+/// block is traced on a `spawn_blocking` worker; the dominant cost (~0.7-1s) is
+/// EVM replay + callTracer, which parallelizes cleanly across blocks. Profiling
+/// showed throughput scaling to ~16-32 concurrency on a 32-core box (4 → ~333ms,
+/// 16 → ~160ms per block), so the historical default of 4 left ~2-4x on the
+/// table. Scale with available cores while leaving headroom for the live path,
+/// clamped to a sane range; falls back to the const if core count is unknown.
+pub fn default_processed_block_disk_cache_fill_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|cores| cores.get().saturating_sub(2).clamp(4, 16))
+        .unwrap_or(DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessedBlockRangeLoadOptions {
     pub fill_batch_blocks: usize,
@@ -29,7 +42,7 @@ impl Default for ProcessedBlockRangeLoadOptions {
     fn default() -> Self {
         Self {
             fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
-            fill_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+            fill_concurrency: default_processed_block_disk_cache_fill_concurrency(),
             read_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY,
         }
     }
