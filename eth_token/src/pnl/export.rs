@@ -62,6 +62,7 @@ impl PoolPnlTracker {
             },
             address_positions,
             movements,
+            meta: Default::default(),
         }
     }
 }

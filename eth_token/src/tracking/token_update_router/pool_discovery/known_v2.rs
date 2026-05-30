@@ -65,6 +65,7 @@ impl ProcessedTokenUpdateRouter {
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);
+            pool.base.creator_address = Some(address_string(&tx.from_address));
             discovered.push(pool_address);
         }
 
@@ -129,6 +130,7 @@ impl ProcessedTokenUpdateRouter {
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);
+            pool.base.creator_address = Some(address_string(&tx.from_address));
             discovered.push(pool_address);
         }
 
@@ -191,6 +193,7 @@ impl ProcessedTokenUpdateRouter {
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);
+            pool.base.creator_address = Some(address_string(&tx.from_address));
             discovered.push(pool_address);
         }
 

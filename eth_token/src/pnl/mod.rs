@@ -11,7 +11,7 @@ pub mod model;
 
 pub use conservation::PoolPnlConservationCheck;
 pub use model::{
-    PnlAddressPositionExport, PnlConservationExport, PnlMovementExport, PnlPoolExport,
+    PnlAddressPositionExport, PnlConservationExport, PnlMovementExport, PnlPoolExport, PnlPoolMeta,
 };
 
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";

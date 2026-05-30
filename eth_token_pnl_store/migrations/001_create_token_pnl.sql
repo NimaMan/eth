@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS token_pnl.pool_pnl_states (
     native_bribe_raw NUMERIC(78,0) NOT NULL DEFAULT 0,
     token_transfer_count BIGINT NOT NULL DEFAULT 0,
     denom_transfer_count BIGINT NOT NULL DEFAULT 0,
+    token_creator_address TEXT,
+    pool_creator_address TEXT,
+    can_buy BOOLEAN NOT NULL DEFAULT false,
+    can_sell BOOLEAN NOT NULL DEFAULT false,
+    lifecycle TEXT,
+    is_scam BOOLEAN NOT NULL DEFAULT false,
+    scam_label TEXT,
+    eligible BOOLEAN NOT NULL DEFAULT false,
+    eligible_outcome TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (run_id, pool_id)
 );

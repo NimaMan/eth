@@ -5,7 +5,7 @@ use tx_processor::ProcessedTransaction;
 
 use super::super::known_token_metadata::known_decimals_for_address_or_native;
 use super::super::ProcessedTokenUpdateRouter;
-use crate::tracking::{hash_string, same_address_str};
+use crate::tracking::{address_string, hash_string, same_address_str};
 
 impl ProcessedTokenUpdateRouter {
     pub(crate) fn discover_uniswap_v4_pools_for_token(
@@ -51,6 +51,7 @@ impl ProcessedTokenUpdateRouter {
             pool.base.creation_block = Some(tx.block_number);
             pool.base.creation_tx = Some(hash_string(&tx.hash));
             pool.base.creation_timestamp = Some(tx.block_timestamp);
+            pool.base.creator_address = Some(address_string(&tx.from_address));
             token.add_uniswap_v4_pool(pool);
             discovered.push(pool_key);
         }

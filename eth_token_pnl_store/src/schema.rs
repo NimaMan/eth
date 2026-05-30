@@ -61,6 +61,15 @@ pub struct PoolPnlStateRow {
     pub native_bribe_raw: String,
     pub token_transfer_count: i64,
     pub denom_transfer_count: i64,
+    pub token_creator_address: Option<String>,
+    pub pool_creator_address: Option<String>,
+    pub can_buy: bool,
+    pub can_sell: bool,
+    pub lifecycle: Option<String>,
+    pub is_scam: bool,
+    pub scam_label: Option<String>,
+    pub eligible: bool,
+    pub eligible_outcome: Option<String>,
 }
 
 #[derive(Clone, Debug, sqlx::FromRow)]

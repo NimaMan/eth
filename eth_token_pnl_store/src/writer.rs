@@ -98,14 +98,18 @@ async fn upsert_pool_state(
             token_decimals, denom_decimals, tx_count, latest_block, latest_timestamp,
             token_in_raw, token_out_raw, denom_in_raw, denom_out_raw,
             pool_token_in_raw, pool_token_out_raw, pool_denom_in_raw, pool_denom_out_raw,
-            native_fee_raw, native_bribe_raw, token_transfer_count, denom_transfer_count
+            native_fee_raw, native_bribe_raw, token_transfer_count, denom_transfer_count,
+            token_creator_address, pool_creator_address,
+            can_buy, can_sell, lifecycle, is_scam, scam_label, eligible, eligible_outcome
         )
         VALUES (
             $1, $2, $3, $4, $5,
             $6, $7, $8, $9, $10,
             $11::numeric(78,0), $12::numeric(78,0), $13::numeric(78,0), $14::numeric(78,0),
             $15::numeric(78,0), $16::numeric(78,0), $17::numeric(78,0), $18::numeric(78,0),
-            $19::numeric(78,0), $20::numeric(78,0), $21, $22
+            $19::numeric(78,0), $20::numeric(78,0), $21, $22,
+            $23, $24,
+            $25, $26, $27, $28, $29, $30, $31
         )
         ON CONFLICT (run_id, pool_id) DO UPDATE SET
             token_address = EXCLUDED.token_address,
@@ -128,6 +132,15 @@ async fn upsert_pool_state(
             native_bribe_raw = EXCLUDED.native_bribe_raw,
             token_transfer_count = EXCLUDED.token_transfer_count,
             denom_transfer_count = EXCLUDED.denom_transfer_count,
+            token_creator_address = EXCLUDED.token_creator_address,
+            pool_creator_address = EXCLUDED.pool_creator_address,
+            can_buy = EXCLUDED.can_buy,
+            can_sell = EXCLUDED.can_sell,
+            lifecycle = EXCLUDED.lifecycle,
+            is_scam = EXCLUDED.is_scam,
+            scam_label = EXCLUDED.scam_label,
+            eligible = EXCLUDED.eligible,
+            eligible_outcome = EXCLUDED.eligible_outcome,
             updated_at = now()
         "#,
     )
@@ -165,6 +178,15 @@ async fn upsert_pool_state(
         export.conservation.denom_transfer_count,
         "denom_transfer_count",
     )?)
+    .bind(&export.meta.token_creator_address)
+    .bind(&export.meta.pool_creator_address)
+    .bind(export.meta.can_buy)
+    .bind(export.meta.can_sell)
+    .bind(&export.meta.lifecycle)
+    .bind(export.meta.is_scam)
+    .bind(&export.meta.scam_label)
+    .bind(export.meta.eligible)
+    .bind(&export.meta.eligible_outcome)
     .execute(&mut **tx)
     .await?;
     Ok(())

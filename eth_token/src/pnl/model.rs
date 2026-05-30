@@ -1,6 +1,21 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// Pool and token state captured at export time.
+/// Filled by the caller who holds both ERC20Token and BasePool.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PnlPoolMeta {
+    pub token_creator_address: Option<String>,
+    pub pool_creator_address: Option<String>,
+    pub can_buy: bool,
+    pub can_sell: bool,
+    pub lifecycle: Option<String>,
+    pub is_scam: bool,
+    pub scam_label: Option<String>,
+    pub eligible: bool,
+    pub eligible_outcome: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PnlPoolExport {
     pub pool_id: String,
@@ -15,6 +30,8 @@ pub struct PnlPoolExport {
     pub conservation: PnlConservationExport,
     pub address_positions: Vec<PnlAddressPositionExport>,
     pub movements: Vec<PnlMovementExport>,
+    #[serde(default)]
+    pub meta: PnlPoolMeta,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

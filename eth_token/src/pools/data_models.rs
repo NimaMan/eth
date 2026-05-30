@@ -16,6 +16,22 @@ pub enum PoolLifecycle {
     Evicted,
 }
 
+impl PoolLifecycle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discovered => "discovered",
+            Self::LiquidityDeposited => "liquidity_deposited",
+            Self::Trading => "trading",
+            Self::CannotSell => "cannot_sell",
+            Self::Dust => "dust",
+            Self::Drained => "drained",
+            Self::Active => "active",
+            Self::LiquidityRemoved => "liquidity_removed",
+            Self::Evicted => "evicted",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PoolRuntimeState {
     pub denom_reserve: f64,
