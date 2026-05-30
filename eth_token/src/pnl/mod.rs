@@ -5,6 +5,64 @@ use rust_decimal::{Decimal, MathematicalOps};
 use serde::{Deserialize, Serialize};
 use tx_processor::ProcessedTransaction;
 
+// Per-address accumulator for a single transaction. Position and entry changes
+// are staged here before being committed so infrastructure addresses (the pool
+// itself, burn address) and exact-zero-net pass-throughs (routers) can be
+// excluded without affecting conservation accounting.
+#[derive(Default)]
+struct TxAddressStage {
+    token_in: U256,
+    token_out: U256,
+    denom_in: U256,
+    denom_out: U256,
+    native_fee: U256,
+    native_bribe: U256,
+    block_number: u64,
+    entries: Vec<PoolPnlEntry>,
+}
+
+impl TxAddressStage {
+    fn new(block_number: u64) -> Self {
+        Self {
+            block_number,
+            ..Default::default()
+        }
+    }
+
+    fn net_denom_abs(&self) -> U256 {
+        if self.denom_in >= self.denom_out {
+            self.denom_in - self.denom_out
+        } else {
+            self.denom_out - self.denom_in
+        }
+    }
+
+    fn net_token_abs(&self) -> U256 {
+        if self.token_in >= self.token_out {
+            self.token_in - self.token_out
+        } else {
+            self.token_out - self.token_in
+        }
+    }
+
+    fn apply_to_position(&self, position: &mut AddressPoolPosition) {
+        position.token_in_raw = position.token_in_raw.saturating_add(self.token_in);
+        position.token_out_raw = position.token_out_raw.saturating_add(self.token_out);
+        position.denom_in_raw = position.denom_in_raw.saturating_add(self.denom_in);
+        position.denom_out_raw = position.denom_out_raw.saturating_add(self.denom_out);
+        position.native_fee_raw = position.native_fee_raw.saturating_add(self.native_fee);
+        position.native_bribe_raw = position.native_bribe_raw.saturating_add(self.native_bribe);
+        if self.block_number > 0 {
+            if position.first_block.is_none() {
+                position.first_block = Some(self.block_number);
+            }
+            position.latest_block = Some(self.block_number);
+        }
+        position.movement_count =
+            position.movement_count.saturating_add(self.entries.len() as u64);
+    }
+}
+
 pub mod conservation;
 pub mod export;
 pub mod model;
@@ -144,7 +202,9 @@ impl PoolPnlTracker {
     }
 
     pub fn record_transaction(&mut self, transaction: &ProcessedTransaction) {
+        let mut stage: BTreeMap<String, TxAddressStage> = BTreeMap::new();
         let mut matched_transfer_count = 0u32;
+
         for transfer in &transaction.erc20_transfers {
             let token_address = address_string(&transfer.token_address);
             if token_address == self.token_address {
@@ -152,6 +212,7 @@ impl PoolPnlTracker {
                 let pool_direct = self.is_pool_side(&transfer.from_address)
                     || self.is_pool_side(&transfer.to_address);
                 self.record_token_transfer(
+                    &mut stage,
                     &transfer.from_address,
                     &transfer.to_address,
                     transfer.amount,
@@ -164,6 +225,7 @@ impl PoolPnlTracker {
                 let pool_direct = self.is_pool_side(&transfer.from_address)
                     || self.is_pool_side(&transfer.to_address);
                 self.record_denom_transfer(
+                    &mut stage,
                     &transfer.from_address,
                     &transfer.to_address,
                     transfer.amount,
@@ -175,7 +237,7 @@ impl PoolPnlTracker {
         }
         if self.denom_tracks_native_eth() {
             matched_transfer_count = matched_transfer_count
-                .saturating_add(self.record_native_denom_transfers(transaction));
+                .saturating_add(self.record_native_denom_transfers(&mut stage, transaction));
         }
 
         if matched_transfer_count == 0
@@ -186,23 +248,38 @@ impl PoolPnlTracker {
         }
 
         if !transaction.fees.tx_fee.is_zero() {
-            self.record_native_fee(
-                &transaction.from_address,
-                transaction.fees.tx_fee,
-                transaction,
-            );
+            self.record_native_fee(&mut stage, &transaction.from_address, transaction.fees.tx_fee, transaction);
         }
         if !transaction.bribe_amount.is_zero() {
-            self.record_native_bribe(
-                &transaction.from_address,
-                transaction.bribe_amount,
-                transaction,
-            );
+            self.record_native_bribe(&mut stage, &transaction.from_address, transaction.bribe_amount, transaction);
         }
 
+        self.commit_tx_stage(stage);
         self.tx_count = self.tx_count.saturating_add(1);
         self.latest_block_number = Some(transaction.block_number);
         self.latest_block_timestamp = Some(transaction.block_timestamp);
+    }
+
+    fn commit_tx_stage(&mut self, stage: BTreeMap<String, TxAddressStage>) {
+        for (address, staged) in stage {
+            if address == self.pool_address || address == ZERO_ADDRESS {
+                continue;
+            }
+            // Exclude pure pass-throughs: addresses with no net change in either
+            // token or denom. Routers receive and immediately forward both sides,
+            // netting to zero. Split-actor receivers (token only, no denom) are kept.
+            if staged.net_denom_abs().is_zero() && staged.net_token_abs().is_zero() {
+                continue;
+            }
+            let position = self
+                .positions
+                .entry(address.clone())
+                .or_insert_with(|| AddressPoolPosition::new(address));
+            staged.apply_to_position(position);
+            for entry in staged.entries {
+                self.push_entry(entry);
+            }
+        }
     }
 
     pub fn position(&self, address: impl AsRef<str>) -> Option<&AddressPoolPosition> {
@@ -292,6 +369,7 @@ impl PoolPnlTracker {
 
     fn record_token_transfer(
         &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
         from_address: &Address,
         to_address: &Address,
         amount: U256,
@@ -301,15 +379,12 @@ impl PoolPnlTracker {
     ) {
         let from = address_string(from_address);
         let to = address_string(to_address);
-        self.position_mut(&from)
-            .record_token_out(amount, transaction.block_number);
-        self.position_mut(&to)
-            .record_token_in(amount, transaction.block_number);
+        let block = transaction.block_number;
+
         self.conservation.token_transfer_count =
             self.conservation.token_transfer_count.saturating_add(1);
         self.conservation.token_in_raw = self.conservation.token_in_raw.saturating_add(amount);
         self.conservation.token_out_raw = self.conservation.token_out_raw.saturating_add(amount);
-
         if to == self.pool_address {
             self.conservation.pool_token_in_raw =
                 self.conservation.pool_token_in_raw.saturating_add(amount);
@@ -319,36 +394,21 @@ impl PoolPnlTracker {
                 self.conservation.pool_token_out_raw.saturating_add(amount);
         }
 
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            log_index,
-            from,
-            PoolPnlEntryKind::TokenOut,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            log_index,
-            to,
-            PoolPnlEntryKind::TokenIn,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
+        {
+            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.token_out = s.token_out.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, log_index, from, PoolPnlEntryKind::TokenOut, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+        }
+        {
+            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.token_in = s.token_in.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, log_index, to, PoolPnlEntryKind::TokenIn, amount, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+        }
     }
 
     fn record_denom_transfer(
         &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
         from_address: &Address,
         to_address: &Address,
         amount: U256,
@@ -358,15 +418,12 @@ impl PoolPnlTracker {
     ) {
         let from = address_string(from_address);
         let to = address_string(to_address);
-        self.position_mut(&from)
-            .record_denom_out(amount, transaction.block_number);
-        self.position_mut(&to)
-            .record_denom_in(amount, transaction.block_number);
+        let block = transaction.block_number;
+
         self.conservation.denom_transfer_count =
             self.conservation.denom_transfer_count.saturating_add(1);
         self.conservation.denom_in_raw = self.conservation.denom_in_raw.saturating_add(amount);
         self.conservation.denom_out_raw = self.conservation.denom_out_raw.saturating_add(amount);
-
         if to == self.pool_address {
             self.conservation.pool_denom_in_raw =
                 self.conservation.pool_denom_in_raw.saturating_add(amount);
@@ -376,49 +433,31 @@ impl PoolPnlTracker {
                 self.conservation.pool_denom_out_raw.saturating_add(amount);
         }
 
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            log_index,
-            from,
-            PoolPnlEntryKind::DenomOut,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            log_index,
-            to,
-            PoolPnlEntryKind::DenomIn,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
+        {
+            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.denom_out = s.denom_out.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, log_index, from, PoolPnlEntryKind::DenomOut, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, pool_direct));
+        }
+        {
+            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.denom_in = s.denom_in.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, log_index, to, PoolPnlEntryKind::DenomIn, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+        }
     }
 
-    fn record_native_denom_transfers(&mut self, transaction: &ProcessedTransaction) -> u32 {
+    fn record_native_denom_transfers(
+        &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
+        transaction: &ProcessedTransaction,
+    ) -> u32 {
         let mut transfer_count = 0u32;
         for transfer in &transaction.eth_transfers {
             if transfer.amount.is_zero() {
                 continue;
             }
-            self.record_native_denom_transfer(
-                &transfer.from_address,
-                &transfer.to_address,
-                transfer.amount,
-                transaction,
-            );
+            self.record_native_denom_transfer(stage, &transfer.from_address, &transfer.to_address, transfer.amount, transaction);
             transfer_count = transfer_count.saturating_add(1);
         }
-
         for transfer in &transaction.internal_transactions {
             if transfer.value.is_zero() || transfer.error.is_some() {
                 continue;
@@ -426,20 +465,15 @@ impl PoolPnlTracker {
             let Some(to_address) = transfer.to_address else {
                 continue;
             };
-            self.record_native_denom_transfer(
-                &transfer.from_address,
-                &to_address,
-                transfer.value,
-                transaction,
-            );
+            self.record_native_denom_transfer(stage, &transfer.from_address, &to_address, transfer.value, transaction);
             transfer_count = transfer_count.saturating_add(1);
         }
-
         transfer_count
     }
 
     fn record_native_denom_transfer(
         &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
         from_address: &Address,
         to_address: &Address,
         amount: U256,
@@ -447,15 +481,13 @@ impl PoolPnlTracker {
     ) {
         let from = address_string(from_address);
         let to = address_string(to_address);
-        self.position_mut(&from)
-            .record_denom_out(amount, transaction.block_number);
-        self.position_mut(&to)
-            .record_denom_in(amount, transaction.block_number);
+        let block = transaction.block_number;
+        let pool_direct = from == self.pool_address || to == self.pool_address;
+
         self.conservation.denom_transfer_count =
             self.conservation.denom_transfer_count.saturating_add(1);
         self.conservation.denom_in_raw = self.conservation.denom_in_raw.saturating_add(amount);
         self.conservation.denom_out_raw = self.conservation.denom_out_raw.saturating_add(amount);
-
         if to == self.pool_address {
             self.conservation.pool_denom_in_raw =
                 self.conservation.pool_denom_in_raw.saturating_add(amount);
@@ -465,91 +497,47 @@ impl PoolPnlTracker {
                 self.conservation.pool_denom_out_raw.saturating_add(amount);
         }
 
-        let pool_direct = from == self.pool_address || to == self.pool_address;
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            None,
-            from,
-            PoolPnlEntryKind::NativeDenomOut,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            None,
-            to,
-            PoolPnlEntryKind::NativeDenomIn,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            pool_direct,
-        ));
+        {
+            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.denom_out = s.denom_out.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, None, from, PoolPnlEntryKind::NativeDenomOut, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, pool_direct));
+        }
+        {
+            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            s.denom_in = s.denom_in.saturating_add(amount);
+            s.entries.push(PoolPnlEntry::new(transaction, None, to, PoolPnlEntryKind::NativeDenomIn, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+        }
     }
 
     fn record_native_fee(
         &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
         address: &Address,
         amount: U256,
         transaction: &ProcessedTransaction,
     ) {
-        let address = address_string(address);
-        self.position_mut(&address)
-            .record_native_fee(amount, transaction.block_number);
+        let addr = address_string(address);
+        let block = transaction.block_number;
         self.conservation.native_fee_raw = self.conservation.native_fee_raw.saturating_add(amount);
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            None,
-            address,
-            PoolPnlEntryKind::NativeFee,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            U256::ZERO,
-            false,
-        ));
+        let s = stage.entry(addr.clone()).or_insert_with(|| TxAddressStage::new(block));
+        s.native_fee = s.native_fee.saturating_add(amount);
+        s.entries.push(PoolPnlEntry::new(transaction, None, addr, PoolPnlEntryKind::NativeFee, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, false));
     }
 
     fn record_native_bribe(
         &mut self,
+        stage: &mut BTreeMap<String, TxAddressStage>,
         address: &Address,
         amount: U256,
         transaction: &ProcessedTransaction,
     ) {
-        let address = address_string(address);
-        self.position_mut(&address)
-            .record_native_bribe(amount, transaction.block_number);
+        let addr = address_string(address);
+        let block = transaction.block_number;
         self.conservation.native_bribe_raw =
             self.conservation.native_bribe_raw.saturating_add(amount);
-        self.push_entry(PoolPnlEntry::new(
-            transaction,
-            None,
-            address,
-            PoolPnlEntryKind::NativeBribe,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            amount,
-            false,
-        ));
-    }
-
-    fn position_mut(&mut self, address: &str) -> &mut AddressPoolPosition {
-        let address = normalize_address(address);
-        self.positions
-            .entry(address.clone())
-            .or_insert_with(|| AddressPoolPosition::new(address))
+        let s = stage.entry(addr.clone()).or_insert_with(|| TxAddressStage::new(block));
+        s.native_bribe = s.native_bribe.saturating_add(amount);
+        s.entries.push(PoolPnlEntry::new(transaction, None, addr, PoolPnlEntryKind::NativeBribe, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, amount, false));
     }
 
     fn push_entry(&mut self, entry: PoolPnlEntry) {
@@ -923,11 +911,9 @@ mod tests {
         assert_eq!(conservation.pool_token_delta_raw, "-50000");
         assert_eq!(conservation.pool_denom_delta_raw, "1000");
 
-        let fee_payer = pool
-            .position(address_string(&FEE_PAYER))
-            .expect("fee payer");
-        assert_eq!(fee_payer.native_fee_raw, U256::from(210_000));
-        assert_eq!(fee_payer.native_bribe_raw, U256::from(7));
+        // FEE_PAYER only paid gas with no token/denom movement in this tx —
+        // net zero in both → excluded by the pass-through filter.
+        assert!(pool.position(address_string(&FEE_PAYER)).is_none());
 
         let denom_payer = pool
             .position(address_string(&DENOM_PAYER))
@@ -987,6 +973,8 @@ mod tests {
         );
 
         let pool = tracker.pool(address_string(&POOL)).expect("pool pnl");
+        // Router nets zero in both token and denom → excluded by pass-through filter.
+        assert!(pool.position(address_string(&router)).is_none());
         assert_eq!(
             pool.position(address_string(&DENOM_PAYER))
                 .expect("payer")
@@ -999,12 +987,13 @@ mod tests {
                 .token_in_raw,
             U256::from(5_000)
         );
+        // Router entries (including pool_direct ones) are not committed.
         assert_eq!(
             pool.recent_entries
                 .iter()
                 .filter(|entry| entry.pool_direct)
                 .count(),
-            4
+            0
         );
         assert!(pool.conservation_summary().token_is_conserved);
         assert!(pool.conservation_summary().denom_is_conserved);
@@ -1045,17 +1034,8 @@ mod tests {
         );
 
         let pool = tracker.pool(address_string(&POOL)).expect("pool pnl");
-        assert_eq!(
-            signed_raw_string(
-                pool.position(address_string(&router))
-                    .expect("router")
-                    .denom_in_raw,
-                pool.position(address_string(&router))
-                    .expect("router")
-                    .denom_out_raw,
-            ),
-            "0"
-        );
+        // Router receives WETH ERC20 and forwards native ETH — net denom zero → excluded.
+        assert!(pool.position(address_string(&router)).is_none());
         assert_eq!(
             pool.position(address_string(&TOKEN_RECEIVER))
                 .expect("receiver")
