@@ -707,8 +707,9 @@ fn export_pool(token: &ERC20Token, pool_id: &str) -> Option<PnlPoolExport> {
                 can_buy: pool.effective_can_buy(),
                 can_sell: pool.effective_can_sell(),
                 lifecycle: Some(pool.state.lifecycle.as_str().to_string()),
-                is_scam: pool.is_scam(),
+                is_scam: pool.is_scam() || pool.scam_mechanism.is_some(),
                 scam_label: pool.scam_label.clone(),
+                scam_mechanism: pool.scam_mechanism.clone(),
                 eligible: classification.eligible,
                 eligible_outcome: classification
                     .eligible_outcome

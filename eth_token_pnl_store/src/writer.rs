@@ -100,7 +100,7 @@ async fn upsert_pool_state(
             pool_token_in_raw, pool_token_out_raw, pool_denom_in_raw, pool_denom_out_raw,
             native_fee_raw, native_bribe_raw, token_transfer_count, denom_transfer_count,
             token_creator_address, pool_creator_address,
-            can_buy, can_sell, lifecycle, is_scam, scam_label, eligible, eligible_outcome
+            can_buy, can_sell, lifecycle, is_scam, scam_label, scam_mechanism, eligible, eligible_outcome
         )
         VALUES (
             $1, $2, $3, $4, $5,
@@ -109,7 +109,7 @@ async fn upsert_pool_state(
             $15::numeric(78,0), $16::numeric(78,0), $17::numeric(78,0), $18::numeric(78,0),
             $19::numeric(78,0), $20::numeric(78,0), $21, $22,
             $23, $24,
-            $25, $26, $27, $28, $29, $30, $31
+            $25, $26, $27, $28, $29, $30, $31, $32
         )
         ON CONFLICT (run_id, pool_id) DO UPDATE SET
             token_address = EXCLUDED.token_address,
@@ -139,6 +139,7 @@ async fn upsert_pool_state(
             lifecycle = EXCLUDED.lifecycle,
             is_scam = EXCLUDED.is_scam,
             scam_label = EXCLUDED.scam_label,
+            scam_mechanism = EXCLUDED.scam_mechanism,
             eligible = EXCLUDED.eligible,
             eligible_outcome = EXCLUDED.eligible_outcome,
             updated_at = now()
@@ -185,6 +186,7 @@ async fn upsert_pool_state(
     .bind(&export.meta.lifecycle)
     .bind(export.meta.is_scam)
     .bind(&export.meta.scam_label)
+    .bind(&export.meta.scam_mechanism)
     .bind(export.meta.eligible)
     .bind(&export.meta.eligible_outcome)
     .execute(&mut **tx)

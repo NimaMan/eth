@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS token_pnl.pool_pnl_states (
     lifecycle TEXT,
     is_scam BOOLEAN NOT NULL DEFAULT false,
     scam_label TEXT,
+    scam_mechanism TEXT,
     eligible BOOLEAN NOT NULL DEFAULT false,
     eligible_outcome TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

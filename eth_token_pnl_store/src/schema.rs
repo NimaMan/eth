@@ -68,6 +68,7 @@ pub struct PoolPnlStateRow {
     pub lifecycle: Option<String>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub scam_mechanism: Option<String>,
     pub eligible: bool,
     pub eligible_outcome: Option<String>,
 }
