@@ -151,5 +151,43 @@ Round-trip correctness is enforced per candidate via an order-independent
 fingerprint over the consumed fields, so a candidate that would lose data a
 consumer reads fails loudly instead of reporting a false saving.
 
-<!-- BENCHMARK-RESULTS: filled in after the corrected run completes. -->
+### Results (mainnet, recent blocks; baseline = on-disk v2 = bincode+zstd-3)
+
+Ratios are space vs the production baseline (1.00). They are stable across
+sample size; absolute baseline was ~188-199 KB/block.
+
+| Candidate | space vs base | write (ms/block) | read decode (ms/block) |
+| --- | --- | --- | --- |
+| baseline (per-block, zstd-3) | 1.00 | ~ | ~2-3 |
+| per-block, zstd-9 | 0.91 | ~30-50 | ~2 |
+| per-block, zstd-19 | 0.84 | ~700-1300 | ~2 |
+| per-block, zstd-19 + trained dict | 0.80 | ~800-1500 | ~1 |
+| **lean** per-block, zstd-9 | 0.90 | ~30 | ~1 |
+| lean per-block, zstd-19 + dict | 0.80 | ~1000+ | ~1 |
+| chunk-64 archive, zstd-9 | 0.82 | ~30-60 | ~1 (range) |
+| chunk-256 archive, zstd-9 | 0.82 | ~60 | ~1 (range) |
+
+Findings:
+
+- **Field-dropping (`Lean`) saves ~1%.** The fields it drops are tiny in the
+  live cache; in particular `struct_logs` are not populated on the production
+  path (uncompressed payload barely changes: Full ~1.38 MB vs Lean ~1.376 MB per
+  block). The big space target we expected is simply not present in the data.
+- **Compression level is the main per-block lever:** zstd-3->9 ~ -10%, ->19
+  ~ -16%, +trained dictionary ~ -20%. Read (decode) time is flat regardless of
+  level - higher compression is essentially free on reads; only write CPU rises
+  (zstd-19 is ~1 s/block, zstd-9 ~ tens of ms).
+- **Chunked archives exploit cross-block redundancy:** compressing 64 consecutive
+  blocks as one zstd frame reaches ~0.82 at level 9 - matching per-block zstd-19
+  at a fraction of the write cost. Gains saturate by ~64 blocks/archive. Tradeoff:
+  great for sequential range reads, but a random single-block read must
+  decompress the whole archive, and per-block invalidation is lost.
+- **MessagePack is not viable** without type changes: alloy types use a
+  human-readable (string) vs binary (bytes) serde split, so a non-self-describing
+  binary codec fails to round-trip (`byte array, expected a string`).
+- **No ~10x is available.** The payload is already ~7:1 compressed and dominated
+  by event data that consumers read and we cannot drop. The realistic ceiling
+  with these levers is ~20% per-block (level+dict) or ~25-30% via chunked
+  archives at high level. The cheap, zero-read-regression win is raising the
+  per-block zstd level (and adopting `Lean`).
 

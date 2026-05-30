@@ -54,6 +54,10 @@ const ETHEREUM_MAINNET_NETWORK: &str = "ethereum-mainnet";
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 /// zstd dictionary size target (bytes). 110 KiB is the zstd default ballpark.
 const DICT_SIZE: usize = 112_640;
+/// Number of payloads used to TRAIN the dictionary. ZDICT scales poorly with
+/// total sample bytes, so cap the training set (the dictionary is then applied
+/// to ALL payloads when measuring). A few hundred blocks is ample.
+const DICT_TRAIN_SAMPLES: usize = 256;
 
 #[derive(Debug, Parser)]
 #[command(about = "Benchmark candidate processed-block disk-cache formats (space + read time).")]
@@ -86,6 +90,20 @@ struct Args {
     /// zstd level used for the trained-dictionary candidate.
     #[arg(long, default_value_t = 19)]
     dict_level: i32,
+
+    /// Chunked-archive sizes (blocks per archive) to test cross-block
+    /// compression. Empty disables the chunked candidates.
+    #[arg(long, value_delimiter = ',', default_values_t = [16usize, 64, 256])]
+    chunk_sizes: Vec<usize>,
+
+    /// zstd level for chunked-archive candidates.
+    #[arg(long, default_value_t = 19)]
+    chunk_level: i32,
+
+    /// Include the MessagePack codec candidates (currently fails round-trip due
+    /// to an alloy binary/human-readable serde mismatch; off by default).
+    #[arg(long, default_value_t = false)]
+    msgpack: bool,
 
     /// Parallel reads for the baseline load.
     #[arg(long, default_value_t = 8)]
@@ -185,7 +203,7 @@ fn main() -> Result<()> {
         .map(|(_, block)| consumed_fingerprint(block))
         .sum();
 
-    let ser_candidates = [
+    let mut ser_candidates = vec![
         SerCandidate {
             label: "full+bincode",
             field_set: CacheFieldSet::Full,
@@ -196,17 +214,19 @@ fn main() -> Result<()> {
             field_set: CacheFieldSet::Lean,
             codec: CacheSerCodec::BincodeJson,
         },
-        SerCandidate {
+    ];
+    if args.msgpack {
+        ser_candidates.push(SerCandidate {
             label: "full+msgpack",
             field_set: CacheFieldSet::Full,
             codec: CacheSerCodec::Msgpack,
-        },
-        SerCandidate {
+        });
+        ser_candidates.push(SerCandidate {
             label: "lean+msgpack",
             field_set: CacheFieldSet::Lean,
             codec: CacheSerCodec::Msgpack,
-        },
-    ];
+        });
+    }
 
     let mut rows: Vec<Row> = Vec::new();
     rows.push(Row {
@@ -226,6 +246,8 @@ fn main() -> Result<()> {
             baseline_fingerprint,
             &args.zstd_levels,
             args.dict_level,
+            &args.chunk_sizes,
+            args.chunk_level,
         ) {
             Ok(mut cand_rows) => rows.append(&mut cand_rows),
             Err(error) => {
@@ -248,12 +270,15 @@ fn main() -> Result<()> {
 }
 
 /// Serialize all blocks once, then sweep compression candidates over the payloads.
+#[allow(clippy::too_many_arguments)]
 fn run_serialization_candidate(
     cand: &SerCandidate,
     blocks: &[(ProcessedBlockDiskCacheKey, ProcessedBlock)],
     baseline_fingerprint: u64,
     zstd_levels: &[i32],
     dict_level: i32,
+    chunk_sizes: &[usize],
+    chunk_level: i32,
 ) -> Result<Vec<Row>> {
     // Serialize (uncompressed) and time it.
     let ser_started = Instant::now();
@@ -310,6 +335,29 @@ fn run_serialization_candidate(
         Err(error) => eprintln!("  {} dictionary candidate skipped: {error:#}", cand.label),
     }
 
+    // Chunked-archive candidates: compress `chunk_size` consecutive block payloads
+    // as one zstd frame to exploit cross-block redundancy (repeated routers,
+    // selectors, token addresses). read_ms is amortized per block over a full
+    // sequential range read (decompress each archive once); random single-block
+    // access would pay the whole-archive decompress.
+    for &chunk_size in chunk_sizes {
+        if chunk_size < 2 {
+            continue;
+        }
+        match measure_chunked(&payloads, chunk_size, chunk_level) {
+            Ok((total, compress_ms, read_ms)) => rows.push(Row {
+                label: format!("{}/zstd{}/chunk{}", cand.label, chunk_level, chunk_size),
+                blocks: blocks_n,
+                total_bytes: total,
+                avg_bytes: total as f64 / blocks_n as f64,
+                compress_ms_per_block: compress_ms + serialize_ms_per_block,
+                read_ms_per_block: read_ms,
+                note: format!("range-read amortized; {chunk_size} blocks/archive"),
+            }),
+            Err(error) => eprintln!("  {} chunk{chunk_size} skipped: {error:#}", cand.label),
+        }
+    }
+
     Ok(rows)
 }
 
@@ -323,7 +371,7 @@ fn worker_threads() -> usize {
 /// Single-threaded compress-cost sample size. Compression (especially zstd-19)
 /// is the slow knob; we get the per-block WRITE cost from a small serial sample
 /// while still compressing every block in parallel to total the on-disk size.
-const COMPRESS_SAMPLE: usize = 64;
+const COMPRESS_SAMPLE: usize = 16;
 
 /// Parallel map over payloads where each worker thread holds its own mutable
 /// state (e.g. a zstd `Compressor`). Results are returned in input order.
@@ -400,7 +448,8 @@ fn measure_plain(payloads: &[Vec<u8>], level: i32) -> Result<(u64, f64, f64)> {
 fn measure_dict(payloads: &[Vec<u8>], level: i32) -> Result<(u64, f64, f64, usize)> {
     use zstd::bulk::{Compressor, Decompressor};
 
-    let dict = zstd::dict::from_samples(payloads, DICT_SIZE)
+    let train = &payloads[..payloads.len().min(DICT_TRAIN_SAMPLES)];
+    let dict = zstd::dict::from_samples(train, DICT_SIZE)
         .wrap_err("zstd dictionary training failed")?;
 
     let compressed = parallel_map(
@@ -426,6 +475,54 @@ fn measure_dict(payloads: &[Vec<u8>], level: i32) -> Result<(u64, f64, f64, usiz
     let decompress_ms = started.elapsed().as_secs_f64() * 1000.0 / payloads.len().max(1) as f64;
 
     Ok((total, compress_ms, decompress_ms, dict.len()))
+}
+
+/// Compress groups of `chunk_size` consecutive block payloads as single zstd
+/// frames (one archive per group) to exploit cross-block redundancy. Each block
+/// is length-prefixed inside its archive so it can be split back out.
+/// Returns (total_compressed_bytes, compress_ms/block, decompress_ms/block) where
+/// decompress is amortized over a full sequential range read.
+fn measure_chunked(payloads: &[Vec<u8>], chunk_size: usize, level: i32) -> Result<(u64, f64, f64)> {
+    // Build one framed buffer per group: [u32 len | bytes] repeated.
+    let archives: Vec<Vec<u8>> = payloads
+        .chunks(chunk_size)
+        .map(|group| {
+            let cap: usize = group.iter().map(|p| p.len() + 4).sum();
+            let mut buf = Vec::with_capacity(cap);
+            for p in group {
+                buf.extend_from_slice(&(p.len() as u32).to_le_bytes());
+                buf.extend_from_slice(p);
+            }
+            buf
+        })
+        .collect();
+    let uncompressed: Vec<usize> = archives.iter().map(|a| a.len()).collect();
+
+    let compressed = parallel_map(
+        &archives,
+        &|| Ok(()),
+        &|_state, archive| zstd::bulk::compress(archive, level).wrap_err("chunk compress failed"),
+    )?;
+    let total: u64 = compressed.iter().map(|c| c.len() as u64).sum();
+    let blocks = payloads.len().max(1) as f64;
+
+    // Per-block compress cost = compress a few archives serially / blocks covered.
+    let sample = archives.len().min(4).max(1);
+    let started = Instant::now();
+    for archive in &archives[..sample] {
+        std::hint::black_box(zstd::bulk::compress(archive, level)?);
+    }
+    let sampled_blocks = (sample * chunk_size).min(payloads.len()).max(1) as f64;
+    let compress_ms = started.elapsed().as_secs_f64() * 1000.0 / sampled_blocks;
+
+    // Range-read cost: decompress every archive once, amortize over all blocks.
+    let started = Instant::now();
+    for (i, c) in compressed.iter().enumerate() {
+        std::hint::black_box(zstd::bulk::decompress(c, uncompressed[i])?);
+    }
+    let decompress_ms = started.elapsed().as_secs_f64() * 1000.0 / blocks;
+
+    Ok((total, compress_ms, decompress_ms))
 }
 
 /// Order-independent fingerprint over the fields consumers actually read.
