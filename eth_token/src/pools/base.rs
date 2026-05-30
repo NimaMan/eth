@@ -438,6 +438,9 @@ impl BasePool {
             .map(|s| s.denom_reserve)
             .filter(|v| v.is_finite())
             .fold(self.denom_reserve(), f64::max);
+        // cohort flags use peak capability: once a pool confirmed a buy it permanently
+        // entered the eligible cohort regardless of its current terminal state.
+        let ever_could_buy = self.can_buy_block.is_some();
         PoolClassificationInput {
             quote_symbol: quote_symbol_for_denom_address(&self.identity.denom_address)
                 .map(str::to_string),
@@ -446,8 +449,8 @@ impl BasePool {
             token_reserve: Some(self.token_reserve()),
             can_buy: self.effective_can_buy(),
             can_sell: self.effective_can_sell(),
-            cohort_can_buy: Some(self.state.can_buy),
-            cohort_can_sell: Some(self.state.can_sell),
+            cohort_can_buy: Some(ever_could_buy),
+            cohort_can_sell: Some(self.state.can_sell || ever_could_buy),
             is_scam: self.is_scam(),
             liquidity_removed: self.has_liquidity_removal(),
             creation_block: self.creation_block,
