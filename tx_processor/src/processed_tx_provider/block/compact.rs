@@ -14,7 +14,8 @@ use crate::tx_processor::data_models::{
     AccessControlRoleGrantedEvent, AccessControlRoleRevokedEvent, AddressBalanceChange,
     ApprovalForAllEvent, ContractCreationEvent, DepositEvent, ERC1155TransferEvent,
     ERC20ApprovalEvent, ERC20TransferEvent, ERC721ApprovalEvent, ERC721TransferEvent,
-    InternalTransaction, OwnershipTransferStartedEvent, OwnershipTransferredEvent, Permit2Event,
+    InternalErc20Call, InternalTransaction, OwnershipTransferStartedEvent,
+    OwnershipTransferredEvent, Permit2Event,
     ProcessedAccessListItem, ProcessedTransaction, ProxyAdminChangedEvent, TradingDisabledEvent,
     TradingEnabledEvent, TransactionFees, UniswapV2BurnEvent, UniswapV2MintEvent,
     UniswapV2PairCreatedEvent, UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV3BurnEvent,
@@ -57,6 +58,8 @@ pub struct CompactProcessedTransaction {
     pub erc721_transfers: Option<Vec<ERC721TransferEvent>>,
     pub erc1155_transfers: Option<Vec<ERC1155TransferEvent>>,
     pub internal_transactions: Option<Vec<InternalTransaction>>,
+    #[serde(default)]
+    pub internal_erc20_calls: Option<Vec<InternalErc20Call>>,
     pub uniswap_v2_syncs: Option<Vec<UniswapV2SyncEvent>>,
     pub uniswap_v2_swaps: Option<Vec<UniswapV2SwapEvent>>,
     pub uniswap_v3_pools: Option<Vec<UniswapV3PoolCreatedEvent>>,
@@ -141,6 +144,7 @@ impl CompactProcessedTransaction {
             erc721_transfers: option_vec(&tx.erc721_transfers),
             erc1155_transfers: option_vec(&tx.erc1155_transfers),
             internal_transactions: option_vec(&tx.internal_transactions),
+            internal_erc20_calls: option_vec(&tx.internal_erc20_calls),
             uniswap_v2_syncs: option_vec(&tx.uniswap_v2_syncs),
             uniswap_v2_swaps: option_vec(&tx.uniswap_v2_swaps),
             uniswap_v3_pools: option_vec(&tx.uniswap_v3_pools),
@@ -218,6 +222,7 @@ impl CompactProcessedTransaction {
         tx.erc721_transfers = self.erc721_transfers.unwrap_or_default();
         tx.erc1155_transfers = self.erc1155_transfers.unwrap_or_default();
         tx.internal_transactions = self.internal_transactions.unwrap_or_default();
+        tx.internal_erc20_calls = self.internal_erc20_calls.unwrap_or_default();
         tx.uniswap_v2_syncs = self.uniswap_v2_syncs.unwrap_or_default();
         tx.uniswap_v2_swaps = self.uniswap_v2_swaps.unwrap_or_default();
         tx.uniswap_v3_pools = self.uniswap_v3_pools.unwrap_or_default();
@@ -638,6 +643,17 @@ mod tests {
         };
         tx.address_balance_changes.insert(owner, balance);
         tx.latest_states.insert(pool, json!({"reserve0": "1"}));
+        tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: token,
+            caller: owner,
+            kind: crate::tx_processor::data_models::Erc20CallKind::TransferFrom,
+            from_address: pool,
+            to_address: recipient,
+            amount: U256::from(4_242),
+            depth: 2,
+            call_type: Some("Call".to_string()),
+            succeeded: true,
+        });
 
         let compact = CompactProcessedTransaction::from_processed(&tx);
         let json_value = compact.to_sparse_json_value().expect("compact json");
@@ -653,6 +669,9 @@ mod tests {
         assert_eq!(decoded.actions, vec!["swap", "token_tracking"]);
         assert_eq!(decoded.input, vec![0xde, 0xad, 0xbe, 0xef]);
         assert_eq!(decoded.bribe_amount, U256::from(5));
+        assert_eq!(decoded.internal_erc20_calls.len(), 1);
+        assert_eq!(decoded.internal_erc20_calls[0].amount, U256::from(4_242));
+        assert_eq!(decoded.internal_erc20_calls[0].depth, 2);
         assert!(decoded.unique_addresses.contains(&recipient));
         assert_eq!(decoded.erc20_transfers.len(), 1);
         assert_eq!(decoded.erc721_transfers.len(), 1);

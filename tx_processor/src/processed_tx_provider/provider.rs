@@ -380,6 +380,8 @@ impl ProcessedTxProvider {
         let trace_processor = TransactionTraceProcessor::new();
         processed_tx.internal_transactions =
             trace_processor.extract_internal_transactions_from_call_trace(&call_frame);
+        processed_tx.internal_erc20_calls =
+            trace_processor.extract_erc20_calls_from_call_trace(&call_frame);
         processed_tx.bribe_amount =
             TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 

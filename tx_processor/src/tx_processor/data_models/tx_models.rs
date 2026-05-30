@@ -1,7 +1,7 @@
 use super::balance_changes::AddressBalanceChange;
 use super::fees::TransactionFees;
 use super::receipt_models::*;
-use super::trace_models::InternalTransaction;
+use super::trace_models::{InternalErc20Call, InternalTransaction};
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
@@ -66,6 +66,13 @@ pub struct ProcessedTransaction {
     pub erc721_transfers: Vec<ERC721TransferEvent>,
     pub erc1155_transfers: Vec<ERC1155TransferEvent>,
     pub internal_transactions: Vec<InternalTransaction>,
+
+    /// Standard ERC-20 mutating calls (`transfer`/`transferFrom`/`approve`)
+    /// decoded from the call trace at any depth. Captures balance moves that
+    /// emit no `Transfer` event (custody backdoors). Cross-reference against
+    /// `erc20_transfers` to find event-less moves.
+    #[serde(default)]
+    pub internal_erc20_calls: Vec<InternalErc20Call>,
 
     // DEX events
     pub uniswap_v2_syncs: Vec<UniswapV2SyncEvent>,
@@ -180,6 +187,7 @@ impl ProcessedTransaction {
             erc721_transfers: Vec::new(),
             erc1155_transfers: Vec::new(),
             internal_transactions: Vec::new(),
+            internal_erc20_calls: Vec::new(),
             uniswap_v2_syncs: Vec::new(),
             uniswap_v2_swaps: Vec::new(),
             uniswap_v3_pools: Vec::new(),

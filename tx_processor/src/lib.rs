@@ -42,7 +42,9 @@ pub use processed_tx_provider::{
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
-pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
+pub use tx_processor::data_models::{
+    Erc20CallKind, InternalErc20Call, ProcessedTransaction, TransactionFees,
+};
 // Export ERC20 token buy-approve-sell simulator through simulator module
 pub use processed_tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 pub use trade_simulation::{

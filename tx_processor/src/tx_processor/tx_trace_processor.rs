@@ -9,9 +9,13 @@
 /// 4. Initial transaction (depth == 0)
 ///
 /// Converts raw simulation traces into structured `InternalTransaction` objects.
-use super::data_models::InternalTransaction;
-use alloy_primitives::U256;
+use super::data_models::{Erc20CallKind, InternalErc20Call, InternalTransaction};
+use alloy_primitives::{Address, U256};
 use tx_simulator::types::CallFrame;
+
+const ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
+const ERC20_TRANSFER_FROM_SELECTOR: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
+const ERC20_APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
 
 /// Processes transaction traces to extract internal transactions
 pub struct TransactionTraceProcessor;
@@ -126,10 +130,159 @@ impl TransactionTraceProcessor {
     // TODO: Implement extract_eth_transfers if needed
     // This method was removed as EthTransfer type is not defined
     // The functionality is now handled in AddressBalanceChangeCalculator
+
+    /// Extract standard ERC-20 mutating calls (`transfer` / `transferFrom` /
+    /// `approve`) from the call trace, at any depth.
+    ///
+    /// Unlike the top-level `transfer_from_calls` path, this captures internal
+    /// calls (where the top-level `tx.to` is not the token), which is how
+    /// custody backdoors move balances without emitting a `Transfer` event.
+    pub fn extract_erc20_calls_from_call_trace(
+        &self,
+        call_trace: &CallFrame,
+    ) -> Vec<InternalErc20Call> {
+        let mut calls = Vec::new();
+        self.extract_erc20_calls_recursive(call_trace, &mut calls, 0);
+        calls
+    }
+
+    fn extract_erc20_calls_recursive(
+        &self,
+        frame: &CallFrame,
+        out: &mut Vec<InternalErc20Call>,
+        depth: u32,
+    ) {
+        if let (Some(token), Some((kind, decoded_from, to_address, amount))) =
+            (frame.to, decode_erc20_call(frame.input.as_ref()))
+        {
+            // For transferFrom the holder is arg0; for transfer/approve the
+            // acting holder/owner is the caller (msg.sender of the call).
+            let from_address = match kind {
+                Erc20CallKind::TransferFrom => decoded_from,
+                Erc20CallKind::Transfer | Erc20CallKind::Approve => frame.from,
+            };
+            out.push(InternalErc20Call {
+                token_address: token,
+                caller: frame.from,
+                kind,
+                from_address,
+                to_address,
+                amount,
+                depth,
+                call_type: Some(format!("{:?}", frame.typ)),
+                succeeded: frame.error.is_none() && frame.revert_reason.is_none(),
+            });
+        }
+        for child in frame.calls.iter() {
+            self.extract_erc20_calls_recursive(child, out, depth + 1);
+        }
+    }
+}
+
+/// Decode a standard ERC-20 mutating call from calldata. Returns
+/// `(kind, decoded_from, to_or_spender, amount)`; `decoded_from` is the real
+/// arg0 only for `transferFrom` (zero otherwise — the caller fills it in).
+fn decode_erc20_call(input: &[u8]) -> Option<(Erc20CallKind, Address, Address, U256)> {
+    let selector: [u8; 4] = input.get(0..4)?.try_into().ok()?;
+    match selector {
+        ERC20_TRANSFER_FROM_SELECTOR => Some((
+            Erc20CallKind::TransferFrom,
+            read_address(input, 0)?,
+            read_address(input, 1)?,
+            read_u256(input, 2)?,
+        )),
+        ERC20_TRANSFER_SELECTOR => Some((
+            Erc20CallKind::Transfer,
+            Address::ZERO,
+            read_address(input, 0)?,
+            read_u256(input, 1)?,
+        )),
+        ERC20_APPROVE_SELECTOR => Some((
+            Erc20CallKind::Approve,
+            Address::ZERO,
+            read_address(input, 0)?,
+            read_u256(input, 1)?,
+        )),
+        _ => None,
+    }
+}
+
+fn read_word(input: &[u8], index: usize) -> Option<[u8; 32]> {
+    let start = 4 + index * 32;
+    input.get(start..start + 32)?.try_into().ok()
+}
+
+fn read_address(input: &[u8], index: usize) -> Option<Address> {
+    let word = read_word(input, index)?;
+    Some(Address::from_slice(&word[12..32]))
+}
+
+fn read_u256(input: &[u8], index: usize) -> Option<U256> {
+    let word = read_word(input, index)?;
+    Some(U256::from_be_slice(&word))
 }
 
 impl Default for TransactionTraceProcessor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod erc20_call_tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+
+    fn transfer_from_calldata(from: Address, to: Address, amount: U256) -> Bytes {
+        let mut data = ERC20_TRANSFER_FROM_SELECTOR.to_vec();
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(from.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(to.as_slice());
+        data.extend_from_slice(&amount.to_be_bytes::<32>());
+        Bytes::from(data)
+    }
+
+    #[test]
+    fn decodes_internal_transfer_from_to_dead() {
+        let token = Address::from_slice(&[0x11u8; 20]);
+        let helper = Address::from_slice(&[0x22u8; 20]);
+        let vault = Address::from_slice(&[0x33u8; 20]);
+        let dead = Address::from_slice(&hex_dead());
+        let amount = U256::from(9_871_487u64);
+
+        // Top-level frame (helper.multicall) with an internal token.transferFrom.
+        let inner = CallFrame {
+            from: helper,
+            to: Some(token),
+            input: transfer_from_calldata(vault, dead, amount),
+            ..Default::default()
+        };
+        let root = CallFrame {
+            from: vault,
+            to: Some(helper),
+            calls: vec![inner],
+            ..Default::default()
+        };
+
+        let processor = TransactionTraceProcessor::new();
+        let calls = processor.extract_erc20_calls_from_call_trace(&root);
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert_eq!(call.kind, Erc20CallKind::TransferFrom);
+        assert_eq!(call.token_address, token);
+        assert_eq!(call.caller, helper);
+        assert_eq!(call.from_address, vault);
+        assert_eq!(call.to_address, dead);
+        assert_eq!(call.amount, amount);
+        assert_eq!(call.depth, 1);
+        assert!(call.succeeded);
+    }
+
+    fn hex_dead() -> [u8; 20] {
+        let mut a = [0u8; 20];
+        a[18] = 0xde;
+        a[19] = 0xad;
+        a
     }
 }

@@ -404,6 +404,8 @@ impl TxProcessor {
         let trace_processor = TransactionTraceProcessor::new();
         let internal_transactions = trace_processor
             .extract_internal_transactions_from_call_trace(&simulation_result.call_trace);
+        let internal_erc20_calls = trace_processor
+            .extract_erc20_calls_from_call_trace(&simulation_result.call_trace);
 
         // First decode the logs to get ERC20 transfers
         let mut erc20_transfers = Vec::new();
@@ -469,6 +471,7 @@ impl TxProcessor {
 
         // Set the extracted internal transactions
         processed_tx.internal_transactions = internal_transactions;
+        processed_tx.internal_erc20_calls = internal_erc20_calls;
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
         processed_tx.bribe_amount =
             Self::calculate_bribe_amount(&processed_tx.fees);

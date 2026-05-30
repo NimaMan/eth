@@ -472,7 +472,7 @@ impl BlockProcessor {
         }
 
         let trace_processor = TransactionTraceProcessor::new();
-        let internal_transactions = if let Some(trace) = trace {
+        let (internal_transactions, internal_erc20_calls) = if let Some(trace) = trace {
             let trace_conversion_started = Instant::now();
             let frame = conversion::convert_transaction_trace(trace);
             if let Some(profile) = profile.as_deref_mut() {
@@ -482,15 +482,19 @@ impl BlockProcessor {
             let internal_extraction_started = Instant::now();
             let internal_transactions =
                 trace_processor.extract_internal_transactions_from_call_trace(&frame);
+            // Reuse the same converted frame to decode standard ERC-20 calls.
+            let internal_erc20_calls =
+                trace_processor.extract_erc20_calls_from_call_trace(&frame);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.internal_extraction += internal_extraction_started.elapsed();
             }
-            internal_transactions
+            (internal_transactions, internal_erc20_calls)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
 
         processed_tx.internal_transactions = internal_transactions;
+        processed_tx.internal_erc20_calls = internal_erc20_calls;
         processed_tx.bribe_amount =
             TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
