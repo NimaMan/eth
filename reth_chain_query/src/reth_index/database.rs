@@ -9,6 +9,7 @@ use reth_libmdbx::{
     Database, DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, Transaction,
     WriteFlags, RO, RW,
 };
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::warn;
@@ -17,6 +18,16 @@ use crate::reth_index::tables::{
     address_block_participation::{AddressBlockParticipationIndex, ParticipationBlockNumber},
     mempool_tx_arrivals::MempoolTxArrivalTable,
 };
+
+const PYRETH_INDEX_DB_MAP_SIZE_BYTES_ENV: &str = "PYRETH_INDEX_DB_MAP_SIZE_BYTES";
+const PYRETH_INDEX_DB_GROWTH_STEP_BYTES_ENV: &str = "PYRETH_INDEX_DB_GROWTH_STEP_BYTES";
+const MIB: usize = 1024 * 1024;
+const GIB: usize = 1024 * MIB;
+const MIN_RETH_INDEX_DB_MAP_SIZE_BYTES: usize = 64 * MIB;
+const DEFAULT_NEW_RETH_INDEX_DB_MAP_SIZE_BYTES: usize = 64 * GIB;
+const DEFAULT_EXISTING_RETH_INDEX_DB_MAP_HEADROOM_BYTES: usize = 32 * GIB;
+const MIN_RETH_INDEX_DB_GROWTH_STEP_BYTES: usize = 16 * MIB;
+const DEFAULT_RETH_INDEX_DB_GROWTH_STEP_BYTES: usize = GIB;
 
 /// RethIndex database manager.
 pub struct RethIndexDB {
@@ -54,7 +65,7 @@ impl RethIndexDB {
             let mut builder = Environment::builder();
             builder.set_flags(EnvironmentFlags::from(Mode::ReadOnly));
             builder.set_max_dbs(32);
-            builder.set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+            builder.set_geometry(reth_index_geometry_from_env(path));
             builder.open(path)?
         } else {
             Self::open_rw_environment(path)?
@@ -128,7 +139,7 @@ impl RethIndexDB {
         tuned.set_flags(Self::sync_flags_from_env());
         tuned
             .set_max_dbs(32)
-            .set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+            .set_geometry(reth_index_geometry_from_env(path));
 
         match tuned.open(path) {
             Ok(env) => Ok(env),
@@ -140,7 +151,7 @@ impl RethIndexDB {
                 let mut fallback = Environment::builder();
                 fallback
                     .set_max_dbs(32)
-                    .set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+                    .set_geometry(reth_index_geometry_from_env(path));
                 fallback.open(path).map_err(|fallback_err| {
                     eyre!(
                         "Failed to open MDBX env with tuned settings ({err}) and fallback also failed ({fallback_err})"
@@ -357,6 +368,109 @@ impl RethIndexDB {
     }
 }
 
+fn reth_index_geometry_from_env(path: &Path) -> Geometry<RangeInclusive<usize>> {
+    let map_size = configured_map_size(path);
+    let growth_step = configured_usize_env(
+        PYRETH_INDEX_DB_GROWTH_STEP_BYTES_ENV,
+        DEFAULT_RETH_INDEX_DB_GROWTH_STEP_BYTES,
+        MIN_RETH_INDEX_DB_GROWTH_STEP_BYTES,
+    );
+
+    reth_index_geometry(map_size, growth_step)
+}
+
+fn configured_map_size(path: &Path) -> usize {
+    configured_usize_env_with_default(
+        PYRETH_INDEX_DB_MAP_SIZE_BYTES_ENV,
+        default_map_size_for_path(path),
+        MIN_RETH_INDEX_DB_MAP_SIZE_BYTES,
+    )
+}
+
+fn default_map_size_for_path(path: &Path) -> usize {
+    let base = DEFAULT_NEW_RETH_INDEX_DB_MAP_SIZE_BYTES;
+    let target = reth_index_data_file_size(path)
+        .map(|size| size.saturating_add(DEFAULT_EXISTING_RETH_INDEX_DB_MAP_HEADROOM_BYTES))
+        .unwrap_or(base)
+        .max(base);
+    round_up_to_multiple(target, GIB)
+}
+
+fn reth_index_data_file_size(path: &Path) -> Option<usize> {
+    ["mdbx.dat", "data.mdb"]
+        .into_iter()
+        .filter_map(|name| {
+            let len = std::fs::metadata(path.join(name)).ok()?.len();
+            usize::try_from(len).ok()
+        })
+        .max()
+}
+
+fn reth_index_geometry(map_size: usize, growth_step: usize) -> Geometry<RangeInclusive<usize>> {
+    Geometry {
+        size: Some(MIN_RETH_INDEX_DB_MAP_SIZE_BYTES..=map_size),
+        growth_step: Some(usize_to_isize_saturating(growth_step)),
+        shrink_threshold: None,
+        page_size: None,
+    }
+}
+
+fn configured_usize_env(key: &str, default: usize, min: usize) -> usize {
+    configured_usize_env_with_default(key, default, min)
+}
+
+fn configured_usize_env_with_default(key: &str, default: usize, min: usize) -> usize {
+    let Ok(raw) = std::env::var(key) else {
+        return default;
+    };
+    match parse_usize_config(&raw) {
+        Some(value) if value >= min => value,
+        Some(value) => {
+            warn!(
+                key,
+                value,
+                min,
+                default,
+                "Configured RethIndex MDBX size is below minimum; using default"
+            );
+            default
+        }
+        None => {
+            warn!(
+                key,
+                value = %raw,
+                default,
+                "Invalid RethIndex MDBX size config; using default"
+            );
+            default
+        }
+    }
+}
+
+fn parse_usize_config(value: &str) -> Option<usize> {
+    let normalized = value.trim().replace('_', "");
+    if normalized.is_empty() {
+        return None;
+    }
+    normalized.parse::<usize>().ok()
+}
+
+fn usize_to_isize_saturating(value: usize) -> isize {
+    value.min(isize::MAX as usize) as isize
+}
+
+fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
+    if multiple == 0 {
+        return value;
+    }
+    let remainder = value % multiple;
+    if remainder == 0 {
+        value
+    } else {
+        value.saturating_add(multiple - remainder)
+    }
+}
+
 /// Lightweight database stats placeholder.
 #[derive(Debug, Default)]
 pub struct DatabaseStats {
@@ -364,4 +478,66 @@ pub struct DatabaseStats {
     pub address_count: u64,
     pub transaction_count: u64,
     pub last_processed_block: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_size_config_with_underscores() {
+        assert_eq!(parse_usize_config("1_073_741_824"), Some(1_073_741_824));
+        assert_eq!(parse_usize_config(" 4096 "), Some(4096));
+        assert_eq!(parse_usize_config(""), None);
+        assert_eq!(parse_usize_config("1GiB"), None);
+    }
+
+    #[test]
+    fn new_index_default_map_size_is_bounded() {
+        let temp = test_temp_dir("new_index_default_map_size_is_bounded");
+        std::fs::create_dir_all(&temp).expect("create tempdir");
+        assert_eq!(
+            default_map_size_for_path(&temp),
+            DEFAULT_NEW_RETH_INDEX_DB_MAP_SIZE_BYTES
+        );
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn existing_index_default_keeps_bounded_headroom() {
+        let temp = test_temp_dir("existing_index_default_keeps_bounded_headroom");
+        std::fs::create_dir_all(&temp).expect("create tempdir");
+        std::fs::write(temp.join("mdbx.dat"), []).expect("create mdbx file");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp.join("mdbx.dat"))
+            .expect("open mdbx file");
+        file.set_len((160 * GIB) as u64).expect("size mdbx file");
+
+        assert_eq!(default_map_size_for_path(&temp), 192 * GIB);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn geometry_uses_explicit_large_upper_bound() {
+        let geometry = reth_index_geometry(
+            DEFAULT_NEW_RETH_INDEX_DB_MAP_SIZE_BYTES,
+            DEFAULT_RETH_INDEX_DB_GROWTH_STEP_BYTES,
+        );
+        let range = geometry.size.expect("geometry size range");
+        assert_eq!(*range.start(), MIN_RETH_INDEX_DB_MAP_SIZE_BYTES);
+        assert_eq!(*range.end(), DEFAULT_NEW_RETH_INDEX_DB_MAP_SIZE_BYTES);
+        assert_eq!(
+            geometry.growth_step,
+            Some(DEFAULT_RETH_INDEX_DB_GROWTH_STEP_BYTES as isize)
+        );
+    }
+
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("reth_index_{name}_{unique}"))
+    }
 }

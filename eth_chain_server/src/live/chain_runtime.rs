@@ -6,15 +6,15 @@ use std::{
 };
 
 use eth_live_feed::{
-    LiveBlockUpdate, LiveTokenError, LiveTokenEvent, LiveTokenReader, LiveTokenRuntime,
-    ResolvedLiveTokenRuntimeRequest, StartLiveTokenRuntimeRequest,
+    LiveBlockReplayWriteMetrics, LiveBlockUpdate, LiveTokenError, LiveTokenEvent, LiveTokenReader,
+    LiveTokenRuntime, ResolvedLiveTokenRuntimeRequest, StartLiveTokenRuntimeRequest,
 };
 use eyre::{bail, Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{watch, Mutex};
 use tx_processor::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockStateFrame, LiveProcessedBlock,
-    ProcessedBlock, ProcessedBlockReplayStoreWriter,
+    ProcessedBlock, ProcessedBlockReplayStoreWriteOptions, ProcessedBlockReplayStoreWriter,
 };
 
 use crate::recent_blocks::{
@@ -273,10 +273,10 @@ impl LiveChainRuntime {
         self.inner
             .recent_live_state_frames
             .record(LiveBlockStateFrame::from_live_processed_block(&processed));
-        let disk_cache_write_ms = self
+        let replay_write_metrics = self
             .write_processed_block_if_missing(processed.processed_block.clone())
             .await?;
-        let update = LiveBlockUpdate::from_live_processed_block(processed, disk_cache_write_ms);
+        let update = LiveBlockUpdate::from_live_processed_block(processed, replay_write_metrics);
         self.inner
             .live_tracker
             .apply_live_block_update(update)
@@ -286,19 +286,30 @@ impl LiveChainRuntime {
         Ok(())
     }
 
-    async fn write_processed_block_if_missing(&self, block: ProcessedBlock) -> Result<u128> {
+    async fn write_processed_block_if_missing(
+        &self,
+        block: ProcessedBlock,
+    ) -> Result<LiveBlockReplayWriteMetrics> {
         let Some(writer) = self.inner.processed_block_replay_store.clone() else {
-            return Ok(0);
+            return Ok(LiveBlockReplayWriteMetrics::default());
         };
         let block_number = block.header.number;
         let started = Instant::now();
-        let write =
-            tokio::task::spawn_blocking(move || writer.write_processed_block_if_missing(&block))
-                .await
-                .wrap_err("processed block replay store write task failed")?;
+        let write = tokio::task::spawn_blocking(move || {
+            writer.write_processed_block_if_missing_with_options(
+                &block,
+                ProcessedBlockReplayStoreWriteOptions::best_effort_address_index(),
+            )
+        })
+        .await
+        .wrap_err("processed block replay store write task failed")?;
         match write {
-            Ok(Some(write)) => Ok(write.disk_cache.write_ms),
-            Ok(None) => Ok(0),
+            Ok(Some(write)) => Ok(LiveBlockReplayWriteMetrics {
+                disk_cache_write_ms: write.disk_cache.write_ms,
+                address_index_failures: u64::from(write.address_block_index_error.is_some()),
+                last_address_index_error: write.address_block_index_error.map(|error| error.error),
+            }),
+            Ok(None) => Ok(LiveBlockReplayWriteMetrics::default()),
             Err(error) => {
                 tracing::warn!(
                     target: "live_chain_runtime",
@@ -307,7 +318,7 @@ impl LiveChainRuntime {
                     elapsed_ms = started.elapsed().as_millis(),
                     "failed to write direct live processed block to replay store"
                 );
-                Ok(0)
+                Ok(LiveBlockReplayWriteMetrics::default())
             }
         }
     }

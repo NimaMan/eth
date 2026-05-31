@@ -20,6 +20,50 @@ But cannot efficiently answer analytical queries like:
 
 RethIndex provides these missing indexes and aggregations.
 
+## Operational Sizing
+
+`RethIndex` is an analytics index, not the canonical chain state. It opens its
+MDBX environment with an explicit geometry so high-volume address indexing does
+not inherit a hidden small map-size ceiling.
+
+Relevant environment variables:
+
+- `PYRETH_INDEX_DB_MAP_SIZE_BYTES`: maximum MDBX map size. The current default
+  is path-aware: new indexes get a 64 GiB ceiling; an existing index gets its
+  current `mdbx.dat` size plus 32 GiB of headroom, rounded to GiB. The current
+  160 GiB file therefore opens with a 192 GiB ceiling, not 1 TiB.
+- `PYRETH_INDEX_DB_GROWTH_STEP_BYTES`: MDBX growth step. The current default is
+  1 GiB.
+- `PYRETH_INDEX_DB_SYNC_MODE`: durability/sync mode, defaulting to
+  `safe-no-sync` for this analytics index.
+
+Live tracking treats address-index writes as best-effort. A full or temporarily
+unavailable `RethIndex` must not stop token/pool state application or the
+chain-server-owned `LiveTxSimulator`; those are Tier One live trading surfaces.
+Failures are still operator-visible through live-token-tracker status fields and
+a `warn/service_degraded` pipeline issue.
+
+MDBX file size is a high-water mark, not necessarily live payload. A diagnostic
+run on `2026-05-31` showed `mdbx.dat` at 160 GiB, while MDBX reported about
+6.04 GiB of used pages and about 154 GiB of freelist/free pages. The
+active payload was:
+
+- `address_to_blocks`: `222,333,079` rows, about 5.06 GiB.
+- `mempool_tx_arrival_times`: `22,381,852` rows, about 0.82 GiB.
+
+Use `cargo run -p reth_chain_query --example reth_index_stats -- <reth_index_dir>`
+to separate mapped file size from live table payload before treating a large
+`mdbx.dat` as a data-growth bug. To shrink the file after changing retention or
+filtering, compact-copy or rebuild the MDBX environment.
+
+The `environment map size limit reached` error means MDBX could not allocate a
+writable page inside the configured map at that moment. It does not mean all
+mapped bytes are live rows. This can happen when the file is already at the
+configured map ceiling and a writer needs fresh pages, even if many pages are
+shown on the freelist; those pages may have come from previous high-water
+states or deleted legacy tables and are not guaranteed to be immediately usable
+by every active write while readers/snapshots exist.
+
 ## Reth Database Tables Reference
 
 Understanding reth's native tables is crucial for designing our analytics database efficiently. We want to avoid duplicating data and leverage reth's existing indexes.
@@ -330,12 +374,26 @@ specific address.
 - `AddressBlockParticipationWriter` unions all transaction-level address
   participations for that block.
 - It writes one `(address, block_number)` duplicate value per address.
+- The current extraction policy is intentionally broad: transaction from/to,
+  contract creation, token contracts, transfer and approval parties, pool
+  contracts, internal calls, balance-change keys, latest-state keys, and
+  decoded/undecoded log-derived addresses can all become candidate
+  participations. This broad policy, not duplicate writes, is the main row-count
+  driver.
 
 **Read contract**:
 - The table returns candidate blocks only.
 - Callers must load/replay those blocks and filter exact transactions in block
   order.
 - Replays are idempotent; duplicate `(address, block_number)` writes are skipped.
+
+Filtering direction:
+- keep the schema as address -> sorted block numbers;
+- exclude zero, low precompile/system, burn/sentinel, and heuristic
+  undecoded-log data addresses unless a caller explicitly needs them;
+- consider moving token-contract, pool-contract, and diagnostic log-address
+  activity into purpose-specific indexes instead of the generic participation
+  index.
 
 ### 2. Mempool Transaction Arrival Times (`mempool_tx_arrival_times`)
 

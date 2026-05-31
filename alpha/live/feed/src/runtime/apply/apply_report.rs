@@ -1,6 +1,9 @@
-use eth_ops_events::{emit_issue, PipelineBottleneckSample, PipelineIssue};
+use eth_ops_events::{
+    emit_issue, PipelineBottleneckSample, PipelineImpact, PipelineIssue, PipelineSeverity,
+};
 use eth_token::token_analytics::collect_current_observations;
 use eth_token::tracking::{LiveTokenRetentionReport, TokenBlockUpdateReport};
+use serde_json::json;
 use tx_processor::LoadedProcessedBlock as LiveBlockLoad;
 
 use super::event::LiveTokenEvent;
@@ -49,6 +52,7 @@ pub(super) fn apply_report(
     } else {
         state.progress.processed_block_disk_cache_misses += 1;
     }
+    record_address_index_warning(state, block_number, &loaded);
     state.progress.updated_at_unix_secs = now_unix_secs();
 
     let observations = collect_current_observations(
@@ -134,6 +138,47 @@ pub(super) fn apply_report(
         updated_v4_pools,
         token_snapshots,
     }
+}
+
+fn record_address_index_warning(
+    state: &mut LiveTokenState,
+    block_number: u64,
+    loaded: &LiveBlockLoad,
+) {
+    if loaded.address_index_failures == 0 {
+        return;
+    }
+
+    let detail = loaded
+        .last_address_index_error
+        .clone()
+        .unwrap_or_else(|| "processed block address index write failed".to_string());
+    state.progress.processed_block_address_index_failures += loaded.address_index_failures;
+    state.progress.last_processed_block_address_index_warning = Some(detail.clone());
+
+    let mut issue = PipelineIssue::new(
+        "eth_chain_server",
+        "live_tracker",
+        "processed_block_address_index",
+        PipelineSeverity::Warn,
+        PipelineImpact::ServiceDegraded,
+        "processed_block_address_index_write_failed",
+        "Processed block address index write failed; live tracker continued",
+    );
+    issue.run_id = state.progress.id.clone();
+    issue.retryable = true;
+    issue.block_number = Some(block_number);
+    issue.detail = Some(detail);
+    issue.context.insert(
+        "address_index_failures".to_string(),
+        json!(loaded.address_index_failures),
+    );
+    issue
+        .context
+        .insert("block_source".to_string(), json!(loaded.source));
+    issue.refresh_ids();
+    emit_issue(&issue);
+    push_issue(state, issue);
 }
 
 fn token_snapshots_for_update(

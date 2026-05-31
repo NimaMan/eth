@@ -16,6 +16,8 @@ pub struct LoadedProcessedBlock {
     pub disk_cache_hit: bool,
     pub disk_cache_read_ms: u128,
     pub disk_cache_write_ms: u128,
+    pub address_index_failures: u64,
+    pub last_address_index_error: Option<String>,
     pub source: &'static str,
 }
 
@@ -91,6 +93,8 @@ pub async fn load_processed_block(
             disk_cache_hit: false,
             disk_cache_read_ms: 0,
             disk_cache_write_ms,
+            address_index_failures: 0,
+            last_address_index_error: None,
             source: ProcessedBlockSource::Processed.as_str(),
         });
     }
@@ -105,6 +109,8 @@ pub async fn load_processed_block(
         disk_cache_hit: false,
         disk_cache_read_ms: 0,
         disk_cache_write_ms: 0,
+        address_index_failures: 0,
+        last_address_index_error: None,
         source: ProcessedBlockSource::Processed.as_str(),
     })
 }
@@ -162,6 +168,8 @@ async fn read_cached_block(
         disk_cache_hit: true,
         disk_cache_read_ms: read_ms,
         disk_cache_write_ms: 0,
+        address_index_failures: 0,
+        last_address_index_error: None,
         source: ProcessedBlockSource::Cache.as_str(),
     }))
 }

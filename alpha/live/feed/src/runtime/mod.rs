@@ -32,7 +32,7 @@ mod helpers;
 #[path = "support/time.rs"]
 mod time;
 
-pub use block_update::LiveBlockUpdate;
+pub use block_update::{LiveBlockReplayWriteMetrics, LiveBlockUpdate};
 pub use config::LiveTokenRuntimeConfig;
 pub use event::LiveTokenEvent;
 pub use progress::{
