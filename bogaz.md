@@ -60,11 +60,12 @@ Do not mix the live-capital run and the live-backtest sweep:
 - Current processes on `40020`: `eth_chain_server`, `mempool_signal_detector`,
   and `asena-static` are running. No live trader or live backtester process is
   running.
-- The live token tracker inside chain-server is currently `failed` with
-  `last_error="environment map size limit reached"`, `live_blocks_processed=0`,
-  and `/api/v1/eth/live-tx-simulator/status` returns `503`. This means there is
-  no healthy current live simulation surface to use for new evidence until the
-  storage failure path is fixed and the chain-server live state is rebuilt.
+- After rebuilding/restarting chain-server on `2026-05-31`, the old
+  `reth_index` map-size failure did not reappear. Warmup reached about
+  `2400/7000` blocks with `processed_block_address_index_failures=0`, then
+  systemd killed the service with `oom-kill` at the unit's `MemoryMax=8G`.
+  The active blocker is now the chain-server service memory cap during live
+  tracker warmup, not the optional address-index write path.
 - `reth_index/mdbx.dat` is 160 GiB on disk, but diagnostics show only about
   6.04 GiB of live MDBX pages: `address_to_blocks` is about 5.06 GiB with
   `222,333,079` rows and `mempool_tx_arrival_times` is about 0.82 GiB with
@@ -97,7 +98,7 @@ These block any new real-capital run.
 | --- | --- | --- |
 | Real and live-backtest position lifecycle are not equivalent | Real hold16 bought positions, then showed missing/zero valuation, stuck open positions, and failed sells while chain-sim marked positions every block. | Finish, commit, build, deploy, and verify real-mode valuation delegation plus exact-sim sell planning. Then re-run a small hold16 validation only after existing rows are reconciled. |
 | Backtest PnL can be inflated by held-balance scams | Session-style `holder_balance_backdoor_drain` can remove vault inventory without a pool update. Previous chain-sim valuation could keep selling synthetic entry inventory. | Re-run backtests/live-backtests only after holder-balance drain detection, token-affecting valuation triggers, and zero-value validation checks are committed, built, and deployed. |
-| Chain-server live tracker uptime is broken | `eth_chain_server` is still running, but live tracker failed during warmup at block `25203730` after `3072/7000` warmup blocks. The optional `reth_index` address-participation MDBX write hit `environment map size limit reached`; `/api/v1/eth/live-tx-simulator/status` is unavailable because no live block state was published. RethIndex stats show the 160 GiB file is mostly MDBX high-water/free pages, while live payload is about 6.04 GiB. | Make live tracker resilient to optional replay/index storage failure, configure explicit `reth_index` MDBX geometry, add stats/diagnostics, rebuild/restart chain-server live state, then verify live tracker and live tx simulator expose the same healthy block/hash. Separately narrow the address-participation filter and compact/rebuild the MDBX env during maintenance. |
+| Chain-server live tracker uptime is broken | The optional address-index failure path is now best-effort and the post-rebuild warmup showed `processed_block_address_index_failures=0`. The service was instead killed by systemd at `MemoryMax=8G` around `2400/7000` warmup blocks, before live tx simulator state became available. RethIndex stats still show the 160 GiB file is mostly MDBX high-water/free pages, while live payload is about 6.04 GiB. | Raise the chain-server systemd memory cap for 7000-block warmup, restart, and verify live tracker reaches `live` and `/api/v1/eth/live-tx-simulator/status` exposes a healthy block/hash. Separately narrow the address-participation filter and compact/rebuild the MDBX env during maintenance. |
 | Real/live frontend state contract is inconsistent | Result-set API says stopped; real-executions API/page says `open` for stopped runs with open positions. | Split `lifecycle_status` from `position_status`, backfill stale terminal metadata on old rows, and make duration use lifecycle stop time. |
 
 ### Tier Two - Evidence/Policy Promotion

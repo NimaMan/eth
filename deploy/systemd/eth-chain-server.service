@@ -26,7 +26,7 @@ ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_chain_server
 StandardOutput=journal
 StandardError=journal
 
-MemoryMax=8G
+MemoryMax=24G
 Nice=0
 LimitNOFILE=1000000
 
