@@ -110,7 +110,7 @@ Not persisted by the v3 payload (`strip_unpersisted_entry_fields` in `store.rs`)
 
 | Field | Why it is dropped |
 | --- | --- |
-| `input` (raw calldata) | The single largest field (~24% of compressed size). Its only cache-side reader is eth_token's `transferFrom`-from-calldata decode, intentionally left **dormant** (returns `None` on empty input) until an on-demand reth calldata fetch is wired up. Raw calldata is recoverable from the reth DB by `(block, tx_index)` / hash. |
+| `input` (raw calldata) | The single largest field. **Truncated to its 4-byte selector** (not fully removed): the two cache-side readers only threshold-check it (`len >= 4` route classification, `!is_empty()` direct-call trigger), which the selector preserves exactly. The direct `transferFrom` `(from,to,amount)` eth_token used to decode from calldata now comes from the trace-derived `internal_erc20_calls` (depth-0 entry), which is independent of `input` and kept. Full calldata is recoverable from the reth DB by `(block, tx_index)` / hash. |
 | `struct_logs` | Per-opcode EVM trace. Not even populated on the production path; no token consumer reads it. |
 | `access_list` | EIP-2930 access list. Never read off a cached tx (the identically-named field on reth/alloy tx types is unrelated). |
 | `blob_versioned_hashes` | EIP-4844 blob hashes. Never read off a cached tx. |
@@ -174,8 +174,9 @@ path writes one block per ~12 s and backfill is parallel).
 **Operational note:** v3 uses a new filename (`<block>.v3.pblock.zst`), so the
 existing ~285k `.v2.` files are orphaned and will not be read. They should be
 pruned, and the range re-filled under v3 via `refresh_disk_cache` (or left to
-re-fill on demand). The `input`-dependent transferFrom-from-calldata detection in
-eth_token goes dormant until an on-demand reth calldata fetch is added.
+re-fill on demand). No detection is lost: eth_token's direct-`transferFrom`
+record now sources `(from,to,amount)` from `internal_erc20_calls` instead of raw
+calldata, and the route/trigger checks are preserved by the 4-byte selector.
 
 ### Full candidate matrix (baseline = on-disk v2 = bincode+zstd-3)
 

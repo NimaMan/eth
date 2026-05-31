@@ -53,10 +53,10 @@ const TRACE_ENGINE_ID: &str = "fresh_inspector";
 /// of mass-invalidating. BUMP THIS whenever the bincode layout of the cached
 /// types changes (e.g. adding `internal_erc20_calls`).
 ///
-/// v3: stops persisting fields no consumer reads — raw calldata `input` (the
-/// single largest field) plus `struct_logs`, `erc1155_contracts`, `access_list`,
-/// `blob_versioned_hashes`. See `strip_unpersisted_entry_fields` and
-/// block/README.md.
+/// v3: shrinks the payload — truncates raw calldata `input` (the single largest
+/// field) to its 4-byte selector, and fully drops `struct_logs`,
+/// `erc1155_contracts`, `access_list`, `blob_versioned_hashes`. See
+/// `strip_unpersisted_entry_fields` and block/README.md.
 const CACHE_SCHEMA_VERSION: u32 = 3;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 /// zstd compression level for cache payloads. Level 9 (vs the original 3) is
@@ -797,15 +797,24 @@ pub enum CacheSerCodec {
     Msgpack,
 }
 
+/// Number of leading calldata bytes (the 4-byte function selector) the v3 cache
+/// keeps. Consumers that still read cached `input` only do threshold checks
+/// (`len >= 4` for route classification, `!is_empty()` for a direct-call
+/// trigger); truncating to the selector preserves both exactly
+/// (`min(len,4) >= 4 ⟺ len >= 4`, and `empty ⟺ empty`) for ~4 bytes/tx.
+const CACHE_INPUT_SELECTOR_BYTES: usize = 4;
+
 /// Strip fields the v3 cache payload does not persist, in place.
 ///
-/// Four fields a repo-wide consumer audit confirmed are never read off a cached
-/// transaction: `struct_logs` (absent on the live path anyway), `erc1155_contracts`,
-/// `access_list`, `blob_versioned_hashes`. PLUS `input` (raw calldata): the
-/// single largest field (~24% of compressed size). Its only cache-side reader is
-/// eth_token's `transferFrom`-from-calldata decode, which is intentionally left
-/// dormant until an on-demand reth calldata fetch is added; raw calldata can be
-/// re-read from the reth DB when needed.
+/// Fully dropped (a repo-wide consumer audit confirmed nothing reads them off a
+/// cached tx): `struct_logs` (absent on the live path anyway), `erc1155_contracts`,
+/// `access_list`, `blob_versioned_hashes`.
+///
+/// `input` (raw calldata, the single largest field) is truncated to its 4-byte
+/// selector. The transferFrom (from,to,amount) eth_token used to decode from
+/// calldata now comes from the trace-derived `internal_erc20_calls` (depth 0),
+/// which is independent of `input` and kept; full calldata is recoverable from
+/// the reth DB if ever needed.
 ///
 /// NOTE: fields that LOOK droppable but ARE read must stay — `erc1155_transfers`
 /// (tx_fund_flow), and `uniswap_v4_protocol_fee_updates` /
@@ -816,7 +825,9 @@ fn strip_unpersisted_compact_fields(processed: &mut CompactProcessedTransaction)
     processed.erc1155_contracts = None;
     processed.access_list = None;
     processed.blob_versioned_hashes = None;
-    processed.input = None;
+    if let Some(input) = processed.input.as_mut() {
+        input.truncate(CACHE_INPUT_SELECTOR_BYTES);
+    }
 }
 
 /// Apply [`strip_unpersisted_compact_fields`] to an assembled cache entry,
@@ -946,7 +957,7 @@ mod tests {
             true,
             9,
             2,
-            vec![0xde, 0xad, 0xbe, 0xef],
+            vec![0xde, 0xad, 0xbe, 0xef, 0x11, 0x22, 0x33, 0x44],
         );
         tx.fees = TransactionFees::new_eip1559(
             U256::from(10),
@@ -1022,9 +1033,13 @@ mod tests {
 
         assert_eq!(cached_tx.fees.gas_limit, 123_456);
         assert_eq!(cached_tx.fees.max_fee_per_gas, Some(U256::from(20)));
-        // v3 does not persist these fields (no cache consumer reads them); they
-        // come back empty after a round trip. See strip_unpersisted_entry_fields.
-        assert!(cached_tx.input.is_empty(), "v3 drops raw calldata input");
+        // v3 keeps only the 4-byte selector of calldata and fully drops the
+        // other never-read fields. See strip_unpersisted_entry_fields.
+        assert_eq!(
+            cached_tx.input,
+            vec![0xde, 0xad, 0xbe, 0xef],
+            "v3 keeps only the 4-byte calldata selector"
+        );
         assert!(cached_tx.access_list.is_empty(), "v3 drops access_list");
         assert!(
             cached_tx.blob_versioned_hashes.is_empty(),

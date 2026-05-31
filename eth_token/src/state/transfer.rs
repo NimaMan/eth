@@ -5,7 +5,7 @@ use eyre::Result;
 use indexmap::IndexMap;
 use reth_chain_query::common_addresses::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS};
 use serde::{Deserialize, Serialize};
-use tx_processor::ProcessedTransaction;
+use tx_processor::{Erc20CallKind, ProcessedTransaction};
 
 use crate::utils::{append_to_index_map_history, append_with_history_limit};
 
@@ -224,13 +224,11 @@ impl TokenTransferTracker {
         }
     }
 
-    // NOTE: this reads `tx.input` (raw calldata) to decode a direct
-    // `transferFrom` call. The processed-block disk cache (v3) no longer persists
-    // `input`, so for cache-loaded transactions `tx.input` is empty and this
-    // detection is dormant — `decode_transfer_from_call` returns `None`. To
-    // re-enable it, fetch the calldata for this tx from the reth DB on demand
-    // (gated below on `to == tracked token`, so it is rare). See tx_processor
-    // block/README.md "Stored vs consumed fields".
+    // Records a direct (top-level) `transferFrom` to this token. The source is
+    // the trace-derived `internal_erc20_calls` (depth 0 = the tx's own call),
+    // NOT raw calldata: the processed-block disk cache (v3) no longer stores
+    // `input`, but `internal_erc20_calls` carries the same (from, to, amount)
+    // and is independent of `input`. See tx_processor block/README.md.
     pub fn add_transfer_from_call(&mut self, tx: &ProcessedTransaction) -> Result<()> {
         let Some(to_address) = tx.to_address else {
             return Ok(());
@@ -238,9 +236,14 @@ impl TokenTransferTracker {
         if !same_address_str(to_address, &self.contract_address) {
             return Ok(());
         }
-        let Some((from_address, to_address, amount)) = decode_transfer_from_call(&tx.input) else {
+        let Some(call) = tx.internal_erc20_calls.iter().find(|call| {
+            call.depth == 0
+                && matches!(call.kind, Erc20CallKind::TransferFrom)
+                && same_address_str(call.token_address, &self.contract_address)
+        }) else {
             return Ok(());
         };
+        let (from_address, transfer_to, amount) = (call.from_address, call.to_address, call.amount);
 
         let emitted_transfer_count = tx
             .erc20_transfers
@@ -260,7 +263,7 @@ impl TokenTransferTracker {
             tx_index: tx.tx_index,
             caller: address_string(&tx.from_address),
             from_address: address_string(&from_address),
-            to_address: address_string(&to_address),
+            to_address: address_string(&transfer_to),
             amount: scale_amount(amount, self.decimals)?,
             token_address: self.contract_address.clone(),
             emitted_transfer_count,
@@ -296,26 +299,6 @@ fn scale_amount(value: U256, decimals: u8) -> Result<f64> {
     Ok(raw / 10_f64.powi(i32::from(decimals)))
 }
 
-fn decode_transfer_from_call(input: &[u8]) -> Option<(Address, Address, U256)> {
-    const TRANSFER_FROM_SELECTOR: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
-
-    if input.len() < 4 + (3 * 32) || input.get(..4)? != TRANSFER_FROM_SELECTOR {
-        return None;
-    }
-    let from_word = read_abi_word(input, 0)?;
-    let to_word = read_abi_word(input, 1)?;
-    let amount_word = read_abi_word(input, 2)?;
-    Some((
-        Address::from_slice(&from_word[12..32]),
-        Address::from_slice(&to_word[12..32]),
-        U256::from_be_slice(amount_word),
-    ))
-}
-
-fn read_abi_word(input: &[u8], index: usize) -> Option<&[u8]> {
-    let start = 4 + (index * 32);
-    input.get(start..start + 32)
-}
 
 fn same_address_str(address: Address, value: &str) -> bool {
     address_string(&address) == normalize_address(value)
