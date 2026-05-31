@@ -51,12 +51,18 @@ const TRACE_ENGINE_ID: &str = "fresh_inspector";
 /// (`<block>.v<N>.pblock.zst`), so old entries are never read against an
 /// incompatible layout — the cache refreshes cleanly per block on demand instead
 /// of mass-invalidating. BUMP THIS whenever the bincode layout of the cached
-/// types changes (e.g. adding `internal_erc20_calls`).
+/// types changes (e.g. adding `internal_erc20_calls`), OR whenever a cached
+/// DERIVED field is recomputed differently (e.g. `address_balance_changes` now
+/// folds in event-less `internal_erc20_transfers`) so stale derivations refresh.
 ///
-/// v3: shrinks the payload — truncates raw calldata `input` (the single largest
-/// field) to its 4-byte selector, and fully drops `struct_logs`,
-/// `erc1155_contracts`, `access_list`, `blob_versioned_hashes`. See
-/// `strip_unpersisted_entry_fields` and block/README.md.
+/// v3 combines two orthogonal payload changes that landed together:
+///   * (dev) add persisted `internal_erc20_transfers` and fold those event-less
+///     ERC-20 transfers into `address_balance_changes`.
+///   * (cache-format-opt) shrink the payload — truncate raw calldata `input`
+///     (the single largest field) to its 4-byte selector, and fully drop
+///     `struct_logs`, `erc1155_contracts`, `access_list`,
+///     `blob_versioned_hashes`. See `strip_unpersisted_entry_fields` and
+///     block/README.md. NOTE: the strip MUST NOT drop `internal_erc20_transfers`.
 const CACHE_SCHEMA_VERSION: u32 = 3;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
 /// zstd compression level for cache payloads. Level 9 (vs the original 3) is

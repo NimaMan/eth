@@ -63,3 +63,72 @@ pub struct InternalErc20Call {
     /// Whether the call frame completed without error/revert.
     pub succeeded: bool,
 }
+
+/// A trace-derived ERC-20 **transfer** that moved a balance but emitted **no**
+/// matching `Transfer` event — the event-less complement of `erc20_transfers`.
+///
+/// This is the normalized, balance-relevant projection of [`InternalErc20Call`]:
+/// only the value-moving kinds (`Transfer` / `TransferFrom`), only succeeded
+/// calls with a non-zero amount, and only those with no emitted `Transfer` event.
+/// `erc20_transfers` ∪ `internal_erc20_transfers` is the COMPLETE transfer set
+/// for the transaction, and both feed `address_balance_changes` so an event-less
+/// custody drain shows up in net movement. See `data_models/README.md`
+/// ("Capturing all transfers").
+///
+/// Note: `amount` is the call argument, not a measured balance delta — exact for
+/// plain transfers, approximate for fee-on-transfer / rebasing tokens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InternalErc20Transfer {
+    /// The token contract whose balance moved.
+    pub token_address: Address,
+    /// The holder whose balance left (`from_address` of the move).
+    pub from_address: Address,
+    /// The recipient.
+    pub to_address: Address,
+    pub amount: U256,
+    /// `msg.sender` of the originating call (provenance).
+    pub caller: Address,
+    /// Whether the move came from a `transfer` or a `transferFrom` call.
+    pub kind: Erc20CallKind,
+    /// Call-trace depth of the originating call (provenance).
+    pub depth: u32,
+}
+
+impl InternalErc20Transfer {
+    /// Project the event-less, balance-moving subset of `calls`, deduplicated
+    /// against the emitted `Transfer` events in `events`.
+    pub fn event_less_complement(
+        calls: &[InternalErc20Call],
+        events: &[super::receipt_models::ERC20TransferEvent],
+    ) -> Vec<InternalErc20Transfer> {
+        calls
+            .iter()
+            .filter(|call| {
+                call.succeeded
+                    && !call.amount.is_zero()
+                    && matches!(call.kind, Erc20CallKind::Transfer | Erc20CallKind::TransferFrom)
+            })
+            .filter(|call| {
+                // Event-less: no emitted Transfer event with the same token, from,
+                // to, and amount. Standard transfers DO emit an event and are kept
+                // out of this set so the union with `erc20_transfers` never
+                // double-counts them.
+                !events.iter().any(|event| {
+                    event.token_address == call.token_address
+                        && event.from_address == call.from_address
+                        && event.to_address == call.to_address
+                        && event.amount == call.amount
+                })
+            })
+            .map(|call| InternalErc20Transfer {
+                token_address: call.token_address,
+                from_address: call.from_address,
+                to_address: call.to_address,
+                amount: call.amount,
+                caller: call.caller,
+                kind: call.kind,
+                depth: call.depth,
+            })
+            .collect()
+    }
+}

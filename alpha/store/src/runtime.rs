@@ -142,7 +142,11 @@ impl PostgresTradingStore {
                 UPDATE alpha_trading.trader_runs
                 SET status = 'stale',
                     stopped_at = COALESCE(stopped_at, NOW()),
-                    metadata = metadata || jsonb_build_object('reason', 'stale_heartbeat')
+                    metadata = metadata || jsonb_build_object(
+                        'reason', 'stale_heartbeat',
+                        'live_status', 'stale',
+                        'trading_enabled', false
+                    )
                 WHERE run_id <> $1
                   AND status = 'running'
                   AND last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 second')
@@ -152,7 +156,11 @@ impl PostgresTradingStore {
                 UPDATE alpha_trading.backtest_result_sets rs
                 SET status = 'stale',
                     stopped_at = COALESCE(rs.stopped_at, NOW()),
-                    metadata = rs.metadata || jsonb_build_object('reason', 'stale_heartbeat'),
+                    metadata = rs.metadata || jsonb_build_object(
+                        'reason', 'stale_heartbeat',
+                        'live_status', 'stale',
+                        'trading_enabled', false
+                    ),
                     updated_at = NOW()
                 FROM alpha_trading.backtest_result_set_runs runs
                 JOIN stale_runs sr ON sr.run_id = runs.run_id
@@ -208,7 +216,10 @@ impl PostgresTradingStore {
         sqlx::query(
             r#"
             UPDATE alpha_trading.trader_runs
-            SET status = $2, stopped_at = NOW(), last_heartbeat_at = NOW(), metadata = $3
+            SET status = $2,
+                stopped_at = NOW(),
+                last_heartbeat_at = NOW(),
+                metadata = $3 || jsonb_build_object('live_status', $2, 'trading_enabled', false)
             WHERE run_id = $1
             "#,
         )
@@ -223,7 +234,7 @@ impl PostgresTradingStore {
             UPDATE alpha_trading.backtest_result_sets rs
             SET status = $2,
                 stopped_at = NOW(),
-                metadata = rs.metadata || $3,
+                metadata = rs.metadata || $3 || jsonb_build_object('live_status', $2, 'trading_enabled', false),
                 updated_at = NOW()
             FROM alpha_trading.backtest_result_set_runs runs
             WHERE runs.result_set_id = rs.result_set_id

@@ -13,7 +13,7 @@ use super::core::initialization::create_provider_factory;
 use crate::block_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock};
 use crate::processed_tx_provider::core::provider_factory::TxProcessorProviderFactory;
 use crate::tx_processor::data_models::{
-    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
+    ContractCreationEvent, InternalErc20Transfer, ProcessedAccessListItem, ProcessedTransaction,
 };
 use crate::tx_processor::tx_loader::TransactionLoader;
 use crate::tx_processor::{
@@ -382,6 +382,10 @@ impl ProcessedTxProvider {
             trace_processor.extract_internal_transactions_from_call_trace(&call_frame);
         processed_tx.internal_erc20_calls =
             trace_processor.extract_erc20_calls_from_call_trace(&call_frame);
+        processed_tx.internal_erc20_transfers = InternalErc20Transfer::event_less_complement(
+            &processed_tx.internal_erc20_calls,
+            &processed_tx.erc20_transfers,
+        );
         processed_tx.bribe_amount =
             TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
@@ -389,6 +393,7 @@ impl ProcessedTxProvider {
         processed_tx.address_balance_changes = balance_calculator
             .calculate_balance_changes_from_processed_data(
                 &processed_tx.erc20_transfers,
+                &processed_tx.internal_erc20_transfers,
                 &processed_tx.internal_transactions,
                 block_number,
                 tx_index,
