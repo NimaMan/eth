@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{PreparedDirectRawTransaction, SignedTransaction};
 
-pub const ETH_SIGNER_WIRE_SCHEMA: &str = "kartal_eth_signer_v1";
+pub const ETH_SIGNER_WIRE_SCHEMA: &str = "eth_tx_signer_v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -30,7 +30,6 @@ impl SignerWireRequest {
             transaction,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

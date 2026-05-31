@@ -3,6 +3,13 @@ use tx_processor::{
     ProcessedBlockSource,
 };
 
+#[derive(Debug, Clone, Default)]
+pub struct LiveBlockReplayWriteMetrics {
+    pub disk_cache_write_ms: u128,
+    pub address_index_failures: u64,
+    pub last_address_index_error: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct LiveBlockUpdate {
     pub(super) loaded: LiveBlockLoad,
@@ -12,7 +19,7 @@ pub struct LiveBlockUpdate {
 impl LiveBlockUpdate {
     pub fn from_live_processed_block(
         processed: LiveProcessedBlock,
-        disk_cache_write_ms: u128,
+        replay_write_metrics: LiveBlockReplayWriteMetrics,
     ) -> Self {
         let upstream_ms = processed
             .processed_at
@@ -26,7 +33,9 @@ impl LiveBlockUpdate {
                 upstream_ms,
                 disk_cache_hit: false,
                 disk_cache_read_ms: 0,
-                disk_cache_write_ms,
+                disk_cache_write_ms: replay_write_metrics.disk_cache_write_ms,
+                address_index_failures: replay_write_metrics.address_index_failures,
+                last_address_index_error: replay_write_metrics.last_address_index_error,
                 source: ProcessedBlockSource::LiveDirect.as_str(),
             },
             state_diffs,

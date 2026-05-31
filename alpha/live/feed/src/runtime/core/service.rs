@@ -8,7 +8,10 @@ use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, watch, Mutex, RwLock, RwLockReadGuard};
 use tx_processor::{
-    BlockProcessor, BlockStateSession, LivePoolBuySellSimulator, ProcessedBlockReplayStoreWriter,
+    load_processed_block_range_with_options, BlockProcessor, BlockStateSession,
+    LivePoolBuySellSimulator, LoadedProcessedBlock as LiveBlockLoad,
+    ProcessedBlockAddressIndexFailurePolicy, ProcessedBlockRangeLoadOptions,
+    ProcessedBlockReplayStoreWriter,
 };
 use tx_simulator::{
     InMemoryLiveBlockStateProvider, LiveStateStatus, LiveTxSimulator, UnsignedTxChainSimulation,
@@ -308,6 +311,23 @@ impl LiveTokenRuntime {
             .and_then(|chain| chain.ranges.iter().map(|range| range.end_block).max()))
     }
 
+    async fn fail_warmup_block(&self, block_number: u64, error: &eyre::Error) {
+        tracing::error!(
+            target: LIVE_TOKEN_TRACKER_LOG_TARGET,
+            block_number,
+            error = %error,
+            "live token runtime warmup block failed"
+        );
+        self.mark_failed(live_error_from_report(
+            Some(block_number),
+            None,
+            None,
+            error,
+            phase_context("warmup"),
+        ))
+        .await;
+    }
+
     async fn run(&self, request: ResolvedLiveTokenRuntimeRequest) {
         tracing::info!(
             target: LIVE_TOKEN_TRACKER_LOG_TARGET,
@@ -324,39 +344,78 @@ impl LiveTokenRuntime {
         let pool_simulator =
             LivePoolBuySellSimulator::from_simulator(self.inner.provider.simulator().clone());
 
-        for block_number in request.start_block..=request.end_block {
+        // Warmup pipeline: load blocks in chunks via the range loader, which
+        // traces missing blocks CONCURRENTLY (adaptive fill concurrency) but
+        // writes the disk cache + address index SERIALLY. Serial writes matter:
+        // the disk-cache index is single-writer MDBX and this runtime has one
+        // worker thread, so concurrent inline writes would serialize on the MDBX
+        // lock and stall the worker (worst on a cache-cold warmup). We then apply
+        // each loaded block to the stateful token tracker in strict ascending
+        // order. Only the expensive trace is parallelized; apply stays ordered.
+        let load_options = ProcessedBlockRangeLoadOptions::default()
+            .with_address_index_failure_policy(ProcessedBlockAddressIndexFailurePolicy::BestEffort);
+        // Bound how many decoded blocks are held in memory per chunk while still
+        // giving the concurrent fill plenty to parallelize.
+        let chunk_blocks: u64 = 128;
+        let mut next_block = request.start_block;
+        while next_block <= request.end_block {
             if self.inner.stop_requested.load(Ordering::SeqCst) {
                 self.mark_stopped().await;
                 return;
             }
-
-            if let Err(error) = self
-                .apply_block(
-                    block_number,
-                    false,
-                    &tx_processor,
-                    &warmup_discovery_provider,
-                    &pool_simulator,
-                )
-                .await
+            let chunk_end = next_block
+                .saturating_add(chunk_blocks - 1)
+                .min(request.end_block);
+            let loaded_chunk = match load_processed_block_range_with_options(
+                &tx_processor,
+                self.inner.provider.as_ref(),
+                next_block,
+                chunk_end,
+                self.inner.processed_block_replay_store.as_deref(),
+                load_options,
+            )
+            .await
             {
-                tracing::error!(
-                    target: LIVE_TOKEN_TRACKER_LOG_TARGET,
-                    live_id = %request.id,
-                    block_number,
-                    error = %error,
-                    "live token runtime warmup block failed"
-                );
-                self.mark_failed(live_error_from_report(
-                    Some(block_number),
-                    None,
-                    None,
-                    &error,
-                    phase_context("warmup"),
-                ))
-                .await;
-                return;
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    self.fail_warmup_block(next_block, &error).await;
+                    return;
+                }
+            };
+
+            for loaded_block in loaded_chunk {
+                if self.inner.stop_requested.load(Ordering::SeqCst) {
+                    self.mark_stopped().await;
+                    return;
+                }
+                let block_number = loaded_block.block.header.number;
+                let loaded = LiveBlockLoad {
+                    block: loaded_block.block,
+                    upstream_ms: loaded_block.upstream_ms,
+                    disk_cache_hit: loaded_block.disk_cache_metrics.disk_cache_hit,
+                    disk_cache_read_ms: loaded_block.disk_cache_metrics.disk_cache_read_ms,
+                    disk_cache_write_ms: loaded_block.disk_cache_metrics.disk_cache_write_ms,
+                    address_index_failures: loaded_block.disk_cache_metrics.address_index_failures,
+                    last_address_index_error: loaded_block
+                        .disk_cache_metrics
+                        .last_address_index_error,
+                    source: loaded_block.disk_cache_metrics.source,
+                };
+                if let Err(error) = self
+                    .apply_preloaded_block(
+                        block_number,
+                        loaded,
+                        &warmup_discovery_provider,
+                        &pool_simulator,
+                    )
+                    .await
+                {
+                    self.fail_warmup_block(block_number, &error).await;
+                    return;
+                }
             }
+
+            next_block = chunk_end + 1;
         }
 
         self.mark_live().await;

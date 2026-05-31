@@ -34,6 +34,10 @@ name = "dump_pblock"
 path = "examples/blocks/dump_pblock.rs"
 
 [[example]]
+name = "address_participation_stats"
+path = "examples/blocks/address_participation_stats.rs"
+
+[[example]]
 name = "process_block"
 path = "examples/blocks/process.rs"
 

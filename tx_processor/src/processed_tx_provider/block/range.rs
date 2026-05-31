@@ -4,6 +4,9 @@ use std::time::Instant;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::RethQueryProvider;
 
+use super::replay_store::{
+    ProcessedBlockAddressIndexFailurePolicy, ProcessedBlockReplayStoreWriteOptions,
+};
 use crate::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore,
     ProcessedBlockReplayStoreWriter, ProcessedBlockSource,
@@ -21,8 +24,8 @@ pub const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY: usize = 2;
 /// Adaptive default for concurrent fresh-block fill (cache misses). Each missing
 /// block is traced on a `spawn_blocking` worker; the dominant cost (~0.7-1s) is
 /// EVM replay + callTracer, which parallelizes cleanly across blocks. Profiling
-/// showed throughput scaling to ~16-32 concurrency on a 32-core box (4 → ~333ms,
-/// 16 → ~160ms per block), so the historical default of 4 left ~2-4x on the
+/// showed throughput scaling to ~16-32 concurrency on a 32-core box (4 -> ~333ms,
+/// 16 -> ~160ms per block), so the historical default of 4 left ~2-4x on the
 /// table. Scale with available cores while leaving headroom for the live path,
 /// clamped to a sane range; falls back to the const if core count is unknown.
 pub fn default_processed_block_disk_cache_fill_concurrency() -> usize {
@@ -36,6 +39,7 @@ pub struct ProcessedBlockRangeLoadOptions {
     pub fill_batch_blocks: usize,
     pub fill_concurrency: usize,
     pub read_concurrency: usize,
+    pub address_index_failure_policy: ProcessedBlockAddressIndexFailurePolicy,
 }
 
 impl Default for ProcessedBlockRangeLoadOptions {
@@ -44,6 +48,7 @@ impl Default for ProcessedBlockRangeLoadOptions {
             fill_batch_blocks: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
             fill_concurrency: default_processed_block_disk_cache_fill_concurrency(),
             read_concurrency: DEFAULT_PROCESSED_BLOCK_DISK_CACHE_READ_CONCURRENCY,
+            address_index_failure_policy: ProcessedBlockAddressIndexFailurePolicy::Strict,
         }
     }
 }
@@ -69,6 +74,14 @@ impl ProcessedBlockRangeLoadOptions {
         }
         self
     }
+
+    pub fn with_address_index_failure_policy(
+        mut self,
+        value: ProcessedBlockAddressIndexFailurePolicy,
+    ) -> Self {
+        self.address_index_failure_policy = value;
+        self
+    }
 }
 
 pub struct LoadedProcessedBlockWithMetrics {
@@ -84,6 +97,8 @@ struct DiskCacheFillMetrics {
     address_index_participating_txs: u64,
     address_index_inserted: u64,
     address_index_write_ms: u128,
+    address_index_failures: u64,
+    last_address_index_error: Option<String>,
     fill_ms: u128,
     source: &'static str,
 }
@@ -100,6 +115,8 @@ pub struct ProcessedBlockLoadMetrics {
     pub address_index_participating_txs: u64,
     pub address_index_inserted: u64,
     pub address_index_write_ms: u128,
+    pub address_index_failures: u64,
+    pub last_address_index_error: Option<String>,
     pub source: &'static str,
 }
 
@@ -155,6 +172,8 @@ pub async fn load_processed_block_range_with_options(
                 address_index_participating_txs: 0,
                 address_index_inserted: 0,
                 address_index_write_ms: 0,
+                address_index_failures: 0,
+                last_address_index_error: None,
                 source: ProcessedBlockSource::Processed.as_str(),
             },
         });
@@ -184,6 +203,8 @@ async fn load_cached_block_range(
                 address_index_participating_txs: 0,
                 address_index_inserted: 0,
                 address_index_write_ms: 0,
+                address_index_failures: 0,
+                last_address_index_error: None,
                 fill_ms: 0,
                 source: ProcessedBlockSource::Cache.as_str(),
             },
@@ -208,7 +229,9 @@ async fn load_cached_block_range(
             options,
         )
         .await?;
+        let mut address_index_failures = 0u64;
         for (block_number, filled) in filled {
+            address_index_failures += filled.metrics.address_index_failures;
             fill_metrics_by_block.insert(block_number, filled.metrics.clone());
             filled_blocks_by_block.insert(block_number, filled);
         }
@@ -221,6 +244,7 @@ async fn load_cached_block_range(
             fill_batch_blocks = options.fill_batch_blocks.max(1),
             fill_concurrency = options.fill_concurrency.max(1),
             read_concurrency = options.read_concurrency.max(1),
+            address_index_failures,
             "filled missing processed block disk cache entries"
         );
     }
@@ -251,7 +275,9 @@ async fn load_cached_block_range(
         );
         let (filled, fill_ms, write_wall_ms) =
             fill_cache_entries(tx_processor, replay_store_writer, &invalid_keys, options).await?;
+        let mut address_index_failures = 0u64;
         for (block_number, filled) in filled {
+            address_index_failures += filled.metrics.address_index_failures;
             fill_metrics_by_block.insert(block_number, filled.metrics.clone());
             filled_blocks_by_block.insert(block_number, filled);
         }
@@ -261,6 +287,7 @@ async fn load_cached_block_range(
             invalid_blocks = invalid_count,
             fill_ms,
             write_wall_ms,
+            address_index_failures,
             "rebuilt invalid processed block disk cache entries"
         );
     }
@@ -308,6 +335,8 @@ async fn load_cached_block_range(
                 address_index_participating_txs: fill_metrics.address_index_participating_txs,
                 address_index_inserted: fill_metrics.address_index_inserted,
                 address_index_write_ms: fill_metrics.address_index_write_ms,
+                address_index_failures: fill_metrics.address_index_failures,
+                last_address_index_error: fill_metrics.last_address_index_error,
                 source: fill_metrics.source,
             },
         });
@@ -349,9 +378,14 @@ async fn fill_cache_entries(
                     block.header.number
                 )
             })?;
-            let write = writer.write_processed_block(&block)?;
+            let write = writer.write_processed_block_with_options(
+                &block,
+                ProcessedBlockReplayStoreWriteOptions::default()
+                    .with_address_index_failure_policy(options.address_index_failure_policy),
+            )?;
             write_wall_ms += write.total_write_ms();
             let address_index_write = write.address_block_index.as_ref();
+            let address_index_error = write.address_block_index_error.as_ref();
             if write.disk_cache.key.chain_id != key.chain_id
                 || write.disk_cache.key.block_number != key.block_number
             {
@@ -378,7 +412,11 @@ async fn fill_cache_entries(
                             .unwrap_or(0),
                         address_index_write_ms: address_index_write
                             .map(|write| write.write_ms)
+                            .or_else(|| address_index_error.map(|write| write.write_ms))
                             .unwrap_or(0),
+                        address_index_failures: u64::from(address_index_error.is_some()),
+                        last_address_index_error: address_index_error
+                            .map(|error| error.error.clone()),
                         fill_ms: fill_started.elapsed().as_millis(),
                         source: ProcessedBlockSource::Processed.as_str(),
                     },

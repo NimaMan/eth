@@ -1,0 +1,24 @@
+[package]
+name = "tx_executor_service"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP policy and operations service for Ethereum tx_executor"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true }
+ethers-core = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tx_executor = { path = "../tx_executor" }
+uuid = { workspace = true }
+

@@ -79,5 +79,4 @@ impl TransactionSigner for LocalTransactionSigner {
             raw_tx_hex: format!("0x{}", hex::encode(raw.as_ref())),
         })
     }
-
 }

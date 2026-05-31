@@ -21,9 +21,9 @@ pub use event::{
 };
 pub use pipeline::{LiveFeedBlockInput, LiveFeedPipeline};
 pub use runtime::{
-    LiveBlockLoad, LiveBlockUpdate, LiveTokenError, LiveTokenEvent, LiveTokenPoolSnapshot,
-    LiveTokenProgress, LiveTokenReader, LiveTokenRuntime, LiveTokenRuntimeConfig,
-    LiveTokenSnapshot, LiveTokenState, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
-    StartLiveTokenRuntimeRequest,
+    LiveBlockLoad, LiveBlockReplayWriteMetrics, LiveBlockUpdate, LiveTokenError, LiveTokenEvent,
+    LiveTokenPoolSnapshot, LiveTokenProgress, LiveTokenReader, LiveTokenRuntime,
+    LiveTokenRuntimeConfig, LiveTokenSnapshot, LiveTokenState, LiveTokenStatus,
+    ResolvedLiveTokenRuntimeRequest, StartLiveTokenRuntimeRequest,
 };
 pub use source::ProcessedBlockSource;

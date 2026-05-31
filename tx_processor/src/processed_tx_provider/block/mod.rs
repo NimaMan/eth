@@ -23,6 +23,7 @@ pub use range::{
     DEFAULT_PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY, DEFAULT_PROCESSED_BLOCK_RANGE_READ_BATCH,
 };
 pub use replay_store::{
+    ProcessedBlockAddressIndexError, ProcessedBlockAddressIndexFailurePolicy,
     ProcessedBlockAddressIndexWrite, ProcessedBlockReplayStoreWrite,
-    ProcessedBlockReplayStoreWriter,
+    ProcessedBlockReplayStoreWriteOptions, ProcessedBlockReplayStoreWriter,
 };

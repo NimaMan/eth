@@ -66,6 +66,41 @@ processed-block disk cache + live execution RPC/WS
 Keep `eth_chain_server` as the confirmed-chain read model host. It should not own
 pending transaction ingestion or mempool signal creation.
 
+### Live Tracker Storage Resilience
+
+The live tracker and chain-server `LiveTxSimulator` are Tier One surfaces. A
+running chain-server with a failed live tracker is not healthy, because Alpha
+and the mempool detector cannot ask for exact live simulation state.
+
+Warmup and live-tail block processing may write two replay artifacts:
+
+- processed-block disk-cache files, used to avoid reprocessing full blocks;
+- the optional `RethIndex` address-participation MDBX index, used for
+  address-centric analytics.
+
+The address-participation index is not required to apply live token/pool state
+or publish `LiveTxSimulator` sessions. Live tracker warmup and direct live block
+writes therefore use best-effort address-index persistence: disk-cache write
+failures remain real cache failures, but address-index write failures are logged
+and counted instead of taking down the live tracker. They also appear in
+`/api/v1/eth/live-token-tracker/status` as
+`progress.processed_block_address_index_failures`,
+`progress.last_processed_block_address_index_warning`, and a
+`warn/service_degraded` pipeline issue so operators can see the degraded
+analytics index without losing the Tier One live state. `RethIndex` also opens
+with an explicit MDBX geometry so the map-size ceiling is controlled by
+`PYRETH_INDEX_DB_MAP_SIZE_BYTES` rather than a hidden library default. Without
+an override, new indexes use a 64 GiB ceiling and existing indexes use current
+`mdbx.dat` size plus 32 GiB of headroom, rounded to GiB.
+
+Current storage diagnostics showed `reth_index/mdbx.dat` at 160 GiB on disk, but
+only about 6.04 GiB of live MDBX pages. The 160 GiB value is MDBX high-water
+allocation/free pages, not current payload. The active payload is mostly
+`address_to_blocks` rows, and duplicates are suppressed both before writing and
+by the MDBX duplicate key flags. If disk recovery is needed, compact-copy or
+rebuild the `reth_index` environment; deleting rows inside the same MDBX file is
+not expected to shrink `mdbx.dat` immediately.
+
 Live runtime contracts:
 
 - `LiveChainRuntime` subscribes to new heads, processes confirmed blocks, writes
