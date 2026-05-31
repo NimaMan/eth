@@ -52,9 +52,19 @@ const TRACE_ENGINE_ID: &str = "fresh_inspector";
 /// incompatible layout — the cache refreshes cleanly per block on demand instead
 /// of mass-invalidating. BUMP THIS whenever the bincode layout of the cached
 /// types changes (e.g. adding `internal_erc20_calls`).
-const CACHE_SCHEMA_VERSION: u32 = 2;
+///
+/// v3: stops persisting fields no consumer reads — raw calldata `input` (the
+/// single largest field) plus `struct_logs`, `erc1155_contracts`, `access_list`,
+/// `blob_versioned_hashes`. See `strip_unpersisted_entry_fields` and
+/// block/README.md.
+const CACHE_SCHEMA_VERSION: u32 = 3;
 const CACHE_FILE_SUFFIX: &str = ".pblock.zst";
-const CACHE_ZSTD_LEVEL: i32 = 3;
+/// zstd compression level for cache payloads. Level 9 (vs the original 3) is
+/// ~8-10% smaller for a modest write cost (~tens of ms/block; the live path
+/// writes one block per ~12s and backfill is parallel) and NO read penalty —
+/// zstd decompression speed is independent of the level a frame was written at.
+/// Combined with the v3 field drop this yields ~-22% vs the original v2/zstd-3.
+const CACHE_ZSTD_LEVEL: i32 = 9;
 const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;
 const ETHEREUM_MAINNET_NETWORK: &str = "ethereum-mainnet";
 
@@ -243,10 +253,12 @@ impl ProcessedBlockDiskCacheStore {
             .ok_or_else(|| eyre::eyre!("cache path has no parent: {}", path.display()))?;
         fs::create_dir_all(parent)?;
 
-        let bytes = encode_cache_entry(&ProcessedBlockDiskCacheEntry::from_block(
-            key.clone(),
-            block,
-        )?)?;
+        let mut entry = ProcessedBlockDiskCacheEntry::from_block(key.clone(), block)?;
+        // v3 payload: do not persist fields no cache consumer reads (see
+        // `strip_unpersisted_entry_fields`). This is the on-disk format; raw
+        // calldata is recoverable from the reth DB if ever needed.
+        strip_unpersisted_entry_fields(&mut entry);
+        let bytes = encode_cache_entry(&entry)?;
         let bytes = zstd::stream::encode_all(bytes.as_slice(), CACHE_ZSTD_LEVEL)?;
         let temp_path = parent.join(format!(
             ".{}.tmp-{}-{}",
@@ -785,19 +797,35 @@ pub enum CacheSerCodec {
     Msgpack,
 }
 
-/// Drop every field that no `ProcessedBlock` consumer reads, in place.
+/// Strip fields the v3 cache payload does not persist, in place.
 ///
-/// The drop-list is exactly the four fields a repo-wide consumer audit confirmed
-/// are never read off a cached transaction (see block/README.md). NOTE: fields
-/// that look droppable but ARE read must stay — `erc1155_transfers` (read by
-/// tx_fund_flow), and `uniswap_v4_protocol_fee_updates` /
+/// Four fields a repo-wide consumer audit confirmed are never read off a cached
+/// transaction: `struct_logs` (absent on the live path anyway), `erc1155_contracts`,
+/// `access_list`, `blob_versioned_hashes`. PLUS `input` (raw calldata): the
+/// single largest field (~24% of compressed size). Its only cache-side reader is
+/// eth_token's `transferFrom`-from-calldata decode, which is intentionally left
+/// dormant until an on-demand reth calldata fetch is added; raw calldata can be
+/// re-read from the reth DB when needed.
+///
+/// NOTE: fields that LOOK droppable but ARE read must stay — `erc1155_transfers`
+/// (tx_fund_flow), and `uniswap_v4_protocol_fee_updates` /
 /// `uniswap_v4_dynamic_lp_fee_updates` /
-/// `uniswap_v4_protocol_fee_controller_updates` (read by eth_token).
-fn bench_lean_compact(processed: &mut CompactProcessedTransaction) {
+/// `uniswap_v4_protocol_fee_controller_updates` (eth_token).
+fn strip_unpersisted_compact_fields(processed: &mut CompactProcessedTransaction) {
     processed.struct_logs = None;
     processed.erc1155_contracts = None;
     processed.access_list = None;
     processed.blob_versioned_hashes = None;
+    processed.input = None;
+}
+
+/// Apply [`strip_unpersisted_compact_fields`] to an assembled cache entry,
+/// including the separately-JSON-extracted struct logs.
+fn strip_unpersisted_entry_fields(entry: &mut ProcessedBlockDiskCacheEntry) {
+    for tx in &mut entry.transactions {
+        tx.struct_logs_json = None;
+        strip_unpersisted_compact_fields(&mut tx.processed);
+    }
 }
 
 /// MessagePack benchmark entry: carries the compact transactions whole (no JSON
@@ -823,7 +851,7 @@ impl BenchMsgpackEntry {
             .map(|tx| {
                 let mut processed = CompactProcessedTransaction::from_processed(&tx.processed);
                 if field_set == CacheFieldSet::Lean {
-                    bench_lean_compact(&mut processed);
+                    strip_unpersisted_compact_fields(&mut processed);
                 }
                 BenchMsgpackTx {
                     processed,
@@ -862,10 +890,7 @@ pub fn bench_serialize_block(
         CacheSerCodec::BincodeJson => {
             let mut entry = ProcessedBlockDiskCacheEntry::from_block(key.clone(), block)?;
             if field_set == CacheFieldSet::Lean {
-                for tx in &mut entry.transactions {
-                    tx.struct_logs_json = None;
-                    bench_lean_compact(&mut tx.processed);
-                }
+                strip_unpersisted_entry_fields(&mut entry);
             }
             encode_cache_entry(&entry)
         }
@@ -997,11 +1022,13 @@ mod tests {
 
         assert_eq!(cached_tx.fees.gas_limit, 123_456);
         assert_eq!(cached_tx.fees.max_fee_per_gas, Some(U256::from(20)));
-        assert_eq!(cached_tx.input, vec![0xde, 0xad, 0xbe, 0xef]);
-        assert_eq!(cached_tx.access_list.len(), 1);
-        assert_eq!(
-            cached_tx.blob_versioned_hashes,
-            vec![B256::repeat_byte(0x66)]
+        // v3 does not persist these fields (no cache consumer reads them); they
+        // come back empty after a round trip. See strip_unpersisted_entry_fields.
+        assert!(cached_tx.input.is_empty(), "v3 drops raw calldata input");
+        assert!(cached_tx.access_list.is_empty(), "v3 drops access_list");
+        assert!(
+            cached_tx.blob_versioned_hashes.is_empty(),
+            "v3 drops blob_versioned_hashes"
         );
         assert_eq!(cached_tx.tx_type, "swap");
         assert_eq!(cached_tx.actions, vec!["token_tracking"]);

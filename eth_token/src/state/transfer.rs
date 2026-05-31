@@ -224,6 +224,13 @@ impl TokenTransferTracker {
         }
     }
 
+    // NOTE: this reads `tx.input` (raw calldata) to decode a direct
+    // `transferFrom` call. The processed-block disk cache (v3) no longer persists
+    // `input`, so for cache-loaded transactions `tx.input` is empty and this
+    // detection is dormant — `decode_transfer_from_call` returns `None`. To
+    // re-enable it, fetch the calldata for this tx from the reth DB on demand
+    // (gated below on `to == tracked token`, so it is rare). See tx_processor
+    // block/README.md "Stored vs consumed fields".
     pub fn add_transfer_from_call(&mut self, tx: &ProcessedTransaction) -> Result<()> {
         let Some(to_address) = tx.to_address else {
             return Ok(());

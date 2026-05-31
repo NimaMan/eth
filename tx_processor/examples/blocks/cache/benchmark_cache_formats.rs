@@ -45,7 +45,7 @@ use clap::Parser;
 use eyre::{bail, Result, WrapErr};
 use tx_processor::{
     bench_deserialize_block, bench_serialize_block, CacheFieldSet, CacheSerCodec, ProcessedBlock,
-    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
+    ProcessedBlockDiskCacheKey,
 };
 
 const DISK_CACHE_DIR_ENV: &str = "PROCESSED_BLOCK_DISK_CACHE_DIR";
@@ -105,9 +105,14 @@ struct Args {
     #[arg(long, default_value_t = false)]
     msgpack: bool,
 
-    /// Parallel reads for the baseline load.
-    #[arg(long, default_value_t = 8)]
-    read_parallelism: usize,
+    /// Skip the trained-dictionary candidate (it is the slowest pass).
+    #[arg(long, default_value_t = false)]
+    skip_dict: bool,
+
+    /// Run a per-field-group size breakdown (raw + zstd-9) instead of the format
+    /// matrix, to show where the uncompressed payload bytes go.
+    #[arg(long, default_value_t = false)]
+    field_breakdown: bool,
 }
 
 /// A serialization candidate: field set x codec.
@@ -152,14 +157,14 @@ fn main() -> Result<()> {
         bail!("end ({end}) < start ({start})");
     }
 
-    let selected: Vec<(u64, u64)> = files
+    let selected: Vec<(u64, u64, PathBuf)> = files
         .range(start..=end)
-        .map(|(block, size)| (*block, *size))
+        .map(|(block, (size, path))| (*block, *size, path.clone()))
         .collect();
     if selected.is_empty() {
         bail!("no cached files in range {start}..={end}");
     }
-    let baseline_total: u64 = selected.iter().map(|(_, size)| *size).sum();
+    let baseline_total: u64 = selected.iter().map(|(_, size, _)| *size).sum();
     let baseline_blocks = selected.len() as u64;
 
     eprintln!(
@@ -169,32 +174,38 @@ fn main() -> Result<()> {
         baseline_total as f64 / baseline_blocks as f64
     );
 
-    // (2) Load blocks via the production reader (decodes the real v2 files) and
-    // measure the baseline parallel read wall time.
-    let store = ProcessedBlockDiskCacheStore::open(&cache_dir)?;
-    let reader = store.reader();
-    let keys: Vec<ProcessedBlockDiskCacheKey> = selected
-        .iter()
-        .map(|(block, _)| ProcessedBlockDiskCacheKey::for_block_number(args.chain_id, *block))
-        .collect();
-
+    // (2) Load blocks by reading the on-disk files directly (zstd-decode then
+    // bincode-decode). We intentionally bypass `store.get`, which is locked to
+    // the CURRENT schema-version filename — the existing cache may be an older
+    // version. The bincode struct layout is unchanged across these versions, so
+    // the payload decodes regardless; only field *content* differs.
     let read_started = Instant::now();
-    let reads = reader.get_many_parallel_with_limit(&keys, args.read_parallelism.max(1))?;
+    let mut blocks: Vec<(ProcessedBlockDiskCacheKey, ProcessedBlock)> =
+        Vec::with_capacity(selected.len());
+    for (block_number, _, path) in &selected {
+        let raw = fs::read(path).wrap_err_with(|| format!("read {}", path.display()))?;
+        let decoded = zstd::stream::decode_all(raw.as_slice())
+            .wrap_err_with(|| format!("zstd decode {}", path.display()))?;
+        let block = bench_deserialize_block(&decoded, CacheSerCodec::BincodeJson)
+            .wrap_err_with(|| format!("decode payload {}", path.display()))?;
+        let key = ProcessedBlockDiskCacheKey::for_block_number(args.chain_id, *block_number);
+        blocks.push((key, block));
+    }
     let baseline_read_wall_ms = read_started.elapsed().as_secs_f64() * 1000.0;
-
-    let blocks: Vec<(ProcessedBlockDiskCacheKey, ProcessedBlock)> = reads
-        .into_iter()
-        .filter_map(|read| read.block.map(|block| (read.key, block)))
-        .collect();
     if blocks.is_empty() {
-        bail!("baseline reader returned no decodable blocks");
+        bail!("no decodable blocks loaded");
     }
     eprintln!(
-        "loaded {} blocks; baseline_parallel_read_wall_ms={:.1} ({:.3} ms/block)\n",
+        "loaded {} blocks; baseline_read+decode_wall_ms={:.1} ({:.3} ms/block, serial)\n",
         blocks.len(),
         baseline_read_wall_ms,
         baseline_read_wall_ms / blocks.len() as f64
     );
+
+    if args.field_breakdown {
+        run_field_breakdown(&blocks)?;
+        return Ok(());
+    }
 
     // Order-independent fingerprint over CONSUMED fields, computed from the
     // freshly-loaded blocks. Every candidate's decode must reproduce this.
@@ -246,6 +257,7 @@ fn main() -> Result<()> {
             baseline_fingerprint,
             &args.zstd_levels,
             args.dict_level,
+            args.skip_dict,
             &args.chunk_sizes,
             args.chunk_level,
         ) {
@@ -277,6 +289,7 @@ fn run_serialization_candidate(
     baseline_fingerprint: u64,
     zstd_levels: &[i32],
     dict_level: i32,
+    skip_dict: bool,
     chunk_sizes: &[usize],
     chunk_level: i32,
 ) -> Result<Vec<Row>> {
@@ -322,17 +335,19 @@ fn run_serialization_candidate(
     }
 
     // Trained-dictionary candidate at dict_level.
-    match measure_dict(&payloads, dict_level) {
-        Ok((total, compress_ms, read_ms, dict_len)) => rows.push(Row {
-            label: format!("{}/zstd{}+dict", cand.label, dict_level),
-            blocks: blocks_n,
-            total_bytes: total,
-            avg_bytes: total as f64 / blocks_n as f64,
-            compress_ms_per_block: compress_ms + serialize_ms_per_block,
-            read_ms_per_block: read_ms,
-            note: format!("dict_bytes={dict_len}"),
-        }),
-        Err(error) => eprintln!("  {} dictionary candidate skipped: {error:#}", cand.label),
+    if !skip_dict {
+        match measure_dict(&payloads, dict_level) {
+            Ok((total, compress_ms, read_ms, dict_len)) => rows.push(Row {
+                label: format!("{}/zstd{}+dict", cand.label, dict_level),
+                blocks: blocks_n,
+                total_bytes: total,
+                avg_bytes: total as f64 / blocks_n as f64,
+                compress_ms_per_block: compress_ms + serialize_ms_per_block,
+                read_ms_per_block: read_ms,
+                note: format!("dict_bytes={dict_len}"),
+            }),
+            Err(error) => eprintln!("  {} dictionary candidate skipped: {error:#}", cand.label),
+        }
     }
 
     // Chunked-archive candidates: compress `chunk_size` consecutive block payloads
@@ -525,6 +540,122 @@ fn measure_chunked(payloads: &[Vec<u8>], chunk_size: usize, level: i32) -> Resul
     Ok((total, compress_ms, decompress_ms))
 }
 
+/// Per-field-group size breakdown: shows where the uncompressed payload bytes
+/// go. For each group we sum the JSON-serialized size across all sampled
+/// transactions (raw data volume) and zstd-9 the concatenated group bytes
+/// (compressibility-aware footprint). JSON is used because several fields are
+/// not bincode-serializable in isolation; absolute numbers differ from the
+/// production bincode payload but the RELATIVE distribution is what matters.
+fn run_field_breakdown(blocks: &[(ProcessedBlockDiskCacheKey, ProcessedBlock)]) -> Result<()> {
+    use tx_processor::CompactProcessedTransaction;
+    // group name -> (raw_bytes, concatenated bytes for compression)
+    let mut groups: BTreeMap<&str, (u64, Vec<u8>)> = BTreeMap::new();
+    let mut tx_count: u64 = 0;
+    let mut full_raw: u64 = 0;
+
+    macro_rules! grp {
+        ($name:expr, $val:expr) => {{
+            let bytes = serde_json::to_vec(&$val).unwrap_or_default();
+            let entry = groups.entry($name).or_insert_with(|| (0, Vec::new()));
+            entry.0 += bytes.len() as u64;
+            entry.1.extend_from_slice(&bytes);
+        }};
+    }
+
+    for (_, block) in blocks {
+        for tx in &block.transactions {
+            tx_count += 1;
+            let p = CompactProcessedTransaction::from_processed(&tx.processed);
+            full_raw += serde_json::to_vec(&p).unwrap_or_default().len() as u64;
+
+            grp!("input(calldata)", p.input);
+            grp!("latest_states", p.latest_states);
+            grp!("other_events", p.other_events);
+            grp!("address_balance_changes", p.address_balance_changes);
+            grp!("struct_logs", p.struct_logs);
+            grp!("internal_transactions", p.internal_transactions);
+            grp!("internal_erc20_calls", p.internal_erc20_calls);
+            grp!("erc20_transfers", p.erc20_transfers);
+            grp!("eth_transfers", p.eth_transfers);
+            grp!("erc721+erc1155_transfers", (&p.erc721_transfers, &p.erc1155_transfers));
+            grp!(
+                "address_sets",
+                (&p.unique_addresses, &p.erc20_contracts, &p.erc721_contracts, &p.erc1155_contracts)
+            );
+            grp!(
+                "uniswap_v2",
+                (&p.uniswap_v2_swaps, &p.uniswap_v2_syncs, &p.uniswap_v2_mints, &p.uniswap_v2_burns, &p.uniswap_v2_pair_created_events)
+            );
+            grp!(
+                "uniswap_v3",
+                (&p.uniswap_v3_swaps, &p.uniswap_v3_mints, &p.uniswap_v3_burns, &p.uniswap_v3_pools, &p.uniswap_v3_positions, &p.uniswap_v3_increases, &p.uniswap_v3_decreases, &p.uniswap_v3_initializations)
+            );
+            grp!(
+                "uniswap_v4",
+                (&p.uniswap_v4_swaps, &p.uniswap_v4_modifies, &p.uniswap_v4_balance_deltas, &p.uniswap_v4_initializes, &p.uniswap_v4_donates, &p.uniswap_v4_protocol_fee_updates, &p.uniswap_v4_dynamic_lp_fee_updates, &p.uniswap_v4_protocol_fee_controller_updates)
+            );
+            grp!(
+                "approvals",
+                (&p.erc20_approval_events, &p.erc721_approval_events, &p.approval_for_all_events)
+            );
+            grp!(
+                "authority",
+                (&p.ownership_transferred_events, &p.ownership_transfer_started_events, &p.access_control_role_granted_events, &p.access_control_role_revoked_events, &p.proxy_admin_changed_events, &p.contract_creation_events, &p.trading_enabled_events, &p.trading_disabled_events, &p.permit2_events)
+            );
+            grp!(
+                "tx_misc(access_list,blob,signed_auth,deposits)",
+                (&p.access_list, &p.blob_versioned_hashes, &p.signed_authorizations, &p.deposit_events, &p.withdraw_events)
+            );
+        }
+    }
+
+    // Compute compressed footprint per group.
+    let mut rows: Vec<(String, u64, u64)> = Vec::new();
+    let mut sum_raw = 0u64;
+    let mut sum_comp = 0u64;
+    for (name, (raw, blob)) in &groups {
+        let comp = zstd::bulk::compress(blob, 9).map(|c| c.len() as u64).unwrap_or(0);
+        sum_raw += *raw;
+        sum_comp += comp;
+        rows.push((name.to_string(), *raw, comp));
+    }
+    rows.sort_by(|a, b| b.2.cmp(&a.2)); // by compressed footprint desc
+
+    println!("field_group,raw_bytes_per_block,zstd9_bytes_per_block,pct_of_zstd9");
+    eprintln!(
+        "\n=== field-size breakdown ({tx_count} txs across {} blocks) ===",
+        blocks.len()
+    );
+    eprintln!(
+        "{:<46} {:>14} {:>14} {:>8}",
+        "group", "raw/blk", "zstd9/blk", "%comp"
+    );
+    let blocks_n = blocks.len().max(1) as f64;
+    for (name, raw, comp) in &rows {
+        let pct = if sum_comp > 0 { *comp as f64 / sum_comp as f64 * 100.0 } else { 0.0 };
+        println!("{name},{:.0},{:.0},{:.1}", *raw as f64 / blocks_n, *comp as f64 / blocks_n, pct);
+        eprintln!(
+            "{:<46} {:>14.0} {:>14.0} {:>7.1}%",
+            truncate(name, 46),
+            *raw as f64 / blocks_n,
+            *comp as f64 / blocks_n,
+            pct
+        );
+    }
+    eprintln!(
+        "{:<46} {:>14.0} {:>14.0}",
+        "TOTAL (grouped)",
+        sum_raw as f64 / blocks_n,
+        sum_comp as f64 / blocks_n
+    );
+    eprintln!(
+        "full compact JSON raw/blk = {:.0} (grouped covers {:.0}%)",
+        full_raw as f64 / blocks_n,
+        sum_raw as f64 / full_raw.max(1) as f64 * 100.0
+    );
+    Ok(())
+}
+
 /// Order-independent fingerprint over the fields consumers actually read.
 /// Summing lengths is insensitive to HashMap iteration order, so a faithful
 /// round-trip yields an identical value; a dropped/garbled consumed field does not.
@@ -571,9 +702,9 @@ fn consumed_fingerprint(block: &ProcessedBlock) -> u64 {
 }
 
 /// Scan a network dir for `<block>.v<N>.pblock.zst` files of the highest version
-/// present, returning block -> on-disk byte size.
-fn scan_current_version_files(network_dir: &Path) -> Result<BTreeMap<u64, u64>> {
-    let mut by_version: BTreeMap<u32, BTreeMap<u64, u64>> = BTreeMap::new();
+/// present, returning block -> (on-disk byte size, path).
+fn scan_current_version_files(network_dir: &Path) -> Result<BTreeMap<u64, (u64, PathBuf)>> {
+    let mut by_version: BTreeMap<u32, BTreeMap<u64, (u64, PathBuf)>> = BTreeMap::new();
     for entry in fs::read_dir(network_dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
@@ -585,7 +716,10 @@ fn scan_current_version_files(network_dir: &Path) -> Result<BTreeMap<u64, u64>> 
             continue;
         };
         let size = entry.metadata()?.len();
-        by_version.entry(version).or_default().insert(block, size);
+        by_version
+            .entry(version)
+            .or_default()
+            .insert(block, (size, entry.path()));
     }
     Ok(by_version
         .into_iter()

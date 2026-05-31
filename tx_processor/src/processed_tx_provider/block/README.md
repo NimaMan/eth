@@ -106,11 +106,12 @@ A repo-wide consumer audit (eth_token, tx_fund_flow, eth_chain_server,
 mempool_processor, alpha, risk_atlas) classified each non-trivial field as
 **consumed** (read off a cached transaction to drive output) or **never read**.
 
-Never read by any consumer — safe to omit from the persisted payload:
+Not persisted by the v3 payload (`strip_unpersisted_entry_fields` in `store.rs`):
 
-| Field | Why it is not needed |
+| Field | Why it is dropped |
 | --- | --- |
-| `struct_logs` | Per-opcode EVM trace. Produced for simulation only; the dominant payload field by size. No token consumer reads it. |
+| `input` (raw calldata) | The single largest field (~24% of compressed size). Its only cache-side reader is eth_token's `transferFrom`-from-calldata decode, intentionally left **dormant** (returns `None` on empty input) until an on-demand reth calldata fetch is wired up. Raw calldata is recoverable from the reth DB by `(block, tx_index)` / hash. |
+| `struct_logs` | Per-opcode EVM trace. Not even populated on the production path; no token consumer reads it. |
 | `access_list` | EIP-2930 access list. Never read off a cached tx (the identically-named field on reth/alloy tx types is unrelated). |
 | `blob_versioned_hashes` | EIP-4844 blob hashes. Never read off a cached tx. |
 | `erc1155_contracts` | ERC-1155 contract set. Never read (the token path is ERC-20 / liquidity focused). |
@@ -127,10 +128,14 @@ Consumed — must stay (representative read sites):
 | `uniswap_v4_protocol_fee_updates`, `uniswap_v4_dynamic_lp_fee_updates`, `uniswap_v4_protocol_fee_controller_updates` | **eth_token** v4 pool state (look droppable, are not) |
 | authority/ownership/role/trading events, approvals, `permit2_events` | eth_token authority + replay triggers |
 | `fees`, `bribe_amount`, `value`, `status`, `from/to`, `tx_type`, `actions` | eth_token + network ingest |
-| `latest_states`, `other_events`, `input` | eth_token token-state / replay triggers, mempool_processor calldata decode |
+| `latest_states`, `other_events` | eth_token token-state / replay triggers |
 
-The `Lean` benchmark field set (see below) drops exactly the four never-read
-fields. `struct_logs` accounts for nearly all of the saving.
+`input` content IS read by mempool_processor, but on *pending mempool* transactions
+(not cache-loaded blocks), so dropping it from the cache does not affect that path.
+
+The `Lean` benchmark field set drops exactly these v3 fields. Dropping `input`
+is by far the largest saving (~24% of compressed size); `struct_logs` is ~0
+because it is not populated.
 
 ## Format Benchmark
 
@@ -151,7 +156,28 @@ Round-trip correctness is enforced per candidate via an order-independent
 fingerprint over the consumed fields, so a candidate that would lose data a
 consumer reads fails loudly instead of reporting a false saving.
 
-### Results (mainnet, recent blocks; baseline = on-disk v2 = bincode+zstd-3)
+### v3 result (what shipped)
+
+The v3 payload drops `input` + the four never-read fields and raises zstd to
+level 9. Measured on recent mainnet blocks vs the v2/zstd-3 baseline:
+
+| Format | avg bytes/block | vs v2 baseline |
+| --- | --- | --- |
+| v2 baseline (full, zstd-3) | ~198,950 | 1.00 |
+| v3 fields only, still zstd-3 | ~171,500 | 0.86 (-14%) |
+| **v3 (fields + zstd-9) — shipped** | **~154,600** | **0.78 (-22%)** |
+
+Read (decode) time is unchanged-to-faster (~1 ms/block decode; less data to
+read). Write cost rises only modestly (~tens of ms/block at zstd-9; the live
+path writes one block per ~12 s and backfill is parallel).
+
+**Operational note:** v3 uses a new filename (`<block>.v3.pblock.zst`), so the
+existing ~285k `.v2.` files are orphaned and will not be read. They should be
+pruned, and the range re-filled under v3 via `refresh_disk_cache` (or left to
+re-fill on demand). The `input`-dependent transferFrom-from-calldata detection in
+eth_token goes dormant until an on-demand reth calldata fetch is added.
+
+### Full candidate matrix (baseline = on-disk v2 = bincode+zstd-3)
 
 Ratios are space vs the production baseline (1.00). They are stable across
 sample size; absolute baseline was ~188-199 KB/block.
