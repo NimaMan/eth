@@ -321,8 +321,7 @@ impl TxProcessor {
 
         populate_unique_addresses(&mut processed_tx);
 
-        processed_tx.bribe_amount =
-            Self::calculate_bribe_amount(&processed_tx.fees);
+        processed_tx.bribe_amount = Self::calculate_bribe_amount(&processed_tx.fees);
 
         processed_tx.actions = self.identify_actions(&tx_type_label, &processed_tx);
         processed_tx.tx_type = tx_type_label;
@@ -405,8 +404,8 @@ impl TxProcessor {
         let trace_processor = TransactionTraceProcessor::new();
         let internal_transactions = trace_processor
             .extract_internal_transactions_from_call_trace(&simulation_result.call_trace);
-        let internal_erc20_calls = trace_processor
-            .extract_erc20_calls_from_call_trace(&simulation_result.call_trace);
+        let internal_erc20_calls =
+            trace_processor.extract_erc20_calls_from_call_trace(&simulation_result.call_trace);
 
         // First decode the logs to get ERC20 transfers
         let mut erc20_transfers = Vec::new();
@@ -480,9 +479,9 @@ impl TxProcessor {
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.internal_erc20_calls = internal_erc20_calls;
         processed_tx.internal_erc20_transfers = internal_erc20_transfers;
+        processed_tx.refresh_trace_derived_indexes();
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
-        processed_tx.bribe_amount =
-            Self::calculate_bribe_amount(&processed_tx.fees);
+        processed_tx.bribe_amount = Self::calculate_bribe_amount(&processed_tx.fees);
         processed_tx.eth_transfers = self.extract_eth_transfers(
             from,
             to,
@@ -657,6 +656,12 @@ impl TxProcessor {
         for transfer in &processed_tx.erc20_transfers {
             erc20_contracts.insert(transfer.token_address);
         }
+        for call in &processed_tx.internal_erc20_calls {
+            erc20_contracts.insert(call.token_address);
+        }
+        for transfer in &processed_tx.internal_erc20_transfers {
+            erc20_contracts.insert(transfer.token_address);
+        }
         for approval in &processed_tx.erc20_approval_events {
             erc20_contracts.insert(approval.token_address);
         }
@@ -765,7 +770,9 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
 
-    use crate::tx_processor::data_models::{UniswapV2PairCreatedEvent, UniswapV3PoolCreatedEvent};
+    use crate::tx_processor::data_models::{
+        Erc20CallKind, InternalErc20Call, UniswapV2PairCreatedEvent, UniswapV3PoolCreatedEvent,
+    };
 
     fn tx() -> ProcessedTransaction {
         ProcessedTransaction::new(
@@ -822,5 +829,26 @@ mod tests {
 
         assert!(contracts.contains(&token0));
         assert!(contracts.contains(&token1));
+    }
+
+    #[test]
+    fn erc20_contracts_include_internal_erc20_call_tokens() {
+        let mut tx = tx();
+        let token = address!("1111111111111111111111111111111111111111");
+        tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: token,
+            caller: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            kind: Erc20CallKind::TransferFrom,
+            from_address: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            to_address: address!("000000000000000000000000000000000000dEaD"),
+            amount: U256::from(1_000_u64),
+            depth: 1,
+            call_type: Some("CALL".to_string()),
+            succeeded: true,
+        });
+
+        let contracts = TxProcessor::collect_erc20_contracts(&tx);
+
+        assert!(contracts.contains(&token));
     }
 }

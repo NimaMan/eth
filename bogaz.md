@@ -65,8 +65,11 @@ Do not mix the live-capital run and the live-backtest sweep:
   `reth_index` map-size failure did not reappear
   (`processed_block_address_index_failures=0`), and
   `/api/v1/eth/live-tx-simulator/status` is healthy from
-  `chain_server_live_tx_simulator` at block `25211656`. The prior `8G`
-  service cap was the immediate restart blocker.
+  `chain_server_live_tx_simulator`. Latest check on `2026-05-31` showed
+  tracker `status=live`, tracker block `25216813`, simulator block
+  `25216814`, `last_error=null`, current memory about `5.6G`, peak about
+  `5.6G`, under the `24G` service cap. The prior `8G` service cap was the
+  immediate restart blocker.
 - `reth_index/mdbx.dat` is 160 GiB on disk, but diagnostics show only about
   6.04 GiB of live MDBX pages: `address_to_blocks` is about 5.06 GiB with
   `222,333,079` rows and `mempool_tx_arrival_times` is about 0.82 GiB with
@@ -79,6 +82,13 @@ Do not mix the live-capital run and the live-backtest sweep:
 
 Latest relevant commits:
 
+- `e38014ca` (`blockchains/eth`): recorded the successful chain-server live
+  tracker restart state after raising the service memory cap.
+- `95ef93a7` (`blockchains/eth`): raised the chain-server systemd `MemoryMax`
+  from `8G` to `24G` for 7000-block live warmup.
+- `8051f30c` (`blockchains/eth`): made optional `reth_index`
+  address-participation writes best-effort for live tracker uptime and added
+  RethIndex diagnostics/geometry.
 - `31ed35f5` (`blockchains/eth`): future stopped/stale trader runs write
   terminal metadata (`live_status=<terminal>`, `trading_enabled=false`).
 - `9b12556` (`new_asena`): committed a duration cap for stopped live rows, but
@@ -91,25 +101,32 @@ Latest relevant commits:
 
 ## Current Three-Tier Limiting Factors 2026-05-31
 
-### Tier One - Capital/Accounting Correctness
+### Tier One - Backtest Validity
 
-These block any new real-capital run.
+These block trusting strategy PnL and therefore block any new real-capital run.
+The immediate goal is not to pick a strategy; it is to prove that a backtest
+values the same inventory a real run would hold, detects the same scam events,
+and reaches the same terminal state for the same pool.
 
-| Issue | Evidence | Next action |
+| Step | Evidence | Next action |
 | --- | --- | --- |
-| Real and live-backtest position lifecycle are not equivalent | Real hold16 bought positions, then showed missing/zero valuation, stuck open positions, and failed sells while chain-sim marked positions every block. | Finish, commit, build, deploy, and verify real-mode valuation delegation plus exact-sim sell planning. Then re-run a small hold16 validation only after existing rows are reconciled. |
-| Backtest PnL can be inflated by held-balance scams | Session-style `holder_balance_backdoor_drain` can remove vault inventory without a pool update. Previous chain-sim valuation could keep selling synthetic entry inventory. | Re-run backtests/live-backtests only after holder-balance drain detection, token-affecting valuation triggers, and zero-value validation checks are committed, built, and deployed. |
-| Chain-server live tracker uptime needs continued observation | The optional address-index failure path is now best-effort, the service cap is `MemoryMax=24G`, warmup completed `7000/7000`, and live tx simulator status is healthy at block `25211656`. RethIndex stats still show the 160 GiB file is mostly MDBX high-water/free pages, while live payload is about 6.04 GiB. | Watch memory through live blocks, keep restart/status pages showing cap/current/peak memory, and separately narrow the address-participation filter plus compact/rebuild the MDBX env during maintenance. |
-| Real/live frontend state contract is inconsistent | Result-set API says stopped; real-executions API/page says `open` for stopped runs with open positions. | Split `lifecycle_status` from `position_status`, backfill stale terminal metadata on old rows, and make duration use lifecycle stop time. |
+| 1. Replay the known scam case | Single-tx replay on `2026-05-31` verified the Session drain tx `0xf0e8542a...c43d8ba`: `0` ERC-20 `Transfer` events and `1` successful internal `transfer_from` from vault to dead for `9871487343970612` raw Session tokens. | Full range/runtime replay is still required: rebuild and run the fixed stack over the Session window and require a risk event plus zero/near-zero snapshot at/after block `25202411`. |
+| 2. Prove transfer coverage is complete enough for held-balance scams | Audit found and fixed a routing gap: `tx_processor` decoded `internal_erc20_calls`, but token candidate routing/touch detection could miss a pure event-less drain unless some other event also mentioned the token. The Session tx had an `Approval`, but a stricter scam might not. | Keep the fix: trace-derived ERC-20 tokens now refresh transaction indexes and route/touch tokens in `eth_token`; package tests pass. Re-run the Session window to prove end-to-end behavior, not just unit paths. |
+| 3. Prove scam detection drives zero valuation | Working tree detects custody/holder-balance drains, marks the pool as scammed, emits mined critical risk, marks the Alpha position drained, and writes a zero-value snapshot. Tests pass, but old live-backtest evidence predates the fix and no fresh result set has passed the Session replay yet. | Require the case replay to produce `holder_balance_backdoor_drain` or the broader custody-confiscation label, a risk event, and a zero/near-zero trade snapshot at or after the drain block. |
+| 4. Prove real and live-backtest lifecycle parity | Real hold16 bought positions, then showed missing/zero valuation, stuck open positions, and failed sells while chain-sim marked positions every block. Working tree now has real valuation delegation, stale `can_sell` gate removal, and per-block real valuation. | Commit/build/deploy the parity working tree, then run fresh no-capital hold16 validation from healthy chain-server state and compare against any later real validation only after old positions are reconciled. |
+| 5. Gate backtest evidence with validation checks | New validation checks catch drain without zero snapshot, positive value after mined drain, and positive value after an earlier zero snapshot. | Make these checks mandatory for promotion and fail old/new result sets that keep synthetic value after balance-drain evidence. |
+| 6. Re-run evidence on the fixed stack | Old hold16/hold50 evidence predates part of the valuation/scam path and cannot promote a policy. | Re-run the exact latest historical window plus fresh live-backtest/shadow after steps 1-5 pass. Compare hold16-to-hold16 with same sizing, gas model, exit policy, and validation gates. |
+| Prerequisite. Keep chain-server simulation health green | Chain-server live tracker and `chain_server_live_tx_simulator` are currently healthy after the rebuild/restart; uptime still needs observation under `MemoryMax=24G`. | Before every live-backtest/shadow run, verify live tracker status, live simulator block/hash, memory cap/current/peak, and no address-index failures. |
 
 ### Tier Two - Evidence/Policy Promotion
 
-These block claiming a production strategy even after Tier One code is healthy.
+These block claiming a production strategy even after Backtest Validity code is
+healthy.
 
 | Issue | Evidence | Next action |
 | --- | --- | --- |
 | Hold16 deployed vs hold50 sweep evidence is mixed | The positive hold50 result is from a chain-sim sweep, while the real deployment was hold16. | Compare hold16-to-hold16 on the exact same block window, with the same entry size, gas model, exit rules, and valuation semantics. |
-| Latest two-week historical + live shadow evidence is missing | The current live-backtest runs are stopped or invalidated by the valuation/scam gap and current live-state failure. | After Tier One fixes, run the exact latest two-week historical backtest and a fresh live-backtest/shadow run from healthy chain-server state. |
+| Latest two-week historical + live shadow evidence is missing | The current live-backtest runs are stopped or invalidated by the valuation/scam gap and earlier live-state failure. | After Backtest Validity fixes, run the exact latest two-week historical backtest and a fresh live-backtest/shadow run from healthy chain-server state. |
 | Trade-level audit is incomplete | Top/worst contributors may include scams that the old backtest valued incorrectly. | Audit top 10 and worst 10 by entry reason, skip reason, exit reason, decision block, simulation block, held balance, gas/slippage, and PnL snapshot. |
 | Risk Atlas policy contract is still implicit | Protocol coverage, labels, thresholds, exclusion reasons, and routeability are spread across code/docs. | Create one versioned Risk Atlas policy contract and attach its version to Alpha backtest/live metadata. |
 
@@ -119,19 +136,21 @@ These should not block code correctness, but they block confident operations.
 
 | Issue | Evidence | Next action |
 | --- | --- | --- |
-| Live parameter surface is missing | Bankroll, buy size, signer/vault, gas-rank, route policy, kill switch, and freshness gates are not visible in one operator page. | Build the Asena live trading parameter page from Alpha/Kartal/signer status. |
+| Live parameter surface is missing | Bankroll, buy size, signer/vault, gas-rank, route policy, kill switch, and freshness gates are not visible in one operator page. | Build the Asena live trading parameter page from Alpha/ETH tx executor/signer status. |
 | Mempool timing attribution is incomplete | Signals are being produced, but the latest rebuilt process set has not produced a complete timing ledger from first seen -> stored -> API visible -> trader received -> decision/report. | Collect fresh timing pairs only after chain-server live state is healthy. |
 | Build/deploy state is easy to misread | Working-tree fixes exist, committed UI fixes exist, but the running `asena-static` and chain-server state do not yet prove those fixes are live. | Record commit hash, binary build time, and process start time on every run/status page. |
 | Old terminal metadata pollutes dashboards | Fixed on `2026-05-31`: terminal `backtest_result_sets` and `trader_runs` rows were backfilled so old stopped/completed/stale rows no longer carry `metadata.live_status=live` or `trading_enabled=true`. | Add validation that terminal rows cannot carry live metadata, so future regressions fail before reaching dashboards. |
 
-## Tier One - Real/Backtest Execution Parity 2026-05-29
+## Backtest Validity Step 4 - Real/Backtest Execution Parity 2026-05-29
 
-Status: active P0 blocker for real capital. Partially fixed in the working tree,
-but not committed/built/deployed as evidence. Discovered from the first real
-broadcast run
+Status: active P0 blocker for real capital until fresh evidence proves parity.
+The working tree now contains the intended implementation fixes and the touched
+packages pass `cargo check`/library tests, but the fixes are not yet
+committed/rebuilt/deployed as Alpha runtime evidence. Discovered from the first
+real broadcast run
 `alpha11-univ2-lp30-pool-update-block-hold16-live-real-broadcast-20260529-151921026902336Z`.
 
-Problem: the real (Kartal) execution path manages an open position's lifecycle
+Problem: the real ETH tx executor execution path manages an open position's lifecycle
 differently from the live-backtest (chain-sim) path. The strategy is the same,
 but after a confirmed buy the real path neither values nor reliably exits the
 position. Concrete evidence from the run above: the Session token
@@ -156,17 +175,17 @@ Verified divergences (each is a parity gap real must close against chain-sim):
      inherited the default `simulate_position_value` that returns `Ok(None)`.
      So open real positions were never valued. The dashboard "Current Value"
      was blank/zero and the strategy had no mark-to-market.
-   - Working tree state: `TxExecutorAdapter` now has an optional
+   - Current working tree: `TxExecutorAdapter` now has an optional
      `LiveChainSimExecutionAdapter` valuation delegate and
      `real_execution/mod.rs` wires it from the same chain-server state. This is
-     the right direction, but it is not yet committed/deployed evidence.
+     test-clean but still needs commit/build/deploy and fresh run evidence.
 
 2. Sell exits blocked by stale `can_sell` snapshot gate.
    - `validate_sell_intent` (`alpha/live/trading/src/planner/route_builder.rs`)
      rejected sells when the snapshot said `can_sell=false`, before the
-     authoritative exact pre-submit simulation. Fixed in working tree (gate
-     removed; exact sim is authoritative) but NOT yet built/deployed. Chain-sim
-     never hit this because it sells via exact simulation.
+     authoritative exact pre-submit simulation. Fixed in working tree: the gate
+     is removed and exact sim is authoritative. Chain-sim never hit this
+     because it sells via exact simulation.
 
 3. Pool-update cadence divergence starves real of exit/valuation triggers.
    - Real uses `LIVE_REAL_FRAME_POLL_TIMEOUT_MS=1` so `block_frame_pool_count`
@@ -184,20 +203,23 @@ the settlement block (`execution_lifecycle/chain_sim_settlement.rs`). Keep this.
 
 Next action, in order:
 
-1. Commit, build, and deploy the real valuation delegate and verify real open
-   positions get per-block `current_value_eth` snapshots.
-2. Build and deploy the `can_sell` gate removal so real exits reach the exact
-   simulation instead of dying on a stale flag.
-3. Confirm max-hold and risk exits fire for real positions once valuation and
-   the sell path work; re-audit against the same-window backtest trades for the
-   same tokens (e.g. `0xed5475` the backtest sold +20..+51%).
-4. Recover/settle the currently stuck open positions before they round-trip.
+1. Commit, build, and deploy the real valuation delegate, per-block valuation
+   trigger, and stale `can_sell` gate removal.
+2. Start with a fresh no-capital hold16 validation from healthy chain-server
+   state; require per-block `current_value_eth` snapshots and successful exact
+   sim sell planning for old failure classes.
+3. Confirm max-hold and risk exits fire once valuation and the sell path work;
+   re-audit against the same-window backtest trades for the same tokens (e.g.
+   `0xed5475` the backtest sold +20..+51%).
+4. Recover/settle the currently stuck old real positions before any new
+   real-capital run.
 
-## Tier One - Position Valuation Must Use Real Held Balance 2026-05-29
+## Backtest Validity Steps 1-3 - Held-Balance Scam Valuation 2026-05-29
 
-Status: active P0 blocker for trusting live-backtest or real-capital PnL. The
-holder-balance drain special case is partially implemented in the working tree,
-but the evidence must be regenerated from a rebuilt chain-server/Alpha stack.
+Status: active P0 blocker for trusting old live-backtest or real-capital PnL.
+The holder-balance drain special case is implemented in the working tree and
+passes package tests, but the evidence must be regenerated from a rebuilt
+chain-server/Alpha stack.
 Discovered from the Session case:
 `risk_atlas/scammer_analytics/cases/eth_0x02467dd0_session_vault_balance_drain_25202411/`.
 
@@ -267,7 +289,7 @@ Required fix:
    A held-token balance drain, holder-to-burn transfer, balance-changing control
    call, or sellability-state update must cause an open-position snapshot even
    when the pool reserves did not change.
-4. Emit a Tier One risk event for
+4. Emit a Backtest Validity risk event for
    `holder_balance_backdoor_drain` / `Backdoored Holder-Balance Drain`, and make
    the strategy exit/zero-value the position immediately when the current held
    balance is materially below expected inventory.
@@ -279,11 +301,18 @@ Required fix:
    - fail if latest trade value is positive after the held balance is zero or
      dust.
 
-Implementation status 2026-05-31 (working tree, pending commit/build/deploy):
+Implementation status 2026-05-31 (working tree, tested, pending
+commit/build/deploy/evidence):
 
 - DONE (3) Token-affecting valuation trigger: `value_open_positions_for_tokens`
   in `alpha/engine/src/valuation/snapshot_flow.rs`; `updated_tokens` threaded
   through `LiveInputBatch` and called for ChainSim in `live_trader/mod.rs`.
+- DONE (2) Trace-derived ERC-20 routing completeness: `ProcessedTransaction`
+  now refreshes trace-derived ERC-20 token/caller/from/to participants into its
+  indexes; block processing, tx-provider processing, and compact-cache decoding
+  call that refresh; token candidate routing and `touches_token_state()` now
+  consider `internal_erc20_calls` and `internal_erc20_transfers` directly. This
+  closes the pure event-less drain routing hole found during the audit.
 - DONE (4) Detection + risk + exit: `holder_balance_backdoor_drain` detected in
   `eth_token` (`pools/scam_mechanism.rs` label;
   `erc20/token/activity.rs::mark_holder_balance_backdoor_drains_from_processed_transaction`
@@ -304,6 +333,18 @@ Implementation status 2026-05-31 (working tree, pending commit/build/deploy):
   drain case is zeroed by explicit risk handling, but non-drain partial-balance
   divergence is still not solved. Track before relying on real-capital PnL for
   non-drain partial-balance cases.
+
+Verification on `2026-05-31`:
+
+```bash
+cargo run -p tx_processor --example inspect_tx_erc20_calls -- \
+  0xf0e8542a57c488121f18bdad4f148799e59ee21b83caa12bdc5b9aadac43d8ba
+cargo test -p tx_processor --lib
+cargo test -p eth_token --lib
+cargo check -p tx_processor -p eth_token -p eth_chain_server \
+  -p eth_alpha_engine -p eth_live_trading -p eth_alpha_lab
+cargo test -p eth_alpha_engine -p eth_live_trading -p eth_alpha_lab -p eth_token --lib
+```
 
 ## Current Simulator Fix State 2026-05-28
 
@@ -343,28 +384,28 @@ What is now addressed:
   APIs under `/api/v1/eth/...` instead of direct legacy `/eth/tokens/api/...`
   paths.
 
-Current deployed evidence at the time of the 2026-05-28 fix:
+Historical deployed evidence at the time of the 2026-05-28 simulator fix:
 
-- Chain-server, mempool processor, `asena-static`, and the live backtester are
+- Chain-server, mempool processor, `asena-static`, and the live backtester were
   running from rebuilt release binaries.
-- Current live-backtest run:
+- Live-backtest run at that time:
   `alpha11-univ2-lp30-pool-update-block-hold-sweep-chain-sim-server-sim-20260528-151530Z`.
-- At the latest check, live token tracker and chain-server `LiveTxSimulator`
+- At that check, live token tracker and chain-server `LiveTxSimulator`
   were both on block `25195314` with the same selected block hash, and
   `state_source="chain_server_live_tx_simulator"`.
-- The current live-backtest result set is running with `poll_error=null`,
+- The live-backtest result set was running with `poll_error=null`,
   `chain_sim_settlement_pending=0`, `chain_sim_settlement_waiting_state=0`, and
   `chain_sim_settlement_missing_block=0`.
 
-2026-05-31 caveat:
+2026-05-31 update:
 
-- The simulator ownership design is still the right architecture, but the
-  current running chain-server live state is not healthy evidence: live token
-  tracker status is `failed` with `environment map size limit reached`, and the
-  live tx simulator status endpoint returns `503`.
-- Before using any new live-backtest result, first restore chain-server live
-  state, verify the live token tracker and live tx simulator expose the same
-  current block/hash, then start a fresh live-backtest from that healthy state.
+- The simulator ownership design is still the right architecture.
+- Chain-server and the mempool detector have been rebuilt/restarted. The live
+  token tracker is `live`, the chain-server `LiveTxSimulator` is available, and
+  the mempool detector is hydrated from the rebuilt chain-server.
+- There is no fresh live-backtest/shadow run yet on the rebuilt
+  held-balance/scam-detection stack. Backtest Validity Step 6 must start from a
+  new run, not the stale 2026-05-28 evidence.
 
 ## Block-Pinned Alpha Inputs 2026-05-28
 
@@ -400,13 +441,16 @@ Implemented:
 
 Remaining follow-up: implemented — see Third-Tier Implementation Items 4 and 5.
 
-## Tier One Issue - Evidence Sufficiency Before Real Capital 2026-05-28
+## Backtest Validity Step 6 - Evidence Sufficiency Before Real Capital 2026-05-28
 
 Status: active blocker for deployment.
 
 Problem:
 
-- The current replacement live backtest is healthy, but a healthy run is not by
+- There is currently no fresh live-backtest/shadow run on the rebuilt
+  held-balance/scam-detection stack. Old live-backtest and sweep evidence
+  predates part of the valuation fix path and cannot promote a policy.
+- A healthy chain-server/live simulator is only a prerequisite; it is not by
   itself a promotion decision.
 - We still need a reproducible current historical backtest window, a live
   shadow/live-backtest comparison, and trade-level audit over top/worst
@@ -414,23 +458,25 @@ Problem:
 
 Next action:
 
-1. Let the current live-backtest run collect enough fresh positions on the
-   chain-server simulator path.
-2. Audit top 10 and worst 10 positions with entry reason, skip/exit reason,
+1. Replay the Session/Risk Atlas scam case first and prove the backtest writes
+   zero/near-zero valuation after the held-balance drain.
+2. Run a fresh no-capital hold16 live-backtest/shadow from healthy
+   chain-server state after the Backtest Validity steps pass.
+3. Run the exact latest historical two-week backtest for the same selected
+   strategy policy and same entry size/gas/exit semantics.
+4. Audit top 10 and worst 10 positions with entry reason, skip/exit reason,
    exact decision block, exact simulation block, gas model, slippage/min-output,
    and PnL snapshot.
-3. Compare current live-backtest behavior against the exact latest historical
-   two-week backtest for the selected strategy policy.
-4. Only after that review, start a real-live validation run with explicit
+5. Only after that review, start a real-live validation run with explicit
    bankroll, kill switch, max exposure, retry policy, and route policy visible.
 
 
 ## Current Limiting Factor
 
 As of 2026-05-31, the live-capital bottleneck is not raw transaction submission.
-It is the Tier One accounting/parity set above: real valuation/exits, held
-balance scam handling, current chain-server live-state health, and frontend/API
-lifecycle truth. The intended real flow is documented in
+It is the Backtest Validity set above: held-balance scam detection, zero
+valuation, real/backtest lifecycle parity, validation gates, and fresh evidence
+from the rebuilt stack. The intended real flow is documented in
 `alpha/live/trading/README.md` and
 `alpha/engine/src/live_trader/real_execution/README.md`:
 
@@ -439,14 +485,14 @@ Alpha strategy/engine
   -> planner
   -> exact deployed V2 vault simulation
   -> gas-rank policy
-  -> Kartal eth_unsigned_tx request with explicit submission_policy
+  -> ETH tx executor eth_unsigned_tx request with explicit submission_policy
   -> tx_executor
   -> receipt reconciliation
 ```
 
 The practical consequence is:
 
-- The pipeline for tracking live real trades is implemented: Kartal
+- The pipeline for tracking live real trades is implemented: ETH tx executor
   `eth_unsigned_tx` submission, explicit public broadcast/tail submission
   policy, receipt reconciliation, vault event parsing, live trade pages, and the
   basic receipt lifecycle are in place.
@@ -458,7 +504,7 @@ The practical consequence is:
 - Risk Atlas must become a formal policy contract: versioned cohorts, features,
   thresholds, targets, exclusions, and decision questions that Alpha and Asena
   can both cite.
-- Real-live validation can public-broadcast through Kartal only when the live
+- Real-live validation can public-broadcast through the ETH tx executor only when the live
   service is started with explicit public-broadcast validation enabled.
 - Broader production remains blocked by evidence quality, healthy block-pinned
   Alpha inputs, and operator visibility, not by missing real-trade tracking or
@@ -637,7 +683,7 @@ and the live gas-rank policy documented in:
 Later, build a single operator-facing live trading parameters page in Asena. It
 should show the active bankroll, buy size, signer/from address, vault address,
 gas-rank policy, gas/fee caps, slippage/min-output policy, simulation freshness,
-receipt finality settings, Kartal mode, and signer/Kartal policy caps. That page
+receipt finality settings, executor mode, and signer/executor policy caps. That page
 is the right place to make duplicated live parameters visible and reviewable;
 `bogaz.md` should only track it as a broad product/ops task.
 
@@ -652,9 +698,9 @@ older cleanup threads.
 | 1 | **Chain/source/simulator parity must be proven first** | `risk_atlas`, `eth_token`, `tx_processor::trade_simulation`, `alpha/backtest` | The V4 observed-flow eligibility leak is fixed, current open P0 parity blockers are none, and `Compass` helper-route V2 sells with meaningful same-block liquidity are now documented as a route-shape parity gap rather than a drained-pool case. Remaining P1 rechecks still affect evidence trust: V3 pool identity and amount-quality/dust sell parity. | Work the ranked promotion queue in `risk_atlas/investigations/README.md` before using affected cohorts for policy or PnL claims. Reproduce each old issue on current code, then either open a focused investigation or close it as stale. |
 | 2 | **Backtests must cover the full Risk Atlas protocol surface** | `alpha/backtest`, `alpha/engine`, `risk_atlas`, `tx_processor::trade_simulation`, `eth_token` | Current executable strategy evidence is V2-centered. Risk Atlas corpus reports include `UNISWAP-V2`, `UNISWAP-V3`, and `UNISWAP-V4`; the older strategy report explicitly notes V3/V4 routing metadata was not yet persisted enough for chain-sim execution. A production policy cannot claim all-surface readiness while only executable on a subset. | Extend replay/backtest ingestion and execution metadata so each protocol is either executable with correct route simulation/valuation or explicitly counted as excluded with reason. Then rerun the selected policy over the exact target window with per-protocol PnL, skipped-pool counts, routeability counts, and all-protocol aggregate performance. |
 | 3 | **Risk Atlas policy contract is not formalized enough for promotion** | `risk_atlas`, `alpha/strategies`, `alpha/lab`, `interface/asena` | Risk Atlas has durable DB/read-model docs, but the policy-facing contract is still implicit: thresholds such as init age, price-to-initial, LP approval timing, direct LP removal horizon, protocol filters, labels, and exclusion reasons are not yet one versioned artifact that Alpha and Asena both cite. | Create a versioned Risk Atlas policy contract that defines eligible cohort, protocol/denom routeability, feature names, target labels, threshold sources, exclusion reasons, calibration windows, and decision-question outputs. Alpha strategies should reference this contract version in backtest/live metadata. |
-| 4 | **Live trading parameter page is missing** | `alpha/engine`, `kartal`, `interface/asena` | The validation bankroll is `0.555 ETH` and the gas policy is configured, but operators still need one page showing the active live-capital parameters and where each value came from. | Build an Asena live trading parameters page that pulls active values from Alpha/Kartal/signer status instead of maintaining another hidden duplicate list. |
+| 4 | **Live trading parameter page is missing** | `alpha/engine`, `tx_executor`, `interface/asena` | The validation bankroll is `0.555 ETH` and the gas policy is configured, but operators still need one page showing the active live-capital parameters and where each value came from. | Build an Asena live trading parameters page that pulls active values from Alpha/ETH tx executor/signer status instead of maintaining another hidden duplicate list. |
 | 5 | **Direct EOA allowance policy is unresolved** | `alpha/live/trading`, `tx_simulator::tx_builders`, `solidity/baygus-executor` | Mode A now has vault emergency-sell calldata and internal approve+sell semantics. Direct EOA sells still need a live allowance reader or explicit pre-approval deployment policy. | Prefer Mode A for scam exits; only enable direct EOA sells after documenting pre-approval, permit/multicall, or two-transaction approval behavior. |
-| 6 | **Live strategy evidence still needs real-planner shadowing** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | Chain-sim live-backtest evidence exists, but it does not include Kartal-shaped tx metadata, gas-rank rejects, or signer/RPC failures. | Run the real planner with Kartal `dry_run` and compare every planned priority exit against live chain-sim outcomes. |
+| 6 | **Live strategy evidence still needs real-planner shadowing** | `alpha/engine`, `alpha/store`, `eth_alpha_trader` | Chain-sim live-backtest evidence exists, but it does not include ETH tx executor-shaped tx metadata, gas-rank rejects, or signer/RPC failures. | Run the real planner with ETH tx executor `dry_run` and compare every planned priority exit against live chain-sim outcomes. |
 | 7 | **Mempool signal latency attribution is incomplete** | `mempool_processor`, `eth_chain_server`, `alpha/engine` | The current 40020 API exposes `signal_created_at`, `signal_source`, and `mempool_first_seen_*`, and the mempool processor is publishing fresh signals on the rebuilt code. We still do not have a current timing ledger proving where any remaining store-to-trader delay occurs. | Let the current run collect fresh signal/decision pairs, then compare `mempool_first_seen_at`, `detection_timestamp`, `signal_events.created_at`, API `signal_created_at`, trader observation time, risk event time, and report completion before changing queue or trader architecture. |
 
 ## Third-Tier Implementation Items
@@ -664,7 +710,7 @@ validation step or the immediate second-tier cleanup.
 
 | Order | Item | Owner | Current state | Next action |
 | --- | --- | --- | --- | --- |
-| 1 | **Private relay/builder execution** | `tx_executor`, `kartal` | Flashbots/relay/bundle submission was attempted and removed. `TxSubmissionRoute` now has exactly two variants: `PublicRpcBroadcast` (default) and `PublicMempoolTail` (tail after enabling tx using its priority fee minus `ALPHA_LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI=500 wei`). No relay URL, no `sign_flashbots_auth`, no bundle path exists in the current codebase. | If private relay submission is needed in future, add a new `TxSubmissionRoute` variant and a new Kartal wire protocol version. Do not re-enable Flashbots in the current path. |
+| 1 | **Private relay/builder execution** | `tx_executor` | Flashbots/relay/bundle submission was attempted and removed. `TxSubmissionRoute` now has exactly two variants: `PublicRpcBroadcast` (default) and `PublicMempoolTail` (tail after enabling tx using its priority fee minus `ALPHA_LIVE_TAIL_ENTRY_PRIORITY_UNDERCUT_WEI=500 wei`). No relay URL, no `sign_flashbots_auth`, no bundle path exists in the current codebase. | If private relay submission is needed in future, add a new `TxSubmissionRoute` variant and a new ETH tx executor wire protocol version. Do not re-enable Flashbots in the current path. |
 | 2 | **Silent simulator gap on session build failure** | `alpha/live/feed`, `eth_chain_server` | When `build_direct_live_block_session` fails (state diffs invalid or unavailable), the simulator is not updated for that block but `BlockApplied` still fires. Alpha receives the block frame and may attempt a buy; the pre-submit simulation then hard-errors and the order is correctly rejected, but the failure was invisible at the block-frame level. Logging fixed in `block_apply.rs`: both the build-error and the no-diffs case now emit `simulator_state_published=false` and `block_hash` so the gap is queryable. | Monitor for `simulator_state_published=false` log lines during live runs. If they appear repeatedly on the same blocks, investigate why state diffs are missing or invalid for those blocks. |
 | 4 | **Frame source/hash in execution reports** | `alpha/engine/src/live_trader` | Implemented: `LiveRealInputResolver::source_metadata` now includes `input_frame_block` and `input_frame_hash` so every execution report carries the exact block frame that woke the decision loop. The Arcs are updated in the main loop on each advancing frame. | Monitor that `input_frame_block` matches `decision_block` for pool-update entries and that `input_frame_hash` is present. If `input_frame_hash` is null in a report, the loop iterated without a fresh frame before the signal fired. |
 | 5 | **Operational alert for live block frame gap** | `alpha/engine/src/live_trader` | Implemented: the main loop now warns at `LIVE_BLOCK_FRAME_GAP_WARN_THRESHOLD = 3` skipped blocks with `prev_last_frame_block`, `new_frame_block`, and `gap` fields, referenced against `ring_buffer_cap = 16`. | If this warning fires repeatedly, investigate whether chain-server is failing to produce frames or Alpha's loop is stalling between polls. |

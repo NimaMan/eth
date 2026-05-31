@@ -34,6 +34,20 @@ pub(super) fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(transfer.to_address);
     }
 
+    for call in &tx.internal_erc20_calls {
+        set.insert(call.token_address);
+        set.insert(call.caller);
+        set.insert(call.from_address);
+        set.insert(call.to_address);
+    }
+
+    for transfer in &tx.internal_erc20_transfers {
+        set.insert(transfer.token_address);
+        set.insert(transfer.caller);
+        set.insert(transfer.from_address);
+        set.insert(transfer.to_address);
+    }
+
     for transfer in &tx.erc721_transfers {
         set.insert(transfer.token_address);
         set.insert(transfer.from_address);

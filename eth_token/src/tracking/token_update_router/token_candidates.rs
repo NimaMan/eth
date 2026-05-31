@@ -262,6 +262,12 @@ fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
     for transfer in &tx.erc20_transfers {
         addresses.insert(transfer.token_address);
     }
+    for call in &tx.internal_erc20_calls {
+        addresses.insert(call.token_address);
+    }
+    for transfer in &tx.internal_erc20_transfers {
+        addresses.insert(transfer.token_address);
+    }
     for approval in &tx.erc20_approval_events {
         addresses.insert(approval.token_address);
     }
@@ -439,7 +445,8 @@ mod tests {
     use std::pin::Pin;
     use std::rc::Rc;
     use tx_processor::tx_processor::data_models::{
-        ERC20TransferEvent, UniswapV2SwapEvent, UniswapV2SyncEvent,
+        ERC20TransferEvent, Erc20CallKind, InternalErc20Call, UniswapV2SwapEvent,
+        UniswapV2SyncEvent,
     };
 
     use reth_chain_query::common_addresses::KnownV2Protocol;
@@ -531,6 +538,31 @@ mod tests {
         let (registry, index) = registry_with_token();
         let mut tx = tx();
         tx.to_address = Some(address!("1111111111111111111111111111111111111111"));
+
+        let candidates = candidate_token_addresses(&registry, &index, &tx);
+
+        assert_eq!(
+            candidates,
+            vec!["0x1111111111111111111111111111111111111111".to_string()]
+        );
+    }
+
+    #[test]
+    fn candidates_route_from_internal_erc20_call_token_address() {
+        let (registry, index) = registry_with_token();
+        let mut tx = tx();
+        tx.to_address = Some(address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: address!("1111111111111111111111111111111111111111"),
+            caller: address!("cccccccccccccccccccccccccccccccccccccccc"),
+            kind: Erc20CallKind::TransferFrom,
+            from_address: address!("dddddddddddddddddddddddddddddddddddddddd"),
+            to_address: address!("000000000000000000000000000000000000dEaD"),
+            amount: U256::from(1_000_u64),
+            depth: 1,
+            call_type: Some("CALL".to_string()),
+            succeeded: true,
+        });
 
         let candidates = candidate_token_addresses(&registry, &index, &tx);
 

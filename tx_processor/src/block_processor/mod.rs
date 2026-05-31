@@ -484,8 +484,7 @@ impl BlockProcessor {
             let internal_transactions =
                 trace_processor.extract_internal_transactions_from_call_trace(&frame);
             // Reuse the same converted frame to decode standard ERC-20 calls.
-            let internal_erc20_calls =
-                trace_processor.extract_erc20_calls_from_call_trace(&frame);
+            let internal_erc20_calls = trace_processor.extract_erc20_calls_from_call_trace(&frame);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.internal_extraction += internal_extraction_started.elapsed();
             }
@@ -500,8 +499,8 @@ impl BlockProcessor {
             &processed_tx.internal_erc20_calls,
             &processed_tx.erc20_transfers,
         );
-        processed_tx.bribe_amount =
-            TxProcessor::calculate_bribe_amount(&processed_tx.fees);
+        processed_tx.refresh_trace_derived_indexes();
+        processed_tx.bribe_amount = TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         let balance_started = Instant::now();

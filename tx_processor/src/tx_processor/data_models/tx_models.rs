@@ -137,6 +137,29 @@ pub struct ProcessedTransaction {
 }
 
 impl ProcessedTransaction {
+    /// Add trace-derived ERC-20 call/transfer participants to the address
+    /// indexes that downstream token routing uses.
+    pub fn refresh_trace_derived_indexes(&mut self) {
+        for call in &self.internal_erc20_calls {
+            if !is_canonical_weth(call.token_address) {
+                self.erc20_contracts.insert(call.token_address);
+            }
+            self.unique_addresses.insert(call.token_address);
+            self.unique_addresses.insert(call.caller);
+            self.unique_addresses.insert(call.from_address);
+            self.unique_addresses.insert(call.to_address);
+        }
+        for transfer in &self.internal_erc20_transfers {
+            if !is_canonical_weth(transfer.token_address) {
+                self.erc20_contracts.insert(transfer.token_address);
+            }
+            self.unique_addresses.insert(transfer.token_address);
+            self.unique_addresses.insert(transfer.caller);
+            self.unique_addresses.insert(transfer.from_address);
+            self.unique_addresses.insert(transfer.to_address);
+        }
+    }
+
     /// Create a failed/empty transaction placeholder for skipped transactions
     pub fn empty_failed(from: Address, to: Option<Address>, nonce: u64, reason: &str) -> Self {
         let hash = B256::from_slice(&[nonce as u8; 32]);
@@ -270,4 +293,8 @@ impl ProcessedTransaction {
             .and_then(|changes| changes.token_net.get(&token_checksum))
             .copied()
     }
+}
+
+fn is_canonical_weth(address: Address) -> bool {
+    address == alloy_primitives::address!("0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2")
 }

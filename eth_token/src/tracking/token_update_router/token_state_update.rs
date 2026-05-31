@@ -36,6 +36,14 @@ pub(super) fn touches_token_state(tx: &ProcessedTransaction, token_address: &str
             .iter()
             .any(|event| same_address_str(event.token_address, token_address))
         || tx
+            .internal_erc20_calls
+            .iter()
+            .any(|call| same_address_str(call.token_address, token_address))
+        || tx
+            .internal_erc20_transfers
+            .iter()
+            .any(|transfer| same_address_str(transfer.token_address, token_address))
+        || tx
             .erc20_approval_events
             .iter()
             .any(|event| same_address_str(event.token_address, token_address))
@@ -153,6 +161,42 @@ mod tests {
             .into_iter()
             .collect(),
         );
+
+        assert!(touches_token_state(
+            &tx,
+            "0x1111111111111111111111111111111111111111"
+        ));
+    }
+
+    #[test]
+    fn internal_erc20_call_touches_token_state() {
+        use tx_processor::tx_processor::data_models::{Erc20CallKind, InternalErc20Call};
+
+        let token = address!("1111111111111111111111111111111111111111");
+        let mut tx = ProcessedTransaction::new(
+            b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            10,
+            1000,
+            0,
+            address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some(address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")),
+            U256::ZERO,
+            true,
+            0,
+            2,
+            Vec::new(),
+        );
+        tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: token,
+            caller: address!("cccccccccccccccccccccccccccccccccccccccc"),
+            kind: Erc20CallKind::TransferFrom,
+            from_address: address!("dddddddddddddddddddddddddddddddddddddddd"),
+            to_address: address!("000000000000000000000000000000000000dEaD"),
+            amount: U256::from(1_000_u64),
+            depth: 1,
+            call_type: Some("CALL".to_string()),
+            succeeded: true,
+        });
 
         assert!(touches_token_state(
             &tx,

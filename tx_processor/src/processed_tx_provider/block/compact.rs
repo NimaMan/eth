@@ -15,12 +15,12 @@ use crate::tx_processor::data_models::{
     ApprovalForAllEvent, ContractCreationEvent, DepositEvent, ERC1155TransferEvent,
     ERC20ApprovalEvent, ERC20TransferEvent, ERC721ApprovalEvent, ERC721TransferEvent,
     InternalErc20Call, InternalErc20Transfer, InternalTransaction, OwnershipTransferStartedEvent,
-    OwnershipTransferredEvent, Permit2Event,
-    ProcessedAccessListItem, ProcessedTransaction, ProxyAdminChangedEvent, TradingDisabledEvent,
-    TradingEnabledEvent, TransactionFees, UniswapV2BurnEvent, UniswapV2MintEvent,
-    UniswapV2PairCreatedEvent, UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV3BurnEvent,
-    UniswapV3DecreaseLiquidityEvent, UniswapV3IncreaseLiquidityEvent, UniswapV3InitializeEvent,
-    UniswapV3MintEvent, UniswapV3PoolCreatedEvent, UniswapV3PositionEvent, UniswapV3SwapEvent,
+    OwnershipTransferredEvent, Permit2Event, ProcessedAccessListItem, ProcessedTransaction,
+    ProxyAdminChangedEvent, TradingDisabledEvent, TradingEnabledEvent, TransactionFees,
+    UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent, UniswapV2SwapEvent,
+    UniswapV2SyncEvent, UniswapV3BurnEvent, UniswapV3DecreaseLiquidityEvent,
+    UniswapV3IncreaseLiquidityEvent, UniswapV3InitializeEvent, UniswapV3MintEvent,
+    UniswapV3PoolCreatedEvent, UniswapV3PositionEvent, UniswapV3SwapEvent,
     UniswapV4BalanceDeltaEvent, UniswapV4DonateEvent, UniswapV4DynamicLPFeeUpdatedEvent,
     UniswapV4FeeControllerUpdatedEvent, UniswapV4FeeUpdatedEvent, UniswapV4InitializeEvent,
     UniswapV4ModifyLiquidityEvent, UniswapV4SwapEvent, WithdrawEvent,
@@ -277,6 +277,7 @@ impl CompactProcessedTransaction {
         tx.latest_states = self.latest_states.unwrap_or_default();
         tx.input = self.input.unwrap_or_default();
         tx.struct_logs = self.struct_logs;
+        tx.refresh_trace_derived_indexes();
 
         tx
     }

@@ -386,8 +386,8 @@ impl ProcessedTxProvider {
             &processed_tx.internal_erc20_calls,
             &processed_tx.erc20_transfers,
         );
-        processed_tx.bribe_amount =
-            TxProcessor::calculate_bribe_amount(&processed_tx.fees);
+        processed_tx.refresh_trace_derived_indexes();
+        processed_tx.bribe_amount = TxProcessor::calculate_bribe_amount(&processed_tx.fees);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         processed_tx.address_balance_changes = balance_calculator
