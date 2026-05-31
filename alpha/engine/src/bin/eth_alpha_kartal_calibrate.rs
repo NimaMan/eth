@@ -67,10 +67,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     write_request_only: bool,
 
-    #[arg(long, default_value = "http://127.0.0.1:5004")]
+    #[arg(long, default_value = "http://127.0.0.1:5006")]
     kartal_url: String,
 
-    /// Env var used for Kartal auth. If empty, KARTAL_API_TOKEN is tried.
+    /// Env var used for ETH tx executor auth. If empty, KARTAL_API_TOKEN is tried.
     #[arg(long, default_value = "ETH_TX_EXECUTOR_API_TOKEN")]
     token_env: String,
 

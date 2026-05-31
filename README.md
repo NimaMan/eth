@@ -31,17 +31,17 @@ The root Rust workspace is this directory. Current workspace members from
 | `alpha/engine/` | `eth_alpha_engine` | Strategy runtime, portfolio/order state, risk gating, and execution adapter boundary. |
 | `alpha/live/state/` | `eth_live_state` | Legacy live-state schemas and protocol helpers; not the normal chain-server live transport. |
 | `alpha/live/feed/` | `eth_live_feed` | Live confirmed-chain feed over processed blocks and token updates. |
-| `alpha/live/trading/` | `eth_live_trading` | Live tx-prep, priority-exit policy, Kartal direct-raw client shape, and value-capped gas/bribe planning. |
+| `alpha/live/trading/` | `eth_live_trading` | Live tx-prep, priority-exit policy, ETH tx executor direct-raw client shape, and value-capped gas/bribe planning. |
 
 Important adjacent code that is not currently a root workspace member:
 
 | Folder | Purpose |
 | --- | --- |
-| `tx_executor/` | Direct transaction submission core. Receives prepared transactions; does not choose strategy, routes, or rank. |
+| `tx_executor/` | Nested ETH tx executor workspace: core transaction executor, HTTP policy service, and host-local signer. Receives prepared transactions; does not choose strategy, routes, or rank. |
 | `tx_fund_flow/` | Fund-flow/network analytics built around processed transactions and DB-backed queries. |
 | `deploy/` | ETH-owned deployment assets, including node scripts, systemd units, and on-chain deployment ledgers. |
 | `solidity/` | Archived Solidity executor/contracts and experiments. Current v4 simulation uses deployed Uniswap periphery. |
-| `deploy/onchain/` | ETH mainnet contract deployment runbooks, configs, audit checklists, Kartal dry-runs, receipt evidence, and reproducible signoff records. |
+| `deploy/onchain/` | ETH mainnet contract deployment runbooks, configs, audit checklists, tx-executor dry-runs, receipt evidence, and reproducible signoff records. |
 | `vendor/reth/` | Vendored upstream Reth reference tree. Use for source parity and examples, not as normal application code. |
 
 ## Main Data Flow
@@ -89,7 +89,7 @@ pyreth
 
 tx_executor
   <- prepared direct transactions from a planner/strategy adapter
-  -> nonce, fee-cap validation, signing, broadcast, execution records
+  -> HTTP policy, nonce, fee-cap validation, signing, broadcast, execution records
 ```
 
 Short version: `tx_simulator` executes chain state; `reth_chain_query` reads and
@@ -116,7 +116,7 @@ Use this map before broad searching:
 | Where are current pipeline bottlenecks tracked? | `bogaz.md` | service memory, cache fill/read metrics, live readiness, mempool timing, alpha decision bottlenecks |
 | How do Python callers access the Rust stack? | `pyreth/README.md` | `pyreth/src/lib.rs`, `src/python.rs`, `src/pyreth_instance.rs`, `examples/` |
 | How does alpha prepare a live transaction? | `alpha/live/trading/README.md` | `alpha/live/trading/src/tx_prep/`, `alpha/engine/src/execution/real/README.md`, `alpha/block_tx_rank/README.md` |
-| How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/src/executor.rs`, `src/service.rs`, `examples/submit_direct_raw.rs` |
+| How is a prepared real transaction submitted? | `tx_executor/README.md` | `tx_executor/tx_executor/src/executor.rs`, `tx_executor/tx_executor_service/src/server.rs`, `tx_executor/tx_executor/examples/submit_direct_raw.rs` |
 | How do we deploy and audit an ETH on-chain contract? | `deploy/onchain/README.md` | contract-specific folders such as `deploy/onchain/uniswap-v2-trading-vault/` |
 | How do I investigate token behavior or launch strategy stats? | `risk_atlas/README.md` | `risk_atlas/token_lab/`, `risk_atlas/investigations/README.md`, `risk_atlas/scam_analytics/`, `risk_atlas/network_analytics/`, `alpha/lab/strategy_analysis/` |
 | How are node paths and services configured? | `deploy/node/README.md` | `config.env`, `deploy/node/scripts/`, `deploy/systemd/` |
@@ -146,7 +146,7 @@ Keep new code inside the crate that owns the behavior:
 | `mempool_processor` | Pending tx ingestion, selector/function detection, routing, live context hydration, signal decisions, DB/ZMQ publishing. | Canonical token state mutation, duplicate tax/decoding logic, trading strategy state. |
 | `alpha` | Market/risk event handling, strategy state machines, chain-sim execution adapters, mined-block rank evidence, live tx-prep, decision persistence, position/order lifecycle. | Raw simulation internals, token indexing, direct transaction signing. |
 | `pyreth` | Thin Python wrappers and stable schema projection. | Business logic that should live in Rust crates. |
-| `tx_executor` | Validate prepared transactions, reserve nonce, enforce fee caps, sign, broadcast, record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery, tx rank estimation. |
+| `tx_executor` | Host the ETH transaction submission boundary, validate prepared transactions, reserve nonces, enforce fee caps, sign, broadcast, and record execution attempts. | Route discovery, quote selection, strategy policy, pool discovery, tx rank estimation. |
 | `tx_fund_flow` | Fund-flow network construction, ranking, analytics, visualization. | Core transaction simulation or decoding duplicates. |
 
 ## Common Runtime Inputs

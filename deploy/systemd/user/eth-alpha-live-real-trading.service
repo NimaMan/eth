@@ -1,5 +1,5 @@
 [Unit]
-Description=Ethereum alpha live real trading (Kartal broadcast guarded)
+Description=Ethereum alpha live real trading (ETH tx executor guarded)
 Wants=network-online.target eth-mempool-signal-detector.service
 After=network-online.target eth-mempool-signal-detector.service
 StartLimitIntervalSec=0
@@ -8,7 +8,6 @@ StartLimitIntervalSec=0
 Type=simple
 WorkingDirectory=/home/nima/code/crypto/blockchains/eth
 EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
-EnvironmentFile=-/home/nima/code/crypto/kartal/.env
 EnvironmentFile=/home/nima/code/crypto/blockchains/eth/deploy/systemd/user/eth-alpha-live-real-trading.env
 Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -16,7 +15,7 @@ Environment=RUST_LOG=info
 ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SET}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_FROM}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --strategy-set ${ALPHA_STRATEGY_SET} --kartal-token-env KARTAL_API_TOKEN --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS} --allow-broadcast-live-validation
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --strategy-set ${ALPHA_STRATEGY_SET} --kartal-token-env ETH_TX_EXECUTOR_API_TOKEN --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS} --allow-broadcast-live-validation
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

@@ -52,3 +52,58 @@ owner = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 treasury = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
 router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
 custody_model = "vault_holds_bought_tokens_and_sells_with_exact_internal_approval"
+
+[eth_tx_executor]
+bind = "127.0.0.1:5006"
+rpc_url = "http://127.0.0.1:8545"
+database_url = "postgresql://postgres:postgres@localhost:5432/eth_db"
+chain_id = 1
+private_key_env = "ETH_EXECUTOR_PRIVATE_KEY"
+signer_backend = "unix_socket"
+signer_socket_path = "/run/eth-tx-executor/signer.sock"
+signer_address = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+broadcast_mode = "dry_run"
+max_priority_fee_per_gas_wei = 3500000000
+max_fee_per_gas_wei = 5000000000
+local_journal_path = "/home/nima/code/crypto/blockchains/eth/tx_executor/.state/executions.jsonl"
+
+[eth_tx_policy]
+version = "eth_tx_policy_v1"
+allowed_from_addresses = ["0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"]
+allowed_targets = ["0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"]
+allowed_selectors = ["0x8a62666c", "0x5f413d10"]
+max_value_wei = 5000000000000000
+max_gas_limit = 300000
+max_fee_per_gas_wei = 5000000000
+max_priority_fee_per_gas_wei = 3500000000
+max_transaction_cost_wei = 7500000000000000
+max_daily_cost_wei = 0
+require_simulation = true
+max_simulation_age_blocks = 2
+required_metadata_fields = [
+  "wire_protocol",
+  "intent_kind",
+  "strategy_name",
+  "strategy_run_id",
+  "trade_id",
+  "token_address",
+  "pool_address",
+]
+
+[eth_signer]
+socket_path = "/run/eth-tx-executor/signer.sock"
+socket_mode = "0600"
+chain_id = 1
+key_backend = "keystore"
+signer_address = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+# keystore_path = "/run/eth-tx-executor/secrets/eth-signer-keystore.json"
+# password_file = "/run/eth-tx-executor/secrets/eth-signer-password"
+# password_env = "ETH_TX_SIGNER_KEYSTORE_PASSWORD"
+journal_path = "/home/nima/code/crypto/blockchains/eth/tx_executor/.state/signer/decisions.jsonl"
+allowed_targets = ["0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"]
+allowed_selectors = ["0x8a62666c", "0x5f413d10"]
+max_value_wei = 5000000000000000
+max_gas_limit = 300000
+max_fee_per_gas_wei = 5000000000
+max_priority_fee_per_gas_wei = 3500000000
+max_transaction_cost_wei = 7500000000000000

@@ -42,7 +42,7 @@ fn specs(args: &Args) -> Vec<LiveStrategySpec> {
 
 fn real_args(allow_broadcast_live_validation: bool) -> RealExecutionArgs {
     RealExecutionArgs {
-        kartal_url: "http://127.0.0.1:5004".to_string(),
+        kartal_url: "http://127.0.0.1:5006".to_string(),
         kartal_token_env: "ETH_TX_EXECUTOR_API_TOKEN".to_string(),
         live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),

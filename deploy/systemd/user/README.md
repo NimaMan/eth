@@ -16,10 +16,10 @@ against the chain-server API instead of starting a second chain-server process.
 
 | Unit | Purpose | Broadcast capability |
 | --- | --- | --- |
-| `eth-alpha-live-backtest.service` | Live no-capital alpha backtest runner using `eth_alpha_live_backtest_trader`. | None; never contacts Kartal. |
-| `eth-alpha-live-real-trading.service` | Live real-executor runner using `eth_alpha_live_trader` with strategy-owned bankroll entries. | Kartal public mempool only when the explicit hold16 deploy guard passes. |
+| `eth-alpha-live-backtest.service` | Live no-capital alpha backtest runner using `eth_alpha_live_backtest_trader`. | None; never contacts the ETH tx executor. |
+| `eth-alpha-live-real-trading.service` | Live real-executor runner using `eth_alpha_live_trader` with strategy-owned bankroll entries. | ETH tx executor public mempool only when the explicit hold16 deploy guard passes. |
 | `eth-alpha-live-backtest.target` | Mempool signal detector and live chain-sim alpha backtest. Chain-server must already be running as the system unit. | None. |
-| `eth-alpha-live-real-trading.target` | Mempool signal detector and live real-executor alpha runner. Chain-server and Kartal signer must already be running as system units. | Same as the real-trading service. |
+| `eth-alpha-live-real-trading.target` | Mempool signal detector and live real-executor alpha runner. Chain-server, `eth-tx-executor`, and `eth-tx-signer` must already be running as system units. | Same as the real-trading service. |
 
 Backtests are intentionally not systemd services here. They are on-demand
 historical jobs from `alpha/backtest` and must stay simulator-only.
@@ -40,12 +40,12 @@ creates a semantic run id from mode and strategy, stores the active session unde
 reuses that id only for crash auto-restarts. A clean stop or restart marks the
 session stopped, so the next service start becomes a new live run.
 
-Kartal still enforces infrastructure safety rails: signer address, target
+The ETH tx executor still enforces infrastructure safety rails: signer address, target
 address, selector allowlist, per-transaction value, gas, fee, simulation
 freshness, and transaction-cost caps. The daily spend cap is intentionally set
 high enough not to be the active strategy limiter during the initial hold16
 deployment; entry capacity is governed by the strategy bankroll.
 
 The real-executor service is separate from the chain-sim runner so the process
-that can talk to Kartal is not the same process used for historical replay or
-no-capital strategy validation.
+that can talk to the ETH tx executor is not the same process used for
+historical replay or no-capital strategy validation.

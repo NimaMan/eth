@@ -117,7 +117,6 @@ impl TransactionSigner for UnixSocketTransactionSigner {
             ))),
         }
     }
-
 }
 
 trait TrimAscii {
@@ -200,5 +199,4 @@ mod tests {
         assert_ne!(signed.raw_tx_hex, "0x");
         let _ = tokio::fs::remove_file(path).await;
     }
-
 }

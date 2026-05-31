@@ -1,0 +1,30 @@
+[Unit]
+Description=ETH tx executor local signer
+Documentation=file:/home/nima/code/crypto/blockchains/eth/tx_executor/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nima
+WorkingDirectory=/home/nima/code/crypto/blockchains/eth/tx_executor
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
+EnvironmentFile=-/etc/eth-tx-executor/signer.env
+Environment=ETH_TX_SIGNER_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.toml
+Environment=ETH_TX_SIGNER_SOCKET_PATH=/run/eth-tx-executor/signer.sock
+Environment=ETH_TX_SIGNER_SOCKET_MODE=0600
+Environment=ETH_TX_SIGNER_KEY_BACKEND=keystore
+ExecStart=/home/nima/code/crypto/blockchains/eth/tx_executor/target/release/run_eth_tx_signer
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=eth-tx-executor
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/run/eth-tx-executor /home/nima/code/crypto/blockchains/eth/tx_executor/.state
+ReadOnlyPaths=/home/nima/code/crypto/blockchains/eth
+
+[Install]
+WantedBy=multi-user.target

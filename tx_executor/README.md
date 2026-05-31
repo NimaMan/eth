@@ -1,377 +1,182 @@
 # tx_executor
 
-Agent operating map for prepared Ethereum transaction submission.
+Workspace for prepared Ethereum transaction execution.
 
-## Purpose
+## Layout
 
-- Receive prepared direct transactions from planners/strategies.
-- Validate request shape, reserve nonce, enforce fee caps, sign,
-  broadcast, and record the result.
-- Provide the execution boundary that alpha can eventually call through an
-  adapter.
+| Path | Crate | Purpose |
+| --- | --- | --- |
+| `tx_executor/` | `tx_executor` | Core library: validates prepared transactions, reserves nonces, signs, dry-runs or broadcasts, and journals execution events. |
+| `tx_executor_service/` | `tx_executor_service` | HTTP service: auth, status routes, ETH policy checks, policy journaling, Postgres spend accounting, and calls into the core crate. |
+| `tx_executor_signer/` | `tx_executor_signer` | Host-local Unix-socket signer plus keystore importer. Enforces signer-side allowlists and caps before returning a signed raw transaction. |
 
-## Current Deployment Status
+This workspace is intentionally nested under `blockchains/eth/tx_executor`.
+It is not a member of the root ETH workspace because it owns a separate
+operational boundary and release surface.
 
-`tx_executor` is ready to receive a fully prepared direct-raw transaction. It is
-not the current bottleneck for strategy-to-Kartal wiring. The missing piece is
-upstream: alpha must still build a concrete live planner that turns strategy
-`OrderIntent`s into `DirectRawTransactionRequest`s through
-`alpha/live/trading::tx_prep`.
-
-What this crate can do now:
-
-- validate chain id, signer address, quantities, calldata, gas caps, and fee
-  caps;
-- reserve a nonce when `nonce = null`;
-- sign through a configured signer backend;
-- journal received/signed/dry-run/broadcast events;
-- dry-run by default or broadcast to the public mempool when explicitly enabled.
-
-What it does not do:
-
-- choose routes, calldata, slippage, or gas-rank candidates;
-- run final route simulations;
-- submit private relay/builder bundles;
-- watch receipts and translate mined results back into alpha fills.
-
-## Owns
-
-- `DirectRawTransactionRequest`, `SimulationReference`, bribe request metadata,
-  and submit results.
-- Nonce reservation, signer integration, validation, fee-cap policy, broadcast mode,
-  and optional event recording.
-
-## Does Not Own
-
-- Route discovery, quoting, slippage math, pool discovery, or strategy policy.
-- Calldata construction except validating a prepared direct transaction.
-- Token/mempool analysis, block-rank estimation, or risk decisions.
-
-## Data Flow
+## Runtime Model
 
 ```text
-planner/strategy adapter
-  -> DirectRawTransactionRequest + simulation reference
-  -> Kartal order server POST /eth/tx/direct-raw
-  -> EthTxExecutor::submit_direct_raw
-  -> validate -> reserve nonce -> sign -> broadcast/dry-run
-  -> SubmitDirectRawResult / execution record
+alpha/planner
+  -> DirectRawTransactionRequest + simulation reference + audit metadata
+  -> tx_executor_service POST /eth/tx/direct-raw or /eth/tx/submit
+  -> ETH policy + spend reservation
+  -> tx_executor core validation, nonce reservation, signing, dry-run/broadcast
+  -> optional tx_executor_signer Unix socket for the final signature
+  -> SubmitDirectRawResult / policy journal row
 ```
 
-## Kartal Integration
+The executor starts from prepared calldata. It does not choose routes, quote,
+slippage, gas-rank candidates, strategy policy, pools, or token risk. Those
+belong upstream in alpha and the ETH analysis crates.
 
-`tx_executor` is a library crate. In live operation it is hosted by Kartal's
-existing Polymarket order server, not by a separate ETH-only daemon.
+## HTTP Service
 
-The canonical HTTP/JSON language is `eth_unsigned_tx`, documented below.
-`tx_executor` owns the Rust request/response structs; Kartal hosts them over
-HTTP; alpha live trading mirrors the JSON client shape and puts
-strategy/rank/value-cap evidence in `metadata`.
-
-Current server surface:
+Default bind:
 
 ```text
-http://127.0.0.1:5004/health
-http://127.0.0.1:5004/eth/tx/status
-http://127.0.0.1:5004/eth/tx/direct-raw
+127.0.0.1:5006
 ```
 
-The active Compose deployment is `/home/nima/code/crypto/kartal`, service
-`order-server`, container `kartal-order-server`. The host port `5005` belongs to
-Tengri's live Polymarket market-data service, not Kartal.
-
-Auth is explicit. Use `KARTAL_API_TOKEN` as one shared token for every Kartal
-execution route, or set separate scoped tokens:
-`POLYMARKET_ORDER_API_TOKEN` for Polymarket routes and
-`ETH_TX_EXECUTOR_API_TOKEN` for ETH tx routes. Scoped tokens do not fall back to
-each other.
-
-Runtime config lives in Kartal's `[eth_tx_executor]` config section and matching
-`ETH_TX_EXECUTOR_*` environment variables. The default broadcast mode is
-`dry_run`. The default signer backend is `env` for local development; live mode
-should use `ETH_TX_EXECUTOR_SIGNER_BACKEND=unix_socket` with
-`ETH_TX_EXECUTOR_SIGNER_SOCKET_PATH` and `ETH_TX_EXECUTOR_SIGNER_ADDRESS`.
-
-When Kartal runs under Compose, it shares the VPN container network namespace.
-The Ethereum RPC endpoint must be reachable from that namespace. The default
-Compose value is `http://172.18.0.1:8545`; a host `reth` process bound only to
-`127.0.0.1:8545` will reject container connections until it is bound or proxied
-onto the Docker bridge.
-
-## Unsigned Tx Wire Protocol
-
-Protocol name: `eth_unsigned_tx`.
-
-This is the wire language between alpha live trading, Kartal, and
-`tx_executor`.
+Routes:
 
 ```text
-alpha live trading / tx prep
-  -> POST /eth/tx/direct-raw on Kartal
-  -> Kartal auth + JSON decode into tx_executor::DirectRawTransactionRequest
-  -> tx_executor validate -> reserve nonce -> sign -> dry-run or broadcast
-  -> Kartal returns tx_executor::SubmitDirectRawResult
-```
-
-Endpoint:
-
-```text
+GET  /health
+GET  /eth/tx/status
+GET  /eth/tx/policy/decisions
+GET  /eth/tx/policy/decisions/{attempt_id}
 POST /eth/tx/direct-raw
-Authorization: Bearer <ETH_TX_EXECUTOR_API_TOKEN or KARTAL_API_TOKEN>
-Content-Type: application/json
+POST /eth/tx/submit
 ```
 
-Kartal also exposes:
+Auth uses `Authorization: Bearer <token>`. Prefer
+`ETH_TX_EXECUTOR_API_TOKEN`; `TX_EXECUTOR_API_TOKEN` and `KARTAL_API_TOKEN` are
+accepted only as migration fallbacks.
+
+## Config
+
+Shared local defaults live in:
 
 ```text
-GET /eth/tx/status
+/home/nima/code/crypto/blockchains/eth/config.env
+/home/nima/code/crypto/blockchains/eth/config.toml
 ```
 
-### Request
+Primary service env:
 
-Canonical type:
+```bash
+ETH_TX_EXECUTOR_BIND=127.0.0.1:5006
+ETH_TX_EXECUTOR_RPC_URL=http://127.0.0.1:8545
+ETH_TX_EXECUTOR_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
+ETH_TX_EXECUTOR_BROADCAST_MODE=dry_run
+ETH_TX_EXECUTOR_SIGNER_BACKEND=unix_socket
+ETH_TX_EXECUTOR_SIGNER_SOCKET_PATH=/run/eth-tx-executor/signer.sock
+ETH_TX_EXECUTOR_SIGNER_ADDRESS=0x...
+ETH_TX_EXECUTOR_API_TOKEN=...
+```
+
+Primary signer env:
+
+```bash
+ETH_TX_SIGNER_ADDRESS=0x...
+ETH_TX_SIGNER_SOCKET_PATH=/run/eth-tx-executor/signer.sock
+ETH_TX_SIGNER_KEY_BACKEND=keystore
+ETH_TX_SIGNER_KEYSTORE_PATH=/path/to/eth-signer-keystore.json
+ETH_TX_SIGNER_PASSWORD_FILE=/path/to/eth-signer-password
+ETH_TX_SIGNER_ALLOWED_TARGETS=0x...
+ETH_TX_SIGNER_ALLOWED_SELECTORS=0x8a62666c,0x5f413d10
+```
+
+The signer and service both enforce hard caps. Keep the policy caps in
+`ETH_TX_POLICY_*` and `ETH_TX_SIGNER_*` aligned before enabling broadcast.
+
+## Wire Contracts
+
+The direct transaction protocol name is `eth_unsigned_tx`.
+
+Canonical request type:
 
 ```text
 tx_executor::request::DirectRawTransactionRequest
 ```
 
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `attempt_id` | string or null | no | Idempotency/audit id from caller. If empty/missing, executor generates one. |
-| `chain_id` | integer | yes | Must match Kartal executor chain id. Mainnet is `1`. |
-| `from` | string | yes | Signer address expected by the executor. Must equal Kartal signer. |
-| `to` | string | yes | Target contract/address. For swaps, this is normally the router. |
-| `value` | decimal or hex quantity string | no | Native ETH value in wei. Defaults to `"0"`. |
-| `data` | hex bytes string | no | Prepared calldata. Defaults to `"0x"`. |
-| `gas_limit` | decimal or hex quantity string | yes | Hard gas limit for the transaction. |
-| `max_fee_per_gas` | decimal or hex quantity string | yes | EIP-1559 max fee per gas in wei. |
-| `max_priority_fee_per_gas` | decimal or hex quantity string | yes | EIP-1559 priority fee per gas in wei. |
-| `nonce` | decimal or hex quantity string or null | no | Optional caller-provided nonce. Prefer `null` so executor reserves. |
-| `bribe` | object or null | no | Priority-fee override metadata, described below. |
-| `simulation` | object or null | strongly recommended | Pre-submit simulation reference. |
-| `metadata` | object | strongly recommended | Caller audit trail and policy evidence. |
+Important request fields:
 
-All numeric transaction quantities are strings because they can exceed normal
-JSON integer precision. Decimal strings are preferred; hex quantity strings with
-`0x` are accepted by `tx_executor`.
+| Field | Meaning |
+| --- | --- |
+| `attempt_id` | Optional idempotency/audit id. If empty, the executor generates one. |
+| `chain_id` | Must match the configured executor chain id. Mainnet is `1`. |
+| `from` | Must match the configured signer address. |
+| `to` | Target contract/address. |
+| `value` | Native ETH value in wei. Defaults to zero. |
+| `data` | Prepared calldata. Defaults to `0x`. |
+| `gas_limit` | Hard gas limit. |
+| `max_fee_per_gas` | EIP-1559 max fee per gas in wei. |
+| `max_priority_fee_per_gas` | EIP-1559 priority fee per gas in wei. |
+| `nonce` | Optional caller nonce. Prefer `null` so the executor reserves it. |
+| `bribe` | Public priority-fee override metadata. |
+| `simulation` | Pre-submit simulation reference. Required by the default ETH policy. |
+| `metadata` | Caller audit trail and policy evidence. Preserved as JSON. |
 
-### Bribe Object
-
-In v1, `bribe` means the public EIP-1559 priority fee paid by the EOA
-transaction. Direct `block.coinbase` transfers and private bundle payments are
-not represented by this direct-raw protocol.
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `priority_fee_per_gas` | decimal or hex quantity string | yes | Requested priority fee per gas in wei. Executor uses the max of this and `max_priority_fee_per_gas`. |
-| `max_fee_per_gas` | decimal or hex quantity string or null | no | Optional max-fee override in wei. |
-
-The executor still enforces its configured hard caps after applying `bribe`.
-
-### Simulation Object
-
-Canonical type:
-
-```text
-tx_executor::request::SimulationReference
-```
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `block_number` | integer | yes | Block used for the final pre-submit simulation. |
-| `block_hash` | string or null | no | Block hash for audit/replay. |
-| `state_root` | string or null | no | State root when available. |
-| `expected_output_token` | string or null | no | Token expected from the transaction. |
-| `expected_output_amount` | string or null | no | Expected output raw amount. |
-| `min_output_amount` | string or null | no | Minimum acceptable output raw amount encoded into calldata/slippage. |
-| `metadata` | object | no | Extra simulation evidence. |
-
-The executor records this object but does not re-run route/slippage analysis.
-If simulation evidence is stale or missing, fix the caller-side planner.
-
-### Metadata Contract
-
-`metadata` is where alpha communicates why the transaction exists. Kartal and
-`tx_executor` treat it as audit data and must preserve it.
-
-Required for alpha priority exits:
-
-```json
-{
-  "wire_protocol": "eth_unsigned_tx",
-  "intent_kind": "priority_sell",
-  "executor_boundary": "kartal_eth_tx_executor",
-  "tx_prep_version": 1,
-  "strategy_name": "alpha11-03-live-v2-hold20-retry3-gasguard",
-  "strategy_run_id": "alpha11-live-...",
-  "trade_id": "trd_...",
-  "token_address": "0x...",
-  "pool_address": "0xtoken:0xpool",
-  "observed_block": 25128246,
-  "reason": "exit.mempool_liquidity_removal_signal",
-  "budget": {
-    "avoidable_loss_eth": "0.0084",
-    "max_total_fee_eth": "0.002",
-    "predicted_base_fee_gwei": "0.6",
-    "estimated_base_fee_cost_eth": "0.00015",
-    "max_priority_spend_eth": "0.00185",
-    "max_priority_fee_gwei": "3.5",
-    "max_fee_per_gas_gwei": "4.1",
-    "estimated_gas_used": 250000
-  },
-  "gas_plan": {
-    "label": "balanced",
-    "priority_fee_gwei": "2",
-    "max_fee_per_gas_gwei": "2.6",
-    "rank_position_p50": 25,
-    "gas_before_p50": 900000,
-    "likely_fits_at_p50": true,
-    "source": "eth_chain_server_gas_rank"
-  }
-}
-```
-
-Development rule: new planner facts go into `metadata`; new executor behavior
-requires a new protocol version or a typed request field.
-
-### Response
-
-Canonical type:
+Canonical response type:
 
 ```text
 tx_executor::types::SubmitDirectRawResult
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `attempt_id` | Attempt id accepted by executor. |
-| `status` | `received`, `rejected`, `signed`, `dry_run`, `broadcast`, or `broadcast_error`. |
-| `tx_hash` | Signed/broadcast tx hash when available. |
-| `from`, `to`, `nonce`, `gas_limit`, `max_fee_per_gas`, `max_priority_fee_per_gas` | Final transaction envelope values. |
-| `error` | Error text for rejected/broadcast-error outcomes. |
-| `elapsed_ms` | Executor-side elapsed time. |
+Response statuses are `received`, `rejected`, `signed`, `dry_run`,
+`broadcast`, and `broadcast_error`.
 
-Kartal maps validation/config problems to HTTP validation errors, auth failures
-to auth errors, and nonce/broadcast/RPC problems to network errors.
+The Unix-socket signer protocol schema is `eth_tx_signer_v1`, maintained in
+`tx_executor::signer::wire`.
 
-## Local Signer Wire Protocol
+## Commands
 
-When `unix_socket` signing is enabled, `tx_executor` talks to the local signer
-with newline-delimited JSON over a Unix socket. The schema name is
-`kartal_eth_signer_v1`, maintained in `tx_executor::signer::wire`.
+Run from `/home/nima/code/crypto/blockchains/eth/tx_executor`:
 
-Request kinds:
-
-| Kind | Payload |
-| --- | --- |
-| `status` | Returns signer address, chain id, and readiness. |
-| `sign_direct_raw` | Carries `PreparedDirectRawTransaction` after validation and nonce reservation. |
-
-Response kinds:
-
-| Kind | Payload |
-| --- | --- |
-| `status` | `SignerStatus` |
-| `signed` | signer address plus `SignedTransaction` |
-| `error` | signer-side rejection or signing error text |
-
-The signer must enforce its own allowlist and caps before returning a raw
-signed transaction. That gives us a second policy boundary if Kartal is
-misconfigured or an authorized caller submits an unexpected transaction.
-
-### Example Priority Sell
-
-```json
-{
-  "attempt_id": "trd_mpce88f0_plrm_f-priority-exit-25128246",
-  "chain_id": 1,
-  "from": "0x1111111111111111111111111111111111111111",
-  "to": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
-  "value": "0",
-  "data": "0x...",
-  "gas_limit": "180000",
-  "max_fee_per_gas": "50000000000",
-  "max_priority_fee_per_gas": "40000000000",
-  "nonce": null,
-  "bribe": {
-    "priority_fee_per_gas": "40000000000",
-    "max_fee_per_gas": "50000000000"
-  },
-  "simulation": {
-    "block_number": 25128246,
-    "block_hash": "0x...",
-    "state_root": null,
-    "expected_output_token": "WETH",
-    "expected_output_amount": "10000000000000000",
-    "min_output_amount": "9000000000000000",
-    "metadata": {
-      "expected_recovery_eth": "0.01",
-      "would_revert": false
-    }
-  },
-  "metadata": {
-    "wire_protocol": "eth_unsigned_tx",
-    "intent_kind": "priority_sell",
-    "executor_boundary": "kartal_eth_tx_executor",
-    "tx_prep_version": 1,
-    "reason": "exit.mempool_liquidity_removal_signal"
-  }
-}
+```bash
+cargo test
+cargo run -p tx_executor --example submit_direct_raw -- --dry-run
+cargo run -p tx_executor_service --bin run_eth_tx_executor
+cargo run -p tx_executor_signer --bin run_eth_tx_signer
+cargo run -p tx_executor_signer --bin import_eth_tx_signer_keystore
 ```
 
-### Development Rules
+Build the deployable service binaries:
 
-- `tx_executor` owns request/response shape and validation semantics.
-- Kartal owns HTTP auth, hosting, config loading, and mapping executor errors
-  into HTTP errors.
-- Alpha owns route choice, calldata construction, slippage, value budget,
-  gas-rank selection, and metadata.
-- Never add route/slippage/risk policy to `tx_executor`.
-- Never let Kartal mutate `metadata`, except to preserve or wrap it in storage.
-- Use `nonce = null` for normal live flow; manual nonce is for recovery tooling.
-- Every real-capital request must include simulation evidence and value-cap
-  metadata.
-- Live broadcast requires explicit Kartal config:
-  `ETH_TX_EXECUTOR_BROADCAST_MODE=broadcast` and signer key availability. The
-  raw `public_mempool` value remains accepted for direct public submission, but
-  `broadcast` is the operator-facing name for public submission.
+```bash
+cargo build --release -p tx_executor_service -p tx_executor_signer
+```
+
+Equivalent absolute-manifest form:
+
+```bash
+cargo test --manifest-path /home/nima/code/crypto/blockchains/eth/tx_executor/Cargo.toml
+cargo run --manifest-path /home/nima/code/crypto/blockchains/eth/tx_executor/Cargo.toml -p tx_executor_service --bin run_eth_tx_executor
+```
+
+## Development Rules
+
+- Keep route construction, quote selection, strategy policy, and gas-rank
+  decisions outside this workspace.
+- Add new executor behavior through typed request/response fields or a new wire
+  protocol version; put caller evidence in `metadata`.
+- Use `nonce = null` for normal live flow; manual nonces are recovery tooling.
+- Keep live broadcast behind explicit `ETH_TX_EXECUTOR_BROADCAST_MODE=broadcast`
+  plus signer key availability.
+- Treat `broadcast` as RPC acceptance, not settlement. Receipt watching and
+  position reconciliation stay upstream.
 
 ## Where To Look First
 
 | Need | Start here |
 | --- | --- |
-| Public API and exports | `src/lib.rs` |
-| Submit flow | `src/executor.rs`, `src/service.rs` |
-| Request/response types | `src/request.rs`, `src/types.rs` |
-| Validation | `src/validation.rs` |
-| Nonce/signing/broadcast | `src/nonce.rs`, `src/signer.rs`, `src/broadcast.rs` |
-| Standalone example | `examples/submit_direct_raw.rs` |
-| Kartal HTTP host | `/home/nima/code/crypto/kartal/src/eth_tx/` |
-
-## Tests And Commands
-
-```bash
-cargo run --manifest-path tx_executor/Cargo.toml --example submit_direct_raw -- --dry-run
-cargo test --manifest-path tx_executor/Cargo.toml
-```
-
-Live broadcast must be explicit:
-
-```bash
-cargo run --manifest-path tx_executor/Cargo.toml --example submit_direct_raw -- --broadcast
-```
-
-## Current Hazards
-
-- This crate starts from prepared calldata. If route/quote/slippage decisions
-  are missing, fix the planner or strategy adapter, not the executor.
-- Rough block-position and gas-before estimates belong in
-  `alpha/block_tx_rank`, before the final transaction reaches this crate.
-- Direct EOA priority fee is the normal validator/builder payment. Explicit
-  `block.coinbase` payments require contract calldata and are not direct raw
-  mode.
-- A submitted payload should include simulator block/hash and expected/min
-  output metadata so execution can be traced back to the off-chain decision.
-- A `broadcast` result means the raw transaction was accepted by the RPC path,
-  not that the trade filled. Alpha still needs a receipt watcher before real
-  deployments can be considered settled.
+| Core public API | `tx_executor/src/lib.rs` |
+| Core submit flow | `tx_executor/src/executor.rs`, `tx_executor/src/service.rs` |
+| Request/response types | `tx_executor/src/request/`, `tx_executor/src/types.rs` |
+| Validation | `tx_executor/src/validation/` |
+| Nonce/signing/broadcast | `tx_executor/src/nonce.rs`, `tx_executor/src/signer/`, `tx_executor/src/broadcast.rs` |
+| HTTP routes | `tx_executor_service/src/server.rs` |
+| ETH policy | `tx_executor_service/src/policy.rs`, `tx_executor_service/src/repository.rs` |
+| Signer daemon | `tx_executor_signer/src/server.rs`, `tx_executor_signer/src/policy.rs` |
+| Keystore importer | `tx_executor_signer/src/bin/import_eth_tx_signer_keystore.rs` |
