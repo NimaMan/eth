@@ -13,9 +13,10 @@ pub mod token;
 
 pub use address::AddressProcessedTxProvider;
 pub use block::{
-    load_cached_processed_block, load_processed_block, load_processed_block_range,
-    load_processed_block_range_with_options, prune_processed_block_disk_cache,
-    should_prune_processed_block_disk_cache, CompactProcessedTransaction, LoadedProcessedBlock,
+    bench_deserialize_block, bench_serialize_block, load_cached_processed_block,
+    load_processed_block, load_processed_block_range, load_processed_block_range_with_options,
+    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache, CacheFieldSet,
+    CacheSerCodec, CompactProcessedTransaction, LoadedProcessedBlock,
     LoadedProcessedBlockWithMetrics, ProcessedBlockAddressIndexError,
     ProcessedBlockAddressIndexFailurePolicy, ProcessedBlockAddressIndexWrite,
     ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,

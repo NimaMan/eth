@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
-use tx_processor::processed_tx_provider::block::disk_cache::store::ProcessedBlockDiskCacheEntry;
+use tx_processor::processed_tx_provider::block::disk_cache::store::{
+    cache_file_name, ProcessedBlockDiskCacheEntry,
+};
 
 fn main() -> eyre::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -16,7 +18,7 @@ fn main() -> eyre::Result<()> {
     let target_token = args[3].to_lowercase();
     let weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
-    let path = cache_root.join(format!("{}.pblock.zst", block_number));
+    let path = cache_root.join(cache_file_name(block_number));
     let bytes = fs::read(&path)?;
     let decoded = zstd::stream::decode_all(bytes.as_slice())?;
     let entry: ProcessedBlockDiskCacheEntry = bincode::deserialize(&decoded)?;

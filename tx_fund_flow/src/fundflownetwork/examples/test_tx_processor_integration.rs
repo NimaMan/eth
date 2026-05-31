@@ -18,9 +18,13 @@ async fn main() -> eyre::Result<()> {
     let provider = ProcessedTxProvider::new(&datadir)?;
     println!("✅ TX Processor initialized");
 
-    // Test with the working transaction we know processes successfully
-    let tx_hash =
-        B256::from_str("0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7")?;
+    let tx_hash_arg = std::env::args()
+        .nth(1)
+        .or_else(|| std::env::var("TX_HASH").ok())
+        .unwrap_or_else(|| {
+            "0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7".to_string()
+        });
+    let tx_hash = B256::from_str(tx_hash_arg.trim_start_matches("0x"))?;
     println!("\n📊 Processing transaction: {}", tx_hash);
 
     // Process transaction with tx_processor
@@ -60,8 +64,8 @@ async fn main() -> eyre::Result<()> {
                             println!(
                                 "   {}. {} → {}: {:.6} ETH ({:?})",
                                 i + 1,
-                                format!("{:?}", movement.from)[..10].to_string(),
-                                format!("{:?}", movement.to)[..10].to_string(),
+                                format!("{:?}", movement.from),
+                                format!("{:?}", movement.to),
                                 amount_eth,
                                 movement.movement_type
                             );
@@ -75,9 +79,9 @@ async fn main() -> eyre::Result<()> {
                             println!(
                                 "   {}. Token {}: {} → {} (amount: {})",
                                 i + 1,
-                                format!("{:?}", movement.token_address)[..10].to_string(),
-                                format!("{:?}", movement.from)[..10].to_string(),
-                                format!("{:?}", movement.to)[..10].to_string(),
+                                format!("{:?}", movement.token_address),
+                                format!("{:?}", movement.from),
+                                format!("{:?}", movement.to),
                                 movement.amount
                             );
                         }

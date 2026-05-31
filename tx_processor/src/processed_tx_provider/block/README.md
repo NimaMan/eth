@@ -94,3 +94,127 @@ It fills missing processed-block cache files through
 cache, the normal backfill path reads it and does not rewrite
 `reth_index/address_to_blocks`. Use `--skip-address-block-index` only for a
 deliberate cache-only refresh of missing blocks.
+
+## Stored vs Consumed Fields
+
+The cache persists a `CompactProcessedTransaction` per transaction (empty
+collections and zero-only values are already elided). Not every field it can
+carry is read back: the cache exists to serve **token tracking and token-related
+analysis**, which consume the *extracted event* data, not raw execution traces.
+
+A repo-wide consumer audit (eth_token, tx_fund_flow, eth_chain_server,
+mempool_processor, alpha, risk_atlas) classified each non-trivial field as
+**consumed** (read off a cached transaction to drive output) or **never read**.
+
+Not persisted by the v3 payload (`strip_unpersisted_entry_fields` in `store.rs`):
+
+| Field | Why it is dropped |
+| --- | --- |
+| `input` (raw calldata) | The single largest field. **Truncated to its 4-byte selector** (not fully removed): the two cache-side readers only threshold-check it (`len >= 4` route classification, `!is_empty()` direct-call trigger), which the selector preserves exactly. The direct `transferFrom` `(from,to,amount)` eth_token used to decode from calldata now comes from the trace-derived `internal_erc20_calls` (depth-0 entry), which is independent of `input` and kept. Full calldata is recoverable from the reth DB by `(block, tx_index)` / hash. |
+| `struct_logs` | Per-opcode EVM trace. Not even populated on the production path; no token consumer reads it. |
+| `access_list` | EIP-2930 access list. Never read off a cached tx (the identically-named field on reth/alloy tx types is unrelated). |
+| `blob_versioned_hashes` | EIP-4844 blob hashes. Never read off a cached tx. |
+| `erc1155_contracts` | ERC-1155 contract set. Never read (the token path is ERC-20 / liquidity focused). |
+
+Consumed — must stay (representative read sites):
+
+| Field | Consumer |
+| --- | --- |
+| `erc20_transfers`, `eth_transfers`, `internal_transactions`, `internal_erc20_calls` | eth_token network ingest + PnL |
+| `erc721_transfers` | eth_token uniswap v3/v4 position tracking |
+| `erc1155_transfers` | **tx_fund_flow** fund-flow extraction (looks droppable, is not) |
+| `unique_addresses`, `erc20_contracts`, `address_balance_changes` | eth_token touched-address / balance tracking |
+| Uniswap v2/v3/v4 swap/mint/burn/modify/initialize/pool events | eth_token pool + candidate tracking |
+| `uniswap_v4_protocol_fee_updates`, `uniswap_v4_dynamic_lp_fee_updates`, `uniswap_v4_protocol_fee_controller_updates` | **eth_token** v4 pool state (look droppable, are not) |
+| authority/ownership/role/trading events, approvals, `permit2_events` | eth_token authority + replay triggers |
+| `fees`, `bribe_amount`, `value`, `status`, `from/to`, `tx_type`, `actions` | eth_token + network ingest |
+| `latest_states`, `other_events` | eth_token token-state / replay triggers |
+
+`input` content IS read by mempool_processor, but on *pending mempool* transactions
+(not cache-loaded blocks), so dropping it from the cache does not affect that path.
+
+The `Lean` benchmark field set drops exactly these v3 fields. Dropping `input`
+is by far the largest saving (~24% of compressed size); `struct_logs` is ~0
+because it is not populated.
+
+## Format Benchmark
+
+`tx_processor/examples/blocks/cache/benchmark_cache_formats.rs` measures candidate
+on-disk formats against the production codec **without re-running EVM replay**: it
+reads existing cache files, re-encodes each block under each candidate, and
+reports space, compress time, and decompress+decode time. Candidates combine a
+field set (`Full` vs `Lean`) x codec (`BincodeJson` production vs `Msgpack`) with
+a zstd level sweep and a trained-dictionary variant. The candidate codecs are
+exposed from the store as `bench_serialize_block` / `bench_deserialize_block`.
+
+```bash
+cargo run -p tx_processor --release --example benchmark_cache_formats -- \
+  --cache-dir /home/nima/storage/samsung8tb/ethereum/processed-block-cache --count 1000
+```
+
+Round-trip correctness is enforced per candidate via an order-independent
+fingerprint over the consumed fields, so a candidate that would lose data a
+consumer reads fails loudly instead of reporting a false saving.
+
+### v3 result (what shipped)
+
+The v3 payload drops `input` + the four never-read fields and raises zstd to
+level 9. Measured on recent mainnet blocks vs the v2/zstd-3 baseline:
+
+| Format | avg bytes/block | vs v2 baseline |
+| --- | --- | --- |
+| v2 baseline (full, zstd-3) | ~198,950 | 1.00 |
+| v3 fields only, still zstd-3 | ~171,500 | 0.86 (-14%) |
+| **v3 (fields + zstd-9) — shipped** | **~154,600** | **0.78 (-22%)** |
+
+Read (decode) time is unchanged-to-faster (~1 ms/block decode; less data to
+read). Write cost rises only modestly (~tens of ms/block at zstd-9; the live
+path writes one block per ~12 s and backfill is parallel).
+
+**Operational note:** v3 uses a new filename (`<block>.v3.pblock.zst`), so the
+existing ~285k `.v2.` files are orphaned and will not be read. They should be
+pruned, and the range re-filled under v3 via `refresh_disk_cache` (or left to
+re-fill on demand). No detection is lost: eth_token's direct-`transferFrom`
+record now sources `(from,to,amount)` from `internal_erc20_calls` instead of raw
+calldata, and the route/trigger checks are preserved by the 4-byte selector.
+
+### Full candidate matrix (baseline = on-disk v2 = bincode+zstd-3)
+
+Ratios are space vs the production baseline (1.00). They are stable across
+sample size; absolute baseline was ~188-199 KB/block.
+
+| Candidate | space vs base | write (ms/block) | read decode (ms/block) |
+| --- | --- | --- | --- |
+| baseline (per-block, zstd-3) | 1.00 | ~ | ~2-3 |
+| per-block, zstd-9 | 0.91 | ~30-50 | ~2 |
+| per-block, zstd-19 | 0.84 | ~700-1300 | ~2 |
+| per-block, zstd-19 + trained dict | 0.80 | ~800-1500 | ~1 |
+| **lean** per-block, zstd-9 | 0.90 | ~30 | ~1 |
+| lean per-block, zstd-19 + dict | 0.80 | ~1000+ | ~1 |
+| chunk-64 archive, zstd-9 | 0.82 | ~30-60 | ~1 (range) |
+| chunk-256 archive, zstd-9 | 0.82 | ~60 | ~1 (range) |
+
+Findings:
+
+- **Field-dropping (`Lean`) saves ~1%.** The fields it drops are tiny in the
+  live cache; in particular `struct_logs` are not populated on the production
+  path (uncompressed payload barely changes: Full ~1.38 MB vs Lean ~1.376 MB per
+  block). The big space target we expected is simply not present in the data.
+- **Compression level is the main per-block lever:** zstd-3->9 ~ -10%, ->19
+  ~ -16%, +trained dictionary ~ -20%. Read (decode) time is flat regardless of
+  level - higher compression is essentially free on reads; only write CPU rises
+  (zstd-19 is ~1 s/block, zstd-9 ~ tens of ms).
+- **Chunked archives exploit cross-block redundancy:** compressing 64 consecutive
+  blocks as one zstd frame reaches ~0.82 at level 9 - matching per-block zstd-19
+  at a fraction of the write cost. Gains saturate by ~64 blocks/archive. Tradeoff:
+  great for sequential range reads, but a random single-block read must
+  decompress the whole archive, and per-block invalidation is lost.
+- **MessagePack is not viable** without type changes: alloy types use a
+  human-readable (string) vs binary (bytes) serde split, so a non-self-describing
+  binary codec fails to round-trip (`byte array, expected a string`).
+- **No ~10x is available.** The payload is already ~7:1 compressed and dominated
+  by event data that consumers read and we cannot drop. The realistic ceiling
+  with these levers is ~20% per-block (level+dict) or ~25-30% via chunked
+  archives at high level. The cheap, zero-read-regression win is raising the
+  per-block zstd level (and adopting `Lean`).
+
