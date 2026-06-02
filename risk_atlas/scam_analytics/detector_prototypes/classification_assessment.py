@@ -89,7 +89,7 @@ class PoolAssessment:
 
 
 def load_live_pools(client: ApiClient) -> list[dict[str, Any]]:
-    data = client.get("/live/pools")
+    data = client.get("/api/v1/eth/live-token-tracker/pools")
     return list(data.get("pools") or [])
 
 

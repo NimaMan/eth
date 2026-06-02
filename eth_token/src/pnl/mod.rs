@@ -17,7 +17,7 @@ struct TxAddressStage {
     denom_in: U256,
     denom_out: U256,
     native_fee: U256,
-    native_bribe: U256,
+    native_priority_fee: U256,
     block_number: u64,
     entries: Vec<PoolPnlEntry>,
 }
@@ -52,18 +52,22 @@ impl TxAddressStage {
         position.denom_in_raw = position.denom_in_raw.saturating_add(self.denom_in);
         position.denom_out_raw = position.denom_out_raw.saturating_add(self.denom_out);
         position.native_fee_raw = position.native_fee_raw.saturating_add(self.native_fee);
-        position.native_bribe_raw = position.native_bribe_raw.saturating_add(self.native_bribe);
+        position.native_priority_fee_raw = position
+            .native_priority_fee_raw
+            .saturating_add(self.native_priority_fee);
         if self.block_number > 0 {
             if position.first_block.is_none() {
                 position.first_block = Some(self.block_number);
             }
             position.latest_block = Some(self.block_number);
         }
-        position.movement_count =
-            position.movement_count.saturating_add(self.entries.len() as u64);
+        position.movement_count = position
+            .movement_count
+            .saturating_add(self.entries.len() as u64);
     }
 }
 
+pub mod accounting;
 pub mod conservation;
 pub mod export;
 pub mod model;
@@ -83,10 +87,7 @@ static KNOWN_INFRASTRUCTURE: OnceLock<HashSet<String>> = OnceLock::new();
 fn known_infrastructure() -> &'static HashSet<String> {
     KNOWN_INFRASTRUCTURE.get_or_init(|| {
         use reth_chain_query::common_addresses::{POOL_FACTORIES, ROUTERS};
-        let mut set: HashSet<String> = ROUTERS
-            .values()
-            .map(|addr| format!("{addr:#x}"))
-            .collect();
+        let mut set: HashSet<String> = ROUTERS.values().map(|addr| format!("{addr:#x}")).collect();
         if let Some(pool_manager) = POOL_FACTORIES.get("univ4_pool_manager") {
             set.insert(format!("{pool_manager:#x}"));
         }
@@ -267,10 +268,21 @@ impl PoolPnlTracker {
         }
 
         if !transaction.fees.tx_fee.is_zero() {
-            self.record_native_fee(&mut stage, &transaction.from_address, transaction.fees.tx_fee, transaction);
+            self.record_native_fee(
+                &mut stage,
+                &transaction.from_address,
+                transaction.fees.tx_fee,
+                transaction,
+            );
         }
         if !transaction.bribe_amount.is_zero() {
-            self.record_native_bribe(&mut stage, &transaction.from_address, transaction.bribe_amount, transaction);
+            // tx_processor currently exposes the public EIP-1559 priority fee as bribe_amount.
+            self.record_native_priority_fee(
+                &mut stage,
+                &transaction.from_address,
+                transaction.bribe_amount,
+                transaction,
+            );
         }
 
         self.commit_tx_stage(stage);
@@ -420,14 +432,42 @@ impl PoolPnlTracker {
         }
 
         {
-            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(from.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.token_out = s.token_out.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, log_index, from, PoolPnlEntryKind::TokenOut, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                log_index,
+                from,
+                PoolPnlEntryKind::TokenOut,
+                U256::ZERO,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
         {
-            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(to.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.token_in = s.token_in.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, log_index, to, PoolPnlEntryKind::TokenIn, amount, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                log_index,
+                to,
+                PoolPnlEntryKind::TokenIn,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
     }
 
@@ -459,14 +499,42 @@ impl PoolPnlTracker {
         }
 
         {
-            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(from.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.denom_out = s.denom_out.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, log_index, from, PoolPnlEntryKind::DenomOut, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                log_index,
+                from,
+                PoolPnlEntryKind::DenomOut,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
         {
-            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(to.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.denom_in = s.denom_in.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, log_index, to, PoolPnlEntryKind::DenomIn, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                log_index,
+                to,
+                PoolPnlEntryKind::DenomIn,
+                U256::ZERO,
+                U256::ZERO,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
     }
 
@@ -480,7 +548,13 @@ impl PoolPnlTracker {
             if transfer.amount.is_zero() {
                 continue;
             }
-            self.record_native_denom_transfer(stage, &transfer.from_address, &transfer.to_address, transfer.amount, transaction);
+            self.record_native_denom_transfer(
+                stage,
+                &transfer.from_address,
+                &transfer.to_address,
+                transfer.amount,
+                transaction,
+            );
             transfer_count = transfer_count.saturating_add(1);
         }
         for transfer in &transaction.internal_transactions {
@@ -490,7 +564,13 @@ impl PoolPnlTracker {
             let Some(to_address) = transfer.to_address else {
                 continue;
             };
-            self.record_native_denom_transfer(stage, &transfer.from_address, &to_address, transfer.value, transaction);
+            self.record_native_denom_transfer(
+                stage,
+                &transfer.from_address,
+                &to_address,
+                transfer.value,
+                transaction,
+            );
             transfer_count = transfer_count.saturating_add(1);
         }
         transfer_count
@@ -523,14 +603,42 @@ impl PoolPnlTracker {
         }
 
         {
-            let s = stage.entry(from.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(from.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.denom_out = s.denom_out.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, None, from, PoolPnlEntryKind::NativeDenomOut, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                None,
+                from,
+                PoolPnlEntryKind::NativeDenomOut,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
         {
-            let s = stage.entry(to.clone()).or_insert_with(|| TxAddressStage::new(block));
+            let s = stage
+                .entry(to.clone())
+                .or_insert_with(|| TxAddressStage::new(block));
             s.denom_in = s.denom_in.saturating_add(amount);
-            s.entries.push(PoolPnlEntry::new(transaction, None, to, PoolPnlEntryKind::NativeDenomIn, U256::ZERO, U256::ZERO, amount, U256::ZERO, U256::ZERO, U256::ZERO, pool_direct));
+            s.entries.push(PoolPnlEntry::new(
+                transaction,
+                None,
+                to,
+                PoolPnlEntryKind::NativeDenomIn,
+                U256::ZERO,
+                U256::ZERO,
+                amount,
+                U256::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                pool_direct,
+            ));
         }
     }
 
@@ -544,12 +652,26 @@ impl PoolPnlTracker {
         let addr = address_string(address);
         let block = transaction.block_number;
         self.conservation.native_fee_raw = self.conservation.native_fee_raw.saturating_add(amount);
-        let s = stage.entry(addr.clone()).or_insert_with(|| TxAddressStage::new(block));
+        let s = stage
+            .entry(addr.clone())
+            .or_insert_with(|| TxAddressStage::new(block));
         s.native_fee = s.native_fee.saturating_add(amount);
-        s.entries.push(PoolPnlEntry::new(transaction, None, addr, PoolPnlEntryKind::NativeFee, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, amount, U256::ZERO, false));
+        s.entries.push(PoolPnlEntry::new(
+            transaction,
+            None,
+            addr,
+            PoolPnlEntryKind::NativeFee,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            amount,
+            U256::ZERO,
+            false,
+        ));
     }
 
-    fn record_native_bribe(
+    fn record_native_priority_fee(
         &mut self,
         stage: &mut BTreeMap<String, TxAddressStage>,
         address: &Address,
@@ -558,11 +680,27 @@ impl PoolPnlTracker {
     ) {
         let addr = address_string(address);
         let block = transaction.block_number;
-        self.conservation.native_bribe_raw =
-            self.conservation.native_bribe_raw.saturating_add(amount);
-        let s = stage.entry(addr.clone()).or_insert_with(|| TxAddressStage::new(block));
-        s.native_bribe = s.native_bribe.saturating_add(amount);
-        s.entries.push(PoolPnlEntry::new(transaction, None, addr, PoolPnlEntryKind::NativeBribe, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, U256::ZERO, amount, false));
+        self.conservation.native_priority_fee_raw = self
+            .conservation
+            .native_priority_fee_raw
+            .saturating_add(amount);
+        let s = stage
+            .entry(addr.clone())
+            .or_insert_with(|| TxAddressStage::new(block));
+        s.native_priority_fee = s.native_priority_fee.saturating_add(amount);
+        s.entries.push(PoolPnlEntry::new(
+            transaction,
+            None,
+            addr,
+            PoolPnlEntryKind::NativePriorityFee,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            amount,
+            false,
+        ));
     }
 
     fn push_entry(&mut self, entry: PoolPnlEntry) {
@@ -602,12 +740,12 @@ impl PoolPnlTracker {
             self.denom_decimals,
         );
         let native_fee = scaled_units(position.native_fee_raw, 18);
-        let native_bribe = scaled_units(position.native_bribe_raw, 18);
+        let native_priority_fee = scaled_units(position.native_priority_fee_raw, 18);
         let marked_token_value_denom = mark_price_denom_per_token
             .and_then(|price| Decimal::try_from(price).ok())
             .map(|price| token_balance * price);
         let native_costs = if self.denom_tracks_native_eth() {
-            native_fee + native_bribe
+            native_fee + native_priority_fee
         } else {
             Decimal::ZERO
         };
@@ -619,11 +757,11 @@ impl PoolPnlTracker {
             token_balance_raw: signed_raw_string(position.token_in_raw, position.token_out_raw),
             denom_cashflow_raw: signed_raw_string(position.denom_in_raw, position.denom_out_raw),
             native_fee_raw: position.native_fee_raw.to_string(),
-            native_bribe_raw: position.native_bribe_raw.to_string(),
+            native_priority_fee_raw: position.native_priority_fee_raw.to_string(),
             token_balance,
             denom_cashflow,
             native_fee,
-            native_bribe,
+            native_priority_fee,
             marked_token_value_denom,
             pnl_proxy_denom,
             token_in_raw: position.token_in_raw.to_string(),
@@ -648,7 +786,8 @@ pub struct PoolPnlConservationTotals {
     pub pool_denom_in_raw: U256,
     pub pool_denom_out_raw: U256,
     pub native_fee_raw: U256,
-    pub native_bribe_raw: U256,
+    #[serde(default, alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: U256,
     pub token_transfer_count: u64,
     pub denom_transfer_count: u64,
 }
@@ -677,7 +816,8 @@ pub struct AddressPoolPosition {
     pub denom_in_raw: U256,
     pub denom_out_raw: U256,
     pub native_fee_raw: U256,
-    pub native_bribe_raw: U256,
+    #[serde(default, alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: U256,
     pub first_block: Option<u64>,
     pub latest_block: Option<u64>,
     pub movement_count: u64,
@@ -692,7 +832,7 @@ impl AddressPoolPosition {
             denom_in_raw: U256::ZERO,
             denom_out_raw: U256::ZERO,
             native_fee_raw: U256::ZERO,
-            native_bribe_raw: U256::ZERO,
+            native_priority_fee_raw: U256::ZERO,
             first_block: None,
             latest_block: None,
             movement_count: 0,
@@ -724,8 +864,8 @@ impl AddressPoolPosition {
         self.touch(block_number);
     }
 
-    fn record_native_bribe(&mut self, amount: U256, block_number: u64) {
-        self.native_bribe_raw = self.native_bribe_raw.saturating_add(amount);
+    fn record_native_priority_fee(&mut self, amount: U256, block_number: u64) {
+        self.native_priority_fee_raw = self.native_priority_fee_raw.saturating_add(amount);
         self.touch(block_number);
     }
 
@@ -744,11 +884,13 @@ pub struct AddressPoolPnlSummary {
     pub token_balance_raw: String,
     pub denom_cashflow_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    #[serde(alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: String,
     pub token_balance: Decimal,
     pub denom_cashflow: Decimal,
     pub native_fee: Decimal,
-    pub native_bribe: Decimal,
+    #[serde(alias = "native_bribe")]
+    pub native_priority_fee: Decimal,
     pub marked_token_value_denom: Option<Decimal>,
     pub pnl_proxy_denom: Option<Decimal>,
     pub token_in_raw: String,
@@ -774,7 +916,8 @@ pub struct PoolPnlEntry {
     pub denom_in_raw: String,
     pub denom_out_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    #[serde(alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: String,
     pub pool_direct: bool,
 }
 
@@ -789,7 +932,7 @@ impl PoolPnlEntry {
         denom_in_raw: U256,
         denom_out_raw: U256,
         native_fee_raw: U256,
-        native_bribe_raw: U256,
+        native_priority_fee_raw: U256,
         pool_direct: bool,
     ) -> Self {
         Self {
@@ -805,7 +948,7 @@ impl PoolPnlEntry {
             denom_in_raw: denom_in_raw.to_string(),
             denom_out_raw: denom_out_raw.to_string(),
             native_fee_raw: native_fee_raw.to_string(),
-            native_bribe_raw: native_bribe_raw.to_string(),
+            native_priority_fee_raw: native_priority_fee_raw.to_string(),
             pool_direct,
         }
     }
@@ -821,7 +964,8 @@ pub enum PoolPnlEntryKind {
     NativeDenomIn,
     NativeDenomOut,
     NativeFee,
-    NativeBribe,
+    #[serde(alias = "native_bribe")]
+    NativePriorityFee,
 }
 
 impl PoolPnlEntryKind {
@@ -834,7 +978,7 @@ impl PoolPnlEntryKind {
             Self::NativeDenomIn => "native_denom_in",
             Self::NativeDenomOut => "native_denom_out",
             Self::NativeFee => "native_fee",
-            Self::NativeBribe => "native_bribe",
+            Self::NativePriorityFee => "native_priority_fee",
         }
     }
 }
@@ -856,7 +1000,10 @@ fn scaled_signed_balance(incoming: U256, outgoing: U256, decimals: u8) -> Decima
 }
 
 fn scaled_units(value: U256, decimals: u8) -> Decimal {
-    let raw = value.to_string().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let raw = value
+        .to_string()
+        .parse::<Decimal>()
+        .unwrap_or(Decimal::ZERO);
     let divisor = Decimal::TEN
         .checked_powu(u64::from(decimals))
         .unwrap_or(Decimal::MAX);
@@ -1071,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn weth_pool_pnl_proxy_subtracts_native_fees_and_bribes() {
+    fn weth_pool_pnl_proxy_subtracts_native_fees_and_priority_fees() {
         let mut tracker = TokenPnlTracker::default();
         let mut tx = tx();
         tx.fees = TransactionFees::new(U256::from(10), 21_000, 21_000);
@@ -1102,8 +1249,14 @@ mod tests {
             .expect("fee payer summary");
 
         assert_eq!(summary.denom_cashflow, Decimal::from(-1));
-        assert_eq!(summary.native_fee, Decimal::from_str("0.00000000000021").unwrap());
-        assert_eq!(summary.native_bribe, Decimal::from_str("0.000000000000000007").unwrap());
+        assert_eq!(
+            summary.native_fee,
+            Decimal::from_str("0.00000000000021").unwrap()
+        );
+        assert_eq!(
+            summary.native_priority_fee,
+            Decimal::from_str("0.000000000000000007").unwrap()
+        );
         assert_eq!(
             summary.pnl_proxy_denom.expect("pnl proxy"),
             Decimal::from_str("-1.000000000000210007").unwrap()

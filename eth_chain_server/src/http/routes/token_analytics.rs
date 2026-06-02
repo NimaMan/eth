@@ -79,11 +79,40 @@ pub(super) async fn risk_atlas_run(
     }
 }
 
-pub(super) async fn scammer_analytics() -> Result<warp::reply::Response, Infallible> {
-    Ok(json_response(
-        &views::scammer_analytics::payload(),
-        StatusCode::OK,
-    ))
+pub(super) async fn scammer_analytics(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    let mut payload = views::scammer_analytics::payload();
+    if let Some(object) = payload.as_object_mut() {
+        match state.risk_atlas.scammer_address_distribution(250).await {
+            Ok(Some(distribution)) => {
+                object.insert("address_distribution".to_string(), distribution);
+            }
+            Ok(None) => {
+                object.insert(
+                    "address_distribution".to_string(),
+                    json!({
+                        "summary": {},
+                        "buckets": [],
+                        "top_addresses": [],
+                        "error": "no token PnL run found"
+                    }),
+                );
+            }
+            Err(error) => {
+                object.insert(
+                    "address_distribution".to_string(),
+                    json!({
+                        "summary": {},
+                        "buckets": [],
+                        "top_addresses": [],
+                        "error": format!("failed to load token PnL address distribution: {error}")
+                    }),
+                );
+            }
+        }
+    }
+    Ok(json_response(&payload, StatusCode::OK))
 }
 
 pub(super) async fn get(

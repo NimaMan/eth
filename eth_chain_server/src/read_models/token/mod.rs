@@ -6,11 +6,11 @@ use eth_token::contract_analysis::{
 };
 use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::pnl::{AddressPoolPnlSummary, PoolPnlConservationSummary};
-use rust_decimal::Decimal;
 use eth_token::token_analytics::{
     build_historical_observations_for_token, TokenPoolCurrentObservation,
 };
 use eth_token::tracking::TrackedTokenStatus;
+use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::ranges::{RangeIndexJob, RangeIndexState};
@@ -120,11 +120,11 @@ pub struct TokenPoolPnlAddressView {
     pub token_balance_raw: String,
     pub denom_cashflow_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    pub native_priority_fee_raw: String,
     pub token_balance: f64,
     pub denom_cashflow: f64,
     pub native_fee: f64,
-    pub native_bribe: f64,
+    pub native_priority_fee: f64,
     pub token_in: f64,
     pub token_out: f64,
     pub denom_in: f64,
@@ -415,11 +415,11 @@ impl TokenPoolPnlAddressView {
             token_balance_raw: summary.token_balance_raw,
             denom_cashflow_raw: summary.denom_cashflow_raw,
             native_fee_raw: summary.native_fee_raw,
-            native_bribe_raw: summary.native_bribe_raw,
+            native_priority_fee_raw: summary.native_priority_fee_raw,
             token_balance: decimal_to_f64(summary.token_balance),
             denom_cashflow: decimal_to_f64(summary.denom_cashflow),
             native_fee: decimal_to_f64(summary.native_fee),
-            native_bribe: decimal_to_f64(summary.native_bribe),
+            native_priority_fee: decimal_to_f64(summary.native_priority_fee),
             realized_pnl_denom: realized_pnl_denom.map(decimal_to_f64),
             marked_token_value_denom: summary.marked_token_value_denom.map(decimal_to_f64),
             pnl_proxy_denom: summary.pnl_proxy_denom.map(decimal_to_f64),

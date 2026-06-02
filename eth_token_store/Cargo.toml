@@ -1,0 +1,34 @@
+[package]
+name = "eth_token_store"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+workspace = ".."
+
+[dependencies]
+eth_token = { path = "../eth_token" }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { version = "1.5.7", features = ["rlp"] }
+eyre.workspace = true
+reth_chain_query = { path = "../reth_chain_query" }
+tx_processor = { path = "../tx_processor" }
+
+[[example]]
+name = "inspect_pool_pnl_db"
+path = "examples/inspect_pool_pnl_db.rs"
+
+[[example]]
+name = "persist_uniswap_v2_pool_pnl"
+path = "examples/persist_uniswap_v2_pool_pnl.rs"
+
+[[example]]
+name = "run_historical_pnl"
+path = "examples/run_historical_pnl.rs"

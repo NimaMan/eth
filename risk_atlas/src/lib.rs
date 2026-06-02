@@ -11,11 +11,12 @@ pub mod atlas;
 pub mod config;
 pub mod db;
 pub mod ingest;
+pub mod scammer_analytics;
 
 pub use api::RiskAtlasPageView;
 pub use config::RiskAtlasConfig;
 pub use db::{
-    ActiveTargetSummary, DecisionQuestion, DistributionBucket, EventEvidenceRow,
-    ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow, ReviewExample,
-    RiskAtlasReader, RiskAtlasRun, RiskAtlasWriter,
+    ActiveTargetSummary, DecisionQuestion, DistributionBucket, EthTraderListParams,
+    EventEvidenceRow, ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow,
+    ReviewExample, RiskAtlasReader, RiskAtlasRun, RiskAtlasWriter,
 };

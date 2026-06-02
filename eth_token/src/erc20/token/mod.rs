@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tx_processor::ProcessedTransaction;
 
+use crate::custody::CustodyFinding;
 use crate::pnl::TokenPnlTracker;
 use crate::pools::balancer::{BalancerPool, BalancerPoolToken};
 use crate::pools::base::{BasePool, BasePoolConfig};
@@ -18,6 +19,7 @@ use crate::pools::pancakeswap::new_pancakeswap_v3_pool;
 use crate::pools::sushiswap::{new_sushiswap_v2_pool, new_sushiswap_v3_pool};
 use crate::pools::uniswap::v2::{UniswapV2Pool, UniswapV2TransactionEvents, UniswapV2TxContext};
 use crate::pools::uniswap::{v4_event_display_key, UniswapV3Pool, UniswapV4Pool};
+use crate::pools::PoolStateFlags;
 use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
 use crate::token_activity::TokenActivityTracker;
 use crate::utils::scale_raw_units;
@@ -62,6 +64,13 @@ pub struct ERC20Token {
     pub transfer_tracker: TokenTransferTracker,
     pub authority_tracker: TokenAuthorityTracker,
     pub status_manager: TokenStatusManager,
+    /// Custody-risk findings: privileged powers observed firing against a
+    /// holder's balance (e.g. the holder-balance backdoor drain that took our
+    /// vault's tokens). Orthogonal to `can_sell`/pool scam labels — this axis
+    /// records *who lost tokens*, not whether the swap path works. Derived only
+    /// from the ProcessedTransaction (the event-less internal `transferFrom`).
+    #[serde(default)]
+    pub custody_findings: Vec<CustodyFinding>,
     #[serde(default)]
     pub v2_pools: HashMap<String, UniswapV2Pool>,
     #[serde(default)]
@@ -111,6 +120,7 @@ impl ERC20Token {
             ),
             authority_tracker: TokenAuthorityTracker::new(DEFAULT_TOKEN_HISTORY_LIMIT),
             status_manager: TokenStatusManager::new(total_supply),
+            custody_findings: Vec::new(),
             v2_pools: HashMap::new(),
             v3_pools: HashMap::new(),
             v4_pools: HashMap::new(),
@@ -156,6 +166,36 @@ impl ERC20Token {
             || self.all_pool_bases().iter().any(|pool| {
                 pool.has_liquidity_removal() || pool.inferred_scam_mechanism().is_some()
             })
+    }
+
+    /// Custody-risk findings (powers observed firing against holder balances).
+    /// Orthogonal to `is_scam()`/sellability — these identify *who lost tokens*.
+    pub fn custody_findings(&self) -> &[CustodyFinding] {
+        &self.custody_findings
+    }
+
+    /// Total scaled token amount confiscated from `holder` across all recorded
+    /// custody findings (the victim's `from` side of an event-less drain). Use
+    /// this to zero a position held at that address once it has been drained.
+    pub fn custody_drained_amount(&self, holder: &str) -> f64 {
+        let holder = normalize_address(holder);
+        self.custody_findings
+            .iter()
+            .filter(|finding| {
+                finding
+                    .evidence
+                    .get("victim")
+                    .and_then(|v| v.as_str())
+                    .map(|v| normalize_address(v) == holder)
+                    .unwrap_or(false)
+            })
+            .filter_map(|finding| {
+                finding
+                    .evidence
+                    .get("amount_scaled")
+                    .and_then(|v| v.as_f64())
+            })
+            .sum()
     }
 
     pub fn scam_label(&self) -> Option<String> {

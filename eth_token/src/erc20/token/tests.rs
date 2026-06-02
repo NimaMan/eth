@@ -8,7 +8,7 @@ use crate::pools::{
     SUSHISWAP_V2_PROTOCOL,
 };
 use crate::token_analytics::{build_current_observation, ActiveObservationReason};
-use alloy_primitives::{address, b256, Address, U256};
+use alloy_primitives::{address, b256, Address, B256, U256};
 use tx_processor::tx_processor::data_models::{ERC20TransferEvent, UniswapV4SwapEvent};
 
 fn token() -> ERC20Token {
@@ -405,4 +405,283 @@ fn token_activity_tracks_eth_bribe_without_double_counting_tx() {
     assert_eq!(block.num_tx, 1);
     assert_eq!(block.total_bribe_eth, 0.025);
     assert_eq!(token.activity.total_bribe_eth(), 0.025);
+}
+
+#[test]
+fn classifies_buyer_token_confiscation_rug_from_event_less_transfer_from() {
+    use tx_processor::tx_processor::data_models::{Erc20CallKind, InternalErc20Call};
+
+    const TEN_POW_18: u128 = 1_000_000_000_000_000_000;
+    let token_addr = address!("0000000000000000000000000000000000000001");
+    let zero = Address::ZERO;
+    let helper = address!("00000000000000000000000000000000000000cc"); // backdoor caller
+    let dead = address!("000000000000000000000000000000000000dEaD");
+    let buyer_a = address!("00000000000000000000000000000000000000aa");
+    let buyer_b = address!("00000000000000000000000000000000000000bb");
+
+    let mut token = token();
+    token.create_uniswap_v2_pool(
+        "0x0000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000003",
+        BasePoolConfig {
+            denom_decimals: Some(18),
+            token1_is_denom: Some(true),
+            ..BasePoolConfig::new(18)
+        },
+        std::iter::empty::<&str>(),
+    );
+
+    // Establish each buyer's held balance via normal (event-emitting) mints.
+    let mut mint_tx = ProcessedTransaction::new(
+        B256::repeat_byte(0x11),
+        10,
+        1_700,
+        0,
+        zero,
+        Some(token_addr),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    mint_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: token_addr,
+        from_address: zero,
+        to_address: buyer_a,
+        amount: U256::from(100u128 * TEN_POW_18),
+        log_index: 1,
+    });
+    mint_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: token_addr,
+        from_address: zero,
+        to_address: buyer_b,
+        amount: U256::from(200u128 * TEN_POW_18),
+        log_index: 2,
+    });
+    token
+        .update_token_state_from_processed_transaction(&mint_tx)
+        .unwrap();
+
+    // Event-less drain: a helper calls transferFrom(buyer, dead, full balance)
+    // with NO matching Transfer event — the backdoor signature. Two buyers wiped
+    // in one tx is enough to classify the systematic rug.
+    let mut drain_tx = ProcessedTransaction::new(
+        B256::repeat_byte(0x22),
+        11,
+        1_712,
+        0,
+        helper,
+        Some(helper),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    for (victim, raw) in [
+        (buyer_a, 100u128 * TEN_POW_18),
+        (buyer_b, 200u128 * TEN_POW_18),
+    ] {
+        drain_tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: token_addr,
+            caller: helper,
+            kind: Erc20CallKind::TransferFrom,
+            from_address: victim,
+            to_address: dead,
+            amount: U256::from(raw),
+            depth: 1,
+            call_type: Some("CALL".to_string()),
+            succeeded: true,
+        });
+    }
+    token
+        .update_token_state_from_processed_transaction(&drain_tx)
+        .unwrap();
+
+    // Custody axis: one finding per wiped buyer, each attributing the loss.
+    assert_eq!(token.custody_findings().len(), 2);
+    assert!(
+        (token.custody_drained_amount("0x00000000000000000000000000000000000000aa") - 100.0).abs()
+            < 1e-6
+    );
+    assert!(
+        (token.custody_drained_amount("0x00000000000000000000000000000000000000bb") - 200.0).abs()
+            < 1e-6
+    );
+
+    // Aggregate axis: classified as the systematic buyer-confiscation rug, and
+    // the pool is marked unsellable.
+    assert_eq!(
+        token.scam_mechanism().as_deref(),
+        Some(crate::pools::SCAM_CUSTODY_BUYER_TOKEN_CONFISCATION)
+    );
+    assert_eq!(
+        token.scam_label().as_deref(),
+        Some("Backdoor Buyer-Token Confiscation Rug")
+    );
+    assert!(token.is_scam());
+    assert!(token
+        .all_pool_bases()
+        .iter()
+        .all(|pool| pool.has_liquidity_removal()));
+}
+
+#[test]
+fn single_event_less_drain_is_a_custody_finding_but_not_yet_the_rug() {
+    use tx_processor::tx_processor::data_models::{Erc20CallKind, InternalErc20Call};
+
+    const TEN_POW_18: u128 = 1_000_000_000_000_000_000;
+    let token_addr = address!("0000000000000000000000000000000000000001");
+    let zero = Address::ZERO;
+    let helper = address!("00000000000000000000000000000000000000cc");
+    let dead = address!("000000000000000000000000000000000000dEaD");
+    let buyer_a = address!("00000000000000000000000000000000000000aa");
+
+    let mut token = token();
+    token.create_uniswap_v2_pool(
+        "0x0000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000003",
+        BasePoolConfig {
+            denom_decimals: Some(18),
+            token1_is_denom: Some(true),
+            ..BasePoolConfig::new(18)
+        },
+        std::iter::empty::<&str>(),
+    );
+
+    let mut mint_tx = ProcessedTransaction::new(
+        B256::repeat_byte(0x11),
+        10,
+        1_700,
+        0,
+        zero,
+        Some(token_addr),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    mint_tx.erc20_transfers.push(ERC20TransferEvent {
+        token_address: token_addr,
+        from_address: zero,
+        to_address: buyer_a,
+        amount: U256::from(100u128 * TEN_POW_18),
+        log_index: 1,
+    });
+    token
+        .update_token_state_from_processed_transaction(&mint_tx)
+        .unwrap();
+
+    let mut drain_tx = ProcessedTransaction::new(
+        B256::repeat_byte(0x22),
+        11,
+        1_712,
+        0,
+        helper,
+        Some(helper),
+        U256::ZERO,
+        true,
+        0,
+        0,
+        Vec::new(),
+    );
+    drain_tx.internal_erc20_calls.push(InternalErc20Call {
+        token_address: token_addr,
+        caller: helper,
+        kind: Erc20CallKind::TransferFrom,
+        from_address: buyer_a,
+        to_address: dead,
+        amount: U256::from(100u128 * TEN_POW_18),
+        depth: 1,
+        call_type: Some("CALL".to_string()),
+        succeeded: true,
+    });
+    token
+        .update_token_state_from_processed_transaction(&drain_tx)
+        .unwrap();
+
+    // The single drain is still captured (custody finding + pool flagged
+    // unsellable via the holder-balance primitive)...
+    assert_eq!(token.custody_findings().len(), 1);
+    assert!(token
+        .all_pool_bases()
+        .iter()
+        .all(|pool| pool.has_liquidity_removal()));
+    // ...but it is not yet upgraded to the systematic buyer-confiscation rug
+    // (one victim < material count).
+    assert_eq!(
+        token.scam_mechanism().as_deref(),
+        Some(crate::pools::SCAM_HOLDER_BALANCE_BACKDOOR_DRAIN)
+    );
+}
+
+#[test]
+fn reconciled_holder_confiscations_are_persisted_and_classified() {
+    let mut token = token();
+    token.create_uniswap_v2_pool(
+        "0x0000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000003",
+        BasePoolConfig {
+            denom_decimals: Some(18),
+            token1_is_denom: Some(true),
+            ..BasePoolConfig::new(18)
+        },
+        std::iter::empty::<&str>(),
+    );
+
+    let victims = vec![
+        crate::custody::CustodyDrainVictim {
+            holder: "0x00000000000000000000000000000000000000aa".to_string(),
+            block_number: 12,
+            expected_balance: 100.0,
+            actual_balance: 0.0,
+            missing_balance: 100.0,
+            drained_fraction: 1.0,
+            expected_supply_share: 0.10,
+        },
+        crate::custody::CustodyDrainVictim {
+            holder: "0x00000000000000000000000000000000000000bb".to_string(),
+            block_number: 12,
+            expected_balance: 200.0,
+            actual_balance: 1.0,
+            missing_balance: 199.0,
+            drained_fraction: 0.995,
+            expected_supply_share: 0.20,
+        },
+    ];
+
+    let added = token.record_reconciled_holder_confiscations(&victims, None);
+
+    assert_eq!(added, 2);
+    assert_eq!(token.custody_findings().len(), 2);
+    assert!(
+        (token.custody_drained_amount("0x00000000000000000000000000000000000000aa") - 100.0).abs()
+            < 1e-6
+    );
+    assert!(
+        (token.custody_drained_amount("0x00000000000000000000000000000000000000bb") - 199.0).abs()
+            < 1e-6
+    );
+    assert_eq!(
+        token.custody_findings()[0]
+            .evidence
+            .get("source")
+            .and_then(|value| value.as_str()),
+        Some("balance_reconciliation")
+    );
+    assert_eq!(
+        token.scam_mechanism().as_deref(),
+        Some(crate::pools::SCAM_CUSTODY_BUYER_TOKEN_CONFISCATION)
+    );
+    assert!(token
+        .all_pool_bases()
+        .iter()
+        .all(|pool| pool.has_liquidity_removal()));
+
+    // Idempotent: already-recorded missing balance is not counted twice.
+    let added_again = token.record_reconciled_holder_confiscations(&victims, None);
+    assert_eq!(added_again, 0);
+    assert_eq!(token.custody_findings().len(), 2);
 }

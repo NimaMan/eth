@@ -1,8 +1,8 @@
 use warp::{Filter, Reply};
 
 use super::{
-    agent, alpha, backtest, health, live, mempool, ops, price, range, simulation, token_activity,
-    token_analytics, tx,
+    agent, alpha, backtest, eth_traders, health, live, mempool, ops, price, range, simulation,
+    token_activity, token_analytics, tx,
 };
 use crate::http::ServerState;
 use crate::read_models::activity::TokenActivityBlocksQuery;
@@ -320,11 +320,13 @@ pub(super) fn routes(
     let risk_atlas_scammer_analytics =
         warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "scammer-analytics")
             .and(warp::get())
+            .and(super::with_state(state.clone()))
             .and_then(token_analytics::scammer_analytics);
 
     let risk_atlas_scammer_analytics_alias =
         warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "scammer_analytics")
             .and(warp::get())
+            .and(super::with_state(state.clone()))
             .and_then(token_analytics::scammer_analytics);
 
     let risk_atlas_runs = warp::path!("api" / "v1" / "eth" / "analytics" / "risk-atlas" / "runs")
@@ -337,6 +339,23 @@ pub(super) fn routes(
             .and(warp::get())
             .and(super::with_state(state.clone()))
             .and_then(token_analytics::risk_atlas_run);
+
+    let eth_traders = warp::path!("api" / "v1" / "eth" / "traders")
+        .and(warp::get())
+        .and(warp::query::<eth_traders::EthTraderListQuery>())
+        .and(super::with_state(state.clone()))
+        .and_then(eth_traders::list);
+
+    let eth_trader = warp::path!("api" / "v1" / "eth" / "traders" / String)
+        .and(warp::get())
+        .and(super::with_state(state.clone()))
+        .and_then(eth_traders::detail);
+
+    let eth_trader_trade =
+        warp::path!("api" / "v1" / "eth" / "traders" / String / "trades" / String)
+            .and(warp::get())
+            .and(super::with_state(state.clone()))
+            .and_then(eth_traders::trade);
 
     let token_network_start = warp::path!("api" / "v1" / "eth" / "analytics" / "network")
         .and(warp::post())
@@ -643,6 +662,9 @@ pub(super) fn routes(
         .or(risk_atlas_runs)
         .or(risk_atlas_run)
         .or(risk_atlas)
+        .or(eth_traders)
+        .or(eth_trader_trade)
+        .or(eth_trader)
         .or(token_network_start)
         .or(token_network_list)
         .or(token_network_get)

@@ -28,11 +28,11 @@ larger local Reth range.
 
 ## Persistence
 
-Database persistence lives in `eth_token_pnl_store` so `eth_token` remains a
+Database persistence lives in `eth_token_store` so `eth_token` remains a
 pure calculation crate.
 
 ```bash
-cargo run -p eth_token_pnl_store --example persist_uniswap_v2_pool_pnl -- \
+cargo run -p eth_token_store --example persist_uniswap_v2_pool_pnl -- \
   --run-id hodl-weth-pnl-v1 \
   --token 0x538F76361ad5e94f21dB670e07f3b4DfF186AF3F \
   --pool 0xb1440adcAc60dCd82d7F40205DaF5f2cC96Edc61 \

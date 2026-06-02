@@ -1,5 +1,6 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Pool and token state captured at export time.
 /// Filled by the caller who holds both ERC20Token and BasePool.
@@ -15,6 +16,10 @@ pub struct PnlPoolMeta {
     pub scam_mechanism: Option<String>,
     pub eligible: bool,
     pub eligible_outcome: Option<String>,
+    #[serde(default)]
+    pub pool_labels: Vec<String>,
+    #[serde(default)]
+    pub pool_state_flags: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,7 +51,8 @@ pub struct PnlConservationExport {
     pub pool_denom_in_raw: String,
     pub pool_denom_out_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    #[serde(alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: String,
     pub token_transfer_count: u64,
     pub denom_transfer_count: u64,
 }
@@ -59,7 +65,8 @@ pub struct PnlAddressPositionExport {
     pub denom_in_raw: String,
     pub denom_out_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    #[serde(alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: String,
     pub first_block: Option<u64>,
     pub latest_block: Option<u64>,
     pub movement_count: u64,
@@ -68,9 +75,32 @@ pub struct PnlAddressPositionExport {
     pub token_balance: Decimal,
     pub denom_cashflow: Decimal,
     pub native_fee: Decimal,
-    pub native_bribe: Decimal,
+    #[serde(alias = "native_bribe")]
+    pub native_priority_fee: Decimal,
     pub marked_token_value_denom: Option<Decimal>,
     pub pnl_proxy_denom: Option<Decimal>,
+    #[serde(default = "default_position_status")]
+    pub position_status: String,
+    #[serde(default = "default_valuation_status")]
+    pub valuation_status: String,
+    #[serde(default = "default_reconciliation_status")]
+    pub reconciliation_status: String,
+    #[serde(default)]
+    pub realized_pnl_denom: Option<Decimal>,
+    #[serde(default)]
+    pub unrealized_value_denom: Option<Decimal>,
+    #[serde(default)]
+    pub total_pnl_denom: Option<Decimal>,
+    #[serde(default)]
+    pub movement_rows_retained: u64,
+    #[serde(default)]
+    pub movement_rows_backed: bool,
+    #[serde(default)]
+    pub actor_roles: Vec<String>,
+    #[serde(default)]
+    pub is_user_candidate: bool,
+    #[serde(default = "default_accounting_context")]
+    pub accounting_context: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -88,6 +118,23 @@ pub struct PnlMovementExport {
     pub denom_in_raw: String,
     pub denom_out_raw: String,
     pub native_fee_raw: String,
-    pub native_bribe_raw: String,
+    #[serde(alias = "native_bribe_raw")]
+    pub native_priority_fee_raw: String,
     pub pool_direct: bool,
+}
+
+fn default_position_status() -> String {
+    "unknown".to_string()
+}
+
+fn default_valuation_status() -> String {
+    "unknown".to_string()
+}
+
+fn default_reconciliation_status() -> String {
+    "unknown".to_string()
+}
+
+fn default_accounting_context() -> Value {
+    Value::Object(Default::default())
 }

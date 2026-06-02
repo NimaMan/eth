@@ -36,7 +36,7 @@ impl PoolPnlTracker {
             .map(|(entry_index, entry)| export_movement(entry_index as u64, entry))
             .collect();
 
-        PnlPoolExport {
+        let mut export = PnlPoolExport {
             pool_id: self.pool_address.clone(),
             token_address: self.token_address.clone(),
             denom_address: self.denom_address.clone(),
@@ -56,14 +56,16 @@ impl PoolPnlTracker {
                 pool_denom_in_raw: self.conservation.pool_denom_in_raw.to_string(),
                 pool_denom_out_raw: self.conservation.pool_denom_out_raw.to_string(),
                 native_fee_raw: self.conservation.native_fee_raw.to_string(),
-                native_bribe_raw: self.conservation.native_bribe_raw.to_string(),
+                native_priority_fee_raw: self.conservation.native_priority_fee_raw.to_string(),
                 token_transfer_count: self.conservation.token_transfer_count,
                 denom_transfer_count: self.conservation.denom_transfer_count,
             },
             address_positions,
             movements,
             meta: Default::default(),
-        }
+        };
+        export.reconcile_accounting(mark_price_denom_per_token);
+        export
     }
 }
 
@@ -78,7 +80,7 @@ fn export_address_position(
         denom_in_raw: position.denom_in_raw.to_string(),
         denom_out_raw: position.denom_out_raw.to_string(),
         native_fee_raw: position.native_fee_raw.to_string(),
-        native_bribe_raw: position.native_bribe_raw.to_string(),
+        native_priority_fee_raw: position.native_priority_fee_raw.to_string(),
         first_block: position.first_block,
         latest_block: position.latest_block,
         movement_count: position.movement_count,
@@ -87,9 +89,20 @@ fn export_address_position(
         token_balance: summary.token_balance,
         denom_cashflow: summary.denom_cashflow,
         native_fee: summary.native_fee,
-        native_bribe: summary.native_bribe,
+        native_priority_fee: summary.native_priority_fee,
         marked_token_value_denom: summary.marked_token_value_denom,
         pnl_proxy_denom: summary.pnl_proxy_denom,
+        position_status: "unknown".to_string(),
+        valuation_status: "unknown".to_string(),
+        reconciliation_status: "unknown".to_string(),
+        realized_pnl_denom: None,
+        unrealized_value_denom: None,
+        total_pnl_denom: None,
+        movement_rows_retained: 0,
+        movement_rows_backed: false,
+        actor_roles: Vec::new(),
+        is_user_candidate: false,
+        accounting_context: serde_json::json!({}),
     }
 }
 
@@ -108,7 +121,7 @@ fn export_movement(entry_index: u64, entry: &PoolPnlEntry) -> PnlMovementExport 
         denom_in_raw: entry.denom_in_raw.clone(),
         denom_out_raw: entry.denom_out_raw.clone(),
         native_fee_raw: entry.native_fee_raw.clone(),
-        native_bribe_raw: entry.native_bribe_raw.clone(),
+        native_priority_fee_raw: entry.native_priority_fee_raw.clone(),
         pool_direct: entry.pool_direct,
     }
 }

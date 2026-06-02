@@ -7,10 +7,32 @@ Rust-only examples for validating and inspecting token-state processing.
 - `replay/`: Process historical blocks and rebuild token or pool state from `tx_processor` output.
 - `validation/`: Compare reconstructed token state against direct chain reads.
 - `network/`: Build token-network and second-order flow-context inspection outputs.
+- `custody/`: Inspect holder-custody risks and pool-state flags.
 - `analysis/`: Human-readable inspections for lifecycle, liquidity, and health.
 - `fixtures/`: Known token/pool/block ranges reused by examples.
 
 ## Current Examples
+
+### `pool_custody_flags`
+
+Builds two in-memory pools and prints the explicit pool-state flag projection:
+one realized holder-balance drain and one USDT-style latent custody authority.
+This demonstrates why custody flags must stay separate from routeability and
+reserve liquidity-removal flags.
+
+```bash
+cargo run -p eth_token --example pool_custody_flags
+```
+
+### `custody_session_balance_drain`
+
+Replays the real Session holder-balance drain case against local Reth data,
+showing the event-less internal `transferFrom` and the resulting custody/pool
+labels.
+
+```bash
+cargo run -p eth_token --example custody_session_balance_drain
+```
 
 ### `uniswap_v2_pool_replay_reserves`
 

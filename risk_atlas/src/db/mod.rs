@@ -4,7 +4,7 @@ pub mod schema;
 mod schema_sql;
 pub mod writer;
 
-pub use reader::RiskAtlasReader;
+pub use reader::{EthTraderListParams, RiskAtlasReader};
 pub use schema::{
     ActiveTargetSummary, DecisionQuestion, DistributionBucket, EventEvidenceRow,
     ModelReadinessItem, NumericStat, ObservationRow, PoolEligibilityRow, ReviewExample,

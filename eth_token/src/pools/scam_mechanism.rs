@@ -7,6 +7,22 @@ use super::base::{meaningful_liquidity_threshold, meaningful_token_reserve_for_r
 
 pub const SCAM_DIRECT_LP_LIQUIDITY_REMOVAL: &str = "direct_lp_liquidity_removal";
 pub const SCAM_PAIR_BALANCE_BACKDOOR_DRAIN: &str = "pair_balance_backdoor_drain";
+/// Control/creator logic that drains a *holder's* token balance (e.g. our
+/// trading vault) via `transferFrom(holder, dead, amount)` with zero allowance
+/// and no normal Transfer log. Distinct from the pair-balance variant: the pool
+/// reserves do not move, so this is set from token-control evidence, not from
+/// reserve-drain inference.
+pub const SCAM_HOLDER_BALANCE_BACKDOOR_DRAIN: &str = "holder_balance_backdoor_drain";
+/// Systematic rug built on the holder-balance backdoor: the operator confiscates
+/// the bulk (>=95%) of MULTIPLE buyers' balances via event-less
+/// `transferFrom(holder, dead, amount)`, then eventually empties the pool (the
+/// liquidity pull is the cash-out). Distinct from a single
+/// `holder_balance_backdoor_drain` finding: this is the aggregate pattern where
+/// independently-bought positions are each wiped, so buyers are left holding
+/// nothing while `can_sell` may still read true. We classify on the mass
+/// confiscation (early) — before the pool drain — so a live position can exit on
+/// the confiscation signal rather than waiting for the liquidity removal.
+pub const SCAM_CUSTODY_BUYER_TOKEN_CONFISCATION: &str = "custody_buyer_token_confiscation";
 pub const SCAM_PRIVILEGED_SELLER_RESERVE_DRAIN: &str = "privileged_seller_reserve_drain";
 pub const SCAM_RESERVE_DUMP_DRAIN: &str = "reserve_dump_drain";
 pub const SCAM_UNKNOWN_RESERVE_DRAIN: &str = "unknown_reserve_drain";
@@ -268,6 +284,8 @@ pub fn scam_mechanism_label(mechanism: &str) -> &'static str {
     match mechanism {
         SCAM_DIRECT_LP_LIQUIDITY_REMOVAL => "Direct LP Liquidity Removal",
         SCAM_PAIR_BALANCE_BACKDOOR_DRAIN => "Backdoored Pair-Balance Drain",
+        SCAM_HOLDER_BALANCE_BACKDOOR_DRAIN => "Backdoored Holder-Balance Drain",
+        SCAM_CUSTODY_BUYER_TOKEN_CONFISCATION => "Backdoor Buyer-Token Confiscation Rug",
         SCAM_PRIVILEGED_SELLER_RESERVE_DRAIN => "Privileged Seller Reserve Drain",
         SCAM_RESERVE_DUMP_DRAIN => "Reserve Dump / External Holder Drain",
         SCAM_UNKNOWN_RESERVE_DRAIN => "Unknown Reserve Drain",

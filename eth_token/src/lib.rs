@@ -1,5 +1,6 @@
 pub mod chain_metadata;
 pub mod contract_analysis;
+pub mod custody;
 pub mod erc20;
 pub mod health;
 pub mod live;

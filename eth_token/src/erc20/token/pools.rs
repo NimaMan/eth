@@ -503,6 +503,41 @@ impl ERC20Token {
         prices
     }
 
+    pub fn current_pool_state_flags(&self) -> HashMap<String, PoolStateFlags> {
+        let mut flags = HashMap::new();
+        for (address, pool) in &self.v2_pools {
+            flags.insert(
+                address.clone(),
+                PoolStateFlags::from_base_and_custody_findings(&pool.base, self.custody_findings()),
+            );
+        }
+        for (address, pool) in &self.v3_pools {
+            flags.insert(
+                address.clone(),
+                PoolStateFlags::from_base_and_custody_findings(&pool.base, self.custody_findings()),
+            );
+        }
+        for (address, pool) in &self.v4_pools {
+            flags.insert(
+                address.clone(),
+                PoolStateFlags::from_base_and_custody_findings(&pool.base, self.custody_findings()),
+            );
+        }
+        for (address, pool) in &self.curve_pools {
+            flags.insert(
+                address.clone(),
+                PoolStateFlags::from_base_and_custody_findings(&pool.base, self.custody_findings()),
+            );
+        }
+        for (address, pool) in &self.balancer_pools {
+            flags.insert(
+                address.clone(),
+                PoolStateFlags::from_base_and_custody_findings(&pool.base, self.custody_findings()),
+            );
+        }
+        flags
+    }
+
     pub fn get_pool_info(&self) -> HashMap<String, PoolStateSnapshot> {
         self.current_prices()
     }

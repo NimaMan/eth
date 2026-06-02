@@ -1,5 +1,5 @@
 use eyre::Result;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
@@ -14,6 +14,19 @@ use super::schema::{
 #[derive(Clone)]
 pub struct RiskAtlasReader {
     pool: PgPool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EthTraderListParams {
+    pub mode: Option<String>,
+    pub sort: Option<String>,
+    pub min_scam_ratio: Option<f64>,
+    pub min_trades: Option<i64>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+    pub mechanism: Option<String>,
+    pub label: Option<String>,
+    pub role: Option<String>,
 }
 
 impl RiskAtlasReader {
@@ -93,6 +106,271 @@ impl RiskAtlasReader {
             review_examples: self.review_examples(run_id).await?,
             model_readiness: self.model_readiness(run_id).await?,
         }))
+    }
+
+    pub async fn scammer_address_distribution(&self, limit: i64) -> Result<Option<Value>> {
+        let limit = limit.clamp(1, 500);
+        let Some(run) = self.latest_token_pnl_run().await? else {
+            return Ok(None);
+        };
+        let run_id: String = run.try_get("run_id")?;
+
+        let summary_sql = scammer_address_summary_sql();
+        let buckets_sql = scammer_address_buckets_sql();
+        let top_sql = scammer_address_top_sql();
+
+        let summary = sqlx::query(&summary_sql)
+            .bind(&run_id)
+            .fetch_one(&self.pool)
+            .await?;
+        let buckets = sqlx::query(&buckets_sql)
+            .bind(&run_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let top_addresses = sqlx::query(&top_sql)
+            .bind(&run_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(Some(json!({
+            "run": {
+                "run_id": run_id,
+                "mode": run.try_get::<String, _>("mode")?,
+                "algorithm_version": run.try_get::<String, _>("algorithm_version")?,
+                "start_block": run.try_get::<Option<i64>, _>("start_block")?,
+                "end_block": run.try_get::<Option<i64>, _>("end_block")?,
+                "status": run.try_get::<String, _>("status")?,
+                "metadata": run.try_get::<Value, _>("metadata")?,
+                "created_at": run.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+                "updated_at": run.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")?,
+            },
+            "summary": {
+                "address_count": summary.try_get::<i64, _>("address_count")?,
+                "pool_position_count": summary.try_get::<i64, _>("pool_position_count")?,
+                "scam_pool_position_count": summary.try_get::<i64, _>("scam_pool_position_count")?,
+                "scam_address_count": summary.try_get::<i64, _>("scam_address_count")?,
+                "all_scam_address_count": summary.try_get::<i64, _>("all_scam_address_count")?,
+                "high_scam_ratio_address_count": summary.try_get::<i64, _>("high_scam_ratio_address_count")?,
+                "trade_count": summary.try_get::<i64, _>("trade_count")?,
+                "exact_trade_count": summary.try_get::<i64, _>("exact_trade_count")?,
+                "movement_count": summary.try_get::<i64, _>("movement_count")?,
+                "total_abs_denom_flow": summary.try_get::<f64, _>("total_abs_denom_flow")?,
+                "scam_abs_denom_flow": summary.try_get::<f64, _>("scam_abs_denom_flow")?,
+                "latest_block": summary.try_get::<Option<i64>, _>("latest_block")?,
+                "movement_rows": summary.try_get::<i64, _>("movement_rows")?,
+            },
+            "buckets": buckets
+                .into_iter()
+                .map(|row| {
+                    Ok(json!({
+                        "bucket": row.try_get::<String, _>("bucket")?,
+                        "count": row.try_get::<i64, _>("count")?,
+                        "share": row.try_get::<Option<f64>, _>("share")?,
+                        "avg_trade_count": row.try_get::<Option<f64>, _>("avg_trade_count")?,
+                        "avg_scam_ratio": row.try_get::<Option<f64>, _>("avg_scam_ratio")?,
+                        "sort_order": row.try_get::<i32, _>("sort_order")?,
+                    }))
+                })
+                .collect::<Result<Vec<_>>>()?,
+            "top_addresses": top_addresses
+                .into_iter()
+                .map(address_distribution_row)
+                .collect::<Result<Vec<_>>>()?,
+        })))
+    }
+
+    pub async fn eth_traders(&self, params: EthTraderListParams) -> Result<Option<Value>> {
+        let Some(run) = self.latest_token_pnl_run().await? else {
+            return Ok(None);
+        };
+        let run_id: String = run.try_get("run_id")?;
+        let params = NormalizedEthTraderListParams::from(params);
+
+        let summary_sql = eth_trader_filtered_summary_sql();
+        let rows_sql = eth_trader_rows_sql(trader_sort_expression(&params.sort));
+
+        let summary = bind_eth_trader_filters(sqlx::query(&summary_sql), &run_id, &params)
+            .fetch_one(&self.pool)
+            .await?;
+        let rows = bind_eth_trader_filters(sqlx::query(&rows_sql), &run_id, &params)
+            .bind(params.page_size)
+            .bind(params.offset())
+            .fetch_all(&self.pool)
+            .await?;
+        let total_count: i64 = summary.try_get("address_count")?;
+
+        Ok(Some(json!({
+            "run": token_pnl_run_json(&run, &run_id)?,
+            "summary": eth_trader_summary_row(summary)?,
+            "rows": rows
+                .into_iter()
+                .map(eth_trader_row)
+                .collect::<Result<Vec<_>>>()?,
+            "page": params.page,
+            "pageSize": params.page_size,
+            "totalCount": total_count,
+            "totalPages": total_pages(total_count, params.page_size),
+            "filters": params.filters_json(),
+        })))
+    }
+
+    pub async fn eth_trader_profile(&self, address: &str) -> Result<Option<Value>> {
+        let Some(run) = self.latest_token_pnl_run().await? else {
+            return Ok(None);
+        };
+        let run_id: String = run.try_get("run_id")?;
+
+        let summary_sql = eth_trader_profile_summary_sql();
+        let Some(summary) = sqlx::query(&summary_sql)
+            .bind(&run_id)
+            .bind(address)
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let top_positions_sql = eth_trader_positions_sql(
+            "abs_denom_cashflow DESC, COALESCE(a.latest_block, 0) DESC, s.pool_id",
+        );
+        let recent_positions_sql = eth_trader_positions_sql(
+            "COALESCE(a.latest_block, 0) DESC, abs_denom_cashflow DESC, s.pool_id",
+        );
+        let mechanism_breakdown_sql = eth_trader_mechanism_breakdown_sql();
+        let label_breakdown_sql = eth_trader_label_breakdown_sql();
+        let recent_movements_sql = eth_trader_recent_movements_sql();
+
+        let top_positions = sqlx::query(&top_positions_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(25_i64)
+            .fetch_all(&self.pool)
+            .await?;
+        let recent_positions = sqlx::query(&recent_positions_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(25_i64)
+            .fetch_all(&self.pool)
+            .await?;
+        let mechanism_breakdowns = sqlx::query(&mechanism_breakdown_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(20_i64)
+            .fetch_all(&self.pool)
+            .await?;
+        let label_breakdowns = sqlx::query(&label_breakdown_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(30_i64)
+            .fetch_all(&self.pool)
+            .await?;
+        let recent_movements = sqlx::query(&recent_movements_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(100_i64)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(Some(json!({
+            "run": token_pnl_run_json(&run, &run_id)?,
+            "summary": eth_trader_row(summary)?,
+            "topPoolPositions": top_positions
+                .into_iter()
+                .map(eth_trader_pool_position_row)
+                .collect::<Result<Vec<_>>>()?,
+            "recentPoolPositions": recent_positions
+                .into_iter()
+                .map(eth_trader_pool_position_row)
+                .collect::<Result<Vec<_>>>()?,
+            "mechanismBreakdowns": mechanism_breakdowns
+                .into_iter()
+                .map(eth_trader_mechanism_breakdown_row)
+                .collect::<Result<Vec<_>>>()?,
+            "labelBreakdowns": label_breakdowns
+                .into_iter()
+                .map(eth_trader_label_breakdown_row)
+                .collect::<Result<Vec<_>>>()?,
+            "recentMovements": recent_movements
+                .into_iter()
+                .map(eth_trader_movement_row)
+                .collect::<Result<Vec<_>>>()?,
+        })))
+    }
+
+    pub async fn eth_trader_trade(&self, address: &str, pool_id: &str) -> Result<Option<Value>> {
+        let Some(run) = self.latest_token_pnl_run().await? else {
+            return Ok(None);
+        };
+        let run_id: String = run.try_get("run_id")?;
+
+        let summary_sql = eth_trader_profile_summary_sql();
+        let Some(summary) = sqlx::query(&summary_sql)
+            .bind(&run_id)
+            .bind(address)
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let position_sql = eth_trader_position_detail_sql();
+        let Some(position) = sqlx::query(&position_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(pool_id)
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let movement_limit = 500_i64;
+        let movements_sql = eth_trader_trade_movements_sql();
+        let movements = sqlx::query(&movements_sql)
+            .bind(&run_id)
+            .bind(address)
+            .bind(pool_id)
+            .bind(movement_limit)
+            .fetch_all(&self.pool)
+            .await?;
+        let position_value = eth_trader_pool_position_row(position)?;
+        let accounting_fields_populated = position_value
+            .get("position_status")
+            .and_then(Value::as_str)
+            .map(|status| status != "unknown")
+            .unwrap_or(false);
+
+        Ok(Some(json!({
+            "run": token_pnl_run_json(&run, &run_id)?,
+            "trader": eth_trader_row(summary)?,
+            "position": position_value,
+            "movements": movements
+                .into_iter()
+                .map(eth_trader_movement_row)
+                .collect::<Result<Vec<_>>>()?,
+            "movementLimit": movement_limit,
+            "source": "trade-detail",
+            "apiStatus": {
+                "source": "token_pnl.pool_address_pnl",
+                "accounting_fields_populated": accounting_fields_populated,
+                "notes": Vec::<String>::new(),
+            },
+        })))
+    }
+
+    async fn latest_token_pnl_run(&self) -> Result<Option<sqlx::postgres::PgRow>> {
+        Ok(sqlx::query(
+            r#"
+            SELECT run_id, mode, algorithm_version, start_block, end_block,
+                   status, metadata, created_at, updated_at
+            FROM token_pnl.calculation_runs
+            ORDER BY (status = 'complete') DESC, updated_at DESC, run_id DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     async fn run(&self, run_id: &str) -> Result<Option<RiskAtlasRun>> {
@@ -226,6 +504,1033 @@ impl RiskAtlasReader {
 
         rows.into_iter().map(row_to_model_readiness).collect()
     }
+}
+
+const SCAMMER_ADDRESS_AGG_CTE: &str = r#"
+WITH movement_counts AS (
+    SELECT run_id, pool_id, address, COUNT(DISTINCT tx_hash)::bigint AS exact_trade_count
+    FROM token_pnl.pool_pnl_movements
+    WHERE run_id = $1
+    GROUP BY run_id, pool_id, address
+),
+address_rows AS (
+    SELECT
+        a.address,
+        a.pool_id,
+        s.token_address,
+        s.is_scam,
+        s.scam_label,
+        s.scam_mechanism,
+        s.lifecycle,
+        s.pool_labels,
+        s.token_creator_address,
+        s.pool_creator_address,
+        a.position_status,
+        a.valuation_status,
+        a.reconciliation_status,
+        a.movement_rows_retained,
+        a.movement_rows_backed,
+        a.actor_roles,
+        a.is_user_candidate,
+        a.realized_pnl_denom,
+        a.unrealized_value_denom,
+        a.total_pnl_denom,
+        a.first_block,
+        a.latest_block,
+        COALESCE(a.movement_count, 0)::bigint AS movement_count,
+        COALESCE(m.exact_trade_count, 0)::bigint AS exact_trade_count,
+        COALESCE(a.denom_cashflow::double precision, 0.0) AS denom_cashflow,
+        ABS(COALESCE(a.denom_cashflow::double precision, 0.0)) AS abs_denom_cashflow,
+        (a.denom_in_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_in,
+        (a.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out
+    FROM token_pnl.pool_address_pnl a
+    JOIN token_pnl.pool_pnl_states s
+      ON s.run_id = a.run_id AND s.pool_id = a.pool_id
+    LEFT JOIN movement_counts m
+      ON m.run_id = a.run_id AND m.pool_id = a.pool_id AND m.address = a.address
+    WHERE a.run_id = $1
+),
+address_agg AS (
+    SELECT
+        address,
+        COUNT(*)::bigint AS pool_position_count,
+        COUNT(DISTINCT token_address)::bigint AS token_count,
+        COUNT(*) FILTER (WHERE is_scam)::bigint AS scam_pool_position_count,
+        COUNT(DISTINCT token_address) FILTER (WHERE is_scam)::bigint AS scam_token_count,
+        SUM(CASE WHEN exact_trade_count > 0 THEN exact_trade_count ELSE movement_count END)::bigint AS trade_count,
+        SUM(exact_trade_count)::bigint AS exact_trade_count,
+        SUM(movement_count)::bigint AS movement_count,
+        MIN(first_block) AS first_block,
+        MAX(latest_block) AS latest_block,
+        SUM(denom_in) AS denom_in,
+        SUM(denom_out) AS denom_out,
+        SUM(denom_cashflow) AS net_denom_cashflow,
+        SUM(abs_denom_cashflow) AS total_abs_denom_flow,
+        SUM(CASE WHEN is_scam THEN abs_denom_cashflow ELSE 0.0 END) AS scam_abs_denom_flow,
+        (COUNT(*) FILTER (WHERE is_scam))::double precision / NULLIF(COUNT(*)::double precision, 0.0) AS scam_ratio,
+        (COUNT(DISTINCT token_address) FILTER (WHERE is_scam))::double precision / NULLIF(COUNT(DISTINCT token_address)::double precision, 0.0) AS scam_token_ratio,
+        ARRAY_AGG(DISTINCT scam_mechanism) FILTER (WHERE scam_mechanism IS NOT NULL) AS scam_mechanisms,
+        ARRAY_AGG(DISTINCT scam_label) FILTER (WHERE scam_label IS NOT NULL) AS scam_labels,
+        ARRAY_AGG(DISTINCT lifecycle) FILTER (WHERE lifecycle IS NOT NULL) AS lifecycles,
+        SUM(CASE WHEN lower(address) = lower(COALESCE(token_creator_address, '')) THEN 1 ELSE 0 END)::bigint AS token_creator_position_count,
+        SUM(CASE WHEN lower(address) = lower(COALESCE(pool_creator_address, '')) THEN 1 ELSE 0 END)::bigint AS pool_creator_position_count
+    FROM address_rows
+    GROUP BY address
+),
+label_agg AS (
+    SELECT
+        ar.address,
+        ARRAY_AGG(DISTINCT label.value ORDER BY label.value) FILTER (WHERE label.value IS NOT NULL) AS pool_labels
+    FROM address_rows ar
+    LEFT JOIN LATERAL jsonb_array_elements_text(COALESCE(ar.pool_labels, '[]'::jsonb)) AS label(value) ON true
+    GROUP BY ar.address
+),
+role_agg AS (
+    SELECT
+        ar.address,
+        ARRAY_AGG(DISTINCT role.value ORDER BY role.value) FILTER (WHERE role.value IS NOT NULL) AS actor_roles
+    FROM address_rows ar
+    LEFT JOIN LATERAL jsonb_array_elements_text(COALESCE(ar.actor_roles, '[]'::jsonb)) AS role(value) ON true
+    GROUP BY ar.address
+),
+movement_total AS (
+    SELECT COUNT(*)::bigint AS movement_rows
+    FROM token_pnl.pool_pnl_movements
+    WHERE run_id = $1
+)
+"#;
+
+fn scammer_address_summary_sql() -> String {
+    format!(
+        "{SCAMMER_ADDRESS_AGG_CTE}
+        , summary AS (
+        SELECT
+            COUNT(*)::bigint AS address_count,
+            COALESCE(SUM(pool_position_count), 0)::bigint AS pool_position_count,
+            COALESCE(SUM(scam_pool_position_count), 0)::bigint AS scam_pool_position_count,
+            COUNT(*) FILTER (WHERE scam_pool_position_count > 0)::bigint AS scam_address_count,
+            COUNT(*) FILTER (WHERE scam_ratio = 1.0)::bigint AS all_scam_address_count,
+            COUNT(*) FILTER (WHERE scam_ratio >= 0.75 AND scam_pool_position_count > 0)::bigint AS high_scam_ratio_address_count,
+            COALESCE(SUM(trade_count), 0)::bigint AS trade_count,
+            COALESCE(SUM(exact_trade_count), 0)::bigint AS exact_trade_count,
+            COALESCE(SUM(movement_count), 0)::bigint AS movement_count,
+            COALESCE(SUM(total_abs_denom_flow), 0.0)::double precision AS total_abs_denom_flow,
+            COALESCE(SUM(scam_abs_denom_flow), 0.0)::double precision AS scam_abs_denom_flow,
+            MAX(latest_block) AS latest_block
+        FROM address_agg
+        )
+        SELECT summary.*, mt.movement_rows
+        FROM summary
+        CROSS JOIN movement_total mt"
+    )
+}
+
+fn scammer_address_buckets_sql() -> String {
+    format!(
+        "{SCAMMER_ADDRESS_AGG_CTE}
+        SELECT
+            bucket,
+            COUNT(*)::bigint AS count,
+            COUNT(*)::double precision / NULLIF((SELECT COUNT(*)::double precision FROM address_agg), 0.0) AS share,
+            AVG(trade_count::double precision) AS avg_trade_count,
+            AVG(scam_ratio) AS avg_scam_ratio,
+            sort_order
+        FROM (
+            SELECT
+                *,
+                CASE
+                    WHEN scam_ratio = 0.0 THEN '0% scam pools'
+                    WHEN scam_ratio < 0.25 THEN '<25% scam pools'
+                    WHEN scam_ratio < 0.50 THEN '25-50% scam pools'
+                    WHEN scam_ratio < 0.75 THEN '50-75% scam pools'
+                    WHEN scam_ratio < 1.0 THEN '75-99% scam pools'
+                    ELSE '100% scam pools'
+                END AS bucket,
+                CASE
+                    WHEN scam_ratio = 0.0 THEN 0
+                    WHEN scam_ratio < 0.25 THEN 1
+                    WHEN scam_ratio < 0.50 THEN 2
+                    WHEN scam_ratio < 0.75 THEN 3
+                    WHEN scam_ratio < 1.0 THEN 4
+                    ELSE 5
+                END AS sort_order
+            FROM address_agg
+        ) bucketed
+        GROUP BY bucket, sort_order
+        ORDER BY sort_order"
+    )
+}
+
+fn scammer_address_top_sql() -> String {
+    format!(
+        "{SCAMMER_ADDRESS_AGG_CTE}
+        SELECT
+            aa.*,
+            COALESCE(la.pool_labels, ARRAY[]::text[]) AS pool_labels,
+            ARRAY(
+                SELECT DISTINCT role
+                FROM unnest(
+                    COALESCE(ra.actor_roles, ARRAY[]::text[])
+                    || ARRAY_REMOVE(ARRAY[
+                        CASE WHEN aa.token_creator_position_count > 0 THEN 'token_creator'::text END,
+                        CASE WHEN aa.pool_creator_position_count > 0 THEN 'pool_creator'::text END
+                    ], NULL)
+                ) AS role(role)
+                ORDER BY role
+            ) AS role_flags,
+            mt.movement_rows
+        FROM address_agg aa
+        LEFT JOIN label_agg la USING (address)
+        LEFT JOIN role_agg ra USING (address)
+        CROSS JOIN movement_total mt
+        ORDER BY
+            aa.scam_ratio DESC NULLS LAST,
+            aa.scam_pool_position_count DESC,
+            aa.trade_count DESC,
+            aa.total_abs_denom_flow DESC
+        LIMIT $2"
+    )
+}
+
+fn address_distribution_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "address": row.try_get::<String, _>("address")?,
+        "pool_position_count": row.try_get::<i64, _>("pool_position_count")?,
+        "token_count": row.try_get::<i64, _>("token_count")?,
+        "scam_pool_position_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "scam_token_count": row.try_get::<i64, _>("scam_token_count")?,
+        "trade_count": row.try_get::<i64, _>("trade_count")?,
+        "exact_trade_count": row.try_get::<i64, _>("exact_trade_count")?,
+        "movement_count": row.try_get::<i64, _>("movement_count")?,
+        "first_block": row.try_get::<Option<i64>, _>("first_block")?,
+        "latest_block": row.try_get::<Option<i64>, _>("latest_block")?,
+        "denom_in": row.try_get::<Option<f64>, _>("denom_in")?,
+        "denom_out": row.try_get::<Option<f64>, _>("denom_out")?,
+        "net_denom_cashflow": row.try_get::<Option<f64>, _>("net_denom_cashflow")?,
+        "total_abs_denom_flow": row.try_get::<Option<f64>, _>("total_abs_denom_flow")?,
+        "scam_abs_denom_flow": row.try_get::<Option<f64>, _>("scam_abs_denom_flow")?,
+        "scam_ratio": row.try_get::<Option<f64>, _>("scam_ratio")?,
+        "scam_token_ratio": row.try_get::<Option<f64>, _>("scam_token_ratio")?,
+        "scam_mechanisms": row.try_get::<Option<Vec<String>>, _>("scam_mechanisms")?.unwrap_or_default(),
+        "scam_labels": row.try_get::<Option<Vec<String>>, _>("scam_labels")?.unwrap_or_default(),
+        "lifecycles": row.try_get::<Option<Vec<String>>, _>("lifecycles")?.unwrap_or_default(),
+        "pool_labels": row.try_get::<Vec<String>, _>("pool_labels")?,
+        "role_flags": row.try_get::<Vec<String>, _>("role_flags")?,
+        "token_creator_position_count": row.try_get::<i64, _>("token_creator_position_count")?,
+        "pool_creator_position_count": row.try_get::<i64, _>("pool_creator_position_count")?,
+        "movement_rows_available": row.try_get::<i64, _>("movement_rows")? > 0,
+    }))
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedEthTraderListParams {
+    mode: String,
+    sort: String,
+    min_scam_ratio: Option<f64>,
+    min_trades: Option<i64>,
+    page: i64,
+    page_size: i64,
+    mechanism: Option<String>,
+    label: Option<String>,
+    role: Option<String>,
+    defaulted_min_scam_ratio: bool,
+    defaulted_min_trades: bool,
+}
+
+impl From<EthTraderListParams> for NormalizedEthTraderListParams {
+    fn from(params: EthTraderListParams) -> Self {
+        let mode = normalize_trader_mode(params.mode.as_deref());
+        let sort = normalize_trader_sort(params.sort.as_deref());
+        let user_min_scam_ratio = params
+            .min_scam_ratio
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(0.0, 1.0));
+        let user_min_trades = params.min_trades.filter(|value| *value >= 0);
+        let defaulted_min_scam_ratio = mode == "inflation" && user_min_scam_ratio.is_none();
+        let defaulted_min_trades = mode == "inflation" && user_min_trades.is_none();
+
+        Self {
+            mode,
+            sort,
+            min_scam_ratio: user_min_scam_ratio.or(if defaulted_min_scam_ratio {
+                Some(0.75)
+            } else {
+                None
+            }),
+            min_trades: user_min_trades.or(if defaulted_min_trades { Some(50) } else { None }),
+            page: params.page.unwrap_or(1).max(1),
+            page_size: params.page_size.unwrap_or(50).clamp(1, 250),
+            mechanism: clean_filter(params.mechanism),
+            label: clean_filter(params.label),
+            role: clean_filter(params.role).map(|role| role.to_ascii_lowercase().replace('-', "_")),
+            defaulted_min_scam_ratio,
+            defaulted_min_trades,
+        }
+    }
+}
+
+impl NormalizedEthTraderListParams {
+    fn offset(&self) -> i64 {
+        (self.page - 1) * self.page_size
+    }
+
+    fn filters_json(&self) -> Value {
+        json!({
+            "mode": &self.mode,
+            "sort": &self.sort,
+            "minScamRatio": self.min_scam_ratio,
+            "minTrades": self.min_trades,
+            "page": self.page,
+            "pageSize": self.page_size,
+            "mechanism": self.mechanism.as_deref(),
+            "label": self.label.as_deref(),
+            "role": self.role.as_deref(),
+            "defaultsApplied": {
+                "minScamRatio": self.defaulted_min_scam_ratio,
+                "minTrades": self.defaulted_min_trades,
+            },
+        })
+    }
+}
+
+fn clean_filter(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_trader_mode(value: Option<&str>) -> String {
+    match value
+        .unwrap_or("inflation")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "leaderboard" => "leaderboard",
+        "custody" => "custody",
+        "creators" | "creator" => "creators",
+        "all" => "all",
+        _ => "inflation",
+    }
+    .to_string()
+}
+
+fn normalize_trader_sort(value: Option<&str>) -> String {
+    match value
+        .unwrap_or("inflation_score")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "scam_ratio" => "scam_ratio",
+        "trades" | "trade_count" => "trades",
+        "scam_eth" | "scam_abs_denom_flow" => "scam_eth",
+        "scam_tokens" | "scam_token_count" => "scam_tokens",
+        _ => "inflation_score",
+    }
+    .to_string()
+}
+
+fn trader_sort_expression(sort: &str) -> &'static str {
+    match sort {
+        "scam_ratio" => {
+            "scam_ratio DESC NULLS LAST, scam_pool_position_count DESC, trade_count DESC, total_abs_denom_flow DESC"
+        }
+        "trades" => {
+            "trade_count DESC, scam_ratio DESC NULLS LAST, scam_pool_position_count DESC, total_abs_denom_flow DESC"
+        }
+        "scam_eth" => {
+            "scam_abs_denom_flow DESC NULLS LAST, scam_ratio DESC NULLS LAST, trade_count DESC"
+        }
+        "scam_tokens" => {
+            "scam_token_count DESC, scam_ratio DESC NULLS LAST, trade_count DESC, scam_abs_denom_flow DESC NULLS LAST"
+        }
+        _ => {
+            "inflation_score DESC NULLS LAST, scam_ratio DESC NULLS LAST, trade_count DESC, scam_abs_denom_flow DESC NULLS LAST"
+        }
+    }
+}
+
+fn bind_eth_trader_filters<'q>(
+    query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    run_id: &'q str,
+    params: &'q NormalizedEthTraderListParams,
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    query
+        .bind(run_id)
+        .bind(&params.mode)
+        .bind(params.min_scam_ratio)
+        .bind(params.min_trades)
+        .bind(params.mechanism.as_deref())
+        .bind(params.label.as_deref())
+        .bind(params.role.as_deref())
+}
+
+fn total_pages(total_count: i64, page_size: i64) -> i64 {
+    if total_count <= 0 {
+        0
+    } else {
+        (total_count + page_size - 1) / page_size
+    }
+}
+
+fn token_pnl_run_json(row: &sqlx::postgres::PgRow, run_id: &str) -> Result<Value> {
+    Ok(json!({
+        "run_id": run_id,
+        "mode": row.try_get::<String, _>("mode")?,
+        "algorithm_version": row.try_get::<String, _>("algorithm_version")?,
+        "start_block": row.try_get::<Option<i64>, _>("start_block")?,
+        "end_block": row.try_get::<Option<i64>, _>("end_block")?,
+        "status": row.try_get::<String, _>("status")?,
+        "metadata": row.try_get::<Value, _>("metadata")?,
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")?,
+    }))
+}
+
+fn eth_trader_ranked_cte() -> String {
+    format!(
+        "{SCAMMER_ADDRESS_AGG_CTE}
+        , ranked AS (
+            SELECT
+                aa.*,
+                COALESCE(la.pool_labels, ARRAY[]::text[]) AS pool_labels,
+                ARRAY(
+                    SELECT DISTINCT role
+                    FROM unnest(
+                        COALESCE(ra.actor_roles, ARRAY[]::text[])
+                        || ARRAY_REMOVE(ARRAY[
+                            CASE WHEN aa.token_creator_position_count > 0 THEN 'token_creator'::text END,
+                            CASE WHEN aa.pool_creator_position_count > 0 THEN 'pool_creator'::text END
+                        ], NULL)
+                    ) AS role(role)
+                    ORDER BY role
+                ) AS role_flags,
+                mt.movement_rows,
+                (
+                    COALESCE(aa.scam_ratio, 0.0)
+                    * LN(1.0 + GREATEST(aa.trade_count::double precision, 0.0))
+                    * LN(1.0 + GREATEST(aa.scam_token_count::double precision, 0.0))
+                    * LN(1.0 + GREATEST(COALESCE(aa.scam_abs_denom_flow, 0.0), 0.000001))
+                ) AS inflation_score
+            FROM address_agg aa
+            LEFT JOIN label_agg la USING (address)
+            LEFT JOIN role_agg ra USING (address)
+            CROSS JOIN movement_total mt
+        )"
+    )
+}
+
+fn eth_trader_filtered_cte() -> String {
+    format!(
+        "{}
+        ,
+        filtered AS (
+            SELECT *
+            FROM ranked
+            WHERE (
+                $2::text = 'all'
+                OR ($2::text = 'leaderboard' AND scam_pool_position_count > 0)
+                OR ($2::text = 'inflation' AND scam_pool_position_count > 0)
+                OR ($2::text = 'custody' AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM unnest(COALESCE(pool_labels, ARRAY[]::text[])) AS label(value)
+                        WHERE lower(label.value) LIKE 'custody:%'
+                           OR lower(label.value) IN (
+                               'risk:custody_buyer_token_confiscation',
+                               'risk:holder_balance_backdoor_drain',
+                               'risk:pair_balance_backdoor_drain'
+                           )
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest(COALESCE(scam_mechanisms, ARRAY[]::text[])) AS mechanism(value)
+                        WHERE lower(mechanism.value) IN (
+                            'custody_buyer_token_confiscation',
+                            'holder_balance_backdoor_drain',
+                            'pair_balance_backdoor_drain'
+                        )
+                    )
+                ))
+                OR ($2::text = 'creators' AND (token_creator_position_count > 0 OR pool_creator_position_count > 0))
+            )
+            AND ($3::double precision IS NULL OR COALESCE(scam_ratio, 0.0) >= $3)
+            AND ($4::bigint IS NULL OR trade_count >= $4)
+            AND (
+                $5::text IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM unnest(COALESCE(scam_mechanisms, ARRAY[]::text[])) AS mechanism(value)
+                    WHERE lower(mechanism.value) = lower($5)
+                )
+            )
+            AND (
+                $6::text IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM unnest(COALESCE(scam_labels, ARRAY[]::text[]) || COALESCE(pool_labels, ARRAY[]::text[])) AS label(value)
+                    WHERE lower(label.value) = lower($6)
+                )
+            )
+            AND (
+                $7::text IS NULL
+                OR ($7::text = 'token_creator' AND token_creator_position_count > 0)
+                OR ($7::text = 'pool_creator' AND pool_creator_position_count > 0)
+                OR ($7::text = 'creator' AND (token_creator_position_count > 0 OR pool_creator_position_count > 0))
+                OR ($7::text = 'custody' AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM unnest(COALESCE(pool_labels, ARRAY[]::text[])) AS label(value)
+                        WHERE lower(label.value) LIKE 'custody:%'
+                           OR lower(label.value) IN (
+                               'risk:custody_buyer_token_confiscation',
+                               'risk:holder_balance_backdoor_drain',
+                               'risk:pair_balance_backdoor_drain'
+                           )
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest(COALESCE(scam_mechanisms, ARRAY[]::text[])) AS mechanism(value)
+                        WHERE lower(mechanism.value) IN (
+                            'custody_buyer_token_confiscation',
+                            'holder_balance_backdoor_drain',
+                            'pair_balance_backdoor_drain'
+                        )
+                    )
+                ))
+            )
+        )",
+        eth_trader_ranked_cte()
+    )
+}
+
+fn eth_trader_filtered_summary_sql() -> String {
+    format!(
+        "{}
+        SELECT
+            COUNT(*)::bigint AS address_count,
+            COALESCE(SUM(pool_position_count), 0)::bigint AS pool_position_count,
+            COALESCE(SUM(token_count), 0)::bigint AS token_count,
+            COALESCE(SUM(scam_pool_position_count), 0)::bigint AS scam_pool_position_count,
+            COALESCE(SUM(scam_token_count), 0)::bigint AS scam_token_count,
+            COUNT(*) FILTER (WHERE scam_pool_position_count > 0)::bigint AS scam_address_count,
+            COUNT(*) FILTER (WHERE scam_ratio = 1.0)::bigint AS all_scam_address_count,
+            COUNT(*) FILTER (WHERE scam_ratio >= 0.75 AND scam_pool_position_count > 0)::bigint AS high_scam_ratio_address_count,
+            COALESCE(SUM(trade_count), 0)::bigint AS trade_count,
+            COALESCE(SUM(exact_trade_count), 0)::bigint AS exact_trade_count,
+            COALESCE(SUM(movement_count), 0)::bigint AS movement_count,
+            COALESCE(SUM(total_abs_denom_flow), 0.0)::double precision AS total_abs_denom_flow,
+            COALESCE(SUM(scam_abs_denom_flow), 0.0)::double precision AS scam_abs_denom_flow,
+            AVG(scam_ratio) AS avg_scam_ratio,
+            AVG(scam_token_ratio) AS avg_scam_token_ratio,
+            AVG(inflation_score) AS avg_inflation_score,
+            MAX(latest_block) AS latest_block,
+            COALESCE(BOOL_OR(movement_rows > 0), false) AS movement_rows_available
+        FROM filtered",
+        eth_trader_filtered_cte()
+    )
+}
+
+fn eth_trader_rows_sql(sort_expression: &str) -> String {
+    format!(
+        "{}
+        SELECT
+            (ROW_NUMBER() OVER (ORDER BY {sort_expression}))::bigint AS rank,
+            *
+        FROM filtered
+        ORDER BY {sort_expression}
+        LIMIT $8 OFFSET $9",
+        eth_trader_filtered_cte()
+    )
+}
+
+fn eth_trader_profile_summary_sql() -> String {
+    format!(
+        "{}
+        SELECT *
+        FROM ranked
+        WHERE lower(address) = lower($2)
+        LIMIT 1",
+        eth_trader_ranked_cte()
+    )
+}
+
+fn eth_trader_positions_sql(order_by: &str) -> String {
+    format!(
+        r#"
+        WITH movement_counts AS (
+            SELECT run_id, pool_id, address, COUNT(DISTINCT tx_hash)::bigint AS exact_trade_count
+            FROM token_pnl.pool_pnl_movements
+            WHERE run_id = $1 AND lower(address) = lower($2)
+            GROUP BY run_id, pool_id, address
+        )
+        SELECT
+            s.pool_id,
+            s.token_address,
+            s.denom_address,
+            s.protocol,
+            s.is_scam,
+            s.scam_label,
+            s.scam_mechanism,
+            s.lifecycle,
+            s.token_creator_address,
+            s.pool_creator_address,
+            COALESCE(labels.pool_labels, ARRAY[]::text[]) AS pool_labels,
+            COALESCE(roles.actor_roles, ARRAY[]::text[]) AS actor_role_flags,
+            ARRAY(
+                SELECT DISTINCT role
+                FROM unnest(
+                    COALESCE(roles.actor_roles, ARRAY[]::text[])
+                    || ARRAY_REMOVE(ARRAY[
+                        CASE WHEN lower(a.address) = lower(COALESCE(s.token_creator_address, '')) THEN 'token_creator'::text END,
+                        CASE WHEN lower(a.address) = lower(COALESCE(s.pool_creator_address, '')) THEN 'pool_creator'::text END
+                    ], NULL)
+                ) AS role(role)
+                ORDER BY role
+            ) AS role_flags,
+            a.position_status,
+            a.valuation_status,
+            a.reconciliation_status,
+            a.realized_pnl_denom::double precision AS realized_pnl_denom,
+            a.unrealized_value_denom::double precision AS unrealized_value_denom,
+            a.unrealized_value_denom::double precision AS unrealized_pnl_denom,
+            a.total_pnl_denom::double precision AS total_pnl_denom,
+            a.movement_rows_retained,
+            a.movement_rows_backed,
+            a.is_user_candidate,
+            a.accounting_context,
+            lower(s.denom_address) = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' AS denom_is_eth,
+            a.first_block,
+            a.latest_block,
+            COALESCE(a.movement_count, 0)::bigint AS movement_count,
+            COALESCE(m.exact_trade_count, 0)::bigint AS exact_trade_count,
+            COALESCE(a.denom_cashflow::double precision, 0.0) AS denom_cashflow,
+            ABS(COALESCE(a.denom_cashflow::double precision, 0.0)) AS abs_denom_cashflow,
+            (a.denom_in_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_in,
+            (a.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out,
+            a.token_balance::double precision AS token_balance,
+            a.marked_token_value_denom::double precision AS marked_token_value_denom,
+            a.pnl_proxy_denom::double precision AS pnl_proxy_denom
+        FROM token_pnl.pool_address_pnl a
+        JOIN token_pnl.pool_pnl_states s
+          ON s.run_id = a.run_id AND s.pool_id = a.pool_id
+        LEFT JOIN movement_counts m
+          ON m.run_id = a.run_id AND m.pool_id = a.pool_id AND m.address = a.address
+        LEFT JOIN LATERAL (
+            SELECT ARRAY_AGG(label.value ORDER BY label.value) AS pool_labels
+            FROM jsonb_array_elements_text(COALESCE(s.pool_labels, '[]'::jsonb)) AS label(value)
+        ) labels ON true
+        LEFT JOIN LATERAL (
+            SELECT ARRAY_AGG(DISTINCT role.value ORDER BY role.value) AS actor_roles
+            FROM jsonb_array_elements_text(COALESCE(a.actor_roles, '[]'::jsonb)) AS role(value)
+        ) roles ON true
+        WHERE a.run_id = $1 AND lower(a.address) = lower($2)
+        ORDER BY {order_by}
+        LIMIT $3
+        "#
+    )
+}
+
+fn eth_trader_position_detail_sql() -> String {
+    eth_trader_positions_sql("s.pool_id")
+        .replace(
+            "WHERE a.run_id = $1 AND lower(a.address) = lower($2)",
+            "WHERE a.run_id = $1 AND lower(a.address) = lower($2) AND lower(a.pool_id) = lower($3)",
+        )
+        .replace("LIMIT $3", "LIMIT 1")
+}
+
+fn eth_trader_mechanism_breakdown_sql() -> String {
+    r#"
+    WITH movement_counts AS (
+        SELECT run_id, pool_id, address, COUNT(DISTINCT tx_hash)::bigint AS exact_trade_count
+        FROM token_pnl.pool_pnl_movements
+        WHERE run_id = $1 AND lower(address) = lower($2)
+        GROUP BY run_id, pool_id, address
+    ),
+    rows AS (
+        SELECT
+            COALESCE(NULLIF(s.scam_mechanism, ''), 'unclassified') AS mechanism,
+            s.token_address,
+            s.is_scam,
+            COALESCE(a.movement_count, 0)::bigint AS movement_count,
+            COALESCE(m.exact_trade_count, 0)::bigint AS exact_trade_count,
+            ABS(COALESCE(a.denom_cashflow::double precision, 0.0)) AS abs_denom_cashflow
+        FROM token_pnl.pool_address_pnl a
+        JOIN token_pnl.pool_pnl_states s
+          ON s.run_id = a.run_id AND s.pool_id = a.pool_id
+        LEFT JOIN movement_counts m
+          ON m.run_id = a.run_id AND m.pool_id = a.pool_id AND m.address = a.address
+        WHERE a.run_id = $1 AND lower(a.address) = lower($2)
+    )
+    SELECT
+        mechanism,
+        COUNT(*)::bigint AS pool_position_count,
+        COUNT(DISTINCT token_address)::bigint AS token_count,
+        COUNT(*) FILTER (WHERE is_scam)::bigint AS scam_pool_position_count,
+        COUNT(DISTINCT token_address) FILTER (WHERE is_scam)::bigint AS scam_token_count,
+        COALESCE(SUM(CASE WHEN exact_trade_count > 0 THEN exact_trade_count ELSE movement_count END), 0)::bigint AS trade_count,
+        COALESCE(SUM(abs_denom_cashflow), 0.0)::double precision AS total_abs_denom_flow,
+        COALESCE(SUM(CASE WHEN is_scam THEN abs_denom_cashflow ELSE 0.0 END), 0.0)::double precision AS scam_abs_denom_flow
+    FROM rows
+    GROUP BY mechanism
+    ORDER BY scam_pool_position_count DESC, scam_abs_denom_flow DESC, trade_count DESC, mechanism
+    LIMIT $3
+    "#
+    .to_string()
+}
+
+fn eth_trader_label_breakdown_sql() -> String {
+    r#"
+    WITH movement_counts AS (
+        SELECT run_id, pool_id, address, COUNT(DISTINCT tx_hash)::bigint AS exact_trade_count
+        FROM token_pnl.pool_pnl_movements
+        WHERE run_id = $1 AND lower(address) = lower($2)
+        GROUP BY run_id, pool_id, address
+    ),
+    base AS (
+        SELECT
+            s.token_address,
+            s.is_scam,
+            s.scam_label,
+            s.pool_labels,
+            COALESCE(a.movement_count, 0)::bigint AS movement_count,
+            COALESCE(m.exact_trade_count, 0)::bigint AS exact_trade_count,
+            ABS(COALESCE(a.denom_cashflow::double precision, 0.0)) AS abs_denom_cashflow
+        FROM token_pnl.pool_address_pnl a
+        JOIN token_pnl.pool_pnl_states s
+          ON s.run_id = a.run_id AND s.pool_id = a.pool_id
+        LEFT JOIN movement_counts m
+          ON m.run_id = a.run_id AND m.pool_id = a.pool_id AND m.address = a.address
+        WHERE a.run_id = $1 AND lower(a.address) = lower($2)
+    ),
+    label_rows AS (
+        SELECT
+            'scam_label'::text AS kind,
+            scam_label AS label,
+            token_address,
+            is_scam,
+            movement_count,
+            exact_trade_count,
+            abs_denom_cashflow
+        FROM base
+        WHERE scam_label IS NOT NULL AND scam_label <> ''
+        UNION ALL
+        SELECT
+            'pool_label'::text AS kind,
+            label.value AS label,
+            base.token_address,
+            base.is_scam,
+            base.movement_count,
+            base.exact_trade_count,
+            base.abs_denom_cashflow
+        FROM base
+        JOIN LATERAL jsonb_array_elements_text(COALESCE(base.pool_labels, '[]'::jsonb)) AS label(value) ON true
+    )
+    SELECT
+        kind,
+        label,
+        COUNT(*)::bigint AS pool_position_count,
+        COUNT(DISTINCT token_address)::bigint AS token_count,
+        COUNT(*) FILTER (WHERE is_scam)::bigint AS scam_pool_position_count,
+        COUNT(DISTINCT token_address) FILTER (WHERE is_scam)::bigint AS scam_token_count,
+        COALESCE(SUM(CASE WHEN exact_trade_count > 0 THEN exact_trade_count ELSE movement_count END), 0)::bigint AS trade_count,
+        COALESCE(SUM(abs_denom_cashflow), 0.0)::double precision AS total_abs_denom_flow,
+        COALESCE(SUM(CASE WHEN is_scam THEN abs_denom_cashflow ELSE 0.0 END), 0.0)::double precision AS scam_abs_denom_flow
+    FROM label_rows
+    GROUP BY kind, label
+    ORDER BY scam_pool_position_count DESC, scam_abs_denom_flow DESC, trade_count DESC, kind, label
+    LIMIT $3
+    "#
+    .to_string()
+}
+
+fn eth_trader_recent_movements_sql() -> String {
+    r#"
+    SELECT
+        m.pool_id,
+        s.token_address,
+        s.denom_address,
+        s.protocol,
+        s.is_scam,
+        s.scam_label,
+        s.scam_mechanism,
+        m.entry_index,
+        m.tx_hash,
+        m.block_number,
+        m.block_timestamp,
+        m.tx_index,
+        m.log_index,
+        m.kind,
+        m.pool_direct,
+        (m.token_in_raw / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_in,
+        (m.token_out_raw / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_out,
+        (m.denom_in_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_in,
+        (m.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out,
+        ((m.denom_out_raw - m.denom_in_raw) / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_delta,
+        ((m.token_out_raw - m.token_in_raw) / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_delta,
+        (m.native_fee_raw / POWER(10::numeric, 18))::double precision AS native_fee_eth,
+        (m.native_priority_fee_raw / POWER(10::numeric, 18))::double precision AS native_priority_fee_eth
+    FROM token_pnl.pool_pnl_movements m
+    JOIN token_pnl.pool_pnl_states s
+      ON s.run_id = m.run_id AND s.pool_id = m.pool_id
+    WHERE m.run_id = $1 AND lower(m.address) = lower($2)
+    ORDER BY m.block_number DESC, m.tx_index DESC, m.entry_index DESC
+    LIMIT $3
+    "#
+    .to_string()
+}
+
+fn eth_trader_trade_movements_sql() -> String {
+    r#"
+    SELECT
+        m.pool_id,
+        s.token_address,
+        s.denom_address,
+        s.protocol,
+        s.is_scam,
+        s.scam_label,
+        s.scam_mechanism,
+        m.entry_index,
+        m.tx_hash,
+        m.block_number,
+        m.block_timestamp,
+        m.tx_index,
+        m.log_index,
+        m.kind,
+        m.pool_direct,
+        (m.token_in_raw / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_in,
+        (m.token_out_raw / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_out,
+        (m.denom_in_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_in,
+        (m.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out,
+        ((m.denom_out_raw - m.denom_in_raw) / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_delta,
+        ((m.token_out_raw - m.token_in_raw) / POWER(10::numeric, GREATEST(s.token_decimals::int, 0)))::double precision AS token_delta,
+        (m.native_fee_raw / POWER(10::numeric, 18))::double precision AS native_fee_eth,
+        (m.native_priority_fee_raw / POWER(10::numeric, 18))::double precision AS native_priority_fee_eth
+    FROM token_pnl.pool_pnl_movements m
+    JOIN token_pnl.pool_pnl_states s
+      ON s.run_id = m.run_id AND s.pool_id = m.pool_id
+    WHERE m.run_id = $1 AND lower(m.address) = lower($2) AND lower(m.pool_id) = lower($3)
+    ORDER BY m.block_number DESC, m.tx_index DESC, m.entry_index DESC
+    LIMIT $4
+    "#
+    .to_string()
+}
+
+fn eth_trader_summary_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "address_count": row.try_get::<i64, _>("address_count")?,
+        "pool_position_count": row.try_get::<i64, _>("pool_position_count")?,
+        "token_count": row.try_get::<i64, _>("token_count")?,
+        "scam_pool_position_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "scam_token_count": row.try_get::<i64, _>("scam_token_count")?,
+        "scam_address_count": row.try_get::<i64, _>("scam_address_count")?,
+        "all_scam_address_count": row.try_get::<i64, _>("all_scam_address_count")?,
+        "high_scam_ratio_address_count": row.try_get::<i64, _>("high_scam_ratio_address_count")?,
+        "trade_count": row.try_get::<i64, _>("trade_count")?,
+        "exact_trade_count": row.try_get::<i64, _>("exact_trade_count")?,
+        "movement_count": row.try_get::<i64, _>("movement_count")?,
+        "total_abs_denom_flow": row.try_get::<f64, _>("total_abs_denom_flow")?,
+        "scam_abs_denom_flow": row.try_get::<f64, _>("scam_abs_denom_flow")?,
+        "avg_scam_ratio": row.try_get::<Option<f64>, _>("avg_scam_ratio")?,
+        "avg_scam_token_ratio": row.try_get::<Option<f64>, _>("avg_scam_token_ratio")?,
+        "avg_inflation_score": row.try_get::<Option<f64>, _>("avg_inflation_score")?,
+        "latest_block": row.try_get::<Option<i64>, _>("latest_block")?,
+        "movement_rows_available": row.try_get::<bool, _>("movement_rows_available")?,
+    }))
+}
+
+fn eth_trader_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "rank": row.try_get::<i64, _>("rank").ok(),
+        "address": row.try_get::<String, _>("address")?,
+        "inflation_score": row.try_get::<Option<f64>, _>("inflation_score")?,
+        "pool_position_count": row.try_get::<i64, _>("pool_position_count")?,
+        "token_count": row.try_get::<i64, _>("token_count")?,
+        "scam_pool_position_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "scam_token_count": row.try_get::<i64, _>("scam_token_count")?,
+        "trade_count": row.try_get::<i64, _>("trade_count")?,
+        "exact_trade_count": row.try_get::<i64, _>("exact_trade_count")?,
+        "movement_count": row.try_get::<i64, _>("movement_count")?,
+        "first_block": row.try_get::<Option<i64>, _>("first_block")?,
+        "latest_block": row.try_get::<Option<i64>, _>("latest_block")?,
+        "denom_in": row.try_get::<Option<f64>, _>("denom_in")?,
+        "denom_out": row.try_get::<Option<f64>, _>("denom_out")?,
+        "net_denom_cashflow": row.try_get::<Option<f64>, _>("net_denom_cashflow")?,
+        "total_abs_denom_flow": row.try_get::<Option<f64>, _>("total_abs_denom_flow")?,
+        "scam_abs_denom_flow": row.try_get::<Option<f64>, _>("scam_abs_denom_flow")?,
+        "scam_ratio": row.try_get::<Option<f64>, _>("scam_ratio")?,
+        "scam_token_ratio": row.try_get::<Option<f64>, _>("scam_token_ratio")?,
+        "scam_mechanisms": row.try_get::<Option<Vec<String>>, _>("scam_mechanisms")?.unwrap_or_default(),
+        "scam_labels": row.try_get::<Option<Vec<String>>, _>("scam_labels")?.unwrap_or_default(),
+        "lifecycles": row.try_get::<Option<Vec<String>>, _>("lifecycles")?.unwrap_or_default(),
+        "pool_labels": row.try_get::<Vec<String>, _>("pool_labels")?,
+        "role_flags": row.try_get::<Vec<String>, _>("role_flags")?,
+        "token_creator_position_count": row.try_get::<i64, _>("token_creator_position_count")?,
+        "pool_creator_position_count": row.try_get::<i64, _>("pool_creator_position_count")?,
+        "movement_rows_available": row.try_get::<i64, _>("movement_rows")? > 0,
+    }))
+}
+
+fn eth_trader_pool_position_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    let pool_labels = row.try_get::<Vec<String>, _>("pool_labels")?;
+    let role_flags = row.try_get::<Vec<String>, _>("role_flags")?;
+    let actor_role_flags = row
+        .try_get::<Vec<String>, _>("actor_role_flags")
+        .unwrap_or_default();
+    let actor_roles = actor_role_flags
+        .iter()
+        .map(|role| {
+            json!({
+                "role": role,
+                "source": "pnl_accounting",
+            })
+        })
+        .collect::<Vec<_>>();
+    let scam_label = row.try_get::<Option<String>, _>("scam_label")?;
+    let scam_mechanism = row.try_get::<Option<String>, _>("scam_mechanism")?;
+    let lifecycle = row.try_get::<Option<String>, _>("lifecycle")?;
+    let position_status = row.try_get::<String, _>("position_status")?;
+    let valuation_status = row.try_get::<String, _>("valuation_status")?;
+    let reconciliation_status = row.try_get::<String, _>("reconciliation_status")?;
+    let denom_is_eth = row.try_get::<bool, _>("denom_is_eth").unwrap_or(false);
+    let realized_pnl_denom = row.try_get::<Option<f64>, _>("realized_pnl_denom")?;
+    let unrealized_pnl_denom = row.try_get::<Option<f64>, _>("unrealized_pnl_denom")?;
+    let total_pnl_denom = row.try_get::<Option<f64>, _>("total_pnl_denom")?;
+    let labels = merged_labels(
+        &pool_labels,
+        &role_flags,
+        [
+            scam_label.as_deref(),
+            scam_mechanism.as_deref(),
+            lifecycle.as_deref(),
+            Some(position_status.as_str()),
+            Some(valuation_status.as_str()),
+            Some(reconciliation_status.as_str()),
+        ],
+    );
+
+    Ok(json!({
+        "pool_id": row.try_get::<String, _>("pool_id")?,
+        "token_address": row.try_get::<String, _>("token_address")?,
+        "denom_address": row.try_get::<String, _>("denom_address")?,
+        "protocol": row.try_get::<Option<String>, _>("protocol")?,
+        "is_scam": row.try_get::<bool, _>("is_scam")?,
+        "scam_label": scam_label,
+        "scam_mechanism": scam_mechanism,
+        "lifecycle": lifecycle,
+        "token_creator_address": row.try_get::<Option<String>, _>("token_creator_address")?,
+        "pool_creator_address": row.try_get::<Option<String>, _>("pool_creator_address")?,
+        "pool_labels": pool_labels,
+        "role_flags": role_flags,
+        "actor_roles": actor_roles,
+        "labels": labels,
+        "position_status": position_status,
+        "valuation_status": valuation_status,
+        "reconciliation_status": reconciliation_status,
+        "movement_backed_status": reconciliation_status,
+        "movement_rows_retained": row.try_get::<i64, _>("movement_rows_retained")?,
+        "movement_backed": row.try_get::<bool, _>("movement_rows_backed")?,
+        "movement_rows_backed": row.try_get::<bool, _>("movement_rows_backed")?,
+        "is_user_candidate": row.try_get::<bool, _>("is_user_candidate")?,
+        "accounting_context": row.try_get::<Value, _>("accounting_context")?,
+        "first_block": row.try_get::<Option<i64>, _>("first_block")?,
+        "latest_block": row.try_get::<Option<i64>, _>("latest_block")?,
+        "movement_count": row.try_get::<i64, _>("movement_count")?,
+        "exact_trade_count": row.try_get::<i64, _>("exact_trade_count")?,
+        "denom_cashflow": row.try_get::<f64, _>("denom_cashflow")?,
+        "abs_denom_cashflow": row.try_get::<f64, _>("abs_denom_cashflow")?,
+        "denom_in": row.try_get::<Option<f64>, _>("denom_in")?,
+        "denom_out": row.try_get::<Option<f64>, _>("denom_out")?,
+        "token_balance": row.try_get::<Option<f64>, _>("token_balance")?,
+        "marked_token_value_denom": row.try_get::<Option<f64>, _>("marked_token_value_denom")?,
+        "pnl_proxy_denom": row.try_get::<Option<f64>, _>("pnl_proxy_denom")?,
+        "realized_pnl_denom": realized_pnl_denom,
+        "unrealized_value_denom": row.try_get::<Option<f64>, _>("unrealized_value_denom")?,
+        "unrealized_pnl_denom": unrealized_pnl_denom,
+        "total_pnl_denom": total_pnl_denom,
+        "realized_pnl_eth": if denom_is_eth { realized_pnl_denom } else { None },
+        "unrealized_pnl_eth": if denom_is_eth { unrealized_pnl_denom } else { None },
+        "total_pnl_eth": if denom_is_eth { total_pnl_denom } else { None },
+    }))
+}
+
+fn eth_trader_mechanism_breakdown_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "mechanism": row.try_get::<String, _>("mechanism")?,
+        "pool_position_count": row.try_get::<i64, _>("pool_position_count")?,
+        "token_count": row.try_get::<i64, _>("token_count")?,
+        "scam_pool_position_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "scam_token_count": row.try_get::<i64, _>("scam_token_count")?,
+        "trade_count": row.try_get::<i64, _>("trade_count")?,
+        "total_abs_denom_flow": row.try_get::<f64, _>("total_abs_denom_flow")?,
+        "scam_abs_denom_flow": row.try_get::<f64, _>("scam_abs_denom_flow")?,
+    }))
+}
+
+fn eth_trader_label_breakdown_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "kind": row.try_get::<String, _>("kind")?,
+        "label": row.try_get::<String, _>("label")?,
+        "pool_position_count": row.try_get::<i64, _>("pool_position_count")?,
+        "token_count": row.try_get::<i64, _>("token_count")?,
+        "scam_pool_position_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "scam_token_count": row.try_get::<i64, _>("scam_token_count")?,
+        "trade_count": row.try_get::<i64, _>("trade_count")?,
+        "total_abs_denom_flow": row.try_get::<f64, _>("total_abs_denom_flow")?,
+        "scam_abs_denom_flow": row.try_get::<f64, _>("scam_abs_denom_flow")?,
+    }))
+}
+
+fn eth_trader_movement_row(row: sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(json!({
+        "pool_id": row.try_get::<String, _>("pool_id")?,
+        "token_address": row.try_get::<String, _>("token_address")?,
+        "denom_address": row.try_get::<String, _>("denom_address")?,
+        "protocol": row.try_get::<Option<String>, _>("protocol")?,
+        "is_scam": row.try_get::<bool, _>("is_scam")?,
+        "scam_label": row.try_get::<Option<String>, _>("scam_label")?,
+        "scam_mechanism": row.try_get::<Option<String>, _>("scam_mechanism")?,
+        "entry_index": row.try_get::<i64, _>("entry_index")?,
+        "tx_hash": row.try_get::<String, _>("tx_hash")?,
+        "block_number": row.try_get::<i64, _>("block_number")?,
+        "block_timestamp": row.try_get::<i64, _>("block_timestamp")?,
+        "tx_index": row.try_get::<i64, _>("tx_index")?,
+        "log_index": row.try_get::<Option<i64>, _>("log_index")?,
+        "kind": row.try_get::<String, _>("kind")?,
+        "pool_direct": row.try_get::<bool, _>("pool_direct")?,
+        "token_in": row.try_get::<Option<f64>, _>("token_in")?,
+        "token_out": row.try_get::<Option<f64>, _>("token_out")?,
+        "token_delta": row.try_get::<Option<f64>, _>("token_delta")?,
+        "denom_in": row.try_get::<Option<f64>, _>("denom_in")?,
+        "denom_out": row.try_get::<Option<f64>, _>("denom_out")?,
+        "denom_delta": row.try_get::<Option<f64>, _>("denom_delta")?,
+        "native_fee_eth": row.try_get::<Option<f64>, _>("native_fee_eth")?,
+        "native_priority_fee_eth": row.try_get::<Option<f64>, _>("native_priority_fee_eth")?,
+    }))
+}
+
+fn merged_labels<'a>(
+    pool_labels: &[String],
+    role_flags: &[String],
+    optional_labels: impl IntoIterator<Item = Option<&'a str>>,
+) -> Vec<String> {
+    let mut labels = pool_labels
+        .iter()
+        .chain(role_flags.iter())
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    for label in optional_labels.into_iter().flatten() {
+        let label = label.trim();
+        if !label.is_empty() {
+            labels.push(label.to_string());
+        }
+    }
+    labels.sort();
+    labels.dedup();
+    labels
 }
 
 fn row_to_run(row: sqlx::postgres::PgRow) -> Result<RiskAtlasRun> {

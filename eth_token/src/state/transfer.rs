@@ -299,7 +299,6 @@ fn scale_amount(value: U256, decimals: u8) -> Result<f64> {
     Ok(raw / 10_f64.powi(i32::from(decimals)))
 }
 
-
 fn same_address_str(address: Address, value: &str) -> bool {
     address_string(&address) == normalize_address(value)
 }
@@ -325,7 +324,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
     use tx_processor::tx_processor::data_models::{
-        ERC20ApprovalEvent, ERC20TransferEvent, InternalTransaction,
+        ERC20ApprovalEvent, ERC20TransferEvent, InternalErc20Call, InternalTransaction,
     };
 
     fn tx() -> ProcessedTransaction {
@@ -413,14 +412,20 @@ mod tests {
     }
 
     #[test]
-    fn tracks_transfer_from_calldata_for_token_contract_calls() {
+    fn tracks_transfer_from_trace_call_for_token_contract_calls() {
         let mut tx = tx();
-        tx.input = transfer_from_input(
-            address!("2222222222222222222222222222222222222222"),
-            address!("000000000000000000000000000000000000dEaD"),
-            U256::from(2_500_000_000_000_000_000_u128),
-        );
         tx.to_address = Some(address!("3333333333333333333333333333333333333333"));
+        tx.internal_erc20_calls.push(InternalErc20Call {
+            token_address: address!("3333333333333333333333333333333333333333"),
+            caller: tx.from_address,
+            kind: Erc20CallKind::TransferFrom,
+            from_address: address!("2222222222222222222222222222222222222222"),
+            to_address: address!("000000000000000000000000000000000000dEaD"),
+            amount: U256::from(2_500_000_000_000_000_000_u128),
+            depth: 0,
+            call_type: Some("call".to_string()),
+            succeeded: true,
+        });
 
         let mut tracker =
             TokenTransferTracker::new("0x3333333333333333333333333333333333333333", 18, 10);
@@ -439,13 +444,5 @@ mod tests {
         assert_eq!(call.amount, 2.5);
         assert_eq!(call.emitted_transfer_count, 1);
         assert_eq!(call.emitted_approval_count, 1);
-    }
-
-    fn transfer_from_input(from: Address, to: Address, amount: U256) -> Vec<u8> {
-        let mut input = vec![0x23, 0xb8, 0x72, 0xdd];
-        input.extend_from_slice(from.into_word().as_slice());
-        input.extend_from_slice(to.into_word().as_slice());
-        input.extend_from_slice(amount.to_be_bytes::<32>().as_slice());
-        input
     }
 }

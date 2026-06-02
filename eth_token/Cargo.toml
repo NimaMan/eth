@@ -7,6 +7,7 @@ workspace = ".."
 
 [dependencies]
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }
+async-trait.workspace = true
 eyre.workspace = true
 rust_decimal.workspace = true
 indexmap = "2"
@@ -18,6 +19,18 @@ tracing = "0.1"
 tx_fund_flow-core-types = { path = "../tx_fund_flow/src/core_types" }
 tx_fund_flow-fundflownetwork = { path = "../tx_fund_flow/src/fundflownetwork" }
 tx_processor = { path = "../tx_processor" }
+
+[[example]]
+name = "custody_session_balance_drain"
+path = "examples/custody/session_balance_drain.rs"
+
+[[example]]
+name = "custody_session_scammer_case_report"
+path = "examples/custody/session_scammer_case_report.rs"
+
+[[example]]
+name = "pool_custody_flags"
+path = "examples/custody/pool_custody_flags.rs"
 
 [[example]]
 name = "uniswap_v2_pool_replay_reserves"

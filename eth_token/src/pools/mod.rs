@@ -5,6 +5,7 @@ pub mod base;
 pub mod classification;
 pub mod curve;
 pub mod data_models;
+pub mod flags;
 pub mod pancakeswap;
 pub mod reserves;
 pub mod scam_mechanism;
@@ -18,13 +19,18 @@ pub use balancer::{BalancerPool, BalancerPoolToken, BALANCER_V2_PROTOCOL};
 pub use base::{BasePool, BasePoolConfig, PoolIdentity, TradingStatus, TradingStatusSnapshot};
 pub use curve::{CurvePool, CurvePoolToken, CURVE_V1_PROTOCOL};
 pub use data_models::{PoolLifecycle, PoolLiquiditySnapshot, PoolRuntimeState};
+pub use flags::{
+    PoolCustodyCapabilityFlag, PoolCustodyFlags, PoolLiquidityFlags, PoolRiskFlags, PoolRouteFlags,
+    PoolStateFlags,
+};
 pub use pancakeswap::{
     PancakeSwapV2Pool, PancakeSwapV3Pool, PANCAKESWAP_V2_FACTORY, PANCAKESWAP_V2_PROTOCOL,
     PANCAKESWAP_V3_PROTOCOL,
 };
 pub use reserves::{PoolReserveTracker, ReserveSnapshot};
 pub use scam_mechanism::{
-    PoolScamMechanism, SCAM_DIRECT_LP_LIQUIDITY_REMOVAL, SCAM_PAIR_BALANCE_BACKDOOR_DRAIN,
+    PoolScamMechanism, SCAM_CUSTODY_BUYER_TOKEN_CONFISCATION, SCAM_DIRECT_LP_LIQUIDITY_REMOVAL,
+    SCAM_HOLDER_BALANCE_BACKDOOR_DRAIN, SCAM_PAIR_BALANCE_BACKDOOR_DRAIN,
     SCAM_PRIVILEGED_SELLER_RESERVE_DRAIN, SCAM_RESERVE_DUMP_DRAIN, SCAM_UNKNOWN_RESERVE_DRAIN,
 };
 pub use sushiswap::{

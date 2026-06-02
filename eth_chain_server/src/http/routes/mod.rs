@@ -1,6 +1,7 @@
 mod agent;
 mod alpha;
 mod backtest;
+mod eth_traders;
 mod health;
 mod live;
 mod mempool;
@@ -213,11 +214,13 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     let token_risk_atlas_scammer_analytics =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "scammer-analytics")
             .and(warp::get())
+            .and(with_state(state.clone()))
             .and_then(token_analytics::scammer_analytics);
 
     let token_risk_atlas_scammer_analytics_alias =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "risk-atlas" / "scammer_analytics")
             .and(warp::get())
+            .and(with_state(state.clone()))
             .and_then(token_analytics::scammer_analytics);
 
     let token_risk_atlas_runs =
@@ -231,6 +234,23 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
             .and(warp::get())
             .and(with_state(state.clone()))
             .and_then(token_analytics::risk_atlas_run);
+
+    let token_eth_traders = warp::path!("eth" / "tokens" / "api" / "traders")
+        .and(warp::get())
+        .and(warp::query::<eth_traders::EthTraderListQuery>())
+        .and(with_state(state.clone()))
+        .and_then(eth_traders::list);
+
+    let token_eth_trader = warp::path!("eth" / "tokens" / "api" / "traders" / String)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(eth_traders::detail);
+
+    let token_eth_trader_trade =
+        warp::path!("eth" / "tokens" / "api" / "traders" / String / "trades" / String)
+            .and(warp::get())
+            .and(with_state(state.clone()))
+            .and_then(eth_traders::trade);
 
     let token_network_analysis_start =
         warp::path!("eth" / "tokens" / "api" / "analytics" / "network")
@@ -581,6 +601,9 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(token_risk_atlas_runs)
         .or(token_risk_atlas_run)
         .or(token_risk_atlas)
+        .or(token_eth_traders)
+        .or(token_eth_trader_trade)
+        .or(token_eth_trader)
         .or(token_network_analysis_start)
         .or(token_network_analysis_list)
         .or(token_network_analysis_get)

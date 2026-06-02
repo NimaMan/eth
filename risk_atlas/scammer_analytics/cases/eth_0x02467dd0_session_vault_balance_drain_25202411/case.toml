@@ -1,0 +1,24 @@
+case_id = "eth_0x02467dd0_session_vault_balance_drain_25202411"
+title = "Session owner-controlled vault balance drain"
+status = "investigating"
+chain = "ethereum"
+
+suspect_address = "0x02467dd05200e5B3FBcdddbF43735aE4d0681a59"
+token_address = "0xc3A640bD249381F8097f44C1b61C46172068cDff"
+pool_address = "0x77a43d235c261436f0ad4577ce575ff0991adc1a"
+denom_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+
+[key_txs]
+lp_approval = "0x41731b558d12e1139a1cf9cefc80bd7556de6c4a61cc4f784f0fc462f8035737"
+victim_buy = "0xbe89b2a69f484ae3db4a9ead7dea4987e43fccee9cb27f76a4082550a190d704"
+balance_drain = "0xf0e8542a57c488121f18bdad4f148799e59ee21b83caa12bdc5b9aadac43d8ba"
+manual_exit = "0x875a44f7f5d59e242082f940b708a6ff0b4a9f355c40db27b2467095f870062a"
+
+[links]
+suspect = "https://etherscan.io/address/0x02467dd05200e5B3FBcdddbF43735aE4d0681a59"
+token = "https://etherscan.io/token/0xc3A640bD249381F8097f44C1b61C46172068cDff"
+pool = "https://etherscan.io/address/0x77a43d235c261436f0ad4577ce575ff0991adc1a"
+lp_approval = "https://etherscan.io/tx/0x41731b558d12e1139a1cf9cefc80bd7556de6c4a61cc4f784f0fc462f8035737"
+victim_buy = "https://etherscan.io/tx/0xbe89b2a69f484ae3db4a9ead7dea4987e43fccee9cb27f76a4082550a190d704"
+balance_drain = "https://etherscan.io/tx/0xf0e8542a57c488121f18bdad4f148799e59ee21b83caa12bdc5b9aadac43d8ba"
+manual_exit = "https://etherscan.io/tx/0x875a44f7f5d59e242082f940b708a6ff0b4a9f355c40db27b2467095f870062a"
