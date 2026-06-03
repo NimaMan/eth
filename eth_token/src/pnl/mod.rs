@@ -71,6 +71,7 @@ pub mod accounting;
 pub mod conservation;
 pub mod export;
 pub mod model;
+pub mod tx_ledger;
 
 pub use conservation::PoolPnlConservationCheck;
 pub use model::{

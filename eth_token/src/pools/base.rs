@@ -430,7 +430,9 @@ impl BasePool {
     }
 
     pub fn classification_input(&self) -> crate::pools::classification::PoolClassificationInput {
-        use crate::pools::classification::{quote_symbol_for_denom_address, PoolClassificationInput};
+        use crate::pools::classification::{
+            quote_symbol_for_denom_address, PoolClassificationInput,
+        };
         let max_denom_reserve = self
             .reserve_tracker
             .reserve_history
