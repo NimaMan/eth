@@ -5,8 +5,12 @@ use crate::pools::base::{BasePool, BasePoolConfig, PoolIdentity};
 use crate::pools::data_models::PoolLifecycle;
 use crate::pools::state::fixtures::{
     banana_gun_pass_through_state, custody_drain_state, lp_pull_state,
+    policy_restricted_routeable_state, reused_confiscation_pattern_state,
+    tax_policy_without_custody_state,
 };
-use crate::pools::state::tracks::{CounterpartyRole, LifecyclePhase, ValuationState};
+use crate::pools::state::tracks::{
+    BehavioralOutcomeSignal, CounterpartyRole, LifecyclePhase, ValuationState,
+};
 use crate::pools::state::views::{LiveTradingPoolView, RiskAtlasPoolView};
 use crate::pools::state::PoolTrackedState;
 
@@ -91,4 +95,84 @@ fn lp_pull_fixture_keeps_lp_control_and_risk_angles_separate() {
     assert!(state.risk.direct_lp_liquidity_removal);
     assert!(state.liquidity.reserve_liquidity_removed);
     assert_eq!(state.valuation.state, ValuationState::TerminalZero);
+}
+
+#[test]
+fn routeable_priced_pool_can_be_blocked_by_policy_and_sell_restriction() {
+    let state = policy_restricted_routeable_state();
+
+    assert!(state.routeability.effective_can_buy);
+    assert!(state.routeability.effective_can_sell);
+    assert_eq!(state.valuation.state, ValuationState::Priced);
+    assert!(state
+        .labels
+        .contains(&"policy:blacklist_present".to_string()));
+    assert!(state
+        .labels
+        .contains(&"restriction:low_sell_limit".to_string()));
+
+    let live = LiveTradingPoolView::from(&state);
+
+    assert!(!live.tradable_now);
+    assert!(live.behavior_risk_blocked);
+    assert_eq!(
+        live.block_reason.as_deref(),
+        Some("policy:blacklist_present")
+    );
+    assert!(live
+        .behavior_risk_blockers
+        .contains(&"policy:blacklist_present".to_string()));
+    assert!(live
+        .behavior_risk_blockers
+        .contains(&"restriction:low_sell_limit".to_string()));
+}
+
+#[test]
+fn tax_policy_flags_do_not_imply_realized_custody() {
+    let state = tax_policy_without_custody_state();
+
+    assert!(state.labels.contains(&"tax:modifiable".to_string()));
+    assert!(state.labels.contains(&"tax:extreme_sell_tax".to_string()));
+    assert!(!state.custody.latent);
+    assert!(!state.custody.realized);
+    assert_eq!(state.valuation.state, ValuationState::Priced);
+
+    let risk_view = RiskAtlasPoolView::from(&state);
+    assert!(risk_view
+        .tax_policy_labels
+        .contains(&"tax:modifiable".to_string()));
+    assert!(risk_view
+        .tax_policy_labels
+        .contains(&"tax:extreme_sell_tax".to_string()));
+    assert!(!risk_view.custody_realized);
+}
+
+#[test]
+fn repeated_signature_maps_to_reused_confiscation_pattern_behavior_label() {
+    let state = reused_confiscation_pattern_state();
+
+    assert!(state.behavioral_outcomes.reused_confiscation_pattern);
+    assert!(state
+        .labels
+        .contains(&"behavior:reused_confiscation_pattern".to_string()));
+
+    let outcome = state
+        .behavioral_outcomes
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.signal == BehavioralOutcomeSignal::ReusedConfiscationPattern)
+        .expect("reused confiscation outcome");
+    assert_eq!(
+        outcome.pattern_id.as_deref(),
+        Some("confiscation_signature_cluster_v1")
+    );
+    assert_eq!(
+        outcome.signature.as_deref(),
+        Some("0x70a08231:balanceOf|0xa9059cbb:transfer")
+    );
+
+    let risk_view = RiskAtlasPoolView::from(&state);
+    assert!(risk_view
+        .behavioral_outcome_labels
+        .contains(&"behavior:reused_confiscation_pattern".to_string()));
 }

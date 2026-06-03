@@ -78,6 +78,25 @@ pub fn labels_for_state(state: &PoolTrackedState) -> Vec<String> {
         ));
     }
 
+    for label in state.transfer_policy.active_labels() {
+        labels.insert(label.to_string());
+    }
+    for label in state.sell_restrictions.active_labels() {
+        labels.insert(label.to_string());
+    }
+    for label in state.tax_policy.active_labels() {
+        labels.insert(label.to_string());
+    }
+    for label in state.contract_posture.active_labels() {
+        labels.insert(label.to_string());
+    }
+    for label in state.supply_control.active_labels() {
+        labels.insert(label.to_string());
+    }
+    for label in state.behavioral_outcomes.active_labels() {
+        labels.insert(label.to_string());
+    }
+
     if state.risk.terminal_position_risk {
         labels.insert("risk:terminal_position".to_string());
     }
