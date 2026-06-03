@@ -219,12 +219,20 @@ fn row_badges(pool: &PoolView) -> Vec<TokenPoolSurfaceBadge> {
     }
     if pool.is_scam {
         badges.push(TokenPoolSurfaceBadge {
-            key: "scammed".to_string(),
+            key: "risk_mechanism".to_string(),
             label: pool
-                .scam_label
+                .scam_mechanism_label
                 .clone()
+                .or_else(|| pool.scam_label.clone())
                 .or_else(|| pool.risk_label.clone())
                 .unwrap_or_else(|| "Scammed".to_string()),
+            tone: "bad".to_string(),
+        });
+    }
+    if pool.liquidity_removal {
+        badges.push(TokenPoolSurfaceBadge {
+            key: "liquidity_removal_evidence".to_string(),
+            label: "Liquidity removal".to_string(),
             tone: "bad".to_string(),
         });
     }

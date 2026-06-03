@@ -23,8 +23,11 @@ use display::{
 };
 
 mod display;
+mod state_tracks;
 #[cfg(test)]
 mod tests;
+
+use state_tracks::{pool_state_tracks, PoolStateTracksView};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PriceRatioPoint {
@@ -141,6 +144,7 @@ pub struct PoolView {
     pub liquidity_removal_label: Option<String>,
     pub liquidity_removal_block: Option<u64>,
     pub liquidity_removal_tx_hash: Option<String>,
+    pub pool_state_tracks: PoolStateTracksView,
     pub risk_level: PoolRiskLevel,
     pub risk_label: Option<String>,
     pub pool_classification: PoolClassification,
@@ -640,6 +644,22 @@ impl PoolView {
             };
             stage = PoolLifecycle::LiquidityRemoved;
         }
+        let pool_state_tracks = pool_state_tracks(
+            token,
+            base,
+            &lp_fields,
+            stage,
+            liquidity_level,
+            &reserve_quality,
+            current_trading,
+            tax_bucket,
+            liquidity_removal,
+            liquidity_removal_label.as_deref(),
+            &risk,
+            scam_mechanism.as_deref(),
+            scam_mechanism_label.as_deref(),
+            &pool_classification,
+        );
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -725,6 +745,7 @@ impl PoolView {
                     .as_ref()
                     .and_then(|mechanism| mechanism.tx_hash.clone())
             }),
+            pool_state_tracks,
             risk_level: risk.level,
             risk_label: risk.label,
             pool_classification,
