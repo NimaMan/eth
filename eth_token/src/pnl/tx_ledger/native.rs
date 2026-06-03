@@ -42,7 +42,7 @@ fn is_excluded_call_kind(value: Option<&str>) -> bool {
     };
     let normalized = value
         .chars()
-        .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
+        .filter(|ch| ch.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_uppercase();
     matches!(
@@ -78,6 +78,15 @@ mod tests {
         row.call_type = Some("CALL".to_string());
         assert!(is_balance_moving_internal_eth(&row));
 
+        row.trace_type = "\"DELEGATECALL\"".to_string();
+        row.call_type = None;
+        assert!(!is_balance_moving_internal_eth(&row));
+
+        row.trace_type = "call".to_string();
+        row.call_type = Some("\"STATICCALL\"".to_string());
+        assert!(!is_balance_moving_internal_eth(&row));
+
+        row.call_type = Some("CALL".to_string());
         row.value = U256::ZERO;
         assert!(!is_balance_moving_internal_eth(&row));
     }
