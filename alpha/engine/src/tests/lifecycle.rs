@@ -577,11 +577,11 @@ async fn critical_risk_policy_rejects_matching_order() {
 }
 
 // A mined liquidity-removal / scam drain must terminalize an open position to a
-// zero-value `Scammed` close even when the strategy has no exit rule enabled
+// zero-value `TerminalZero` close even when the strategy has no exit rule enabled
 // (config-independent). A confiscated balance cannot be sold, so the close must
 // not depend on a successful sell.
 #[tokio::test]
-async fn drained_position_terminalizes_to_scammed_on_mined_liquidity_removal() {
+async fn drained_position_terminalizes_to_terminal_zero_on_mined_liquidity_removal() {
     let store = MemoryTradingStore::default();
     let token = Address::repeat_byte(0x11);
     let pool_address = Address::repeat_byte(0x22);
@@ -618,7 +618,7 @@ async fn drained_position_terminalizes_to_scammed_on_mined_liquidity_removal() {
         .unwrap();
 
     let position = store.positions().into_iter().next().expect("position");
-    assert_eq!(position.state, PositionState::Scammed);
+    assert_eq!(position.state, PositionState::TerminalZero);
     assert!(position.drained);
     assert!(!position.has_exposure());
 
@@ -632,9 +632,9 @@ async fn drained_position_terminalizes_to_scammed_on_mined_liquidity_removal() {
 }
 
 // A drained position whose sell fails (a confiscated balance cannot fill) must
-// still terminalize to `Scammed` rather than lingering in `SellFailed`.
+// still terminalize to `TerminalZero` rather than lingering in `SellFailed`.
 #[tokio::test]
-async fn failed_sell_of_drained_position_terminalizes_to_scammed() {
+async fn failed_sell_of_drained_position_terminalizes_to_terminal_zero() {
     let store = MemoryTradingStore::default();
 
     let mut position = test_position(PositionState::SellSubmitted);
@@ -668,6 +668,6 @@ async fn failed_sell_of_drained_position_terminalizes_to_scammed() {
         .unwrap();
 
     let position = store.positions().into_iter().next().expect("position");
-    assert_eq!(position.state, PositionState::Scammed);
+    assert_eq!(position.state, PositionState::TerminalZero);
     assert!(!position.has_exposure());
 }

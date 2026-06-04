@@ -169,7 +169,10 @@ pub(crate) fn position_state_label(state: &PositionState) -> &'static str {
         PositionState::SellCancelled => "sell_cancelled",
         PositionState::SellConfirmed => "sell_confirmed",
         PositionState::Cancelled => "cancelled",
-        PositionState::Scammed => "scammed",
+        // Cause-agnostic terminal "value is permanently zero" state. The legacy
+        // `"scammed"` label is still accepted on the read path (string
+        // terminal-state helpers) for back-compat with already-persisted rows.
+        PositionState::TerminalZero => "terminal_zero",
     }
 }
 

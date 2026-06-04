@@ -359,6 +359,10 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Does a position's value flip back to positive after reaching zero?",
             "Once an open position records a zero/near-zero value snapshot after a mined drain, no later non-terminal snapshot may report a positive value; a flip back to positive resurrects a drained position.",
         ),
+        "drained_position_reaches_terminal_zero" => (
+            "Are drained positions terminalized at zero value?",
+            "When a mined value-destroying risk event (liquidity_removal/scam_confirmed, mined evidence only) hits a position's pool at or before its latest observed block, the position must reach the terminal terminal_zero state (legacy scammed or a clean sell_confirmed exit are also accepted); a position left non-terminal/open means the drain-close was missed.",
+        ),
         _ => (
             "What invariant is this check validating?",
             "Runs a scoped validation query against alpha_trading and reports any violating rows.",

@@ -257,7 +257,7 @@ where
                         // In-flight exits (Sell{IntentCreated,Submitted}) are left to
                         // resolve and are terminalized on their failed/cancelled report.
                         if !position.has_exit_in_flight() {
-                            position.mark_scammed();
+                            position.mark_terminal_zero();
                         }
                         let _ = self.store.upsert_position(position).await;
                         // Snapshot the drained state so baseline PnL is honest

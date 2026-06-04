@@ -296,7 +296,7 @@ where
                 // A confiscated/drained position cannot be sold; a failed/cancelled sell
                 // must still close it terminally at zero value rather than leaving it open.
                 if !position.state.is_terminal() {
-                    position.mark_scammed();
+                    position.mark_terminal_zero();
                     self.store.upsert_position(&position).await?;
                 }
                 let block_number = report

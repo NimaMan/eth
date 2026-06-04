@@ -407,3 +407,58 @@ pub(super) async fn active_hold_limit_exit_check(
     )
     .await
 }
+
+/// S6 lifecycle gate (cause-agnostic value-zero close enforcement). The three
+/// existing S6 checks only assert snapshot VALUATION invariants and therefore
+/// pass on both a pre-fix run (positions left open after a confirmed drain) and
+/// the fixed run, so they do not discriminate. This gate closes that gap: a
+/// position whose pool suffered a mined, value-destroying risk event
+/// (`liquidity_removal` / `scam_confirmed`, mined evidence only — pending
+/// mempool signals excluded) at or before the position's latest observed block
+/// MUST be terminalized at permanently-zero value. The required terminal state
+/// is `terminal_zero`; the legacy `scammed` label is accepted for back-compat,
+/// and a clean `sell_confirmed` exit is also acceptable. Any other state
+/// (`buy_confirmed`, `sell_failed`, `sell_cancelled`, or any non-terminal/open
+/// state) at run end despite the drain is a FAIL: the drain-close was missed and
+/// the position is left lingering open.
+pub(super) async fn drained_position_reaches_terminal_zero_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "lifecycle",
+        "drained_position_reaches_terminal_zero",
+        Verdict::Fail,
+        "positions with a mined value-destroying drain are terminalized at zero value",
+        "positions left non-terminal/open despite a mined value-destroying drain",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trades t
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND t.state NOT IN ('terminal_zero', 'scammed', 'sell_confirmed')
+          AND EXISTS (
+              SELECT 1
+              FROM alpha_trading.risk_events re
+              WHERE re.run_id = t.run_id
+                AND lower(re.pool_address) = lower(t.pool_address)
+                AND re.kind IN ('liquidity_removal', 'scam_confirmed')
+                AND re.pending_tx_hash IS NULL
+                AND COALESCE(re.payload->>'source', '') NOT IN ('mempool_signal')
+                AND re.observed_block IS NOT NULL
+                AND re.observed_block <= COALESCE(
+                    t.latest_observed_block,
+                    t.latest_valuation_block,
+                    t.latest_snapshot_block,
+                    t.exit_block,
+                    t.entry_block
+                )
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}

@@ -200,6 +200,10 @@ pub async fn run_checks(
         .push(lifecycle::no_duplicate_terminal_events_check(pool, result_set_id, strategy).await?);
     checks.push(lifecycle::lifecycle_order_check(pool, result_set_id, strategy).await?);
     checks.push(lifecycle::active_hold_limit_exit_check(pool, result_set_id, strategy).await?);
+    checks.push(
+        lifecycle::drained_position_reaches_terminal_zero_check(pool, result_set_id, strategy)
+            .await?,
+    );
     checks
         .push(accounting::entry_cost_matches_buy_fill_check(pool, result_set_id, strategy).await?);
     checks

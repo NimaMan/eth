@@ -356,8 +356,12 @@ impl Position {
         self.state == PositionState::SellConfirmed
     }
 
-    pub fn mark_scammed(&mut self) {
-        self.state = PositionState::Scammed;
+    /// Terminalize this position at permanently-zero value. Cause-agnostic: it
+    /// records only the OUTCOME (no recoverable proceeds, e.g. a confiscated /
+    /// drained balance that can never be sold). The cause (a confirmed pool
+    /// drain / scam) is captured separately in pool-state flags and risk events.
+    pub fn mark_terminal_zero(&mut self) {
+        self.state = PositionState::TerminalZero;
     }
 }
 

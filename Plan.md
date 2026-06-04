@@ -114,14 +114,19 @@ Latest relevant commits:
   zeroes at 25202411 and stays terminal.
 - **Terminal-state semantics decision:** the position-level `Scammed` state (which had NO
   pre-existing setters — dead until the drain-close) is being replaced by a cause-agnostic
-  `ValueZeroed` ("value is zero, final"). Cause/classification (scam mechanism, holder-balance
+  `TerminalZero` ("value is zero, final"). Cause/classification (scam mechanism, holder-balance
   backdoor drain, LP removal, custody confiscation) stays in the comprehensive pool-state
   flags / risk events, not the position lifecycle state.
-- **Backtest Validity Step 6 — GAP found, lifecycle gate in progress.** The 3 committed S6
+- **Backtest Validity Step 6 — GAP found + lifecycle gate ADDED.** The 3 prior S6
   checks (`alpha/lab/.../checks/snapshots.rs`) PASS on the fixed run but ALSO pass on the
   pre-fix stuck run — they only assert snapshot *valuation* invariants (already correct
-  pre-fix), never the trade *lifecycle state*. No gate asserts "a drained position must reach
-  terminal `ValueZeroed`." A new lifecycle gate is being added so the drain-close is enforced.
+  pre-fix), never the trade *lifecycle state*. New gate `drained_position_reaches_terminal_zero`
+  (`alpha/lab/src/strategy_validation/checks/lifecycle.rs`) closes it: a position with a mined
+  value-destroying drain at/before its latest block that is not terminalized
+  (`terminal_zero`/`scammed`/`sell_confirmed`) is a violation. Proven to discriminate — FAILS
+  the pre-fix run (7 violations), PASSES `…fix01` (0). Position terminal state renamed
+  `Scammed → TerminalZero` to match eth_token's `ValuationState::TerminalZero` /
+  token_pnl's `terminal_zero`.
 - **Alpha structure verdict (architecture review):** mostly-fine, NO real restructure needed —
   the "Alpha Structure State 2026-05-24" oversized-file offenders are already split (that
   snapshot is stale). Crate DAG acyclic; `lab` DB-decoupled and `live/feed` HTTP-decoupled

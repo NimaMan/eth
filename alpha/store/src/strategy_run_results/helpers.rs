@@ -485,6 +485,7 @@ pub(super) fn is_open_trade_state(state: &str) -> bool {
             | "buy_failed"
             | "buy_cancelled"
             | "cancelled"
+            | "terminal_zero"
             | "scammed"
             | "failed"
     )
