@@ -274,8 +274,16 @@ pub async fn run() -> Result<()> {
             format!("failed to load token_state terminal pool events for scope {scope_id}")
         })?;
         events.extend(overlay_events);
-        events = sort_events_by_block(events);
     }
+
+    // Order events by (block, event_order) for EVERY replay path. Within a block a mined
+    // value-destroying drain must lead, so open positions are marked drained before the
+    // same block's pool-update valuation runs — otherwise the valuation books a (often
+    // dust-sized) positive snapshot at the drain block before the drain-close zeroes it,
+    // which fails `no_positive_open_snapshot_after_drain` and misleads per-event assessment.
+    // This previously ran only inside the `--token-state-scope` overlay branch, so plain
+    // risk-atlas replays were left unsorted and the within-block reorder never applied.
+    events = sort_events_by_block(events);
 
     if events.is_empty() {
         return Err(eyre::eyre!(
