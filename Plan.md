@@ -195,6 +195,52 @@ These should not block code correctness, but they block confident operations.
 | Block-hash pinning needs operator/audit enforcement | ETH has block-frame and simulator hash plumbing in parts of the stack, but promotion dashboards and audit exports still need consistent block number+hash visibility for decision, simulation, settlement, and valuation evidence. | Surface and validate number+hash on Alpha reports, Asena detail pages, and promotion checks; label evidence incomplete when hashes are missing or mismatched. |
 | Old terminal metadata pollutes dashboards | Fixed on `2026-05-31`: terminal `backtest_result_sets` and `trader_runs` rows were backfilled so old stopped/completed/stale rows no longer carry `metadata.live_status=live` or `trading_enabled=true`. | Add validation that terminal rows cannot carry live metadata, so future regressions fail before reaching dashboards. |
 
+## Scammer Analytics — Tier-Two Case 2026-06-04
+
+Scammer Analytics is the tier-two consumer of the Tier-One scam-detection and
+address-level PnL work: it turns the same on-chain evidence into **actionable
+intelligence to clean up the chain** — flag and track the malactors, follow the
+stolen money to its off-ramp, and produce packets an average person can read and
+that are usable to escalate to law enforcement and to contact the exchanges that
+received the funds. Objective = actionable cleanup; use anything that helps (PnL,
+token/pool state, fund-flow tracer, CEX catalog, mempool/risk events). Spec:
+`risk_atlas/scammer_analytics/DESIGN.md`.
+
+### Entity model — the funder tree (not reused operator addresses)
+
+A scammer is NOT one wallet that runs many cases. The observed pattern is:
+**fund a fresh address → run one scam (deploy → pump → rug/drain → forward out)
+→ abandon the address → repeat from the same funding source.** So the durable
+identity is the **funding root**, and cases form a **tree** under it: one
+disposable operator address per case, linked by the shared funder (and,
+secondarily, shared cash-out path, shared forwarder/sink, and identical token
+bytecode). Grouping cases by `suspect_address` yields one case per scammer (the
+addresses are disposable); the rollup must group by the **funder tree**.
+
+### Current state (built, 2026-06-04)
+
+| Piece | State |
+| --- | --- |
+| First-time scam detection | Verified: the holder-balance/confiscation detector fires first-time on a single victim (`eth_token/src/erc20/token/activity.rs`), surfaced as a critical liquidity-removal-class risk event. Gap: the trace-independent balanceOf-vs-ledger fallback (`custody/reconciliation.rs`) exists but is unwired in the live decision path (fires only if call traces are on at the drain block). |
+| Per-case fund-flow trace | `custody_suspect_cashout_trace` — multi-asset (ETH/WETH/USDC/USDT), value-conserving taint, swap-carry, recoverability (at-exchange/in-wallet/bridged/destroyed), per-exchange terminals via the 2,776-addr CEX catalog, funder-source scan. |
+| Per-case scam mechanics | `scam_inflation_lifecycle` — price-pump curve, `inflation_x`, LP-add vs rug-removal extraction, lifecycle timeline, plain-language `how_it_was_scammed.md`. |
+| Buyer outcomes | `custody_session_scammer_case_report` — confiscated/holding buyers, PnL, address clusters. |
+| Read-model / API | `eth_chain_server/.../scammer.rs` serves `scammers[]`, `exchanges[]` (per-exchange exposure), `recoverability`, per-case artifacts; per-address scam-ratio via `scammer_address_distribution`. |
+| Frontend | Single-scammer "follow the money" page live (verdict → money-flow path → step story → recoverability → victims → evidence fold). Home/landscape page in progress. |
+| Docs/structure | `DESIGN.md` + objective-first README per folder (cases/scammers/clusters/addresses/exchanges/schemas/pipeline/packets). |
+
+### Next action
+
+| Item | Next action |
+| --- | --- |
+| Funder-tree rollup | Regroup `scammers[]` by **funding source** (tree root), not `suspect_address`; attribute each case's fresh operator address to its funder via the per-case funding scan + nearest pre-deploy funding. |
+| Cluster/funder attribution | Link cases across the chain by shared funder, shared cash-out deposit address, shared forwarder/sink, and identical token bytecode; emit `clusters/` with confidence (shared-funder / shared-cash-out = strong). |
+| Surface scam mechanics | Put the inflation/lifecycle (`scam_mechanics.json`) on the scammer page — the pump→rug curve + extraction; generate it per case. |
+| High-impact showcase case | Pick a real pump-and-dump (large `inflation_x` + many victims + CEX cash-out) and generate its full artifact set, so the page demonstrates all three pillars. |
+| Actionable output | Export an LE packet (`packets/`) and a per-exchange "contact this exchange" block (exchange, deposit addresses, amount, request) for record-preservation / freeze. |
+| Address first-degree screen | Per-address page: scam-trade ratio + scam pools + roles/mechanisms + the cases the address appears in (the entry screen). |
+| Live detection fallback | Wire the trace-independent balanceOf-vs-ledger reconcile into the live/backtest decision path so a drain is caught even when call traces are off. |
+
 ## Backtest Validity Step 4 - Real/Backtest Execution Parity 2026-05-29
 
 Status: active P0 blocker for real capital until fresh evidence proves parity.

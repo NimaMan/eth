@@ -180,7 +180,7 @@
 ?? eth_token/src/pnl/conservation.rs
 ?? eth_token/src/pnl/export.rs
 ?? eth_token/src/pnl/model.rs
-?? eth_token_pnl_store/
+?? eth_token_store/
 ?? onchain-deployments/uniswap-v2-trading-vault/audit/contract-test-gas-review-2026-05-19.md
 ?? reth_chain_query/src/common_addresses/burn_addresses.rs
 ?? token_lab/investigations/vyp_burned_lp_reserve_drain_25077324/
