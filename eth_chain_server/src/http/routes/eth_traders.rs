@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use eth_risk_atlas::EthTraderListParams;
+use eth_pnl::EthTraderListParams;
 use serde::Deserialize;
 use warp::http::StatusCode;
 
@@ -45,7 +45,7 @@ pub(super) async fn list(
     query: EthTraderListQuery,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.risk_atlas.eth_traders(query.into()).await {
+    match state.token_pnl.eth_traders(query.into()).await {
         Ok(Some(payload)) => Ok(json_response(&payload, StatusCode::OK)),
         Ok(None) => Ok(error_response(
             "token PnL has no calculation run",
@@ -70,7 +70,7 @@ pub(super) async fn detail(
         ));
     }
 
-    match state.risk_atlas.eth_trader_profile(address).await {
+    match state.token_pnl.eth_trader_profile(address).await {
         Ok(Some(payload)) => Ok(json_response(&payload, StatusCode::OK)),
         Ok(None) => Ok(error_response(
             "ETH trader address not found",
@@ -97,7 +97,7 @@ pub(super) async fn trade(
         ));
     }
 
-    match state.risk_atlas.eth_trader_trade(address, pool_id).await {
+    match state.token_pnl.eth_trader_trade(address, pool_id).await {
         Ok(Some(payload)) => Ok(json_response(&payload, StatusCode::OK)),
         Ok(None) => Ok(error_response(
             "ETH trader trade position not found",

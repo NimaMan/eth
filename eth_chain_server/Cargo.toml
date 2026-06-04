@@ -12,6 +12,7 @@ eth_alpha_lab = { path = "../alpha/lab" }
 eth_block_tx_rank = { path = "../alpha/block_tx_rank" }
 eth_live_feed = { path = "../alpha/live/feed" }
 eth_ops_events = { path = "../eth_ops_events" }
+eth_pnl = { path = "../eth_pnl" }
 eth_price = { path = "../eth_price" }
 eth_token = { path = "../eth_token" }
 rust_decimal.workspace = true

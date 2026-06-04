@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use eth_live_feed::{LiveTokenEvent, LiveTokenReader, LiveTokenRuntimeConfig};
+use eth_pnl::TokenPnlReader;
 use eth_risk_atlas::RiskAtlasReader;
 use eyre::{eyre, Result, WrapErr};
 use reth_chain_query::{reth_index::RethIndexDB, RethQueryProvider};
@@ -37,6 +38,7 @@ pub struct ServerState {
     pub mempool_signals: MempoolSignalStore,
     pub alpha_trading: AlphaTradingStore,
     pub risk_atlas: RiskAtlasReader,
+    pub token_pnl: TokenPnlReader,
     pub price_service: ChainPriceService,
 }
 
@@ -96,6 +98,7 @@ impl ServerState {
                 .with_arrival_provider(provider.clone());
         let alpha_trading = AlphaTradingStore::new(&config.alpha_database_url)?;
         let risk_atlas = RiskAtlasReader::connect_lazy(&config.risk_atlas_database_url)?;
+        let token_pnl = TokenPnlReader::connect_lazy(&config.token_pnl_database_url)?;
         let price_service = ChainPriceService::new(provider.provider_factory().clone())?;
 
         Ok(Self {
@@ -114,6 +117,7 @@ impl ServerState {
             mempool_signals,
             alpha_trading,
             risk_atlas,
+            token_pnl,
             price_service,
         })
     }

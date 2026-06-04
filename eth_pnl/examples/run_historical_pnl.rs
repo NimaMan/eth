@@ -6,8 +6,8 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use eth_pnl_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
-use eth_pnl_store::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
+use eth_pnl::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
+use eth_pnl::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
 use eth_token::{
     chain_metadata::RethChainMetadataProvider,
     custody::CustodyFinding,
@@ -912,7 +912,7 @@ fn print_usage() {
     println!(
         "\
 Usage:
-  cargo run -p eth_pnl_store --example run_historical_pnl -- \\
+  cargo run -p eth_pnl --example run_historical_pnl -- \\
     [--run-id <run_id>] [--start <block>] [--end <block>] [--blocks 50000]
 
 Options:

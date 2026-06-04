@@ -9,6 +9,7 @@ workspace = ".."
 alloy-primitives.workspace = true
 chrono.workspace = true
 eyre.workspace = true
+eth_pnl = { path = "../eth_pnl" }
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

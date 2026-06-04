@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-use eth_pnl_store::{EthConfigFile, TokenPnlReader, TokenPnlStoreConfig};
+use eth_pnl::{EthConfigFile, TokenPnlReader, TokenPnlStoreConfig};
 use eyre::{bail, eyre, Result};
 use sqlx::PgPool;
 
@@ -108,6 +108,6 @@ fn next_arg(name: &str, args: &mut impl Iterator<Item = String>) -> Result<Strin
 
 fn print_usage() {
     println!(
-        "Usage:\n  cargo run -p eth_pnl_store --example inspect_pool_pnl_db -- \\\n    --run-id <run_id> --pool <pool_id> [--config /path/to/config.toml] [--limit 10]"
+        "Usage:\n  cargo run -p eth_pnl --example inspect_pool_pnl_db -- \\\n    --run-id <run_id> --pool <pool_id> [--config /path/to/config.toml] [--limit 10]"
     );
 }

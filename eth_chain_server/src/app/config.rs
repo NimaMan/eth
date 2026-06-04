@@ -24,6 +24,7 @@ const LIVE_TOKEN_TRACKER_BLOCK_APPLY_TIMEOUT_MS_CONFIG: &str =
 const MEMPOOL_DATABASE_CONFIG_KEY: &str = "databases.mempool.url";
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const RISK_ATLAS_DATABASE_CONFIG_KEY: &str = "databases.risk_atlas.url";
+const TOKEN_PNL_DATABASE_CONFIG_KEY: &str = "databases.token_pnl.url";
 const MEMPOOL_SIGNAL_LIMIT_CONFIG: &str = "MEMPOOL_SIGNAL_LIMIT";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
@@ -57,6 +58,7 @@ pub struct ChainServerConfig {
     pub mempool_database_url: String,
     pub alpha_database_url: String,
     pub risk_atlas_database_url: String,
+    pub token_pnl_database_url: String,
     pub mempool_signal_limit: i64,
 }
 
@@ -116,6 +118,7 @@ impl ChainServerConfig {
         let alpha_database_url = required_config_string(config, ALPHA_DATABASE_CONFIG_KEY)?;
         let risk_atlas_database_url =
             required_config_string(config, RISK_ATLAS_DATABASE_CONFIG_KEY)?;
+        let token_pnl_database_url = required_config_string(config, TOKEN_PNL_DATABASE_CONFIG_KEY)?;
         let mempool_signal_limit = config_parse(
             config,
             MEMPOOL_SIGNAL_LIMIT_CONFIG,
@@ -162,6 +165,9 @@ impl ChainServerConfig {
         if risk_atlas_database_url.trim().is_empty() {
             return Err(eyre!("{RISK_ATLAS_DATABASE_CONFIG_KEY} must not be empty"));
         }
+        if token_pnl_database_url.trim().is_empty() {
+            return Err(eyre!("{TOKEN_PNL_DATABASE_CONFIG_KEY} must not be empty"));
+        }
         if mempool_signal_limit <= 0 {
             return Err(eyre!(
                 "{MEMPOOL_SIGNAL_LIMIT_CONFIG} must be greater than zero"
@@ -184,6 +190,7 @@ impl ChainServerConfig {
             mempool_database_url,
             alpha_database_url,
             risk_atlas_database_url,
+            token_pnl_database_url,
             mempool_signal_limit,
         })
     }
@@ -271,6 +278,7 @@ fn merge_toml_database_config(values: &mut HashMap<String, String>, path: &Path)
     insert_toml_database_url(values, &root, "mempool", MEMPOOL_DATABASE_CONFIG_KEY);
     insert_toml_database_url(values, &root, "alpha", ALPHA_DATABASE_CONFIG_KEY);
     insert_toml_database_url(values, &root, "risk_atlas", RISK_ATLAS_DATABASE_CONFIG_KEY);
+    insert_toml_database_url(values, &root, "token_pnl", TOKEN_PNL_DATABASE_CONFIG_KEY);
     Ok(())
 }
 
@@ -382,6 +390,7 @@ mod tests {
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.token_pnl.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -400,6 +409,7 @@ mod tests {
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.token_pnl.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -417,6 +427,7 @@ mod tests {
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.token_pnl.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 
@@ -434,6 +445,7 @@ mod tests {
             databases.mempool.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.alpha.url=postgresql://postgres:postgres@localhost:5432/eth_db
             databases.risk_atlas.url=postgresql://postgres:postgres@localhost:5432/eth_db
+            databases.token_pnl.url=postgresql://postgres:postgres@localhost:5432/eth_db
             "#,
         );
 

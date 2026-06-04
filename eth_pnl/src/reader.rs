@@ -1,9 +1,30 @@
-use sqlx::PgPool;
+// Token PnL readers expose persisted token_pnl state without owning calculation
+// logic: run selection, address-level views, pool state, and movement lookups.
+pub mod run;
+pub mod sql;
+
+mod address_pnl;
+mod rows;
+
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
 use crate::{
     schema::{AddressPnlRow, PnlMovementRow, PoolPnlStateRow},
     Result,
 };
+
+#[derive(Debug, Clone, Default)]
+pub struct EthTraderListParams {
+    pub mode: Option<String>,
+    pub sort: Option<String>,
+    pub min_scam_ratio: Option<f64>,
+    pub min_trades: Option<i64>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+    pub mechanism: Option<String>,
+    pub label: Option<String>,
+    pub role: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct TokenPnlReader {
@@ -11,8 +32,30 @@ pub struct TokenPnlReader {
 }
 
 impl TokenPnlReader {
+    pub async fn connect(database_url: &str) -> Result<Self> {
+        Ok(Self {
+            pool: PgPool::connect(database_url).await?,
+        })
+    }
+
+    pub fn connect_lazy(database_url: &str) -> Result<Self> {
+        Ok(Self {
+            pool: PgPoolOptions::new()
+                .max_connections(5)
+                .connect_lazy(database_url)?,
+        })
+    }
+
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     pub fn from_pool(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn latest_token_pnl_run(&self) -> Result<Option<sqlx::postgres::PgRow>> {
+        run::latest_token_pnl_run(&self.pool).await
     }
 
     pub async fn pool_state(&self, run_id: &str, pool_id: &str) -> Result<Option<PoolPnlStateRow>> {
@@ -80,8 +123,14 @@ impl TokenPnlReader {
                 native_priority_fee,
                 marked_token_value_denom,
                 pnl_proxy_denom,
-                position_status,
-                valuation_status,
+                CASE position_status
+                    WHEN 'terminal_zero' THEN 'closed_zero_valuation'
+                    ELSE position_status
+                END AS position_status,
+                CASE valuation_status
+                    WHEN 'terminal_zero' THEN 'closed_zero_valuation'
+                    ELSE valuation_status
+                END AS valuation_status,
                 reconciliation_status,
                 realized_pnl_denom,
                 unrealized_value_denom,

@@ -12,7 +12,7 @@ pub use config::{
 };
 pub use error::{Result, TokenPnlStoreError};
 pub use migration::run_migrations;
-pub use reader::TokenPnlReader;
+pub use reader::{EthTraderListParams, TokenPnlReader};
 pub use schema::{AddressPnlRow, PnlCalculationRun, PnlMovementRow, PoolPnlStateRow};
 pub use state::{
     PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig,
