@@ -22,8 +22,8 @@ async fn main() -> eyre::Result<()> {
     let provider = ProcessedTxProvider::new(&reth_datadir)?;
 
     for hash_str in &args[1..] {
-        let hash = B256::from_str(hash_str)
-            .map_err(|e| eyre::eyre!("invalid tx hash {hash_str}: {e}"))?;
+        let hash =
+            B256::from_str(hash_str).map_err(|e| eyre::eyre!("invalid tx hash {hash_str}: {e}"))?;
         // process_transaction_by_hash loads from the reth DB and simulates — no
         // disk-cache involvement.
         let tx = provider.process_transaction_by_hash(hash).await?;

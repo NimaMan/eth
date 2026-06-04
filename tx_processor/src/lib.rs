@@ -27,10 +27,10 @@ pub use live::{
     LiveStateDiffFrame,
 };
 pub use processed_tx_provider::{
-    load_cached_processed_block, load_processed_block, load_processed_block_range,
-    load_processed_block_range_with_options, processed_block_trace_config_hash,
-    prune_processed_block_disk_cache, should_prune_processed_block_disk_cache,
-    bench_deserialize_block, bench_serialize_block, AddressProcessedTxProvider, CacheFieldSet,
+    bench_deserialize_block, bench_serialize_block, load_cached_processed_block,
+    load_processed_block, load_processed_block_range, load_processed_block_range_with_options,
+    processed_block_trace_config_hash, prune_processed_block_disk_cache,
+    should_prune_processed_block_disk_cache, AddressProcessedTxProvider, CacheFieldSet,
     CacheSerCodec, CompactProcessedTransaction, LoadedProcessedBlock,
     LoadedProcessedBlockWithMetrics, ProcessedBlockAddressIndexError,
     ProcessedBlockAddressIndexFailurePolicy, ProcessedBlockAddressIndexWrite,

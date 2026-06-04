@@ -175,6 +175,7 @@ async fn main() -> Result<()> {
                 .address_index_participating_txs;
             chunk.address_index_inserted += loaded_block.disk_cache_metrics.address_index_inserted;
             chunk.address_index_write_ms += loaded_block.disk_cache_metrics.address_index_write_ms;
+            chunk.address_index_failures += loaded_block.disk_cache_metrics.address_index_failures;
             if loaded_block
                 .disk_cache_metrics
                 .address_index_participating_txs
@@ -187,7 +188,7 @@ async fn main() -> Result<()> {
         totals.add(&chunk);
 
         println!(
-            "chunk {}..{} blocks={} hits={} writes={} txs={} elapsed_ms={} disk_read_ms={} disk_write_ms={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={}",
+            "chunk {}..{} blocks={} hits={} writes={} txs={} elapsed_ms={} disk_read_ms={} disk_write_ms={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={} address_index_failures={}",
             cursor,
             chunk_end,
             chunk.blocks,
@@ -200,7 +201,8 @@ async fn main() -> Result<()> {
             chunk.address_index_blocks,
             chunk.address_index_participating_txs,
             chunk.address_index_inserted,
-            chunk.address_index_write_ms
+            chunk.address_index_write_ms,
+            chunk.address_index_failures
         );
 
         if !args.no_prune && should_prune_processed_block_disk_cache(chunk_end, end_block) {
@@ -219,7 +221,7 @@ async fn main() -> Result<()> {
 
     let coverage = replay_store_writer.disk_cache_store().coverage()?;
     println!(
-        "done blocks={} hits={} writes={} txs={} elapsed_ms={} cache_files={} cache_bytes={} trace_hash={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={}",
+        "done blocks={} hits={} writes={} txs={} elapsed_ms={} cache_files={} cache_bytes={} trace_hash={} address_index_blocks={} address_index_txs={} address_index_inserted={} address_index_write_ms={} address_index_failures={}",
         totals.blocks,
         totals.cache_hits,
         totals.cache_writes,
@@ -231,7 +233,8 @@ async fn main() -> Result<()> {
         totals.address_index_blocks,
         totals.address_index_participating_txs,
         totals.address_index_inserted,
-        totals.address_index_write_ms
+        totals.address_index_write_ms,
+        totals.address_index_failures
     );
 
     Ok(())
@@ -249,6 +252,7 @@ struct RefreshTotals {
     address_index_participating_txs: u64,
     address_index_inserted: u64,
     address_index_write_ms: u128,
+    address_index_failures: u64,
 }
 
 impl RefreshTotals {
@@ -263,6 +267,7 @@ impl RefreshTotals {
         self.address_index_participating_txs += other.address_index_participating_txs;
         self.address_index_inserted += other.address_index_inserted;
         self.address_index_write_ms += other.address_index_write_ms;
+        self.address_index_failures += other.address_index_failures;
     }
 }
 

@@ -14,8 +14,8 @@ async fn main() -> eyre::Result<()> {
     let provider = ProcessedTxProvider::new(&reth_datadir)?;
 
     for hash_str in &args[1..] {
-        let hash = B256::from_str(hash_str)
-            .map_err(|e| eyre::eyre!("invalid tx hash {hash_str}: {e}"))?;
+        let hash =
+            B256::from_str(hash_str).map_err(|e| eyre::eyre!("invalid tx hash {hash_str}: {e}"))?;
 
         let tx = provider.process_transaction_by_hash(hash).await?;
         let fees = &tx.fees;
@@ -29,12 +29,28 @@ async fn main() -> eyre::Result<()> {
 
         println!("tx:               {}", hash_str);
         println!("  protocol_type:  {}", fees.protocol_type);
-        println!("  gas_price:      {} gwei", fees.gas_price.to::<u128>() as f64 / 1e9);
+        println!(
+            "  gas_price:      {} gwei",
+            fees.gas_price.to::<u128>() as f64 / 1e9
+        );
         println!("  max_priority:   {} gwei", priority_gwei);
-        println!("  max_fee:        {} gwei", fees.max_fee_per_gas.map(|f| f.to::<u128>() as f64 / 1e9).unwrap_or(0.0));
+        println!(
+            "  max_fee:        {} gwei",
+            fees.max_fee_per_gas
+                .map(|f| f.to::<u128>() as f64 / 1e9)
+                .unwrap_or(0.0)
+        );
         println!("  gas_used:       {}", fees.gas_used);
-        println!("  bribe_amount:   {} wei  ({:.8} ETH)", bribe_wei, bribe_eth);
-        println!("  expected:       {} * {} = {} wei", fees.max_priority_fee.unwrap_or_default(), fees.gas_used, priority_gwei * fees.gas_used as f64 * 1e9);
+        println!(
+            "  bribe_amount:   {} wei  ({:.8} ETH)",
+            bribe_wei, bribe_eth
+        );
+        println!(
+            "  expected:       {} * {} = {} wei",
+            fees.max_priority_fee.unwrap_or_default(),
+            fees.gas_used,
+            priority_gwei * fees.gas_used as f64 * 1e9
+        );
         println!();
     }
 

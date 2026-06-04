@@ -146,7 +146,10 @@ fn main() -> Result<()> {
     // (1) Scan for current-version files and pick the block range.
     let files = scan_current_version_files(&network_dir)?;
     if files.is_empty() {
-        bail!("no current-version .pblock.zst files in {}", network_dir.display());
+        bail!(
+            "no current-version .pblock.zst files in {}",
+            network_dir.display()
+        );
     }
     let max_block = *files.keys().next_back().expect("non-empty");
     let end = args.end.unwrap_or(max_block);
@@ -297,7 +300,12 @@ fn run_serialization_candidate(
     let ser_started = Instant::now();
     let mut payloads: Vec<Vec<u8>> = Vec::with_capacity(blocks.len());
     for (key, block) in blocks {
-        payloads.push(bench_serialize_block(key, block, cand.field_set, cand.codec)?);
+        payloads.push(bench_serialize_block(
+            key,
+            block,
+            cand.field_set,
+            cand.codec,
+        )?);
     }
     let serialize_ms_per_block = ser_started.elapsed().as_secs_f64() * 1000.0 / blocks.len() as f64;
 
@@ -305,8 +313,8 @@ fn run_serialization_candidate(
     // confirm the consumed-field fingerprint matches the freshly loaded blocks.
     let mut decoded_fingerprint: u64 = 0;
     for payload in &payloads {
-        let block = bench_deserialize_block(payload, cand.codec)
-            .wrap_err("round-trip decode failed")?;
+        let block =
+            bench_deserialize_block(payload, cand.codec).wrap_err("round-trip decode failed")?;
         decoded_fingerprint += consumed_fingerprint(&block);
     }
     if decoded_fingerprint != baseline_fingerprint {
@@ -330,7 +338,10 @@ fn run_serialization_candidate(
             avg_bytes: total as f64 / blocks_n as f64,
             compress_ms_per_block: compress_ms + serialize_ms_per_block,
             read_ms_per_block: read_ms,
-            note: format!("uncompressed_avg={:.0}", uncompressed_total as f64 / blocks_n as f64),
+            note: format!(
+                "uncompressed_avg={:.0}",
+                uncompressed_total as f64 / blocks_n as f64
+            ),
         });
     }
 
@@ -434,11 +445,9 @@ fn parallel_map<S>(
 /// a small serial sample, then decompress all (serial; decompression is cheap).
 /// Returns (total_compressed_bytes, compress_ms_per_block, decompress_ms_per_block).
 fn measure_plain(payloads: &[Vec<u8>], level: i32) -> Result<(u64, f64, f64)> {
-    let compressed = parallel_map(
-        payloads,
-        &|| Ok(()),
-        &|_state, payload| zstd::bulk::compress(payload, level).wrap_err("zstd compress failed"),
-    )?;
+    let compressed = parallel_map(payloads, &|| Ok(()), &|_state, payload| {
+        zstd::bulk::compress(payload, level).wrap_err("zstd compress failed")
+    })?;
     let total: u64 = compressed.iter().map(|c| c.len() as u64).sum();
 
     let sample = payloads.len().min(COMPRESS_SAMPLE);
@@ -464,13 +473,17 @@ fn measure_dict(payloads: &[Vec<u8>], level: i32) -> Result<(u64, f64, f64, usiz
     use zstd::bulk::{Compressor, Decompressor};
 
     let train = &payloads[..payloads.len().min(DICT_TRAIN_SAMPLES)];
-    let dict = zstd::dict::from_samples(train, DICT_SIZE)
-        .wrap_err("zstd dictionary training failed")?;
+    let dict =
+        zstd::dict::from_samples(train, DICT_SIZE).wrap_err("zstd dictionary training failed")?;
 
     let compressed = parallel_map(
         payloads,
         &|| Compressor::with_dictionary(level, &dict).wrap_err("dict compressor init failed"),
-        &|compressor, payload| compressor.compress(payload).wrap_err("zstd dict compress failed"),
+        &|compressor, payload| {
+            compressor
+                .compress(payload)
+                .wrap_err("zstd dict compress failed")
+        },
     )?;
     let total: u64 = compressed.iter().map(|c| c.len() as u64).sum();
 
@@ -513,11 +526,9 @@ fn measure_chunked(payloads: &[Vec<u8>], chunk_size: usize, level: i32) -> Resul
         .collect();
     let uncompressed: Vec<usize> = archives.iter().map(|a| a.len()).collect();
 
-    let compressed = parallel_map(
-        &archives,
-        &|| Ok(()),
-        &|_state, archive| zstd::bulk::compress(archive, level).wrap_err("chunk compress failed"),
-    )?;
+    let compressed = parallel_map(&archives, &|| Ok(()), &|_state, archive| {
+        zstd::bulk::compress(archive, level).wrap_err("chunk compress failed")
+    })?;
     let total: u64 = compressed.iter().map(|c| c.len() as u64).sum();
     let blocks = payloads.len().max(1) as f64;
 
@@ -577,34 +588,86 @@ fn run_field_breakdown(blocks: &[(ProcessedBlockDiskCacheKey, ProcessedBlock)]) 
             grp!("internal_erc20_calls", p.internal_erc20_calls);
             grp!("erc20_transfers", p.erc20_transfers);
             grp!("eth_transfers", p.eth_transfers);
-            grp!("erc721+erc1155_transfers", (&p.erc721_transfers, &p.erc1155_transfers));
+            grp!(
+                "erc721+erc1155_transfers",
+                (&p.erc721_transfers, &p.erc1155_transfers)
+            );
             grp!(
                 "address_sets",
-                (&p.unique_addresses, &p.erc20_contracts, &p.erc721_contracts, &p.erc1155_contracts)
+                (
+                    &p.unique_addresses,
+                    &p.erc20_contracts,
+                    &p.erc721_contracts,
+                    &p.erc1155_contracts
+                )
             );
             grp!(
                 "uniswap_v2",
-                (&p.uniswap_v2_swaps, &p.uniswap_v2_syncs, &p.uniswap_v2_mints, &p.uniswap_v2_burns, &p.uniswap_v2_pair_created_events)
+                (
+                    &p.uniswap_v2_swaps,
+                    &p.uniswap_v2_syncs,
+                    &p.uniswap_v2_mints,
+                    &p.uniswap_v2_burns,
+                    &p.uniswap_v2_pair_created_events
+                )
             );
             grp!(
                 "uniswap_v3",
-                (&p.uniswap_v3_swaps, &p.uniswap_v3_mints, &p.uniswap_v3_burns, &p.uniswap_v3_pools, &p.uniswap_v3_positions, &p.uniswap_v3_increases, &p.uniswap_v3_decreases, &p.uniswap_v3_initializations)
+                (
+                    &p.uniswap_v3_swaps,
+                    &p.uniswap_v3_mints,
+                    &p.uniswap_v3_burns,
+                    &p.uniswap_v3_pools,
+                    &p.uniswap_v3_positions,
+                    &p.uniswap_v3_increases,
+                    &p.uniswap_v3_decreases,
+                    &p.uniswap_v3_initializations
+                )
             );
             grp!(
                 "uniswap_v4",
-                (&p.uniswap_v4_swaps, &p.uniswap_v4_modifies, &p.uniswap_v4_balance_deltas, &p.uniswap_v4_initializes, &p.uniswap_v4_donates, &p.uniswap_v4_protocol_fee_updates, &p.uniswap_v4_dynamic_lp_fee_updates, &p.uniswap_v4_protocol_fee_controller_updates)
+                (
+                    &p.uniswap_v4_swaps,
+                    &p.uniswap_v4_modifies,
+                    &p.uniswap_v4_balance_deltas,
+                    &p.uniswap_v4_initializes,
+                    &p.uniswap_v4_donates,
+                    &p.uniswap_v4_protocol_fee_updates,
+                    &p.uniswap_v4_dynamic_lp_fee_updates,
+                    &p.uniswap_v4_protocol_fee_controller_updates
+                )
             );
             grp!(
                 "approvals",
-                (&p.erc20_approval_events, &p.erc721_approval_events, &p.approval_for_all_events)
+                (
+                    &p.erc20_approval_events,
+                    &p.erc721_approval_events,
+                    &p.approval_for_all_events
+                )
             );
             grp!(
                 "authority",
-                (&p.ownership_transferred_events, &p.ownership_transfer_started_events, &p.access_control_role_granted_events, &p.access_control_role_revoked_events, &p.proxy_admin_changed_events, &p.contract_creation_events, &p.trading_enabled_events, &p.trading_disabled_events, &p.permit2_events)
+                (
+                    &p.ownership_transferred_events,
+                    &p.ownership_transfer_started_events,
+                    &p.access_control_role_granted_events,
+                    &p.access_control_role_revoked_events,
+                    &p.proxy_admin_changed_events,
+                    &p.contract_creation_events,
+                    &p.trading_enabled_events,
+                    &p.trading_disabled_events,
+                    &p.permit2_events
+                )
             );
             grp!(
                 "tx_misc(access_list,blob,signed_auth,deposits)",
-                (&p.access_list, &p.blob_versioned_hashes, &p.signed_authorizations, &p.deposit_events, &p.withdraw_events)
+                (
+                    &p.access_list,
+                    &p.blob_versioned_hashes,
+                    &p.signed_authorizations,
+                    &p.deposit_events,
+                    &p.withdraw_events
+                )
             );
         }
     }
@@ -614,7 +677,9 @@ fn run_field_breakdown(blocks: &[(ProcessedBlockDiskCacheKey, ProcessedBlock)]) 
     let mut sum_raw = 0u64;
     let mut sum_comp = 0u64;
     for (name, (raw, blob)) in &groups {
-        let comp = zstd::bulk::compress(blob, 9).map(|c| c.len() as u64).unwrap_or(0);
+        let comp = zstd::bulk::compress(blob, 9)
+            .map(|c| c.len() as u64)
+            .unwrap_or(0);
         sum_raw += *raw;
         sum_comp += comp;
         rows.push((name.to_string(), *raw, comp));
@@ -632,8 +697,17 @@ fn run_field_breakdown(blocks: &[(ProcessedBlockDiskCacheKey, ProcessedBlock)]) 
     );
     let blocks_n = blocks.len().max(1) as f64;
     for (name, raw, comp) in &rows {
-        let pct = if sum_comp > 0 { *comp as f64 / sum_comp as f64 * 100.0 } else { 0.0 };
-        println!("{name},{:.0},{:.0},{:.1}", *raw as f64 / blocks_n, *comp as f64 / blocks_n, pct);
+        let pct = if sum_comp > 0 {
+            *comp as f64 / sum_comp as f64 * 100.0
+        } else {
+            0.0
+        };
+        println!(
+            "{name},{:.0},{:.0},{:.1}",
+            *raw as f64 / blocks_n,
+            *comp as f64 / blocks_n,
+            pct
+        );
         eprintln!(
             "{:<46} {:>14.0} {:>14.0} {:>7.1}%",
             truncate(name, 46),

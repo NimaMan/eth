@@ -48,7 +48,11 @@ fn main() -> eyre::Result<()> {
         for c in &p.internal_erc20_calls {
             println!(
                 "      internal_erc20: {} token={} from={} to={} amount={}",
-                c.kind.as_str(), c.token_address, c.from_address, c.to_address, c.amount
+                c.kind.as_str(),
+                c.token_address,
+                c.from_address,
+                c.to_address,
+                c.amount
             );
         }
     }

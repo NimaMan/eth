@@ -106,7 +106,10 @@ impl InternalErc20Transfer {
             .filter(|call| {
                 call.succeeded
                     && !call.amount.is_zero()
-                    && matches!(call.kind, Erc20CallKind::Transfer | Erc20CallKind::TransferFrom)
+                    && matches!(
+                        call.kind,
+                        Erc20CallKind::Transfer | Erc20CallKind::TransferFrom
+                    )
             })
             .filter(|call| {
                 // Event-less: no emitted Transfer event with the same token, from,
