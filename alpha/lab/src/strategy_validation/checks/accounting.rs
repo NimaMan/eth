@@ -242,7 +242,25 @@ pub(super) async fn open_snapshot_pnl_formula_check(
         "open-state snapshots reconcile current value, entry cost, and gas through their valuation block",
         "open-state snapshots with inconsistent realized or unrealized PnL",
         r#"
-        WITH event_gas AS (
+        WITH latest_at_block AS (
+            -- Several snapshots can share one (trade_id, block_number): a
+            -- same-block sequence such as sell_submitted -> sell_failed ->
+            -- closed_zero_valuation. An intermediate snapshot's realized PnL was
+            -- correct AT CREATION (e.g. a sell_submitted carries only the buy
+            -- gas), but the same-block gas sum below also picks up gas from a
+            -- LATER same-block event (the sell_failed). Comparing an
+            -- intermediate snapshot against later same-block gas is a false
+            -- positive, so we reconcile only the LATEST snapshot per
+            -- (trade_id, block_number) -- the one whose realized PnL must
+            -- account for every gas event at/through that block.
+            SELECT DISTINCT ON (ts.trade_id, ts.block_number) ts.id
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+            ORDER BY ts.trade_id, ts.block_number, ts.id DESC
+        ),
+        event_gas AS (
             SELECT ts.id,
                    coalesce(sum(coalesce(nullif(te.gas_cost_eth, '')::numeric, 0)), 0) AS gas_cost_eth
             FROM alpha_trading.trade_snapshots ts
@@ -254,6 +272,7 @@ pub(super) async fn open_snapshot_pnl_formula_check(
         SELECT count(*)
         FROM alpha_trading.trade_snapshots ts
         JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        JOIN latest_at_block lab ON lab.id = ts.id
         JOIN event_gas ON event_gas.id = ts.id
         WHERE t.result_set_id = $1
           AND ($2::text IS NULL OR t.strategy_name = $2)

@@ -163,6 +163,7 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                    t.pool_address,
                    t.entry_block,
                    t.exit_block,
+                   t.state,
                    cfg.exit_lp_approval,
                    cfg.exit_tax,
                    cfg.exit_scam,
@@ -209,6 +210,31 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
               AND te.event_type = 'sell_submitted'
               AND te.block_number >= risk.observed_block
         )
+          -- Drain-close is a valid response: a confiscated/drained balance is
+          -- unsellable, so a mined CRITICAL liquidity-removal/scam_confirmed on
+          -- a pool with an open position terminalizes it to
+          -- `closed_zero_valuation` at the drain block WITHOUT a sell. Accept a
+          -- position that reached that terminal state at/after the risk block.
+          AND NOT (
+              risk.state = 'closed_zero_valuation'
+              AND EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.trade_snapshots ts
+                  WHERE ts.trade_id = risk.trade_id
+                    AND ts.state = 'closed_zero_valuation'
+                    AND COALESCE(ts.valuation_block_number, ts.block_number) >= risk.observed_block
+              )
+          )
+          -- A position that already completed a real exit (sell_confirmed with
+          -- its mined exit at/before the drain block) was not left in-position
+          -- when the risk fired: the confirmed sale IS the response. (Its
+          -- sell_submitted necessarily precedes the confirm, so it can land one
+          -- block before a same-block drain confirm.)
+          AND NOT (
+              risk.state = 'sell_confirmed'
+              AND risk.exit_block IS NOT NULL
+              AND risk.exit_block <= risk.observed_block
+          )
           AND NOT (
               risk.kind IN ('mempool_liquidity_removal', 'liquidity_removal')
               AND (

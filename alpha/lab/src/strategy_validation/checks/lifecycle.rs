@@ -224,7 +224,8 @@ pub(super) async fn single_submitted_event_per_order_check(
                    te.order_id,
                    te.order_side,
                    count(*) FILTER (WHERE te.status = 'submitted') AS submitted_count,
-                   count(*) FILTER (WHERE te.status IN ('confirmed', 'failed', 'cancelled')) AS terminal_count
+                   count(*) FILTER (WHERE te.status IN ('confirmed', 'failed', 'cancelled')) AS terminal_count,
+                   count(*) FILTER (WHERE te.status = 'cancelled') AS cancelled_count
             FROM alpha_trading.trade_events te
             JOIN alpha_trading.trades t
               ON t.run_id = te.run_id
@@ -236,8 +237,20 @@ pub(super) async fn single_submitted_event_per_order_check(
         )
         SELECT count(*)
         FROM order_events
-        WHERE submitted_count <> 1
+        WHERE submitted_count > 1
            OR terminal_count > 1
+           OR (
+               -- An order normally has exactly one submitted event. The lone
+               -- exception is an intent cancelled BEFORE submission: when a
+               -- drain-close terminalizes the position, a pending sell intent is
+               -- cancelled with no submission (e.g. uneconomic/unsellable). That
+               -- is the only legal submitted_count = 0 shape: exactly one
+               -- terminal event, and it is a cancellation. Anything else with no
+               -- submitted event (a confirmed/failed terminal without a submit,
+               -- or no terminal at all) is still a violation.
+               submitted_count = 0
+               AND NOT (terminal_count = 1 AND cancelled_count = 1)
+           )
         "#,
         result_set_id,
         strategy,

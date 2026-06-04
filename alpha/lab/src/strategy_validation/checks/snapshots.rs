@@ -588,6 +588,8 @@ pub(super) async fn drain_block_has_zero_snapshot_check(
         r#"
         WITH drained AS (
             SELECT t.trade_id,
+                   t.state,
+                   t.exit_block,
                    min(re.observed_block) AS drain_block
             FROM alpha_trading.trades t
             JOIN alpha_trading.risk_events re
@@ -599,11 +601,21 @@ pub(super) async fn drain_block_has_zero_snapshot_check(
               AND re.pending_tx_hash IS NULL
               AND COALESCE(re.payload->>'source', '') NOT IN ('mempool_signal')
               AND re.observed_block IS NOT NULL
-            GROUP BY t.trade_id
+            GROUP BY t.trade_id, t.state, t.exit_block
         )
         SELECT count(*)
         FROM drained d
-        WHERE NOT EXISTS (
+        -- Only positions that still held EXPOSURE at/after the drain block need a
+        -- zero/near-zero snapshot there. A `sell_confirmed` whose exit landed
+        -- BEFORE the drain block was already closed (no post-drain snapshot is
+        -- emitted), and a `buy_failed` never held the position at all -- neither
+        -- can be expected to carry a post-drain zero snapshot. A `sell_confirmed`
+        -- that exited AT/AFTER the drain was still exposed through it, so it must.
+        WHERE (
+                  d.state NOT IN ('sell_confirmed', 'buy_failed')
+                  OR (d.state = 'sell_confirmed' AND d.exit_block >= d.drain_block)
+              )
+          AND NOT EXISTS (
             SELECT 1
             FROM alpha_trading.trade_snapshots ts
             WHERE ts.trade_id = d.trade_id
