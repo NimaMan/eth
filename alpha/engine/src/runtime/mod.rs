@@ -251,6 +251,14 @@ where
                         && !position.drained
                     {
                         position.mark_drained();
+                        // A confiscated/drained position has no sellable balance, so it
+                        // must terminalize at zero value config-independently (no exit_*
+                        // flag and no successful sell required) instead of lingering open.
+                        // In-flight exits (Sell{IntentCreated,Submitted}) are left to
+                        // resolve and are terminalized on their failed/cancelled report.
+                        if !position.has_exit_in_flight() {
+                            position.mark_scammed();
+                        }
                         let _ = self.store.upsert_position(position).await;
                         // Snapshot the drained state so baseline PnL is honest
                         // even when no pool update follows the signal.

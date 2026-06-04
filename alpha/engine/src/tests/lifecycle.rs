@@ -575,3 +575,99 @@ async fn critical_risk_policy_rejects_matching_order() {
     assert!(store.positions().is_empty());
     assert_eq!(store.strategy_decisions().len(), 2);
 }
+
+// A mined liquidity-removal / scam drain must terminalize an open position to a
+// zero-value `Scammed` close even when the strategy has no exit rule enabled
+// (config-independent). A confiscated balance cannot be sold, so the close must
+// not depend on a successful sell.
+#[tokio::test]
+async fn drained_position_terminalizes_to_scammed_on_mined_liquidity_removal() {
+    let store = MemoryTradingStore::default();
+    let token = Address::repeat_byte(0x11);
+    let pool_address = Address::repeat_byte(0x22);
+    let pool = TokenPoolId::new(token, pool_address.to_string());
+
+    let mut position = test_position(PositionState::BuyConfirmed);
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.005").unwrap());
+    position.entry_block = Some(10);
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+
+    // No strategy added on purpose: the terminal close is an engine-level
+    // invariant, not gated by any `exit_*` strategy flag.
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        ConfirmingTestExecutionAdapter,
+    )
+    .with_portfolio(portfolio);
+
+    engine
+        .handle_event(EngineEvent::Risk(RiskEvent {
+            kind: RiskKind::LiquidityRemoval,
+            severity: RiskSeverity::Critical,
+            source: None,
+            token_address: token,
+            pool_address: Some(pool),
+            pending_tx_hash: None,
+            observed_block: Some(11),
+            message: "holder-balance backdoor drain".to_string(),
+            evidence: None,
+        }))
+        .await
+        .unwrap();
+
+    let position = store.positions().into_iter().next().expect("position");
+    assert_eq!(position.state, PositionState::Scammed);
+    assert!(position.drained);
+    assert!(!position.has_exposure());
+
+    // A terminal zero-value snapshot must back the drained close, and there must
+    // be no positive valuation after it.
+    let snapshots = store.snapshots();
+    assert!(!snapshots.is_empty());
+    assert!(snapshots
+        .iter()
+        .all(|snapshot| snapshot.current_value_eth == DecimalAmount::ZERO));
+}
+
+// A drained position whose sell fails (a confiscated balance cannot fill) must
+// still terminalize to `Scammed` rather than lingering in `SellFailed`.
+#[tokio::test]
+async fn failed_sell_of_drained_position_terminalizes_to_scammed() {
+    let store = MemoryTradingStore::default();
+
+    let mut position = test_position(PositionState::SellSubmitted);
+    position.drained = true;
+    position.exit_order_id = Some(OrderId("sell-1".to_string()));
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.005").unwrap());
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        ConfirmingTestExecutionAdapter,
+    )
+    .with_portfolio(portfolio);
+
+    engine
+        .handle_event(EngineEvent::Execution(ExecutionReport {
+            order_id: OrderId("sell-1".to_string()),
+            status: ExecutionStatus::Failed,
+            tx_hash: None,
+            block_number: Some(12),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("uneconomic sell".to_string()),
+        }))
+        .await
+        .unwrap();
+
+    let position = store.positions().into_iter().next().expect("position");
+    assert_eq!(position.state, PositionState::Scammed);
+    assert!(!position.has_exposure());
+}

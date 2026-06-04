@@ -100,9 +100,31 @@ fn mined_liquidity_removal(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let key = mined_risk_key("liquidity_removal", pool, block, tx_hash, None);
+    // Custody-class drains surface through the same liquidity-removal flag (the
+    // token tracker marks the pool scam without a reserve move) but carry a
+    // distinct label. Tag the evidence risk_kind so backtest validation and
+    // operator review can tell the variants apart. Valuation does not depend on
+    // this tag — RiskKind::LiquidityRemoval already drives the drained/zero-value
+    // path regardless — but the classification feeds analytics.
+    let label = pool_wire
+        .liquidity_removal_label
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    let is_buyer_confiscation = label.contains("confiscation") || label.contains("custody");
+    let is_holder_balance_drain =
+        label.contains("holder-balance") || label.contains("holder_balance");
+    let risk_kind_tag = if is_buyer_confiscation {
+        "custody_buyer_token_confiscation"
+    } else if is_holder_balance_drain {
+        "holder_balance_backdoor_drain"
+    } else {
+        "liquidity_removal"
+    };
+    let is_custody_drain = is_buyer_confiscation || is_holder_balance_drain;
+    let key = mined_risk_key(risk_kind_tag, pool, block, tx_hash, None);
     let mut evidence = base_evidence(pool_wire, pool, block);
-    evidence.insert("risk_kind".to_string(), json!("liquidity_removal"));
+    evidence.insert("risk_kind".to_string(), json!(risk_kind_tag));
     evidence.insert("liquidity_removal".to_string(), json!(true));
     evidence.insert("liquidity_removal_block".to_string(), json!(block));
     evidence.insert(
@@ -124,7 +146,13 @@ fn mined_liquidity_removal(
             pool_address: Some(pool.address.clone()),
             pending_tx_hash: None,
             observed_block: Some(block),
-            message: format!("mined liquidity removal at block {block}"),
+            message: if is_buyer_confiscation {
+                format!("backdoor buyer-token confiscation rug at block {block}")
+            } else if is_custody_drain {
+                format!("holder-balance backdoor drain at block {block}")
+            } else {
+                format!("mined liquidity removal at block {block}")
+            },
             evidence: Some(Value::Object(evidence)),
         },
     })

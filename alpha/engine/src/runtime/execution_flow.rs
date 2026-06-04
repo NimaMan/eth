@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use eth_alpha_core::{
     amount::DecimalAmount,
     error::{AlphaCoreError, Result},
@@ -77,6 +79,24 @@ where
                 | StrategyDecision::CancelOrders { .. } => {}
                 StrategyDecision::SubmitOrder(mut intent)
                 | StrategyDecision::SubmitOrderWithReason { mut intent, .. } => {
+                    // Operator buy-halt ("exit-only"): when this strategy is
+                    // paused, drop new BUY entries before any risk/execution.
+                    // Sells, strategy exits and manual closes are always
+                    // OrderSide::Sell, so they are never affected here.
+                    if buy_entry_halted(
+                        &self.halt_buys_strategies,
+                        intent.side,
+                        &intent.strategy_name.0,
+                    ) {
+                        tracing::info!(
+                            strategy = %intent.strategy_name.0,
+                            token = %intent.token_address,
+                            pool = %intent.pool_address.0,
+                            reason = "entry.paused_by_operator",
+                            "buy entry skipped: strategy buys paused by operator (exit-only)"
+                        );
+                        continue;
+                    }
                     intent.decision_reason = structured_reason;
                     reports.extend(
                         self.execute_if_allowed(intent, market_valuation_pool)
@@ -273,6 +293,12 @@ where
             ExecutionStatus::Failed | ExecutionStatus::Cancelled
         ) {
             if position.drained {
+                // A confiscated/drained position cannot be sold; a failed/cancelled sell
+                // must still close it terminally at zero value rather than leaving it open.
+                if !position.state.is_terminal() {
+                    position.mark_scammed();
+                    self.store.upsert_position(&position).await?;
+                }
                 let block_number = report
                     .block_number
                     .or_else(|| self.market.as_ref().map(|m| m.block_number))
@@ -384,5 +410,36 @@ where
         let trade_id = intent.trade_id.clone().unwrap_or_else(new_trade_id);
         let id = PositionId(trade_id.0.clone());
         Position::with_trade_id(id, trade_id, key)
+    }
+}
+
+/// True when a new BUY entry should be skipped because an operator has paused
+/// buys for this strategy ("exit-only"). Only buys are gated — sells, strategy
+/// exits and manual closes (always `OrderSide::Sell`) always pass through.
+fn buy_entry_halted(halt_buys: &HashSet<String>, side: OrderSide, strategy_name: &str) -> bool {
+    side == OrderSide::Buy && halt_buys.contains(strategy_name)
+}
+
+#[cfg(test)]
+mod buy_halt_tests {
+    use super::buy_entry_halted;
+    use eth_alpha_core::order::OrderSide;
+    use std::collections::HashSet;
+
+    #[test]
+    fn halts_only_buys_for_paused_strategy() {
+        let halt = HashSet::from(["alpha-A".to_string()]);
+        // Buy for the paused strategy is halted...
+        assert!(buy_entry_halted(&halt, OrderSide::Buy, "alpha-A"));
+        // ...but its sells / exits / manual closes still flow.
+        assert!(!buy_entry_halted(&halt, OrderSide::Sell, "alpha-A"));
+        // A different, unpaused strategy keeps buying.
+        assert!(!buy_entry_halted(&halt, OrderSide::Buy, "alpha-B"));
+    }
+
+    #[test]
+    fn empty_halt_set_allows_all_buys() {
+        let halt: HashSet<String> = HashSet::new();
+        assert!(!buy_entry_halted(&halt, OrderSide::Buy, "alpha-A"));
     }
 }

@@ -125,6 +125,16 @@ impl Position {
         self.drained = true;
     }
 
+    /// True while an exit order is in flight (created or submitted) and may
+    /// still settle. Used to avoid terminalizing a drained position out from
+    /// under an order whose execution report has not arrived yet.
+    pub fn has_exit_in_flight(&self) -> bool {
+        matches!(
+            self.state,
+            PositionState::SellIntentCreated | PositionState::SellSubmitted
+        )
+    }
+
     pub fn mark_intent_created(&mut self, side: OrderSide) -> Result<()> {
         match (&self.state, side) {
             (PositionState::Init | PositionState::BuyDeferred, OrderSide::Buy) => {
