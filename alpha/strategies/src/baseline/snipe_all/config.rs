@@ -126,5 +126,4 @@ impl SnipeAllConfig {
             ..PoolClassificationConfig::default()
         }
     }
-
 }

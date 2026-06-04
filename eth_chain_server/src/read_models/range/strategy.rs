@@ -545,11 +545,14 @@ mod tests {
         )
         .with_creation_data(Some(100), Some(1_700_000_000))
         .with_price_history(true);
-        classify_pool_with_config(&input, &PoolClassificationConfig {
-            require_creation_data: true,
-            require_price_history: true,
-            ..PoolClassificationConfig::default()
-        })
+        classify_pool_with_config(
+            &input,
+            &PoolClassificationConfig {
+                require_creation_data: true,
+                require_price_history: true,
+                ..PoolClassificationConfig::default()
+            },
+        )
     }
 
     fn refresh_classification(record: &mut PoolStatsRecord) {
