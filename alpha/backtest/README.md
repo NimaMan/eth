@@ -89,18 +89,70 @@ Backtests use the same EVM simulation path as live chain-sim trading:
 - Token taxes, max-transaction limits, honeypots, and other contract behaviour are captured exactly.
 - No hidden theoretical fallbacks (e.g. `cost_basis / price`) are applied.
 
+## Assumptions and limitations
+
+A backtest result is conditioned on these simplifying assumptions. They are the only
+intended differences from real live trading — read every result in their light.
+
+1. **No receipt wait — EVM-simulation confirmation.** Orders emit `Confirmed` when the
+   EVM swap simulation for the target block succeeds and `Failed` when it reverts. No real
+   tx hash, receipt, nonce, gas auction, reorg, or finality is modeled.
+2. **Execution delay (`--execution-delay-blocks`, default 1).** A signal observed at
+   block `N` is submitted at `N` and filled against post-block `N + delay` state. So a
+   decision made at `N` cannot exploit intra-block ordering at `N`, and an exit submitted
+   at `N` races anything that mines within the delay window.
+3. **Mempool liquidity-removal exit is live-backtest-only and cannot out-run the removal
+   under the default delay.** Historical backtests replay confirmed-chain observations
+   only and ignore stored mempool rows; the live-backtest (chain-sim) feeds mempool
+   signals. But a mempool removal observed at `N` is acted on with the `N+1` fill delay, so
+   the resulting exit generally cannot beat the removal it signals. Under the default delay
+   the mempool liquidity-removal exit therefore **verifies the signal path is wired and
+   triggers terminalization — it does not model a realizable pre-drain escape.** A
+   realizable pre-drain exit would require modeling execution at least as fast as the
+   removal (same-block / ordering-aware).
+4. **Liquidity-removal exit is fundamental (always-on).** Every strategy exits on a
+   liquidity-removal risk — mined `LiquidityRemoval` or `MempoolLiquidityRemoval` — for any
+   pool it holds, regardless of config. The `exit_liquidity_removal` /
+   `exit_on_liquidity_removal` flag is a retained **no-op** (spec/JSON/DB compatibility),
+   not an on/off switch.
+5. **Mined drain → zero-close (config-independent).** A mined value-destroying drain
+   (`LiquidityRemoval` / `ScamConfirmed`) marks every open position on the pool `drained`
+   and terminalizes it to `closed_zero_valuation` with no successful sell required. A sell
+   already submitted (and simulated against pre-drain state) is **force-failed** at report
+   application, so a confiscated balance never realizes synthetic proceeds; the realized
+   loss is the full entry cost plus gas.
+6. **Within-block ordering: mined drains are applied first.** Within a block, mined
+   value-destroying risks are processed before market valuation and execution, so a
+   position on a drained pool is marked `drained` before it can be valued positively or
+   sold. Mempool projections keep normal order. Otherwise do not assume a strategy decision
+   was known before every tx in the same block unless the replay provides transaction-level
+   ordering.
+7. **Open-position valuation simulates a sell of the stored entry token amount.**
+   Mark-to-market values an open position by simulating a sell of the buy report's raw
+   token amount against current pool state (real EVM, real taxes/honeypots/limits; no
+   `cost_basis / price` fallback). A `drained` position is valued at zero rather than by
+   simulating a sell of a confiscated balance.
+8. **Transfer-capture completeness.** Net-flow accounting upstream of the backtest assumes
+   every transfer is captured from block traces (see `tx_processor` data_models invariant);
+   the range/accounting path traces every block by default.
+
 ## Usage
 
 ### CLI
 
+Current runs use a named strategy suite (the deployable `snipe-all` identity was removed;
+single-strategy runs still accept `--strategy-impl` / `--strategy-name`):
+
 ```bash
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader -- \
-  --strategy-impl snipe-all \
-  --strategy-name snipe-all \
-  --replay-run-id "alpha-trader-1715350000-12345" \
-  --buy-amount-wei 10000000000000000 \
-  --min-liquidity-eth 0.5 \
-  --min-liquidity-usd 1000
+  --run-id my-backtest-25202408-25202412 \
+  --replay-run-id "risk-atlas-<run-id>" \
+  --strategy-suite alpha-11-risk-atlas \
+  --token-state-scope "historical:<token-pnl-scope>" \
+  --from-block 25202408 --to-block 25202412 \
+  --buy-amount-wei 5000000000000000 \
+  --min-liquidity-eth 0.5 --min-liquidity-usd 1000 \
+  --execution-delay-blocks 1
 ```
 
 The backtest reads `databases.alpha.url` and `databases.risk_atlas.url` from
@@ -127,7 +179,12 @@ by `alpha/lab` in `alpha_trading.strategy_validation_reports`.
 |------|-------------|---------|
 | `--strategy-impl` | Strategy implementation to instantiate | `snipe-all` |
 | `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all` |
-| `--strategy-suite historical-pool-update-hold` | Run hold1/2/3/5/10 pool-update variants in one replay pass | disabled |
+| `--strategy-suite` | Named strategy suite to run in one replay pass (e.g. `alpha-11-risk-atlas`, `historical-pool-update-hold`) | disabled |
+| `--token-state-scope` | `token_state.scope_id` whose mined terminal/custody pool events are overlaid (drain/confiscation evidence) | none |
+| `--execution-delay-blocks` | Blocks between observation/submission and simulated fill. `1` = observe N, submit at N, fill against post-block N+1 state (see Assumptions #2) | `1` |
+| `--buy-amount-wei` | Buy amount in wei (also the sell amount for the core engine) | `10000000000000000` |
+| `--min-liquidity-eth` | Minimum ETH/WETH reserve for pool eligibility | `0.5` |
+| `--min-liquidity-usd` | Minimum stable-denom (USDC/USDT/DAI) reserve for eligibility | `1000` |
 | `--from-block` | Start block (inclusive) | first observation |
 | `--to-block` | End block (inclusive) | last observation |
 | `--skip-primed` | Skip warmup observations | false |
