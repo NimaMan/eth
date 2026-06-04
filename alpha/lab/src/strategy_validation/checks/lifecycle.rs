@@ -415,13 +415,14 @@ pub(super) async fn active_hold_limit_exit_check(
 /// position whose pool suffered a mined, value-destroying risk event
 /// (`liquidity_removal` / `scam_confirmed`, mined evidence only — pending
 /// mempool signals excluded) at or before the position's latest observed block
-/// MUST be terminalized at permanently-zero value. The required terminal state
-/// is `terminal_zero`; the legacy `scammed` label is accepted for back-compat,
-/// and a clean `sell_confirmed` exit is also acceptable. Any other state
-/// (`buy_confirmed`, `sell_failed`, `sell_cancelled`, or any non-terminal/open
-/// state) at run end despite the drain is a FAIL: the drain-close was missed and
-/// the position is left lingering open.
-pub(super) async fn drained_position_reaches_terminal_zero_check(
+/// MUST be closed at zero value. The required terminal state is
+/// `closed_zero_valuation`; legacy `terminal_zero` and `scammed` labels are
+/// accepted for back-compat, and a clean `sell_confirmed` exit is also
+/// acceptable. Any other state (`buy_confirmed`, `sell_failed`,
+/// `sell_cancelled`, or any non-terminal/open state) at run end despite the
+/// drain is a FAIL: the drain-close was missed and the position is left
+/// lingering open.
+pub(super) async fn drained_position_reaches_closed_zero_valuation_check(
     pool: &PgPool,
     result_set_id: &str,
     strategy: Option<&str>,
@@ -429,7 +430,7 @@ pub(super) async fn drained_position_reaches_terminal_zero_check(
     count_check(
         pool,
         "lifecycle",
-        "drained_position_reaches_terminal_zero",
+        "drained_position_reaches_closed_zero_valuation",
         Verdict::Fail,
         "positions with a mined value-destroying drain are terminalized at zero value",
         "positions left non-terminal/open despite a mined value-destroying drain",
@@ -438,7 +439,7 @@ pub(super) async fn drained_position_reaches_terminal_zero_check(
         FROM alpha_trading.trades t
         WHERE t.result_set_id = $1
           AND ($2::text IS NULL OR t.strategy_name = $2)
-          AND t.state NOT IN ('terminal_zero', 'scammed', 'sell_confirmed')
+          AND t.state NOT IN ('closed_zero_valuation', 'terminal_zero', 'scammed', 'sell_confirmed')
           AND EXISTS (
               SELECT 1
               FROM alpha_trading.risk_events re

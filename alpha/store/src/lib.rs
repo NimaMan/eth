@@ -42,6 +42,7 @@ fn trade_accounting_fields_for_position(position: &Position) -> TradeAccountingF
         PositionState::BuyDeferred
             | PositionState::BuyFailed
             | PositionState::BuyCancelled
+            | PositionState::ClosedZeroValuation
             | PositionState::Cancelled
     ) {
         return TradeAccountingFields {

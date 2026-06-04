@@ -387,9 +387,9 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "Does a position's value flip back to positive after reaching zero?",
             "Once an open position records a zero/near-zero value snapshot after a mined drain, no later non-terminal snapshot may report a positive value; a flip back to positive resurrects a drained position.",
         ),
-        "drained_position_reaches_terminal_zero" => (
-            "Are drained positions terminalized at zero value?",
-            "When a mined value-destroying risk event (liquidity_removal/scam_confirmed, mined evidence only) hits a position's pool at or before its latest observed block, the position must reach the terminal terminal_zero state (legacy scammed or a clean sell_confirmed exit are also accepted); a position left non-terminal/open means the drain-close was missed.",
+        "drained_position_reaches_closed_zero_valuation" => (
+            "Are drained positions closed at zero value?",
+            "When a mined value-destroying risk event (liquidity_removal/scam_confirmed, mined evidence only) hits a position's pool at or before its latest observed block, the position must reach the closed_zero_valuation state (legacy terminal_zero/scammed or a clean sell_confirmed exit are also accepted); a position left non-terminal/open means the drain-close was missed.",
         ),
         _ => (
             "What invariant is this check validating?",
@@ -410,7 +410,7 @@ mod tests {
             "no_positive_open_snapshot_after_drain",
             "no_positive_value_after_zero_balance",
             // lifecycle drain terminalization
-            "drained_position_reaches_terminal_zero",
+            "drained_position_reaches_closed_zero_valuation",
             // accounting / PnL-identity checks
             "total_pnl_equals_realized_plus_unrealized",
             "open_trade_pnl_formula",

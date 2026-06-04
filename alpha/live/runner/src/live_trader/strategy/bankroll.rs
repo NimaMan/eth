@@ -102,7 +102,7 @@ pub(super) fn restored_entry_bankroll_from_terminal_positions(
                     position_exit_proceeds_wei(position),
                 );
             }
-            PositionState::TerminalZero => {
+            PositionState::ClosedZeroValuation => {
                 bankroll.record_position_result(
                     position.key.pool_address.clone(),
                     position_entry_spend_wei(position, fallback_buy_wei),

@@ -454,6 +454,7 @@ pub(super) fn is_terminal_state(state: &str) -> bool {
             | "buy_cancelled"
             | "sell_confirmed"
             | "cancelled"
+            | "closed_zero_valuation"
             | "terminal_zero"
             | "scammed"
     )
@@ -517,6 +518,7 @@ mod tests {
         assert!(is_terminal_state("buy_failed"));
         assert!(is_terminal_state("buy_cancelled"));
         assert!(is_terminal_state("cancelled"));
+        assert!(is_terminal_state("closed_zero_valuation"));
         assert!(is_terminal_state("terminal_zero"));
         assert!(is_terminal_state("scammed"));
         assert!(!is_terminal_state("buy_confirmed"));

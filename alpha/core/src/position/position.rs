@@ -356,12 +356,11 @@ impl Position {
         self.state == PositionState::SellConfirmed
     }
 
-    /// Terminalize this position at permanently-zero value. Cause-agnostic: it
-    /// records only the OUTCOME (no recoverable proceeds, e.g. a confiscated /
-    /// drained balance that can never be sold). The cause (a confirmed pool
-    /// drain / scam) is captured separately in pool-state flags and risk events.
-    pub fn mark_terminal_zero(&mut self) {
-        self.state = PositionState::TerminalZero;
+    /// Close this position at zero value. Cause-agnostic: it records only the
+    /// OUTCOME (no recoverable proceeds). The cause is captured separately in
+    /// pool-state flags and risk events.
+    pub fn mark_closed_zero_valuation(&mut self) {
+        self.state = PositionState::ClosedZeroValuation;
     }
 }
 

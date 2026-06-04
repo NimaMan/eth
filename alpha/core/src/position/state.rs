@@ -15,14 +15,20 @@ pub enum PositionState {
     SellCancelled,
     SellConfirmed,
     Cancelled,
-    /// Terminal, cause-agnostic "value is permanently zero" outcome: the
-    /// position holds no recoverable proceeds (e.g. a confiscated/drained
-    /// balance that can never be sold). This describes the OUTCOME only; the
-    /// cause (a confirmed pool drain / scam) lives in pool-state flags and risk
-    /// events, not in the position lifecycle. Accepts the legacy `"Scammed"`
-    /// serialized form for back-compat with already-persisted rows.
-    #[serde(alias = "Scammed")]
-    TerminalZero,
+    /// Terminal, cause-agnostic "closed at zero value" outcome: the position
+    /// holds no recoverable proceeds. This describes the OUTCOME only; the cause
+    /// (for example, a confirmed pool drain / scam) lives in pool-state flags and
+    /// risk events, not in the position lifecycle. Accepts legacy serialized
+    /// forms for back-compat with already-persisted rows.
+    #[serde(
+        rename = "closed_zero_valuation",
+        alias = "ClosedZeroValuation",
+        alias = "TerminalZero",
+        alias = "terminal_zero",
+        alias = "Scammed",
+        alias = "scammed"
+    )]
+    ClosedZeroValuation,
 }
 
 impl PositionState {
@@ -34,7 +40,7 @@ impl PositionState {
                 | PositionState::BuyCancelled
                 | PositionState::SellConfirmed
                 | PositionState::Cancelled
-                | PositionState::TerminalZero
+                | PositionState::ClosedZeroValuation
         )
     }
 

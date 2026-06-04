@@ -505,7 +505,7 @@ fn apply_position_to_entry_bankroll(
         | PositionState::SellSubmitted
         | PositionState::SellFailed
         | PositionState::SellCancelled
-        | PositionState::TerminalZero => {
+        | PositionState::ClosedZeroValuation => {
             available.saturating_sub(position_entry_spend_wei(position, config))
         }
         PositionState::SellConfirmed => available
