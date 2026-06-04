@@ -33,13 +33,12 @@ Eligibility is the set of pools we would have considered trading at the time of
 analysis. After that first split, the same classifier assigns the current pool
 category: eligible active, eligible risk, or ineligible.
 
-The source of truth for this split is the Rust crate
-`alpha/pool_classification`. Batch checks can call its JSON CLI for parity:
+The source of truth for this split is `eth_token::pools::classification`
+(`eth_token/src/pools/classification.rs`); call `classify_pool_with_config`
+for parity. Classifier input shape:
 
-```text
-cargo run -q -p eth_pool_classification --bin pool_classification <<'JSON'
+```json
 {"currency":"WETH","denom_reserve":0.5,"can_buy":true,"can_sell":true}
-JSON
 ```
 
 Initial eligible cohort rules:
