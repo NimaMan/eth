@@ -1,6 +1,6 @@
 # Bogaz
 
-`bogaz.md` is the ETH bottleneck ledger. Keep only active bottlenecks here:
+`Plan.md` is the ETH bottleneck ledger. Keep only active bottlenecks here:
 what is limiting the pipeline, the evidence, the owning subsystem, and the next
 action. Completed work belongs in focused docs or commit history.
 
@@ -99,23 +99,57 @@ Latest relevant commits:
   transfer accounting, transaction inspection, and live processing ownership.
   They do not by themselves validate live-capital strategy PnL.
 
+## Progress 2026-06-04 — Drain-close, S6 lifecycle gate, structure verdict
+
+- **Backtest Validity Step 5 (lifecycle parity) — drain-close DONE + committed.**
+  Diagnosis of the 06-03 parity run `live-parity-session-token-state-drain-25202408-25202464-20260603-04`:
+  the 15 stuck `buy_confirmed` positions were NOT a valuation bug — risk events fire
+  (10 critical `liquidity_removal`; Session at block 25202411) and value zeroes correctly,
+  but the alpha11 config has `exit_liquidity_removal=false` AND nothing terminalized a
+  drained (zero-sellable-balance) position. Fixed config-independently in the engine:
+  a drained position now terminalizes to a zero-value terminal close (commit `75a402bc`:
+  `runtime/mod.rs` drained loop + `execution_flow.rs` failed-sell-of-drained + a
+  `has_exit_in_flight` guard + `value_open_positions_for_tokens`). Validated by replay
+  `…20260604-fix01`: 7 drained positions terminalize (was 15 stuck); Session position
+  zeroes at 25202411 and stays terminal.
+- **Terminal-state semantics decision:** the position-level `Scammed` state (which had NO
+  pre-existing setters — dead until the drain-close) is being replaced by a cause-agnostic
+  `ValueZeroed` ("value is zero, final"). Cause/classification (scam mechanism, holder-balance
+  backdoor drain, LP removal, custody confiscation) stays in the comprehensive pool-state
+  flags / risk events, not the position lifecycle state.
+- **Backtest Validity Step 6 — GAP found, lifecycle gate in progress.** The 3 committed S6
+  checks (`alpha/lab/.../checks/snapshots.rs`) PASS on the fixed run but ALSO pass on the
+  pre-fix stuck run — they only assert snapshot *valuation* invariants (already correct
+  pre-fix), never the trade *lifecycle state*. No gate asserts "a drained position must reach
+  terminal `ValueZeroed`." A new lifecycle gate is being added so the drain-close is enforced.
+- **Alpha structure verdict (architecture review):** mostly-fine, NO real restructure needed —
+  the "Alpha Structure State 2026-05-24" oversized-file offenders are already split (that
+  snapshot is stale). Crate DAG acyclic; `lab` DB-decoupled and `live/feed` HTTP-decoupled
+  (intentional). One recommended (not urgent) move: create `alpha/live/runner`
+  (`eth_alpha_live_runner`) owning the two live bins + the `live_trader/` subtree so
+  `eth_alpha_engine` becomes a pure backtest-safe library; plus an optional
+  `real_execution/mod.rs` file split. Queued.
+- `eth_token_store` crate renamed to `eth_pnl_store` (kept; owner's in-progress rename).
+
 ## Current Three-Tier Limiting Factors 2026-05-31
 
 ### Tier One - Backtest Validity
 
-These block trusting strategy PnL and therefore block any new real-capital run.
-The immediate goal is not to pick a strategy; it is to prove that a backtest
-values the same inventory a real run would hold, detects the same scam events,
-and reaches the same terminal state for the same pool.
+These block trusting strategy PnL, address-level token PnL, and therefore any
+new real-capital run. The immediate goal is not to pick a strategy; it is to
+prove that a backtest and the address-level PnL layer value the same inventory a
+real run would hold, detect the same scam events, and reach the same terminal
+state for the same pool/address/trade.
 
 | Step | Evidence | Next action |
 | --- | --- | --- |
 | 1. Replay the known scam case | Single-tx replay on `2026-05-31` verified the Session drain tx `0xf0e8542a...c43d8ba`: `0` ERC-20 `Transfer` events and `1` successful internal `transfer_from` from vault to dead for `9871487343970612` raw Session tokens. | Full range/runtime replay is still required: rebuild and run the fixed stack over the Session window and require a risk event plus zero/near-zero snapshot at/after block `25202411`. |
 | 2. Prove transfer coverage is complete enough for held-balance scams | Audit found and fixed a routing gap: `tx_processor` decoded `internal_erc20_calls`, but token candidate routing/touch detection could miss a pure event-less drain unless some other event also mentioned the token. The Session tx had an `Approval`, but a stricter scam might not. | Keep the fix: trace-derived ERC-20 tokens now refresh transaction indexes and route/touch tokens in `eth_token`; package tests pass. Re-run the Session window to prove end-to-end behavior, not just unit paths. |
-| 3. Prove scam detection drives zero valuation | Working tree detects custody/holder-balance drains, marks the pool as scammed, emits mined critical risk, marks the Alpha position drained, and writes a zero-value snapshot. Tests pass, but old live-backtest evidence predates the fix and no fresh result set has passed the Session replay yet. | Require the case replay to produce `holder_balance_backdoor_drain` or the broader custody-confiscation label, a risk event, and a zero/near-zero trade snapshot at or after the drain block. |
-| 4. Prove real and live-backtest lifecycle parity | Real hold16 bought positions, then showed missing/zero valuation, stuck open positions, and failed sells while chain-sim marked positions every block. Working tree now has real valuation delegation, stale `can_sell` gate removal, and per-block real valuation. | Commit/build/deploy the parity working tree, then run fresh no-capital hold16 validation from healthy chain-server state and compare against any later real validation only after old positions are reconciled. |
-| 5. Gate backtest evidence with validation checks | New validation checks catch drain without zero snapshot, positive value after mined drain, and positive value after an earlier zero snapshot. | Make these checks mandatory for promotion and fail old/new result sets that keep synthetic value after balance-drain evidence. |
-| 6. Re-run evidence on the fixed stack | Old hold16/hold50 evidence predates part of the valuation/scam path and cannot promote a policy. | Re-run the exact latest historical window plus fresh live-backtest/shadow after steps 1-5 pass. Compare hold16-to-hold16 with same sizing, gas model, exit policy, and validation gates. |
+| 3. Prove pool-state scam detection drives zero valuation | Pool state must be correct enough to flag the scam mechanism and force terminal/zero valuation at the first observed instance, and where possible before the scam fires. This covers direct reserve drains, LP-removal drains, external-holder reserve dumps, backdoored pair-balance drains, and holder-balance custody confiscations where token creators wipe buyer balances without an ordinary sell path. Working tree detects custody/holder-balance drains, marks the pool as scammed, emits mined critical risk, marks the Alpha position drained, and writes a zero-value snapshot. Tests pass, but old live-backtest evidence predates the fix and no fresh result set has passed the Session replay yet. | Require the case replay and new 50K PnL assessment to prove that pool-state flags include the right route/reserve/LP/risk/lifecycle/custody labels, produce `holder_balance_backdoor_drain` or the broader custody-confiscation label when buyers are confiscated, emit a risk event, and zero both trade snapshots and address-level valuations at or after the first scam evidence block. |
+| 4. Prove address-level token PnL is Tier-One-valid | Implemented `eth_token::pnl` semantic accounting and DB persistence for position status, valuation status, reconciliation status, realized/unrealized/total denom PnL, movement-row backing, actor roles, user-candidate flag, and accounting context. New run `token-pnl-semantic-traders-50k-20260602-01` completed over blocks `25180546..=25230545`: `63,775` address-position rows, `20,146` addresses, `1,538` pools, `715,022` movement rows, and `100,891` exact tx hashes. Pool labels/state flags now include route/liquidity/risk/lifecycle/custody labels for Risk Atlas trader/scammer analytics and the `/eth/traders/:address/trades/:poolId` page. | Treat PnL as a promotion blocker: assess `terminal_zero` vs `closed`, the `115` open/no-mark rows, the `2,240` partial-movement rows, and non-user/creator/custody roles. Then decide whether to keep aggregate-only retention behavior, add stricter movement reconciliation deltas, and promote the stable schema/API into the live PnL pipeline only after PnL can explain each address/pool/trade valuation from pool-state flags and accounting evidence. |
+| 5. Prove real and live-backtest lifecycle parity | Real hold16 bought positions, then showed missing/zero valuation, stuck open positions, and failed sells while chain-sim marked positions every block. Working tree now has real valuation delegation, stale `can_sell` gate removal, and per-block real valuation. | Commit/build/deploy the parity working tree, then run fresh no-capital hold16 validation from healthy chain-server state and compare against any later real validation only after old positions are reconciled. |
+| 6. Gate backtest and PnL evidence with validation checks | New validation checks catch drain without zero snapshot, positive value after mined drain, and positive value after an earlier zero snapshot. The same gate must apply to address-level PnL rows so `priced`, `terminal_zero`, `no_mark`, `closed/open`, and reconciliation status cannot contradict pool-state scam evidence. | Make these checks mandatory for promotion and fail old/new result sets or PnL exports that keep synthetic value after balance-drain evidence, fail to mark terminal scam/custody states, or cannot explain material movement/valuation gaps. |
+| 7. Re-run evidence on the fixed stack | Old hold16/hold50 evidence predates part of the valuation/scam path and cannot promote a policy. | Re-run the exact latest historical window plus fresh live-backtest/shadow after steps 1-6 pass. Compare hold16-to-hold16 with same sizing, gas model, exit policy, valuation semantics, pool-state labels, and PnL validation gates. |
 | Prerequisite. Keep chain-server simulation health green | Chain-server live tracker and `chain_server_live_tx_simulator` are currently healthy after the rebuild/restart; uptime still needs observation under `MemoryMax=24G`. | Before every live-backtest/shadow run, verify live tracker status, live simulator block/hash, memory cap/current/peak, and no address-index failures. |
 
 ### Tier Two - Evidence/Policy Promotion
@@ -128,7 +162,6 @@ healthy.
 | Hold16 deployed vs hold50 sweep evidence is mixed | The positive hold50 result is from a chain-sim sweep, while the real deployment was hold16. | Compare hold16-to-hold16 on the exact same block window, with the same entry size, gas model, exit rules, and valuation semantics. |
 | Latest two-week historical + live shadow evidence is missing | The current live-backtest runs are stopped or invalidated by the valuation/scam gap and earlier live-state failure. | After Backtest Validity fixes, run the exact latest two-week historical backtest and a fresh live-backtest/shadow run from healthy chain-server state. |
 | Trade-level audit is incomplete | Top/worst contributors may include scams that the old backtest valued incorrectly. | Audit top 10 and worst 10 by entry reason, skip reason, exit reason, decision block, simulation block, held balance, gas/slippage, and PnL snapshot. |
-| Address-level token PnL v1 is in first-version assessment | Implemented `eth_token::pnl` semantic accounting and DB persistence for position status, valuation status, reconciliation status, realized/unrealized/total denom PnL, movement-row backing, actor roles, user-candidate flag, and accounting context. New run `token-pnl-semantic-traders-50k-20260602-01` completed over blocks `25180546..=25230545`: `63,775` address-position rows, `20,146` addresses, `1,538` pools, `715,022` movement rows, and `100,891` exact tx hashes. Pool labels/state flags now include route/liquidity/risk/lifecycle/custody labels for Risk Atlas trader/scammer analytics and the `/eth/traders/:address/trades/:poolId` page. | Assess the first-version distributions before live-pipeline dependency: review `terminal_zero` vs `closed`, the `115` open/no-mark rows, the `2,240` partial-movement rows, and non-user/creator/custody roles. Then decide whether to keep aggregate-only retention behavior, add stricter movement reconciliation deltas, and promote the stable schema/API into the live PnL pipeline. |
 | Risk Atlas policy contract is still implicit | Protocol coverage, labels, thresholds, exclusion reasons, and routeability are spread across code/docs. | Create one versioned Risk Atlas policy contract and attach its version to Alpha backtest/live metadata. |
 
 ### Tier Three - Operator/Observability
@@ -140,6 +173,7 @@ These should not block code correctness, but they block confident operations.
 | Live parameter surface is missing | Bankroll, buy size, signer/vault, gas-rank, route policy, kill switch, and freshness gates are not visible in one operator page. | Build the Asena live trading parameter page from Alpha/ETH tx executor/signer status. |
 | Mempool timing attribution is incomplete | Signals are being produced, but the latest rebuilt process set has not produced a complete timing ledger from first seen -> stored -> API visible -> trader received -> decision/report. | Collect fresh timing pairs only after chain-server live state is healthy. |
 | Build/deploy state is easy to misread | Working-tree fixes exist, committed UI fixes exist, but the running `asena-static` and chain-server state do not yet prove those fixes are live. | Record commit hash, binary build time, and process start time on every run/status page. |
+| Block-hash pinning needs operator/audit enforcement | ETH has block-frame and simulator hash plumbing in parts of the stack, but promotion dashboards and audit exports still need consistent block number+hash visibility for decision, simulation, settlement, and valuation evidence. | Surface and validate number+hash on Alpha reports, Asena detail pages, and promotion checks; label evidence incomplete when hashes are missing or mismatched. |
 | Old terminal metadata pollutes dashboards | Fixed on `2026-05-31`: terminal `backtest_result_sets` and `trader_runs` rows were backfilled so old stopped/completed/stale rows no longer carry `metadata.live_status=live` or `trading_enabled=true`. | Add validation that terminal rows cannot carry live metadata, so future regressions fail before reaching dashboards. |
 
 ## Backtest Validity Step 4 - Real/Backtest Execution Parity 2026-05-29
@@ -686,7 +720,7 @@ should show the active bankroll, buy size, signer/from address, vault address,
 gas-rank policy, gas/fee caps, slippage/min-output policy, simulation freshness,
 receipt finality settings, executor mode, and signer/executor policy caps. That page
 is the right place to make duplicated live parameters visible and reviewable;
-`bogaz.md` should only track it as a broad product/ops task.
+`Plan.md` should only track it as a broad product/ops task.
 
 ## Module-Level Backlog
 
