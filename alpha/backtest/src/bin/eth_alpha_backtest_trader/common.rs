@@ -30,11 +30,14 @@ struct Args {
     run_id: Option<String>,
 
     /// Strategy instance name to persist on orders, positions, and reports.
-    #[arg(long, default_value = "snipe-all")]
+    /// Defaults to the canonical core-engine identifier; the legacy bare
+    /// `snipe-all` deploy identity was removed in the strategies refactor.
+    #[arg(long, default_value = eth_strategies::core::spec::CORE_STRATEGY_IMPL)]
     strategy_name: String,
 
-    /// Strategy implementation to instantiate.
-    #[arg(long, default_value = "snipe-all")]
+    /// Strategy implementation to instantiate. Defaults to the canonical
+    /// core-engine identifier the chain-sim engine resolves.
+    #[arg(long, default_value = eth_strategies::core::spec::CORE_STRATEGY_IMPL)]
     strategy_impl: String,
 
     /// Named historical strategy suite to run in one replay pass.

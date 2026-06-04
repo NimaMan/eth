@@ -130,7 +130,6 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
         r#"
         WITH strategy_cfg AS (
             SELECT spec->>'strategy_name' AS strategy_name,
-                   COALESCE((spec->>'exit_liquidity_removal')::boolean, false) AS exit_liquidity_removal,
                    COALESCE((spec->>'exit_lp_approval')::boolean, false) AS exit_lp_approval,
                    COALESCE((spec->>'exit_tax')::boolean, false) AS exit_tax,
                    COALESCE((spec->>'exit_scam')::boolean, false) AS exit_scam,
@@ -147,7 +146,6 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
             WHERE rs.result_set_id = $1
             UNION ALL
             SELECT rs.config->>'strategy_name' AS strategy_name,
-                   COALESCE((rs.config->>'exit_liquidity_removal')::boolean, false) AS exit_liquidity_removal,
                    COALESCE((rs.config->>'exit_lp_approval')::boolean, false) AS exit_lp_approval,
                    COALESCE((rs.config->>'exit_tax')::boolean, false) AS exit_tax,
                    COALESCE((rs.config->>'exit_scam')::boolean, false) AS exit_scam,
@@ -165,7 +163,6 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
                    t.pool_address,
                    t.entry_block,
                    t.exit_block,
-                   cfg.exit_liquidity_removal,
                    cfg.exit_lp_approval,
                    cfg.exit_tax,
                    cfg.exit_scam,
@@ -193,7 +190,11 @@ pub(super) async fn configured_critical_risks_have_strategy_response_check(
              AND (s.exit_block IS NULL OR re.observed_block <= s.exit_block)
             WHERE re.severity IN ('critical', 'high')
               AND (
-                  (re.kind IN ('liquidity_removal', 'mempool_liquidity_removal') AND s.exit_liquidity_removal)
+                  -- The liquidity-removal exit is fundamental/always-on: every
+                  -- strategy exits on a liquidity-removal risk regardless of
+                  -- config, so this is unconditional (no spec flag to gate on;
+                  -- the former no-op exit_liquidity_removal field was removed).
+                  re.kind IN ('liquidity_removal', 'mempool_liquidity_removal')
                   OR (re.kind = 'lp_approval' AND s.exit_lp_approval)
                   OR (re.kind IN ('tax_change', 'honeypot') AND s.exit_tax)
                   OR (re.kind IN ('scam_confirmed', 'honeypot') AND s.exit_scam)

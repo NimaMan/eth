@@ -26,10 +26,6 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "strategy_impl": spec.strategy_impl,
         "strategy_label": spec.strategy_label,
         "strategy_runtime": STRATEGY_RUNTIME,
-        // Liquidity-removal exit is fundamental/always-on for every strategy;
-        // persisted as a constant for config-shape/DB back-compat (no longer a
-        // spec field). Not a toggle — see `StrategyEngine::on_risk_event`.
-        "exit_liquidity_removal": true,
         "exit_tax": spec.exit_tax,
         "exit_lp_approval": spec.exit_lp_approval,
         "exit_lp_approval_critical_only": spec.exit_lp_approval_critical_only,
@@ -174,7 +170,6 @@ mod tests {
                 "strategy_impl": ALPHA11_STRATEGY_IMPL,
                 "strategy_label": "Alpha11 Uniswap V2 LP30 pool-update-block hold 15",
                 "strategy_runtime": STRATEGY_RUNTIME,
-                "exit_liquidity_removal": true,
                 "exit_tax": true,
                 "exit_lp_approval": true,
                 "exit_lp_approval_critical_only": false,

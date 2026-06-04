@@ -114,9 +114,7 @@ intended differences from real live trading — read every result in their light
    liquidity-removal risk — mined `LiquidityRemoval` or `MempoolLiquidityRemoval` — for any
    pool it holds, regardless of config. There is **no** strategy/spec flag for this: the
    former no-op `exit_liquidity_removal` / `exit_on_liquidity_removal` spec/config fields
-   have been removed. Persisted run config JSON still carries an `"exit_liquidity_removal":
-   true` constant for DB/JSON shape back-compat (it reflects the always-on behavior; it is
-   not a toggle).
+   have been removed, and the persisted run config JSON no longer carries the key at all.
 5. **Mined drain → zero-close (config-independent).** A mined value-destroying drain
    (`LiquidityRemoval` / `ScamConfirmed`) marks every open position on the pool `drained`
    and terminalizes it to `closed_zero_valuation` with no successful sell required. A sell

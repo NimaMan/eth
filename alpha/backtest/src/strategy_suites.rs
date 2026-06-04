@@ -75,7 +75,6 @@ impl BacktestStrategySpec {
         serde_json::json!({
             "strategy_name": self.strategy_name,
             "strategy_impl": self.strategy_impl,
-            "exit_liquidity_removal": self.exit_on_liquidity_removal,
             "exit_tax": self.exit_on_tax,
             "exit_lp_approval": self.exit_on_lp_approval,
             "exit_lp_approval_critical_only": self.exit_on_critical_lp_approval_only,
