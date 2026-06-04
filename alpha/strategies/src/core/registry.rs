@@ -1,6 +1,17 @@
-use super::spec::{LiveStrategySpec, LiveStrategySpecOptions};
-use super::strategy_sets;
+use super::spec::{LiveStrategySpec, LiveStrategySpecOptions, StrategyId};
 use crate::alpha11::live::specs as alpha11_specs;
+use crate::core::dispatch::strategy_sets;
+
+/// Resolve a [`StrategyId`] into its complete resolved [`super::spec::StrategySpec`]s.
+///
+/// This is the single dispatch entry point all runtimes (live and backtest)
+/// share, so an id produces an identical spec set in every mode.
+pub fn resolve(
+    id: &StrategyId,
+    options: &LiveStrategySpecOptions,
+) -> Result<Vec<LiveStrategySpec>, String> {
+    strategy_set_specs(id.as_str(), options)
+}
 
 pub fn strategy_set_specs(
     set_name: &str,

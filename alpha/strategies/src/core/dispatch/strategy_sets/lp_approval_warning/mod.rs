@@ -1,4 +1,4 @@
-use super::super::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
+use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
 
 pub fn spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {

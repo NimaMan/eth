@@ -3,6 +3,34 @@ pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All";
 pub const STRATEGY_RUNTIME: &str = "live";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-strategy-set";
 
+/// Identifier a runtime hands to the registry to resolve a strategy (or strategy
+/// set) into its complete resolved [`StrategySpec`]s. It is either a single
+/// strategy name or a set name; the registry owns the mapping.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StrategyId(pub String);
+
+impl StrategyId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for StrategyId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for StrategyId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct LiveStrategySpecOptions;
 
@@ -51,6 +79,12 @@ pub struct LiveStrategySpec {
     pub take_profit_ratio: Option<String>,
     pub max_hold_blocks: Option<u64>,
 }
+
+/// Canonical, complete, resolved strategy spec. Every field is fully resolved
+/// (no further defaulting) so live and backtest instantiate the identical
+/// engine. `LiveStrategySpec` is the historical name; `StrategySpec` is the
+/// mode-neutral alias the registry/factory speak in.
+pub type StrategySpec = LiveStrategySpec;
 
 pub fn default_strategy_spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {

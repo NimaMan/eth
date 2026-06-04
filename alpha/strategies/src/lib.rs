@@ -11,7 +11,9 @@ mod market_tracker;
 
 pub use core::dispatch as shared_rules_live;
 pub use core::{
-    LiveStrategyConfig, LiveStrategyEngine, RestoredEntryBankroll, StrategyConfig, StrategyEngine,
+    config_from_spec, resolve, strategy_set_specs, EngineRuntimeInputs, LiveStrategyConfig,
+    LiveStrategyEngine, RestoredEntryBankroll, StrategyConfig, StrategyEngine, StrategyId,
+    StrategySpec,
 };
 
 pub use alpha11::{

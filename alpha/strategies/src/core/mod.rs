@@ -16,13 +16,19 @@
 mod config;
 pub mod dispatch;
 mod engine;
+pub mod factory;
 pub mod live;
+pub mod registry;
 pub mod rule;
+pub mod spec;
 mod state;
 
 pub mod rules;
 
 pub use config::StrategyConfig;
 pub use engine::StrategyEngine;
+pub use factory::{config_from_spec, EngineRuntimeInputs};
 pub use live::{LiveStrategyConfig, LiveStrategyEngine};
+pub use registry::{resolve, strategy_set_specs};
+pub use spec::{StrategyId, StrategySpec};
 pub use state::RestoredEntryBankroll;

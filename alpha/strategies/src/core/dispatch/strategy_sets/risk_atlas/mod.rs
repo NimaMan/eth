@@ -1,4 +1,4 @@
-use super::super::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
+use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
 
 pub const LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
