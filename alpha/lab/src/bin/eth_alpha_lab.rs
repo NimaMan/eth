@@ -90,6 +90,14 @@ enum Command {
 
         #[arg(long)]
         persist: bool,
+
+        /// Promotion gate: exit non-zero when any promotion-blocking check
+        /// fails. ON by default so CI/operators gate on the exit code. Pass
+        /// --no-gate to always exit 0 (still prints/persists the verdict) for
+        /// non-gating diagnostic runs. A `Blocked` ("could not evaluate")
+        /// verdict never counts as a blocking failure.
+        #[arg(long = "no-gate", action = clap::ArgAction::SetFalse, default_value_t = true)]
+        gate: bool,
     },
 
     /// Strategy-quality assessment questions such as PnL concentration and exposure.
@@ -210,6 +218,7 @@ async fn main() -> Result<()> {
             sample_limit: _deprecated_sample_limit,
             json,
             persist,
+            gate,
         } => {
             let report = strategy_validation::validate_strategy(
                 &pool,
@@ -232,6 +241,18 @@ async fn main() -> Result<()> {
                     println!();
                     println!("Persisted validation report: {validation_id}");
                 }
+            }
+            // Gate LAST so printing/persisting always happens first. Exit
+            // non-zero only on a promotion-blocking failure when gating is on
+            // (the default); --no-gate keeps diagnostic runs at exit 0.
+            if gate && report.summary.has_blocking_failures() {
+                if !json {
+                    eprintln!(
+                        "strategy-validation: {} promotion-blocking check(s) failed; refusing promotion (exit 1). Pass --no-gate for a non-gating run.",
+                        report.summary.blocking_failures
+                    );
+                }
+                std::process::exit(1);
             }
         }
         Command::StrategyAssessment {

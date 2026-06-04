@@ -17,7 +17,11 @@ pub async fn persist_strategy_validation_report(
     let report_json =
         serde_json::to_value(report).wrap_err("failed to encode validation report as json")?;
     let overall_verdict = overall_verdict(report).as_str();
-    let status = if matches!(overall_verdict, "fail" | "blocked") {
+    // Any blocking failure forces needs_review so a promotion reader can refuse
+    // on status alone; non-blocking fail/blocked verdicts also stay in review.
+    let status = if report.summary.has_blocking_failures()
+        || matches!(overall_verdict, "fail" | "blocked")
+    {
         "needs_review"
     } else {
         "validated"

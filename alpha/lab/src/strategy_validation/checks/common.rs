@@ -50,6 +50,7 @@ pub(super) fn check(
 ) -> CheckResult {
     let code = code.into();
     let (question, description) = check_copy(&code);
+    let blocking = is_blocking_code(&code);
     CheckResult {
         category: category.into(),
         code,
@@ -58,7 +59,34 @@ pub(super) fn check(
         verdict,
         message: message.into(),
         evidence,
+        blocking,
     }
+}
+
+/// Promotion-blocking classification for a validation check, keyed on `code`.
+///
+/// A `Verdict::Fail` on a blocking check is a HARD promotion/broadcast blocker
+/// (it increments `ValidationSummary.blocking_failures`, which drives the CLI
+/// exit code and the live-real preflight gate). Advisory checks never gate.
+///
+/// Policy: CORRECTNESS-FIRST. Every check is blocking by DEFAULT; only an
+/// explicit allowlist of coverage/informational checks is advisory. This keeps
+/// newly added correctness invariants gating automatically unless deliberately
+/// downgraded here. Note: this is independent of the verdict — a `Blocked`
+/// ("could not evaluate") verdict never counts as a blocking failure regardless
+/// of this classification (see `ValidationSummary::from_checks`), so a vacuous
+/// historical `tail_entry_coverage=Blocked` does not gate.
+pub(super) fn is_blocking_code(code: &str) -> bool {
+    !matches!(
+        code,
+        // Coverage probe: returns Blocked (vacuous) on pure historical runs and
+        // is a "did we exercise this path" meter, not a correctness invariant.
+        "tail_entry_coverage"
+        // Informational: counts whether the strategy produced any trades in
+        // scope. Empty scope is a "nothing to validate" signal, not a failed
+        // invariant, so it must not block promotion on its own.
+        | "strategy_rows"
+    )
 }
 
 fn check_copy(code: &str) -> (&'static str, &'static str) {
@@ -367,5 +395,52 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
             "What invariant is this check validating?",
             "Runs a scoped validation query against alpha_trading and reports any violating rows.",
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocking_code;
+
+    #[test]
+    fn mandated_blocking_checks_are_blocking() {
+        for code in [
+            // 3 snapshot drain checks
+            "open_position_balance_drain_has_zero_snapshot",
+            "no_positive_open_snapshot_after_drain",
+            "no_positive_value_after_zero_balance",
+            // lifecycle drain terminalization
+            "drained_position_reaches_terminal_zero",
+            // accounting / PnL-identity checks
+            "total_pnl_equals_realized_plus_unrealized",
+            "open_trade_pnl_formula",
+            "open_snapshot_pnl_formula",
+            "realized_sell_pnl_formula",
+            "closed_trade_has_no_unrealized_value",
+            "closed_trade_snapshots_have_no_unrealized_value",
+            "entry_cost_matches_buy_fill",
+            "exit_value_matches_sell_fill",
+            "gas_cost_matches_trade_events",
+            // lifecycle ordering / no-duplicate-terminal / active-hold-exit
+            "event_block_order",
+            "single_terminal_event_per_trade",
+            "single_submitted_event_per_order",
+            "active_hold_limit_submits_exit",
+            // execution-delay & terminal-report presence
+            "terminal_report_matches_execution_delay",
+            "submitted_orders_have_terminal_report_after_delay",
+            // metadata result-set / runtime-status consistency
+            "result_set_status",
+            "live_runtime_status_matches_result_set",
+            "running_result_set_has_no_stop_marker",
+        ] {
+            assert!(is_blocking_code(code), "{code} must be promotion-blocking");
+        }
+    }
+
+    #[test]
+    fn coverage_and_informational_checks_are_advisory() {
+        assert!(!is_blocking_code("tail_entry_coverage"));
+        assert!(!is_blocking_code("strategy_rows"));
     }
 }

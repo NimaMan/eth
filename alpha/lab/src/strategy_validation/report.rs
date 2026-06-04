@@ -24,6 +24,13 @@ pub struct ValidationSummary {
     pub warnings: usize,
     pub failures: usize,
     pub blocked: usize,
+    /// Count of checks that BOTH carry a promotion-blocking classification
+    /// (`CheckResult.blocking == true`) AND returned `Verdict::Fail`. A
+    /// `Verdict::Blocked` ("could not evaluate") check never contributes here,
+    /// so a vacuous historical `tail_entry_coverage=Blocked` does not gate.
+    /// `blocking_failures > 0` is the single hard promotion/broadcast blocker.
+    #[serde(default)]
+    pub blocking_failures: usize,
 }
 
 impl ValidationSummary {
@@ -36,11 +43,22 @@ impl ValidationSummary {
             match check.verdict {
                 Verdict::Pass => summary.passed += 1,
                 Verdict::Warn => summary.warnings += 1,
-                Verdict::Fail => summary.failures += 1,
+                Verdict::Fail => {
+                    summary.failures += 1;
+                    if check.blocking {
+                        summary.blocking_failures += 1;
+                    }
+                }
                 Verdict::Blocked => summary.blocked += 1,
             }
         }
         summary
+    }
+
+    /// True when at least one promotion-blocking check hard-failed. This is the
+    /// gate predicate consumed by the CLI exit code and the live-real preflight.
+    pub fn has_blocking_failures(&self) -> bool {
+        self.blocking_failures > 0
     }
 }
 
@@ -53,6 +71,18 @@ pub struct CheckResult {
     pub verdict: Verdict,
     pub message: String,
     pub evidence: Value,
+    /// When true, a `Verdict::Fail` on this check is a HARD promotion/broadcast
+    /// blocker (counts toward `ValidationSummary.blocking_failures`). When
+    /// false, the check is advisory/coverage-only and never gates promotion.
+    /// Classified centrally in `checks::common::is_blocking_code` keyed on
+    /// `code`. Defaults to `true` on deserialization so older persisted reports
+    /// (written before this field existed) are treated correctness-first.
+    #[serde(default = "default_blocking")]
+    pub blocking: bool,
+}
+
+fn default_blocking() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -137,8 +167,22 @@ pub fn print_strategy_validation_report(report: &StrategyValidationReport) {
             vec!["warnings".to_string(), report.summary.warnings.to_string()],
             vec!["failures".to_string(), report.summary.failures.to_string()],
             vec!["blocked".to_string(), report.summary.blocked.to_string()],
+            vec![
+                "blocking_failures".to_string(),
+                report.summary.blocking_failures.to_string(),
+            ],
         ],
     );
+    if report.summary.has_blocking_failures() {
+        println!();
+        println!(
+            "PROMOTION GATE: BLOCKED - {} promotion-blocking check(s) failed; this strategy/result-set MUST NOT be promoted or broadcast.",
+            report.summary.blocking_failures
+        );
+    } else {
+        println!();
+        println!("PROMOTION GATE: clear - no promotion-blocking check failed.");
+    }
     println!();
 
     println!("## Strategies");
@@ -178,13 +222,15 @@ pub fn print_strategy_validation_report(report: &StrategyValidationReport) {
 
     println!("## Checks");
     render::print_table(
-        &["verdict", "category", "question", "message"],
+        &["verdict", "gate", "category", "question", "message"],
         &report
             .checks
             .iter()
             .map(|check| {
+                let gate = if check.blocking { "blocking" } else { "advisory" };
                 vec![
                     check.verdict.as_str().to_string(),
+                    gate.to_string(),
                     check.category.clone(),
                     check.question.clone(),
                     check.message.clone(),
@@ -243,4 +289,84 @@ fn short(value: &str) -> String {
         return value.to_string();
     }
     format!("{}...{}", &value[..12], &value[value.len() - 6..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn check(verdict: Verdict, blocking: bool) -> CheckResult {
+        CheckResult {
+            category: "test".to_string(),
+            code: "synthetic".to_string(),
+            question: String::new(),
+            description: String::new(),
+            verdict,
+            message: String::new(),
+            evidence: json!({}),
+            blocking,
+        }
+    }
+
+    #[test]
+    fn blocking_fail_counts_as_blocking_failure_and_gates() {
+        let summary = ValidationSummary::from_checks(&[
+            check(Verdict::Pass, true),
+            check(Verdict::Fail, true),
+        ]);
+        assert_eq!(summary.failures, 1);
+        assert_eq!(summary.blocking_failures, 1);
+        assert!(summary.has_blocking_failures());
+    }
+
+    #[test]
+    fn advisory_fail_does_not_gate() {
+        let summary = ValidationSummary::from_checks(&[check(Verdict::Fail, false)]);
+        assert_eq!(summary.failures, 1);
+        assert_eq!(summary.blocking_failures, 0);
+        assert!(!summary.has_blocking_failures());
+    }
+
+    #[test]
+    fn blocked_verdict_never_gates_even_when_classified_blocking() {
+        // A historical `tail_entry_coverage` returns Blocked; even if some
+        // future blocking-classified check returns Blocked it must not gate,
+        // because Blocked means "could not evaluate", not "failed".
+        let summary = ValidationSummary::from_checks(&[
+            check(Verdict::Blocked, true),
+            check(Verdict::Blocked, false),
+        ]);
+        assert_eq!(summary.blocked, 2);
+        assert_eq!(summary.blocking_failures, 0);
+        assert!(!summary.has_blocking_failures());
+    }
+
+    #[test]
+    fn warnings_and_passes_never_gate() {
+        let summary = ValidationSummary::from_checks(&[
+            check(Verdict::Warn, true),
+            check(Verdict::Pass, true),
+        ]);
+        assert_eq!(summary.warnings, 1);
+        assert_eq!(summary.passed, 1);
+        assert!(!summary.has_blocking_failures());
+    }
+
+    #[test]
+    fn blocking_field_defaults_true_for_legacy_reports() {
+        // Reports persisted before `blocking` existed deserialize with the
+        // field absent; serde must default it to true (correctness-first).
+        let legacy = json!({
+            "category": "accounting",
+            "code": "total_pnl_equals_realized_plus_unrealized",
+            "question": "",
+            "description": "",
+            "verdict": "fail",
+            "message": "",
+            "evidence": {}
+        });
+        let parsed: CheckResult = serde_json::from_value(legacy).unwrap();
+        assert!(parsed.blocking);
+    }
 }
