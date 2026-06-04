@@ -725,3 +725,83 @@ async fn confirmed_sell_of_drained_position_is_forced_to_zero_close() {
         position.exit_proceeds
     );
 }
+
+/// Window regression (HIGH): a sell deferred from an earlier block that comes DUE at
+/// the drain block must NOT confirm with synthetic proceeds. Because the mined-drain
+/// baseline now runs BEFORE due pending reports are applied, the pending Confirmed sell
+/// is seen as `drained` and force-failed to `closed_zero_valuation`. Before the fix the
+/// pending report was applied first (drained=false) and the position closed as
+/// `sell_confirmed` with phantom proceeds — this test fails on the pre-fix ordering.
+#[tokio::test]
+async fn pending_sell_due_at_drain_block_is_force_failed_not_confirmed() {
+    let store = MemoryTradingStore::default();
+    let token = Address::repeat_byte(0x11);
+    let pool_address = Address::repeat_byte(0x22);
+    let pool = TokenPoolId::new(token, pool_address.to_string());
+
+    let mut position = test_position(PositionState::SellSubmitted);
+    position.exit_order_id = Some(OrderId("sell-1".to_string()));
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.01").unwrap());
+    let position_id = position.id.clone();
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        ConfirmingTestExecutionAdapter,
+    )
+    .with_portfolio(portfolio);
+
+    // A sell simulated against pre-drain state, deferred to (due at) the drain block 11.
+    engine
+        .pending_execution_reports
+        .push(crate::PendingExecutionReport {
+            position_id,
+            side: OrderSide::Sell,
+            report: ExecutionReport {
+                order_id: OrderId("sell-1".to_string()),
+                status: ExecutionStatus::Confirmed,
+                tx_hash: None,
+                block_number: Some(11),
+                filled_amount: Some(Amount {
+                    raw: U256::from(9_563_057_646_691_455u64),
+                    decimals: 18,
+                }),
+                token_amount: None,
+                gas_used: Some(21_000),
+                gas_cost: None,
+                mined_evidence: None,
+                error: None,
+            },
+        });
+
+    // Mined drain at block 11 — the same block the deferred sell comes due.
+    engine
+        .handle_event(EngineEvent::Risk(RiskEvent {
+            kind: RiskKind::LiquidityRemoval,
+            severity: RiskSeverity::Critical,
+            source: None,
+            token_address: token,
+            pool_address: Some(pool),
+            pending_tx_hash: None,
+            observed_block: Some(11),
+            message: "holder-balance backdoor drain".to_string(),
+            evidence: None,
+        }))
+        .await
+        .unwrap();
+
+    let position = store.positions().into_iter().next().expect("position");
+    assert_eq!(
+        position.state,
+        PositionState::ClosedZeroValuation,
+        "a sell coming due at the drain block must be force-failed and zero-closed, not confirmed"
+    );
+    assert!(position.drained);
+    assert!(
+        position.exit_proceeds.is_none(),
+        "no synthetic proceeds for a sell due at the drain block, got {:?}",
+        position.exit_proceeds
+    );
+}

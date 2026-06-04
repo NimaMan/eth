@@ -45,6 +45,12 @@ where
                 Ok(reports)
             }
             EngineEvent::Risk(event) => {
+                // Apply a mined value-destroying drain BEFORE any due pending reports: a
+                // sell simulated against pre-drain state that comes due at the drain block
+                // must be force-failed (it sees `drained`), not confirmed with synthetic
+                // proceeds. This closes the window between due-report application and the
+                // drain-marking that previously lived at the end of `run_risk_strategies`.
+                self.apply_mined_drain_baseline(&event).await?;
                 let mut reports = if let Some(block_number) = event.observed_block {
                     self.apply_due_pending_execution_reports(block_number, None)
                         .await?
@@ -235,71 +241,85 @@ where
             .apply_risk_decisions(decisions, event_source, event)
             .await?;
 
-        // Worst-case baseline: mark open positions as drained on mined
-        // liquidity removal or scam confirmation, even if strategy does not
-        // exit. Pending mempool removal signals are exit triggers, not
-        // confirmed pool drains.
-        if matches!(
+        // The mined-drain baseline now runs in `apply_mined_drain_baseline`, called from
+        // `handle_event` BEFORE due pending reports are applied (so a sell simulated
+        // pre-drain that comes due at the drain block is force-failed, not confirmed).
+        Ok(reports)
+    }
+
+    /// Worst-case baseline for a mined value-destroying drain (confirmed liquidity
+    /// removal or scam confirmation): mark every open position on the pool `drained`
+    /// and, when no exit is in flight, terminalize it to `closed_zero_valuation` with a
+    /// zero snapshot. Pending mempool removal signals are exit triggers, not confirmed
+    /// drains, so they are excluded.
+    ///
+    /// This MUST run before `apply_due_pending_execution_reports` for the same block: a
+    /// sell that was simulated against pre-drain state and deferred to the drain block
+    /// would otherwise be applied with `drained == false` and confirm with synthetic
+    /// proceeds. Marking the drain first lets the drained-sell interception in
+    /// `apply_final_execution_report` force that report to fail and zero-close instead.
+    async fn apply_mined_drain_baseline(&mut self, event: &RiskEvent) -> Result<()> {
+        if !matches!(
             event.kind,
             RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed
         ) {
-            if let Some(ref pool_address) = event.pool_address {
-                let mut drained_snapshots = Vec::new();
-                for position in self.portfolio.positions.values_mut() {
-                    if position.key.pool_address == *pool_address
-                        && position.has_exposure()
-                        && !position.drained
-                    {
-                        position.mark_drained();
-                        // A confiscated/drained position has no sellable balance, so it
-                        // must terminalize at zero value config-independently (no exit_*
-                        // flag and no successful sell required) instead of lingering open.
-                        // In-flight exits (Sell{IntentCreated,Submitted}) are left to
-                        // resolve and are terminalized on their failed/cancelled report.
-                        if !position.has_exit_in_flight() {
-                            position.mark_closed_zero_valuation();
-                        }
-                        let _ = self.store.upsert_position(position).await;
-                        // Snapshot the drained state so baseline PnL is honest
-                        // even when no pool update follows the signal.
-                        // Use a high block number so this snapshot is picked as
-                        // the latest by DISTINCT ON ... ORDER BY block_number DESC.
-                        let block_number = event.observed_block.unwrap_or(u64::MAX - 1);
-                        let snapshot = PositionSnapshot {
-                            position_id: position.id.clone(),
-                            trade_id: position.trade_id.clone(),
-                            state: position.state.clone(),
-                            block_number,
-                            observed_block_number: event.observed_block,
-                            valuation_block_number: event.observed_block,
-                            current_value_eth: DecimalAmount::ZERO,
-                            realized_profit_eth: position.realized_pnl(),
-                            unrealized_profit_eth: -position.entry_cost_basis.unwrap_or_default(),
-                            roi: DecimalAmount::from(-1),
-                            pool_price_to_initial_price_ratio: None,
-                            pool_initial_price_denom_per_token: None,
-                            pool_price_denom_per_token: None,
-                            pool_liquidity_denom: None,
-                            pool_token_reserve: None,
-                            pool_denom_symbol: None,
-                        };
-                        let pool_snapshot = self.pool_snapshots.get(pool_address).filter(|pool| {
-                            pool.token_address == event.token_address
-                                && event
-                                    .observed_block
-                                    .map(|observed_block| pool.latest_block == observed_block)
-                                    .unwrap_or(false)
-                        });
-                        let snapshot = snapshot_with_pool_metrics(snapshot, pool_snapshot);
-                        drained_snapshots.push(snapshot);
-                    }
+            return Ok(());
+        }
+        let Some(pool_address) = event.pool_address.clone() else {
+            return Ok(());
+        };
+        let mut drained_snapshots = Vec::new();
+        for position in self.portfolio.positions.values_mut() {
+            if position.key.pool_address == pool_address
+                && position.has_exposure()
+                && !position.drained
+            {
+                position.mark_drained();
+                // A confiscated/drained position has no sellable balance, so it must
+                // terminalize at zero value config-independently (no exit_* flag and no
+                // successful sell required) instead of lingering open. In-flight exits
+                // (Sell{IntentCreated,Submitted}) are left to resolve and are terminalized
+                // when their (now force-failed) report is applied.
+                if !position.has_exit_in_flight() {
+                    position.mark_closed_zero_valuation();
                 }
-                for snapshot in drained_snapshots {
-                    let _ = self.append_position_snapshot_once(snapshot).await;
-                }
+                let _ = self.store.upsert_position(position).await;
+                // Snapshot the drained state so baseline PnL is honest even when no pool
+                // update follows the signal. Use a high block number so this snapshot is
+                // picked as the latest by DISTINCT ON ... ORDER BY block_number DESC.
+                let block_number = event.observed_block.unwrap_or(u64::MAX - 1);
+                let snapshot = PositionSnapshot {
+                    position_id: position.id.clone(),
+                    trade_id: position.trade_id.clone(),
+                    state: position.state.clone(),
+                    block_number,
+                    observed_block_number: event.observed_block,
+                    valuation_block_number: event.observed_block,
+                    current_value_eth: DecimalAmount::ZERO,
+                    realized_profit_eth: position.realized_pnl(),
+                    unrealized_profit_eth: -position.entry_cost_basis.unwrap_or_default(),
+                    roi: DecimalAmount::from(-1),
+                    pool_price_to_initial_price_ratio: None,
+                    pool_initial_price_denom_per_token: None,
+                    pool_price_denom_per_token: None,
+                    pool_liquidity_denom: None,
+                    pool_token_reserve: None,
+                    pool_denom_symbol: None,
+                };
+                let pool_snapshot = self.pool_snapshots.get(&pool_address).filter(|pool| {
+                    pool.token_address == event.token_address
+                        && event
+                            .observed_block
+                            .map(|observed_block| pool.latest_block == observed_block)
+                            .unwrap_or(false)
+                });
+                let snapshot = snapshot_with_pool_metrics(snapshot, pool_snapshot);
+                drained_snapshots.push(snapshot);
             }
         }
-
-        Ok(reports)
+        for snapshot in drained_snapshots {
+            let _ = self.append_position_snapshot_once(snapshot).await;
+        }
+        Ok(())
     }
 }
