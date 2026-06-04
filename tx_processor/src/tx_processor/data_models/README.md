@@ -91,6 +91,45 @@ principled-complete source for *net state before → after* is balance-slot
 approximation that covers the common cases (including a standard custody-drain
 `transferFrom`).
 
+## Invariant: complete transfer capture ⇒ correct movements
+
+This is the foundational correctness principle every downstream consumer (PnL,
+position valuation, net-flow accounting) rests on:
+
+> **If every transfer in a transaction is captured in `ProcessedTransaction`
+> (emitted `Transfer` events in `erc20_transfers` *and* event-less internal
+> ERC-20 calls folded into `internal_erc20_transfers`), then the net-flow
+> movements and the reserve / held-balance accounting derived from it are
+> correct.**
+
+The accounting is **event-sourced from the captured transfer set**, never a
+`balanceOf`-vs-ledger reconstruction. The downstream chain is pure net flow:
+`erc20_transfers ∪ internal_erc20_transfers ∪ eth_transfers ∪ internal_transactions`
+→ `TxLedger` (`eth_token::pnl::tx_ledger`) → per-position `token_in/out`,
+`denom_in/out` → `token_balance = token_in − token_out`. No step queries on-chain
+`balanceOf` or reconstructs a balance outside the captured transfers
+(`custody::reconcile_custody_drain` exists but is **not** on this path). A holder
+confiscation therefore needs no special oracle: the `transferFrom(vault, …)` that
+moves the tokens out is itself a captured transfer, so the vault's net flow falls
+to zero on its own.
+
+Because correctness rests *entirely* on capture being complete, there is one hard
+precondition and one known limit:
+
+- **Trace precondition (must be guaranteed, not assumed).** Event-less internal
+  transfers are captured *only when the block was processed with a call trace*. In
+  `block_processor/mod.rs`, when the trace is `None`, `internal_erc20_calls` and
+  `internal_erc20_transfers` are left empty and an event-less custody drain
+  **silently vanishes** from `address_balance_changes` — the antecedent ("every
+  transfer captured") fails with no error or warning. Any path that produces a
+  `ProcessedTransaction` for accounting must run **with traces**; an absent trace
+  is a correctness hole, not a degraded mode.
+- **Argument-vs-delta limit.** A captured transfer's `amount` is the call argument,
+  not a measured balance delta, so fee-on-transfer / rebasing tokens are
+  approximate (see "Limit — argument vs. measured delta" above). This bounds
+  *magnitude* exactness, not the *presence* of a transfer — drains/confiscations,
+  which are about presence, are unaffected.
+
 ## Adding New Models
 
 1. Define the struct in the appropriate module.

@@ -28,6 +28,26 @@ pub struct ProcessedAccessListItem {
     pub storage_keys: Vec<B256>,
 }
 
+/// The complete record of everything a transaction moved: decoded events,
+/// internal calls, captured transfers, and the derived per-address balance
+/// changes.
+///
+/// **Invariant — complete capture ⇒ correct movements.** If every transfer in
+/// the transaction is captured here (emitted `Transfer` events in
+/// `erc20_transfers` *and* event-less internal ERC-20 calls folded into
+/// `internal_erc20_transfers`), then the net-flow movements and balance
+/// accounting derived from this struct are correct. The design is
+/// **event-sourced from the captured transfer set**, not a `balanceOf`-vs-ledger
+/// reconstruction: a holder confiscation shows up because the `transferFrom` that
+/// moves the tokens is itself a captured transfer, so the net flow falls to zero.
+///
+/// **Precondition (must be guaranteed):** event-less internal transfers are
+/// captured *only when the block was processed with a call trace*. With
+/// `trace = None`, `internal_erc20_calls` / `internal_erc20_transfers` are empty
+/// and an event-less drain silently vanishes from `address_balance_changes` — the
+/// invariant's antecedent fails with no error. Produce `ProcessedTransaction` for
+/// accounting only **with traces**. See `data_models/README.md` →
+/// "Invariant: complete transfer capture ⇒ correct movements".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedTransaction {
     // Core transaction data
