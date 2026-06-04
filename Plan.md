@@ -134,7 +134,21 @@ Latest relevant commits:
   (`eth_alpha_live_runner`) owning the two live bins + the `live_trader/` subtree so
   `eth_alpha_engine` becomes a pure backtest-safe library; plus an optional
   `real_execution/mod.rs` file split. Queued.
-- `eth_token_store` crate renamed to `eth_pnl_store` (kept; owner's in-progress rename).
+- **Address-level PnL surface shipped 2026-06-04.** `eth_token_store` → `eth_pnl_store`
+  rename DONE (leaf crate, zero external consumers; builds; no DB-schema/config-key change).
+  `eth_risk_atlas` `eth_trader_profile` now serves per-address **aggregate PnL** (sum
+  realized/unrealized/total, gas, win/loss/breakeven, pool/scam counts — the `address_agg`
+  CTE in `risk_atlas/src/db/reader.rs` was previously dropping these), a DB-only **address
+  `type`** (`clean_trader`/`fresh_launch_sniper`/`creator_scammer`/`external_inflow_seller`/
+  `custody_anomaly`/`mixed_trader`) + stackable **validityFlags** (`pnl_dominated_by_scam_pools`/
+  `gas_not_attributed`/`movement_reconciliation_incomplete`/`custody_victim_with_positive_pnl`).
+  New `/api/v1/eth/addresses*` routes (`/traders*` kept as live aliases). Frontend rebuilt
+  into an **address-activity** page (kimi-driven) with the user-facing concept renamed
+  **traders → addresses** (old paths redirect). Verified live via caddy:
+  `…:40020/eth/addresses` and `/api/v1/eth/addresses/:address` return `aggregatePnl` +
+  `addressType`. Deferred fast-follow: **chain-enriched** type (EOA-vs-contract + known-router
+  registry via `reth_chain_query`, sets `infra_*` types + `infra_mislabeled_as_user`); and the
+  page's movement-level activity needs a movement-persisted run (the last one OOM-crashed).
 
 ## Current Three-Tier Limiting Factors 2026-05-31
 

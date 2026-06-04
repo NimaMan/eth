@@ -357,6 +357,25 @@ pub(super) fn routes(
             .and(super::with_state(state.clone()))
             .and_then(eth_traders::trade);
 
+    // `/addresses` is the canonical user-facing path; `/traders` is kept as a
+    // live alias for back-compat. Both map to the same handlers.
+    let eth_addresses = warp::path!("api" / "v1" / "eth" / "addresses")
+        .and(warp::get())
+        .and(warp::query::<eth_traders::EthTraderListQuery>())
+        .and(super::with_state(state.clone()))
+        .and_then(eth_traders::list);
+
+    let eth_address = warp::path!("api" / "v1" / "eth" / "addresses" / String)
+        .and(warp::get())
+        .and(super::with_state(state.clone()))
+        .and_then(eth_traders::detail);
+
+    let eth_address_trade =
+        warp::path!("api" / "v1" / "eth" / "addresses" / String / "trades" / String)
+            .and(warp::get())
+            .and(super::with_state(state.clone()))
+            .and_then(eth_traders::trade);
+
     let token_network_start = warp::path!("api" / "v1" / "eth" / "analytics" / "network")
         .and(warp::post())
         .and(warp::body::json())
@@ -665,6 +684,9 @@ pub(super) fn routes(
         .or(eth_traders)
         .or(eth_trader_trade)
         .or(eth_trader)
+        .or(eth_addresses)
+        .or(eth_address_trade)
+        .or(eth_address)
         .or(token_network_start)
         .or(token_network_list)
         .or(token_network_get)

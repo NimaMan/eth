@@ -272,9 +272,21 @@ impl RiskAtlasReader {
             .fetch_all(&self.pool)
             .await?;
 
+        let aggregate_pnl = eth_address_aggregate_json(&summary)?;
+        let (address_type, validity_flags) = eth_address_type_and_flags(&summary)?;
+        let activity = json!({
+            "first_block": summary.try_get::<Option<i64>, _>("first_block")?,
+            "latest_block": summary.try_get::<Option<i64>, _>("latest_block")?,
+        });
+        let summary_json = eth_trader_row(summary)?;
+
         Ok(Some(json!({
             "run": token_pnl_run_json(&run, &run_id)?,
-            "summary": eth_trader_row(summary)?,
+            "summary": summary_json,
+            "aggregatePnl": aggregate_pnl,
+            "addressType": address_type,
+            "validityFlags": validity_flags,
+            "activity": activity,
             "topPoolPositions": top_positions
                 .into_iter()
                 .map(eth_trader_pool_position_row)
@@ -542,7 +554,10 @@ address_rows AS (
         COALESCE(a.denom_cashflow::double precision, 0.0) AS denom_cashflow,
         ABS(COALESCE(a.denom_cashflow::double precision, 0.0)) AS abs_denom_cashflow,
         (a.denom_in_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_in,
-        (a.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out
+        (a.denom_out_raw / POWER(10::numeric, GREATEST(s.denom_decimals::int, 0)))::double precision AS denom_out,
+        COALESCE(a.native_fee::double precision, 0.0) AS native_fee,
+        COALESCE(a.native_priority_fee::double precision, 0.0) AS native_priority_fee,
+        (lower(s.denom_address) = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2') AS denom_is_eth
     FROM token_pnl.pool_address_pnl a
     JOIN token_pnl.pool_pnl_states s
       ON s.run_id = a.run_id AND s.pool_id = a.pool_id
@@ -573,7 +588,18 @@ address_agg AS (
         ARRAY_AGG(DISTINCT scam_label) FILTER (WHERE scam_label IS NOT NULL) AS scam_labels,
         ARRAY_AGG(DISTINCT lifecycle) FILTER (WHERE lifecycle IS NOT NULL) AS lifecycles,
         SUM(CASE WHEN lower(address) = lower(COALESCE(token_creator_address, '')) THEN 1 ELSE 0 END)::bigint AS token_creator_position_count,
-        SUM(CASE WHEN lower(address) = lower(COALESCE(pool_creator_address, '')) THEN 1 ELSE 0 END)::bigint AS pool_creator_position_count
+        SUM(CASE WHEN lower(address) = lower(COALESCE(pool_creator_address, '')) THEN 1 ELSE 0 END)::bigint AS pool_creator_position_count,
+        SUM(realized_pnl_denom)::double precision AS realized_pnl_denom_sum,
+        SUM(unrealized_value_denom)::double precision AS unrealized_pnl_denom_sum,
+        SUM(total_pnl_denom)::double precision AS total_pnl_denom_sum,
+        SUM(native_fee + native_priority_fee)::double precision AS gas_paid,
+        COUNT(*) FILTER (WHERE total_pnl_denom > 0)::bigint AS win_count,
+        COUNT(*) FILTER (WHERE total_pnl_denom < 0)::bigint AS loss_count,
+        COUNT(*) FILTER (WHERE total_pnl_denom = 0 OR total_pnl_denom IS NULL)::bigint AS breakeven_count,
+        SUM(movement_rows_retained)::bigint AS movement_rows_retained_sum,
+        COUNT(*) FILTER (WHERE movement_rows_backed)::bigint AS movement_backed_position_count,
+        BOOL_AND(denom_is_eth) AS all_denom_eth,
+        BOOL_OR(is_user_candidate) AS any_user_candidate
     FROM address_rows
     GROUP BY address
 ),
@@ -1371,6 +1397,88 @@ fn eth_trader_row(row: sqlx::postgres::PgRow) -> Result<Value> {
         "pool_creator_position_count": row.try_get::<i64, _>("pool_creator_position_count")?,
         "movement_rows_available": row.try_get::<i64, _>("movement_rows")? > 0,
     }))
+}
+
+/// Address-level aggregate PnL band for the profile/activity page. Reads the
+/// SUM columns added to `address_agg` (flow through `ranked` via `aa.*`).
+fn eth_address_aggregate_json(row: &sqlx::postgres::PgRow) -> Result<Value> {
+    let all_eth = row.try_get::<Option<bool>, _>("all_denom_eth")?.unwrap_or(false);
+    let realized = row.try_get::<Option<f64>, _>("realized_pnl_denom_sum")?;
+    let unrealized = row.try_get::<Option<f64>, _>("unrealized_pnl_denom_sum")?;
+    let total = row.try_get::<Option<f64>, _>("total_pnl_denom_sum")?;
+    Ok(json!({
+        "realized_pnl_denom": realized,
+        "unrealized_pnl_denom": unrealized,
+        "total_pnl_denom": total,
+        "realized_pnl_eth": if all_eth { realized } else { None },
+        "unrealized_pnl_eth": if all_eth { unrealized } else { None },
+        "total_pnl_eth": if all_eth { total } else { None },
+        "denom_is_eth": all_eth,
+        "net_denom_cashflow": row.try_get::<Option<f64>, _>("net_denom_cashflow")?,
+        "denom_in": row.try_get::<Option<f64>, _>("denom_in")?,
+        "denom_out": row.try_get::<Option<f64>, _>("denom_out")?,
+        "gas_paid_eth": row.try_get::<Option<f64>, _>("gas_paid")?,
+        "pool_count": row.try_get::<i64, _>("pool_position_count")?,
+        "scam_pool_count": row.try_get::<i64, _>("scam_pool_position_count")?,
+        "win_count": row.try_get::<i64, _>("win_count")?,
+        "loss_count": row.try_get::<i64, _>("loss_count")?,
+        "breakeven_count": row.try_get::<i64, _>("breakeven_count")?,
+    }))
+}
+
+/// Derive a per-address `type` + stackable validity flags from DB-only signals
+/// (roles, scam-share, gas, reconciliation). `confidence = "db_only"`; the
+/// EOA-vs-contract / known-router refinement is a chain-enriched fast-follow.
+fn eth_address_type_and_flags(row: &sqlx::postgres::PgRow) -> Result<(Value, Value)> {
+    let role_flags = row.try_get::<Vec<String>, _>("role_flags").unwrap_or_default();
+    let scam_ratio = row.try_get::<Option<f64>, _>("scam_ratio")?.unwrap_or(0.0);
+    let pool_count = row.try_get::<i64, _>("pool_position_count")?;
+    let total_pnl = row.try_get::<Option<f64>, _>("total_pnl_denom_sum")?.unwrap_or(0.0);
+    let gas_paid = row.try_get::<Option<f64>, _>("gas_paid")?.unwrap_or(0.0);
+    let movement_count = row.try_get::<i64, _>("movement_count")?;
+    let total_abs = row.try_get::<Option<f64>, _>("total_abs_denom_flow")?.unwrap_or(0.0);
+    let scam_abs = row.try_get::<Option<f64>, _>("scam_abs_denom_flow")?.unwrap_or(0.0);
+    let movement_backed = row.try_get::<i64, _>("movement_backed_position_count")?;
+    let token_creator = row.try_get::<i64, _>("token_creator_position_count")?;
+    let pool_creator = row.try_get::<i64, _>("pool_creator_position_count")?;
+
+    let has = |role: &str| role_flags.iter().any(|value| value == role);
+    let is_creator = token_creator > 0 || pool_creator > 0 || has("token_creator") || has("pool_creator");
+
+    let address_type = if is_creator && scam_ratio >= 0.5 {
+        "creator_scammer"
+    } else if is_creator {
+        "creator"
+    } else if has("external_token_source") && has("seller") && !has("buyer") {
+        "external_inflow_seller"
+    } else if has("custody_victim_candidate") && total_pnl > 0.0 {
+        "custody_anomaly"
+    } else if scam_ratio >= 0.8 {
+        "fresh_launch_sniper"
+    } else if has("buyer") && scam_ratio < 0.5 {
+        "clean_trader"
+    } else {
+        "mixed_trader"
+    };
+
+    let mut flags: Vec<String> = Vec::new();
+    if total_abs > 0.0 && scam_abs / total_abs >= 0.8 {
+        flags.push("pnl_dominated_by_scam_pools".to_string());
+    }
+    if gas_paid == 0.0 && movement_count > 0 {
+        flags.push("gas_not_attributed".to_string());
+    }
+    if movement_backed < pool_count {
+        flags.push("movement_reconciliation_incomplete".to_string());
+    }
+    if has("custody_victim_candidate") && total_pnl > 0.0 {
+        flags.push("custody_victim_with_positive_pnl".to_string());
+    }
+
+    Ok((
+        json!({ "type": address_type, "confidence": "db_only" }),
+        json!(flags),
+    ))
 }
 
 fn eth_trader_pool_position_row(row: sqlx::postgres::PgRow) -> Result<Value> {

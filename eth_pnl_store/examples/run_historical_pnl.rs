@@ -14,8 +14,8 @@ use eth_token::{
     pools::{classification::classify_pool, PoolStateFlags},
     tracking::BlockTokenProcessor,
 };
-use eth_token_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
-use eth_token_store::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
+use eth_pnl_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
+use eth_pnl_store::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
 use eyre::{bail, eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::{json, to_value};
@@ -861,7 +861,7 @@ fn print_usage() {
     println!(
         "\
 Usage:
-  cargo run -p eth_token_store --example run_historical_pnl -- \\
+  cargo run -p eth_pnl_store --example run_historical_pnl -- \\
     [--run-id <run_id>] [--start <block>] [--end <block>] [--blocks 50000]
 
 Options:

@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, sync::Arc, time::Instant};
 
 use alloy_primitives::Address;
 use eth_token::{erc20::ERC20TokenMetadata, tracking::TokenStateBuilder};
-use eth_token_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
+use eth_pnl_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
 use eyre::{bail, eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::json;
@@ -274,6 +274,6 @@ fn next_arg(name: &str, args: &mut impl Iterator<Item = String>) -> Result<Strin
 
 fn print_usage() {
     println!(
-        "Usage:\n  cargo run -p eth_token_store --example persist_uniswap_v2_pool_pnl -- \\\n    --run-id <run_id> --token <erc20> --pool <uniswap-v2-pair> \\\n    --start <block> --end <block> [--config /path/to/config.toml] [--datadir <reth-datadir>] [--no-traces]"
+        "Usage:\n  cargo run -p eth_pnl_store --example persist_uniswap_v2_pool_pnl -- \\\n    --run-id <run_id> --token <erc20> --pool <uniswap-v2-pair> \\\n    --start <block> --end <block> [--config /path/to/config.toml] [--datadir <reth-datadir>] [--no-traces]"
     );
 }
