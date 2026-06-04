@@ -8,8 +8,9 @@ use std::{
 
 use eth_token::{
     chain_metadata::RethChainMetadataProvider,
+    custody::CustodyFinding,
     erc20::ERC20Token,
-    pnl::{PnlPoolExport, PnlPoolMeta},
+    pnl::{PnlCustodyFindingMeta, PnlPoolExport, PnlPoolMeta},
     pools::{classification::classify_pool, PoolStateFlags},
     tracking::BlockTokenProcessor,
 };
@@ -730,6 +731,11 @@ fn export_pool(token: &ERC20Token, pool_id: &str) -> Option<PnlPoolExport> {
                 pool_state_flags: pool_state_flags
                     .as_ref()
                     .and_then(|flags| to_value(flags).ok()),
+                custody_findings: token
+                    .custody_findings()
+                    .iter()
+                    .filter_map(pnl_custody_finding_meta)
+                    .collect(),
             }
         })
         .unwrap_or_default();
@@ -737,6 +743,56 @@ fn export_pool(token: &ERC20Token, pool_id: &str) -> Option<PnlPoolExport> {
     export.meta = meta;
     export.reconcile_accounting(mark_price);
     Some(export)
+}
+
+fn pnl_custody_finding_meta(finding: &CustodyFinding) -> Option<PnlCustodyFindingMeta> {
+    let evidence = &finding.evidence;
+    let victim = evidence
+        .get("victim")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(PnlCustodyFindingMeta {
+        victim_address: victim.to_ascii_lowercase(),
+        capability: finding.capability.as_str().to_string(),
+        state: finding.state.as_str().to_string(),
+        block_number: finding.block_number.or_else(|| {
+            evidence
+                .get("block_number")
+                .and_then(|value| value.as_u64())
+        }),
+        tx_hash: evidence
+            .get("tx_hash")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        amount_raw: evidence
+            .get("amount")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        amount_scaled: evidence
+            .get("amount_scaled")
+            .and_then(|value| value.as_f64()),
+        expected_balance: evidence
+            .get("expected_balance")
+            .and_then(|value| value.as_f64()),
+        actual_balance: evidence
+            .get("actual_balance")
+            .and_then(|value| value.as_f64()),
+        missing_balance: evidence
+            .get("missing_balance")
+            .and_then(|value| value.as_f64()),
+        drained_fraction: evidence
+            .get("drained_fraction")
+            .and_then(|value| value.as_f64()),
+        source: evidence
+            .get("source")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        detail: evidence
+            .get("detail")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
 }
 
 fn load_eth_config(path: Option<PathBuf>) -> Result<EthConfigFile> {

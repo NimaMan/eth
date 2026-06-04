@@ -251,6 +251,14 @@ pub async fn run_checks(
     checks.push(snapshots::closed_trade_final_snapshot_check(pool, result_set_id, strategy).await?);
     checks
         .push(snapshots::closed_trade_latest_snapshot_check(pool, result_set_id, strategy).await?);
+    checks
+        .push(snapshots::drain_block_has_zero_snapshot_check(pool, result_set_id, strategy).await?);
+    checks.push(
+        snapshots::synthetic_balance_used_after_drain_check(pool, result_set_id, strategy).await?,
+    );
+    checks.push(
+        snapshots::positive_value_after_zero_balance_check(pool, result_set_id, strategy).await?,
+    );
     checks.push(
         execution_replay::execution_replay_inputs_check(pool, result_set_id, strategy).await?,
     );

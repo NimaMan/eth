@@ -20,6 +20,25 @@ pub struct PnlPoolMeta {
     pub pool_labels: Vec<String>,
     #[serde(default)]
     pub pool_state_flags: Option<Value>,
+    #[serde(default)]
+    pub custody_findings: Vec<PnlCustodyFindingMeta>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PnlCustodyFindingMeta {
+    pub victim_address: String,
+    pub capability: String,
+    pub state: String,
+    pub block_number: Option<u64>,
+    pub tx_hash: Option<String>,
+    pub amount_raw: Option<String>,
+    pub amount_scaled: Option<f64>,
+    pub expected_balance: Option<f64>,
+    pub actual_balance: Option<f64>,
+    pub missing_balance: Option<f64>,
+    pub drained_fraction: Option<f64>,
+    pub source: Option<String>,
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

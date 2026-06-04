@@ -177,7 +177,7 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         ),
         "chain_sim_has_no_real_execution_artifacts" => (
             "Did chain-sim avoid real execution artifacts?",
-            "Rejects tx hashes and Kartal submission errors in chain-sim backtests, which should only contain simulated execution reports.",
+            "Rejects tx hashes and ETH tx executor submission errors in chain-sim backtests, which should only contain simulated execution reports.",
         ),
         "pre_submit_simulation_state_ready" => (
             "Was pre-submit simulation state ready for every attempted order?",
@@ -346,6 +346,18 @@ fn check_copy(code: &str) -> (&'static str, &'static str) {
         "closed_trade_replay_inputs_present" => (
             "Can this closed trade be independently replayed?",
             "Requires buy token amount, sell order amount, and sell-confirmed filled amount to be persisted.",
+        ),
+        "open_position_balance_drain_has_zero_snapshot" => (
+            "Does an open position with a mined drain have a zero-value snapshot?",
+            "When a mined liquidity-removal or holder-balance backdoor drain hits a position's pool, a zero/near-zero valuation snapshot must exist at or after the drain block; otherwise the position keeps a stale positive mark after its inventory is gone.",
+        ),
+        "no_positive_open_snapshot_after_drain" => (
+            "Are open positions still valued positive after a mined drain?",
+            "Fails if an open-state snapshot is valued above zero at or after a mined drain for its pool, which means the valuation used synthetic/entry inventory instead of the current held balance.",
+        ),
+        "no_positive_value_after_zero_balance" => (
+            "Does a position's value flip back to positive after reaching zero?",
+            "Once an open position records a zero/near-zero value snapshot after a mined drain, no later non-terminal snapshot may report a positive value; a flip back to positive resurrects a drained position.",
         ),
         _ => (
             "What invariant is this check validating?",

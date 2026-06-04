@@ -138,6 +138,16 @@ pub(super) async fn historical_market_buy_decisions_have_observations_check(
                 AND lower(o.pool_address) = lower(COALESCE(NULLIF(split_part(sd.pool_address, ':', 2), ''), sd.pool_address))
                 AND o.block_number = sd.block_number
           )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM alpha_trading.strategy_observations so
+              WHERE so.run_id = rs.replay_run_id
+                AND so.event_source = 'pool_update'
+                AND lower(COALESCE(NULLIF(so.token_address, ''), so.payload->'pool'->>'token_address')) = lower(sd.token_address)
+                AND lower(COALESCE(NULLIF(split_part(COALESCE(NULLIF(so.pool_address, ''), so.payload->'pool'->>'pool_address'), ':', 2), ''), COALESCE(NULLIF(so.pool_address, ''), so.payload->'pool'->>'pool_address'))) =
+                    lower(COALESCE(NULLIF(split_part(sd.pool_address, ':', 2), ''), sd.pool_address))
+                AND so.block_number = sd.block_number
+          )
         "#,
         &result_set.result_set_id,
         strategy,

@@ -8,6 +8,7 @@ use clap::Parser;
 use eth_alpha_backtest::execution::chain_sim::{run_chain_sim_backtest, ChainSimBacktestConfig};
 use eth_alpha_backtest::replay::{
     common_nonempty_allowed_protocols, load_events_from_observations, load_events_from_risk_atlas,
+    load_events_from_token_state, sort_events_by_block,
 };
 use eth_alpha_backtest::strategy_suites::{
     build_strategy_specs, validate_historical_signal_replay_names, BacktestStrategySpec,
@@ -20,6 +21,7 @@ use rust_decimal::Decimal;
 
 const ALPHA_DATABASE_CONFIG_KEY: &str = "databases.alpha.url";
 const RISK_ATLAS_DATABASE_CONFIG_KEY: &str = "databases.risk_atlas.url";
+const TOKEN_STATE_DATABASE_CONFIG_KEY: &str = "databases.token_state.url";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -42,6 +44,10 @@ struct Args {
     /// Existing live chain-sim run_id to replay from `strategy_observations`.
     #[arg(long)]
     replay_run_id: String,
+
+    /// token_state.scope_id whose mined terminal/custody pool events should be overlaid.
+    #[arg(long)]
+    token_state_scope: Option<String>,
 
     /// Buy amount in wei (also used as sell amount for snipe-all).
     #[arg(long, default_value = "10000000000000000")]
@@ -102,6 +108,14 @@ pub async fn run() -> Result<()> {
     let database_url = required_shared_config_value(&shared_config, ALPHA_DATABASE_CONFIG_KEY)?;
     let risk_atlas_database_url =
         required_shared_config_value(&shared_config, RISK_ATLAS_DATABASE_CONFIG_KEY)?;
+    let token_state_database_url = if args.token_state_scope.is_some() {
+        Some(required_shared_config_value(
+            &shared_config,
+            TOKEN_STATE_DATABASE_CONFIG_KEY,
+        )?)
+    } else {
+        None
+    };
     let reth_datadir = required_shared_config_value(&shared_config, "RETH_DATADIR")?;
 
     let run_id = args.run_id.clone().unwrap_or_else(default_run_id);
@@ -147,6 +161,8 @@ pub async fn run() -> Result<()> {
                 "strategy_suite": args.strategy_suite.clone(),
                 "strategies": strategy_specs.iter().map(BacktestStrategySpec::config_json).collect::<Vec<_>>(),
                 "replay_run_id": args.replay_run_id.clone(),
+                "token_state_scope": args.token_state_scope.clone(),
+                "token_state_risk_overlay": args.token_state_scope.is_some(),
                 "from_block": args.from_block,
                 "to_block": args.to_block,
                 "skip_primed": args.skip_primed,
@@ -164,7 +180,7 @@ pub async fn run() -> Result<()> {
         .await
         .wrap_err("failed to start backtest run")?;
 
-    let events = if args.replay_run_id.starts_with("risk-atlas-") {
+    let mut events = if args.replay_run_id.starts_with("risk-atlas-") {
         let risk_atlas_pool = sqlx::PgPool::connect(&risk_atlas_database_url)
             .await
             .wrap_err("failed to connect Risk Atlas database")?;
@@ -194,6 +210,28 @@ pub async fn run() -> Result<()> {
         .await
         .wrap_err_with(|| format!("failed to load observations for run {}", args.replay_run_id))?
     };
+
+    if let (Some(scope_id), Some(database_url)) = (
+        args.token_state_scope.as_deref(),
+        token_state_database_url.as_deref(),
+    ) {
+        let token_state_pool = sqlx::PgPool::connect(database_url)
+            .await
+            .wrap_err("failed to connect token_state database")?;
+        let overlay_events = load_events_from_token_state(
+            &token_state_pool,
+            scope_id,
+            args.from_block,
+            args.to_block,
+            &risk_atlas_loader_allowed_protocols,
+        )
+        .await
+        .wrap_err_with(|| {
+            format!("failed to load token_state terminal pool events for scope {scope_id}")
+        })?;
+        events.extend(overlay_events);
+        events = sort_events_by_block(events);
+    }
 
     if events.is_empty() {
         return Err(eyre::eyre!(
@@ -248,7 +286,7 @@ fn required_shared_config_value(config: &HashMap<String, String>, key: &str) -> 
         .ok_or_else(|| {
             eyre::eyre!(
                 "{key} must be set in shared config file {}",
-                if key == ALPHA_DATABASE_CONFIG_KEY {
+                if key.starts_with("databases.") {
                     shared_toml_config_path()
                 } else {
                     shared_config_path()
@@ -295,6 +333,16 @@ fn merge_toml_database_config(values: &mut HashMap<String, String>) -> Result<()
         .filter(|value| !value.is_empty())
     {
         values.insert(RISK_ATLAS_DATABASE_CONFIG_KEY.to_string(), url.to_string());
+    }
+    if let Some(url) = root
+        .get("databases")
+        .and_then(|value| value.get("token_state"))
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        values.insert(TOKEN_STATE_DATABASE_CONFIG_KEY.to_string(), url.to_string());
     }
     Ok(())
 }

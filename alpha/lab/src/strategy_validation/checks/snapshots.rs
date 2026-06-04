@@ -568,3 +568,162 @@ pub(super) async fn closed_trade_latest_snapshot_check(
     )
     .await
 }
+
+/// (a) An open position whose pool had a mined liquidity-removal / holder-balance
+/// drain must have a zero/near-zero valuation snapshot at or after the drain
+/// block. Catches the Session-class bug where the position kept a positive mark
+/// after the held inventory was gone.
+pub(super) async fn drain_block_has_zero_snapshot_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "open_position_balance_drain_has_zero_snapshot",
+        Verdict::Fail,
+        "open positions with a mined drain have a zero/near-zero snapshot at/after the drain block",
+        "open positions with a mined drain but no zero/near-zero snapshot at/after the drain block",
+        r#"
+        WITH drained AS (
+            SELECT t.trade_id,
+                   min(re.observed_block) AS drain_block
+            FROM alpha_trading.trades t
+            JOIN alpha_trading.risk_events re
+              ON re.run_id = t.run_id
+             AND lower(re.pool_address) = lower(t.pool_address)
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+              AND re.kind = 'liquidity_removal'
+              AND re.pending_tx_hash IS NULL
+              AND COALESCE(re.payload->>'source', '') NOT IN ('mempool_signal')
+              AND re.observed_block IS NOT NULL
+            GROUP BY t.trade_id
+        )
+        SELECT count(*)
+        FROM drained d
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM alpha_trading.trade_snapshots ts
+            WHERE ts.trade_id = d.trade_id
+              AND COALESCE(ts.valuation_block_number, ts.block_number) >= d.drain_block
+              AND abs(COALESCE(NULLIF(ts.current_value_eth, '')::numeric, 0)) <= 0.000001
+        )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+/// (b) After a mined drain for a position's pool, no open-state snapshot may keep
+/// a positive value. A positive mark valued after the drain block means the
+/// valuation used synthetic/entry inventory instead of the current held balance.
+pub(super) async fn synthetic_balance_used_after_drain_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_positive_open_snapshot_after_drain",
+        Verdict::Fail,
+        "no open-state snapshot keeps a positive value after a mined drain",
+        "open-state snapshots valued positive after a mined drain (synthetic/entry balance)",
+        r#"
+        SELECT count(*)
+        FROM alpha_trading.trade_snapshots ts
+        JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+        WHERE t.result_set_id = $1
+          AND ($2::text IS NULL OR t.strategy_name = $2)
+          AND ts.state IN (
+              'buy_confirmed', 'sell_intent_created', 'sell_submitted',
+              'sell_failed', 'sell_cancelled'
+          )
+          AND COALESCE(NULLIF(ts.current_value_eth, '')::numeric, 0) > 0.000001
+          AND EXISTS (
+              SELECT 1
+              FROM alpha_trading.risk_events re
+              WHERE re.run_id = t.run_id
+                AND lower(re.pool_address) = lower(t.pool_address)
+                AND re.kind = 'liquidity_removal'
+                AND re.pending_tx_hash IS NULL
+                AND COALESCE(re.payload->>'source', '') NOT IN ('mempool_signal')
+                AND re.observed_block IS NOT NULL
+                AND re.observed_block <= COALESCE(ts.valuation_block_number, ts.block_number)
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}
+
+/// (c) Once a trade has a zero/near-zero snapshot after a mined drain, no later
+/// non-terminal snapshot may flip back to a positive value. This catches
+/// re-valuation that resurrects a drained position without treating an unpriced
+/// entry snapshot as a confirmed drain.
+pub(super) async fn positive_value_after_zero_balance_check(
+    pool: &PgPool,
+    result_set_id: &str,
+    strategy: Option<&str>,
+) -> Result<CheckResult> {
+    count_check(
+        pool,
+        "snapshots",
+        "no_positive_value_after_zero_balance",
+        Verdict::Fail,
+        "no non-terminal snapshot flips back to positive value after a zero-value snapshot",
+        "non-terminal snapshots valued positive after an earlier zero-value snapshot",
+        r#"
+        WITH scoped AS (
+            SELECT ts.trade_id,
+                   t.run_id,
+                   t.pool_address,
+                   ts.block_number,
+                   COALESCE(ts.valuation_block_number, ts.block_number) AS valuation_block_number,
+                   ts.state,
+                   NULLIF(ts.current_value_eth, '')::numeric AS current_value_eth
+            FROM alpha_trading.trade_snapshots ts
+            JOIN alpha_trading.trades t ON t.trade_id = ts.trade_id
+            WHERE t.result_set_id = $1
+              AND ($2::text IS NULL OR t.strategy_name = $2)
+        ),
+        zero_block AS (
+            SELECT trade_id, min(block_number) AS first_zero_block
+            FROM scoped
+            WHERE abs(COALESCE(current_value_eth, 0)) <= 0.000001
+              AND state IN (
+                  'buy_confirmed', 'sell_intent_created', 'sell_submitted',
+                  'sell_failed', 'sell_cancelled'
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM alpha_trading.risk_events re
+                  WHERE re.run_id = scoped.run_id
+                    AND lower(re.pool_address) = lower(scoped.pool_address)
+                    AND re.kind = 'liquidity_removal'
+                    AND re.pending_tx_hash IS NULL
+                    AND COALESCE(re.payload->>'source', '') NOT IN ('mempool_signal')
+                    AND re.observed_block IS NOT NULL
+                    AND re.observed_block <= scoped.valuation_block_number
+              )
+            GROUP BY trade_id
+        )
+        SELECT count(*)
+        FROM scoped s
+        JOIN zero_block z ON z.trade_id = s.trade_id
+        WHERE s.block_number > z.first_zero_block
+          AND COALESCE(s.current_value_eth, 0) > 0.000001
+          AND s.state IN (
+              'buy_confirmed', 'sell_intent_created', 'sell_submitted',
+              'sell_failed', 'sell_cancelled'
+          )
+        "#,
+        result_set_id,
+        strategy,
+    )
+    .await
+}

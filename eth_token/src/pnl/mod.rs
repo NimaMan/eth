@@ -11,7 +11,8 @@ pub mod tracker;
 pub use conservation::PoolPnlConservationCheck;
 pub(crate) use infrastructure::known_infrastructure;
 pub use model::{
-    PnlAddressPositionExport, PnlConservationExport, PnlMovementExport, PnlPoolExport, PnlPoolMeta,
+    PnlAddressPositionExport, PnlConservationExport, PnlCustodyFindingMeta, PnlMovementExport,
+    PnlPoolExport, PnlPoolMeta,
 };
 pub use tracker::{
     AddressPoolPnlSummary, AddressPoolPosition, PoolPnlConservationSummary,

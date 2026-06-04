@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use rust_decimal::Decimal;
 use serde_json::{json, Value};
 
-use super::super::{known_infrastructure, PnlAddressPositionExport, PnlPoolExport, PnlPoolMeta};
+use super::super::{
+    known_infrastructure, PnlAddressPositionExport, PnlCustodyFindingMeta, PnlPoolExport,
+    PnlPoolMeta,
+};
 
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
@@ -58,6 +61,7 @@ struct PoolAccountingContext {
     dust_or_illiquid: bool,
     dust_reason: Option<String>,
     custody_realized: bool,
+    custody_by_victim: BTreeMap<String, CustodyAddressContext>,
 }
 
 impl PoolAccountingContext {
@@ -81,6 +85,7 @@ impl PoolAccountingContext {
                 || label == "risk:holder_balance_backdoor_drain"
                 || label == "risk:custody_buyer_token_confiscation"
         });
+        let custody_by_victim = custody_by_victim(&export.meta.custody_findings);
 
         Self {
             pool_id: normalize_address(&export.pool_id),
@@ -94,9 +99,30 @@ impl PoolAccountingContext {
             terminal_reason,
             dust_or_illiquid: dust_reason.is_some(),
             dust_reason,
-            custody_realized,
+            custody_realized: custody_realized || !custody_by_victim.is_empty(),
+            custody_by_victim,
         }
     }
+
+    fn custody_for(&self, address: &str) -> Option<&CustodyAddressContext> {
+        self.custody_by_victim.get(&normalize_address(address))
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct CustodyAddressContext {
+    victim_address: String,
+    finding_count: u64,
+    first_block: Option<u64>,
+    drained_amount_scaled: Option<f64>,
+    missing_balance: Option<f64>,
+    expected_balance: Option<f64>,
+    actual_balance: Option<f64>,
+    max_drained_fraction: Option<f64>,
+    tx_hashes: BTreeSet<String>,
+    capabilities: BTreeSet<String>,
+    sources: BTreeSet<String>,
+    details: BTreeSet<String>,
 }
 
 fn reconcile_position(
@@ -109,6 +135,8 @@ fn reconcile_position(
     let has_token_balance = position.token_balance != Decimal::ZERO;
     let positive_token_balance = position.token_balance > Decimal::ZERO;
     let negative_token_balance = position.token_balance < Decimal::ZERO;
+    let custody = context.custody_for(&position.address).cloned();
+    let exact_custody_victim = custody.is_some();
     let terminal_zero = has_token_balance && context.terminal_position_risk;
 
     position.movement_rows_retained = retained_movements;
@@ -116,7 +144,9 @@ fn reconcile_position(
     position.reconciliation_status =
         reconciliation_status(position.movement_count, retained_movements);
 
-    position.position_status = if !has_token_balance {
+    position.position_status = if exact_custody_victim && has_token_balance {
+        "confiscated".to_string()
+    } else if !has_token_balance {
         "closed".to_string()
     } else if terminal_zero {
         "terminal_zero".to_string()
@@ -165,6 +195,7 @@ fn reconcile_position(
     let actor_roles = actor_roles(
         position,
         context,
+        exact_custody_victim,
         positive_token_balance,
         negative_token_balance,
     );
@@ -176,6 +207,19 @@ fn reconcile_position(
     position.actor_roles = actor_roles.into_iter().collect();
 
     let notes = accounting_notes(position, context);
+    let custody_context = custody
+        .as_ref()
+        .map(|custody| custody_accounting_context(custody, position))
+        .unwrap_or_else(|| {
+            json!({
+                "status": if positive_token_balance && context.custody_realized {
+                    "candidate"
+                } else {
+                    "none"
+                },
+                "confiscated": false
+            })
+        });
     position.accounting_context = json!({
         "version": ACCOUNTING_VERSION,
         "position_status": position.position_status,
@@ -184,6 +228,7 @@ fn reconcile_position(
         "terminal_reason": context.terminal_reason,
         "dust_reason": context.dust_reason,
         "custody_realized": context.custody_realized,
+        "custody": custody_context,
         "denom_tracks_native_eth": context.denom_tracks_native_eth,
         "native_costs_denom": native_costs.to_string(),
         "mark_price_denom_per_token": context.mark_price_denom_per_token,
@@ -234,6 +279,7 @@ fn native_costs_denom(
 fn actor_roles(
     position: &PnlAddressPositionExport,
     context: &PoolAccountingContext,
+    exact_custody_victim: bool,
     positive_token_balance: bool,
     negative_token_balance: bool,
 ) -> BTreeSet<String> {
@@ -260,6 +306,9 @@ fn actor_roles(
     }
     if same_optional_address(&address, context.meta.pool_creator_address.as_deref()) {
         roles.insert("pool_creator".to_string());
+    }
+    if exact_custody_victim {
+        roles.insert("custody_victim".to_string());
     }
     if positive_token_balance && context.custody_realized {
         roles.insert("custody_victim_candidate".to_string());
@@ -296,6 +345,11 @@ fn accounting_notes(
     context: &PoolAccountingContext,
 ) -> Vec<String> {
     let mut notes = Vec::new();
+    if context.custody_for(&position.address).is_some() {
+        notes.push(
+            "address has trace-backed or reconciled custody confiscation evidence".to_string(),
+        );
+    }
     if context.terminal_position_risk {
         notes.push(
             "pool has terminal position risk; open token balance is valued at zero".to_string(),
@@ -317,6 +371,134 @@ fn accounting_notes(
         );
     }
     notes
+}
+
+fn custody_by_victim(
+    findings: &[PnlCustodyFindingMeta],
+) -> BTreeMap<String, CustodyAddressContext> {
+    let mut by_victim = BTreeMap::<String, CustodyAddressContext>::new();
+    for finding in findings {
+        let victim = normalize_address(&finding.victim_address);
+        if victim.is_empty() {
+            continue;
+        }
+        let entry = by_victim
+            .entry(victim.clone())
+            .or_insert_with(|| CustodyAddressContext {
+                victim_address: victim,
+                ..Default::default()
+            });
+        entry.finding_count = entry.finding_count.saturating_add(1);
+        if let Some(block) = finding.block_number {
+            entry.first_block = Some(
+                entry
+                    .first_block
+                    .map_or(block, |existing| existing.min(block)),
+            );
+        }
+        entry.drained_amount_scaled =
+            sum_optional_f64(entry.drained_amount_scaled, finding.amount_scaled);
+        entry.missing_balance = sum_optional_f64(entry.missing_balance, finding.missing_balance);
+        entry.expected_balance = max_optional_f64(entry.expected_balance, finding.expected_balance);
+        entry.actual_balance = min_optional_f64(entry.actual_balance, finding.actual_balance);
+        entry.max_drained_fraction =
+            max_optional_f64(entry.max_drained_fraction, finding.drained_fraction);
+        if let Some(tx_hash) = finding.tx_hash.as_deref() {
+            if !tx_hash.trim().is_empty() {
+                entry.tx_hashes.insert(tx_hash.to_ascii_lowercase());
+            }
+        }
+        if !finding.capability.trim().is_empty() {
+            entry.capabilities.insert(finding.capability.clone());
+        }
+        if let Some(source) = finding.source.as_deref() {
+            if !source.trim().is_empty() {
+                entry.sources.insert(source.to_string());
+            }
+        }
+        if let Some(detail) = finding.detail.as_deref() {
+            if !detail.trim().is_empty() {
+                entry.details.insert(detail.to_string());
+            }
+        }
+    }
+    by_victim
+}
+
+fn custody_accounting_context(
+    custody: &CustodyAddressContext,
+    position: &PnlAddressPositionExport,
+) -> Value {
+    let position_token_balance = decimal_to_positive_f64(position.token_balance);
+    let expected_balance = custody.expected_balance.or(position_token_balance);
+    let missing_balance = custody.missing_balance.or(custody.drained_amount_scaled);
+    let actual_balance = custody.actual_balance.or_else(|| {
+        expected_balance
+            .zip(missing_balance)
+            .map(|(expected, missing)| (expected - missing).max(0.0))
+    });
+    let max_drained_fraction = custody.max_drained_fraction.or_else(|| {
+        expected_balance
+            .zip(missing_balance)
+            .and_then(|(expected, missing)| {
+                if expected > 0.0 {
+                    Some((missing / expected).clamp(0.0, 1.0))
+                } else {
+                    None
+                }
+            })
+    });
+
+    json!({
+        "status": "confiscated",
+        "confiscated": true,
+        "victim_address": custody.victim_address,
+        "finding_count": custody.finding_count,
+        "first_block": custody.first_block,
+        "drained_amount_scaled": custody.drained_amount_scaled,
+        "missing_balance": missing_balance,
+        "expected_balance": expected_balance,
+        "actual_balance": actual_balance,
+        "max_drained_fraction": max_drained_fraction,
+        "tx_hashes": custody.tx_hashes.iter().cloned().collect::<Vec<_>>(),
+        "capabilities": custody.capabilities.iter().cloned().collect::<Vec<_>>(),
+        "sources": custody.sources.iter().cloned().collect::<Vec<_>>(),
+        "details": custody.details.iter().cloned().collect::<Vec<_>>(),
+    })
+}
+
+fn decimal_to_positive_f64(value: Decimal) -> Option<f64> {
+    if value <= Decimal::ZERO {
+        return None;
+    }
+    value.to_string().parse::<f64>().ok()
+}
+
+fn sum_optional_f64(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left + right),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn max_optional_f64(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn min_optional_f64(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
 }
 
 fn terminal_reason(meta: &PnlPoolMeta, labels_lower: &[String], lifecycle: &str) -> Option<String> {
@@ -425,6 +607,77 @@ mod tests {
         assert!(row
             .actor_roles
             .contains(&"custody_victim_candidate".to_string()));
+    }
+
+    #[test]
+    fn exact_custody_finding_marks_address_confiscated() {
+        let victim = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut export = pool_export(position(victim));
+        export.meta = PnlPoolMeta {
+            is_scam: true,
+            scam_mechanism: Some("holder_balance_backdoor_drain".to_string()),
+            pool_labels: vec![
+                "risk:terminal_position".to_string(),
+                "custody:realized".to_string(),
+            ],
+            custody_findings: vec![crate::pnl::PnlCustodyFindingMeta {
+                victim_address: victim.to_string(),
+                capability: "custody_burn_drain".to_string(),
+                state: "realized".to_string(),
+                block_number: Some(10),
+                tx_hash: Some("0xdeadbeef".to_string()),
+                amount_raw: Some("1000000000".to_string()),
+                amount_scaled: Some(1.0),
+                expected_balance: None,
+                actual_balance: None,
+                missing_balance: None,
+                drained_fraction: None,
+                source: Some("balance_reconciliation".to_string()),
+                detail: Some(
+                    "holder_balance_missing_from_state_without_transfer_event".to_string(),
+                ),
+            }],
+            ..Default::default()
+        };
+
+        export.reconcile_accounting(Some(1.0));
+
+        let row = &export.address_positions[0];
+        assert_eq!(row.position_status, "confiscated");
+        assert_eq!(row.valuation_status, "terminal_zero");
+        assert!(row.actor_roles.contains(&"custody_victim".to_string()));
+        assert!(row
+            .actor_roles
+            .contains(&"custody_victim_candidate".to_string()));
+        assert_eq!(
+            row.accounting_context["custody"]["status"].as_str(),
+            Some("confiscated")
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["first_block"].as_u64(),
+            Some(10)
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["drained_amount_scaled"].as_f64(),
+            Some(1.0)
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["expected_balance"].as_f64(),
+            Some(1.0)
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["actual_balance"].as_f64(),
+            Some(0.0)
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["missing_balance"].as_f64(),
+            Some(1.0)
+        );
+        assert_eq!(
+            row.accounting_context["custody"]["max_drained_fraction"].as_f64(),
+            Some(1.0)
+        );
+        assert_eq!(row.unrealized_value_denom, Some(Decimal::ZERO));
     }
 
     #[test]

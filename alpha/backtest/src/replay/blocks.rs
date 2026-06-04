@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
 
+use eth_alpha_core::market::MarketEvent;
+use eth_alpha_engine::EngineEvent;
+
 pub fn add_block_completed_events(
-    events: Vec<eth_alpha_engine::EngineEvent>,
+    events: Vec<EngineEvent>,
     from_block: Option<u64>,
     to_block: Option<u64>,
-) -> Vec<eth_alpha_engine::EngineEvent> {
-    let mut by_block: BTreeMap<u64, Vec<eth_alpha_engine::EngineEvent>> = BTreeMap::new();
+) -> Vec<EngineEvent> {
+    let mut by_block: BTreeMap<u64, Vec<EngineEvent>> = BTreeMap::new();
     let mut without_block = Vec::new();
 
     for event in events {
@@ -40,36 +43,45 @@ pub fn add_block_completed_events(
             updated_pools = block_events
                 .iter()
                 .filter(|event| {
-                    matches!(
-                        event,
-                        eth_alpha_engine::EngineEvent::Market(
-                            eth_alpha_core::market::MarketEvent::PoolUpdated { .. }
-                        )
-                    )
+                    matches!(event, EngineEvent::Market(MarketEvent::PoolUpdated { .. }))
                 })
                 .count();
             expanded.extend(block_events);
         }
-        expanded.push(eth_alpha_engine::EngineEvent::Market(
-            eth_alpha_core::market::MarketEvent::BlockCompleted {
-                block_number: block,
-                updated_tokens: 0,
-                updated_pools,
-            },
-        ));
+        expanded.push(EngineEvent::Market(MarketEvent::BlockCompleted {
+            block_number: block,
+            updated_tokens: 0,
+            updated_pools,
+        }));
     }
     expanded.extend(without_block);
     expanded
 }
 
-fn event_block(event: &eth_alpha_engine::EngineEvent) -> Option<u64> {
+pub fn sort_events_by_block(mut events: Vec<EngineEvent>) -> Vec<EngineEvent> {
+    events.sort_by_key(|event| (event_block(event).unwrap_or(u64::MAX), event_order(event)));
+    events
+}
+
+fn event_block(event: &EngineEvent) -> Option<u64> {
     match event {
-        eth_alpha_engine::EngineEvent::Market(
-            eth_alpha_core::market::MarketEvent::PoolUpdated { block_number, .. }
-            | eth_alpha_core::market::MarketEvent::TokenUpdated { block_number, .. }
-            | eth_alpha_core::market::MarketEvent::BlockCompleted { block_number, .. },
+        EngineEvent::Market(
+            MarketEvent::PoolUpdated { block_number, .. }
+            | MarketEvent::TokenUpdated { block_number, .. }
+            | MarketEvent::BlockCompleted { block_number, .. },
         ) => Some(*block_number),
-        eth_alpha_engine::EngineEvent::Risk(risk) => risk.observed_block,
-        eth_alpha_engine::EngineEvent::Execution(report) => report.block_number,
+        EngineEvent::Risk(risk) => risk.observed_block,
+        EngineEvent::Execution(report) => report.block_number,
+    }
+}
+
+fn event_order(event: &EngineEvent) -> u8 {
+    match event {
+        EngineEvent::Market(MarketEvent::PoolUpdated { .. } | MarketEvent::TokenUpdated { .. }) => {
+            0
+        }
+        EngineEvent::Risk(_) => 1,
+        EngineEvent::Execution(_) => 2,
+        EngineEvent::Market(MarketEvent::BlockCompleted { .. }) => 9,
     }
 }
