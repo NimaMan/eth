@@ -490,6 +490,21 @@ impl BlockProcessor {
             }
             (internal_transactions, internal_erc20_calls)
         } else {
+            // No call trace for this transaction: event-less internal transfers (e.g. a
+            // custody `transferFrom` that emits no `Transfer` log) cannot be captured, so
+            // this tx's net-flow accounting is log-only. Accounting paths trace every block
+            // (`BlockBatchOptions::default().include_traces == true`); surface the gap when
+            // token activity is present so an unexpectedly traceless accounting run is not
+            // silent — the transfer-capture invariant requires traces (data_models/README.md).
+            if !processed_tx.erc20_transfers.is_empty() {
+                tracing::debug!(
+                    block_number = processed_tx.block_number,
+                    tx_hash = %processed_tx.hash,
+                    erc20_log_transfers = processed_tx.erc20_transfers.len(),
+                    "tx processed without a call trace: event-less internal transfers not \
+                     captured (log-only net flow)"
+                );
+            }
             (Vec::new(), Vec::new())
         };
 

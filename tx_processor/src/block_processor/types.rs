@@ -26,6 +26,12 @@ pub struct ProcessedBlockTransactions {
 /// Controls batch block processing behaviour.
 #[derive(Debug, Clone, Copy)]
 pub struct BlockBatchOptions {
+    /// Capture call traces for every block in the batch. MUST stay `true` on any path
+    /// whose `ProcessedTransaction`s feed net-flow accounting (PnL / token-state /
+    /// risk-atlas): event-less internal transfers (e.g. a custody `transferFrom` that
+    /// emits no `Transfer` log) are captured ONLY from traces, so `false` silently drops
+    /// them and breaks the transfer-capture invariant (see `data_models/README.md`). The
+    /// default is `true` and is regression-pinned by `accounting_default_traces_every_block`.
     pub include_traces: bool,
     pub max_concurrency: usize,
     pub trace_engine: BlockTraceEngine,
@@ -82,6 +88,26 @@ impl Default for BlockBatchOptions {
             max_concurrency: 10,
             trace_engine: BlockTraceEngine::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod block_batch_options_tests {
+    use super::BlockBatchOptions;
+
+    /// Transfer-capture invariant guard. The chain-server range cache-fill
+    /// (`load_processed_block_range_with_options`) and the live block processor both build
+    /// on `BlockBatchOptions::default()` to trace every accounted block. If this default
+    /// ever flips to `false`, event-less internal transfers (custody/holder-balance
+    /// drains) silently vanish from net-flow accounting — see the transfer-capture
+    /// invariant in `data_models/README.md`. Keep it `true`.
+    #[test]
+    fn accounting_default_traces_every_block() {
+        assert!(
+            BlockBatchOptions::default().include_traces,
+            "BlockBatchOptions::default().include_traces must stay true: net-flow accounting \
+             capture of event-less transfers depends on traces"
+        );
     }
 }
 

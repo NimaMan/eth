@@ -116,14 +116,19 @@ to zero on its own.
 Because correctness rests *entirely* on capture being complete, there is one hard
 precondition and one known limit:
 
-- **Trace precondition (must be guaranteed, not assumed).** Event-less internal
-  transfers are captured *only when the block was processed with a call trace*. In
-  `block_processor/mod.rs`, when the trace is `None`, `internal_erc20_calls` and
-  `internal_erc20_transfers` are left empty and an event-less custody drain
-  **silently vanishes** from `address_balance_changes` — the antecedent ("every
-  transfer captured") fails with no error or warning. Any path that produces a
-  `ProcessedTransaction` for accounting must run **with traces**; an absent trace
-  is a correctness hole, not a degraded mode.
+- **Trace precondition (guaranteed on the accounting path, pinned).** Event-less
+  internal transfers are captured *only when the block was processed with a call
+  trace*. In `block_processor/mod.rs`, when the trace is `None`, `internal_erc20_calls`
+  and `internal_erc20_transfers` are left empty (a debug line is logged when token
+  activity is present, so the gap is not silent). The accounting paths satisfy the
+  precondition by construction: `BlockBatchOptions::default().include_traces == true`
+  drives both the chain-server range cache-fill (`load_processed_block_range_with_options`)
+  and the live block processor, and a regression test (`accounting_default_traces_every_block`)
+  pins that default so it cannot silently flip. The processed-block disk cache keys on the
+  trace config (`processed_block_trace_config_hash`), so a traceless block is never served
+  as traced. A consumer that needs a hard per-`ProcessedTransaction` guarantee (rather than
+  relying on the accounting default) should assert trace presence at ingestion. An absent
+  trace on an accounting path is a correctness hole, not a degraded mode.
 - **Argument-vs-delta limit.** A captured transfer's `amount` is the call argument,
   not a measured balance delta, so fee-on-transfer / rebasing tokens are
   approximate (see "Limit — argument vs. measured delta" above). This bounds
