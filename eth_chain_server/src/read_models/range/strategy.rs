@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use eth_pool_classification::{
+use eth_token::pools::classification::{
     EligiblePoolOutcome, NonEligibleReason, PoolClassification, PoolClassificationConfig,
     PoolCohort, ETH_ELIGIBLE_LIQUIDITY, STABLE_ELIGIBLE_LIQUIDITY,
 };
@@ -511,7 +511,7 @@ fn tax_bucket_label(bucket: TaxBucket) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eth_pool_classification::{classify_pool_with_config, PoolClassificationInput};
+    use eth_token::pools::classification::{classify_pool_with_config, PoolClassificationInput};
 
     fn record() -> PoolStatsRecord {
         PoolStatsRecord {

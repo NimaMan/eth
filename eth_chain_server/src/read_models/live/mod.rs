@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eth_ops_events::{PipelineBottleneckSample, PipelineIssue};
-use eth_pool_classification::PoolCohort;
+use eth_token::pools::classification::PoolCohort;
 use eth_token::erc20::{ERC20Token, TokenSummary};
 use eth_token::token_analytics::TokenPoolCurrentObservation;
 use eth_token::tracking::{LiveTokenRetentionPolicy, LiveTokenRetentionReport, TrackedTokenStatus};

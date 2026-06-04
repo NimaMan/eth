@@ -1,4 +1,4 @@
-use eth_pool_classification::PoolClassification;
+use eth_token::pools::classification::PoolClassification;
 use eth_price::liquidity::PoolLiquidityLevel;
 use eth_token::custody::CustodyState;
 use eth_token::erc20::ERC20Token;

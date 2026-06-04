@@ -6,7 +6,6 @@ members = [
     "alpha/backtest",
     "alpha/lab",
     "alpha/block_tx_rank",
-    "alpha/pool_classification",
     "alpha/store",
     "alpha/strategies",
     "alpha/live/state",

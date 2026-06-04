@@ -1,4 +1,4 @@
-use eth_pool_classification::{EligiblePoolOutcome, PoolCohort};
+use eth_token::pools::classification::{EligiblePoolOutcome, PoolCohort};
 use eth_price::liquidity::{USDC_ADDRESS, WETH_ADDRESS};
 use eth_token::erc20::{ERC20Token, ERC20TokenMetadata};
 use eth_token::pools::BasePoolConfig;

@@ -1,4 +1,4 @@
-use eth_pool_classification::{
+use eth_token::pools::classification::{
     classify_pool_with_config, EligiblePoolOutcome, PoolClassificationConfig,
 };
 

@@ -3,7 +3,7 @@ use eth_alpha_core::{
     amount::{Amount, DecimalAmount},
     ids::{PortfolioId, StrategyName, WalletId},
 };
-use eth_pool_classification::PoolClassificationConfig;
+use eth_token::pools::classification::PoolClassificationConfig;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
 use crate::core::rules::entry::init_policy::EntryInitPolicyConfig;

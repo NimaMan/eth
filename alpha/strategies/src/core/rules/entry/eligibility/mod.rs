@@ -1,6 +1,6 @@
 use alloy_primitives::{address, Address};
 use eth_alpha_core::market::{PoolProtocol, PoolSnapshot};
-use eth_pool_classification::{
+use eth_token::pools::classification::{
     classify_pool_with_config, PoolClassificationConfig, PoolClassificationInput,
 };
 use rust_decimal::prelude::ToPrimitive;

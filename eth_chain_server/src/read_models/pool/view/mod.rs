@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, U256};
-use eth_pool_classification::{
+use eth_token::pools::classification::{
     classify_pool_with_config, EligiblePoolOutcome, PoolClassification, PoolClassificationConfig,
     PoolClassificationInput,
 };
