@@ -6,6 +6,10 @@
 //! chain-state EVM simulation; real submission remains isolated behind a future
 //! `tx_executor` adapter.
 
+// The live-trader heartbeat builds a large `json!` metadata object; the default
+// macro recursion limit (128) is exceeded once enough keys are present.
+#![recursion_limit = "256"]
+
 pub mod execution;
 pub mod live_trader;
 pub mod wire;
@@ -17,7 +21,7 @@ mod runtime;
 mod store;
 mod valuation;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use eth_alpha_core::{
@@ -102,6 +106,10 @@ where
     portfolio: PortfolioState,
     market: Option<MarketSnapshotRef>,
     active_risks: Vec<RiskEvent>,
+    // Strategy names whose new BUY entries are currently halted by an operator
+    // ("exit-only"). Replaced wholesale each live poll from the
+    // `strategy_buy_controls` table. Sells/exits/manual-closes are never gated.
+    halt_buys_strategies: HashSet<String>,
     strategies: Vec<Box<dyn Strategy>>,
     risk_policy: R,
     store: S,
@@ -123,6 +131,7 @@ where
             portfolio: PortfolioState::default(),
             market: None,
             active_risks: Vec::new(),
+            halt_buys_strategies: HashSet::new(),
             strategies: Vec::new(),
             risk_policy,
             store,
@@ -141,6 +150,13 @@ where
 
     pub fn add_strategy(&mut self, strategy: Box<dyn Strategy>) {
         self.strategies.push(strategy);
+    }
+
+    /// Replace the set of strategies whose new buy entries are halted
+    /// ("exit-only"). Called once per live poll with the current paused list
+    /// from `strategy_buy_controls`; passing an empty list resumes all buys.
+    pub fn set_halt_buys_strategies(&mut self, strategy_names: Vec<String>) {
+        self.halt_buys_strategies = strategy_names.into_iter().collect();
     }
 
     pub fn portfolio(&self) -> &PortfolioState {

@@ -30,3 +30,19 @@ have a final confirmed, failed, deferred, or cancelled report.
 
 That means chain-sim settlement is restart-safe: the database submitted report,
 not an in-memory queue, determines what still needs final simulation.
+
+## Operator buy-halt control (`strategy_buy_controls`)
+
+`alpha_trading.strategy_buy_controls` is a durable per-`(run_id, strategy_name)`
+toggle for "pause new buys / exit-only". Unlike `manual_close_requests` (a
+one-shot action queue), this is **state**: exactly one row per strategy, upserted
+by the dashboard and re-read by the live trader every poll. `buys_paused = true`
+means the strategy stops opening new buys while still exiting and manually
+closing positions. `paused_at`/`resumed_at` stamp the transitions; the row is
+removed by `ON DELETE CASCADE` when the run is deleted.
+
+- `load_paused_buy_strategies()` (runtime.rs) returns the strategy names with
+  `buys_paused = true` for this run; the engine applies them via
+  `AlphaEngine::set_halt_buys_strategies` before processing buy decisions.
+- The write side lives in the dashboard server (`eth_pause_buys_api.rs`), which
+  upserts this table and rejects changes against a stopped/stale run.

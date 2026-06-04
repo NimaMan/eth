@@ -169,6 +169,29 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ON alpha_trading.manual_close_requests (run_id, strategy_name, trade_id)
     WHERE status IN ('pending', 'processing')
     "#,
+    // Operator buy-halt control. Unlike manual_close_requests (a one-shot action
+    // queue), this is a DURABLE per-(run,strategy) toggle state: exactly one row
+    // per strategy, upserted by the dashboard and re-read by the live trader on
+    // every poll. `buys_paused = true` means "exit-only": the strategy keeps
+    // exiting/closing but opens no new buys until resumed.
+    r#"
+    CREATE TABLE IF NOT EXISTS alpha_trading.strategy_buy_controls (
+        run_id TEXT NOT NULL REFERENCES alpha_trading.trader_runs(run_id) ON DELETE CASCADE,
+        strategy_name TEXT NOT NULL,
+        buys_paused BOOLEAN NOT NULL DEFAULT false,
+        reason TEXT,
+        source TEXT,
+        paused_at TIMESTAMPTZ,
+        resumed_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (run_id, strategy_name)
+    )
+    "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS strategy_buy_controls_paused_idx
+    ON alpha_trading.strategy_buy_controls (run_id)
+    WHERE buys_paused
+    "#,
     r#"
     CREATE TABLE IF NOT EXISTS alpha_trading.position_snapshots (
         id BIGSERIAL PRIMARY KEY,

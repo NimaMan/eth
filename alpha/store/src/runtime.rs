@@ -323,9 +323,49 @@ impl PostgresTradingStore {
         Ok(())
     }
 
+    pub async fn load_pending_manual_close_requests(
+        &self,
+        limit: usize,
+        trade_id: Option<&str>,
+    ) -> Result<Vec<ManualCloseRequest>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                request_id,
+                run_id,
+                strategy_name,
+                trade_id,
+                position_id,
+                token_address,
+                pool_address,
+                requested_percent,
+                requested_raw_amount,
+                reason_code,
+                payload
+            FROM alpha_trading.manual_close_requests
+            WHERE run_id = $1
+              AND status = 'pending'
+              AND ($3::text IS NULL OR trade_id = $3)
+            ORDER BY created_at ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(&self.run_id)
+        .bind(usize_to_i32(limit))
+        .bind(trade_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(manual_close_request_from_row)
+            .collect()
+    }
+
     pub async fn claim_pending_manual_close_requests(
         &self,
         limit: usize,
+        trade_id: Option<&str>,
     ) -> Result<Vec<ManualCloseRequest>> {
         let rows = sqlx::query(
             r#"
@@ -334,6 +374,7 @@ impl PostgresTradingStore {
                 FROM alpha_trading.manual_close_requests
                 WHERE run_id = $1
                   AND status = 'pending'
+                  AND ($3::text IS NULL OR trade_id = $3)
                 ORDER BY created_at ASC
                 LIMIT $2
                 FOR UPDATE SKIP LOCKED
@@ -359,28 +400,13 @@ impl PostgresTradingStore {
         )
         .bind(&self.run_id)
         .bind(usize_to_i32(limit))
+        .bind(trade_id)
         .fetch_all(&self.pool)
         .await
         .map_err(store_error)?;
 
         rows.into_iter()
-            .map(|row| {
-                Ok(ManualCloseRequest {
-                    request_id: row.try_get("request_id").map_err(store_error)?,
-                    run_id: row.try_get("run_id").map_err(store_error)?,
-                    strategy_name: row.try_get("strategy_name").map_err(store_error)?,
-                    trade_id: row.try_get("trade_id").map_err(store_error)?,
-                    position_id: row.try_get("position_id").map_err(store_error)?,
-                    token_address: row.try_get("token_address").map_err(store_error)?,
-                    pool_address: row.try_get("pool_address").map_err(store_error)?,
-                    requested_percent: row.try_get("requested_percent").map_err(store_error)?,
-                    requested_raw_amount: row
-                        .try_get("requested_raw_amount")
-                        .map_err(store_error)?,
-                    reason_code: row.try_get("reason_code").map_err(store_error)?,
-                    payload: row.try_get("payload").map_err(store_error)?,
-                })
-            })
+            .map(manual_close_request_from_row)
             .collect()
     }
 
@@ -429,6 +455,35 @@ impl PostgresTradingStore {
         Ok(())
     }
 
+    /// Strategies whose new buys are currently paused for this run.
+    ///
+    /// Read once per live-trader poll; the engine drops new buy entries for any
+    /// strategy in the returned list while still exiting/closing positions. A
+    /// missing row means "not paused" (default trading), so the absence of the
+    /// table or any rows yields an empty list, never an error to the caller.
+    pub async fn load_paused_buy_strategies(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT strategy_name
+            FROM alpha_trading.strategy_buy_controls
+            WHERE run_id = $1
+              AND buys_paused
+            ORDER BY strategy_name ASC
+            "#,
+        )
+        .bind(&self.run_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get::<String, _>("strategy_name")
+                    .map_err(store_error)
+            })
+            .collect()
+    }
+
     pub async fn load_active_positions(&self, strategy_name: &str) -> Result<Vec<Position>> {
         let rows = sqlx::query(
             r#"
@@ -436,7 +491,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed', 'failed')
+              AND state NOT IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'terminal_zero', 'scammed', 'failed')
             ORDER BY updated_at DESC
             "#,
         )
@@ -471,7 +526,7 @@ impl PostgresTradingStore {
             FROM alpha_trading.positions
             WHERE run_id = $1
               AND strategy_name = $2
-              AND state IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'scammed')
+              AND state IN ('sell_confirmed', 'buy_deferred', 'buy_failed', 'buy_cancelled', 'cancelled', 'terminal_zero', 'scammed')
             ORDER BY updated_at DESC
             "#,
         )
@@ -907,6 +962,22 @@ impl PostgresTradingStore {
             .map_err(store_error)
             .map(|value| i64_to_u64(value).unwrap_or_default())
     }
+}
+
+fn manual_close_request_from_row(row: sqlx::postgres::PgRow) -> Result<ManualCloseRequest> {
+    Ok(ManualCloseRequest {
+        request_id: row.try_get("request_id").map_err(store_error)?,
+        run_id: row.try_get("run_id").map_err(store_error)?,
+        strategy_name: row.try_get("strategy_name").map_err(store_error)?,
+        trade_id: row.try_get("trade_id").map_err(store_error)?,
+        position_id: row.try_get("position_id").map_err(store_error)?,
+        token_address: row.try_get("token_address").map_err(store_error)?,
+        pool_address: row.try_get("pool_address").map_err(store_error)?,
+        requested_percent: row.try_get("requested_percent").map_err(store_error)?,
+        requested_raw_amount: row.try_get("requested_raw_amount").map_err(store_error)?,
+        reason_code: row.try_get("reason_code").map_err(store_error)?,
+        payload: row.try_get("payload").map_err(store_error)?,
+    })
 }
 
 fn json_string_array(value: Value) -> Option<Vec<String>> {
