@@ -136,6 +136,66 @@ intended differences from real live trading — read every result in their light
    every transfer is captured from block traces (see `tx_processor` data_models invariant);
    the range/accounting path traces every block by default.
 
+## Prerequisites
+
+The backtester (`eth_alpha_backtest_trader`) fails fast with a single, named
+error if any of the following is missing, so a fresh agent gets an actionable
+message up front instead of an opaque mid-pipeline failure. Run
+`--list-strategy-suites` first to discover valid suites with zero infrastructure.
+
+1. **Chain-server up and synced (sim state source).** Buy/sell fills run real
+   swap calldata through the EVM. The chain-server's `live-tx-simulator`
+   (`/api/v1/eth/live-tx-simulator/...`) is what provides exact-block simulation
+   state for live chain-sim runs; the backtester's EVM simulation reads the same
+   synced reth datadir directly via `tx_simulator::TxSimulator`. If reth is not
+   synced past the replayed blocks, fills cannot be produced. Bring the
+   chain-server / reth node up and let it sync past `--to-block` before running.
+2. **`RETH_DATADIR` (from `blockchains/eth/config.env`).** Must be set and point
+   at a readable reth datadir directory. Pre-flight checks the directory exists
+   and is readable.
+   ```
+   RETH_DATADIR=/path/to/ethereum/reth
+   ```
+3. **`config.toml` database URLs (from `blockchains/eth/config.toml`).** Each
+   required connection is probed during pre-flight:
+   - `databases.alpha.url` — always required; backtest results are written here,
+     and non-`risk-atlas-` replay inputs are read from
+     `alpha_trading.strategy_observations` here.
+   - `databases.risk_atlas.url` — required when `--replay-run-id` is
+     `risk-atlas-` prefixed; replay inputs are read from
+     `risk_atlas_observations` here.
+   - `databases.token_state.url` — required only when `--token-state-scope` is
+     given.
+   ```toml
+   [databases.alpha]
+   url = "postgresql://user:pass@host:5432/db"
+   [databases.risk_atlas]
+   url = "postgresql://user:pass@host:5432/db"
+   [databases.token_state]
+   url = "postgresql://user:pass@host:5432/db"
+   ```
+4. **`--replay-run-id` must exist.** Pre-flight verifies the run id has at least
+   one observation row in the target table (`risk_atlas_observations` for
+   `risk-atlas-` ids, else `alpha_trading.strategy_observations`) and fails with
+   a message naming the table and database key if not.
+5. **`--token-state-scope` (optional overlay).** A `token_state.scope_id` whose
+   mined terminal/custody pool events are overlaid on top of the replayed
+   observations — drain / confiscation evidence used by the mined-drain
+   zero-close path (see Assumptions #5). Example value:
+   ```
+   --token-state-scope "historical:<token-pnl-scope>"
+   ```
+   It overlays terminal pool events (e.g. liquidity removal / scam confirmation)
+   into the event stream so positions on a drained pool terminalize to
+   `closed_zero_valuation` exactly as live chain history would have forced.
+
+### Discovery
+
+```bash
+# Print every valid --strategy-suite value and exit (no DB / reth needed):
+cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader -- --list-strategy-suites
+```
+
 ## Usage
 
 ### CLI
@@ -181,7 +241,8 @@ by `alpha/lab` in `alpha_trading.strategy_validation_reports`.
 | `--strategy-name` | Strategy instance name persisted on orders, positions, reports, and PnL rows | `snipe-all` |
 | `--strategy-suite` | Named strategy suite to run in one replay pass (e.g. `alpha-11-risk-atlas`, `historical-pool-update-hold`) | disabled |
 | `--token-state-scope` | `token_state.scope_id` whose mined terminal/custody pool events are overlaid (drain/confiscation evidence) | none |
-| `--execution-delay-blocks` | Blocks between observation/submission and simulated fill. `1` = observe N, submit at N, fill against post-block N+1 state (see Assumptions #2) | `1` |
+| `--list-strategy-suites` | Print every valid `--strategy-suite` name and exit (no DB / reth access) | false |
+| `--execution-delay-blocks` | Blocks between observation/submission and simulated fill. `1` = observe N, submit at N, fill against post-block N+1 state (see Assumptions #2). Validated `>= 1` and, when both bounds are set, `<= (--to-block - --from-block)` | `1` |
 | `--buy-amount-wei` | Buy amount in wei (also the sell amount for the core engine) | `10000000000000000` |
 | `--min-liquidity-eth` | Minimum ETH/WETH reserve for pool eligibility | `0.5` |
 | `--min-liquidity-usd` | Minimum stable-denom (USDC/USDT/DAI) reserve for eligibility | `1000` |

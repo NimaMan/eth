@@ -99,6 +99,40 @@ impl BacktestStrategySpec {
     }
 }
 
+/// Every accepted `--strategy-suite` value, in the order the dispatch match in
+/// [`build_strategy_specs`] lists them. This is the single source of truth for
+/// the `--list-strategy-suites` discovery flag and for the "valid suites" list
+/// rendered in error messages, so a fresh agent never has to read this file to
+/// learn what suites exist. Keep this list in lockstep with the match below.
+pub fn strategy_suite_names() -> Vec<&'static str> {
+    vec![
+        "historical-pool-update-hold",
+        "risk-atlas-edge-v1",
+        "risk-atlas-edge-v2",
+        "risk-atlas-edge-v3",
+        "risk-atlas-edge-v4",
+        "risk-atlas-edge-v5",
+        "alpha-10-risk-atlas",
+        "alpha-10-risk-atlas-leader",
+        "alpha-11-risk-atlas",
+        "gamma-10-risk-atlas",
+        "gamma-10-risk-atlas-leader",
+        "risk-atlas-lp-buy-confirm-block-comparison",
+        "risk-atlas-lp-buy-confirm-block-comparison-uniswap-v2-only",
+        lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME,
+        lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_STRATEGY_NAME,
+    ]
+}
+
+/// Render the valid-suite list for fail-fast error messages.
+fn valid_strategy_suites_hint() -> String {
+    strategy_suite_names()
+        .into_iter()
+        .map(|name| format!("  --strategy-suite {name}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestStrategySpec>> {
     if let Some(suite) = args.strategy_suite.as_deref() {
         return match suite {
@@ -125,14 +159,19 @@ pub fn build_strategy_specs(args: &StrategySuiteOptions) -> Result<Vec<BacktestS
             ]),
             lp_approval_warning_exit::SUITE_NAME | lp_approval_warning_exit::STRATEGY_NAME => {
                 Err(eyre::eyre!(
-                    "historical replay of stored mempool_signal rows must use a mempool-aware name. Use --strategy-suite {}",
-                    lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME
+                    "strategy suite '{suite}' is the non-mempool-aware variant and is rejected for historical replay: replaying stored mempool_signal rows must use a mempool-aware name. Use --strategy-suite {}.\nValid suites:\n{}",
+                    lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME,
+                    valid_strategy_suites_hint()
                 ))
             }
             "mempool-history-exits" => Err(eyre::eyre!(
-                "strategy suite mempool-history-exits was removed; historical backtests no longer replay mempool signals. Use --strategy-suite historical-pool-update-hold"
+                "strategy suite 'mempool-history-exits' was removed; historical backtests no longer replay mempool signals. Use --strategy-suite historical-pool-update-hold.\nValid suites:\n{}",
+                valid_strategy_suites_hint()
             )),
-            other => Err(eyre::eyre!("unsupported strategy suite: {other}")),
+            other => Err(eyre::eyre!(
+                "unknown --strategy-suite '{other}'. Run with --list-strategy-suites to print every valid name.\nValid suites:\n{}",
+                valid_strategy_suites_hint()
+            )),
         };
     }
 
@@ -684,6 +723,53 @@ mod tests {
                 .iter()
                 .any(|s| s.strategy_name == "alpha11-all-pools-lp30-pool-update-block-hold16"),
             "backtest now includes the all-pools hold16 variant (was missing)"
+        );
+    }
+
+    fn options_for(suite: &str) -> StrategySuiteOptions {
+        StrategySuiteOptions {
+            strategy_name: "ignored".to_string(),
+            strategy_impl: "ignored".to_string(),
+            strategy_suite: Some(suite.to_string()),
+            stop_loss_ratio: None,
+            take_profit_ratio: None,
+            max_hold_blocks: None,
+        }
+    }
+
+    /// Every name advertised by `--list-strategy-suites` must actually resolve
+    /// through the dispatch match. This is the lockstep guard that keeps the
+    /// enumerated discovery list from drifting away from the real suites.
+    #[test]
+    fn every_listed_suite_builds() {
+        for name in strategy_suite_names() {
+            let specs = build_strategy_specs(&options_for(name))
+                .unwrap_or_else(|err| panic!("listed suite '{name}' failed to build: {err}"));
+            assert!(!specs.is_empty(), "listed suite '{name}' built zero specs");
+        }
+    }
+
+    /// An unknown suite must fail with a message that points the agent at the
+    /// discovery flag and lists the valid names.
+    #[test]
+    fn unknown_suite_errors_with_valid_list() {
+        let err = build_strategy_specs(&options_for("does-not-exist"))
+            .expect_err("unknown suite must error");
+        let message = format!("{err}");
+        assert!(message.contains("--list-strategy-suites"), "{message}");
+        assert!(message.contains("alpha-11-risk-atlas"), "{message}");
+    }
+
+    /// The non-mempool-aware variant is deliberately rejected for historical
+    /// replay; the error must name the mempool-aware replacement.
+    #[test]
+    fn non_mempool_aware_variant_rejected_with_hint() {
+        let err = build_strategy_specs(&options_for(lp_approval_warning_exit::SUITE_NAME))
+            .expect_err("non-mempool-aware variant must be rejected");
+        let message = format!("{err}");
+        assert!(
+            message.contains(lp_approval_warning_exit::MEMPOOL_AWARE_HISTORICAL_SUITE_NAME),
+            "{message}"
         );
     }
 }
