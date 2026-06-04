@@ -7,8 +7,8 @@ use eth_token::chain_metadata::{LiveRethChainMetadataProvider, TokenDiscoveryPro
 use eyre::{bail, Result};
 use serde_json::json;
 use tx_processor::{
-    load_processed_block, BlockProcessor, BlockStateSession, LivePoolBuySellSimulator,
-    LiveStateDiffFrame, LoadedProcessedBlock as LiveBlockLoad,
+    BlockStateSession, LivePoolBuySellSimulator, LiveStateDiffFrame,
+    LoadedProcessedBlock as LiveBlockLoad,
 };
 
 use super::apply_report::{apply_report, push_bottleneck};
@@ -48,36 +48,6 @@ impl LiveTokenRuntime {
             &discovery_provider,
             &pool_simulator,
             state_diffs.as_deref(),
-        )
-        .await
-    }
-
-    pub(super) async fn apply_block<P>(
-        &self,
-        block_number: u64,
-        is_live_tail: bool,
-        tx_processor: &BlockProcessor,
-        discovery_provider: &P,
-        pool_simulator: &LivePoolBuySellSimulator,
-    ) -> Result<()>
-    where
-        P: TokenDiscoveryProvider,
-    {
-        let loaded = load_processed_block(
-            tx_processor,
-            self.inner.provider.as_ref(),
-            self.inner.processed_block_replay_store.clone(),
-            block_number,
-        )
-        .await?;
-
-        self.apply_loaded_block(
-            block_number,
-            is_live_tail,
-            loaded,
-            discovery_provider,
-            pool_simulator,
-            None,
         )
         .await
     }
