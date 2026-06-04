@@ -77,14 +77,18 @@ fn event_block(event: &EngineEvent) -> Option<u64> {
 
 fn event_order(event: &EngineEvent) -> u8 {
     match event {
-        // A mined, value-destroying drain (confirmed liquidity removal / scam — not a
-        // pending mempool projection) must be applied BEFORE the same block's market
-        // valuation and execution. Otherwise the open-position valuation pass re-marks a
-        // confiscated position positively (a holder-balance drain leaves pool reserves
-        // intact, so a synthetic sell still "succeeds"), and an in-flight sell confirms
-        // with phantom proceeds. Ordering the drain first lets the existing `drained`
-        // guards zero the valuation and zero-close the position.
-        EngineEvent::Risk(risk) if is_mined_value_destroying_risk(risk) => 0,
+        // Every MINED risk event (confirmed, not a pending mempool projection) leads its
+        // block, ahead of the market valuation/decision and execution. A strategy's
+        // buy/exit decision on a block's PoolUpdated must see that block's confirmed
+        // risks: lp-approval entry blockers (block_entry_on_lp_approval), liquidity
+        // removals, and scam confirmations. This preserves the source insertion order
+        // (risk_atlas.rs pushes lp-approval before the pool update) AND additionally moves
+        // the liquidity-removal ahead of the pool update so the `drained` guard zeroes the
+        // open valuation before it is taken (no dust/phantom snapshot). Restricting order 0
+        // to only drains regressed lp-approval entry gating (it slipped after the pool
+        // update), so the rule is "all mined risks first". Pending mempool projections stay
+        // after the market events so they react to current state.
+        EngineEvent::Risk(risk) if is_mined_risk(risk) => 0,
         EngineEvent::Market(MarketEvent::PoolUpdated { .. } | MarketEvent::TokenUpdated { .. }) => {
             1
         }
@@ -94,15 +98,12 @@ fn event_order(event: &EngineEvent) -> u8 {
     }
 }
 
-/// A confirmed (mined) liquidity-removal / scam drain, as opposed to a pending mempool
-/// projection (`pending_tx_hash` set). Only mined drains reorder ahead of the block's
-/// market events; mempool signals stay in normal order so they see current market state.
-fn is_mined_value_destroying_risk(risk: &eth_alpha_core::risk::RiskEvent) -> bool {
-    use eth_alpha_core::risk::RiskKind;
-    matches!(
-        risk.kind,
-        RiskKind::LiquidityRemoval | RiskKind::ScamConfirmed
-    ) && risk.pending_tx_hash.is_none()
+/// A confirmed (mined) risk event, as opposed to a pending mempool projection
+/// (`pending_tx_hash` set). All mined risks lead their block so the block's buy/exit
+/// decisions see them (lp-approval entry gating, liquidity removals, scam confirmations);
+/// mempool projections stay in normal order so they react to current market state.
+fn is_mined_risk(risk: &eth_alpha_core::risk::RiskEvent) -> bool {
+    risk.pending_tx_hash.is_none()
 }
 
 #[cfg(test)]
@@ -125,13 +126,18 @@ mod tests {
     }
 
     #[test]
-    fn mined_drain_leads_the_block_ahead_of_market_events() {
-        // Mined liquidity-removal / scam drains lead the block (order 0), strictly ahead
-        // of PoolUpdated/TokenUpdated (order 1), so the drain is applied before the
-        // block's open-position valuation and sell execution.
-        for kind in [RiskKind::LiquidityRemoval, RiskKind::ScamConfirmed] {
+    fn mined_risks_lead_the_block_ahead_of_market_events() {
+        // Every mined risk — lp-approval entry blockers, liquidity removals, scam
+        // confirmations — leads the block (order 0), strictly ahead of PoolUpdated/
+        // TokenUpdated (order 1), so the block's buy/exit decision and the drained guard
+        // see them before the open-position valuation and sell execution.
+        for kind in [
+            RiskKind::LpApproval,
+            RiskKind::LiquidityRemoval,
+            RiskKind::ScamConfirmed,
+        ] {
             let event = risk_event(kind, false);
-            assert!(is_mined_value_destroying_risk(&event));
+            assert!(is_mined_risk(&event));
             assert_eq!(event_order(&EngineEvent::Risk(event)), 0);
         }
     }
@@ -141,7 +147,7 @@ mod tests {
         // A pending mempool projection is a predictive exit trigger, not a confirmed
         // drain: it stays in normal order (after market events) so it sees current state.
         let pending = risk_event(RiskKind::LiquidityRemoval, true);
-        assert!(!is_mined_value_destroying_risk(&pending));
+        assert!(!is_mined_risk(&pending));
         assert_eq!(event_order(&EngineEvent::Risk(pending)), 2);
     }
 }
