@@ -47,7 +47,6 @@ pub fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStr
         strategy_name: format!("alpha11-univ2-lp30-pool-update-block-hold{max_hold_blocks}"),
         strategy_impl: STRATEGY_IMPL.to_string(),
         strategy_label: format!("Alpha11 Uniswap V2 LP30 pool-update-block hold {max_hold_blocks}"),
-        exit_liquidity_removal: true,
         exit_tax: true,
         exit_lp_approval: true,
         exit_lp_approval_critical_only: false,

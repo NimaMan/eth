@@ -80,7 +80,6 @@ mod tests {
             ]
         );
         assert!(specs.iter().all(|spec| spec.strategy_impl == STRATEGY_IMPL));
-        assert!(specs.iter().all(|spec| spec.exit_liquidity_removal));
         assert!(specs.iter().all(|spec| spec.exit_lp_approval));
         assert!(specs
             .iter()
@@ -145,7 +144,6 @@ mod tests {
         assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
         assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
-        assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
     }
@@ -169,7 +167,6 @@ mod tests {
         assert_eq!(spec.buy_wei, BUY_WEI);
         assert!(spec.allowed_protocols.is_empty());
         assert_eq!(spec.lp_approval_gate_min_pct.as_deref(), Some("30"));
-        assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
     }
@@ -188,7 +185,6 @@ mod tests {
         assert_eq!(spec.max_entry_pools, Some(LIVE_VALIDATION_MAX_ENTRY_POOLS));
         assert_eq!(spec.buy_wei, BUY_WEI);
         assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
-        assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(spec.defer_buy_confirm_block_lp_approval_to_max_hold);
         assert_eq!(

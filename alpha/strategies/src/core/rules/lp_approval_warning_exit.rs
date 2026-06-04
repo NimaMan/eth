@@ -15,6 +15,9 @@ pub const MEMPOOL_AWARE_HISTORICAL_STRATEGY_LABEL: &str =
     "Snipe All mempool-aware LP approval warning exit";
 pub const MEMPOOL_AWARE_HISTORICAL_SUITE_NAME: &str = "mempool-aware-lp-approval-warning-exit";
 
+/// Backtest signal-replay declaration for this diagnostic strategy: with the
+/// fundamental always-on liquidity-removal exit, the historical runner replays
+/// stored mempool liquidity-removal signals for it. Not a strategy on/off toggle.
 pub const EXIT_LIQUIDITY_REMOVAL: bool = true;
 pub const EXIT_TAX: bool = false;
 pub const EXIT_LP_APPROVAL: bool = true;

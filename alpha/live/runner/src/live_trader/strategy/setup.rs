@@ -151,7 +151,6 @@ pub(super) fn build_live_strategy(
         stop_loss_ratio,
         take_profit_ratio,
         max_hold_blocks: spec.max_hold_blocks,
-        exit_on_liquidity_removal: spec.exit_liquidity_removal,
         exit_on_tax: spec.exit_tax,
         exit_on_lp_approval: spec.exit_lp_approval,
         exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,

@@ -16,6 +16,11 @@ pub struct StrategySuiteOptions {
 pub struct BacktestStrategySpec {
     pub(crate) strategy_name: String,
     pub(crate) strategy_impl: String,
+    /// Backtest-harness signal-replay declaration: when true, the historical
+    /// runner loads stored `mempool_signal` rows so the engine's fundamental
+    /// (always-on) liquidity-removal exit is exercised against mempool signals.
+    /// This is NOT a strategy on/off toggle — the engine exit is unconditional —
+    /// it only gates which historical events the backtest replays.
     pub(crate) exit_on_liquidity_removal: bool,
     pub(crate) exit_on_tax: bool,
     pub(crate) exit_on_lp_approval: bool,
@@ -42,7 +47,12 @@ impl BacktestStrategySpec {
         Self {
             strategy_name: spec.strategy_name.clone(),
             strategy_impl: spec.strategy_impl.clone(),
-            exit_on_liquidity_removal: spec.exit_liquidity_removal,
+            // Liquidity-removal exit is fundamental/always-on, so the engine
+            // reacts to mempool liquidity-removal signals for every resolved
+            // spec; replay them in historical backtests. (Was previously the
+            // now-removed `spec.exit_liquidity_removal`, which was always true
+            // for the live specs projected here.)
+            exit_on_liquidity_removal: true,
             exit_on_tax: spec.exit_tax,
             exit_on_lp_approval: spec.exit_lp_approval,
             exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
@@ -645,7 +655,9 @@ mod tests {
             assert_eq!(bt.strategy_name, lv.strategy_name);
             assert_eq!(bt.strategy_impl, lv.strategy_impl);
             assert_eq!(bt.strategy_impl, "alpha11");
-            assert_eq!(bt.exit_on_liquidity_removal, lv.exit_liquidity_removal);
+            // Liquidity-removal exit is fundamental/always-on; the projection
+            // declares signal replay unconditionally (no live spec field).
+            assert!(bt.exit_on_liquidity_removal);
             assert_eq!(bt.exit_on_tax, lv.exit_tax);
             assert_eq!(bt.exit_on_lp_approval, lv.exit_lp_approval);
             assert_eq!(

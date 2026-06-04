@@ -61,7 +61,6 @@ pub struct LiveStrategySpec {
     pub strategy_name: String,
     pub strategy_impl: String,
     pub strategy_label: String,
-    pub exit_liquidity_removal: bool,
     pub exit_tax: bool,
     pub exit_lp_approval: bool,
     pub exit_lp_approval_critical_only: bool,

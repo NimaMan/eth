@@ -26,7 +26,10 @@ pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {
         "strategy_impl": spec.strategy_impl,
         "strategy_label": spec.strategy_label,
         "strategy_runtime": STRATEGY_RUNTIME,
-        "exit_liquidity_removal": spec.exit_liquidity_removal,
+        // Liquidity-removal exit is fundamental/always-on for every strategy;
+        // persisted as a constant for config-shape/DB back-compat (no longer a
+        // spec field). Not a toggle — see `StrategyEngine::on_risk_event`.
+        "exit_liquidity_removal": true,
         "exit_tax": spec.exit_tax,
         "exit_lp_approval": spec.exit_lp_approval,
         "exit_lp_approval_critical_only": spec.exit_lp_approval_critical_only,
@@ -132,7 +135,6 @@ mod tests {
         assert_eq!(spec.strategy_name, ALPHA11_HOLD15_STRATEGY_NAME);
         assert_eq!(spec.strategy_impl, ALPHA11_STRATEGY_IMPL);
         assert_eq!(spec.allowed_protocols, vec!["UNISWAP-V2".to_string()]);
-        assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_tax);
         assert!(spec.exit_lp_approval);
         assert!(!spec.exit_lp_approval_critical_only);

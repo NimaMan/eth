@@ -10,7 +10,6 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
         strategy_name: LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME.to_string(),
         strategy_impl: CORE_STRATEGY_IMPL.to_string(),
         strategy_label: "Snipe All risk atlas LP gate hold 15 buy-confirm LP maxhold".to_string(),
-        exit_liquidity_removal: true,
         exit_tax: false,
         exit_lp_approval: true,
         exit_lp_approval_critical_only: false,
@@ -58,7 +57,6 @@ mod tests {
             Some(crate::core::rules::exit::lp_approval::DEFAULT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS)
         );
         assert_eq!(spec.max_hold_blocks, Some(15));
-        assert!(spec.exit_liquidity_removal);
         assert!(spec.exit_lp_approval);
         assert!(!spec.exit_lp_approval_critical_only);
         assert!(!spec.exit_tax);

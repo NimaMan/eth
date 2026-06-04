@@ -45,11 +45,11 @@ fn sells_restored_open_position_on_liquidity_removal() {
 }
 
 #[test]
-fn liquidity_removal_exit_is_fundamental_even_with_flag_disabled() {
+fn liquidity_removal_exit_is_fundamental() {
     // Liquidity removal (mined or mempool) is a FUNDAMENTAL, always-on exit:
-    // every strategy gets out on it regardless of the now no-op
-    // `exit_on_liquidity_removal` config flag (a drain/confiscation can take a
-    // holder's tokens, so this is not a per-strategy toggle).
+    // every strategy gets out on it for any held position, with no per-strategy
+    // toggle (a drain/confiscation can take a holder's tokens). There is no
+    // config flag to disable it — see `StrategyEngine::on_risk_event`.
     let pool = pool();
     let market = MarketSnapshotRef {
         block_number: 1,
@@ -58,10 +58,7 @@ fn liquidity_removal_exit_is_fundamental_even_with_flag_disabled() {
         token: None,
         pool: Some(pool.clone()),
     };
-    let mut strategy = StrategyEngine::new(StrategyConfig {
-        exit_on_liquidity_removal: false,
-        ..StrategyConfig::default()
-    });
+    let mut strategy = StrategyEngine::new(StrategyConfig::default());
     let position = confirmed_position(&strategy, &pool);
     let mut portfolio = PortfolioState::default();
     portfolio.positions.insert(position.id.clone(), position);
@@ -84,7 +81,7 @@ fn liquidity_removal_exit_is_fundamental_even_with_flag_disabled() {
     assert_eq!(
         decision.order_intent().map(|intent| intent.side),
         Some(OrderSide::Sell),
-        "liquidity removal must force a sell even with exit_on_liquidity_removal = false"
+        "liquidity removal must force a sell for any held position"
     );
 }
 

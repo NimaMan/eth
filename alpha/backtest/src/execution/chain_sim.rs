@@ -144,7 +144,6 @@ where
                     min_denom_reserve: min_liquidity_eth,
                     min_stable_denom_reserve: min_liquidity_usd,
                     min_sell_pool_denom_reserve,
-                    exit_on_liquidity_removal: spec.exit_on_liquidity_removal,
                     exit_on_tax: spec.exit_on_tax,
                     exit_on_lp_approval: spec.exit_on_lp_approval,
                     exit_on_critical_lp_approval_only: spec.exit_on_critical_lp_approval_only,

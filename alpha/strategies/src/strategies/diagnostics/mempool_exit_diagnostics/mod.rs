@@ -15,7 +15,6 @@ pub fn specs(_options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     strategy_label: format!(
                         "Snipe All live hold {max_hold_blocks} pool updates + liquidity exit"
                     ),
-                    exit_liquidity_removal: true,
                     exit_tax: false,
                     exit_lp_approval: false,
                     exit_lp_approval_critical_only: false,
@@ -44,7 +43,6 @@ pub fn specs(_options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     strategy_label: format!(
                         "Snipe All live hold {max_hold_blocks} pool updates + liquidity + critical LP exit"
                     ),
-                    exit_liquidity_removal: true,
                     exit_tax: false,
                     exit_lp_approval: true,
                     exit_lp_approval_critical_only: true,
@@ -75,11 +73,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn set_enables_liquidity_removal_for_every_variant() {
+    fn set_resolves_six_variants() {
+        // Liquidity-removal exit is fundamental/always-on (no per-spec flag); this
+        // set just resolves a hold-block x critical-LP variant matrix.
         let specs = specs(&LiveStrategySpecOptions::default());
 
         assert_eq!(specs.len(), 6);
-        assert!(specs.iter().all(|spec| spec.exit_liquidity_removal));
     }
 
     #[test]
