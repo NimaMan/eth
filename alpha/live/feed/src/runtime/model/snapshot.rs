@@ -332,7 +332,6 @@ pub struct LiveTokenPoolLpSnapshot {
     pub approval_count: u64,
 }
 
-
 fn sorted_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut values = values.into_iter().collect::<Vec<_>>();
     values.sort();

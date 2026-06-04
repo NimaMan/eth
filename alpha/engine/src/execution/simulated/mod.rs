@@ -251,6 +251,15 @@ impl LiveChainSimExecutionAdapter {
         self.current_block.clone()
     }
 
+    /// Share an externally-owned current-block counter. Used when this adapter
+    /// is embedded as a valuation delegate inside the real execution adapter:
+    /// the real loop owns the block counter, and valuation must read the same
+    /// block the rest of the real path is acting on.
+    pub fn with_shared_current_block(mut self, current_block: Arc<AtomicU64>) -> Self {
+        self.current_block = current_block;
+        self
+    }
+
     pub fn set_current_block_hash(&self, block: Option<u64>, hash: Option<B256>) {
         *self.current_block_hash.lock().expect("block hash lock") = block.zip(hash);
     }

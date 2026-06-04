@@ -38,12 +38,14 @@ impl LivePrioritySellPlannerError {
     }
 
     pub fn is_pre_broadcast_reject(&self) -> bool {
-        let Self::Simulation(reason) = self else {
-            return false;
-        };
-        let reason = reason.to_ascii_lowercase();
-        reason.contains("would revert")
-            || reason.contains("no expected recovery")
-            || reason.contains("min-output is zero")
+        match self {
+            Self::Simulation(reason) => {
+                let reason = reason.to_ascii_lowercase();
+                reason.contains("would revert")
+                    || reason.contains("no expected recovery")
+                    || reason.contains("min-output is zero")
+            }
+            _ => false,
+        }
     }
 }

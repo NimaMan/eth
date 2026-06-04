@@ -266,11 +266,17 @@ fn validate_sell_intent(
             "sell amount is zero".to_string(),
         ));
     }
-    if !pool.can_sell {
-        return Err(LivePrioritySellPlannerError::InvalidInput(
-            "pool snapshot says can_sell=false".to_string(),
-        ));
-    }
+    // Intentionally do NOT gate the sell on the pool snapshot `can_sell` flag.
+    // The snapshot is a stale, block-lagged heuristic (and pools can even be
+    // dropped from the tracker by retention before the exit fires). For an exit
+    // of a position we already hold, the authoritative sellability check is the
+    // exact pre-submit simulation against chain-server live state in
+    // `PreSubmitSimulator::simulate`: a genuine honeypot returns
+    // `would_revert=true` with zero recovery and is rejected at the value-cap
+    // stage before broadcast, while a sellable token proceeds. Gating here on a
+    // stale `can_sell=false` caused live exits to be refused for tokens the
+    // chain-sim backtest sold profitably (parity gap).
+    let _ = pool.can_sell;
     Ok(())
 }
 

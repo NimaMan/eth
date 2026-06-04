@@ -82,6 +82,33 @@ impl LiveTokenRuntime {
         .await
     }
 
+    /// Apply a processed block that was loaded elsewhere (e.g. prefetched
+    /// concurrently during warmup). The expensive part of `apply_block` is the
+    /// load/trace (~0.7s/block fresh); token application is cheap (~tens of ms)
+    /// and must stay strictly ordered. This lets the warmup pipeline parallel
+    /// loads ahead of the serial, in-order apply. Always non-tail
+    /// (`is_live_tail = false`); live-tail uses `apply_live_block_update`.
+    pub(super) async fn apply_preloaded_block<P>(
+        &self,
+        block_number: u64,
+        loaded: LiveBlockLoad,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> Result<()>
+    where
+        P: TokenDiscoveryProvider,
+    {
+        self.apply_loaded_block(
+            block_number,
+            false,
+            loaded,
+            discovery_provider,
+            pool_simulator,
+            None,
+        )
+        .await
+    }
+
     async fn apply_loaded_block<P>(
         &self,
         block_number: u64,
