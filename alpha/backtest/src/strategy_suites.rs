@@ -610,3 +610,69 @@ pub fn validate_historical_signal_replay_names(specs: &[BacktestStrategySpec]) -
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn suite_options() -> StrategySuiteOptions {
+        StrategySuiteOptions {
+            strategy_name: "ignored".to_string(),
+            strategy_impl: "ignored".to_string(),
+            strategy_suite: Some("alpha-11-risk-atlas".to_string()),
+            stop_loss_ratio: None,
+            take_profit_ratio: None,
+            max_hold_blocks: None,
+        }
+    }
+
+    /// Backtest alpha-11 suite must be the projection of the single live alpha11
+    /// factory: same variant set (incl. the all-pools hold16 variant),
+    /// strategy_impl, and exit policy. This is the live/backtest parity proof at
+    /// the backtest boundary (entry bankroll / buy size / liquidity are
+    /// CLI-controlled in backtest and intentionally not compared).
+    #[test]
+    fn alpha_11_suite_is_projection_of_live_factory() {
+        let backtest = build_strategy_specs(&suite_options()).unwrap();
+        let live = eth_strategies::strategies::alpha11::factory::specs(
+            &eth_strategies::shared_rules::live::LiveStrategySpecOptions::default(),
+        );
+
+        assert_eq!(backtest.len(), live.len());
+        assert_eq!(backtest.len(), 10, "10-variant set incl hold16-all-pools");
+
+        for (bt, lv) in backtest.iter().zip(live.iter()) {
+            assert_eq!(bt.strategy_name, lv.strategy_name);
+            assert_eq!(bt.strategy_impl, lv.strategy_impl);
+            assert_eq!(bt.strategy_impl, "alpha11");
+            assert_eq!(bt.exit_on_liquidity_removal, lv.exit_liquidity_removal);
+            assert_eq!(bt.exit_on_tax, lv.exit_tax);
+            assert_eq!(bt.exit_on_lp_approval, lv.exit_lp_approval);
+            assert_eq!(
+                bt.exit_on_critical_lp_approval_only,
+                lv.exit_lp_approval_critical_only
+            );
+            assert_eq!(bt.exit_on_scam, lv.exit_scam);
+            assert_eq!(bt.allowed_protocols, lv.allowed_protocols);
+            assert_eq!(bt.block_entry_on_lp_approval, lv.block_entry_on_lp_approval);
+            assert_eq!(bt.lp_approval_gate_min_pct, lv.lp_approval_gate_min_pct);
+            assert_eq!(
+                bt.defer_buy_confirm_block_lp_approval_to_max_hold,
+                lv.defer_buy_confirm_block_lp_approval_to_max_hold
+            );
+            assert_eq!(
+                bt.lp_approval_exit_defer_max_trading_enabled_age_blocks,
+                lv.lp_approval_exit_defer_max_trading_enabled_age_blocks
+            );
+            assert_eq!(bt.min_sell_pool_denom_reserve, lv.min_sell_pool_denom_reserve);
+            assert_eq!(bt.max_hold_blocks, lv.max_hold_blocks);
+        }
+
+        assert!(
+            backtest
+                .iter()
+                .any(|s| s.strategy_name == "alpha11-all-pools-lp30-pool-update-block-hold16"),
+            "backtest now includes the all-pools hold16 variant (was missing)"
+        );
+    }
+}

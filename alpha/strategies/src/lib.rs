@@ -7,7 +7,6 @@
 
 pub mod core;
 pub mod strategies;
-mod market_tracker;
 
 /// Back-compat alias: `eth_strategies::alpha11::...` resolves to the strategy.
 pub use strategies::alpha11;
@@ -26,7 +25,6 @@ pub use strategies::alpha11::{
     HOLD3_VALIDATION_STRATEGY_NAME as ALPHA11_HOLD3_VALIDATION_STRATEGY_NAME,
     HOLD_SWEEP_SET_NAME as ALPHA11_HOLD_SWEEP_SET_NAME, STRATEGY_IMPL as ALPHA11_STRATEGY_IMPL,
 };
-pub use market_tracker::{MarketTrackerConfig, MarketTrackerStrategy};
 
 /// Compatibility surface for consumers that import the shared rules / live
 /// dispatch via `eth_strategies::shared_rules::...`. The rules themselves now

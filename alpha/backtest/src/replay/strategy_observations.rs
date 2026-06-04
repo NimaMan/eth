@@ -193,6 +193,8 @@ mod tests {
             mempool_first_seen_ms: None,
             detection_timestamp: None,
             detection_tx_hash: None,
+            detected_at_head_block_number: None,
+            detected_at_head_block_hash: None,
             token_address: Some("0x1111111111111111111111111111111111111111".to_string()),
             pool_address: Some("0x2222222222222222222222222222222222222222".to_string()),
             pool_type: None,

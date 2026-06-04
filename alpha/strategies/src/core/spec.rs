@@ -56,7 +56,7 @@ impl Default for LiveEntryInitPolicySpec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LiveStrategySpec {
     pub strategy_name: String,
     pub strategy_impl: String,

@@ -45,6 +45,37 @@ pub fn strategy_set_specs(
 mod tests {
     use super::*;
 
+    /// Live and backtest resolve a strategy id through this same registry/factory,
+    /// so a given id must resolve to an identical StrategySpec in every mode.
+    /// This asserts the single-id registry resolutions match the alpha11 factory
+    /// set entries that the backtest suite consumes — i.e. one source of truth.
+    #[test]
+    fn strategy_ids_resolve_identically_across_modes() {
+        let options = LiveStrategySpecOptions::default();
+
+        // Backtest source: the full alpha11 factory set.
+        let factory_set = alpha11_specs::specs(&options);
+        // Live source: resolving the sweep set id through the registry.
+        let registry_set = resolve(&StrategyId::new(alpha11_specs::SET_NAME), &options).unwrap();
+        assert_eq!(registry_set, factory_set, "sweep set must be identical");
+
+        // Each single-strategy id resolves to the same spec the set contains.
+        for id in [
+            crate::strategies::alpha11::HOLD15_STRATEGY_NAME,
+            crate::strategies::alpha11::HOLD16_STRATEGY_NAME,
+            crate::strategies::alpha11::HOLD16_ALL_POOLS_STRATEGY_NAME,
+            crate::strategies::alpha11::HOLD3_VALIDATION_STRATEGY_NAME,
+        ] {
+            let resolved = resolve(&StrategyId::new(id), &options).unwrap();
+            assert_eq!(resolved.len(), 1, "{id} resolves to a single spec");
+            // hold3-validation is not part of the sweep set, so only assert
+            // set-membership for the ids that are in it.
+            if let Some(in_set) = factory_set.iter().find(|s| s.strategy_name == id) {
+                assert_eq!(&resolved[0], in_set, "{id} live spec == backtest spec");
+            }
+        }
+    }
+
     #[test]
     fn routes_known_strategy_sets() {
         let options = LiveStrategySpecOptions::default();
