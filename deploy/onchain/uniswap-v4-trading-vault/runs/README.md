@@ -8,5 +8,5 @@ mainnet broadcast is allowed.
 Current pre-deploy gate run:
 
 - `20260519-v4-gates-202032Z/`: build/hash, fork rehearsal, tx_simulator
-  comparison, constructor/init-code calldata, and Kartal policy-rejection
+  comparison, constructor/init-code calldata, and ETH tx executor policy-rejection
   evidence. It does not contain a mainnet deployment receipt.

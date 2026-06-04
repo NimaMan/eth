@@ -56,7 +56,7 @@ strategy intent
   -> min-output derivation from that exact simulation
   -> simulated gas extraction, no fallback gas estimate
   -> gas-rank and economic policy selection
-  -> Kartal/signer policy
+  -> ETH tx executor/signer policy
   -> public mempool broadcast
   -> mined receipt reconciliation
   -> expected V2 vault fill event extraction
@@ -85,7 +85,7 @@ The missing parity points are:
 | --- | --- | --- | --- |
 | Public ordering inversion | Our buy lands before the launcher/trading-enabled tx and reverts. | Chain-sim sees post-block state and assumes the dependency already happened. | Mempool overlay evidence with dependency tx hashes, tail-after ordering basis, and receipt tx index. |
 | Successful receipt without vault fill | Receipt status is `1`, but no matching `BoughtV2` or `EmergencySoldV2` event exists for our token. | Chain-sim only sees simulation deltas. | Receipt reconciliation must remain required; backtest replay should model missing-event as unresolved, not confirmed. |
-| Nonce or replacement failure | Tx is dropped, replaced, nonce-too-low, or stuck pending. | Backtest has no nonce pool or broadcast lifecycle. | Kartal journal replay and pending-age validation before any deploy increase. |
+| Nonce or replacement failure | Tx is dropped, replaced, nonce-too-low, or stuck pending. | Backtest has no nonce pool or broadcast lifecycle. | ETH tx executor journal replay and pending-age validation before any deploy increase. |
 | Stale gas-rank or fee policy | Gas data is stale, missing, or fee cap rejects the only viable policy. | Chain-sim can still price the swap and mark it profitable. | Production gas-policy shadow must be mandatory for every order intent. |
 | State mutation between preflight and mining | Token blacklist/tax/liquidity changes after simulation but before mined inclusion. | Backtest assumes one target execution state. | Receipt replay plus late-state simulation at mined block and tx index where available. |
 | Same-block risk ordering mismatch | LP approval or liquidity-removal signal appears in the same block as entry. | Different poll order can flip `entry` vs `blocked_by_active_risk`. | Persist and validate signal id, created-at, pending tx hash, mined tx index, and event-source ordering. |

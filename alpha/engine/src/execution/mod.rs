@@ -8,7 +8,7 @@
 //! |---------|---------|
 //! | `ChainSimExecutionAdapter` | Historical backtest simulation via `tx_simulator` |
 //! | `LiveChainSimExecutionAdapter` | Live no-capital submission plus exact-block in-memory chain-sim settlement |
-//! | `TxExecutorAdapter` | Crate-private real live submission via Kartal |
+//! | `TxExecutorAdapter` | Crate-private real live submission via ETH tx executor |
 
 pub(crate) mod real;
 mod sell_economics;

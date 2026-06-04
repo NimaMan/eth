@@ -105,7 +105,7 @@ and gas profile are acceptable for the next deployment gate.
 
 Still pending before production broadcast:
 
-- exact deployed target allowlist in Kartal;
+- exact deployed target allowlist in the ETH tx executor;
 - final simulation of exact buy and emergency-sell calldata against current
   state;
 - post-deploy immutable readback;

@@ -1,7 +1,7 @@
 //! Live transaction planner for real priority sells.
 //!
 //! The planner is the bridge between an alpha `OrderIntent` and the existing
-//! `tx_prep` value-capped Kartal request builder. It owns live route assembly,
+//! `tx_prep` value-capped ETH tx executor request builder. It owns live route assembly,
 //! allowance checks, final simulation evidence, and gas-rank inputs. It still
 //! does not sign, reserve nonces, or broadcast.
 

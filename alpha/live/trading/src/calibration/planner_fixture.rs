@@ -22,7 +22,7 @@ use crate::{
 const DEFAULT_BLOCK: u64 = 25_128_246;
 const DEFAULT_DEADLINE_UNIX_SECS: u64 = 1_800_000_000;
 const DEFAULT_STRATEGY_NAME: &str = "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
-const DEFAULT_STRATEGY_RUN_ID: &str = "kartal-calibration-planner-fixture";
+const DEFAULT_STRATEGY_RUN_ID: &str = "eth-tx-calibration-planner-fixture";
 const DEFAULT_VAULT_ADDRESS: Address =
     alloy_primitives::address!("0000000000000000000000000000000000000002");
 const WETH_ADDRESS: Address =
@@ -118,7 +118,7 @@ fn planner_input(config: &PlannerCalibrationFixtureConfig) -> LivePrioritySellPl
     let token = token();
     let pool_address = pool_address();
     let strategy_name = StrategyName(config.strategy_name.clone());
-    let trade_id = TradeId("kartal-calibration-trade-1".to_string());
+    let trade_id = TradeId("eth-tx-calibration-trade-1".to_string());
 
     LivePrioritySellPlannerInput {
         context: PlannerTxContext {
@@ -139,8 +139,8 @@ fn planner_input(config: &PlannerCalibrationFixtureConfig) -> LivePrioritySellPl
         },
         intent: OrderIntent {
             trade_id: Some(trade_id.clone()),
-            portfolio_id: PortfolioId("kartal-calibration-portfolio".to_string()),
-            wallet_id: WalletId("kartal-calibration-wallet".to_string()),
+            portfolio_id: PortfolioId("eth-tx-calibration-portfolio".to_string()),
+            wallet_id: WalletId("eth-tx-calibration-wallet".to_string()),
             strategy_name: strategy_name.clone(),
             side: OrderSide::Sell,
             token_address: token,
@@ -175,8 +175,8 @@ fn position(
         PositionId(trade_id.0.clone()),
         trade_id,
         PositionKey {
-            portfolio_id: PortfolioId("kartal-calibration-portfolio".to_string()),
-            wallet_id: WalletId("kartal-calibration-wallet".to_string()),
+            portfolio_id: PortfolioId("eth-tx-calibration-portfolio".to_string()),
+            wallet_id: WalletId("eth-tx-calibration-wallet".to_string()),
             strategy_name,
             token_address: token,
             pool_address,

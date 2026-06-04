@@ -6,10 +6,10 @@ pub enum ExpectedCalibrationOutcome {
     /// Diagnostic mode: require a policy journal decision, but accept either
     /// policy rejection or dry-run signing.
     AnyDecision,
-    /// Safe default for always-runnable checks with a reject-by-default Kartal
-    /// policy. No signer is required because Kartal rejects before signing.
+    /// Safe default for always-runnable checks with a reject-by-default ETH tx executor
+    /// policy. No signer is required because ETH tx executor rejects before signing.
     PolicyRejected,
-    /// Full dry-run path: Kartal policy accepts the request and tx_executor
+    /// Full dry-run path: ETH tx executor policy accepts the request and tx_executor
     /// returns `dry_run`, proving decode -> policy -> signing -> journaling.
     DryRunSigned,
 }

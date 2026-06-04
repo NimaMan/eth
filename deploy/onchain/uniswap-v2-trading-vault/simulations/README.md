@@ -10,15 +10,16 @@ The simulation gate complements the Solidity tests:
   the Rust tx simulator against local Reth state.
 - Direct-router simulations provide a non-vault baseline for functional and
   gas comparison. They do not replace the vault gate because live execution
-  uses the deployed vault target and Kartal allowlist.
-- Kartal dry-runs prove the executor policy accepts only the intended target
-  and selectors.
+  uses the deployed vault target and ETH tx executor allowlist.
+- ETH tx executor dry-runs prove the executor policy accepts only the intended
+  target and selectors.
 
 The live readiness rule is:
 
 - final pre-submit simulation uses exact vault calldata;
 - direct-router simulation is only a comparison baseline;
-- Kartal live policy allowlists the vault target, not arbitrary router calls.
+- ETH tx executor live policy allowlists the vault target, not arbitrary router
+  calls.
 
 We accept the vault overhead over direct router calls because the vault owns the
 token-side mechanics: bought tokens stay in the vault, the emergency-sell call

@@ -1,0 +1,27 @@
+{
+  "schema": "uniswap_v4_trading_vault_eth_tx_policy_candidate_v1",
+  "status": "blocked",
+  "allowed_from": [
+    "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27"
+  ],
+  "allowed_targets": [],
+  "allowed_selectors": [
+    {
+      "name": "buyV4ExactEthForTokens((address,address,uint24,int24,address),address,uint128,uint256,bytes)",
+      "selector": "0x1c2ecb7f"
+    },
+    {
+      "name": "emergencySellV4ExactTokensForEth((address,address,uint24,int24,address),address,uint128,uint128,uint256,bytes)",
+      "selector": "0x3a832d08"
+    }
+  ],
+  "max_value_wei": "10000000000000000",
+  "max_gas_limit": "500000",
+  "require_simulation": true,
+  "notes": [
+    "Fill allowed_targets only after deployment address exists.",
+    "max_value_wei is the candidate per-buy principal cap; change only with operator signoff.",
+    "Rescue selectors are intentionally excluded from the live trading policy.",
+    "Direct coinbase or private bundle bribes are not part of direct-raw v1."
+  ]
+}

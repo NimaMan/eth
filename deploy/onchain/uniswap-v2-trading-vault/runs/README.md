@@ -14,7 +14,7 @@ network, and version, for example:
 
 | File | Purpose |
 | --- | --- |
-| `inputs.json` | Resolved deployment, route, gas, and Kartal inputs. |
+| `inputs.json` | Resolved deployment, route, gas, and ETH tx executor inputs. |
 | `git-revision.txt` | Git commit used for the run. |
 | `git-status.txt` | Dirty-state summary at run time. |
 | `forge-fmt.txt` | Foundry format check output. |
@@ -27,7 +27,7 @@ network, and version, for example:
 | `fork-rehearsal.json` | Fork block and rehearsal status. |
 | `gas-snapshot.txt` | Fork gas snapshot. |
 | `calldata.json` | Representative buy and emergency-sell calldata. |
-| `kartal-dry-run.json` | Kartal calibration or policy evidence. |
+| `eth-tx-executor-dry-run.json` | ETH tx executor calibration or policy evidence. |
 | `deploy-output.json` | Mainnet deployment transaction output. |
 | `verification-output.json` | Contract verification result. |
 | `post-deploy-smoke.json` | Immutable readback checks. |

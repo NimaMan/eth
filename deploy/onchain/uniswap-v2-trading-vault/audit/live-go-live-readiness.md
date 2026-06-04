@@ -2,7 +2,7 @@
 
 Status: **blocked**
 
-This is the release gate for relaxing Kartal from `dry_run` to
+This is the release gate for relaxing the ETH tx executor from `dry_run` to
 `public_mempool` for the Ethereum alpha live strategy that targets the deployed
 `UniswapV2TradingVault`.
 
@@ -26,7 +26,7 @@ still has blockers:
   evidence;
 - stuck, dropped, replaced, and reorged transactions do not yet have a finality
   policy;
-- per-strategy and per-token spend caps are not implemented in Kartal.
+- per-strategy and per-token spend caps are not implemented in the ETH tx executor.
 
 ## Required Green Gates
 
@@ -41,19 +41,19 @@ Every item in this section must be `ready` before broadcast.
 | Min-output/slippage | partial | `min_output_amount` is derived from exact simulation and policy for V2 vault buy/sell. Need live dry-run evidence proving non-zero min-output on real candidates. |
 | Gas-rank provider | blocked | Chosen EIP-1559 fees come from recent `eth_block_tx_rank` evidence. Fixed shadow fees are rejected for broadcast. |
 | Value cap | blocked | Priority spend and total max-fee spend are capped by protected value, late-recovery value, and safety buffer from final simulation. |
-| Kartal policy | partial | Target, selector, `from`, value, gas, fee, simulation freshness, metadata, and daily spend gates exist. Need final deployed config proof. |
+| ETH tx executor policy | partial | Target, selector, `from`, value, gas, fee, simulation freshness, metadata, and daily spend gates exist. Need final deployed config proof. |
 | Signer policy | partial | Unix-socket signer exists. Need final deployed config proof matching vault target, selectors, value/gas/fee caps, and expected signer address. |
-| Per-strategy/token spend caps | blocked | Kartal enforces caps beyond global daily cap before materially funding the hot wallet. |
+| Per-strategy/token spend caps | blocked | ETH tx executor enforces caps beyond global daily cap before materially funding the hot wallet. |
 | Receipt reconciliation | partial | Alpha worker exists and unit tests pass. Need live integration evidence and finality policy. |
 | Stuck/replaced tx handling | blocked | Null receipts after timeout are surfaced, replacements are detected, and operators have a cancel/replace playbook. |
 | Reorg/finality policy | blocked | Confirmed reports are emitted only after the configured confirmation depth, or shallow confirmations are explicitly accepted with alerting. |
 | Idempotency | partial | Attempt ids and submitted/final reports are keyed by order id. Need duplicate-submit and restart tests against Postgres. |
 | Nonce safety | partial | Tx executor reserves nonce. Need restart, concurrent request, and broadcast-error tests with the live nonce store. |
-| Kill switch | partial | `KARTAL_EXECUTION_DISABLED` exists. Need a drill proving it stops signing/broadcast while services stay observable. |
-| RPC isolation | partial | Reth RPC is exposed to the Docker bridge for Kartal. Need current systemd status and health evidence in the release run folder. |
+| Kill switch | partial | `ETH_TX_EXECUTOR_DISABLED` exists. Need a drill proving it stops signing/broadcast while services stay observable. |
+| RPC isolation | partial | Reth RPC is consumed directly by the ETH tx executor. Need current systemd status and health evidence in the release run folder. |
 | Observability | blocked | Trade page shows broadcast mode, signer backend, caps, spend, submitted/confirmed/failed/unresolved receipts, and stuck tx age. |
-| Dry-run soak | blocked | Run production-shaped strategy through Kartal dry-run for a fixed window and store policy decisions, requests, and alpha reports. |
-| Hot-wallet funding | blocked | Dedicated wallet balance is small enough that max loss is survivable and aligned with Kartal per-day/per-strategy caps. |
+| Dry-run soak | blocked | Run production-shaped strategy through ETH tx executor dry-run for a fixed window and store policy decisions, requests, and alpha reports. |
+| Hot-wallet funding | blocked | Dedicated wallet balance is small enough that max loss is survivable and aligned with ETH tx executor per-day/per-strategy caps. |
 | Operator signoff | blocked | Release folder contains config hashes, command transcript, status snapshots, and explicit operator approval. |
 
 ## Failure Classes And Controls
@@ -89,7 +89,7 @@ Risk:
 Controls required:
 
 - alpha builds only deployed-vault calldata for the selected route;
-- Kartal allowlists the exact vault target and selectors:
+- ETH tx executor allowlists the exact vault target and selectors:
   `0x8a62666c` and `0x5f413d10`;
 - signer policy independently allowlists the same target/selectors;
 - final simulation is attached to the exact request;
@@ -108,7 +108,7 @@ Risk:
 
 Controls required:
 
-- Kartal rejects missing/stale simulation references;
+- ETH tx executor rejects missing/stale simulation references;
 - alpha rejects broadcast when simulation says revert;
 - `min_output_amount` is derived from expected recovery and slippage policy;
 - current-state simulations cover representative success and negative cases;
@@ -128,7 +128,7 @@ Controls required:
 - gas candidate must come from recent block-rank evidence;
 - priority spend is capped by final simulated value;
 - total max fee is capped by policy;
-- Kartal and signer both enforce hard gas and fee caps;
+- ETH tx executor and signer both enforce hard gas and fee caps;
 - policy journal records gas-rank label, source window, expected rank, and
   estimated spend.
 
@@ -137,7 +137,7 @@ Controls required:
 Risk:
 
 - private key leaks;
-- Kartal signs arbitrary target/calldata after compromise;
+- ETH tx executor signs arbitrary target/calldata after compromise;
 - wrong signer owns the vault;
 - env/config accidentally flips live mode.
 
@@ -216,15 +216,15 @@ The first real run must be deliberately tiny:
 - low per-transaction cap;
 - low daily cap;
 - low per-strategy and per-token caps;
-- operator watching the trade page, Kartal status, and logs live;
-- immediate rollback path: `KARTAL_EXECUTION_DISABLED=true` or return
+- operator watching the trade page, ETH tx executor status, and logs live;
+- immediate rollback path: `ETH_TX_EXECUTOR_DISABLED=true` or return
   `ETH_TX_EXECUTOR_BROADCAST_MODE=dry_run`.
 
 ## Evidence To Store In The Release Run Folder
 
-- git revision and dirty-state summary for alpha, Kartal, tx_executor, and
+- git revision and dirty-state summary for alpha, ETH tx executor, and
   vault source;
-- Kartal `/eth/tx/status` JSON;
+- ETH tx executor `/eth/tx/status` JSON;
 - signer `/status` or systemd status;
 - policy config hashes;
 - dry-run request/response pairs;

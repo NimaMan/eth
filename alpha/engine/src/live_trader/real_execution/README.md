@@ -2,10 +2,11 @@
 
 This folder contains the live-runner wiring for capital-bearing execution.
 
-It resolves engine `OrderIntent`s into live planning inputs, validates Kartal
-preflight state, builds the real execution adapter, and keeps valuation routed
-through the chain-sim adapter. Route building, exact calldata simulation,
-gas-rank policy, and Kartal request construction remain in `alpha/live/trading`.
+It resolves engine `OrderIntent`s into live planning inputs, validates ETH tx
+executor preflight state, builds the real execution adapter, and keeps valuation
+routed through the chain-sim adapter. Route building, exact calldata simulation,
+gas-rank policy, and ETH tx executor request construction remain in
+`alpha/live/trading`.
 
 The implemented capital path is:
 
@@ -17,7 +18,7 @@ AlphaEngine OrderIntent
   -> gas-rank policy submission_route
      - public_rpc_broadcast for normal buys/sells
      - public_mempool_tail for mempool trading-enabled tail-entry buys
-  -> Kartal /eth/tx/submit with explicit submission_policy
+  -> ETH tx executor /eth/tx/submit with explicit submission_policy
   -> tx_executor validation/sign/dry-run-or-broadcast
   -> receipt_reconciliation/ mined receipt and vault-event settlement
 ```

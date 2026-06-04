@@ -21,7 +21,7 @@ pub(super) async fn wait_for_next_loop_event(
 ) -> Result<()> {
     match execution_mode {
         TraderExecutionMode::ChainSim => {}
-        TraderExecutionMode::KartalReal => {
+        TraderExecutionMode::EthTxExecutorReal => {
             time::sleep(Duration::from_millis(
                 LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS,
             ))
@@ -34,7 +34,7 @@ pub(super) async fn wait_for_next_loop_event(
 pub(super) fn poll_error_retry_delay(execution_mode: TraderExecutionMode) -> Duration {
     match execution_mode {
         TraderExecutionMode::ChainSim => Duration::from_millis(LIVE_POLL_ERROR_RETRY_MS),
-        TraderExecutionMode::KartalReal => {
+        TraderExecutionMode::EthTxExecutorReal => {
             Duration::from_millis(LIVE_REAL_MEMPOOL_SIGNAL_POLL_INTERVAL_MS)
         }
     }
@@ -144,9 +144,9 @@ mod tests {
     }
 
     #[test]
-    fn kartal_real_keeps_trading_enabled_mempool_entries() {
+    fn eth_tx_executor_real_keeps_trading_enabled_mempool_entries() {
         assert!(mempool_signal_skip_reason_code_for_execution_mode(
-            TraderExecutionMode::KartalReal,
+            TraderExecutionMode::EthTxExecutorReal,
             "trading_enabled"
         )
         .is_none());

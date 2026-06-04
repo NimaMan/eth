@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn planner_prepares_value_capped_kartal_signal() {
+    async fn planner_prepares_value_capped_eth_tx_executor_signal() {
         let outcome = planner(StaticAllowanceChecker::pre_approved())
             .plan_priority_sell(input())
             .await

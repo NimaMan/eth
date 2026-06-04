@@ -32,8 +32,8 @@ Strategies create decisions. The engine converts actionable decisions into
 
 `Submitted` means the execution adapter accepted the order for its runtime:
 
-- real live: Kartal accepted a transaction request and returned a broadcast tx
-  hash;
+- real live: the ETH tx executor accepted a transaction request and returned a
+  broadcast tx hash;
 - live backtest or historical backtest: the simulator accepted the order and a
   synthetic submitted report is recorded at the decision block.
 

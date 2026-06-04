@@ -6,7 +6,7 @@ and sell. It does not prove the full production envelope.
 ## Covered
 
 - Final deployed-vault calldata simulation.
-- Kartal policy acceptance.
+- ETH tx executor policy acceptance.
 - Signer policy acceptance.
 - Signing.
 - Public mempool broadcast.

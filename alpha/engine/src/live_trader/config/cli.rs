@@ -1,7 +1,7 @@
 use clap::Parser;
 
 use super::{
-    DEFAULT_KARTAL_TOKEN_ENV, DEFAULT_KARTAL_URL, DEFAULT_LIVE_REAL_FROM,
+    DEFAULT_ETH_TX_EXECUTOR_TOKEN_ENV, DEFAULT_ETH_TX_EXECUTOR_URL, DEFAULT_LIVE_REAL_FROM,
     DEFAULT_UNISWAP_V2_TRADING_VAULT,
 };
 
@@ -18,8 +18,8 @@ pub(super) struct Args {
 
 #[derive(Debug)]
 pub(super) struct RealExecutionArgs {
-    pub(super) kartal_url: String,
-    pub(super) kartal_token_env: String,
+    pub(super) eth_tx_executor_url: String,
+    pub(super) eth_tx_executor_token_env: String,
     pub(super) live_real_from: String,
     pub(super) live_real_vault_address: String,
     pub(super) allow_broadcast_live_validation: bool,
@@ -67,15 +67,15 @@ struct LiveRealCli {
 
 #[derive(Debug, Parser)]
 struct LiveRealOnlyCli {
-    /// Kartal base URL used only by real live execution.
-    #[arg(long, default_value = DEFAULT_KARTAL_URL)]
-    kartal_url: String,
+    /// ETH tx executor base URL used only by real live execution.
+    #[arg(long, default_value = DEFAULT_ETH_TX_EXECUTOR_URL)]
+    eth_tx_executor_url: String,
 
-    /// Env var containing the Kartal bearer token.
-    #[arg(long, default_value = DEFAULT_KARTAL_TOKEN_ENV)]
-    kartal_token_env: String,
+    /// Env var containing the ETH tx executor bearer token.
+    #[arg(long, default_value = DEFAULT_ETH_TX_EXECUTOR_TOKEN_ENV)]
+    eth_tx_executor_token_env: String,
 
-    /// EOA/from address that Kartal policy and the vault owner must allow.
+    /// EOA/from address that ETH tx executor policy and the vault owner must allow.
     #[arg(long, default_value = DEFAULT_LIVE_REAL_FROM)]
     live_real_from: String,
 
@@ -83,9 +83,9 @@ struct LiveRealOnlyCli {
     #[arg(long, default_value = DEFAULT_UNISWAP_V2_TRADING_VAULT)]
     live_real_vault_address: String,
 
-    /// Allow Kartal broadcast only for the explicit Alpha11 hold16
+    /// Allow ETH tx executor broadcast only for the explicit Alpha11 hold16
     /// deploy strategy. Without this flag the live trader refuses
-    /// any non-dry-run Kartal status.
+    /// any non-dry-run ETH tx executor status.
     #[arg(long, default_value_t = false)]
     allow_broadcast_live_validation: bool,
 }
@@ -116,8 +116,8 @@ impl From<LiveCommonCli> for Args {
 impl From<LiveRealOnlyCli> for RealExecutionArgs {
     fn from(real: LiveRealOnlyCli) -> Self {
         Self {
-            kartal_url: real.kartal_url,
-            kartal_token_env: real.kartal_token_env,
+            eth_tx_executor_url: real.eth_tx_executor_url,
+            eth_tx_executor_token_env: real.eth_tx_executor_token_env,
             live_real_from: real.live_real_from,
             live_real_vault_address: real.live_real_vault_address,
             allow_broadcast_live_validation: real.allow_broadcast_live_validation,

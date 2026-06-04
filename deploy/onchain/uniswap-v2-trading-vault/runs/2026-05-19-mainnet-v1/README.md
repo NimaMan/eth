@@ -3,7 +3,7 @@
 This run folder is the first mainnet canary deployment package for
 `UniswapV2TradingVault`.
 
-The temporary test address used for owner, treasury, deployer, and Kartal
+The temporary test address used for owner, treasury, deployer, and ETH tx executor
 `from` is
 [`0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27`](https://etherscan.io/address/0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27).
 

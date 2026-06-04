@@ -1,0 +1,42 @@
+{
+  "name": "reject-by-default-policy",
+  "cases": [
+    {
+      "name": "reject-empty-policy",
+      "expect": "policy_rejected",
+      "request": {
+        "attempt_id": "eth-tx-calibration-reject-empty-policy",
+        "chain_id": 1,
+        "from": "0x0000000000000000000000000000000000000001",
+        "to": "0x0000000000000000000000000000000000000002",
+        "value": "0",
+        "data": "0x095ea7b30000000000000000000000000000000000000000000000000000000000000000",
+        "gas_limit": "21000",
+        "max_fee_per_gas": "1000000000",
+        "max_priority_fee_per_gas": "1000000000",
+        "nonce": null,
+        "bribe": null,
+        "simulation": {
+          "block_number": 1,
+          "block_hash": null,
+          "state_root": null,
+          "expected_output_token": null,
+          "expected_output_amount": null,
+          "min_output_amount": null,
+          "metadata": {
+            "fixture": "reject_policy_request"
+          }
+        },
+        "metadata": {
+          "wire_protocol": "eth_unsigned_tx",
+          "intent_kind": "calibration",
+          "strategy_name": "eth-tx-calibration",
+          "strategy_run_id": "eth-tx-calibration-local",
+          "trade_id": "eth-tx-calibration-reject-empty-policy",
+          "token_address": "0x0000000000000000000000000000000000000003",
+          "pool_address": "0x0000000000000000000000000000000000000004"
+        }
+      }
+    }
+  ]
+}

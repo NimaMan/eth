@@ -44,7 +44,7 @@ where
     E: EngineExecutionAdapter,
 {
     let requests = store
-        .claim_pending_manual_close_requests(limit)
+        .claim_pending_manual_close_requests(limit, None)
         .await
         .wrap_err("failed to claim pending manual close requests")?;
     let mut summary = ManualCloseProcessSummary {
@@ -127,14 +127,8 @@ where
             )
         })?;
 
-    let (available_tokens, decimals, balance_block, balance_source) = match vault_address {
-        Some(_) => {
-            return Err(eyre!(
-                "manual close vault balance lookup is not supported in chain-sim execution mode"
-            ));
-        }
-        None => chain_sim_position_token_balance(&position, request)?,
-    };
+    let (available_tokens, decimals, balance_block, balance_source) =
+        position_token_balance(&position, request, vault_address)?;
     let amount_raw = requested_close_amount(request, available_tokens)?;
     let defaults = SnipeAllConfig::default();
     let intent = OrderIntent {
@@ -188,19 +182,19 @@ where
         })
 }
 
-fn chain_sim_position_token_balance(
+fn position_entry_token_balance(
     position: &Position,
     request: &ManualCloseRequest,
 ) -> Result<(U256, u8, u64, &'static str)> {
     let amount = position.entry_token_raw_amount.as_ref().ok_or_else(|| {
         eyre!(
-            "manual close request {} cannot resolve simulated position token amount",
+            "manual close request {} cannot resolve position token amount",
             request.request_id
         )
     })?;
     if amount.raw.is_zero() {
         return Err(eyre!(
-            "simulated position token balance is zero for manual close request {}",
+            "position token balance is zero for manual close request {}",
             request.request_id
         ));
     }
@@ -212,10 +206,24 @@ fn chain_sim_position_token_balance(
     ))
 }
 
-fn requested_close_amount(request: &ManualCloseRequest, vault_balance: U256) -> Result<U256> {
-    if vault_balance.is_zero() {
+fn position_token_balance(
+    position: &Position,
+    request: &ManualCloseRequest,
+    vault_address: Option<Address>,
+) -> Result<(U256, u8, u64, &'static str)> {
+    let (raw, decimals, block, _) = position_entry_token_balance(position, request)?;
+    let source = if vault_address.is_some() {
+        "real_position_entry_token_amount"
+    } else {
+        "chain_sim_position_entry_token_amount"
+    };
+    Ok((raw, decimals, block, source))
+}
+
+fn requested_close_amount(request: &ManualCloseRequest, available_tokens: U256) -> Result<U256> {
+    if available_tokens.is_zero() {
         return Err(eyre!(
-            "current vault token balance is zero for manual close request {}",
+            "available token balance is zero for manual close request {}",
             request.request_id
         ));
     }
@@ -229,22 +237,22 @@ fn requested_close_amount(request: &ManualCloseRequest, vault_balance: U256) -> 
         if amount.is_zero() {
             return Err(eyre!("requested_raw_amount must be greater than zero"));
         }
-        if amount > vault_balance {
+        if amount > available_tokens {
             return Err(eyre!(
-                "requested_raw_amount {} exceeds current vault token balance {}",
+                "requested_raw_amount {} exceeds available token balance {}",
                 amount,
-                vault_balance
+                available_tokens
             ));
         }
         return Ok(amount);
     }
 
     let percent_bps = requested_percent_bps(request.requested_percent.as_deref())?;
-    let amount = vault_balance.saturating_mul(U256::from(percent_bps)) / U256::from(10_000u64);
+    let amount = available_tokens.saturating_mul(U256::from(percent_bps)) / U256::from(10_000u64);
     if amount.is_zero() {
         return Err(eyre!(
-            "manual close percent resolved to zero tokens from vault balance {}",
-            vault_balance
+            "manual close percent resolved to zero tokens from available balance {}",
+            available_tokens
         ));
     }
     Ok(amount)
@@ -306,7 +314,12 @@ fn parse_u256_quantity(value: &str, label: &str) -> Result<U256> {
 fn report_failure(reports: &[ExecutionReport]) -> Option<String> {
     reports
         .iter()
-        .find(|report| report.status == ExecutionStatus::Failed)
+        .find(|report| {
+            matches!(
+                report.status,
+                ExecutionStatus::Failed | ExecutionStatus::Cancelled
+            )
+        })
         .map(|report| {
             report
                 .error
@@ -317,7 +330,9 @@ fn report_failure(reports: &[ExecutionReport]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::requested_percent_bps;
+    use eth_alpha_core::{execution::ExecutionReport, ids::OrderId};
+
+    use super::{report_failure, requested_percent_bps};
 
     #[test]
     fn manual_close_percent_defaults_to_full_balance() {
@@ -337,5 +352,26 @@ mod tests {
         assert!(requested_percent_bps(Some("0")).is_err());
         assert!(requested_percent_bps(Some("100.01")).is_err());
         assert!(requested_percent_bps(Some("1.234")).is_err());
+    }
+
+    #[test]
+    fn manual_close_cancelled_report_counts_as_failed_request() {
+        let reports = vec![ExecutionReport {
+            order_id: OrderId("manual-close-order".to_string()),
+            status: eth_alpha_core::execution::ExecutionStatus::Cancelled,
+            tx_hash: None,
+            block_number: Some(25_202_363),
+            filled_amount: None,
+            token_amount: None,
+            gas_used: None,
+            gas_cost: None,
+            mined_evidence: None,
+            error: Some("priority sell planner rejected before broadcast".to_string()),
+        }];
+
+        assert_eq!(
+            report_failure(&reports).as_deref(),
+            Some("priority sell planner rejected before broadcast")
+        );
     }
 }

@@ -16,7 +16,7 @@ items:
   - id: owner-model-reviewed
     area: access-control
     status: reviewed
-    requirement: Confirm owner address is the intended Kartal signer or explicitly delegated operational account.
+    requirement: Confirm owner address is the intended ETH tx executor signer or explicitly delegated operational account.
     note: Owner-only behavior is tested; deployed owner is 0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27.
   - id: treasury-reviewed
     area: funds
@@ -48,7 +48,7 @@ items:
     status: partial
     requirement: Confirm exact buy and emergency-sell calldata are simulated against current state before submission.
     evidence: deploy/onchain/uniswap-v2-trading-vault/simulations/
-    note: Deployed-vault simulator now covers functional success and negative cases. Keep partial until the live planner's exact final Kartal request is simulated and attached for each real submission.
+    note: Deployed-vault simulator now covers functional success and negative cases. Keep partial until the live planner's exact final ETH tx executor request is simulated and attached for each real submission.
   - id: production-min-output-reviewed
     area: simulation
     status: todo
@@ -59,16 +59,16 @@ items:
     status: todo
     requirement: Confirm live entry route is implemented through the deployed vault, or the first public run is explicitly sell-only with entry disabled.
     note: Current real live trader requires --disable-entry.
-  - id: kartal-policy-reviewed
+  - id: eth-tx-executor-policy-reviewed
     area: execution
     status: reviewed
-    requirement: Confirm Kartal allowlist only permits the deployed vault target and strategy selectors.
-    evidence: deploy/onchain/uniswap-v2-trading-vault/config/kartal-policy.mainnet.json
+    requirement: Confirm ETH tx executor allowlist only permits the deployed vault target and strategy selectors.
+    evidence: deploy/onchain/uniswap-v2-trading-vault/config/eth-tx-policy.mainnet.json
     note: Policy allows only 0x28474cbCd780AeEb3ED1501B68254bEd87cF5597 and selectors 0x8a62666c, 0x5f413d10.
   - id: dry-run-reviewed
     area: execution
     status: todo
-    requirement: Confirm Kartal dry-run or safe policy-reject evidence is stored in the run folder.
+    requirement: Confirm ETH tx executor dry-run or safe policy-reject evidence is stored in the run folder.
   - id: receipt-reconciliation-reviewed
     area: alpha-state
     status: partial
@@ -82,7 +82,7 @@ items:
   - id: per-strategy-token-caps-reviewed
     area: execution
     status: todo
-    requirement: Confirm Kartal enforces per-strategy and per-token spend caps in addition to per-tx and daily caps.
+    requirement: Confirm ETH tx executor enforces per-strategy and per-token spend caps in addition to per-tx and daily caps.
   - id: live-observability-reviewed
     area: operations
     status: todo
@@ -90,7 +90,7 @@ items:
   - id: kill-switch-drill-reviewed
     area: operations
     status: todo
-    requirement: Confirm KARTAL_EXECUTION_DISABLED stops signing/broadcast and the live trader reports the disabled state without corrupting positions.
+    requirement: Confirm ETH_TX_EXECUTOR_DISABLED stops signing/broadcast and the live trader reports the disabled state without corrupting positions.
   - id: post-deploy-smoke-reviewed
     area: deployment
     status: reviewed

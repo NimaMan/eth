@@ -10,7 +10,7 @@ The live trader processes one loop tick in this order:
 3. Settle already-submitted executions:
    - chain-sim live backtests simulate due submissions against the exact target
      block state;
-   - real trading reconciles Kartal submissions from mined receipts and vault
+   - real trading reconciles ETH tx executor submissions from mined receipts and vault
      events.
 4. If chain-sim settlement is due but the exact confirmation-block state is not
    ready yet, buffer fetched mempool signals and stop this tick before strategy
@@ -63,9 +63,9 @@ continues processing new strategy events from the next retained block frame.
 
 The live tick is block-pinned. Chain-server has already updated its
 `LiveTxSimulator`, token state, and pool state before the frame is visible to
-Alpha. Alpha real mode may turn strategy decisions into Kartal submissions;
-chain-sim mode asks chain-server to simulate submitted orders at their exact
-target block.
+Alpha. Alpha real mode may turn strategy decisions into ETH tx executor
+submissions; chain-sim mode asks chain-server to simulate submitted orders at
+their exact target block.
 
 For chain-sim live backtests, a submitted report has
 `mined_evidence.receipt_status = live_backtest_chain_sim_submitted`. A final

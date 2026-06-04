@@ -9,7 +9,7 @@ candidate without broadcasting a mainnet deployment.
 - `fork-rehearsal.json`: pinned fork gas test plus tx_simulator direct-vs-vault comparison.
 - `constructor-args.json`: owner, treasury, Universal Router, Permit2, hooks policy, and deployer.
 - `calldata.json`: constructor init code, deploy gas estimate, nonce-bound predicted address, and representative buy/sell calldata.
-- `kartal-dry-run.json`: current Kartal dry-run evidence.
+- `eth-tx-executor-dry-run.json`: current ETH tx executor dry-run evidence.
 - `deploy-fail-closed.txt`: deploy script refusal without `CONFIRM_DEPLOY=1`.
 
 ## Current Result
@@ -20,7 +20,7 @@ At nonce `55`, the predicted CREATE address is
 
 That prediction is valid only while the deployer nonce remains `55`.
 
-Kartal is healthy and in `dry_run` mode, but the current live policy still
+ETH tx executor is healthy and in `dry_run` mode, but the current live policy still
 allowlists the deployed V2 vault target/selectors. The V4 buy and sell dry-run
-requests were intentionally rejected by policy. Do not switch Kartal to the V4
+requests were intentionally rejected by policy. Do not switch ETH tx executor to the V4
 target until the V4 contract is actually deployed and the operator signs off.

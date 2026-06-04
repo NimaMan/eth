@@ -33,13 +33,18 @@ async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
     // Wallet used purely for simulation (never broadcast!)
-    let pk = match env::var("KARTAL_KILIT") {
+    let pk = match env::var("ETH_TX_EXECUTOR_DEV_PRIVATE_KEY") {
         Ok(value) => value,
         Err(env::VarError::NotPresent) => {
-            println!("Skipping signed bundle simulation: set KARTAL_KILIT to a dev private key.");
+            println!("Skipping signed bundle simulation: set ETH_TX_EXECUTOR_DEV_PRIVATE_KEY to a dev private key.");
             return Ok(());
         }
-        Err(err) => return Err(eyre::eyre!("failed to read KARTAL_KILIT: {}", err)),
+        Err(err) => {
+            return Err(eyre::eyre!(
+                "failed to read ETH_TX_EXECUTOR_DEV_PRIVATE_KEY: {}",
+                err
+            ))
+        }
     };
     let signer_secret = parse_private_key(&pk)?;
 
@@ -52,7 +57,7 @@ async fn main() -> eyre::Result<()> {
         simulator.get_latest_block()?
     );
 
-    let chain_id: u64 = env::var("ETH_KARTAL_CHAIN_ID")
+    let chain_id: u64 = env::var("ETH_TX_EXECUTOR_CHAIN_ID")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
@@ -186,9 +191,12 @@ async fn main() -> eyre::Result<()> {
 
 fn parse_private_key(raw: &str) -> eyre::Result<B256> {
     let key = raw.trim().trim_start_matches("0x");
-    format!("0x{key}")
-        .parse::<B256>()
-        .map_err(|e| eyre::eyre!("invalid KARTAL_KILIT hex private key: {}", e))
+    format!("0x{key}").parse::<B256>().map_err(|e| {
+        eyre::eyre!(
+            "invalid ETH_TX_EXECUTOR_DEV_PRIVATE_KEY hex private key: {}",
+            e
+        )
+    })
 }
 
 fn private_key_to_address(secret: B256) -> eyre::Result<AlloyAddress> {

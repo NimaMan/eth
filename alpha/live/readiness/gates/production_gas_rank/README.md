@@ -64,7 +64,7 @@ values still cover the public mined receipts by `20769` gas on the buy and
 ## Implementation State
 
 - Real buy planning filters candidates by source, priority cap, and estimated
-  gas-fee cap before building the Kartal request.
+  gas-fee cap before building the ETH tx executor request.
 - Real sell tx-prep can require a gas-rank source; the production live-real
   adapter sets this to `eth_chain_server_gas_rank`.
 - Max-hold exits are classified as normal strategy exits, not mempool
@@ -74,9 +74,9 @@ values still cover the public mined receipts by `20769` gas on the buy and
 
 ## Still Required Before More Public Capital
 
-- Lower Kartal and signer hard caps so the last line of defense is not much
+- Lower ETH tx executor and signer hard caps so the last line of defense is not much
   looser than the Alpha gas policy.
-- Run one Kartal dry-run using the production gas-rank path and confirm the
+- Run one ETH tx executor dry-run using the production gas-rank path and confirm the
   metadata shows `source=eth_chain_server_gas_rank`, `label=p50`, and
   priority below the cap.
 - Re-run the hold3 public validation only after the dry-run metadata check

@@ -12,6 +12,6 @@ deployment.
 | Permit2 lifecycle | evidence-ready | Sell path grants exact ERC20 and Permit2 allowances, clears both after success, and reverts state on failure. |
 | Gas review | evidence-ready | Latest fork report: vault route 354,887 gas vs direct full route 382,953 gas; deploy 1,228,234 gas. |
 | Deploy calldata | evidence-ready | `runs/20260519-v4-gates-202032Z/calldata.json` records constructor args, init code hash, gas estimate, and representative buy/sell calldata. |
-| Kartal policy | partial | Candidate policy has from address and buy/sell selectors; current live Kartal rejects V4 target/selectors until a deployed V4 target is allowlisted. |
+| ETH tx executor policy | partial | Candidate policy has from address and buy/sell selectors; current live ETH tx executor rejects V4 target/selectors until a deployed V4 target is allowlisted. |
 | Bribe policy | blocked | Only public EIP-1559 priority fee is allowed until separate bundle support exists. |
 | Deployment | fail-closed | `scripts/05_deploy.sh` requires `CONFIRM_DEPLOY=1`; final mainnet broadcast still needs operator signoff. |

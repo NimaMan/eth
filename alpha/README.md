@@ -23,7 +23,7 @@ events, and persists decisions before execution.
 | `store/` | `eth_alpha_store` | Durable run, observation, order, execution, position, and risk records. |
 | `live/state/` | `eth_live_state` | Shared live-state snapshot schemas, protocol types, and store traits. |
 | `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
-| `live/trading/` | `eth_live_trading` | Live priority-exit policy, tx-prep, value-capped gas planning, and Kartal request/client shape. |
+| `live/trading/` | `eth_live_trading` | Live priority-exit policy, tx-prep, value-capped gas planning, and ETH tx executor request/client shape. |
 | `backtest/` | `eth_alpha_backtest` | Historical replay over the same core strategy contracts. |
 
 ## Does Not Own
@@ -48,13 +48,13 @@ reth/node publishes new execution head B
   -> Alpha live backtest / Alpha real consume next frame B
   -> strategies make decisions pinned to B/hash
   -> chain-sim mode settles via chain-server simulation
-  -> real mode builds tx plan and submits through Kartal
-  -> Kartal validates/signs/broadcasts according to policy
+  -> real mode builds tx plan and submits through ETH tx executor
+  -> ETH tx executor validates/signs/broadcasts according to policy
 ```
 
 For real live trading, chain-server owns live state, `LiveTxSimulator`, and
 simulation sessions. Alpha owns strategy decisions, tx planning, gas policy, and
-Kartal submission. Alpha sends small exact-block simulation requests to
+ETH tx executor submission. Alpha sends small exact-block simulation requests to
 chain-server. Chain-sim live backtests use the same boundary for order
 settlement and do not hydrate a local simulator from live-state stream frames.
 Confirmed-chain strategy inputs come from chain-server block frames, not from
@@ -65,11 +65,11 @@ block, and chain-server waits until that frame exists.
 `eth_alpha_live_backtest_trader` is the no-capital live runner. It must not
 become decision-active until `/live-token-tracker/status` is `live`; while warming, it records
 heartbeats and primes watermarks only. It always uses live chain-state EVM
-simulation and has no Kartal execution path.
+simulation and has no real-executor path.
 
 `eth_alpha_live_trader` is the separate real-executor runner. It instantiates
 `TxExecutorAdapter`, uses the deployed Uniswap V2 trading vault route, and
-refuses to start unless Kartal reports `broadcast_mode = dry_run`, except for
+refuses to start unless the ETH tx executor reports `broadcast_mode = dry_run`, except for
 the explicit Alpha11 hold16 deploy strategy. That exception requires
 `--allow-public-mempool-live-validation`, strategy
 `alpha11-univ2-lp30-pool-update-block-hold16`, no `--replay-current`, no
@@ -83,7 +83,7 @@ liquidity floors, entry-pool caps, bankroll, and hold window, are not live-run
 CLI parameters; named live strategies own those values in their strategy specs.
 The V2 buy and emergency-sell paths derive non-zero min-output from provisional
 exact-calldata simulation and simulate the final exact vault calldata before
-Kartal submission.
+ETH tx executor submission.
 
 Backtests are not a service and must never be able to broadcast. The backtest
 binary stays in `alpha/backtest`, reads historical inputs, and only constructs
@@ -125,7 +125,7 @@ liquidity-removal exit and critical LP-approval exit.
 | Durable decision ledger | `store/README.md`, Postgres `alpha_trading.*` tables |
 | Mined-block transaction rank estimates | `block_tx_rank/README.md`, `block_tx_rank/src/lib.rs` |
 | Snipe All entry/exit rules | `strategies/README.md`, `strategies/src/baseline/snipe_all/` |
-| Live tx prep and Kartal request shape | `live/trading/README.md`, `live/trading/src/tx_prep/` |
+| Live tx prep and ETH tx executor request shape | `live/trading/README.md`, `live/trading/src/tx_prep/` |
 | Live confirmed-chain feed | `live/feed/README.md`, `live/feed/src/` |
 | Live-state contract | `live/state/README.md`, `live/state/src/` |
 | Service wiring | Thin wrappers in `engine/src/bin/`, shared live runtime in `engine/src/live_trader/`, historical backtest wrapper in `backtest/src/bin/eth_alpha_backtest_trader.rs` |
@@ -153,9 +153,10 @@ cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 
 ## Current Hazards
 
-- Backtests must never load Kartal config, signer state, hot-wallet balance, or
+- Backtests must never load ETH tx executor config, signer state, hot-wallet balance, or
   deployed vault addresses.
-- `kartal-real` public broadcast is only allowed for
+- `eth_tx_executor-real` is the legacy persisted mode name for the ETH tx executor real
+  path. Public broadcast is only allowed for
   `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit public-mempool
   flag. Other strategy names, including hold3 validation and hold15, are blocked
   from public broadcast by the real-trader guard.

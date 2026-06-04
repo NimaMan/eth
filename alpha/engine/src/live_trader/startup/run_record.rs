@@ -67,10 +67,10 @@ pub(super) async fn record_alpha_trader_run_start(
                     "path": record.run_session_path,
                 },
                 "entry_enabled": !record.args.disable_entry,
-                "kartal": if let Some(real_args) = record.real_args {
+                "eth_tx_executor": if let Some(real_args) = record.real_args {
                     json!({
-                        "url": &real_args.kartal_url,
-                        "token_env": &real_args.kartal_token_env,
+                        "url": &real_args.eth_tx_executor_url,
+                        "token_env": &real_args.eth_tx_executor_token_env,
                         "from": &real_args.live_real_from,
                         "vault_address": &real_args.live_real_vault_address,
                         "broadcast_requirement": if real_args.allow_broadcast_live_validation {

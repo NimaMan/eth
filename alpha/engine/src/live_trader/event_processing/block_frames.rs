@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use eth_alpha_core::{ids::TokenPoolId, market::PoolSnapshot};
+use eth_alpha_core::{
+    ids::{TokenAddress, TokenPoolId},
+    market::PoolSnapshot,
+};
 use eyre::{eyre, Result};
 use tracing::warn;
 
@@ -22,6 +25,7 @@ pub(in crate::live_trader) struct LiveInputBatch {
     pub(in crate::live_trader) frame_pool_count: usize,
     pub(in crate::live_trader) polled_pools: Vec<(PoolWire, PoolSnapshot)>,
     pub(in crate::live_trader) polled_pool_wires: HashMap<TokenPoolId, PoolWire>,
+    pub(in crate::live_trader) updated_tokens: std::collections::HashSet<TokenAddress>,
 }
 
 pub(in crate::live_trader) async fn read_live_inputs(
@@ -66,6 +70,17 @@ pub(in crate::live_trader) async fn read_live_inputs(
         }
     }
 
+    let updated_tokens = frame
+        .as_ref()
+        .map(|frame| {
+            frame
+                .updated_tokens
+                .iter()
+                .filter_map(|address| address.trim().parse::<TokenAddress>().ok())
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+
     let signals = client
         .mempool_signals(signal_limit, mempool_since_days)
         .await?;
@@ -78,6 +93,7 @@ pub(in crate::live_trader) async fn read_live_inputs(
         frame_pool_count: polled_pools.len(),
         polled_pools,
         polled_pool_wires: pool_wire_cache.clone(),
+        updated_tokens,
     })
 }
 
@@ -107,6 +123,6 @@ fn collect_frame_pools(
 fn frame_wait_timeout_ms(execution_mode: TraderExecutionMode) -> u64 {
     match execution_mode {
         TraderExecutionMode::ChainSim => LIVE_UPDATE_WAIT_TIMEOUT_MS,
-        TraderExecutionMode::KartalReal => LIVE_REAL_FRAME_POLL_TIMEOUT_MS,
+        TraderExecutionMode::EthTxExecutorReal => LIVE_REAL_FRAME_POLL_TIMEOUT_MS,
     }
 }

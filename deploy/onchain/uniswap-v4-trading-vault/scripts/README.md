@@ -9,7 +9,7 @@ still fails closed unless `CONFIRM_DEPLOY=1` is set explicitly.
 | `01_build_and_hash.sh` | Build and record bytecode, ABI, and source hashes. |
 | `02_fork_rehearsal.sh` | Run V4 fork tests and gas benchmarks. |
 | `03_generate_calldata.sh` | Generate representative V4 vault calldata. |
-| `04_kartal_dry_run.sh` | Run candidate direct-raw requests through Kartal. |
+| `04_eth_tx_executor_dry_run.sh` | Legacy-named script that runs candidate direct-raw requests through the ETH tx executor. |
 | `05_deploy.sh` | Mainnet deploy, blocked until all gates pass. |
 | `06_verify_contract.sh` | Verify deployed source and constructor args. |
 | `07_post_deploy_smoke.sh` | Read deployed immutable values and smoke-test selectors. |
@@ -22,9 +22,9 @@ RUN_DIR=deploy/onchain/uniswap-v4-trading-vault/runs/<run-id>
 RUN_DIR="$RUN_DIR" ./deploy/onchain/uniswap-v4-trading-vault/scripts/01_build_and_hash.sh
 RUN_DIR="$RUN_DIR" ./deploy/onchain/uniswap-v4-trading-vault/scripts/02_fork_rehearsal.sh
 RUN_DIR="$RUN_DIR" ./deploy/onchain/uniswap-v4-trading-vault/scripts/03_generate_calldata.sh
-RUN_DIR="$RUN_DIR" EXPECT=policy-rejected ./deploy/onchain/uniswap-v4-trading-vault/scripts/04_kartal_dry_run.sh
+RUN_DIR="$RUN_DIR" EXPECT=policy-rejected ./deploy/onchain/uniswap-v4-trading-vault/scripts/04_eth_tx_executor_dry_run.sh
 ```
 
-The final accepted Kartal dry-run must happen after deployment, with
-`VAULT_ADDRESS` set to the deployed contract and both Kartal and signer policies
-updated to the V4 target and selectors.
+The final accepted ETH tx executor dry-run must happen after deployment, with
+`VAULT_ADDRESS` set to the deployed contract and both executor and signer
+policies updated to the V4 target and selectors.

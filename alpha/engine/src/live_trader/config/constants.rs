@@ -16,8 +16,8 @@ pub(super) const DEFAULT_ALPHA_TRADER_LOG_DIR: &str =
 pub(super) const DEFAULT_ALPHA_TRADER_SESSION_DIR: &str =
     "/home/nima/code/crypto/blockchains/eth/.state/alpha_trader_sessions";
 pub(super) const ALPHA_TRADER_STALE_RUN_MAX_AGE_SECS: u64 = 60;
-pub(super) const DEFAULT_KARTAL_URL: &str = "http://127.0.0.1:5006";
-pub(super) const DEFAULT_KARTAL_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
+pub(super) const DEFAULT_ETH_TX_EXECUTOR_URL: &str = "http://127.0.0.1:5006";
+pub(super) const DEFAULT_ETH_TX_EXECUTOR_TOKEN_ENV: &str = "ETH_TX_EXECUTOR_API_TOKEN";
 pub(super) const DEFAULT_LIVE_REAL_FROM: &str = "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27";
 pub(super) const DEFAULT_UNISWAP_V2_TRADING_VAULT: &str =
     "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597";

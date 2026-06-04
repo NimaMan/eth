@@ -85,7 +85,7 @@ strategy result and returns a backend-owned `CheckResult`.
 | `submitted_orders_have_terminal_report_after_delay` | Does every elapsed submitted order have a terminal execution report? | A submitted order stuck past the execution delay means the execution adapter or persistence pipeline dropped the terminal outcome. | `execution_replay.rs` |
 | `live_chain_sim_execution_blocks_align` | Did live chain-sim use the exact expected simulation block? | Live backtest terminal reports must prove submitted block N, expected/simulation/receipt/event block N + execution_delay_blocks, with no stale simulator state. | `execution_replay.rs` |
 | `live_chain_sim_block_hash_evidence` | Did live chain-sim persist exact block hashes? | Block hashes make same-height reorg and stale-state problems auditable; block numbers alone are not enough. | `execution_replay.rs` |
-| `chain_sim_has_no_real_execution_artifacts` | Did chain-sim avoid real execution artifacts? | Backtests must not contain real tx hashes or Kartal submission errors; those belong only in live-real execution. | `execution_replay.rs` |
+| `chain_sim_has_no_real_execution_artifacts` | Did chain-sim avoid real execution artifacts? | Backtests must not contain real tx hashes or ETH tx executor submission errors; those belong only in live-real execution. | `execution_replay.rs` |
 | `pre_submit_simulation_state_ready` | Was pre-submit simulation state ready for every attempted order? | A deferred order caused by stale simulator state means the decision block and simulation state were not block-coupled, which invalidates live/backtest comparison. | `execution_replay.rs` |
 | `terminal_reports_have_gas_policy_fee_evidence` | Do terminal reports retain gas-policy fee evidence? | Selected terminal rows should retain selected fee/profile/source evidence; rejected rows should retain the rejection guard and candidate profiles. | `execution_replay.rs` |
 | `confirmed_reports_have_simulation_outputs` | Are confirmed fills backed by persisted EVM simulation output? | A confirmed fill must carry fill amount, gas, gas cost, and buy token output so PnL can be reconstructed. | `execution_replay.rs` |
@@ -142,6 +142,9 @@ strategy result and returns a backend-owned `CheckResult`.
 | `terminal_snapshots_have_no_pool_metrics` | Do terminal closed snapshots omit pool metrics? | A sell-confirmed row is terminal accounting state, not an open pool valuation. | `snapshots.rs` |
 | `closed_trade_final_snapshot` | Does each closed trade have a final closed snapshot? | UI and validators need a clean sell-confirmed snapshot at `exit_block` for terminal valuation. | `snapshots.rs` |
 | `closed_trade_latest_snapshot_is_terminal` | Is the latest closed-trade snapshot terminal? | For a closed trade, the latest snapshot by block/id must be the sell-confirmed exit snapshot, not a stale open valuation. | `snapshots.rs` |
+| `open_position_balance_drain_has_zero_snapshot` | Does an open position with a mined drain have a zero-value snapshot? | A mined liquidity-removal or holder-balance backdoor drain must produce a zero/near-zero valuation at/after the drain block, or the position keeps a stale positive mark after its inventory is gone. | `snapshots.rs` |
+| `no_positive_open_snapshot_after_drain` | Are open positions still valued positive after a mined drain? | A positive open-state value at/after a mined drain means the valuation used synthetic/entry inventory instead of current held balance. | `snapshots.rs` |
+| `no_positive_value_after_zero_balance` | Does a position's value flip back to positive after reaching zero? | After a zero-value snapshot, no later non-terminal snapshot may report a positive value; a flip-back resurrects a drained position. | `snapshots.rs` |
 
 ## Adding A Check
 

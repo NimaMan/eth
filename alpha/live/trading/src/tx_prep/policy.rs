@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_kartal_request_with_value_capped_bribe() {
+    fn prepares_eth_tx_executor_request_with_value_capped_bribe() {
         let outcome = prepare_priority_sell(&config(100), input(40));
 
         match outcome {

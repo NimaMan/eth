@@ -13,13 +13,13 @@ use eth_alpha_core::{
 use eth_alpha_store::PostgresTradingStore;
 use eth_live_trading::{
     apply_min_priority_fee_floor_to_candidates, derive_min_output_from_expected_output,
-    ChainServerGasRankProvider, ChainServerLivePreSubmitSimulator, GasEstimateConfig, GasRankPlan,
-    GasRankProvider, KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalSimulationReference, LiveDirectRawTransactionRequest, LivePrioritySellPlanner,
-    LivePrioritySellPlannerConfig, LivePrioritySellPlannerError, LiveTraderTxSignal,
-    MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator, PreparedSellRoute,
-    RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy, TxSubmissionRoute,
-    UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
+    ChainServerGasRankProvider, ChainServerLivePreSubmitSimulator, EthTxBribeRequest,
+    EthTxExecutorSubmitClient, EthTxExecutorSubmitClientConfig, EthTxSimulationReference,
+    GasEstimateConfig, GasRankPlan, GasRankProvider, LiveDirectRawTransactionRequest,
+    LivePrioritySellPlanner, LivePrioritySellPlannerConfig, LivePrioritySellPlannerError,
+    LiveTraderTxSignal, MempoolRaceGasRankProvider, PreSubmitSimulation, PreSubmitSimulator,
+    PreparedSellRoute, RankedFeeCandidate, StrategyGasRankPolicy, TxPrepConfig, TxSubmissionPolicy,
+    TxSubmissionRoute, UniswapV2TradingVaultBuyRouteBuilder, UniswapV2TradingVaultSellRouteBuilder,
     VaultInternalAllowanceChecker, ETH_UNSIGNED_TX_WIRE_PROTOCOL,
 };
 use eyre::Result;
@@ -30,6 +30,7 @@ use crate::execution::real::{
     LiveTradingPlannerBridge, LiveTxPlanner, LiveTxSubmissionResult, LiveTxSubmitter,
     TxExecutorAdapter,
 };
+use crate::execution::LiveChainSimExecutionAdapter;
 use crate::EngineExecutionAdapter;
 
 use super::cli::RealExecutionArgs;
@@ -40,17 +41,17 @@ mod preflight;
 mod tail_entry;
 use input_resolver::LiveRealInputResolver;
 use preflight::parse_live_real_address;
-pub(super) use preflight::preflight_kartal_real;
-pub(in crate::live_trader) use preflight::KartalRealPreflight;
+pub(super) use preflight::preflight_eth_tx_executor_real;
+pub(in crate::live_trader) use preflight::EthTxExecutorRealPreflight;
 #[cfg(test)]
-use preflight::{validate_kartal_real_status, HOLD16_DEPLOY_BUY_WEI};
+use preflight::{validate_eth_tx_executor_real_status, HOLD16_DEPLOY_BUY_WEI};
 use tail_entry::TailEntryOrderingEvidence;
 use tail_entry::{
     buy_submission_policy, tail_entry_ordering_evidence, tail_entry_overlay_plan,
     validate_tail_entry_route,
 };
 
-struct KartalRealPlanner<P, S, G> {
+struct EthTxExecutorRealPlanner<P, S, G> {
     sell_planner: P,
     resolver: LiveRealInputResolver,
     simulator: S,
@@ -60,17 +61,17 @@ struct KartalRealPlanner<P, S, G> {
     gas_policy: LiveRealGasPolicy,
 }
 
-struct KartalPolicySubmitter {
-    kartal: KartalExecutorClient,
+struct EthTxPolicySubmitter {
+    eth_tx_executor: EthTxExecutorSubmitClient,
 }
 
 #[async_trait]
-impl LiveTxSubmitter for KartalPolicySubmitter {
+impl LiveTxSubmitter for EthTxPolicySubmitter {
     async fn submit_signal(
         &self,
         signal: &LiveTraderTxSignal,
     ) -> std::result::Result<LiveTxSubmissionResult, String> {
-        self.kartal
+        self.eth_tx_executor
             .submit_signal(signal)
             .await
             .map(Into::into)
@@ -79,7 +80,7 @@ impl LiveTxSubmitter for KartalPolicySubmitter {
 }
 
 #[async_trait]
-impl<P, S, G> LiveTxPlanner for KartalRealPlanner<P, S, G>
+impl<P, S, G> LiveTxPlanner for EthTxExecutorRealPlanner<P, S, G>
 where
     P: LiveTxPlanner,
     S: PreSubmitSimulator,
@@ -96,7 +97,7 @@ where
     }
 }
 
-impl<P, S, G> KartalRealPlanner<P, S, G>
+impl<P, S, G> EthTxExecutorRealPlanner<P, S, G>
 where
     S: PreSubmitSimulator,
     G: GasRankProvider,
@@ -230,11 +231,11 @@ where
                 max_fee_per_gas: decimal_gwei_to_wei_string(fee.max_fee_per_gas_gwei),
                 max_priority_fee_per_gas: decimal_gwei_to_wei_string(fee.priority_fee_gwei),
                 nonce: None,
-                bribe: Some(KartalBribeRequest {
+                bribe: Some(EthTxBribeRequest {
                     priority_fee_per_gas: decimal_gwei_to_wei_string(fee.priority_fee_gwei),
                     max_fee_per_gas: Some(decimal_gwei_to_wei_string(fee.max_fee_per_gas_gwei)),
                 }),
-                simulation: Some(KartalSimulationReference {
+                simulation: Some(EthTxSimulationReference {
                     block_number: simulation.block_number,
                     block_hash: simulation.block_hash.clone(),
                     state_root: simulation.state_root.clone(),
@@ -315,7 +316,7 @@ fn planner_error(error: LivePrioritySellPlannerError) -> AlphaCoreError {
     AlphaCoreError::Execution(error.to_string())
 }
 
-// Kartal policy evaluates and signs the inner DirectRawTransactionRequest;
+// ETH tx executor policy evaluates and signs the inner DirectRawTransactionRequest;
 // submission_policy only selects the transport/order route.
 fn transaction_wire_protocol(_submission_policy: &TxSubmissionPolicy) -> &'static str {
     ETH_UNSIGNED_TX_WIRE_PROTOCOL
@@ -323,7 +324,7 @@ fn transaction_wire_protocol(_submission_policy: &TxSubmissionPolicy) -> &'stati
 
 fn executor_boundary(submission_policy: &TxSubmissionPolicy) -> &'static str {
     match submission_policy {
-        TxSubmissionPolicy::PublicRpcBroadcast => "kartal_eth_tx_executor",
+        TxSubmissionPolicy::PublicRpcBroadcast => "eth_tx_executor",
     }
 }
 
@@ -639,9 +640,9 @@ fn parse_u256_quantity(value: &str, label: &str) -> eth_alpha_core::error::Resul
     }
 }
 
-pub(super) async fn build_kartal_real_adapter(
+pub(super) async fn build_eth_tx_executor_real_adapter(
     args: &RealExecutionArgs,
-    preflight: KartalRealPreflight,
+    preflight: EthTxExecutorRealPreflight,
     chain_server_url: String,
     store: PostgresTradingStore,
     run_id: String,
@@ -656,6 +657,16 @@ pub(super) async fn build_kartal_real_adapter(
         parse_live_real_address(&args.live_real_vault_address, "--live-real-vault-address")?;
     let pre_submit_simulator =
         ChainServerLivePreSubmitSimulator::new(chain_server_url.clone(), vault);
+    // Valuation delegate: marks open real positions to market each block by
+    // simulating a sell against exact current block state via chain-server,
+    // identical to the live-backtest valuation. Shares the real loop's
+    // current-block counter so it values at the block the loop is acting on.
+    let position_valuation = LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
+        chain_server_url.clone(),
+        format!("{run_id}-valuation"),
+        0,
+    )?
+    .with_shared_current_block(current_block.clone());
     let gas_rank_provider = MempoolRaceGasRankProvider::new(
         ChainServerGasRankProvider::new(chain_server_url)
             .with_lookback_blocks(gas_policy.gas_rank_lookback_blocks)
@@ -709,7 +720,7 @@ pub(super) async fn build_kartal_real_adapter(
         chain_id: preflight.status.chain_id,
     };
     let bridge = LiveTradingPlannerBridge::new(planner, resolver.clone());
-    let real_planner = KartalRealPlanner {
+    let real_planner = EthTxExecutorRealPlanner {
         sell_planner: bridge,
         resolver,
         simulator: pre_submit_simulator,
@@ -721,12 +732,13 @@ pub(super) async fn build_kartal_real_adapter(
         gas_estimate,
         gas_policy,
     };
-    let kartal = KartalExecutorClient::new(KartalExecutorClientConfig::new(
-        &args.kartal_url,
+    let eth_tx_executor = EthTxExecutorSubmitClient::new(EthTxExecutorSubmitClientConfig::new(
+        &args.eth_tx_executor_url,
         preflight.token.clone(),
     ));
-    let submitter = KartalPolicySubmitter { kartal };
-    let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id);
+    let submitter = EthTxPolicySubmitter { eth_tx_executor };
+    let executor = TxExecutorAdapter::with_order_prefix(real_planner, submitter, run_id)
+        .with_valuation_delegate(position_valuation);
     Ok(Box::new(executor))
 }
 

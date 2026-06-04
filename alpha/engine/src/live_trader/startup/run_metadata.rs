@@ -7,7 +7,7 @@ pub(super) fn live_gas_policy_run_metadata_json(
     execution_mode: TraderExecutionMode,
 ) -> Value {
     json!({
-        "mode": if execution_mode.uses_kartal() { "kartal-real" } else { "chain-sim-shadow" },
+        "mode": if execution_mode.uses_eth_tx_executor() { "eth-tx-real" } else { "chain-sim-shadow" },
         "required_gas_rank_source": &policy.required_gas_rank_source,
         "gas_rank_lookback_blocks": policy.gas_rank_lookback_blocks,
         "gas_rank_priority_tie_breaker_gwei": policy.gas_rank_priority_tie_breaker_gwei.to_string(),

@@ -46,7 +46,7 @@ pub struct CalibrationCaseInput {
 }
 
 fn default_suite_name() -> String {
-    "kartal-calibration".to_string()
+    "eth-tx-calibration".to_string()
 }
 
 fn default_case_name() -> String {

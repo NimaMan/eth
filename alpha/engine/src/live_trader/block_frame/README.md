@@ -23,8 +23,8 @@ reth/node publishes new execution head N
   -> Alpha live backtest / Alpha real consume next frame N
   -> strategies make decisions pinned to N/hash
   -> chain-sim mode settles via chain-server simulation
-  -> real mode builds tx plan and submits through Kartal
-  -> Kartal validates/signs/broadcasts according to policy
+  -> real mode builds tx plan and submits through ETH tx executor
+  -> ETH tx executor validates/signs/broadcasts according to policy
 ```
 
 Alpha must only treat block `N` as strategy-visible after that upstream sequence

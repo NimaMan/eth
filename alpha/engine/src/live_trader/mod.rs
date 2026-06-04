@@ -83,7 +83,7 @@ use loop_control::{
 };
 use manual_close::{default_manual_close_limit, process_manual_close_requests};
 use poll_error::handle_poll_error;
-use real_execution::preflight_kartal_real;
+use real_execution::preflight_eth_tx_executor_real;
 use restored_state::restore_runtime_state;
 use risk_annotation::{annotate_signal_risk_event, prime_projected_mempool_entry_pool};
 use run_metadata::live_gas_policy_run_metadata_json;
@@ -134,7 +134,7 @@ async fn run(
             signal_limit
         ));
     }
-    if execution_mode.uses_kartal() != real_args.is_some() {
+    if execution_mode.uses_eth_tx_executor() != real_args.is_some() {
         return Err(eyre!(
             "{} internal configuration mismatch: execution mode {} and real args presence disagree",
             runner_name,
@@ -144,14 +144,16 @@ async fn run(
     let strategy_specs = build_strategy_specs(&args, execution_mode)?;
     let mut live_gas_policy = load_live_real_gas_policy(&shared_config)?;
     live_gas_policy.mempool_pre_mine_gas_rank_policy = StrategyGasRankPolicy::mempool_race_only();
-    let live_real_gas_policy = if execution_mode.uses_kartal() {
+    let live_real_gas_policy = if execution_mode.uses_eth_tx_executor() {
         Some(live_gas_policy.clone())
     } else {
         None
     };
-    let kartal_real_preflight = match real_args.as_ref() {
+    let eth_tx_executor_real_preflight = match real_args.as_ref() {
         None => None,
-        Some(real_args) => Some(preflight_kartal_real(real_args, &args, &strategy_specs).await?),
+        Some(real_args) => {
+            Some(preflight_eth_tx_executor_real(real_args, &args, &strategy_specs).await?)
+        }
     };
     let token_server_url = chain_server_url_from_config(&shared_config)?;
     let preflight_client = TokenServerClient::new(token_server_url.clone());
@@ -168,7 +170,7 @@ async fn run(
         .iter()
         .map(resolve_entry_bankroll_wei)
         .collect::<Result<Vec<_>>>()?;
-    if execution_mode.uses_kartal() && !args.disable_entry {
+    if execution_mode.uses_eth_tx_executor() && !args.disable_entry {
         validate_live_real_entry_bankrolls(
             runner_name,
             &strategy_specs,
@@ -267,7 +269,7 @@ async fn run(
         run_id: run_id.clone(),
         live_gas_policy: live_gas_policy.clone(),
         live_real_gas_policy: live_real_gas_policy.clone(),
-        kartal_real_preflight,
+        eth_tx_executor_real_preflight,
     })
     .await?;
     let adapter_current_block = execution_stack.adapter_current_block.clone();
@@ -365,6 +367,7 @@ async fn run(
             frame_pool_count,
             polled_pools,
             polled_pool_wires,
+            updated_tokens,
         } = match input_result {
             Ok(result) => result,
             Err(error) => {
@@ -429,6 +432,21 @@ async fn run(
         }
         let live_ready = status.progress.status == "live";
         let suppress_events = !args.replay_current && !live_ready;
+
+        // Operator buy-halt: re-read the durable per-strategy pause state from
+        // `strategy_buy_controls` every poll and apply it to the engine BEFORE
+        // any pool/mempool buy decisions are processed below. A read failure is
+        // non-fatal (warn and treat as "nothing paused") so a transient DB blip
+        // never silently freezes trading. Sells/exits/manual closes are never
+        // gated by this set.
+        let paused_buy_strategies = match store.load_paused_buy_strategies().await {
+            Ok(strategies) => strategies,
+            Err(error) => {
+                warn!(error = %error, "failed to load paused buy strategies");
+                Vec::new()
+            }
+        };
+        engine.set_halt_buys_strategies(paused_buy_strategies.clone());
 
         let mut market_events = 0usize;
         let mut risk_events = 0usize;
@@ -653,26 +671,24 @@ async fn run(
             }
         }
 
-        if execution_mode == TraderExecutionMode::ChainSim {
-            if !suppress_events && (!first_poll || args.replay_current) {
-                match process_manual_close_requests(
-                    &store,
-                    &mut engine,
-                    manual_close_vault_address,
-                    status.progress.current_block,
-                    default_manual_close_limit(),
-                )
-                .await
-                {
-                    Ok(summary) => {
-                        manual_close_requests += summary.claimed;
-                        manual_close_failed += summary.failed;
-                        manual_close_reports += summary.reports;
-                        reports += summary.reports;
-                    }
-                    Err(error) => {
-                        warn!(error = %error, "manual close request processing failed");
-                    }
+        if !suppress_events && (!first_poll || args.replay_current) {
+            match process_manual_close_requests(
+                &store,
+                &mut engine,
+                manual_close_vault_address,
+                status.progress.current_block,
+                default_manual_close_limit(),
+            )
+            .await
+            {
+                Ok(summary) => {
+                    manual_close_requests += summary.claimed;
+                    manual_close_failed += summary.failed;
+                    manual_close_reports += summary.reports;
+                    reports += summary.reports;
+                }
+                Err(error) => {
+                    warn!(error = %error, "manual close request processing failed");
                 }
             }
         }
@@ -694,6 +710,73 @@ async fn run(
         .await?;
         position_monitor_events += monitor_summary.position_monitor_events;
         reports += monitor_summary.reports;
+
+        // Real-execution valuation parity: the live-backtest values open
+        // positions on each PoolUpdated event, but the real runner receives
+        // almost none, so it would never mark positions to market. Once per
+        // block, value all open real positions against the cached pool
+        // snapshots via the adapter's chain-server sell simulation. ChainSim is
+        // excluded because it already values on its PoolUpdated stream.
+        if execution_mode == TraderExecutionMode::EthTxExecutorReal && !suppress_events {
+            if let Some(block_number) = status.progress.current_block {
+                let pools_snapshot = {
+                    let guard = pool_updates.lock().expect("pool lock");
+                    guard.clone()
+                };
+                match engine
+                    .value_open_positions(block_number, &pools_snapshot)
+                    .await
+                {
+                    Ok(valued) => {
+                        if valued > 0 {
+                            tracing::debug!(
+                                block_number,
+                                valued,
+                                "valued open real positions for snapshot parity"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        warn!(error = %error, block_number, "failed to value open real positions");
+                    }
+                }
+            }
+        }
+
+        // Live-backtest valuation parity for token-affecting blocks. The backtest
+        // values positions on PoolUpdated events, but a holder-balance drain (or
+        // any token/control activity that does not move pool reserves) produces no
+        // PoolUpdated, so the position is never re-valued at that block. Revalue
+        // any held position whose token had activity this block (token-scoped, so
+        // normal blocks add no extra snapshots).
+        if execution_mode == TraderExecutionMode::ChainSim
+            && !suppress_events
+            && !updated_tokens.is_empty()
+        {
+            if let Some(block_number) = status.progress.current_block {
+                let pools_snapshot = {
+                    let guard = pool_updates.lock().expect("pool lock");
+                    guard.clone()
+                };
+                match engine
+                    .value_open_positions_for_tokens(block_number, &updated_tokens, &pools_snapshot)
+                    .await
+                {
+                    Ok(valued) => {
+                        if valued > 0 {
+                            tracing::debug!(
+                                block_number,
+                                valued,
+                                "valued open positions for token-affecting block parity"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        warn!(error = %error, block_number, "failed to value token-affected positions");
+                    }
+                }
+            }
+        }
 
         if first_poll && !args.replay_current {
             info!(
@@ -742,6 +825,7 @@ async fn run(
             observation_strategy_name: &observation_strategy_name,
             positions: engine.portfolio().active_position_count(),
             entry_enabled: !args.disable_entry,
+            paused_buy_strategies: &paused_buy_strategies,
             single_max_entry_pools,
             single_entry_bankroll_eth: &single_entry_bankroll_eth,
             single_entry_bankroll_wei,

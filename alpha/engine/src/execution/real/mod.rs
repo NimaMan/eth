@@ -3,7 +3,7 @@
 //! The engine does not build live transaction calldata directly. It asks a
 //! live transaction planner, owned by `alpha/live/trading`, to turn an approved
 //! `OrderIntent` into a `LiveTraderTxSignal`. The adapter then submits that
-//! signal through Kartal's ETH tx executor endpoint and maps the response back
+//! signal through ETH tx executor's ETH tx executor endpoint and maps the response back
 //! into an `ExecutionReport`, so the existing position store path remains the
 //! single owner of position state transitions.
 
@@ -18,13 +18,14 @@ use eth_alpha_core::{
     order::OrderIntent,
 };
 use eth_live_trading::{
-    KartalExecutorClient, KartalSubmitDirectRawResult, KartalSubmitTransactionResult,
+    EthTxExecutorSubmitClient, EthTxSubmitDirectRawResult, EthTxSubmitTransactionResult,
     LivePrioritySellPlannerInput, LiveTraderTxSignal, PrioritySellPlanner,
     PrioritySellPlannerOutcome,
 };
 use serde_json::Value;
 
-use crate::EngineExecutionAdapter;
+use crate::execution::LiveChainSimExecutionAdapter;
+use crate::{EngineExecutionAdapter, PositionValueSimulation};
 
 #[async_trait]
 pub trait LiveTxPlanner: Send + Sync {
@@ -58,8 +59,8 @@ pub struct LiveTxSubmissionResult {
     pub bundle_tail_after_tx_hash: Option<String>,
 }
 
-impl From<KartalSubmitTransactionResult> for LiveTxSubmissionResult {
-    fn from(result: KartalSubmitTransactionResult) -> Self {
+impl From<EthTxSubmitTransactionResult> for LiveTxSubmissionResult {
+    fn from(result: EthTxSubmitTransactionResult) -> Self {
         Self {
             attempt_id: result.attempt_id,
             status: result.status,
@@ -73,8 +74,8 @@ impl From<KartalSubmitTransactionResult> for LiveTxSubmissionResult {
     }
 }
 
-impl From<KartalSubmitDirectRawResult> for LiveTxSubmissionResult {
-    fn from(result: KartalSubmitDirectRawResult) -> Self {
+impl From<EthTxSubmitDirectRawResult> for LiveTxSubmissionResult {
+    fn from(result: EthTxSubmitDirectRawResult) -> Self {
         Self {
             attempt_id: result.attempt_id,
             status: result.status,
@@ -155,12 +156,12 @@ where
 }
 
 #[async_trait]
-impl LiveTxSubmitter for KartalExecutorClient {
+impl LiveTxSubmitter for EthTxExecutorSubmitClient {
     async fn submit_signal(
         &self,
         signal: &LiveTraderTxSignal,
     ) -> std::result::Result<LiveTxSubmissionResult, String> {
-        KartalExecutorClient::submit_signal(self, signal)
+        EthTxExecutorSubmitClient::submit_signal(self, signal)
             .await
             .map(Into::into)
             .map_err(|error| error.to_string())
@@ -172,6 +173,14 @@ pub struct TxExecutorAdapter<P, S> {
     submitter: S,
     order_prefix: String,
     next_order_id: AtomicU64,
+    /// Optional chain-server-backed valuation delegate. Real execution submits
+    /// orders through ETH tx executor, but it has no native way to mark an open position
+    /// to market. To keep parity with the live-backtest path, the real adapter
+    /// delegates `simulate_position_value` to a `LiveChainSimExecutionAdapter`
+    /// pointed at the same chain-server, which simulates a sell of the held
+    /// position against exact current block state. Without this the engine
+    /// default returns `None` and real positions never get valued.
+    valuation: Option<LiveChainSimExecutionAdapter>,
 }
 
 impl<P, S> TxExecutorAdapter<P, S> {
@@ -186,7 +195,13 @@ impl<P, S> TxExecutorAdapter<P, S> {
             submitter,
             order_prefix: order_prefix.into(),
             next_order_id: AtomicU64::new(0),
+            valuation: None,
         }
+    }
+
+    pub fn with_valuation_delegate(mut self, valuation: LiveChainSimExecutionAdapter) -> Self {
+        self.valuation = Some(valuation);
+        self
     }
 
     fn next_order_id(&self) -> OrderId {
@@ -241,22 +256,33 @@ where
             Err(error) => {
                 return Ok(failed_report(
                     order_id,
-                    format!("Kartal tx executor submission failed: {error}"),
+                    format!("ETH tx executor tx executor submission failed: {error}"),
                     observed_block,
                 ));
             }
         };
 
-        Ok(execution_report_from_kartal_result(
+        Ok(execution_report_from_eth_tx_executor_result(
             order_id,
             result,
             observed_block,
             &signal,
         ))
     }
+
+    async fn simulate_position_value(
+        &self,
+        position: &eth_alpha_core::position::Position,
+        pool: &eth_alpha_core::market::PoolSnapshot,
+    ) -> Result<Option<PositionValueSimulation>> {
+        match &self.valuation {
+            Some(valuation) => valuation.simulate_position_value(position, pool).await,
+            None => Ok(None),
+        }
+    }
 }
 
-fn execution_report_from_kartal_result(
+fn execution_report_from_eth_tx_executor_result(
     order_id: OrderId,
     result: LiveTxSubmissionResult,
     observed_block: Option<BlockNumber>,
@@ -394,7 +420,9 @@ fn parse_tx_hash(value: Option<&str>) -> (Option<TxHash>, Option<String>) {
         Ok(hash) => (Some(hash), None),
         Err(error) => (
             None,
-            Some(format!("invalid tx hash from Kartal tx executor: {error}")),
+            Some(format!(
+                "invalid tx hash from ETH tx executor tx executor: {error}"
+            )),
         ),
     }
 }

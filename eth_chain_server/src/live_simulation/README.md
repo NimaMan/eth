@@ -7,7 +7,7 @@ Boundary:
 
 - chain-server owns live state, `LiveTxSimulator`, and exact block simulation
   sessions;
-- Alpha owns strategy decisions, tx planning, gas policy, and Kartal
+- Alpha owns strategy decisions, tx planning, gas policy, and ETH tx executor
   submission.
 
 Live-tail data flow:

@@ -12,7 +12,7 @@ fee candidates would likely land early enough based on recent mined blocks?
 
 The crate does not choose whether a strategy should trade. It produces rank
 evidence that Alpha can combine with exact route simulation, strategy urgency,
-and value caps before submitting through Kartal.
+and value caps before submitting through the ETH tx executor.
 
 ## Bribe Definition
 
@@ -21,8 +21,8 @@ through `max_priority_fee_per_gas`. The base fee is mandatory execution cost,
 not bribe. Direct `block.coinbase` transfers, bundles, and private relay
 payments are not part of the current `eth_unsigned_tx` path.
 
-Kartal and `tx_executor` do not discover the bribe. Alpha selects the priority
-fee first, includes it in the transaction request, and also mirrors it in the
+The ETH tx executor does not discover the bribe. Alpha selects the priority fee
+first, includes it in the transaction request, and also mirrors it in the
 request `bribe` object for auditability.
 
 ## Owns
@@ -54,7 +54,7 @@ Alpha live strategy decision
   -> /api/v1/eth/alpha/gas-rank/estimate
   -> eth_block_tx_rank mined-block rank evidence
   -> alpha/live/trading tx_prep value-cap and source gate
-  -> Kartal direct-raw request
+  -> ETH tx executor direct-raw request
   -> tx_executor validation/sign/dry-run-or-broadcast
 ```
 
@@ -174,7 +174,7 @@ selected, rejected, and mined outcomes.
 
 - `../live/trading/README.md` documents how the live planner consumes gas-rank
   evidence, applies exact deployed V2 vault simulation, and submits through
-  Kartal.
+  the ETH tx executor.
 - `../live/readiness/gates/production_gas_rank/` tracks the production readiness
   gate for mined gas-rank evidence.
 

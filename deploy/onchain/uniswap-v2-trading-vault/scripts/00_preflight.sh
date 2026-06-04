@@ -28,7 +28,7 @@ test -f tx_simulator/src/tx_builders/protocols/uniswap_v2_trading_vault.rs
 test -f alpha/live/trading/src/planner/route_builder.rs
 test -f deploy/onchain/uniswap-v2-trading-vault/config/mainnet.toml
 test -f deploy/onchain/uniswap-v2-trading-vault/config/gas-policy.mainnet.toml
-test -f deploy/onchain/uniswap-v2-trading-vault/config/kartal-policy.mainnet.json
+test -f deploy/onchain/uniswap-v2-trading-vault/config/eth-tx-policy.mainnet.json
 
 if rg -n "PRIVATE_KEY|API_TOKEN|SECRET|PASSWORD" deploy/onchain/uniswap-v2-trading-vault/config; then
   echo "config references secret env names only; confirm no secret values are committed" >&2

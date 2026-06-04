@@ -92,6 +92,20 @@ impl eth_live_trading::PrioritySellPlanner for RevertingPrioritySellPlanner {
     }
 }
 
+struct CannotSellPrioritySellPlanner;
+
+#[async_trait]
+impl eth_live_trading::PrioritySellPlanner for CannotSellPrioritySellPlanner {
+    async fn plan_priority_sell(
+        &self,
+        _input: LivePrioritySellPlannerInput,
+    ) -> std::result::Result<PrioritySellPlannerOutcome, LivePrioritySellPlannerError> {
+        Err(LivePrioritySellPlannerError::InvalidInput(
+            "pool snapshot says can_sell=false".to_string(),
+        ))
+    }
+}
+
 struct FixedPlanningInputResolver {
     input: LivePrioritySellPlannerInput,
 }
@@ -252,8 +266,8 @@ fn planning_input(intent: OrderIntent) -> LivePrioritySellPlannerInput {
     }
 }
 
-fn submit_result(status: &str, error: Option<&str>) -> KartalSubmitDirectRawResult {
-    KartalSubmitDirectRawResult {
+fn submit_result(status: &str, error: Option<&str>) -> EthTxSubmitDirectRawResult {
+    EthTxSubmitDirectRawResult {
         attempt_id: "attempt-1".to_string(),
         status: status.to_string(),
         tx_hash: Some(format!("0x{}", "11".repeat(32))),
@@ -313,6 +327,26 @@ async fn bridge_turns_reverting_pre_submit_simulation_into_cancelled_error() {
             assert!(reason.contains("rejected before broadcast"));
         }
         other => panic!("expected cancelled execution, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn bridge_surfaces_invalid_planner_input_as_execution_error() {
+    let bridge = LiveTradingPlannerBridge::new(
+        CannotSellPrioritySellPlanner,
+        FixedPlanningInputResolver {
+            input: planning_input(intent()),
+        },
+    );
+
+    let error = bridge.prepare_signal(&intent()).await.unwrap_err();
+
+    match error {
+        AlphaCoreError::Execution(reason) => {
+            assert!(reason.contains("invalid planner input"));
+            assert!(reason.contains("can_sell=false"));
+        }
+        other => panic!("expected execution error, got {other:?}"),
     }
 }
 

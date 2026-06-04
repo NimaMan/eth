@@ -1,14 +1,14 @@
 //! Live trading policy scaffolding.
 //!
-//! This crate owns live strategy policy and the guarded handoff to Kartal.
+//! This crate owns live strategy policy and the guarded handoff to ETH tx executor.
 //! It owns live transaction preparation and audit metadata, but it does not
 //! sign, reserve nonces, or broadcast transactions locally.
 
 pub const ETH_UNSIGNED_TX_WIRE_PROTOCOL: &str = "eth_unsigned_tx";
 
 pub mod calibration;
-pub mod kartal;
-pub mod kartal_executor;
+pub mod eth_tx_executor;
+pub mod eth_tx_submission;
 pub mod lp_approval_exit;
 pub mod planner;
 pub mod tx_prep;
@@ -20,15 +20,15 @@ pub use calibration::{
     CalibrationSummary, CalibrationVerdictKind, ExpectedCalibrationOutcome,
     PlannerCalibrationFixtureConfig, PlannerCalibrationFixtureError, PlannerCalibrationRoute,
 };
-pub use kartal::{
-    KartalClient, KartalClientConfig, KartalClientError, KartalDailySpendStatus,
-    KartalEthTxExecutorStatus, KartalEthTxPolicyStatus, KartalPolicyDecision,
-    KartalPolicyDecisionList, KartalServerError, KartalStatusBroadcastMode,
+pub use eth_tx_executor::{
+    EthTxDailySpendStatus, EthTxExecutorBroadcastMode, EthTxExecutorClient,
+    EthTxExecutorClientConfig, EthTxExecutorClientError, EthTxExecutorServerError,
+    EthTxExecutorStatus, EthTxPolicyDecision, EthTxPolicyDecisionList, EthTxPolicyStatus,
 };
-pub use kartal_executor::{
-    KartalBribeRequest, KartalExecutorClient, KartalExecutorClientConfig,
-    KartalExecutorClientError, KartalSimulationReference, KartalSubmitDirectRawResult,
-    KartalSubmitTransactionRequest, KartalSubmitTransactionResult, LiveDirectRawTransactionRequest,
+pub use eth_tx_submission::{
+    EthTxBribeRequest, EthTxExecutorSubmitClient, EthTxExecutorSubmitClientConfig,
+    EthTxExecutorSubmitClientError, EthTxSimulationReference, EthTxSubmitDirectRawResult,
+    EthTxSubmitTransactionRequest, EthTxSubmitTransactionResult, LiveDirectRawTransactionRequest,
     LiveTraderTxSignal, LiveTxExecution, TxSubmissionPolicy,
 };
 pub use lp_approval_exit::{

@@ -27,8 +27,8 @@ broadcast.
 | Allowance lifecycle | Tests prove no standing unsafe allowance remains after successful paths and failures revert allowance state. |
 | Gas benchmark | Local and pinned fork gas reports compare vault route costs against direct execution. |
 | Calldata evidence | Representative buy and emergency-sell calldata are generated from the same ABI used by tx prep. |
-| Kartal policy | Target, selector, from address, value cap, gas cap, fee cap, simulation freshness, and daily cap are recorded. |
-| Dry-run evidence | Kartal dry-run evidence is stored in the run folder before live broadcast is enabled. |
+| ETH tx executor policy | Target, selector, from address, value cap, gas cap, fee cap, simulation freshness, and daily cap are recorded. |
+| Dry-run evidence | ETH tx executor dry-run evidence is stored in the run folder before live broadcast is enabled. |
 | Deploy fail-closed | Deploy script refuses to broadcast unless `CONFIRM_DEPLOY=1` and signer inputs are explicit. |
 | Verification and smoke | Etherscan verification output and immutable readback are stored after deploy. |
 | Signoff | Operator and reviewer signoff is recorded before public broadcast or live trading enablement. |
@@ -45,8 +45,8 @@ broadcast.
 | Permit2 exact lifecycle | Sell path grants exact ERC20 allowance to Permit2 and exact Permit2 allowance to Universal Router, then clears both after success. |
 | Recipient policy | Buy output token stays in the vault; emergency-sell native ETH is paid directly to treasury. |
 | Route scope | Candidate supports only audited exact-input single-hop route shape. Dynamic path discovery, unknown hooks, and generic router calldata are out of scope. |
-| Current-state simulation freshness | The final Kartal request must reference a simulation block within the configured freshness window. |
-| V4 target allowlist | Kartal and signer policies must allow only the deployed V4 vault target and V4 trading selectors. Rescue selectors are excluded from live trading policy. |
+| Current-state simulation freshness | The final ETH tx executor request must reference a simulation block within the configured freshness window. |
+| V4 target allowlist | ETH tx executor and signer policies must allow only the deployed V4 vault target and V4 trading selectors. Rescue selectors are excluded from live trading policy. |
 | Nonce-bound address check | If deployment uses a predicted address, the deployer nonce must be rechecked immediately before broadcast and calldata regenerated if it changed. |
 | Bribe policy | Only EIP-1559 priority fee is allowed. Direct coinbase transfers and private bundle payments require a separate protocol and are not part of this vault. |
 
@@ -62,8 +62,8 @@ Evidence already present:
   `calldata.json`;
 - pinned fork and tx_simulator comparison: `fork-rehearsal.json`;
 - representative buy and emergency-sell calldata: `calldata.json`;
-- Kartal policy-rejection dry-run against current V2 allowlist:
-  `kartal-dry-run.json`;
+- ETH tx executor policy-rejection dry-run against current V2 allowlist:
+  `eth-tx-executor-dry-run.json`;
 - deploy fail-closed proof: `deploy-fail-closed.txt`.
 
 Current blockers:
@@ -71,9 +71,9 @@ Current blockers:
 - upstream interface hash/version signoff is still partial;
 - mainnet deployment has not been broadcast;
 - post-deploy verification and smoke evidence do not exist yet;
-- Kartal and signer policies have not been switched to an actual deployed V4
+- ETH tx executor and signer policies have not been switched to an actual deployed V4
   target;
-- accepted Kartal V4 dry-run does not exist yet;
+- accepted ETH tx executor V4 dry-run does not exist yet;
 - operator/reviewer signoff remains blocked.
 
 ## Final Go/No-Go Checklist
@@ -92,8 +92,8 @@ Immediately after deploy:
 1. Store deploy output and receipt.
 2. Run source verification.
 3. Run post-deploy immutable smoke checks.
-4. Update Kartal and signer allowlists to the deployed V4 vault address and
+4. Update ETH tx executor and signer allowlists to the deployed V4 vault address and
    selectors `0x1c2ecb7f` and `0x3a832d08`.
-5. Rerun Kartal with `EXPECT=accepted` and store the report.
+5. Rerun the ETH tx executor dry-run with `EXPECT=accepted` and store the report.
 6. Keep live trading disabled until receipt reconciliation and live planner
    wiring are signed off.

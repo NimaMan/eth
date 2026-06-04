@@ -8,6 +8,6 @@ Required evidence files:
 - `artifact-hashes.json`
 - `fork-rehearsal.json`
 - `calldata.json`
-- `kartal-dry-run.json`
+- `eth-tx-executor-dry-run.json`
 - `gas-snapshot.txt`
 - `signoff.json`

@@ -1,1 +1,1 @@
-{"schema":"audit_findings_jsonl_v1","type":"deployment_note","id":"UV4TV-2026-05-19-SCAFFOLD","severity":"info","status":"open","summary":"V4 trading vault deployment is blocked until implementation, simulator evidence, gas review, and Kartal policy are complete."}
+{"schema":"audit_findings_jsonl_v1","type":"deployment_note","id":"UV4TV-2026-05-19-SCAFFOLD","severity":"info","status":"open","summary":"V4 trading vault deployment is blocked until implementation, simulator evidence, gas review, and ETH tx executor policy are complete."}

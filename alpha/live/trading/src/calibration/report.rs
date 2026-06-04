@@ -4,16 +4,16 @@ use super::{
     CalibrationCaseInput, CalibrationCaseVerdict, CalibrationOverallVerdict,
     ExpectedCalibrationOutcome,
 };
-use crate::kartal::{
-    KartalEthTxExecutorStatus, KartalPolicyDecision, KartalServerError, KartalSubmitDirectRawResult,
+use crate::eth_tx_executor::{
+    EthTxExecutorServerError, EthTxExecutorStatus, EthTxPolicyDecision, EthTxSubmitDirectRawResult,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CalibrationReport {
     pub suite_name: String,
     pub started_at_unix_seconds: u64,
-    pub kartal_base_url: String,
-    pub status: Option<KartalEthTxExecutorStatus>,
+    pub eth_tx_executor_base_url: String,
+    pub status: Option<EthTxExecutorStatus>,
     pub preflight_issues: Vec<String>,
     pub cases: Vec<CalibrationCaseReport>,
     pub summary: CalibrationSummary,
@@ -57,7 +57,7 @@ pub struct CalibrationCaseReport {
     pub attempt_id: String,
     pub expect: ExpectedCalibrationOutcome,
     pub submit: CalibrationSubmitReport,
-    pub policy_decisions: Vec<KartalPolicyDecision>,
+    pub policy_decisions: Vec<EthTxPolicyDecision>,
     pub verdict: CalibrationCaseVerdict,
 }
 
@@ -83,14 +83,14 @@ impl CalibrationCaseReport {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CalibrationSubmitReport {
-    Success { result: KartalSubmitDirectRawResult },
+    Success { result: EthTxSubmitDirectRawResult },
     ServerError { status: u16, body: String },
     ClientError { error: String },
     Skipped { reason: String },
 }
 
-impl From<KartalServerError> for CalibrationSubmitReport {
-    fn from(error: KartalServerError) -> Self {
+impl From<EthTxExecutorServerError> for CalibrationSubmitReport {
+    fn from(error: EthTxExecutorServerError) -> Self {
         Self::ServerError {
             status: error.status,
             body: error.body,

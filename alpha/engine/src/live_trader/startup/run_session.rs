@@ -199,7 +199,7 @@ pub(super) fn resolve_alpha_trader_run_session(input: RunSessionInput<'_>) -> Re
 fn semantic_run_base(execution_mode: TraderExecutionMode, strategy_key: &str) -> String {
     let suffix = match execution_mode {
         TraderExecutionMode::ChainSim => "chain-sim-block-frame",
-        TraderExecutionMode::KartalReal => "live-real-broadcast",
+        TraderExecutionMode::EthTxExecutorReal => "live-real-broadcast",
     };
     format!("{}-{suffix}", sanitize_path_segment(strategy_key))
 }
@@ -262,7 +262,7 @@ mod tests {
     fn semantic_real_run_id_uses_strategy_and_mode() {
         assert_eq!(
             semantic_run_base(
-                TraderExecutionMode::KartalReal,
+                TraderExecutionMode::EthTxExecutorReal,
                 "alpha11-univ2-lp30-pool-update-block-hold16"
             ),
             "alpha11-univ2-lp30-pool-update-block-hold16-live-real-broadcast"

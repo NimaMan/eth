@@ -8,19 +8,19 @@ use super::{
     CalibrationRunConfig, CalibrationSubmitReport, CalibrationSuiteInput, CalibrationSummary,
     ExpectedCalibrationOutcome,
 };
-use crate::kartal::{
-    KartalClient, KartalClientConfig, KartalClientError, KartalEthTxExecutorStatus,
-    KartalPolicyDecision, KartalServerError,
+use crate::eth_tx_executor::{
+    EthTxExecutorClient, EthTxExecutorClientConfig, EthTxExecutorClientError,
+    EthTxExecutorServerError, EthTxExecutorStatus, EthTxPolicyDecision,
 };
 
 pub async fn run_calibration(
     config: CalibrationRunConfig,
     input: CalibrationInputFile,
     default_expect: ExpectedCalibrationOutcome,
-) -> Result<CalibrationReport, KartalClientError> {
+) -> Result<CalibrationReport, EthTxExecutorClientError> {
     let suite = input.into_suite(default_expect);
-    let client = KartalClient::new(KartalClientConfig::new(
-        config.kartal_base_url.clone(),
+    let client = EthTxExecutorClient::new(EthTxExecutorClientConfig::new(
+        config.eth_tx_executor_base_url.clone(),
         config.bearer_token.clone(),
     ));
     run_calibration_with_client(config, suite, client).await
@@ -29,8 +29,8 @@ pub async fn run_calibration(
 async fn run_calibration_with_client(
     config: CalibrationRunConfig,
     suite: CalibrationSuiteInput,
-    client: KartalClient,
-) -> Result<CalibrationReport, KartalClientError> {
+    client: EthTxExecutorClient,
+) -> Result<CalibrationReport, EthTxExecutorClientError> {
     let started_at_unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -63,7 +63,7 @@ async fn run_calibration_with_client(
     Ok(CalibrationReport {
         suite_name: suite.name,
         started_at_unix_seconds,
-        kartal_base_url: config.kartal_base_url,
+        eth_tx_executor_base_url: config.eth_tx_executor_base_url,
         status: Some(status),
         preflight_issues,
         cases,
@@ -72,7 +72,7 @@ async fn run_calibration_with_client(
 }
 
 async fn run_case(
-    client: &KartalClient,
+    client: &EthTxExecutorClient,
     config: &CalibrationRunConfig,
     case: CalibrationCaseInput,
 ) -> CalibrationCaseReport {
@@ -84,7 +84,7 @@ async fn run_case(
 
     let submit = match client.submit_direct_raw(&case.request).await {
         Ok(result) => CalibrationSubmitReport::Success { result },
-        Err(KartalClientError::Server(error)) => CalibrationSubmitReport::from(error),
+        Err(EthTxExecutorClientError::Server(error)) => CalibrationSubmitReport::from(error),
         Err(error) => CalibrationSubmitReport::ClientError {
             error: error.to_string(),
         },
@@ -110,19 +110,19 @@ async fn run_case(
     }
 }
 
-fn preflight_issues(status: &KartalEthTxExecutorStatus, require_dry_run: bool) -> Vec<String> {
+fn preflight_issues(status: &EthTxExecutorStatus, require_dry_run: bool) -> Vec<String> {
     let mut issues = Vec::new();
     if require_dry_run && !status.broadcast_mode.is_dry_run() {
         issues.push(format!(
-            "Kartal broadcast_mode is {:?}; calibration requires dry_run",
+            "ETH tx executor broadcast_mode is {:?}; calibration requires dry_run",
             status.broadcast_mode
         ));
     }
     if status.execution_disabled {
-        issues.push("Kartal execution kill switch is active".to_string());
+        issues.push("ETH tx executor execution kill switch is active".to_string());
     }
     if !status.api_token_configured {
-        issues.push("Kartal reports no API token configured".to_string());
+        issues.push("ETH tx executor reports no API token configured".to_string());
     }
     issues
 }
@@ -137,7 +137,7 @@ fn ensure_attempt_id(case: &mut CalibrationCaseInput) {
         .is_none();
     if missing {
         case.request.attempt_id = Some(format!(
-            "kartal-calibration-{}",
+            "eth-tx-calibration-{}",
             stable_request_suffix(&case.name, &case.request.to, &case.request.data)
         ));
     }
@@ -149,7 +149,7 @@ fn refresh_case_simulation_block(case: &mut CalibrationCaseInput, latest_block_n
     }
 }
 
-async fn fetch_latest_block_number(rpc_url: &str) -> Result<u64, KartalClientError> {
+async fn fetch_latest_block_number(rpc_url: &str) -> Result<u64, EthTxExecutorClientError> {
     let response = reqwest::Client::new()
         .post(rpc_url)
         .json(&json!({
@@ -167,7 +167,7 @@ async fn fetch_latest_block_number(rpc_url: &str) -> Result<u64, KartalClientErr
     let block_hex = response.result.trim();
     let block_hex = block_hex.strip_prefix("0x").unwrap_or(block_hex);
     u64::from_str_radix(block_hex, 16).map_err(|error| {
-        KartalClientError::Config(format!(
+        EthTxExecutorClientError::Config(format!(
             "failed to decode eth_blockNumber response {:?}: {error}",
             response.result
         ))
@@ -191,7 +191,7 @@ fn stable_request_suffix(name: &str, to: &str, data: &str) -> u64 {
 fn verdict_for_case(
     expect: &ExpectedCalibrationOutcome,
     submit: &CalibrationSubmitReport,
-    latest_decision: Option<&KartalPolicyDecision>,
+    latest_decision: Option<&EthTxPolicyDecision>,
 ) -> super::CalibrationCaseVerdict {
     match expect {
         ExpectedCalibrationOutcome::PolicyRejected => {
@@ -202,7 +202,7 @@ fn verdict_for_case(
             };
             if decision.is_rejected_or_disabled() {
                 super::CalibrationCaseVerdict::passed(format!(
-                    "Kartal rejected before signing with policy decision {}",
+                    "ETH tx executor rejected before signing with policy decision {}",
                     decision.decision
                 ))
             } else {
@@ -217,7 +217,7 @@ fn verdict_for_case(
                 match latest_decision {
                     Some(decision) if decision.is_accepted() => {
                         super::CalibrationCaseVerdict::passed(
-                            "Kartal accepted policy and tx_executor returned dry_run",
+                            "ETH tx executor accepted policy and tx_executor returned dry_run",
                         )
                     }
                     Some(decision) => super::CalibrationCaseVerdict::failed(format!(
@@ -234,7 +234,7 @@ fn verdict_for_case(
             ),
             CalibrationSubmitReport::ServerError { status, body } => {
                 super::CalibrationCaseVerdict::failed(format!(
-                    "expected dry_run signing but Kartal returned HTTP {status}: {body}"
+                    "expected dry_run signing but ETH tx executor returned HTTP {status}: {body}"
                 ))
             }
             CalibrationSubmitReport::ClientError { error } => {
@@ -250,7 +250,7 @@ fn verdict_for_case(
         },
         ExpectedCalibrationOutcome::AnyDecision => {
             if latest_decision.is_some() {
-                super::CalibrationCaseVerdict::passed("Kartal wrote a policy decision")
+                super::CalibrationCaseVerdict::passed("ETH tx executor wrote a policy decision")
             } else {
                 super::CalibrationCaseVerdict::failed("no policy decision was found")
             }
@@ -259,7 +259,7 @@ fn verdict_for_case(
 }
 
 #[allow(dead_code)]
-fn _server_error_report(error: KartalServerError) -> CalibrationSubmitReport {
+fn _server_error_report(error: EthTxExecutorServerError) -> CalibrationSubmitReport {
     CalibrationSubmitReport::from(error)
 }
 
@@ -268,13 +268,13 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::kartal::{
-        KartalDailySpendStatus, KartalEthTxPolicyStatus, KartalStatusBroadcastMode,
+    use crate::eth_tx_executor::{
+        EthTxDailySpendStatus, EthTxExecutorBroadcastMode, EthTxPolicyStatus,
     };
     use crate::CalibrationVerdictKind;
 
-    fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
-        KartalEthTxExecutorStatus {
+    fn status(mode: EthTxExecutorBroadcastMode) -> EthTxExecutorStatus {
+        EthTxExecutorStatus {
             service: "eth_tx_executor".to_string(),
             enabled: false,
             api_token_configured: true,
@@ -287,7 +287,7 @@ mod tests {
             journal_path: None,
             direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
             submit_endpoint: Some("/eth/tx/submit".to_string()),
-            policy: KartalEthTxPolicyStatus {
+            policy: EthTxPolicyStatus {
                 version: "test".to_string(),
                 allowed_from_count: 0,
                 allowed_target_count: 0,
@@ -299,7 +299,7 @@ mod tests {
                 max_transaction_cost_wei: "0".to_string(),
                 max_daily_cost_wei: "0".to_string(),
                 daily_spend_cap_enabled: Some(false),
-                daily_spend: KartalDailySpendStatus {
+                daily_spend: EthTxDailySpendStatus {
                     spend_day: "2026-05-19".to_string(),
                     spent_wei: "0".to_string(),
                     remaining_daily_cost_wei: None,
@@ -311,7 +311,7 @@ mod tests {
         }
     }
 
-    fn decision(decision: &str) -> KartalPolicyDecision {
+    fn decision(decision: &str) -> EthTxPolicyDecision {
         serde_json::from_value(json!({
             "id": 1,
             "attempt_id": "attempt-1",
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn preflight_rejects_non_dry_run_by_default() {
-        let issues = preflight_issues(&status(KartalStatusBroadcastMode::Broadcast), true);
+        let issues = preflight_issues(&status(EthTxExecutorBroadcastMode::Broadcast), true);
         assert!(issues.iter().any(|issue| issue.contains("dry_run")));
     }
 

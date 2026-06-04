@@ -22,10 +22,7 @@ pub fn tx_prep_metadata(
         json!(ETH_UNSIGNED_TX_WIRE_PROTOCOL),
     );
     map.insert("intent_kind".to_string(), json!("priority_sell"));
-    map.insert(
-        "executor_boundary".to_string(),
-        json!("kartal_eth_tx_executor"),
-    );
+    map.insert("executor_boundary".to_string(), json!("eth_tx_executor"));
     map.insert("tx_prep_version".to_string(), json!(1));
     map.insert("reason".to_string(), json!(plan.reason));
     map.insert("signal_source".to_string(), json!(plan.signal_source));

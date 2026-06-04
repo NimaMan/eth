@@ -7,7 +7,7 @@ use super::{
     PreparedSellRoute, PriorityFeeBudget, StrategyGasRankPolicy,
 };
 use crate::{
-    KartalBribeRequest, KartalSimulationReference, LiveDirectRawTransactionRequest,
+    EthTxBribeRequest, EthTxSimulationReference, LiveDirectRawTransactionRequest,
     LiveTraderTxSignal, PrioritySellPlan, TxSubmissionPolicy,
 };
 
@@ -67,11 +67,11 @@ pub fn build_priority_sell_request(
         max_fee_per_gas: gwei_to_wei_string(gas_plan.max_fee_per_gas_gwei),
         max_priority_fee_per_gas: gwei_to_wei_string(gas_plan.priority_fee_gwei),
         nonce: None,
-        bribe: Some(KartalBribeRequest {
+        bribe: Some(EthTxBribeRequest {
             priority_fee_per_gas: gwei_to_wei_string(gas_plan.priority_fee_gwei),
             max_fee_per_gas: Some(gwei_to_wei_string(gas_plan.max_fee_per_gas_gwei)),
         }),
-        simulation: Some(KartalSimulationReference {
+        simulation: Some(EthTxSimulationReference {
             block_number: simulation.block_number,
             block_hash: simulation.block_hash.clone(),
             state_root: simulation.state_root.clone(),

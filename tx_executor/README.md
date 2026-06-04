@@ -49,9 +49,8 @@ POST /eth/tx/direct-raw
 POST /eth/tx/submit
 ```
 
-Auth uses `Authorization: Bearer <token>`. Prefer
-`ETH_TX_EXECUTOR_API_TOKEN`; `TX_EXECUTOR_API_TOKEN` and `KARTAL_API_TOKEN` are
-accepted only as migration fallbacks.
+Auth uses `Authorization: Bearer <token>`. Configure
+`ETH_TX_EXECUTOR_API_TOKEN`.
 
 ## Config
 

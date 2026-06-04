@@ -21,7 +21,7 @@ pub async fn run_live_real() -> Result<()> {
     run(
         "eth_alpha_live_trader",
         args,
-        TraderExecutionMode::KartalReal,
+        TraderExecutionMode::EthTxExecutorReal,
         Some(real_args),
     )
     .await

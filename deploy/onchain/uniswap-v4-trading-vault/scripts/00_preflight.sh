@@ -28,11 +28,11 @@ test -f solidity/baygus-executor/contracts/test/bench/v4/UniswapV4TradingVaultFo
 test -f tx_simulator/src/tx_builders/protocols/uniswap/v4/trading_vault/mod.rs
 test -f deploy/onchain/uniswap-v4-trading-vault/config/mainnet.candidate.toml
 test -f deploy/onchain/uniswap-v4-trading-vault/config/gas-policy.candidate.toml
-test -f deploy/onchain/uniswap-v4-trading-vault/config/kartal-policy.candidate.json
+test -f deploy/onchain/uniswap-v4-trading-vault/config/eth-tx-policy.candidate.json
 test -f deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json
 
-jq -e '.schema == "uniswap_v4_trading_vault_kartal_policy_candidate_v1"' \
-  deploy/onchain/uniswap-v4-trading-vault/config/kartal-policy.candidate.json >/dev/null
+jq -e '.schema == "uniswap_v4_trading_vault_eth_tx_policy_candidate_v1"' \
+  deploy/onchain/uniswap-v4-trading-vault/config/eth-tx-policy.candidate.json >/dev/null
 jq -e '.schema == "uniswap_v4_route_fixture_v1"' \
   deploy/onchain/uniswap-v4-trading-vault/simulations/route-fixtures/eth-usdc-500-no-hook.json >/dev/null
 

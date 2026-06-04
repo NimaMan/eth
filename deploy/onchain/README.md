@@ -33,7 +33,7 @@ folder records:
 - Foundry and Rust test outputs;
 - fork rehearsal block and gas snapshot;
 - generated buy/sell calldata examples;
-- Kartal dry-run or policy-reject evidence;
+- ETH tx executor dry-run or policy-reject evidence;
 - deployment transaction hash and receipt;
 - verification result;
 - post-deploy smoke result;

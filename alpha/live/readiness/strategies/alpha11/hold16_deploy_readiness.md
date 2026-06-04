@@ -62,21 +62,21 @@ Runtime evidence observed after restart:
 | Real live trader | `eth_alpha_live_trader` running `alpha11-univ2-lp30-pool-update-block-hold16-live-real-public-20260523-152925Z` |
 | Live-backtest status | `live`, no last error |
 | Hold16 validation | Current `0.555 ETH` live-backtest validation passes `50 / 50` checks with `5` trades, `4` closed, `1` open |
-| Kartal broadcast mode | `broadcast` |
-| Kartal signer | Available through `unix_socket` |
-| Kartal caps | max value `0.005 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0075 ETH`; Kartal daily cap disabled |
+| ETH tx executor broadcast mode | `broadcast` |
+| ETH tx executor signer | Available through `unix_socket` |
+| ETH tx executor caps | max value `0.005 ETH`, max gas `300000`, max fee `5 gwei`, max tx cost `0.0075 ETH`; daily cap disabled |
 | Cap/signing preflight | `alpha11-hold16-cap-signing-preflight-20260523T125653Z` returned `dry_run` and tx hash `0x31b17a0d96a93d9a6209a665d67052a0b5d1ed79a3206bf6a40bb0b031d11829` |
 | Max-fee enforcement | `alpha11-hold16-maxfee-5gwei-accepted-20260523T131107Z` returned `dry_run`; `alpha11-hold16-maxfee-6gwei-rejected-20260523T131107Z` was rejected because `max_fee_per_gas` exceeded the `5 gwei` policy cap |
-| Post-signer-restart preflight | `alpha11-hold16-post-signer-restart-preflight-20260523T133813Z` returned `dry_run` after remounting the `/run/kartal` socket into the Kartal container |
-| Public spend accounting | Kartal daily spend budget disabled; Alpha's `0.555 ETH` initial bankroll is the active budget limiter |
-| First real candidate | Pre-submit exact vault calldata simulation reverted at block `25158902`; no tx hash, no Kartal spend, no gas |
+| Post-signer-restart preflight | `alpha11-hold16-post-signer-restart-preflight-20260523T133813Z` returned `dry_run` after remounting the signer socket into the legacy executor container |
+| Public spend accounting | ETH tx executor daily spend budget disabled; Alpha's `0.555 ETH` initial bankroll is the active budget limiter |
+| First real candidate | Pre-submit exact vault calldata simulation reverted at block `25158902`; no tx hash, no executor spend, no gas |
 
 ## Public Hold16 State
 
 Hold16 has been promoted to the guarded broadcast runner. The active
-strategy limiter is the strategy-owned `0.555 ETH` initial bankroll. Kartal
-continues to enforce signer, target, selector, value, gas, fee, simulation
-freshness, and per-transaction cost safety rails.
+strategy limiter is the strategy-owned `0.555 ETH` initial bankroll. The ETH tx
+executor continues to enforce signer, target, selector, value, gas, fee,
+simulation freshness, and per-transaction cost safety rails.
 
 ## Current Blockers
 

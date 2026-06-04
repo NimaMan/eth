@@ -74,8 +74,8 @@ Exit:
 Real execution status: these strategies stop at `StrategyDecision` /
 `OrderIntent`. That is correct. The live-capital gap is not inside strategy
 rules; it is the missing planner that converts an approved sell `OrderIntent`
-into route calldata, simulation evidence, gas-rank candidates, and a Kartal
-direct-raw request.
+into route calldata, simulation evidence, gas-rank candidates, and an ETH tx
+executor direct-raw request.
 
 Planned rule growth:
 

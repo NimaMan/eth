@@ -7,9 +7,9 @@ use eth_alpha_core::{
     position::{Position, PositionKey},
 };
 use eth_live_trading::{
-    KartalDailySpendStatus, KartalEthTxExecutorStatus, KartalEthTxPolicyStatus,
-    KartalStatusBroadcastMode, LivePrioritySellPlannerInput, PlannerTxContext,
-    TxPrepRequestContext, TxSubmissionPolicy, TxSubmissionRoute,
+    EthTxDailySpendStatus, EthTxExecutorBroadcastMode, EthTxExecutorStatus, EthTxPolicyStatus,
+    LivePrioritySellPlannerInput, PlannerTxContext, TxPrepRequestContext, TxSubmissionPolicy,
+    TxSubmissionRoute,
 };
 use eth_strategies::{
     alpha11::HOLD16_STRATEGY_NAME,
@@ -42,16 +42,16 @@ fn specs(args: &Args) -> Vec<LiveStrategySpec> {
 
 fn real_args(allow_broadcast_live_validation: bool) -> RealExecutionArgs {
     RealExecutionArgs {
-        kartal_url: "http://127.0.0.1:5006".to_string(),
-        kartal_token_env: "ETH_TX_EXECUTOR_API_TOKEN".to_string(),
+        eth_tx_executor_url: "http://127.0.0.1:5006".to_string(),
+        eth_tx_executor_token_env: "ETH_TX_EXECUTOR_API_TOKEN".to_string(),
         live_real_from: "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27".to_string(),
         live_real_vault_address: "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597".to_string(),
         allow_broadcast_live_validation,
     }
 }
 
-fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
-    KartalEthTxExecutorStatus {
+fn status(mode: EthTxExecutorBroadcastMode) -> EthTxExecutorStatus {
+    EthTxExecutorStatus {
         service: "eth_tx_executor".to_string(),
         enabled: true,
         api_token_configured: true,
@@ -64,7 +64,7 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
         journal_path: Some("/data/eth-tx-executions.jsonl".to_string()),
         direct_raw_endpoint: "/eth/tx/direct-raw".to_string(),
         submit_endpoint: Some("/eth/tx/submit".to_string()),
-        policy: KartalEthTxPolicyStatus {
+        policy: EthTxPolicyStatus {
             version: "eth_tx_policy_v1".to_string(),
             allowed_from_count: 1,
             allowed_target_count: 1,
@@ -76,7 +76,7 @@ fn status(mode: KartalStatusBroadcastMode) -> KartalEthTxExecutorStatus {
             max_transaction_cost_wei: "30000000000000000".to_string(),
             max_daily_cost_wei: "50000000000000000".to_string(),
             daily_spend_cap_enabled: Some(true),
-            daily_spend: KartalDailySpendStatus {
+            daily_spend: EthTxDailySpendStatus {
                 spend_day: "2026-05-21".to_string(),
                 spent_wei: "0".to_string(),
                 remaining_daily_cost_wei: Some("50000000000000000".to_string()),
@@ -124,8 +124,8 @@ fn gas_policy() -> LiveRealGasPolicy {
 
 #[test]
 fn dry_run_status_is_allowed_without_public_validation_flag() {
-    validate_kartal_real_status(
-        &status(KartalStatusBroadcastMode::DryRun),
+    validate_eth_tx_executor_real_status(
+        &status(EthTxExecutorBroadcastMode::DryRun),
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
@@ -135,8 +135,8 @@ fn dry_run_status_is_allowed_without_public_validation_flag() {
 
 #[test]
 fn broadcast_requires_explicit_validation_flag() {
-    let error = validate_kartal_real_status(
-        &status(KartalStatusBroadcastMode::Broadcast),
+    let error = validate_eth_tx_executor_real_status(
+        &status(EthTxExecutorBroadcastMode::Broadcast),
         &real_args(false),
         &live_args(),
         &specs(&live_args()),
@@ -156,8 +156,8 @@ fn broadcast_hold16_deploy_rejects_other_strategy_scopes() {
         let mut args = live_args();
         args.strategy_set = Some(disallowed_strategy_set.to_string());
 
-        let error = validate_kartal_real_status(
-            &status(KartalStatusBroadcastMode::Broadcast),
+        let error = validate_eth_tx_executor_real_status(
+            &status(EthTxExecutorBroadcastMode::Broadcast),
             &real_args(true),
             &args,
             &specs(&args),
@@ -170,8 +170,8 @@ fn broadcast_hold16_deploy_rejects_other_strategy_scopes() {
 
 #[test]
 fn broadcast_hold16_deploy_accepts_hold16_scope() {
-    validate_kartal_real_status(
-        &status(KartalStatusBroadcastMode::Broadcast),
+    validate_eth_tx_executor_real_status(
+        &status(EthTxExecutorBroadcastMode::Broadcast),
         &real_args(true),
         &live_args(),
         &specs(&live_args()),
@@ -181,12 +181,12 @@ fn broadcast_hold16_deploy_accepts_hold16_scope() {
 
 #[test]
 fn broadcast_hold16_deploy_accepts_disabled_daily_budget() {
-    let mut status = status(KartalStatusBroadcastMode::Broadcast);
+    let mut status = status(EthTxExecutorBroadcastMode::Broadcast);
     status.policy.max_daily_cost_wei = "0".to_string();
     status.policy.daily_spend_cap_enabled = Some(false);
     status.policy.daily_spend.remaining_daily_cost_wei = None;
 
-    validate_kartal_real_status(
+    validate_eth_tx_executor_real_status(
         &status,
         &real_args(true),
         &live_args(),
@@ -197,10 +197,10 @@ fn broadcast_hold16_deploy_accepts_disabled_daily_budget() {
 
 #[test]
 fn broadcast_hold16_deploy_requires_value_cap_for_buy() {
-    let mut status = status(KartalStatusBroadcastMode::Broadcast);
+    let mut status = status(EthTxExecutorBroadcastMode::Broadcast);
     status.policy.max_value_wei = "0".to_string();
 
-    let error = validate_kartal_real_status(
+    let error = validate_eth_tx_executor_real_status(
         &status,
         &real_args(true),
         &live_args(),
@@ -304,7 +304,7 @@ fn public_submission_keeps_unsigned_transaction_wire_protocol() {
     let policy = TxSubmissionPolicy::PublicRpcBroadcast;
 
     assert_eq!(transaction_wire_protocol(&policy), "eth_unsigned_tx");
-    assert_eq!(executor_boundary(&policy), "kartal_eth_tx_executor");
+    assert_eq!(executor_boundary(&policy), "eth_tx_executor");
 }
 
 #[test]

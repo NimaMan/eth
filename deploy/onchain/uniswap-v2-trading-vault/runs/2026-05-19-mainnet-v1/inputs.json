@@ -23,7 +23,7 @@
     "treasury": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",
     "vault": "0x28474cbCd780AeEb3ED1501B68254bEd87cF5597"
   },
-  "kartal": {
+  "eth_tx_executor": {
     "base_url": "http://127.0.0.1:5004",
     "token_env": "ETH_TX_EXECUTOR_API_TOKEN",
     "required_from": "0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27",

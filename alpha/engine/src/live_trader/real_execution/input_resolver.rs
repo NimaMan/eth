@@ -195,7 +195,7 @@ impl LiveRealInputResolver {
     ) -> serde_json::Value {
         json!({
             "resolver": "eth_alpha_live_trader_real_execution",
-            "execution_mode": "kartal-real",
+            "execution_mode": "eth-tx-real",
             "route": "uniswap_v2_trading_vault",
             "simulation_provider": "reth_exact_calldata_uniswap_v2_trading_vault",
             "gas_rank_provider": "eth_chain_server_gas_rank",

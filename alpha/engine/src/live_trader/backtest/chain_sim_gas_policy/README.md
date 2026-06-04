@@ -12,4 +12,4 @@ shadow evidence used by real live trading.
   contains the focused unit tests for that evidence.
 
 This folder must remain behavior-preserving backtest glue. It must not contact
-Kartal or build a broadcastable transaction.
+the ETH tx executor or build a broadcastable transaction.

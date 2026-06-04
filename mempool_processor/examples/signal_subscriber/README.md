@@ -16,7 +16,7 @@ python signal_subscriber.py
 
 This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent consumers:
 - Database writers can consume signals
-- eth_kartal can consume signals  
+- ETH alpha/executor planners can consume signals
 - Multiple monitoring tools can consume simultaneously
 - Each consumer receives all published signals independently
 
@@ -59,7 +59,7 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 ## Integration Notes
 
 - **Database Writers**: Can consume signals to store detection results
-- **eth_kartal**: Can consume signals for automated trading decisions
+- **ETH alpha/executor planners**: Can consume signals for automated trading decisions
 - **Monitoring**: Multiple monitoring tools can run simultaneously
 - **Real-time**: Signals are published as soon as detected (microsecond latency)
 - **Wire Format**: Signal publisher sends multipart `{topic, json}` on port `5556`.

@@ -16,7 +16,7 @@ This crate replays historical market data through the same trading core used by 
 - No separate strategy API.
 - No separate position state machine.
 - No live signing or broadcasting.
-- No Kartal client, signer, hot-wallet, deployed-vault, or live nonce
+- No ETH tx executor client, signer, hot-wallet, deployed-vault, or live nonce
   dependency.
 - No mutation of canonical live state.
 - No external file formats (JSONL, Parquet, etc.).  Events are read directly from Postgres.
@@ -158,8 +158,8 @@ Asena's existing performance endpoints (`/alpha/strategies/<id>/performance`) ca
 ## Broadcast Guard
 
 Backtests must never be able to broadcast. The only execution adapter in this
-crate is `ChainSimExecutionAdapter`; do not add Kartal, `TxExecutorAdapter`,
-signer env vars, hot-wallet config, or deployed-vault config to the backtest
-binary. If a historical experiment needs to exercise live tx-prep code, run it
-as a lab/calibration artifact that writes requests or uses Kartal dry-run, not
-as `eth_alpha_backtest_trader`.
+crate is `ChainSimExecutionAdapter`; do not add the ETH tx executor,
+`TxExecutorAdapter`, signer env vars, hot-wallet config, or deployed-vault
+config to the backtest binary. If a historical experiment needs to exercise live
+tx-prep code, run it as a lab/calibration artifact that writes requests or uses
+ETH tx executor dry-run, not as `eth_alpha_backtest_trader`.

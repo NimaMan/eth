@@ -40,6 +40,7 @@ pub(super) struct HeartbeatInput<'a> {
     pub(super) observation_strategy_name: &'a str,
     pub(super) positions: usize,
     pub(super) entry_enabled: bool,
+    pub(super) paused_buy_strategies: &'a [String],
     pub(super) single_max_entry_pools: Option<usize>,
     pub(super) single_entry_bankroll_eth: &'a Option<String>,
     pub(super) single_entry_bankroll_wei: Option<U256>,
@@ -80,6 +81,7 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         reports = input.reports,
         strategy_count = input.strategy_count,
         positions = input.positions,
+        paused_buy_strategies = ?input.paused_buy_strategies,
         chain_sim_selected_block = ?input.chain_state_payload.as_ref().and_then(|state| state.get("selected_block_number")).and_then(serde_json::Value::as_u64),
         chain_sim_state_source = ?input.chain_state_payload.as_ref().and_then(|state| state.get("source")).and_then(serde_json::Value::as_str),
         "alpha trader tick"
@@ -122,11 +124,12 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
         "observation_strategy_name": input.observation_strategy_name,
         "positions": input.positions,
         "entry_enabled": input.entry_enabled,
+        "paused_buy_strategies": input.paused_buy_strategies,
         "max_entry_pools": input.single_max_entry_pools,
         "entry_bankroll_eth": input.single_entry_bankroll_eth,
         "entry_bankroll_wei": input.single_entry_bankroll_wei.map(|value| value.to_string()),
         "entry_bankrolls": input.entry_bankroll_summary,
-        "kartal_enabled": input.execution_mode.uses_kartal(),
+        "eth_tx_executor_enabled": input.execution_mode.uses_eth_tx_executor(),
     });
 
     let mut health = PipelineHealth::new(
@@ -217,6 +220,10 @@ pub(super) async fn emit_tick_heartbeat(input: HeartbeatInput<'_>) -> Result<Val
     health
         .metrics
         .insert("trading_enabled".to_string(), json!(!input.suppress_events));
+    health.metrics.insert(
+        "paused_buy_strategies".to_string(),
+        json!(input.paused_buy_strategies),
+    );
     emit_health(&health);
 
     input

@@ -10,7 +10,7 @@ use eth_alpha_core::{
     position::{Position, PositionKey, PositionState},
 };
 use eth_live_trading::{
-    derive_min_output_from_expected_output, KartalBribeRequest, KartalSubmitDirectRawResult,
+    derive_min_output_from_expected_output, EthTxBribeRequest, EthTxSubmitDirectRawResult,
     LiveDirectRawTransactionRequest, LiveTraderTxSignal, PreSubmitSimulation, TxSubmissionPolicy,
 };
 use serde_json::{json, Value};
@@ -93,7 +93,7 @@ fn signal() -> LiveTraderTxSignal {
             max_fee_per_gas: "1000000000".to_string(),
             max_priority_fee_per_gas: "100000000".to_string(),
             nonce: None,
-            bribe: Some(KartalBribeRequest {
+            bribe: Some(EthTxBribeRequest {
                 priority_fee_per_gas: "100000000".to_string(),
                 max_fee_per_gas: Some("1000000000".to_string()),
             }),
@@ -103,8 +103,8 @@ fn signal() -> LiveTraderTxSignal {
     }
 }
 
-fn submit_result(status: &str, tx_hash: Option<&str>) -> KartalSubmitDirectRawResult {
-    KartalSubmitDirectRawResult {
+fn submit_result(status: &str, tx_hash: Option<&str>) -> EthTxSubmitDirectRawResult {
+    EthTxSubmitDirectRawResult {
         attempt_id: "gate3-attempt-1".to_string(),
         status: status.to_string(),
         tx_hash: tx_hash.map(str::to_string),

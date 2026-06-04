@@ -10,7 +10,7 @@ Required evidence:
 - upstream interface versions;
 - unit, fork, and gas test output;
 - simulator route rehearsal reports;
-- Kartal dry-run reports;
+- ETH tx executor dry-run reports;
 - operator signoff before any broadcast.
 
 Primary criteria document:

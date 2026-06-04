@@ -17,7 +17,6 @@ Current system units:
 - `eth-chain-server.service` - Rust in-memory chain/token tracking API and live runtime.
 - `eth-tx-signer.service` - host-local Unix-socket signer for the ETH tx executor.
 - `eth-tx-executor.service` - standalone HTTP service for `/eth/tx/*` submission routes.
-- `reth-rpc-kartal-bridge.socket` / `reth-rpc-kartal-bridge.service` - legacy bridge for Docker-hosted Kartal access to Reth RPC. The standalone ETH tx executor does not need this bridge.
 
 Current user units are documented in `user/README.md` and are installed by
 `../node/scripts/install-user-services.sh`. Chain-server is not installed as a
@@ -109,23 +108,4 @@ Then keep the HTTP executor pointed at the signer:
 ETH_TX_EXECUTOR_SIGNER_BACKEND=unix_socket
 ETH_TX_EXECUTOR_SIGNER_SOCKET_PATH=/run/eth-tx-executor/signer.sock
 ETH_TX_EXECUTOR_SIGNER_ADDRESS=0x2348E8a3A21DBe64Ace84853D7b4B696E8A1fC27
-```
-
-## Legacy Kartal Reth RPC Bridge
-
-`reth.service` binds HTTP RPC to `127.0.0.1:8545`. The old Kartal container
-path used the `kartal_default` Docker bridge network and reached host Reth at
-`172.18.0.1`, so this bridge exposes only:
-
-```text
-172.18.0.1:8545 -> 127.0.0.1:8545
-```
-
-Install or refresh it only if a Docker-hosted Kartal process still needs direct
-Reth RPC:
-
-```bash
-sudo cp /home/nima/code/crypto/blockchains/eth/deploy/systemd/reth-rpc-kartal-bridge.* /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now reth-rpc-kartal-bridge.socket
 ```

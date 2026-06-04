@@ -3,14 +3,14 @@ running 29 tests
 test calibration::input::tests::single_request_file_becomes_one_case_suite ... ok
 test calibration::run::tests::preflight_rejects_non_dry_run_by_default ... ok
 test calibration::run::tests::policy_rejected_expectation_passes_on_rejected_decision ... ok
-test kartal::client::tests::endpoint_join_removes_trailing_slash ... ok
+test eth_tx_executor::client::tests::endpoint_join_removes_trailing_slash ... ok
 test calibration::run::tests::refreshes_existing_simulation_block ... ok
-test kartal_executor::tests::direct_raw_endpoint_is_joined_without_double_slash ... ok
-test kartal::wire::tests::status_decodes_dry_run_policy_summary ... ok
-test kartal_executor::tests::serde_defaults_match_kartal_direct_raw_contract ... ok
+test eth_tx_executor_executor::tests::direct_raw_endpoint_is_joined_without_double_slash ... ok
+test eth_tx_executor::wire::tests::status_decodes_dry_run_policy_summary ... ok
+test eth_tx_executor_executor::tests::serde_defaults_match_eth_tx_executor_direct_raw_contract ... ok
 test lp_approval_exit::tests::approval_at_threshold_does_not_trigger ... ok
 test lp_approval_exit::tests::buy_confirm_block_lp_approval_submits_priority_sell ... ok
-test kartal_executor::tests::strategy_signal_adds_audit_metadata ... ok
+test eth_tx_executor_executor::tests::strategy_signal_adds_audit_metadata ... ok
 test lp_approval_exit::tests::mempool_lp_approval_submits_pre_mine_priority_sell ... ok
 test lp_approval_exit::tests::mined_liquidity_removal_is_too_late_for_priority_edge ... ok
 test lp_approval_exit::tests::mempool_lp_approval_uses_mempool_exit_reason ... ok
@@ -22,12 +22,12 @@ test tx_prep::gas_plan::tests::picks_best_rank_within_value_cap ... ok
 test tx_prep::gas_plan::tests::rejects_when_all_ranked_candidates_exceed_cap ... ok
 test calibration::planner_fixture::tests::builds_direct_uniswap_v2_planner_request ... ok
 test tx_prep::policy::tests::rejects_reverting_simulation_before_request_build ... ok
-test tx_prep::policy::tests::prepares_kartal_request_with_value_capped_bribe ... ok
+test tx_prep::policy::tests::prepares_eth_tx_executor_request_with_value_capped_bribe ... ok
 test calibration::planner_fixture::tests::builds_trading_vault_planner_request ... ok
 test tx_prep::policy::tests::rejects_when_required_bribe_exceeds_value_cap ... ok
 test planner::route_builder::tests::uniswap_v2_trading_vault_route_targets_vault_and_internal_sell_selector ... ok
 test planner::priority_sell::tests::planner_rejects_missing_preapproval ... ok
-test planner::priority_sell::tests::planner_prepares_value_capped_kartal_signal ... ok
+test planner::priority_sell::tests::planner_prepares_value_capped_eth_tx_executor_signal ... ok
 test planner::priority_sell::tests::planner_can_submit_uniswap_v2_trading_vault_route_without_eoa_preapproval ... ok
 
 test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

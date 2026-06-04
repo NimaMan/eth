@@ -12,4 +12,4 @@ under the repository-level `deploy/` tree.
 | --- | --- |
 | `node/` | Reth/Lighthouse install, bootstrap, snapshot, health, and user-service install scripts. |
 | `onchain/` | Mainnet contract deployment runbooks, configs, audit evidence, dry-runs, receipts, and signoff records. |
-| `systemd/` | ETH execution, beacon, chain-processing, token tracking, mempool, Kartal signer, and alpha systemd units. |
+| `systemd/` | ETH execution, beacon, chain-processing, token tracking, mempool, tx executor/signer, and alpha systemd units. |

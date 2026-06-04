@@ -170,7 +170,7 @@ def main():
     print("=" * 70)
     print("This subscriber can run alongside other consumers like:")
     print("  • Database writers")
-    print("  • eth_kartal signal processor")
+    print("  • eth_tx_executor signal processor")
     print("  • Other monitoring tools")
     print("=" * 70)
     

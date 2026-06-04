@@ -6,8 +6,8 @@ surface: Universal Router, Permit2, PoolManager, hooks, and pool-key policy.
 
 Current state: candidate source with unit tests, fork gas tests, and
 tx_simulator direct-vs-vault rehearsal evidence. Mainnet broadcast remains
-blocked by the deployment folder until calldata generation, Kartal dry-run, and
-operator signoff are recorded.
+blocked by the deployment folder until calldata generation, ETH tx executor
+dry-run, and operator signoff are recorded.
 
 Expected implementation files:
 

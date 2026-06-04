@@ -15,7 +15,7 @@ Environment=RUST_LOG=info
 ExecStartPre=/usr/bin/test -n ${ALPHA_STRATEGY_SET}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_FROM}
 ExecStartPre=/usr/bin/test -n ${ALPHA_LIVE_REAL_VAULT_ADDRESS}
-ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --strategy-set ${ALPHA_STRATEGY_SET} --kartal-token-env ETH_TX_EXECUTOR_API_TOKEN --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS} --allow-broadcast-live-validation
+ExecStart=/home/nima/code/crypto/blockchains/eth/target/release/eth_alpha_live_trader --strategy-set ${ALPHA_STRATEGY_SET} --eth-tx-executor-token-env ETH_TX_EXECUTOR_API_TOKEN --live-real-from ${ALPHA_LIVE_REAL_FROM} --live-real-vault-address ${ALPHA_LIVE_REAL_VAULT_ADDRESS} --allow-broadcast-live-validation
 Restart=always
 RestartSec=5
 LimitNOFILE=1000000

@@ -6,7 +6,7 @@
   "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
   "signer": {
     "backend": "keystore",
-    "keystore": "/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-keystore.json",
-    "password_file": "/home/nima/code/crypto/kartal/.state/eth_signer/secrets/eth-signer-password"
+    "keystore": "/home/nima/code/crypto/eth_tx_executor/.state/eth_signer/secrets/eth-signer-keystore.json",
+    "password_file": "/home/nima/code/crypto/eth_tx_executor/.state/eth_signer/secrets/eth-signer-password"
   }
 }

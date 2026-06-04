@@ -1,13 +1,13 @@
 # Live Trader
 
 Live trader owns live event processing for both no-capital chain simulation and
-real Kartal execution.
+real ETH tx executor execution.
 
 - `run_live_backtest()` uses live chain-state simulation and never contacts
-  Kartal.
+  the ETH tx executor.
 - `run_live_real()` uses the crate-private real execution boundary. It defaults
-  to dry-run-only Kartal status and permits broadcast only for the explicit
-  Alpha11 hold16 validation service flag. Each entry-enabled strategy must
+  to dry-run-only ETH tx executor status and permits broadcast only for the
+  explicit Alpha11 hold16 validation service flag. Each entry-enabled strategy must
   resolve to a bankroll of at most `0.555 ETH` during validation. Strategy specs
   provide buy size, liquidity floors, bankroll, entry-pool caps, and hold
   windows; live runs select those parameters by strategy name.
@@ -36,6 +36,18 @@ main orchestration loop. Supporting code is grouped by responsibility:
 - `receipt_reconciliation/`: real receipt RPC reads, vault-event decoding, and
   mined execution evidence.
 
+## Operator pause-buys (exit-only)
+
+Each poll, `mod.rs` re-reads the durable per-strategy buy-halt state via
+`store.load_paused_buy_strategies()` and applies it with
+`engine.set_halt_buys_strategies(...)` **before** any pool/mempool buy decisions
+are processed. Paused strategies stop opening new buys but keep exiting and
+remain manually closeable (see `operator/` and the runtime buy gate). The current
+paused set is surfaced in the heartbeat metadata as `paused_buy_strategies`. The
+toggle is written by the dashboard server (`eth_pause_buys_api.rs` →
+`strategy_buy_controls`) and takes effect on the running trader within one poll —
+no restart. A read failure is non-fatal (logged; treated as nothing paused).
+
 ## Live Event Sequence
 
 The intended live behavior is block-coupled:
@@ -51,8 +63,8 @@ reth/node publishes new execution head N
   -> Alpha live backtest / Alpha real consume next frame N
   -> strategies make decisions pinned to N/hash
   -> chain-sim mode settles via chain-server simulation
-  -> real mode builds tx plan and submits through Kartal
-  -> Kartal validates/signs/broadcasts according to policy
+  -> real mode builds tx plan and submits through ETH tx executor
+  -> ETH tx executor validates/signs/broadcasts according to policy
 ```
 
 This contract is meant to be the same for live backtest and real live trading.
@@ -159,7 +171,7 @@ live trader tick it:
 1. loads submitted execution reports with tx hashes from `alpha_store`;
 2. waits until the live processed-block watermark is at least
    `submitted_block + 1`;
-3. calls `eth_getTransactionReceipt` on the same RPC URL Kartal reports in
+3. calls `eth_getTransactionReceipt` on the same RPC URL the ETH tx executor reports in
    `/eth/tx/status`;
 4. turns receipt `status = 0x0` into a failed `ExecutionReport`;
 5. turns receipt `status = 0x1` into a confirmed `ExecutionReport` only when
@@ -192,7 +204,8 @@ cargo test -p eth_alpha_engine gate3 --lib
 
 The suite currently locks these real-live assumptions:
 
-- Kartal `broadcast`, `received`, `signed`, `dry_run`, `broadcast_error`, and
+- ETH tx executor `broadcast`, `received`, `signed`, `dry_run`,
+  `broadcast_error`, and
   `rejected` responses never become confirmed without receipt evidence.
 - `dry_run`, executor `rejected`, planner policy rejects, and pre-submit
   simulation rejects map to cancelled reports because no transaction was

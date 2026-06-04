@@ -158,8 +158,8 @@ pub(super) async fn chain_sim_real_execution_artifacts_check(
         "execution_replay",
         "chain_sim_has_no_real_execution_artifacts",
         Verdict::Fail,
-        "chain-sim backtests contain no real tx hashes or Kartal submission artifacts",
-        "chain-sim backtest execution rows with real tx/Kartal artifacts",
+        "chain-sim backtests contain no real tx hashes or ETH tx executor submission artifacts",
+        "chain-sim backtest execution rows with real tx/ETH tx executor artifacts",
         r#"
         WITH chain_sim_trades AS (
             SELECT t.trade_id, t.run_id
@@ -177,7 +177,7 @@ pub(super) async fn chain_sim_real_execution_artifacts_check(
              AND t.run_id = te.run_id
             WHERE NULLIF(te.tx_hash, '') IS NOT NULL
                OR NULLIF(te.payload->>'tx_hash', '') IS NOT NULL
-               OR lower(COALESCE(te.error, '')) LIKE '%kartal%'
+               OR lower(COALESCE(te.error, '')) LIKE '%eth_tx_executor%'
             UNION ALL
             SELECT 1
             FROM alpha_trading.execution_reports er
@@ -186,7 +186,7 @@ pub(super) async fn chain_sim_real_execution_artifacts_check(
              AND t.run_id = er.run_id
             WHERE NULLIF(er.tx_hash, '') IS NOT NULL
                OR NULLIF(er.payload->>'tx_hash', '') IS NOT NULL
-               OR lower(COALESCE(er.error, '')) LIKE '%kartal%'
+               OR lower(COALESCE(er.error, '')) LIKE '%eth_tx_executor%'
         )
         SELECT count(*)
         FROM violations

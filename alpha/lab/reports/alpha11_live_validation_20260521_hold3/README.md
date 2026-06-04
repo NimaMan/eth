@@ -4,14 +4,14 @@
 
 Passed the one-position mined-validation gate for the happy path:
 
-- buy request accepted by Kartal policy;
+- buy request accepted by ETH tx executor policy;
 - buy accepted and signed by the local signer;
 - buy broadcast to public mempool;
 - buy mined successfully and reconciled as `buy_confirmed`;
 - hold3 exit emitted from the confirmed position;
 - sell accepted, signed, and broadcast;
 - sell mined successfully and reconciled as `sell_confirmed`;
-- Kartal was returned to `dry_run` after the run.
+- ETH tx executor was returned to `dry_run` after the run.
 
 This does not clear multi-position, replacement, reorg, delayed inclusion, or
 live gas-rank production-readiness gates.
@@ -50,9 +50,9 @@ The negative result is dominated by the temporary validation gas envelope:
 `40 gwei` priority fee on both buy and sell. The gate was a pipeline proof, not
 a profitability test.
 
-## Kartal State After Run
+## ETH tx executor State After Run
 
-Kartal was returned to `broadcast_mode = dry_run`.
+ETH tx executor was returned to `broadcast_mode = dry_run`.
 
 Daily spend ledger after the real buy and sell:
 
@@ -69,7 +69,7 @@ probe reservations.
 
 - The earlier readiness probes exposed a stale Docker build context; the
   order-server image was rebuilt from current source before this run.
-- Restarting the signer recreated `/run/kartal`; the order-server container had
+- Restarting the signer recreated `/run/eth_tx_executor`; the order-server container had
   to be recreated so it could see the current signer socket.
 - Public broadcast was enabled only for this validation run and disabled
   immediately afterward.

@@ -5,8 +5,8 @@ to be run from any working directory and resolve the ETH repo root from their
 own path.
 
 The scripts default to checks, local builds, fork rehearsal, calldata
-generation, and Kartal dry-runs. The mainnet deployment script refuses to
-broadcast unless `CONFIRM_DEPLOY=1` is set and all required environment
+generation, and ETH tx executor dry-runs. The mainnet deployment script refuses
+to broadcast unless `CONFIRM_DEPLOY=1` is set and all required environment
 variables are present.
 
 ## Order
@@ -17,7 +17,7 @@ variables are present.
 | `01_build_and_hash.sh` | Run Foundry/Rust checks and write bytecode hash evidence. |
 | `02_fork_rehearsal.sh` | Run mainnet fork gas tests at a fixed block. |
 | `03_generate_calldata.sh` | Generate representative vault buy and emergency-sell calldata. |
-| `04_kartal_dry_run.sh` | Submit a prepared direct-raw request through Kartal calibration. |
+| `04_eth_tx_executor_dry_run.sh` | Legacy-named script that submits a prepared direct-raw request through ETH tx executor calibration. |
 | `05_deploy.sh` | Deploy the vault to mainnet after explicit confirmation. |
 | `06_verify_contract.sh` | Verify the deployed contract and constructor arguments. |
 | `07_post_deploy_smoke.sh` | Read deployed immutable values and compare them to expected config. |

@@ -17,7 +17,7 @@
     "route_name": "uniswap_v2_trading_vault_mode_a",
     "protocol": "uniswap_v2_trading_vault"
   },
-  "kartal": {
+  "eth_tx_executor": {
     "base_url": "http://127.0.0.1:5004",
     "token_env": "ETH_TX_EXECUTOR_API_TOKEN",
     "required_broadcast_mode_before_go_live": "dry_run"

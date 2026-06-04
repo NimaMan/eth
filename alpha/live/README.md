@@ -89,10 +89,10 @@ The boundary should still stay modular:
 - `mempool_processor` consumes live token state and live token events.
 
 Current deployment note: `trading/` now also contains the direct-raw tx-prep
-boundary for Kartal. The deployed V2 vault buy and emergency-sell paths run
-exact-calldata pre-submit simulation against local Reth state. A real live
-strategy still needs live gas-rank inputs, a guarded capped validation run, and
-receipt operations before public broadcast is allowed.
+boundary for the ETH tx executor. The deployed V2 vault buy and emergency-sell
+paths run exact-calldata pre-submit simulation against local Reth state. A real
+live strategy still needs live gas-rank inputs, a guarded capped validation run,
+and receipt operations before public broadcast is allowed.
 
 This lets us split the runtimes into separate services later without changing
 the conceptual data flow.

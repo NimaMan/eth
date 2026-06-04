@@ -88,20 +88,21 @@ mod tests {
         let args = alpha11_hold15_args();
         let chain_sim_specs =
             build_strategy_specs(&args, TraderExecutionMode::ChainSim).expect("chain-sim specs");
-        let kartal_real_specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
-            .expect("kartal-real specs");
+        let eth_tx_executor_real_specs =
+            build_strategy_specs(&args, TraderExecutionMode::EthTxExecutorReal)
+                .expect("eth-tx-real specs");
 
         assert_eq!(chain_sim_specs.len(), 1);
-        assert_eq!(kartal_real_specs.len(), 1);
+        assert_eq!(eth_tx_executor_real_specs.len(), 1);
         assert_eq!(
             chain_sim_specs[0].strategy_name,
             ALPHA11_HOLD15_STRATEGY_NAME
         );
         assert_eq!(
-            kartal_real_specs[0].strategy_name,
+            eth_tx_executor_real_specs[0].strategy_name,
             ALPHA11_HOLD15_STRATEGY_NAME
         );
-        for spec in [&chain_sim_specs[0], &kartal_real_specs[0]] {
+        for spec in [&chain_sim_specs[0], &eth_tx_executor_real_specs[0]] {
             assert_eq!(
                 spec.entry_init_policy.max_age_blocks,
                 Some(ENTRY_INIT_MAX_AGE_BLOCKS)
@@ -112,10 +113,13 @@ mod tests {
             );
         }
         assert_eq!(TraderExecutionMode::ChainSim.label(), "chain-sim");
-        assert_eq!(TraderExecutionMode::KartalReal.label(), "kartal-real");
+        assert_eq!(
+            TraderExecutionMode::EthTxExecutorReal.label(),
+            "eth-tx-real"
+        );
         assert_ne!(
             TraderExecutionMode::ChainSim.execution_model(),
-            TraderExecutionMode::KartalReal.execution_model()
+            TraderExecutionMode::EthTxExecutorReal.execution_model()
         );
     }
 
@@ -203,7 +207,7 @@ mod tests {
     fn alpha11_live_real_uses_explicit_init_policy() {
         let args = alpha11_hold15_args();
 
-        let specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
+        let specs = build_strategy_specs(&args, TraderExecutionMode::EthTxExecutorReal)
             .expect("alpha11 live-real hold15 specs");
 
         assert_eq!(specs.len(), 1);
@@ -226,7 +230,7 @@ mod tests {
         let mut args = alpha11_hold15_args();
         args.strategy_set = Some(ALPHA11_HOLD16_STRATEGY_NAME.to_string());
 
-        let specs = build_strategy_specs(&args, TraderExecutionMode::KartalReal)
+        let specs = build_strategy_specs(&args, TraderExecutionMode::EthTxExecutorReal)
             .expect("alpha11 live-real hold16 specs");
 
         assert_eq!(specs.len(), 1);

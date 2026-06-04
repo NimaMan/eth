@@ -7,12 +7,12 @@ decision path without relying on terminal scrollback.
 
 - Strategy run id.
 - Strategy name.
-- Kartal status snapshot before public broadcast.
-- Kartal executor policy snapshot.
+- ETH tx executor status snapshot before public broadcast.
+- ETH tx executor policy snapshot.
 - Signer status or configured signer cap summary.
 - Exact final request body or hash of the request body.
 - Exact pre-submit simulation metadata.
-- Kartal tx execution journal rows for received, accepted, signed, dry-run,
+- ETH tx executor journal rows for received, accepted, signed, dry-run,
   broadcast, broadcast-error, or rejected decisions.
 - Signer journal rows for signed or rejected decisions.
 - Alpha DB rows for order intent, trade, position, snapshots, and lifecycle
@@ -43,11 +43,10 @@ For every confirmed buy or sell:
 
 Failed gates are useful when they are precise. Record:
 
-- rejecting component: alpha, Kartal policy, signer policy, tx executor, RPC,
+- rejecting component: alpha, ETH tx executor policy, signer policy, tx executor, RPC,
   receipt reconciliation, or strategy lifecycle;
 - exact rejection reason;
 - whether any transaction was signed;
 - whether any transaction was broadcast;
 - whether spend reservation was released;
 - whether alpha correctly avoided a confirmed lifecycle state.
-

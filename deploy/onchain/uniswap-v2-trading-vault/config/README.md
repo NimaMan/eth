@@ -14,7 +14,7 @@ machine-local secret paths here.
 | `mainnet.toml` | Chain constants, source paths, constructor arguments, and signer identities. |
 | `alpha-route-policy.mainnet.toml` | How alpha should target the deployed vault for buy and emergency-sell routes. |
 | `gas-policy.mainnet.toml` | Priority-fee, value-cap, and gas-rank policy for the vault route. |
-| `kartal-policy.mainnet.json` | Intended Kartal allowlist and request-policy shape for this deployed address. |
+| `eth-tx-policy.mainnet.json` | Legacy-named ETH tx executor allowlist and request-policy shape for this deployed address. |
 
 The resolved run inputs belong under `../runs/<run-id>/inputs.json`.
 
@@ -24,4 +24,4 @@ The deployed mainnet address is also duplicated in the ETH root config files:
 - `config.env`: `ETH_MAINNET_UNISWAP_V2_TRADING_VAULT`.
 
 Keep those values aligned with `mainnet.toml`, `alpha-route-policy.mainnet.toml`,
-and `kartal-policy.mainnet.json`.
+and the legacy-named `eth-tx-policy.mainnet.json`.

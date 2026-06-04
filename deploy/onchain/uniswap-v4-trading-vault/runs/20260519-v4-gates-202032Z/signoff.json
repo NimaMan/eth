@@ -3,5 +3,5 @@
   "status": "blocked",
   "operator": null,
   "reviewer": null,
-  "notes": "Local pre-deploy gates completed. Mainnet broadcast, post-deploy smoke, verification, and accepted Kartal allowlist dry-run remain blocked until explicit operator approval."
+  "notes": "Local pre-deploy gates completed. Mainnet broadcast, post-deploy smoke, verification, and accepted ETH tx executor allowlist dry-run remain blocked until explicit operator approval."
 }

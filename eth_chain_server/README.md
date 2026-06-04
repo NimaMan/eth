@@ -178,10 +178,10 @@ strategy/atlas surfaces every block. Those jobs are read-model work.
 The live simulation state frame and exact `LiveTxSimulator` state are available
 before `BlockApplied` is published. For real live trading, chain-server owns
 live state, `LiveTxSimulator`, and simulation sessions. Alpha owns strategy
-decisions, tx planning, gas policy, and Kartal submission. The mempool detector
-owns pending-tx routing and signal interpretation. Both clients should request
-exact-block simulation results from chain-server instead of rebuilding the live
-state frame locally.
+decisions, tx planning, gas policy, and ETH tx executor submission. The mempool
+detector owns pending-tx routing and signal interpretation. Both clients should
+request exact-block simulation results from chain-server instead of rebuilding
+the live state frame locally.
 
 For live-tail blocks, the `LiveTxSimulator` update is immediate within the
 processed-block apply path: after chain-server has the processed block header,

@@ -29,7 +29,7 @@
     "trade_id": "v4-vault-v4_vault_buy-20260519-202122Z",
     "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "pool_address": "v4:(0x0000000000000000000000000000000000000000,0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,500,10,0x0000000000000000000000000000000000000000)",
-    "executor_boundary": "kartal_eth_tx_executor",
+    "executor_boundary": "eth_tx_executor_eth_tx_executor",
     "tx_prep_version": 1
   }
 }

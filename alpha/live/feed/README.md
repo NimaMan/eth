@@ -72,8 +72,8 @@ valid for live tail state.
 
 For real live trading, this crate keeps the chain-server `LiveTxSimulator`
 current. Alpha does not own live simulation state in that mode: Alpha owns
-strategy decisions, tx planning, gas policy, and Kartal submission, while
-chain-server owns live state and exact simulation sessions.
+strategy decisions, tx planning, gas policy, and ETH tx executor submission,
+while chain-server owns live state and exact simulation sessions.
 
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, direct live block application, and read-only consumers.
 

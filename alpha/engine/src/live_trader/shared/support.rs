@@ -327,26 +327,26 @@ pub(super) fn reports_payload(reports: &[ExecutionReport]) -> Vec<Value> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum TraderExecutionMode {
     ChainSim,
-    KartalReal,
+    EthTxExecutorReal,
 }
 
 impl TraderExecutionMode {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::ChainSim => "chain-sim",
-            Self::KartalReal => "kartal-real",
+            Self::EthTxExecutorReal => "eth-tx-real",
         }
     }
 
     pub(super) fn execution_model(self) -> &'static str {
         match self {
             Self::ChainSim => "chain_state_evm_simulation",
-            Self::KartalReal => "kartal_tx_executor",
+            Self::EthTxExecutorReal => "eth_tx_executor",
         }
     }
 
-    pub(super) fn uses_kartal(self) -> bool {
-        matches!(self, Self::KartalReal)
+    pub(super) fn uses_eth_tx_executor(self) -> bool {
+        matches!(self, Self::EthTxExecutorReal)
     }
 }
 

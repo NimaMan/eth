@@ -1,7 +1,7 @@
 //! Priority transaction preparation for live exits.
 //!
 //! This module turns an already approved live exit plan into a fully prepared
-//! Kartal direct-raw request. It owns value-capped priority-fee policy and
+//! ETH tx executor direct-raw request. It owns value-capped priority-fee policy and
 //! audit metadata, but it does not discover routes, sign, reserve nonces, or
 //! broadcast.
 

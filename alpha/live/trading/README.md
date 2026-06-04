@@ -1,10 +1,10 @@
 # Live Trading
 
 `eth_live_trading` contains deployable live-trading policy scaffolding and the
-guarded handoff to Kartal's ETH tx executor. It owns live transaction
+guarded handoff to the standalone ETH tx executor. It owns live transaction
 preparation and audit metadata, but it does not sign, reserve nonces, or
 broadcast transactions locally. Strategy code prepares an explicit transaction
-request, attaches audit metadata, and submits it to Kartal.
+request, attaches audit metadata, and submits it to the ETH tx executor.
 
 ## Current Deployment Status
 
@@ -14,13 +14,15 @@ ETH/WETH direct-sell calldata, build deployed Uniswap V2 trading vault buy and
 emergency-sell calldata, derive a non-zero min-output from provisional
 exact-calldata simulation, run a second exact-calldata pre-submit simulation for
 the final deployed V2 vault calldata, consume gas-rank inputs, value-cap the
-priority fee, build the Kartal JSON request, and submit that request to Kartal.
+priority fee, build the ETH tx executor JSON request, and submit that request to
+the executor service.
 
 Current live-runner integration:
 
 `eth_alpha_live_trader` now instantiates `TxExecutorAdapter` and the
 `LiveTradingPlannerBridge` for deployed Uniswap V2 trading-vault buys and
-emergency sells. That runner refuses non-dry-run Kartal status by default. The
+emergency sells. That runner refuses non-dry-run ETH tx executor status by
+default. The
 only public broadcast exception is the explicit Alpha11 hold16 deploy strategy,
 enabled with `--allow-public-mempool-live-validation` and
 `--strategy-set alpha11-univ2-lp30-pool-update-block-hold16`.
@@ -37,7 +39,7 @@ entry-pool cap, or hold duration.
 
 The deployed Uniswap V2 trading vault is
 `0x28474cbCd780AeEb3ED1501B68254bEd87cF5597`, also recorded in the root
-`config.toml` and `config.env`. Live final simulation and Kartal submission for
+`config.toml` and `config.env`. Live final simulation and ETH tx executor submission for
 Mode A must target this vault. Direct Uniswap V2 router simulation is retained
 only as a gas and behavior baseline; it is not the final pre-submit check for a
 real live order.
@@ -49,8 +51,8 @@ own `LiveTxSimulator` state for the required decision block; Alpha does not
 rebuild or own the live state window. After the final exact simulation the
 planner raises `route.estimated_gas_used`
 to at least the simulated gas used plus the configured buffer, currently 2500
-bps / 25%, before gas-rank lookup, value-cap budgeting, and Kartal request
-metadata are built.
+bps / 25%, before gas-rank lookup, value-cap budgeting, and ETH tx executor
+request metadata are built.
 
 Production gas-rank readiness is tracked in:
 
@@ -70,11 +72,11 @@ The decision loop is:
 
 | Strategy signal | Decision reason | Execution category | Gas ladder | Execution route | Current usage |
 | --- | --- | --- | --- | --- | --- |
-| Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault buy | Active Alpha11 path |
-| Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p85 -> p75 -> p50 -> normal` | Kartal V2 vault sell | Active Alpha11 path |
-| Mined LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Available confirmed-chain risk exit |
-| Mined liquidity removal after entry | `exit.liquidity_removal` from `pool_update` | `mined_liquidity_removal_exit` | `p90 -> p75 -> p50 -> normal` | Kartal priority V2 vault sell | Confirmed-chain removal, not a mempool race |
-| Mempool LP/removal risk | `exit.lp_approval` from `mempool_signal` or `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `mempool_race` | Kartal priority V2 vault sell | Requires a pending dependency tx hash |
+| Eligible Alpha11 pool entry | `entry.buy_eligible_pool_once` | `entry_buy` | `p85 -> p75 -> p50 -> normal` | ETH tx executor V2 vault buy | Active Alpha11 path |
+| Max-hold / normal strategy exit | `exit.max_hold_active_blocks` or other strategy exit | `normal_exit` | `p85 -> p75 -> p50 -> normal` | ETH tx executor V2 vault sell | Active Alpha11 path |
+| Mined LP approval after entry | `exit.lp_approval_mined_race` or `exit.lp_approval_buy_confirm_block` | `lp_approval_exit` | `p90 -> p75 -> p50 -> normal` | ETH tx executor priority V2 vault sell | Available confirmed-chain risk exit |
+| Mined liquidity removal after entry | `exit.liquidity_removal` from `pool_update` | `mined_liquidity_removal_exit` | `p90 -> p75 -> p50 -> normal` | ETH tx executor priority V2 vault sell | Confirmed-chain removal, not a mempool race |
+| Mempool LP/removal risk | `exit.lp_approval` from `mempool_signal` or `exit.mempool_liquidity_removal_signal` | `mempool_race_exit` | `mempool_race` | ETH tx executor priority V2 vault sell | Requires a pending dependency tx hash |
 | Mempool trading-enabled tail entry | `entry.tail_after_enabling_tx` | `tail_entry_buy` | relative placement policy | Reserved V2 vault buy | Not Alpha11 default |
 | Extreme emergency | strategy-specific emergency reason | `emergency_priority_exit` | disabled by default | Reserved priority sell | Reserved |
 
@@ -115,23 +117,24 @@ Keep this README focused on the transaction-prep boundary. Gate criteria,
 operator runbooks, evidence requirements, and failed-attempt notes belong in the
 readiness folder.
 
-## Kartal Execution Handoff
+## ETH Tx Executor Handoff
 
 The wire contract is `eth_unsigned_tx`, documented in
 `../../../tx_executor/README.md`. Alpha prepares the request and metadata;
-Kartal hosts the HTTP endpoint; `tx_executor` validates, signs, and broadcasts
-or dry-runs.
+`tx_executor_service` hosts the HTTP endpoint, while `tx_executor` validates,
+signs, and broadcasts or dry-runs.
 
 The first execution surface is prepared direct raw transaction submission:
 
 ```text
 LiveTraderTxSignal
   -> LiveDirectRawTransactionRequest
-  -> POST /eth/tx/direct-raw on Kartal's order server
+  -> POST /eth/tx/direct-raw on the ETH tx executor service
   -> tx_executor validation/sign/dry-run-or-broadcast
 ```
 
-`KartalExecutorClient::submit_signal` adds strategy metadata before submission:
+`EthTxExecutorSubmitClient::submit_signal` is the client method that
+adds strategy metadata before submission:
 
 - `strategy_name`
 - `strategy_run_id`
@@ -141,44 +144,49 @@ LiveTraderTxSignal
 - `observed_block`
 
 The request must include `to`, `data`, value, gas limit, EIP-1559 fee caps, and
-optional simulation reference before it crosses the Kartal boundary. The tx-prep
-modules in this crate own the live-trading policy and request assembly; reusable
-route discovery, quoting, calldata builders, and simulation engines can stay in
-lower-level crates and be wrapped here.
+optional simulation reference before it crosses the ETH tx executor boundary.
+The tx-prep modules in this crate own the live-trading policy and request
+assembly; reusable route discovery, quoting, calldata builders, and simulation
+engines can stay in lower-level crates and be wrapped here.
 
-## Kartal Calibration
+## ETH Tx Executor Calibration
 
 `src/calibration/` is the repeatable end-to-end dry-run test harness for this
-boundary. It checks Kartal status, submits one or more prepared direct-raw
-requests, reads Kartal's policy journal, and writes a verdict report under
-`alpha/lab/reports/kartal_calibration/`.
+boundary. It checks ETH tx executor status, submits one or more prepared
+direct-raw requests, reads the executor policy journal, and writes a verdict
+report under
+`alpha/lab/reports/eth_tx_calibration/`.
+
+The calibration binary and fixture directory still use `eth_tx_executor` in their names
+for compatibility with existing runbooks and report paths.
 
 Safe reject-by-default check:
 
 ```bash
 cd /home/nima/code/crypto/blockchains/eth
-ETH_TX_EXECUTOR_API_TOKEN=... cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
-  --request alpha/live/trading/fixtures/kartal_calibration/reject_policy_request.json
+ETH_TX_EXECUTOR_API_TOKEN=... cargo run -p eth_alpha_engine --bin eth_alpha_tx_executor_calibrate -- \
+  --request alpha/live/trading/fixtures/eth_tx_calibration/reject_policy_request.json
 ```
 
-Full dry-run signing check, after Kartal has a signer and narrow policy:
+Full dry-run signing check, after the ETH tx executor has a signer and narrow
+policy:
 
 ```bash
-cargo run -p eth_alpha_engine --bin eth_alpha_kartal_calibrate -- \
+cargo run -p eth_alpha_engine --bin eth_alpha_tx_executor_calibrate -- \
   --planner-fixture \
   --planner-fixture-from 0x... \
   --expect dry-run-signed \
   --refresh-simulation-block
 ```
 
-Use `--write-request-path /tmp/kartal-planner-produced-request.json` with
-`--write-request-only` first when the operator needs to update Kartal's target
-and selector allowlists to the exact planner-produced transaction before
-submitting the signed dry-run.
+Use `--write-request-path /tmp/eth-tx-planner-produced-request.json` with
+`--write-request-only` first when the operator needs to update the ETH tx
+executor target and selector allowlists to the exact planner-produced
+transaction before submitting the signed dry-run.
 
 Planner-fixture calibration appends a UTC timestamp to the generated
 `attempt_id` by default. That keeps repeated dry-run signing attempts separate
-in Kartal's policy journal and spend ledger.
+in the ETH tx executor policy journal and spend ledger.
 
 Current bottleneck: the real-runner boundary exists, and public broadcast is
 limited to `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit
@@ -186,12 +194,12 @@ public-mempool flag. The deployed V2 vault buy and sell paths simulate the exact
 prepared calldata against chain-server-owned exact in-memory live state, reject
 missing simulation state, use simulated gas with a buffer for fee economics, and
 fetch route-specific gas-rank recommendations from `eth_chain_server` before
-building the Kartal request.
+building the ETH tx executor request.
 
 Ownership boundary:
 
 - chain-server owns live state, `LiveTxSimulator`, and simulation sessions;
-- Alpha owns strategy decisions, tx planning, gas policy, and Kartal
+- Alpha owns strategy decisions, tx planning, gas policy, and ETH tx executor
   submission.
 
 ## Tx Submission Data Flow
@@ -203,7 +211,7 @@ Alpha strategy/engine
   -> LiveTradingPlannerBridge
   -> chain-server exact deployed V2 vault simulation
   -> gas-rank policy
-  -> Kartal direct-raw request
+  -> ETH tx executor direct-raw request
   -> tx_executor validation/sign/dry-run-or-broadcast
   -> alpha live_trader receipt reconciliation
 ```
@@ -242,7 +250,7 @@ mempool/confirmed risk signal
        recovered ETH from EmergencySoldV2
   -> GasRankProvider converts recent block-rank evidence into fee candidates
   -> tx_prep computes the value cap and chooses/rejects the gas plan
-  -> LiveTraderTxSignal carries LiveDirectRawTransactionRequest to Kartal
+  -> LiveTraderTxSignal carries LiveDirectRawTransactionRequest to ETH tx executor
   -> tx_executor validates, reserves nonce, signs, journals, and dry-runs or broadcasts
   -> TxExecutorAdapter records submitted/cancelled/failed ExecutionReport
   -> receipt reconciler later records confirmed/reverted outcome plus mined
@@ -250,21 +258,22 @@ mempool/confirmed risk signal
 ```
 
 The planner must reject instead of submitting when any critical input is stale,
-inconsistent, unverifiable, or not worth the required gas/priority fee. Kartal
-and `tx_executor` should receive only a final direct-raw transaction request,
-never an abstract trading instruction.
+inconsistent, unverifiable, or not worth the required gas/priority fee. The ETH
+tx executor should receive only a final direct-raw transaction request, never an
+abstract trading instruction.
 
 ## Gas-Rank Integration
 
 The detailed bribe and gas-rank policy lives in `../../block_tx_rank/README.md`.
-This crate consumes that evidence after exact route simulation and before Kartal
-submission.
+This crate consumes that evidence after exact route simulation and before ETH tx
+executor submission.
 
 For `eth_unsigned_tx`, the selected bribe is the EIP-1559 priority fee in
-`max_priority_fee_per_gas`; the same selected fee is mirrored into the Kartal
-request `bribe` object for auditability. `tx_prep` applies the live gas-rank
-ladder, required source gate, value cap, and request metadata. If no ranked
-candidate fits, the planner rejects instead of creating a synthetic fallback.
+`max_priority_fee_per_gas`; the same selected fee is mirrored into the ETH tx
+executor request `bribe` object for auditability. `tx_prep` applies the live
+gas-rank ladder, required source gate, value cap, and request metadata. If no
+ranked candidate fits, the planner rejects instead of creating a synthetic
+fallback.
 
 Mempool LP approval and mempool liquidity-removal exits use dependency-relative
 `mempool_race`; mined LP approval exits start from the configured P90 ladder.
@@ -338,7 +347,7 @@ the live strategy needs:
 - route policy that selects the deployed trading vault for Mode A scam exits, or
   a real allowance/pre-approval policy before direct EOA sells are allowed;
 - per-trade max fee, capital limit, and circuit breaker enforcement;
-- dry-run and shadow-mode evidence through Kartal's direct-raw path;
+- dry-run and shadow-mode evidence through the ETH tx executor direct-raw path;
 - receipt tracking that proves whether the sell landed before removal.
 
 ## Current Module
@@ -347,14 +356,14 @@ the live strategy needs:
   policy logic so it can be tested independently from RPC, signing, or
   broadcasting.
 - `src/tx_prep/` turns an approved priority-exit plan plus a prepared sell route,
-  simulation result, and gas-rank fee candidates into either a Kartal direct-raw
-  request or an explicit reject reason. It enforces value-capped priority fees:
-  the selected bribe must fit inside the ETH value protected by escaping before
-  the scam path, after late-recovery and safety buffers. The request metadata
-  includes structured decision-rationale fields such as `reason_code`,
-  `reason_source`, and `decision_reason`. Production callers can require a
-  specific gas-rank source so fixed/test gas candidates cannot pass the real
-  execution boundary.
+  simulation result, and gas-rank fee candidates into either an ETH tx executor
+  direct-raw request or an explicit reject reason. It enforces value-capped
+  priority fees: the selected bribe must fit inside the ETH value protected by
+  escaping before the scam path, after late-recovery and safety buffers. The
+  request metadata includes structured decision-rationale fields such as
+  `reason_code`, `reason_source`, and `decision_reason`. Production callers can
+  require a specific gas-rank source so fixed/test gas candidates cannot pass the
+  real execution boundary.
 - `src/planner/` orchestrates live transaction planning from
   `LivePrioritySellPlannerInput` to `LiveTraderTxSignal`. Route builders support
   direct Uniswap V2 ETH/WETH sells and deployed Uniswap V2 trading vault buys
@@ -363,9 +372,9 @@ the live strategy needs:
   the live-real runner uses `ChainServerGasRankProvider` for route-specific
   recommendations. Fixed gas-rank providers remain only for tests and
   calibration fixtures.
-- `src/kartal_executor.rs` exposes the Kartal client and JSON contract for
-  submitting already-prepared direct raw transactions.
-- `src/kartal/` exposes status and policy-journal readers used by calibration
-  and operator checks.
-- `src/calibration/` runs repeatable policy-calibration suites against Kartal in
-  dry-run mode.
+- `src/eth_tx_submission.rs` exposes the ETH tx executor client and
+  JSON contract for submitting already-prepared direct raw transactions.
+- `src/eth_tx_executor/` exposes status and policy-journal readers used by
+  calibration and operator checks.
+- `src/calibration/` runs repeatable policy-calibration suites against the ETH tx
+  executor in dry-run mode.

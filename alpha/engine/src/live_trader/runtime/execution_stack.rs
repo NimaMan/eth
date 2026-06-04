@@ -14,7 +14,7 @@ use super::backtest::ChainSimGasPolicyBacktestAdapter;
 use super::cli::RealExecutionArgs;
 use super::execution_lifecycle::ChainSimSettlement;
 use super::gas_policy::LiveRealGasPolicy;
-use super::real_execution::{build_kartal_real_adapter, KartalRealPreflight};
+use super::real_execution::{build_eth_tx_executor_real_adapter, EthTxExecutorRealPreflight};
 use super::receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
 use super::support::TraderExecutionMode;
 
@@ -27,7 +27,7 @@ pub(super) struct ExecutionStackInput<'a> {
     pub(super) run_id: String,
     pub(super) live_gas_policy: LiveRealGasPolicy,
     pub(super) live_real_gas_policy: Option<LiveRealGasPolicy>,
-    pub(super) kartal_real_preflight: Option<KartalRealPreflight>,
+    pub(super) eth_tx_executor_real_preflight: Option<EthTxExecutorRealPreflight>,
 }
 
 pub(super) struct ExecutionStack {
@@ -52,7 +52,7 @@ pub(super) async fn build_execution_stack(
         .await
         .wrap_err("failed to restore alpha trader order sequence")?;
     let manual_close_vault_address = match (input.execution_mode, input.real_args) {
-        (TraderExecutionMode::KartalReal, Some(real_args)) => {
+        (TraderExecutionMode::EthTxExecutorReal, Some(real_args)) => {
             Some(parse_address(&real_args.live_real_vault_address)?)
         }
         _ => None,
@@ -60,9 +60,9 @@ pub(super) async fn build_execution_stack(
     let receipt_reconciler = match (
         input.execution_mode,
         input.real_args,
-        input.kartal_real_preflight.as_ref(),
+        input.eth_tx_executor_real_preflight.as_ref(),
     ) {
-        (TraderExecutionMode::KartalReal, Some(real_args), Some(preflight)) => {
+        (TraderExecutionMode::EthTxExecutorReal, Some(real_args), Some(preflight)) => {
             let vault = parse_address(&real_args.live_real_vault_address)?;
             Some(VaultReceiptReconciler::new(
                 JsonRpcReceiptProvider::new(preflight.status.rpc_url.clone()),
@@ -116,17 +116,17 @@ pub(super) async fn build_execution_stack(
                 chain_sim_settlement,
             )
         }
-        TraderExecutionMode::KartalReal => {
+        TraderExecutionMode::EthTxExecutorReal => {
             let real_args = input
                 .real_args
-                .expect("kartal-real execution requires real args");
+                .expect("eth-tx-real execution requires real args");
             let adapter_current_block = Arc::new(AtomicU64::new(0));
             let pool_updates = Arc::new(Mutex::new(HashMap::new()));
-            build_kartal_real_adapter(
+            build_eth_tx_executor_real_adapter(
                 real_args,
                 input
-                    .kartal_real_preflight
-                    .expect("kartal-real preflight must exist"),
+                    .eth_tx_executor_real_preflight
+                    .expect("eth-tx-real preflight must exist"),
                 input.token_server_url.to_string(),
                 input.store.clone(),
                 input.run_id.clone(),
@@ -136,7 +136,7 @@ pub(super) async fn build_execution_stack(
                 last_frame_hash.clone(),
                 input
                     .live_real_gas_policy
-                    .expect("kartal-real gas policy must exist"),
+                    .expect("eth-tx-real gas policy must exist"),
             )
             .await
             .map(|adapter| (adapter, adapter_current_block, pool_updates, None, None))?

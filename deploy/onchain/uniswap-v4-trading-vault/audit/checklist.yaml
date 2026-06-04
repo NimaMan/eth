@@ -62,20 +62,20 @@ items:
     requirement: Store fork gas benchmarks for direct and vault paths.
     evidence: runs/20260519-v4-gates-202032Z/fork-rehearsal.txt and runs/20260519-v4-gates-202032Z/fork-rehearsal.json
     note: pinned block 25131251; vault route 354887 gas; direct full route 382953 gas.
-  - id: kartal-policy-reviewed
+  - id: eth-tx-policy-reviewed
     area: execution
     status: partial
     requirement: Confirm target, selector, value, gas, fee, simulation, and daily cap policy.
-    evidence: runs/20260519-v4-gates-202032Z/kartal-dry-run.json
-    note: Candidate policy has from address and buy/sell selectors; current live Kartal policy correctly rejects V4 until the deployed target is known and allowlisted.
+    evidence: runs/20260519-v4-gates-202032Z/eth-tx-executor-dry-run.json
+    note: Candidate policy has from address and buy/sell selectors; current live ETH tx executor policy correctly rejects V4 until the deployed target is known and allowlisted.
   - id: final-simulation-reviewed
     area: simulation
     status: todo
     requirement: Confirm exact deployed-vault buy and emergency-sell calldata are simulated against current state before enabling live submissions.
-  - id: accepted-kartal-dry-run-reviewed
+  - id: accepted-eth-tx-executor-dry-run-reviewed
     area: execution
     status: todo
-    requirement: After deployment, confirm Kartal accepts only the deployed V4 vault target and V4 trading selectors in dry_run mode.
+    requirement: After deployment, confirm the ETH tx executor accepts only the deployed V4 vault target and V4 trading selectors in dry_run mode.
   - id: post-deploy-smoke-reviewed
     area: deployment
     status: todo
