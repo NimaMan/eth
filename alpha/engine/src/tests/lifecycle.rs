@@ -671,3 +671,57 @@ async fn failed_sell_of_drained_position_closes_to_zero_valuation() {
     assert_eq!(position.state, PositionState::ClosedZeroValuation);
     assert!(!position.has_exposure());
 }
+
+/// The Session-class regression: a sell is submitted and simulated against pre-drain
+/// state, then a mined holder-balance drain confiscates the balance before the deferred
+/// sell report applies. The confirmed sell carries synthetic proceeds, but a confiscated
+/// balance is unsellable — the engine must force the confirmation to fail and close the
+/// position to `closed_zero_valuation` with NO realized proceeds, not `sell_confirmed`.
+#[tokio::test]
+async fn confirmed_sell_of_drained_position_is_forced_to_zero_close() {
+    let store = MemoryTradingStore::default();
+
+    let mut position = test_position(PositionState::SellSubmitted);
+    position.drained = true;
+    position.exit_order_id = Some(OrderId("sell-1".to_string()));
+    position.entry_cost_basis = Some(DecimalAmount::from_str_exact("0.01").unwrap());
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+
+    let mut engine = AlphaEngine::new(
+        AllowAllRiskPolicy,
+        store.clone(),
+        ConfirmingTestExecutionAdapter,
+    )
+    .with_portfolio(portfolio);
+
+    // A successful (synthetic) sell confirmation with positive proceeds.
+    engine
+        .handle_event(EngineEvent::Execution(ExecutionReport {
+            order_id: OrderId("sell-1".to_string()),
+            status: ExecutionStatus::Confirmed,
+            tx_hash: None,
+            block_number: Some(12),
+            filled_amount: Some(Amount {
+                raw: U256::from(9_563_057_646_691_455u64),
+                decimals: 18,
+            }),
+            token_amount: None,
+            gas_used: Some(21_000),
+            gas_cost: None,
+            mined_evidence: None,
+            error: None,
+        }))
+        .await
+        .unwrap();
+
+    let position = store.positions().into_iter().next().expect("position");
+    assert_eq!(position.state, PositionState::ClosedZeroValuation);
+    assert!(!position.has_exposure());
+    // No synthetic proceeds may be credited for a confiscated balance.
+    assert!(
+        position.exit_proceeds.is_none(),
+        "drained position must not realize synthetic sell proceeds, got {:?}",
+        position.exit_proceeds
+    );
+}

@@ -283,6 +283,29 @@ where
                     report.order_id.0, position_id.0
                 ))
             })?;
+
+        // A mined custody/holder-balance drain confiscates the position's balance after
+        // an exit was already submitted and simulated against pre-drain state. That sell
+        // must NOT confirm with synthetic proceeds: a confiscated balance is unsellable.
+        // Force the confirmation to a failure so the drained-failure branch below
+        // terminalizes the position to `closed_zero_valuation` with no realized proceeds.
+        let drained_sell = side == OrderSide::Sell
+            && matches!(report.status, ExecutionStatus::Confirmed)
+            && position.drained;
+        let drained_failed_report = drained_sell.then(|| {
+            let mut failed = report.clone();
+            failed.status = ExecutionStatus::Failed;
+            failed.filled_amount = None;
+            failed.token_amount = None;
+            failed.error = Some(
+                "position drained (mined custody/liquidity drain): balance confiscated, \
+                 in-flight sell cannot realize proceeds"
+                    .to_string(),
+            );
+            failed
+        });
+        let report = drained_failed_report.as_ref().unwrap_or(report);
+
         let report_status = report.status.clone();
         let fill_price = fill_price_for_report(side, report);
         position.apply_execution_report_with_price(report, fill_price)?;
