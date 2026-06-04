@@ -45,6 +45,50 @@ fn sells_restored_open_position_on_liquidity_removal() {
 }
 
 #[test]
+fn liquidity_removal_exit_is_fundamental_even_with_flag_disabled() {
+    // Liquidity removal (mined or mempool) is a FUNDAMENTAL, always-on exit:
+    // every strategy gets out on it regardless of the now no-op
+    // `exit_on_liquidity_removal` config flag (a drain/confiscation can take a
+    // holder's tokens, so this is not a per-strategy toggle).
+    let pool = pool();
+    let market = MarketSnapshotRef {
+        block_number: 1,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        token: None,
+        pool: Some(pool.clone()),
+    };
+    let mut strategy = StrategyEngine::new(StrategyConfig {
+        exit_on_liquidity_removal: false,
+        ..StrategyConfig::default()
+    });
+    let position = confirmed_position(&strategy, &pool);
+    let mut portfolio = PortfolioState::default();
+    portfolio.positions.insert(position.id.clone(), position);
+    let risks = Vec::new();
+    let ctx = ctx(&market, &portfolio, &risks);
+    let risk = RiskEvent {
+        kind: RiskKind::LiquidityRemoval,
+        severity: RiskSeverity::Critical,
+        source: None,
+        token_address: pool.token_address,
+        pool_address: Some(pool.address.clone()),
+        pending_tx_hash: None,
+        observed_block: Some(2),
+        message: "liquidity removal".to_string(),
+        evidence: None,
+    };
+
+    let decision = strategy.on_risk_event(&ctx, &risk).unwrap();
+    assert_eq!(decision.reason(), Some("exit.liquidity_removal"));
+    assert_eq!(
+        decision.order_intent().map(|intent| intent.side),
+        Some(OrderSide::Sell),
+        "liquidity removal must force a sell even with exit_on_liquidity_removal = false"
+    );
+}
+
+#[test]
 fn mempool_liquidity_removal_signal_uses_explicit_exit_reason() {
     let pool = pool();
     let market = MarketSnapshotRef {

@@ -35,6 +35,9 @@ pub struct StrategyConfig {
     /// Restored seen pools without a loaded position count as one configured
     /// buy amount until their position is available.
     pub entry_bankroll_wei: Option<U256>,
+    /// No-op: kept for spec/JSON/DB compatibility. Liquidity-removal exit is now
+    /// FUNDAMENTAL (always-on for every strategy, mined or mempool) and is not
+    /// gated by this flag — see `StrategyEngine::on_risk_event`.
     pub exit_on_liquidity_removal: bool,
     pub exit_on_tax: bool,
     pub exit_on_lp_approval: bool,

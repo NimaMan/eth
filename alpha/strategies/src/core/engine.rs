@@ -598,19 +598,19 @@ impl Strategy for StrategyEngine {
         }
 
         // Shared exit rules: any strategy with an open position should exit on
-        // these signals. The strategy config controls which ones are enabled.
-        // Each rule is evaluated independently so we can quantify per-rule effect.
-        if self.config.exit_on_liquidity_removal {
-            if let RuleDecision::Exit { rule } =
-                shared_rules::exit::liquidity_removal::evaluate(ctx, &strategy_name, event)
+        // these signals. Most are config-gated, but liquidity removal is
+        // FUNDAMENTAL — every strategy gets out on it (mined OR mempool),
+        // regardless of config, because a drain/confiscation can take a holder's
+        // tokens. Each rule is evaluated independently to quantify per-rule effect.
+        if let RuleDecision::Exit { rule } =
+            shared_rules::exit::liquidity_removal::evaluate(ctx, &strategy_name, event)
+        {
+            if let Some(pool_address) = event
+                .pool_address
+                .clone()
+                .or_else(|| ctx.market.pool_address.clone())
             {
-                if let Some(pool_address) = event
-                    .pool_address
-                    .clone()
-                    .or_else(|| ctx.market.pool_address.clone())
-                {
-                    return Ok(self.sell_pool(ctx, event.token_address, pool_address, rule));
-                }
+                return Ok(self.sell_pool(ctx, event.token_address, pool_address, rule));
             }
         }
 
