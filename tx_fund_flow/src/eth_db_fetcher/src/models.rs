@@ -10,7 +10,7 @@ pub struct AddressRecord {
     pub address_id: i64,
     pub address: String,
     pub is_contract: bool,
-    
+
     // Trading metrics
     pub total_profit: Option<f64>,
     pub total_realized_profit: Option<f64>,
@@ -18,11 +18,11 @@ pub struct AddressRecord {
     pub scam_ratio: Option<f64>,
     pub trade_frequency: Option<f64>,
     pub total_tx_fee: Option<f64>,
-    
+
     // Activity
     pub first_seen: Option<i32>,
     pub last_seen: Option<i32>,
-    
+
     // Metadata
     pub name: Option<String>,
     pub entity_category: Option<String>,
@@ -75,18 +75,18 @@ pub struct TradeRecord {
     pub address_id: i64,
     pub token_address: String,
     pub currency: Option<String>,
-    
+
     // Transaction metrics
     pub entry_block: Option<i32>,
     pub latest_block: Option<i32>,
     pub total_denom_spent: Option<f64>,
     pub total_denom_received: Option<f64>,
     pub tx_fee: Option<f64>,
-    
+
     // PnL metrics
     pub realized_profit: Option<f64>,
     pub unrealized_profit: Option<f64>,
-    
+
     // Activity metrics
     pub num_buys: Option<i32>,
     pub num_sells: Option<i32>,

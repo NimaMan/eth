@@ -20,6 +20,9 @@ tx_fund_flow-core-types = { path = "../tx_fund_flow/src/core_types" }
 tx_fund_flow-fundflownetwork = { path = "../tx_fund_flow/src/fundflownetwork" }
 tx_processor = { path = "../tx_processor" }
 
+[dev-dependencies]
+toml.workspace = true
+
 [[example]]
 name = "custody_session_balance_drain"
 path = "examples/custody/session_balance_drain.rs"
@@ -27,6 +30,10 @@ path = "examples/custody/session_balance_drain.rs"
 [[example]]
 name = "custody_session_scammer_case_report"
 path = "examples/custody/session_scammer_case_report.rs"
+
+[[example]]
+name = "custody_suspect_cashout_trace"
+path = "examples/custody/session_suspect_cashout_trace.rs"
 
 [[example]]
 name = "pool_custody_flags"
@@ -51,3 +58,7 @@ path = "examples/network/token_network_flow_context.rs"
 [[example]]
 name = "uniswap_v2_pool_user_pnl_conservation"
 path = "examples/pnl/uniswap_v2_pool_user_pnl_conservation.rs"
+
+[[example]]
+name = "scam_inflation_lifecycle"
+path = "examples/scam/scam_inflation_lifecycle.rs"

@@ -55,6 +55,15 @@ fn payload_result() -> Result<Value, Box<dyn Error>> {
         .iter()
         .map(|case| value_i64(&case["summary"], "confiscated_buyer_count"))
         .sum::<i64>();
+    let total_cex_terminals = cases
+        .iter()
+        .map(|case| value_i64(&case["summary"], "cashout_cex_terminal_count"))
+        .sum::<i64>();
+
+    // Scammer-centric, per-exchange, and recoverability rollups (DESIGN §5.2, §8).
+    let scammers = build_scammers(&cases);
+    let exchanges = build_exchanges(&cases);
+    let recoverability = build_recoverability_rollup(&cases);
 
     Ok(json!({
         "root": root,
@@ -65,9 +74,201 @@ fn payload_result() -> Result<Value, Box<dyn Error>> {
             "total_forwarded_eth": total_forwarded_eth,
             "buyer_count": total_buyers,
             "confiscated_buyer_count": total_confiscated_buyers,
+            "cex_terminal_count": total_cex_terminals,
+            "scammer_count": scammers.len(),
+            "exchange_count": exchanges.len(),
         },
+        "scammers": scammers,
+        "exchanges": exchanges,
+        "recoverability": recoverability,
         "cases": cases,
     }))
+}
+
+/// Recoverability ETH-eq split (DESIGN §4.1) read from a case's cashout-trace
+/// `summary.recoverability` object. Defaults to all-zero when absent.
+fn case_recoverability(cashout_summary: &Value) -> (f64, f64, f64, f64) {
+    let recover = cashout_summary
+        .get("recoverability")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    (
+        value_f64(&recover, "at_exchange_eth"),
+        value_f64(&recover, "in_wallet_eth"),
+        value_f64(&recover, "bridged_eth"),
+        value_f64(&recover, "destroyed_eth"),
+    )
+}
+
+/// The cashout-trace summary object for a case (already nested in the case JSON).
+fn cashout_summary(case: &Value) -> Value {
+    case.get("suspect_cashout_trace")
+        .and_then(|trace| trace.get("summary"))
+        .cloned()
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Scammer-centric rollup (DESIGN §8): group cases by operator wallet — the
+/// case `suspect_address`, plus the trace `control_address` recorded as an
+/// associated control wallet. Rolls up case counts, victim/confiscated counts,
+/// the cashout-trace out-traced / to-CEX totals, and the recoverability split.
+fn build_scammers(cases: &[Value]) -> Vec<Value> {
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Acc {
+        suspect_address: String,
+        control_addresses: BTreeSet<String>,
+        case_ids: Vec<String>,
+        case_count: i64,
+        buyer_count: i64,
+        confiscated_buyer_count: i64,
+        out_traced_eth: f64,
+        to_cex_eth: f64,
+        at_exchange_eth: f64,
+        in_wallet_eth: f64,
+        bridged_eth: f64,
+        destroyed_eth: f64,
+    }
+
+    let mut by_operator: BTreeMap<String, Acc> = BTreeMap::new();
+    for case in cases {
+        let suspect = value_string(case, "suspect_address");
+        if suspect.is_empty() {
+            continue;
+        }
+        let summary = cashout_summary(case);
+        let control = value_string(&summary, "control_address");
+        let (at_exchange, in_wallet, bridged, destroyed) = case_recoverability(&summary);
+
+        let acc = by_operator.entry(suspect.clone()).or_default();
+        acc.suspect_address = suspect;
+        if !control.is_empty() {
+            acc.control_addresses.insert(control);
+        }
+        acc.case_ids.push(value_string(case, "case_id"));
+        acc.case_count += 1;
+        acc.buyer_count += value_i64(&case["summary"], "buyer_count");
+        acc.confiscated_buyer_count += value_i64(&case["summary"], "confiscated_buyer_count");
+        acc.out_traced_eth += value_f64(&summary, "total_value_out_traced_eth");
+        acc.to_cex_eth += value_f64(&summary, "total_value_to_cex_eth");
+        acc.at_exchange_eth += at_exchange;
+        acc.in_wallet_eth += in_wallet;
+        acc.bridged_eth += bridged;
+        acc.destroyed_eth += destroyed;
+    }
+
+    by_operator
+        .into_values()
+        .map(|acc| {
+            json!({
+                "suspect_address": acc.suspect_address,
+                "control_addresses": acc.control_addresses.into_iter().collect::<Vec<_>>(),
+                "case_ids": acc.case_ids,
+                "case_count": acc.case_count,
+                "buyer_count": acc.buyer_count,
+                "confiscated_buyer_count": acc.confiscated_buyer_count,
+                "total_value_out_traced_eth": acc.out_traced_eth,
+                "total_value_to_cex_eth": acc.to_cex_eth,
+                "recoverability": {
+                    "at_exchange_eth": acc.at_exchange_eth,
+                    "in_wallet_eth": acc.in_wallet_eth,
+                    "bridged_eth": acc.bridged_eth,
+                    "destroyed_eth": acc.destroyed_eth,
+                },
+            })
+        })
+        .collect()
+}
+
+/// Per-exchange aggregate exposure (DESIGN §5.2): iterate every case's cashout
+/// `terminals[]`, group by `exchange`, sum `total_value_received_eth`, and count
+/// distinct scammers / cases reaching that exchange. This is the compliance
+/// contact list. May be empty when no case reaches a CEX (that is valid).
+fn build_exchanges(cases: &[Value]) -> Vec<Value> {
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Acc {
+        exchange: String,
+        total_value_received_eth: f64,
+        terminal_count: i64,
+        scammers: BTreeSet<String>,
+        cases: BTreeSet<String>,
+    }
+
+    let mut by_exchange: BTreeMap<String, Acc> = BTreeMap::new();
+    for case in cases {
+        let suspect = value_string(case, "suspect_address");
+        let case_id = value_string(case, "case_id");
+        let terminals = case
+            .get("suspect_cashout_trace")
+            .and_then(|trace| trace.get("terminals"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for terminal in &terminals {
+            let exchange = terminal
+                .get("exchange")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+                .unwrap_or("unknown")
+                .to_string();
+            let acc = by_exchange.entry(exchange.clone()).or_default();
+            acc.exchange = exchange;
+            acc.total_value_received_eth += value_f64(terminal, "total_value_received_eth");
+            acc.terminal_count += 1;
+            if !suspect.is_empty() {
+                acc.scammers.insert(suspect.clone());
+            }
+            if !case_id.is_empty() {
+                acc.cases.insert(case_id.clone());
+            }
+        }
+    }
+
+    let mut rows: Vec<Value> = by_exchange
+        .into_values()
+        .map(|acc| {
+            json!({
+                "exchange": acc.exchange,
+                "total_value_received_eth": acc.total_value_received_eth,
+                "terminal_count": acc.terminal_count,
+                "scammer_count": acc.scammers.len(),
+                "case_count": acc.cases.len(),
+            })
+        })
+        .collect();
+    // Compliance-target list: largest exposure first.
+    rows.sort_by(|left, right| {
+        value_f64(right, "total_value_received_eth")
+            .partial_cmp(&value_f64(left, "total_value_received_eth"))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rows
+}
+
+/// Top-level recoverability rollup (DESIGN §4.1, §8): sum the per-case cashout
+/// `summary.recoverability` splits into one landscape-level actionability split.
+fn build_recoverability_rollup(cases: &[Value]) -> Value {
+    let mut at_exchange = 0.0;
+    let mut in_wallet = 0.0;
+    let mut bridged = 0.0;
+    let mut destroyed = 0.0;
+    for case in cases {
+        let summary = cashout_summary(case);
+        let (a, w, b, d) = case_recoverability(&summary);
+        at_exchange += a;
+        in_wallet += w;
+        bridged += b;
+        destroyed += d;
+    }
+    json!({
+        "at_exchange_eth": at_exchange,
+        "in_wallet_eth": in_wallet,
+        "bridged_eth": bridged,
+        "destroyed_eth": destroyed,
+    })
 }
 
 fn scammer_analytics_root() -> PathBuf {
@@ -104,6 +305,16 @@ fn case_payload(case_dir: &Path) -> Result<Value, Box<dyn Error>> {
             .join("traces")
             .join("forwarder_traces.json"),
     );
+    let suspect_cashout_trace = read_json_object_or_default(
+        case_dir
+            .join("artifacts")
+            .join("tx_fund_flow")
+            .join("suspect_cashout_trace.json"),
+    );
+    let cashout_summary = suspect_cashout_trace
+        .get("summary")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     let readme_path = case_dir.join("README.md");
     let readme = fs::read_to_string(&readme_path).unwrap_or_default();
     let report_path = case_dir.join("reports").join("evidence_packet.md");
@@ -184,6 +395,12 @@ fn case_payload(case_dir: &Path) -> Result<Value, Box<dyn Error>> {
             "total_forwarded_eth": total_forwarded_eth,
             "first_block": blocks.first().copied(),
             "last_block": blocks.last().copied(),
+            "cashout_node_count": value_i64(&cashout_summary, "node_count"),
+            "cashout_edge_count": value_i64(&cashout_summary, "edge_count"),
+            "cashout_cex_terminal_count": value_i64(&cashout_summary, "cex_terminal_count"),
+            "cashout_unlabeled_lead_count": value_i64(&cashout_summary, "unlabeled_lead_count"),
+            "cashout_total_eth_to_cex": value_f64(&cashout_summary, "total_value_to_cex_eth"),
+            "cashout_funding_source_count": value_i64(&cashout_summary, "funding_source_count"),
         },
         "key_txs": case_config.get("key_txs").cloned().unwrap_or(Value::Null),
         "links": case_config.get("links").cloned().unwrap_or(Value::Null),
@@ -192,6 +409,7 @@ fn case_payload(case_dir: &Path) -> Result<Value, Box<dyn Error>> {
         "buyer_outcomes": buyer_outcomes,
         "buyer_fund_flow_edges": buyer_edge_rows,
         "address_clusters": cluster_rows,
+        "suspect_cashout_trace": suspect_cashout_trace,
         "readme_excerpt": readme.lines().take(180).collect::<Vec<_>>().join("\n"),
         "report_excerpt": report.lines().take(80).collect::<Vec<_>>().join("\n"),
         "buyer_report_excerpt": buyer_report.lines().take(120).collect::<Vec<_>>().join("\n"),
@@ -215,6 +433,15 @@ fn read_json_or_default(path: PathBuf) -> Value {
         .ok()
         .and_then(|contents| serde_json::from_str(&contents).ok())
         .unwrap_or_else(|| json!([]))
+}
+
+/// Like [`read_json_or_default`] but defaults to an empty object, for artifacts
+/// whose top level is a JSON object (e.g. `suspect_cashout_trace.json`).
+fn read_json_object_or_default(path: PathBuf) -> Value {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_else(|| json!({}))
 }
 
 fn toml_string(value: &Value, key: &str) -> String {

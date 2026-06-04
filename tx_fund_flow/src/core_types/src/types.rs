@@ -34,7 +34,7 @@ impl EthAddress {
     pub fn from_str(s: &str) -> crate::error::QarqaResult<Self> {
         s.try_into()
     }
-    
+
     /// Create a new EthAddress with validation
     pub fn new(address: Address) -> Self {
         Self {
@@ -43,13 +43,13 @@ impl EthAddress {
             entity_type: None,
         }
     }
-    
+
     /// Set the label for this address
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
-    
+
     /// Set the entity type for this address
     pub fn with_entity_type(mut self, entity_type: EntityType) -> Self {
         self.entity_type = Some(entity_type);
@@ -59,13 +59,15 @@ impl EthAddress {
 
 impl TryFrom<&str> for EthAddress {
     type Error = crate::error::QarqaError;
-    
+
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let address = s.parse()
-            .map_err(|e| crate::error::QarqaError::InvalidInput(
-                format!("Invalid Ethereum address '{}': {}", s, e)
-            ))?;
-        
+        let address = s.parse().map_err(|e| {
+            crate::error::QarqaError::InvalidInput(format!(
+                "Invalid Ethereum address '{}': {}",
+                s, e
+            ))
+        })?;
+
         Ok(Self {
             address,
             label: None,
@@ -104,9 +106,9 @@ pub struct TransactionParticipant {
 /// Direction of participation in a transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ParticipantDirection {
-    In,    // Received value/tokens
-    Out,   // Sent value/tokens
-    Both,  // Both sent and received (e.g., swap)
+    In,   // Received value/tokens
+    Out,  // Sent value/tokens
+    Both, // Both sent and received (e.g., swap)
 }
 
 /// Fund flow between two addresses
@@ -155,10 +157,10 @@ pub struct EthMovement {
 /// Type of ETH movement
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EthMovementType {
-    Direct,      // Direct transaction transfer
-    Internal,    // Internal contract transfer
-    Gas,         // Gas payment
-    Refund,      // Gas refund
+    Direct,       // Direct transaction transfer
+    Internal,     // Internal contract transfer
+    Gas,          // Gas payment
+    Refund,       // Gas refund
     SelfDestruct, // Contract self-destruct
 }
 
@@ -198,38 +200,38 @@ pub struct TokenBalanceChange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EntityType {
     // Exchanges
-    CEX,           // Centralized Exchange
-    DEX,           // Decentralized Exchange
-    
+    CEX, // Centralized Exchange
+    DEX, // Decentralized Exchange
+
     // Users
-    Whale,         // Large holder/trader
-    Retail,        // Individual user
-    Bot,           // Automated trading bot
-    Arbitrageur,   // Arbitrage trader
-    
+    Whale,       // Large holder/trader
+    Retail,      // Individual user
+    Bot,         // Automated trading bot
+    Arbitrageur, // Arbitrage trader
+
     // Infrastructure
-    Bridge,        // Cross-chain bridge
-    Mixer,         // Privacy mixer
-    Miner,         // Mining pool
-    Validator,     // PoS validator
-    
+    Bridge,    // Cross-chain bridge
+    Mixer,     // Privacy mixer
+    Miner,     // Mining pool
+    Validator, // PoS validator
+
     // Protocols
-    DeFiProtocol,  // DeFi protocol contract
-    Token,         // Token contract
-    MultiSig,      // Multi-signature wallet
-    DAO,           // DAO treasury
-    
+    DeFiProtocol, // DeFi protocol contract
+    Token,        // Token contract
+    MultiSig,     // Multi-signature wallet
+    DAO,          // DAO treasury
+
     // Unknown
-    Unknown,       // Unable to classify
+    Unknown, // Unable to classify
 }
 
 /// Risk level assessment
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskLevel {
-    Low,        // 0.0 - 0.3
-    Medium,     // 0.3 - 0.6  
-    High,       // 0.6 - 0.8
-    Critical,   // 0.8 - 1.0
+    Low,      // 0.0 - 0.3
+    Medium,   // 0.3 - 0.6
+    High,     // 0.6 - 0.8
+    Critical, // 0.8 - 1.0
 }
 
 /// Time range for analysis
@@ -251,7 +253,7 @@ impl TimeRange {
             end_time: None,
         }
     }
-    
+
     /// Create a time range from timestamps
     pub fn from_timestamps(start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
         Self {
@@ -261,10 +263,14 @@ impl TimeRange {
             end_time: Some(end),
         }
     }
-    
+
     /// Create a time range for the last N blocks
     pub fn last_blocks(n: u64, latest_block: BlockNumber) -> Self {
-        let start = if latest_block > n { latest_block - n } else { 0 };
+        let start = if latest_block > n {
+            latest_block - n
+        } else {
+            0
+        };
         Self::from_blocks(start, latest_block)
     }
 }
@@ -284,13 +290,13 @@ pub struct AnalysisConfig {
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
-            eth_threshold: 0.01,           // 0.01 ETH minimum
-            token_threshold_usd: 10.0,     // $10 minimum for tokens
-            max_depth: 3,                  // 3 hops maximum
+            eth_threshold: 0.01,                                 // 0.01 ETH minimum
+            token_threshold_usd: 10.0,                           // $10 minimum for tokens
+            max_depth: 3,                                        // 3 hops maximum
             time_range: TimeRange::last_blocks(10000, u64::MAX), // Last 10k blocks
-            include_gas_flows: false,      // Usually not interesting
-            include_token_flows: true,     // Include ERC20 flows
-            min_transaction_count: 1,      // At least 1 transaction
+            include_gas_flows: false,                            // Usually not interesting
+            include_token_flows: true,                           // Include ERC20 flows
+            min_transaction_count: 1,                            // At least 1 transaction
         }
     }
 }

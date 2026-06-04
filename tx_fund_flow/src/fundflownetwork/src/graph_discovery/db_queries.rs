@@ -1,9 +1,9 @@
 //! Database queries for graph discovery
 
 use alloy_primitives::{Address, TxHash, U256};
-use sqlx::{PgPool, FromRow};
-use std::collections::HashMap;
 use eyre::Result;
+use sqlx::{FromRow, PgPool};
+use std::collections::HashMap;
 
 /// Raw transaction participant record from database
 #[derive(Debug, FromRow)]
@@ -67,7 +67,7 @@ impl RawAddressInfo {
     pub fn parse(self) -> Result<AddressInfo> {
         // Derive entity type before consuming self
         let entity_type = derive_entity_type(&self.cluster_label);
-        
+
         Ok(AddressInfo {
             address: self.address.parse()?,
             is_contract: self.is_contract,
@@ -97,8 +97,8 @@ pub struct AddressInfo {
     pub is_contract: bool,
     pub cluster_label: Option<String>,
     pub scam_ratio: Option<f64>,
-    pub entity_type: Option<String>,  // Derived from cluster_label
-    pub name: Option<String>,         // Always None in this schema
+    pub entity_type: Option<String>, // Derived from cluster_label
+    pub name: Option<String>,        // Always None in this schema
 }
 
 /// Database queries for graph discovery
@@ -110,7 +110,7 @@ impl GraphDiscoveryQueries {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-    
+
     /// Get transactions involving an address - gets ALL participant pairs from tx_participants
     pub async fn get_address_transactions(
         &self,
@@ -119,16 +119,16 @@ impl GraphDiscoveryQueries {
         max_block: Option<u64>,
     ) -> Result<Vec<TxParticipant>> {
         let address_str = format!("{:?}", address);
-        
+
         // Step 1: Get address_id for our target address
         let address_id: i64 = sqlx::query_scalar(
-            "SELECT address_id FROM eth_db.addresses WHERE LOWER(address) = LOWER($1)"
+            "SELECT address_id FROM eth_db.addresses WHERE LOWER(address) = LOWER($1)",
         )
         .bind(&address_str)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| eyre::eyre!("Address not found: {}", address_str))?;
-        
+
         // Step 2: Get transaction hashes for this address with block filtering
         let tx_hashes: Vec<(String, i32, String)> = if let Some(max_block) = max_block {
             sqlx::query_as(
@@ -137,7 +137,7 @@ impl GraphDiscoveryQueries {
                  JOIN eth_db.transactions t ON t.tx_hash = tp.tx_hash
                  WHERE tp.address_id = $1 AND t.block_number <= $2 
                  ORDER BY t.block_number DESC 
-                 LIMIT $3"
+                 LIMIT $3",
             )
             .bind(address_id)
             .bind(max_block as i32)
@@ -151,25 +151,25 @@ impl GraphDiscoveryQueries {
                  JOIN eth_db.transactions t ON t.tx_hash = tp.tx_hash
                  WHERE tp.address_id = $1 
                  ORDER BY t.block_number DESC 
-                 LIMIT $2"
+                 LIMIT $2",
             )
             .bind(address_id)
             .bind(limit as i64)
             .fetch_all(&self.pool)
             .await?
         };
-        
+
         if tx_hashes.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let mut all_participants = Vec::new();
-        
+
         // Step 3: For each transaction, get ALL participant pairs
         for (tx_hash, block_number, value) in tx_hashes {
             let participants = self.get_tx_participants(&tx_hash.parse()?).await?;
             let value = parse_transaction_value(&value)?;
-            
+
             // Create pairs between our target address and all other participants
             for participant in participants {
                 if participant != *address {
@@ -183,17 +183,14 @@ impl GraphDiscoveryQueries {
                 }
             }
         }
-        
+
         Ok(all_participants)
     }
-    
+
     /// Get address metadata
-    pub async fn get_address_info(
-        &self,
-        address: &Address,
-    ) -> Result<AddressInfo> {
+    pub async fn get_address_info(&self, address: &Address) -> Result<AddressInfo> {
         let address_str = format!("{:?}", address);
-        
+
         let query = r#"
             SELECT 
                 address,
@@ -203,7 +200,7 @@ impl GraphDiscoveryQueries {
             FROM eth_db.addresses
             WHERE LOWER(address) = LOWER($1)
         "#;
-        
+
         let info = sqlx::query_as::<_, RawAddressInfo>(query)
             .bind(&address_str)
             .fetch_optional(&self.pool)
@@ -214,36 +211,33 @@ impl GraphDiscoveryQueries {
                 cluster_label: None,
                 scam_ratio: None,
             });
-            
+
         info.parse()
     }
-    
+
     /// Get all participants for a given transaction hash
-    pub async fn get_tx_participants(
-        &self,
-        tx_hash: &TxHash,
-    ) -> Result<Vec<Address>> {
+    pub async fn get_tx_participants(&self, tx_hash: &TxHash) -> Result<Vec<Address>> {
         let tx_hash_str = format!("{:?}", tx_hash);
-        
+
         let query = r#"
             SELECT DISTINCT a.address
             FROM eth_db.tx_participants tp
             JOIN eth_db.addresses a ON a.address_id = tp.address_id
             WHERE tp.tx_hash = $1
         "#;
-        
+
         let addresses: Vec<String> = sqlx::query_scalar(query)
             .bind(&tx_hash_str)
             .fetch_all(&self.pool)
             .await?;
-            
+
         let mut result = Vec::new();
         for addr_str in addresses {
             if let Ok(addr) = addr_str.parse() {
                 result.push(addr);
             }
         }
-        
+
         Ok(result)
     }
 
@@ -255,12 +249,10 @@ impl GraphDiscoveryQueries {
         if addresses.is_empty() {
             return Ok(HashMap::new());
         }
-        
+
         // Build IN clause with placeholders
-        let placeholders: Vec<String> = (1..=addresses.len())
-            .map(|i| format!("${}", i))
-            .collect();
-        
+        let placeholders: Vec<String> = (1..=addresses.len()).map(|i| format!("${}", i)).collect();
+
         let query = format!(
             r#"
             SELECT address, is_contract, cluster_label, scam_ratio
@@ -269,17 +261,17 @@ impl GraphDiscoveryQueries {
             "#,
             placeholders.join(", ")
         );
-        
+
         // Build query
         let mut query_builder = sqlx::query_as::<_, RawAddressInfo>(&query);
         for addr in addresses {
             let addr_str = format!("{:?}", addr).to_lowercase();
             query_builder = query_builder.bind(addr_str);
         }
-        
+
         // Execute
         let rows = query_builder.fetch_all(&self.pool).await?;
-        
+
         // Convert to HashMap
         let mut result = HashMap::new();
         for row in rows {
@@ -287,21 +279,24 @@ impl GraphDiscoveryQueries {
                 result.insert(typed.address, typed);
             }
         }
-        
+
         // Add default entries for addresses not in DB
         for addr in addresses {
             if !result.contains_key(addr) {
-                result.insert(*addr, AddressInfo {
-                    address: *addr,
-                    is_contract: false,
-                    cluster_label: None,
-                    scam_ratio: None,
-                    entity_type: None,
-                    name: None,
-                });
+                result.insert(
+                    *addr,
+                    AddressInfo {
+                        address: *addr,
+                        is_contract: false,
+                        cluster_label: None,
+                        scam_ratio: None,
+                        entity_type: None,
+                        name: None,
+                    },
+                );
             }
         }
-        
+
         Ok(result)
     }
 }

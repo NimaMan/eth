@@ -1,0 +1,194 @@
+{
+  "summary": {
+    "token": "0x2CedB62299Ad3422Fc0b0ec57180695501D15fef",
+    "pool": "0x5D43262637B4fc4bfaF4164A8974c436D5CFCe8D",
+    "suspect": "0x9d58c75A8749a94C9CF9539B4f625Ed42936105D",
+    "denom": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "token_symbol": "e",
+    "token_name": "e",
+    "start_block": 25180893,
+    "end_block": 25181215,
+    "active_block_count": 12,
+    "replay_window_blocks": 322
+  },
+  "inflation": {
+    "initial_price": 1.3324113047104736e-9,
+    "peak_price": 1.5744097240177072e-9,
+    "peak_block": 25181138,
+    "price_at_removal": 0.0,
+    "inflation_x": 1.1816244116600456,
+    "collapse_ratio": 0.0
+  },
+  "liquidity": {
+    "eth_added_as_lp": 1.0,
+    "eth_added_block": 25181124,
+    "eth_removed_at_rug": 1.0642539561542674,
+    "eth_removed_block": 25181165,
+    "net_eth_extracted": 0.06425395615426743,
+    "source": "reserve_history_denom_delta",
+    "mint_event_count": 1,
+    "burn_event_count": 1
+  },
+  "trading": {
+    "buy_count": 5,
+    "sell_count": 2,
+    "swap_count": 7,
+    "distinct_buyers": 5,
+    "confidence": "tool_derived_from_swap_events"
+  },
+  "scam_mechanism": {
+    "mechanism": "direct_lp_liquidity_removal",
+    "label": "Direct LP Liquidity Removal",
+    "block_number": 25181165,
+    "tx_hash": "0xba87aaeaff423a9c312a3432919c6191951639277c5d1835bfa09bf71b65fb33",
+    "source": "inferred_scam_mechanism"
+  },
+  "lifecycle": [
+    {
+      "phase": "token_deploy",
+      "label": "Operator deployed the token contract",
+      "kind": "key_tx",
+      "block_number": 25180893,
+      "timestamp": 1779815339,
+      "tx_hash": "0x04c678d5ba91f2c07c02343042c6bb3a1fd657601ecf1166b0738bcec784c565"
+    },
+    {
+      "phase": "token_fund",
+      "label": "Operator funded the token / seeded ETH",
+      "kind": "key_tx",
+      "block_number": 25180926,
+      "timestamp": 1779815735,
+      "tx_hash": "0xfa786c9b9c9d20245b09e2f222de1a4ac8de078bb43712e447e40bf4c5eb5b16"
+    },
+    {
+      "phase": "first_trade",
+      "label": "First on-chain trade established a live price",
+      "kind": "derived",
+      "block_number": 25181124,
+      "timestamp": null,
+      "tx_hash": "0x0ef032ee97e3024e8cd7f9c0a76b99356759aac4f6b8b4e62f00bf4e9490bc66"
+    },
+    {
+      "phase": "open_trading",
+      "label": "Operator opened trading (buys enabled)",
+      "kind": "key_tx",
+      "block_number": 25181124,
+      "timestamp": 1779818123,
+      "tx_hash": "0x0ef032ee97e3024e8cd7f9c0a76b99356759aac4f6b8b4e62f00bf4e9490bc66"
+    },
+    {
+      "phase": "peak",
+      "label": "Price peaked (top of the pump)",
+      "kind": "derived",
+      "block_number": 25181138,
+      "timestamp": null,
+      "tx_hash": null
+    },
+    {
+      "phase": "lp_approval",
+      "label": "Operator approved LP tokens to the router (pre-stage the rug)",
+      "kind": "key_tx",
+      "block_number": 25181163,
+      "timestamp": 1779818591,
+      "tx_hash": "0x867dafbf651afbd961800f14a54ed680c090ea300ed96c9997b1eb508b828d44"
+    },
+    {
+      "phase": "collapse",
+      "label": "Price collapsed to ~0 after liquidity was pulled",
+      "kind": "derived",
+      "block_number": 25181165,
+      "timestamp": null,
+      "tx_hash": null
+    },
+    {
+      "phase": "liquidity_removal",
+      "label": "Operator removed the liquidity (the rug pull)",
+      "kind": "key_tx",
+      "block_number": 25181165,
+      "timestamp": 1779818615,
+      "tx_hash": "0xba87aaeaff423a9c312a3432919c6191951639277c5d1835bfa09bf71b65fb33"
+    }
+  ],
+  "price_series": [
+    {
+      "block_number": 25181124,
+      "tx_hash": "0x0ef032ee97e3024e8cd7f9c0a76b99356759aac4f6b8b4e62f00bf4e9490bc66",
+      "denom_reserve": 1.0,
+      "token_reserve": 750519000.0,
+      "price": 1.3324113047104736e-9,
+      "price_ratio_to_initial": 1.0
+    },
+    {
+      "block_number": 25181124,
+      "tx_hash": "0x68f811f9c40dbb47c3fce8154b64c3a3e60bfa0258d078ee0556b897083c581b",
+      "denom_reserve": 1.0274601763152291,
+      "token_reserve": 730519000.0,
+      "price": 1.4064797442848565e-9,
+      "price_ratio_to_initial": 1.0555897712009263
+    },
+    {
+      "block_number": 25181126,
+      "tx_hash": "0xf3986cc4c3b73796f0d680472d3df788932a33c5f76a2e358b9c9e4d64a7f6bd",
+      "denom_reserve": 1.0474601763152291,
+      "token_reserve": 716611661.4398277,
+      "price": 1.4616845254941224e-9,
+      "price_ratio_to_initial": 1.0970220083893234
+    },
+    {
+      "block_number": 25181127,
+      "tx_hash": "0xf1c44dee0157c0e2e57d6bd3840c813d7c813040c8383be1a109ac8ada79b6e1",
+      "denom_reserve": 1.0574601763152292,
+      "token_reserve": 709855075.1189687,
+      "price": 1.4896846037735285e-9,
+      "price_ratio_to_initial": 1.118036599139505
+    },
+    {
+      "block_number": 25181138,
+      "tx_hash": "0x773130662ac3e7a9dd76105257abe8cc3f98ba569b44828f657ed4569fa81d02",
+      "denom_reserve": 1.0871601763152292,
+      "token_reserve": 690519221.0963517,
+      "price": 1.5744097240177072e-9,
+      "price_ratio_to_initial": 1.1816244116600456
+    },
+    {
+      "block_number": 25181140,
+      "tx_hash": "0x84018a387f5fcf2e4cb2741df62186eb571ea4fcba341b13a020cf8dd0e90c65",
+      "denom_reserve": 1.0642815469702718,
+      "token_reserve": 705407828.6937668,
+      "price": 1.5087464352940999e-9,
+      "price_ratio_to_initial": 1.1323428658704926
+    },
+    {
+      "block_number": 25181165,
+      "tx_hash": "0xba87aaeaff423a9c312a3432919c6191951639277c5d1835bfa09bf71b65fb33",
+      "denom_reserve": 0.000027590816004274,
+      "token_reserve": 18287.245198293,
+      "price": 0.0,
+      "price_ratio_to_initial": 0.0
+    },
+    {
+      "block_number": 25181167,
+      "tx_hash": "0xa7c2ecedfa05524d0b173d0c316ac92d6c9c12ce46c68769b9c74f65b05a1f40",
+      "denom_reserve": 0.12872759081600427,
+      "token_reserve": 3.931386603,
+      "price": 0.032743559414323074,
+      "price_ratio_to_initial": 24574663.46807834
+    },
+    {
+      "block_number": 25181169,
+      "tx_hash": "0x3ad68ef6000510fb4407c962f3fdee3b0b9f41370b4eddc80c89ec491c4707cd",
+      "denom_reserve": 0.000036045825107464,
+      "token_reserve": 14082.083021605,
+      "price": 0.0,
+      "price_ratio_to_initial": 0.0
+    }
+  ],
+  "provenance": {
+    "method": "reth_db_replay_token_state_builder",
+    "block_range": "25180893..=25181215",
+    "history_limit": 50000,
+    "notes": [
+      "trading counts from pool.swap_events (7 events); price/liquidity from reserve_history deltas"
+    ]
+  }
+}

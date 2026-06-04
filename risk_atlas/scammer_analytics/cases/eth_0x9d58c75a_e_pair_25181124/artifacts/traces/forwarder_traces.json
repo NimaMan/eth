@@ -1,0 +1,362 @@
+[
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x1e892034717a2b035529d88369b2995c33b5db27",
+    "sink_address": "0xdbf1773e5e2f175d78d630d565cd8cf57b6b3771",
+    "amount_wei": "104475713487430064",
+    "amount_eth": 0.10447571348743007,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x1e892034717a2b035529d88369b2995c33b5db27 with 104475713487430064 wei",
+      "0x1e892034717a2b035529d88369b2995c33b5db27 forwards/selfdestructs into 0xdbf1773e5e2f175d78d630d565cd8cf57b6b3771"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x1c8821d8254b00f3a58287e2787a6153ebb8f9ba",
+    "sink_address": "0x15711b2750a4c54c3165a028e802621eb8891643",
+    "amount_wei": "107116135768344464",
+    "amount_eth": 0.10711613576834446,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x1c8821d8254b00f3a58287e2787a6153ebb8f9ba with 107116135768344464 wei",
+      "0x1c8821d8254b00f3a58287e2787a6153ebb8f9ba forwards/selfdestructs into 0x15711b2750a4c54c3165a028e802621eb8891643"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xa487e09d0ea361593452ac6f83028cf93e92a11d",
+    "sink_address": "0x2b0ad9401f54a5c1861f4361a7d99b131602fc7d",
+    "amount_wei": "110000875504143520",
+    "amount_eth": 0.11000087550414352,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xa487e09d0ea361593452ac6f83028cf93e92a11d with 110000875504143520 wei",
+      "0xa487e09d0ea361593452ac6f83028cf93e92a11d forwards/selfdestructs into 0x2b0ad9401f54a5c1861f4361a7d99b131602fc7d"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xb9ff7e504a1e515ec3b6a0b2c869239f402f2071",
+    "sink_address": "0xad7614c055b837017f2f9d70f8f84cd8f9c2d84b",
+    "amount_wei": "113161025338616656",
+    "amount_eth": 0.11316102533861666,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xb9ff7e504a1e515ec3b6a0b2c869239f402f2071 with 113161025338616656 wei",
+      "0xb9ff7e504a1e515ec3b6a0b2c869239f402f2071 forwards/selfdestructs into 0xad7614c055b837017f2f9d70f8f84cd8f9c2d84b"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x59cd02af0cf12235da55b965adae119072cfe753",
+    "sink_address": "0xe22ee24a4b81f424463921cda8c1f1610573c994",
+    "amount_wei": "116632785750040160",
+    "amount_eth": 0.11663278575004016,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x59cd02af0cf12235da55b965adae119072cfe753 with 116632785750040160 wei",
+      "0x59cd02af0cf12235da55b965adae119072cfe753 forwards/selfdestructs into 0xe22ee24a4b81f424463921cda8c1f1610573c994"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xc01ad4528da6806dbabf7c862521ed1ee00b349a",
+    "sink_address": "0xf2e03fb476c79971527e1f0e07e1ffe26dcd822e",
+    "amount_wei": "120458506057787888",
+    "amount_eth": 0.12045850605778789,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xc01ad4528da6806dbabf7c862521ed1ee00b349a with 120458506057787888 wei",
+      "0xc01ad4528da6806dbabf7c862521ed1ee00b349a forwards/selfdestructs into 0xf2e03fb476c79971527e1f0e07e1ffe26dcd822e"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xada0dd4e53db8e441a78382ab654ec6a0a3fd6a0",
+    "sink_address": "0x3768ff7567deb1c288a1c13c2cb55b2e9b99374f",
+    "amount_wei": "124687981633304928",
+    "amount_eth": 0.12468798163330493,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xada0dd4e53db8e441a78382ab654ec6a0a3fd6a0 with 124687981633304928 wei",
+      "0xada0dd4e53db8e441a78382ab654ec6a0a3fd6a0 forwards/selfdestructs into 0x3768ff7567deb1c288a1c13c2cb55b2e9b99374f"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x14839882b62c2bbb3b09c94ec96aeba161adf7e4",
+    "sink_address": "0x8f95e0ca4b54c21d24c666c3a7f9470485c21cb0",
+    "amount_wei": "129380081999100368",
+    "amount_eth": 0.12938008199910037,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x14839882b62c2bbb3b09c94ec96aeba161adf7e4 with 129380081999100368 wei",
+      "0x14839882b62c2bbb3b09c94ec96aeba161adf7e4 forwards/selfdestructs into 0x8f95e0ca4b54c21d24c666c3a7f9470485c21cb0"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x11ad0632876a4604d30066afbacadcc23c85b95d",
+    "sink_address": "0x6e055e776900520b897b105c0c5e1d5069d04c79",
+    "amount_wei": "134604809915751488",
+    "amount_eth": 0.1346048099157515,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x11ad0632876a4604d30066afbacadcc23c85b95d with 134604809915751488 wei",
+      "0x11ad0632876a4604d30066afbacadcc23c85b95d forwards/selfdestructs into 0x6e055e776900520b897b105c0c5e1d5069d04c79"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x466bef290e4de1d324fef2f40336751b64a252a9",
+    "sink_address": "0x9a9f7c70fea0a5eb9f5f3559f0353ddada52ef9d",
+    "amount_wei": "140445926961242640",
+    "amount_eth": 0.14044592696124264,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x466bef290e4de1d324fef2f40336751b64a252a9 with 140445926961242640 wei",
+      "0x466bef290e4de1d324fef2f40336751b64a252a9 forwards/selfdestructs into 0x9a9f7c70fea0a5eb9f5f3559f0353ddada52ef9d"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xc69011b984d5c838c7bcf3776f731743d3368de8",
+    "sink_address": "0xd5da7220422fbf56503fb30a9a05d1c9660f886a",
+    "amount_wei": "147004330993255488",
+    "amount_eth": 0.1470043309932555,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xc69011b984d5c838c7bcf3776f731743d3368de8 with 147004330993255488 wei",
+      "0xc69011b984d5c838c7bcf3776f731743d3368de8 forwards/selfdestructs into 0xd5da7220422fbf56503fb30a9a05d1c9660f886a"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x498e4ecc72959afdf88df42dad51ed4a3eae1579",
+    "sink_address": "0x88bef867783fe2aae6b1a107084614373f50d4e0",
+    "amount_wei": "154402442047071360",
+    "amount_eth": 0.15440244204707135,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x498e4ecc72959afdf88df42dad51ed4a3eae1579 with 154402442047071360 wei",
+      "0x498e4ecc72959afdf88df42dad51ed4a3eae1579 forwards/selfdestructs into 0x88bef867783fe2aae6b1a107084614373f50d4e0"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xedae46a06418a2a34faf5623bdf9e9440a1ff18f",
+    "sink_address": "0x35a47553e097b5b0614bd3b70ba84721413a74fc",
+    "amount_wei": "162789956084925888",
+    "amount_eth": 0.16278995608492589,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xedae46a06418a2a34faf5623bdf9e9440a1ff18f with 162789956084925888 wei",
+      "0xedae46a06418a2a34faf5623bdf9e9440a1ff18f forwards/selfdestructs into 0x35a47553e097b5b0614bd3b70ba84721413a74fc"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x95711db89de1664d11f118c6838069b62bd59a31",
+    "sink_address": "0xb101d1d627658a1cfb52fbd8f9a7998703e7f592",
+    "amount_wei": "172351476834962272",
+    "amount_eth": 0.17235147683496227,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x95711db89de1664d11f118c6838069b62bd59a31 with 172351476834962272 wei",
+      "0x95711db89de1664d11f118c6838069b62bd59a31 forwards/selfdestructs into 0xb101d1d627658a1cfb52fbd8f9a7998703e7f592"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xe2dcca20d6c0d1cab61462d733d143b3d166ad5c",
+    "sink_address": "0x14518fe59eb4cdcebd35f33c091c571288c396bf",
+    "amount_wei": "183316760537775680",
+    "amount_eth": 0.18331676053777568,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xe2dcca20d6c0d1cab61462d733d143b3d166ad5c with 183316760537775680 wei",
+      "0xe2dcca20d6c0d1cab61462d733d143b3d166ad5c forwards/selfdestructs into 0x14518fe59eb4cdcebd35f33c091c571288c396bf"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x137062768c8bb07e033b7325a15a33b41c8a702a",
+    "sink_address": "0x93ef1adc0ef255727853f5815473f25bb7d4724c",
+    "amount_wei": "195974648471358304",
+    "amount_eth": 0.19597464847135831,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x137062768c8bb07e033b7325a15a33b41c8a702a with 195974648471358304 wei",
+      "0x137062768c8bb07e033b7325a15a33b41c8a702a forwards/selfdestructs into 0x93ef1adc0ef255727853f5815473f25bb7d4724c"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xc2b27390905bf6849efa55e2d0fc5c650cf40655",
+    "sink_address": "0xacd9a9626ea6bb02fa565d00963a4303446c3c3d",
+    "amount_wei": "210692286498594336",
+    "amount_eth": 0.21069228649859434,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xc2b27390905bf6849efa55e2d0fc5c650cf40655 with 210692286498594336 wei",
+      "0xc2b27390905bf6849efa55e2d0fc5c650cf40655 forwards/selfdestructs into 0xacd9a9626ea6bb02fa565d00963a4303446c3c3d"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x94902c9da12aacc386c2ce9f2d4e9e4dd108445c",
+    "sink_address": "0xc3d03e53c255dbc707d558fc9c7312fc6a89fae7",
+    "amount_wei": "227942055767414432",
+    "amount_eth": 0.22794205576741444,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x94902c9da12aacc386c2ce9f2d4e9e4dd108445c with 227942055767414432 wei",
+      "0x94902c9da12aacc386c2ce9f2d4e9e4dd108445c forwards/selfdestructs into 0xc3d03e53c255dbc707d558fc9c7312fc6a89fae7"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x9f27c800930c9ae3aaa09bca8d44fa4388996cc8",
+    "sink_address": "0xee807059f78bb958922b94bf1c7df74a7502c7e2",
+    "amount_wei": "248339965042437280",
+    "amount_eth": 0.24833996504243727,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x9f27c800930c9ae3aaa09bca8d44fa4388996cc8 with 248339965042437280 wei",
+      "0x9f27c800930c9ae3aaa09bca8d44fa4388996cc8 forwards/selfdestructs into 0xee807059f78bb958922b94bf1c7df74a7502c7e2"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xe09ead2f1d400425956f2098163972edc967fc8b",
+    "sink_address": "0x128e868e2a93ee74f9e022770cf0b764b9be4dd2",
+    "amount_wei": "272701439979526272",
+    "amount_eth": 0.2727014399795263,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xe09ead2f1d400425956f2098163972edc967fc8b with 272701439979526272 wei",
+      "0xe09ead2f1d400425956f2098163972edc967fc8b forwards/selfdestructs into 0x128e868e2a93ee74f9e022770cf0b764b9be4dd2"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xf6002a31af300461e57212fdeb2eebcfdb842322",
+    "sink_address": "0x67484eba28d74961021ef987b2754c2c5574af22",
+    "amount_wei": "302124141461521088",
+    "amount_eth": 0.3021241414615211,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xf6002a31af300461e57212fdeb2eebcfdb842322 with 302124141461521088 wei",
+      "0xf6002a31af300461e57212fdeb2eebcfdb842322 forwards/selfdestructs into 0x67484eba28d74961021ef987b2754c2c5574af22"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x7236f148385d1ea8fa01370250ab127f4573622b",
+    "sink_address": "0xbc7153ce399cee09bf3157beb512f73535a7a3f9",
+    "amount_wei": "338113890373698304",
+    "amount_eth": 0.3381138903736983,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x7236f148385d1ea8fa01370250ab127f4573622b with 338113890373698304 wei",
+      "0x7236f148385d1ea8fa01370250ab127f4573622b forwards/selfdestructs into 0xbc7153ce399cee09bf3157beb512f73535a7a3f9"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xf5dbe30021febcab3a0ebe74425af77d8c3ad32c",
+    "sink_address": "0x5a76e01bf6ff0e8b1fce3b896d84cb65f391b0fe",
+    "amount_wei": "382781398041512256",
+    "amount_eth": 0.38278139804151223,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xf5dbe30021febcab3a0ebe74425af77d8c3ad32c with 382781398041512256 wei",
+      "0xf5dbe30021febcab3a0ebe74425af77d8c3ad32c forwards/selfdestructs into 0x5a76e01bf6ff0e8b1fce3b896d84cb65f391b0fe"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x504e0c9af8add55b60b0dad4a24b47c969140165",
+    "sink_address": "0xa957d4d9c540090bf8784a8bca53e44a8a23f962",
+    "amount_wei": "439159272504408000",
+    "amount_eth": 0.439159272504408,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x504e0c9af8add55b60b0dad4a24b47c969140165 with 439159272504408000 wei",
+      "0x504e0c9af8add55b60b0dad4a24b47c969140165 forwards/selfdestructs into 0xa957d4d9c540090bf8784a8bca53e44a8a23f962"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x5de6ca17f416674ad0b4645c072b89b2d6c0073b",
+    "sink_address": "0x9c7a2ceb53fb11107726b2d51be48badecd22545",
+    "amount_wei": "511731372405017088",
+    "amount_eth": 0.5117313724050171,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x5de6ca17f416674ad0b4645c072b89b2d6c0073b with 511731372405017088 wei",
+      "0x5de6ca17f416674ad0b4645c072b89b2d6c0073b forwards/selfdestructs into 0x9c7a2ceb53fb11107726b2d51be48badecd22545"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x2681ed4f369bb65e73b27bf2a90da7a24271d1dd",
+    "sink_address": "0x851e444b61d53b5525f7b8ae6679bb6359b86737",
+    "amount_wei": "607354254827486592",
+    "amount_eth": 0.6073542548274866,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x2681ed4f369bb65e73b27bf2a90da7a24271d1dd with 607354254827486592 wei",
+      "0x2681ed4f369bb65e73b27bf2a90da7a24271d1dd forwards/selfdestructs into 0x851e444b61d53b5525f7b8ae6679bb6359b86737"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0xf68cc173caea87ce33461e283ad109bc5c055388",
+    "sink_address": "0xfa4e356eff4d6249ae417fcede90614bc56cd8b0",
+    "amount_wei": "736941870262990848",
+    "amount_eth": 0.7369418702629909,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0xf68cc173caea87ce33461e283ad109bc5c055388 with 736941870262990848 wei",
+      "0xf68cc173caea87ce33461e283ad109bc5c055388 forwards/selfdestructs into 0xfa4e356eff4d6249ae417fcede90614bc56cd8b0"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x15f160dfa1e9556b039186b482c463c7c92ece9b",
+    "sink_address": "0x5440daf670995b11c3e49682eb47d0e685e7c3a7",
+    "amount_wei": "918732907265059584",
+    "amount_eth": 0.9187329072650596,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x15f160dfa1e9556b039186b482c463c7c92ece9b with 918732907265059584 wei",
+      "0x15f160dfa1e9556b039186b482c463c7c92ece9b forwards/selfdestructs into 0x5440daf670995b11c3e49682eb47d0e685e7c3a7"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x98d30b9a67d2acb68c1f0103082f9f07e9768cde",
+    "sink_address": "0x8dfd53cab73b0dd80735fddff525c9605334c779",
+    "amount_wei": "1185103118587640832",
+    "amount_eth": 1.1851031185876408,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x98d30b9a67d2acb68c1f0103082f9f07e9768cde with 1185103118587640832 wei",
+      "0x98d30b9a67d2acb68c1f0103082f9f07e9768cde forwards/selfdestructs into 0x8dfd53cab73b0dd80735fddff525c9605334c779"
+    ]
+  },
+  {
+    "pattern": "create2_selfdestruct_forward",
+    "forwarder_address": "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4",
+    "ephemeral_address": "0x10a073e90efa45b1d976a9f1141f60b91a3bca78",
+    "sink_address": "0x0bd06ec5231ed51b82052f5d493361927bebd66b",
+    "amount_wei": "19762181910274144",
+    "amount_eth": 0.019762181910274144,
+    "evidence": [
+      "0x14b7b488ada20b3b3ec6735d212cf9bb03e5f9c4 creates ephemeral 0x10a073e90efa45b1d976a9f1141f60b91a3bca78 with 19762181910274144 wei",
+      "0x10a073e90efa45b1d976a9f1141f60b91a3bca78 forwards/selfdestructs into 0x0bd06ec5231ed51b82052f5d493361927bebd66b"
+    ]
+  }
+]

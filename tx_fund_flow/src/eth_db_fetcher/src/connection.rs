@@ -1,8 +1,8 @@
 //! Database connection management
 
+use eyre::Result;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
-use eyre::Result;
 
 /// Database connection configuration
 #[derive(Debug, Clone)]
@@ -33,10 +33,10 @@ pub async fn create_pool(config: &DbConfig) -> Result<PgPool> {
         .acquire_timeout(config.connect_timeout)
         .connect(&config.database_url)
         .await?;
-    
+
     // Verify schema exists
     verify_schema(&pool).await?;
-    
+
     Ok(pool)
 }
 
@@ -48,17 +48,15 @@ async fn verify_schema(pool: &PgPool) -> Result<()> {
         WHERE table_schema = 'eth_db' 
         AND table_name IN ('addresses', 'transactions', 'tx_participants', 'tokens', 'trades')
     "#;
-    
-    let row: (i64,) = sqlx::query_as(query)
-        .fetch_one(pool)
-        .await?;
-    
+
+    let row: (i64,) = sqlx::query_as(query).fetch_one(pool).await?;
+
     if row.0 < 5 {
         return Err(eyre::eyre!(
             "eth_db schema is missing required tables. Found {} of 5 expected tables",
             row.0
         ));
     }
-    
+
     Ok(())
 }

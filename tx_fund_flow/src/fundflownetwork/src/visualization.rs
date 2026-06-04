@@ -1,9 +1,9 @@
 //! Visualization exporters for fund flow networks
 
 use crate::network_types::*;
+use eyre::Result;
 use serde_json::json;
 use std::collections::HashMap;
-use eyre::Result;
 
 /// Cytoscape.js format exporter
 pub struct CytoscapeExporter;
@@ -12,21 +12,21 @@ impl CytoscapeExporter {
     /// Export network to Cytoscape.js JSON format
     pub fn export(network: &FundFlowNetwork) -> Result<serde_json::Value> {
         let mut elements = Vec::new();
-        
+
         // Add nodes
         for (address, node) in &network.nodes {
             let node_color = match node.node_type {
                 NodeType::CEX => "#ff6b6b",      // Red
                 NodeType::DEX => "#4ecdc4",      // Teal
                 NodeType::DeFi => "#45b7d1",     // Blue
-                NodeType::Contract => "#f39c12",  // Orange
+                NodeType::Contract => "#f39c12", // Orange
                 NodeType::EOA => "#95a5a6",      // Gray
                 NodeType::Token => "#9b59b6",    // Purple
                 NodeType::Unknown => "#7f8c8d",  // Dark gray
             };
-            
+
             let size = 30.0 + (node.balance_change.abs().log10().max(0.0) * 10.0);
-            
+
             elements.push(json!({
                 "data": {
                     "id": format!("{:?}", address),
@@ -44,12 +44,12 @@ impl CytoscapeExporter {
                 }
             }));
         }
-        
+
         // Add edges
         for edge in &network.edges {
             let width = 1.0 + (edge.eth_amount.log10().max(0.0) * 2.0);
             let opacity = 0.3 + (edge.transaction_count as f64 / 100.0).min(0.7);
-            
+
             elements.push(json!({
                 "data": {
                     "id": format!("{:?}-{:?}", edge.from, edge.to),
@@ -70,7 +70,7 @@ impl CytoscapeExporter {
                 }
             }));
         }
-        
+
         Ok(json!({
             "elements": elements,
             "layout": {
@@ -123,17 +123,17 @@ impl VisJsExporter {
     pub fn export(network: &FundFlowNetwork) -> Result<serde_json::Value> {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
-        
+
         // Create ID mapping
         let mut id_map = HashMap::new();
         for (i, address) in network.nodes.keys().enumerate() {
             id_map.insert(address, i);
         }
-        
+
         // Add nodes
         for (address, node) in &network.nodes {
             let node_id = id_map[&address];
-            
+
             let color = match node.node_type {
                 NodeType::CEX => "#ff6b6b",
                 NodeType::DEX => "#4ecdc4",
@@ -143,9 +143,9 @@ impl VisJsExporter {
                 NodeType::Token => "#9b59b6",
                 NodeType::Unknown => "#7f8c8d",
             };
-            
+
             let size = 10.0 + (node.balance_change.abs().log10().max(0.0) * 5.0);
-            
+
             nodes.push(json!({
                 "id": node_id,
                 "label": node.label.as_ref()
@@ -166,12 +166,12 @@ impl VisJsExporter {
                 }
             }));
         }
-        
+
         // Add edges
         for edge in &network.edges {
             if let (Some(&from_id), Some(&to_id)) = (id_map.get(&edge.from), id_map.get(&edge.to)) {
                 let width = 1.0 + (edge.eth_amount.log10().max(0.0));
-                
+
                 edges.push(json!({
                     "from": from_id,
                     "to": to_id,
@@ -193,7 +193,7 @@ impl VisJsExporter {
                 }));
             }
         }
-        
+
         Ok(json!({
             "nodes": nodes,
             "edges": edges,
@@ -228,15 +228,18 @@ pub struct GraphMLExporter;
 impl GraphMLExporter {
     /// Export network to GraphML format
     pub fn export(network: &FundFlowNetwork) -> Result<String> {
-        let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?>
+        let mut xml = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns
          http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
-"#);
-        
+"#,
+        );
+
         // Define attributes
-        xml.push_str(r#"  <key id="label" for="node" attr.name="label" attr.type="string"/>
+        xml.push_str(
+            r#"  <key id="label" for="node" attr.name="label" attr.type="string"/>
   <key id="balance_change" for="node" attr.name="balance_change" attr.type="double"/>
   <key id="node_type" for="node" attr.name="node_type" attr.type="string"/>
   <key id="tx_count" for="node" attr.name="tx_count" attr.type="long"/>
@@ -244,8 +247,9 @@ impl GraphMLExporter {
   <key id="edge_type" for="edge" attr.name="edge_type" attr.type="string"/>
   
   <graph id="G" edgedefault="directed">
-"#);
-        
+"#,
+        );
+
         // Add nodes
         for (address, node) in &network.nodes {
             xml.push_str(&format!(
@@ -263,7 +267,7 @@ impl GraphMLExporter {
                 node.transaction_count
             ));
         }
-        
+
         // Add edges
         for (i, edge) in network.edges.iter().enumerate() {
             xml.push_str(&format!(
@@ -275,9 +279,9 @@ impl GraphMLExporter {
                 i, edge.from, edge.to, edge.eth_amount, edge.edge_type
             ));
         }
-        
+
         xml.push_str("  </graph>\n</graphml>");
-        
+
         Ok(xml)
     }
 }

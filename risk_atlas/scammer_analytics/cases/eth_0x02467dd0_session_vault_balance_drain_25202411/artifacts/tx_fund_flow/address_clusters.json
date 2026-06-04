@@ -1,0 +1,15 @@
+[
+  {
+    "cluster_id": "shared_funder_0xee5a7a...5f6f7a",
+    "cluster_type": "shared_funder",
+    "confidence": "weak",
+    "hub_address": "0xee5a7a26f0345086c48da6886253296c4d5f6f7a",
+    "members": [
+      "0x596a5e9b117a3d7b21e0f77ff4431c4d1770f494",
+      "0xcbb3baa593bea0f5c3509bf612422d6f1abb926c"
+    ],
+    "evidence": [
+      "0xee5a7a26f0345086c48da6886253296c4d5f6f7a funded 2 buyer address(es) in the token investigation window"
+    ]
+  }
+]
