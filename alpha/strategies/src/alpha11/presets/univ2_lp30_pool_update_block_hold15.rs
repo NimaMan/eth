@@ -8,8 +8,8 @@ use crate::{
         ENTRY_INIT_MAX_PRICE_RATIO_TO_INITIAL, HOLD15_STRATEGY_NAME,
         LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
     },
-    baseline::snipe_all::SnipeAllConfig,
-    shared_rules::entry::init_policy::EntryInitPolicyConfig,
+    core::StrategyConfig,
+    core::rules::entry::init_policy::EntryInitPolicyConfig,
 };
 
 pub const HOLD_BLOCKS: u64 = 15;
@@ -19,8 +19,8 @@ pub fn config() -> Alpha11Config {
     Alpha11Config::new(snipe_all_config())
 }
 
-pub fn snipe_all_config() -> SnipeAllConfig {
-    SnipeAllConfig {
+pub fn snipe_all_config() -> StrategyConfig {
+    StrategyConfig {
         strategy_name: StrategyName(HOLD15_STRATEGY_NAME.to_string()),
         buy_amount: Amount {
             raw: U256::from(BUY_WEI),
@@ -36,7 +36,7 @@ pub fn snipe_all_config() -> SnipeAllConfig {
         allowed_protocols: vec!["UNISWAP-V2".to_string()],
         block_entry_on_lp_approval: true,
         lp_approval_gate_min_pct: Some(
-            crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.into(),
+            crate::core::rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.into(),
         ),
         entry_init_policy: EntryInitPolicyConfig {
             max_age_blocks: Some(ENTRY_INIT_MAX_AGE_BLOCKS),
@@ -53,6 +53,6 @@ pub fn snipe_all_config() -> SnipeAllConfig {
             LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
         ),
         max_hold_blocks: Some(HOLD_BLOCKS),
-        ..SnipeAllConfig::default()
+        ..StrategyConfig::default()
     }
 }

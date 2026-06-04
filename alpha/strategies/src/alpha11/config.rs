@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
 
-use crate::baseline::snipe_all::SnipeAllConfig;
+use crate::core::StrategyConfig;
 
 pub const STRATEGY_IMPL: &str = "alpha11";
 pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold-sweep";
@@ -23,11 +23,11 @@ const INITIAL_ENTRY_BANKROLL_WEI: u64 = 555_000_000_000_000_000;
 
 #[derive(Clone, Debug)]
 pub struct Alpha11Config {
-    pub snipe_all: SnipeAllConfig,
+    pub snipe_all: StrategyConfig,
 }
 
 impl Alpha11Config {
-    pub fn new(snipe_all: SnipeAllConfig) -> Self {
+    pub fn new(snipe_all: StrategyConfig) -> Self {
         Self { snipe_all }
     }
 }

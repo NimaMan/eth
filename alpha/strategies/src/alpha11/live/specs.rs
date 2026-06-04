@@ -6,7 +6,7 @@ use crate::{
         LIVE_VALIDATION_MAX_ENTRY_POOLS, LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
         MIN_LIQUIDITY_ETH, MIN_LIQUIDITY_USD, STRATEGY_IMPL,
     },
-    shared_rules::live::{LiveEntryInitPolicySpec, LiveStrategySpec, LiveStrategySpecOptions},
+    core::dispatch::{LiveEntryInitPolicySpec, LiveStrategySpec, LiveStrategySpecOptions},
 };
 
 const MIN_SELL_POOL_DENOM_RESERVE: &str = "0";
@@ -60,7 +60,7 @@ fn spec(max_hold_blocks: u64, _options: &LiveStrategySpecOptions) -> LiveStrateg
         allowed_protocols: vec!["UNISWAP-V2".to_string()],
         block_entry_on_lp_approval: true,
         lp_approval_gate_min_pct: Some(
-            crate::shared_rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
+            crate::core::rules::lp_approval::DEFAULT_GATE_MIN_APPROVED_PCT.to_string(),
         ),
         entry_init_policy: LiveEntryInitPolicySpec {
             max_age_blocks: Some(ENTRY_INIT_MAX_AGE_BLOCKS),

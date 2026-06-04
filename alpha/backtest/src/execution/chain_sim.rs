@@ -8,7 +8,7 @@ use eth_alpha_core::ids::{PoolAddress, StrategyName};
 use eth_alpha_core::market::PoolSnapshot;
 use eth_alpha_engine::{AlphaEngine, BlockCriticalRiskPolicy};
 use eth_alpha_store::PostgresTradingStore;
-use eth_strategies::{SnipeAllConfig, SnipeAllStrategy};
+use eth_strategies::{StrategyConfig, StrategyEngine};
 use eyre::{Result, WrapErr};
 use rust_decimal::Decimal;
 use tracing::info;
@@ -132,9 +132,9 @@ where
                     .min_sell_pool_denom_reserve
                     .as_deref()
                     .and_then(|s| Decimal::from_str(s).ok())
-                    .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
+                    .unwrap_or_else(|| StrategyConfig::default().min_sell_pool_denom_reserve);
 
-                engine.add_strategy(Box::new(SnipeAllStrategy::new(SnipeAllConfig {
+                engine.add_strategy(Box::new(StrategyEngine::new(StrategyConfig {
                     strategy_name: StrategyName(spec.strategy_name.clone()),
                     buy_amount: buy_amount.clone(),
                     sell_fraction: eth_alpha_core::amount::DecimalAmount::from(1),
@@ -156,7 +156,7 @@ where
                     stop_loss_ratio,
                     take_profit_ratio,
                     max_hold_blocks: spec.max_hold_blocks,
-                    ..SnipeAllConfig::default()
+                    ..StrategyConfig::default()
                 })));
             }
             other => {

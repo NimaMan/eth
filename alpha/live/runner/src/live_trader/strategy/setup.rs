@@ -12,8 +12,8 @@ use eth_alpha_core::{
 use eth_alpha_store::ActiveHoldCounterRecord;
 use eth_strategies::{
     shared_rules::{entry::init_policy::EntryInitPolicyConfig, live::LiveStrategySpec},
-    Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveSnipeAllConfig,
-    LiveSnipeAllStrategy, RestoredEntryBankroll, SnipeAllConfig, ALPHA11_STRATEGY_IMPL,
+    Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveStrategyConfig, LiveStrategyEngine,
+    RestoredEntryBankroll, StrategyConfig, ALPHA11_STRATEGY_IMPL,
 };
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
@@ -134,8 +134,8 @@ pub(super) fn build_live_strategy(
         .min_sell_pool_denom_reserve
         .as_deref()
         .and_then(|s| Decimal::from_str(s).ok())
-        .unwrap_or_else(|| SnipeAllConfig::default().min_sell_pool_denom_reserve);
-    let snipe_all_config = SnipeAllConfig {
+        .unwrap_or_else(|| StrategyConfig::default().min_sell_pool_denom_reserve);
+    let snipe_all_config = StrategyConfig {
         strategy_name: StrategyName(spec.strategy_name.clone()),
         buy_amount: Amount {
             raw: buy_wei,
@@ -164,7 +164,7 @@ pub(super) fn build_live_strategy(
             .defer_buy_confirm_block_lp_approval_to_max_hold,
         lp_approval_exit_defer_max_trading_enabled_age_blocks: spec
             .lp_approval_exit_defer_max_trading_enabled_age_blocks,
-        ..SnipeAllConfig::default()
+        ..StrategyConfig::default()
     };
 
     match spec.strategy_impl.as_str() {
@@ -174,8 +174,8 @@ pub(super) fn build_live_strategy(
             restore.active_hold_counters,
             restore.entry_bankroll,
         ))),
-        "snipe-all" => Ok(Box::new(LiveSnipeAllStrategy::with_restored_runtime_state(
-            LiveSnipeAllConfig::new(snipe_all_config),
+        "snipe-all" => Ok(Box::new(LiveStrategyEngine::with_restored_runtime_state(
+            LiveStrategyConfig::new(snipe_all_config),
             restore.seen_pools,
             restore.active_hold_counters,
             restore.entry_bankroll,

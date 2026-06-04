@@ -9,7 +9,7 @@ use eth_alpha_core::{
     strategy::StrategyDecision,
 };
 use eth_alpha_store::{ManualCloseRequest, PostgresTradingStore};
-use eth_strategies::SnipeAllConfig;
+use eth_strategies::StrategyConfig;
 use eyre::{eyre, Result, WrapErr};
 use serde_json::json;
 
@@ -129,7 +129,7 @@ where
     let (available_tokens, decimals, balance_block, balance_source) =
         position_token_balance(&position, request, vault_address)?;
     let amount_raw = requested_close_amount(request, available_tokens)?;
-    let defaults = SnipeAllConfig::default();
+    let defaults = StrategyConfig::default();
     let intent = OrderIntent {
         trade_id: Some(position.trade_id.clone()),
         portfolio_id: position.key.portfolio_id.clone(),

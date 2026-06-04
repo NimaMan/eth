@@ -7,7 +7,7 @@ use eth_alpha_core::{
 
 use crate::{
     alpha11::{Alpha11Strategy, LiveAlpha11Config},
-    baseline::snipe_all::RestoredEntryBankroll,
+    core::RestoredEntryBankroll,
 };
 
 #[derive(Clone, Debug)]
