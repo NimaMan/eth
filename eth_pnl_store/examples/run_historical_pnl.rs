@@ -6,16 +6,16 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use eth_pnl_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
+use eth_pnl_store::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
 use eth_token::{
     chain_metadata::RethChainMetadataProvider,
     custody::CustodyFinding,
     erc20::ERC20Token,
     pnl::{PnlCustodyFindingMeta, PnlPoolExport, PnlPoolMeta},
-    pools::{classification::classify_pool, PoolStateFlags},
+    pools::{classification::classify_pool, BasePool, PoolStateFlags},
     tracking::BlockTokenProcessor,
 };
-use eth_pnl_store::{EthConfigFile, PnlCalculationRun, TokenPnlStore, TokenPnlStoreConfig};
-use eth_pnl_store::{PoolLatestState, TokenLatestState, TokenStateStore, TokenStateStoreConfig};
 use eyre::{bail, eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use serde_json::{json, to_value};
@@ -155,6 +155,7 @@ async fn main() -> Result<()> {
     token_processor.disable_network_graphs();
 
     let mut stats = RunStats::default();
+    let mut pool_export_cache = PoolExportContextCache::default();
     let mut next_block = start_block;
     while next_block <= end_block {
         let chunk_end = next_block
@@ -234,6 +235,7 @@ async fn main() -> Result<()> {
                     &run_id,
                     &token_processor,
                     &flush_plan.pools,
+                    &mut pool_export_cache,
                     "retention_drop",
                     args.persist_movements,
                     &mut stats,
@@ -301,6 +303,7 @@ async fn main() -> Result<()> {
         &run_id,
         &token_processor,
         &final_flushes,
+        &mut pool_export_cache,
         "run_final",
         args.persist_movements,
         &mut stats,
@@ -605,6 +608,7 @@ async fn flush_pool_requests(
     run_id: &str,
     processor: &BlockTokenProcessor,
     requests: &[PoolFlushRequest],
+    pool_export_cache: &mut PoolExportContextCache,
     reason: &str,
     persist_movements: bool,
     stats: &mut RunStats,
@@ -613,7 +617,7 @@ async fn flush_pool_requests(
         let Some(token) = processor.registry.token(&request.token_address) else {
             continue;
         };
-        let Some(export) = export_pool(token, &request.pool_id) else {
+        let Some(export) = export_pool(token, &request.pool_id, pool_export_cache) else {
             continue;
         };
         stats.pool_flushes += 1;
@@ -701,48 +705,95 @@ async fn flush_pool_state_requests(
     Ok(())
 }
 
-fn export_pool(token: &ERC20Token, pool_id: &str) -> Option<PnlPoolExport> {
+#[derive(Clone, Debug, Default)]
+struct PoolExportContext {
+    protocol: Option<String>,
+    mark_price: Option<f64>,
+    meta: PnlPoolMeta,
+}
+
+#[derive(Default)]
+struct PoolExportContextCache {
+    by_pool: HashMap<String, PoolExportContext>,
+}
+
+impl PoolExportContextCache {
+    fn get(&self, token_address: &str, pool_id: &str) -> Option<PoolExportContext> {
+        self.by_pool
+            .get(&pool_cache_key(token_address, pool_id))
+            .cloned()
+    }
+
+    fn insert(&mut self, token_address: &str, pool_id: &str, context: PoolExportContext) {
+        self.by_pool
+            .insert(pool_cache_key(token_address, pool_id), context);
+    }
+}
+
+fn pool_cache_key(token_address: &str, pool_id: &str) -> String {
+    format!(
+        "{}:{}",
+        token_address.trim().to_ascii_lowercase(),
+        pool_id.trim().to_ascii_lowercase()
+    )
+}
+
+fn export_pool(
+    token: &ERC20Token,
+    pool_id: &str,
+    pool_export_cache: &mut PoolExportContextCache,
+) -> Option<PnlPoolExport> {
     let pnl_pool = token.pnl.pool(pool_id)?;
-    let pool_base = token.pool_base(pool_id);
-    let pool_state_flags = pool_base
-        .map(|pool| PoolStateFlags::from_base_and_custody_findings(pool, token.custody_findings()));
-    let mark_price = pool_base
-        .map(|pool| pool.price())
-        .filter(|price| price.is_finite() && *price > 0.0);
-    let protocol = pool_base.map(|pool| pool.identity.protocol.as_str());
-    let meta = pool_base
+    let context = token
+        .pool_base(pool_id)
         .map(|pool| {
-            let classification = classify_pool(&pool.classification_input());
-            PnlPoolMeta {
-                token_creator_address: token.creator_address.clone(),
-                pool_creator_address: pool.creator_address.clone(),
-                can_buy: pool.effective_can_buy(),
-                can_sell: pool.effective_can_sell(),
-                lifecycle: Some(pool.state.lifecycle.as_str().to_string()),
-                is_scam: pool.is_scam() || pool.scam_mechanism.is_some(),
-                scam_label: pool.scam_label.clone(),
-                scam_mechanism: pool.scam_mechanism.clone(),
-                eligible: classification.eligible,
-                eligible_outcome: classification.eligible_outcome.map(|o| o.key().to_string()),
-                pool_labels: pool_state_flags
-                    .as_ref()
-                    .map(|flags| flags.labels.clone())
-                    .unwrap_or_default(),
-                pool_state_flags: pool_state_flags
-                    .as_ref()
-                    .and_then(|flags| to_value(flags).ok()),
-                custody_findings: token
-                    .custody_findings()
-                    .iter()
-                    .filter_map(pnl_custody_finding_meta)
-                    .collect(),
-            }
+            let context = pool_export_context(token, pool);
+            pool_export_cache.insert(&token.contract_address, pool_id, context.clone());
+            context
         })
+        .or_else(|| pool_export_cache.get(&token.contract_address, pool_id))
         .unwrap_or_default();
-    let mut export = pnl_pool.export(protocol, mark_price);
-    export.meta = meta;
-    export.reconcile_accounting(mark_price);
+    let mut export = pnl_pool.export(context.protocol.as_deref(), context.mark_price);
+    export.meta = context.meta;
+    export.reconcile_accounting(context.mark_price);
     Some(export)
+}
+
+fn pool_export_context(token: &ERC20Token, pool: &BasePool) -> PoolExportContext {
+    let pool_state_flags =
+        PoolStateFlags::from_base_and_custody_findings(pool, token.custody_findings());
+    let pool_price = pool.price();
+    let mark_price = pool_price
+        .is_finite()
+        .then_some(pool_price)
+        .filter(|price| *price > 0.0);
+    let classification = classify_pool(&pool.classification_input());
+
+    PoolExportContext {
+        protocol: Some(pool.identity.protocol.clone()),
+        mark_price,
+        meta: PnlPoolMeta {
+            token_creator_address: token.creator_address.clone(),
+            pool_creator_address: pool.creator_address.clone(),
+            can_buy: pool.effective_can_buy(),
+            can_sell: pool.effective_can_sell(),
+            lifecycle: Some(pool.state.lifecycle.as_str().to_string()),
+            is_scam: pool.is_scam() || pool.scam_mechanism.is_some(),
+            scam_label: pool.scam_label.clone(),
+            scam_mechanism: pool.scam_mechanism.clone(),
+            eligible: classification.eligible,
+            eligible_outcome: classification
+                .eligible_outcome
+                .map(|outcome| outcome.key().to_string()),
+            pool_labels: pool_state_flags.labels.clone(),
+            pool_state_flags: to_value(&pool_state_flags).ok(),
+            custody_findings: token
+                .custody_findings()
+                .iter()
+                .filter_map(pnl_custody_finding_meta)
+                .collect(),
+        },
+    }
 }
 
 fn pnl_custody_finding_meta(finding: &CustodyFinding) -> Option<PnlCustodyFindingMeta> {
