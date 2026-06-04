@@ -33,6 +33,34 @@ pub struct BacktestStrategySpec {
 }
 
 impl BacktestStrategySpec {
+    /// Project a canonical resolved [`eth_strategies::StrategySpec`] (the single
+    /// source of truth the live runtime also uses) into the backtest spec. The
+    /// backtest does not model entry bankroll, and buy size / liquidity floors
+    /// come from CLI, so those resolved-spec fields are intentionally dropped
+    /// here — that is the documented live/backtest parity boundary.
+    fn from_resolved_spec(spec: &eth_strategies::StrategySpec) -> Self {
+        Self {
+            strategy_name: spec.strategy_name.clone(),
+            strategy_impl: spec.strategy_impl.clone(),
+            exit_on_liquidity_removal: spec.exit_liquidity_removal,
+            exit_on_tax: spec.exit_tax,
+            exit_on_lp_approval: spec.exit_lp_approval,
+            exit_on_critical_lp_approval_only: spec.exit_lp_approval_critical_only,
+            exit_on_scam: spec.exit_scam,
+            allowed_protocols: spec.allowed_protocols.clone(),
+            block_entry_on_lp_approval: spec.block_entry_on_lp_approval,
+            lp_approval_gate_min_pct: spec.lp_approval_gate_min_pct.clone(),
+            defer_buy_confirm_block_lp_approval_to_max_hold: spec
+                .defer_buy_confirm_block_lp_approval_to_max_hold,
+            lp_approval_exit_defer_max_trading_enabled_age_blocks: spec
+                .lp_approval_exit_defer_max_trading_enabled_age_blocks,
+            min_sell_pool_denom_reserve: spec.min_sell_pool_denom_reserve.clone(),
+            stop_loss_ratio: spec.stop_loss_ratio.clone(),
+            take_profit_ratio: spec.take_profit_ratio.clone(),
+            max_hold_blocks: spec.max_hold_blocks,
+        }
+    }
+
     pub fn config_json(&self) -> Value {
         serde_json::json!({
             "strategy_name": self.strategy_name,
@@ -382,35 +410,16 @@ fn alpha_10_risk_atlas_leader_spec(args: &StrategySuiteOptions) -> Vec<BacktestS
     vec![leader]
 }
 
-fn alpha_11_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
-    vec![
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold12", 12, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold14", 14, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold15", 15, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold16", 16, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold18", 18, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold20", 20, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold25", 25, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold50", 50, args),
-        alpha_11_v2_buy_confirm_spec("alpha11-univ2-lp30-pool-update-block-hold100", 100, args),
-    ]
-}
-
-fn alpha_11_v2_buy_confirm_spec(
-    strategy_name: &str,
-    max_hold_blocks: u64,
-    args: &StrategySuiteOptions,
-) -> BacktestStrategySpec {
-    let mut spec =
-        risk_atlas_uniswap_v2_only_spec(strategy_name, true, true, Some(max_hold_blocks), args);
-    spec.defer_buy_confirm_block_lp_approval_to_max_hold = true;
-    spec.lp_approval_exit_defer_max_trading_enabled_age_blocks = Some(
-        eth_strategies::shared_rules::exit::lp_approval::DEFAULT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS,
-    );
-    spec.min_sell_pool_denom_reserve = Some("0".to_string());
-    spec.exit_on_tax = true;
-    spec.exit_on_scam = true;
-    spec
+fn alpha_11_risk_atlas_suite_specs(_args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {
+    // Resolve through the single alpha11 factory so backtest is at parity with
+    // live: the full 10-variant set (incl. the all-pools hold16 variant),
+    // strategy_impl="alpha11", and the alpha11 exit policy come from one source
+    // of truth rather than a hand-maintained duplicate.
+    let options = eth_strategies::shared_rules::live::LiveStrategySpecOptions::default();
+    eth_strategies::strategies::alpha11::factory::specs(&options)
+        .iter()
+        .map(BacktestStrategySpec::from_resolved_spec)
+        .collect()
 }
 
 fn gamma_10_risk_atlas_suite_specs(args: &StrategySuiteOptions) -> Vec<BacktestStrategySpec> {

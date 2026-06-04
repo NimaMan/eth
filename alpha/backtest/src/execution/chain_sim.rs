@@ -114,8 +114,11 @@ where
     let mut engine = AlphaEngine::new(BlockCriticalRiskPolicy, store.clone(), adapter.clone());
 
     for spec in &strategy_specs {
+        // alpha11 and snipe-all were pure-delegation wrappers over the same core
+        // engine; both build the generic engine. strategy_impl is a descriptive
+        // label only.
         match spec.strategy_impl.as_str() {
-            "snipe-all" => {
+            "snipe-all" | "alpha11" => {
                 let stop_loss_ratio = spec
                     .stop_loss_ratio
                     .as_deref()

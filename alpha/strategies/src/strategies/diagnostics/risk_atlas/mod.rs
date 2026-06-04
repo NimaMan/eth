@@ -1,4 +1,4 @@
-use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
+use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, CORE_STRATEGY_IMPL};
 
 pub const LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME: &str =
     "snipe-all-risk-atlas-lp-gate-hold15-buy-confirm-lp-maxhold";
@@ -8,7 +8,7 @@ pub fn lp_gate_hold15_buy_confirm_lp_maxhold_spec(
 ) -> LiveStrategySpec {
     LiveStrategySpec {
         strategy_name: LP_GATE_HOLD15_BUY_CONFIRM_LP_MAXHOLD_STRATEGY_NAME.to_string(),
-        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+        strategy_impl: CORE_STRATEGY_IMPL.to_string(),
         strategy_label: "Snipe All risk atlas LP gate hold 15 buy-confirm LP maxhold".to_string(),
         exit_liquidity_removal: true,
         exit_tax: false,

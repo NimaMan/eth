@@ -1,4 +1,4 @@
-use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
+use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, CORE_STRATEGY_IMPL};
 
 pub const SET_NAME: &str = "mempool-live-exits";
 
@@ -11,7 +11,7 @@ pub fn specs(_options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     strategy_name: format!(
                         "snipe-all-live-hold{max_hold_blocks}-pool-updates-liquidity-exit"
                     ),
-                    strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+                    strategy_impl: CORE_STRATEGY_IMPL.to_string(),
                     strategy_label: format!(
                         "Snipe All live hold {max_hold_blocks} pool updates + liquidity exit"
                     ),
@@ -40,7 +40,7 @@ pub fn specs(_options: &LiveStrategySpecOptions) -> Vec<LiveStrategySpec> {
                     strategy_name: format!(
                         "snipe-all-live-hold{max_hold_blocks}-pool-updates-liquidity-critical-lp-exit"
                     ),
-                    strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+                    strategy_impl: CORE_STRATEGY_IMPL.to_string(),
                     strategy_label: format!(
                         "Snipe All live hold {max_hold_blocks} pool updates + liquidity + critical LP exit"
                     ),

@@ -5,3 +5,4 @@
 //! trait-level logic; they only choose engine config.
 
 pub mod alpha11;
+pub mod diagnostics;

@@ -1,5 +1,8 @@
-pub const DEFAULT_STRATEGY_NAME: &str = "snipe-all";
-pub const DEFAULT_STRATEGY_LABEL: &str = "Snipe All";
+/// Descriptive `strategy_impl` label for strategies that compose the core
+/// engine without a product-specific impl tag. Dispatch no longer branches on
+/// it; it is persisted/displayed only. (Historically the deployable "snipe-all"
+/// identity; that bare-default deploy target has been removed.)
+pub const CORE_STRATEGY_IMPL: &str = "snipe-all";
 pub const STRATEGY_RUNTIME: &str = "live";
 pub const SUITE_OBSERVATION_NAME: &str = "snipe-all-strategy-set";
 
@@ -85,34 +88,6 @@ pub struct LiveStrategySpec {
 /// engine. `LiveStrategySpec` is the historical name; `StrategySpec` is the
 /// mode-neutral alias the registry/factory speak in.
 pub type StrategySpec = LiveStrategySpec;
-
-pub fn default_strategy_spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
-    LiveStrategySpec {
-        strategy_name: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
-        strategy_label: DEFAULT_STRATEGY_LABEL.to_string(),
-        exit_liquidity_removal: true,
-        exit_tax: true,
-        exit_lp_approval: true,
-        exit_lp_approval_critical_only: false,
-        exit_scam: true,
-        allowed_protocols: Vec::new(),
-        block_entry_on_lp_approval: false,
-        lp_approval_gate_min_pct: None,
-        entry_init_policy: LiveEntryInitPolicySpec::default(),
-        defer_buy_confirm_block_lp_approval_to_max_hold: false,
-        lp_approval_exit_defer_max_trading_enabled_age_blocks: None,
-        min_sell_pool_denom_reserve: None,
-        buy_wei: "10000000000000000".to_string(),
-        min_liquidity_eth: "0.5".to_string(),
-        min_liquidity_usd: "1000".to_string(),
-        max_entry_pools: None,
-        entry_bankroll_eth: None,
-        stop_loss_ratio: None,
-        take_profit_ratio: None,
-        max_hold_blocks: None,
-    }
-}
 
 pub fn observation_strategy_name(strategy_specs: &[LiveStrategySpec]) -> String {
     if strategy_specs.len() == 1 {

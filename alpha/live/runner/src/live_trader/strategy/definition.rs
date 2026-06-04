@@ -1,6 +1,5 @@
 use eth_strategies::shared_rules::live::{
-    default_strategy_spec, strategy_set_specs, LiveStrategySpec, LiveStrategySpecOptions,
-    STRATEGY_RUNTIME,
+    strategy_set_specs, LiveStrategySpec, LiveStrategySpecOptions, STRATEGY_RUNTIME,
 };
 use eyre::{eyre, Result};
 use serde_json::{json, Value};
@@ -13,13 +12,12 @@ pub(super) fn build_strategy_specs(
 ) -> Result<Vec<LiveStrategySpec>> {
     let options = LiveStrategySpecOptions;
 
-    let specs = if let Some(strategy_set) = args.strategy_set.as_deref() {
-        strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error))?
-    } else {
-        vec![default_strategy_spec(&options)]
-    };
+    // There is no bare deployable default any more; a strategy id is required.
+    let strategy_set = args.strategy_set.as_deref().ok_or_else(|| {
+        eyre!("no strategy selected: pass --strategy-set <strategy-id> (e.g. an alpha11 hold variant)")
+    })?;
 
-    Ok(specs)
+    strategy_set_specs(strategy_set, &options).map_err(|error| eyre!(error))
 }
 
 pub(super) fn live_strategy_spec_config_json(spec: &LiveStrategySpec) -> Value {

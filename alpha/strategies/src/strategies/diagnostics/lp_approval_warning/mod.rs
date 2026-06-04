@@ -1,9 +1,9 @@
-use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, DEFAULT_STRATEGY_NAME};
+use crate::core::spec::{LiveStrategySpec, LiveStrategySpecOptions, CORE_STRATEGY_IMPL};
 
 pub fn spec(_options: &LiveStrategySpecOptions) -> LiveStrategySpec {
     LiveStrategySpec {
         strategy_name: crate::core::rules::lp_approval_warning_exit::STRATEGY_NAME.to_string(),
-        strategy_impl: DEFAULT_STRATEGY_NAME.to_string(),
+        strategy_impl: CORE_STRATEGY_IMPL.to_string(),
         strategy_label: crate::core::rules::lp_approval_warning_exit::STRATEGY_LABEL.to_string(),
         exit_liquidity_removal:
             crate::core::rules::lp_approval_warning_exit::EXIT_LIQUIDITY_REMOVAL,
