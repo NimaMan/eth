@@ -12,8 +12,8 @@ use eth_alpha_core::{
 use eth_alpha_store::ActiveHoldCounterRecord;
 use eth_strategies::{
     shared_rules::{entry::init_policy::EntryInitPolicyConfig, live::LiveStrategySpec},
-    Alpha11Config, LiveAlpha11Config, LiveAlpha11Strategy, LiveStrategyConfig, LiveStrategyEngine,
-    RestoredEntryBankroll, StrategyConfig, ALPHA11_STRATEGY_IMPL,
+    LiveStrategyConfig, LiveStrategyEngine, RestoredEntryBankroll, StrategyConfig,
+    ALPHA11_STRATEGY_IMPL,
 };
 use eyre::{eyre, Result, WrapErr};
 use rust_decimal::Decimal;
@@ -167,19 +167,18 @@ pub(super) fn build_live_strategy(
         ..StrategyConfig::default()
     };
 
+    // alpha11 and snipe-all were pure-delegation wrappers over the same engine;
+    // both now build the generic core engine directly. strategy_impl remains a
+    // descriptive label on the spec.
     match spec.strategy_impl.as_str() {
-        ALPHA11_STRATEGY_IMPL => Ok(Box::new(LiveAlpha11Strategy::with_restored_runtime_state(
-            LiveAlpha11Config::new(Alpha11Config::new(snipe_all_config)),
-            restore.seen_pools,
-            restore.active_hold_counters,
-            restore.entry_bankroll,
-        ))),
-        "snipe-all" => Ok(Box::new(LiveStrategyEngine::with_restored_runtime_state(
-            LiveStrategyConfig::new(snipe_all_config),
-            restore.seen_pools,
-            restore.active_hold_counters,
-            restore.entry_bankroll,
-        ))),
+        ALPHA11_STRATEGY_IMPL | "snipe-all" => {
+            Ok(Box::new(LiveStrategyEngine::with_restored_runtime_state(
+                LiveStrategyConfig::new(snipe_all_config),
+                restore.seen_pools,
+                restore.active_hold_counters,
+                restore.entry_bankroll,
+            )))
+        }
         other => Err(eyre!(
             "{} cannot instantiate unsupported live strategy_impl {} for {}",
             runner_name,

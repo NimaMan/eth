@@ -1,6 +1,10 @@
-use alloy_primitives::U256;
-
-use crate::core::StrategyConfig;
+//! Alpha11 strategy constants.
+//!
+//! Alpha11 is a config preset over the core engine: a fixed entry/exit policy
+//! (init-age 5, price-ratio 2, LP gate 30%, lp-approval-exit defer 2, bankroll
+//! 0.555 ETH, Uniswap V2 filter, all exit rules on, defer-buy-confirm). The
+//! sub-strategy variants differ only in hold horizon (and the all-pools /
+//! validation tweaks); see `variants.rs` and `factory.rs`.
 
 pub const STRATEGY_IMPL: &str = "alpha11";
 pub const HOLD_SWEEP_SET_NAME: &str = "alpha11-univ2-lp30-pool-update-block-hold-sweep";
@@ -18,20 +22,3 @@ pub const LP_APPROVAL_EXIT_DEFER_MAX_TRADING_ENABLED_AGE_BLOCKS: u64 = 2;
 pub const INITIAL_ENTRY_BANKROLL_ETH: &str = "0.555";
 pub const LIVE_VALIDATION_ENTRY_BANKROLL_ETH: &str = "0.01";
 pub const LIVE_VALIDATION_MAX_ENTRY_POOLS: usize = 1;
-
-const INITIAL_ENTRY_BANKROLL_WEI: u64 = 555_000_000_000_000_000;
-
-#[derive(Clone, Debug)]
-pub struct Alpha11Config {
-    pub snipe_all: StrategyConfig,
-}
-
-impl Alpha11Config {
-    pub fn new(snipe_all: StrategyConfig) -> Self {
-        Self { snipe_all }
-    }
-}
-
-pub fn initial_entry_bankroll_wei() -> U256 {
-    U256::from(INITIAL_ENTRY_BANKROLL_WEI)
-}

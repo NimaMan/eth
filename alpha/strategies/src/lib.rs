@@ -1,13 +1,16 @@
 //! Strategy implementations for the alpha engine.
 //!
 //! Structure: `core` is the generic engine (config, state, shared rules, live
-//! wrapper, and the resolved-spec registry) that every strategy composes.
-//! Each strategy under `strategies` (e.g. `alpha11`) is a named config preset
-//! plus a factory over that core engine; it adds no trait-level logic.
+//! wrapper, and the resolved-spec registry/factory) that every strategy
+//! composes. Each strategy under `strategies` (e.g. `alpha11`) is a named config
+//! preset plus a factory over that core engine; it adds no trait-level logic.
 
-pub mod alpha11;
 pub mod core;
+pub mod strategies;
 mod market_tracker;
+
+/// Back-compat alias: `eth_strategies::alpha11::...` resolves to the strategy.
+pub use strategies::alpha11;
 
 pub use core::dispatch as shared_rules_live;
 pub use core::{
@@ -16,8 +19,7 @@ pub use core::{
     StrategySpec,
 };
 
-pub use alpha11::{
-    Alpha11Config, Alpha11Strategy, LiveAlpha11Config, LiveAlpha11Strategy,
+pub use strategies::alpha11::{
     HOLD15_STRATEGY_NAME as ALPHA11_HOLD15_STRATEGY_NAME,
     HOLD16_ALL_POOLS_STRATEGY_NAME as ALPHA11_HOLD16_ALL_POOLS_STRATEGY_NAME,
     HOLD16_STRATEGY_NAME as ALPHA11_HOLD16_STRATEGY_NAME,
@@ -31,7 +33,5 @@ pub use market_tracker::{MarketTrackerConfig, MarketTrackerStrategy};
 /// live in `core::rules`; the resolved-spec types live in `core::dispatch`.
 pub mod shared_rules {
     pub use crate::core::dispatch as live;
-    pub use crate::core::rules::{
-        entry, exit, lp_approval, lp_approval_warning_exit,
-    };
+    pub use crate::core::rules::{entry, exit, lp_approval, lp_approval_warning_exit};
 }

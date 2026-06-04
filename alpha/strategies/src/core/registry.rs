@@ -1,6 +1,6 @@
 use super::spec::{LiveStrategySpec, LiveStrategySpecOptions, StrategyId};
-use crate::alpha11::live::specs as alpha11_specs;
 use crate::core::dispatch::strategy_sets;
+use crate::strategies::alpha11::factory as alpha11_specs;
 
 /// Resolve a [`StrategyId`] into its complete resolved [`super::spec::StrategySpec`]s.
 ///
