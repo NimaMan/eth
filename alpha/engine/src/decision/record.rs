@@ -3,7 +3,7 @@ use eth_alpha_core::{
 };
 use serde_json::json;
 
-pub(crate) fn strategy_decision_record(
+pub fn strategy_decision_record(
     strategy_name: &str,
     event_source: &str,
     event_key: String,

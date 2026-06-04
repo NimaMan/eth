@@ -11,7 +11,6 @@
 #![recursion_limit = "256"]
 
 pub mod execution;
-pub mod live_trader;
 pub mod wire;
 
 mod decision;
@@ -38,11 +37,19 @@ use eth_alpha_core::{
 };
 
 // Re-export simulation adapters at crate root for convenience. Real tx
-// execution stays inside `execution::real` and `live_trader::real_execution` so
+// execution stays inside `execution::real`; the live poll loop and real
+// submission wiring live in the separate `eth_alpha_live_runner` crate so
 // historical and no-capital backtests cannot import it accidentally.
 pub use execution::{ChainSimExecutionAdapter, LiveChainSimExecutionAdapter};
 pub use policy::{AllowAllRiskPolicy, BlockCriticalRiskPolicy};
 pub use store::MemoryTradingStore;
+
+// Decision-record builder used by the live runner's operator manual-close flow.
+// Hidden from the public docs: it is an internal helper exposed only so
+// `eth_alpha_live_runner` can construct strategy decision records that match the
+// engine's own persistence shape.
+#[doc(hidden)]
+pub use decision::strategy_decision_record;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {

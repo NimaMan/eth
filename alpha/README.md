@@ -24,6 +24,7 @@ events, and persists decisions before execution.
 | `live/state/` | `eth_live_state` | Shared live-state snapshot schemas, protocol types, and store traits. |
 | `live/feed/` | `eth_live_feed` | Confirmed processed-block/token feed used by live services. |
 | `live/trading/` | `eth_live_trading` | Live priority-exit policy, tx-prep, value-capped gas planning, and ETH tx executor request/client shape. |
+| `live/runner/` | `eth_alpha_live_runner` | Owns the live trading binaries and the `live_trader/` poll-loop runtime (real + no-capital chain-sim); depends on `eth_alpha_engine`. |
 | `backtest/` | `eth_alpha_backtest` | Historical replay over the same core strategy contracts. |
 
 ## Does Not Own
@@ -144,10 +145,10 @@ cargo test -p eth_block_tx_rank
 cargo test -p eth_alpha_engine
 cargo test -p eth_alpha_store
 cargo test -p eth_strategies
-cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader
-cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
-cargo run -p eth_alpha_engine --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold16 --allow-public-mempool-live-validation
+cargo run -p eth_alpha_live_runner --bin eth_alpha_live_backtest_trader
+cargo run -p eth_alpha_live_runner --bin eth_alpha_live_backtest_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
+cargo run -p eth_alpha_live_runner --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold15
+cargo run -p eth_alpha_live_runner --bin eth_alpha_live_trader -- --strategy-set alpha11-univ2-lp30-pool-update-block-hold16 --allow-public-mempool-live-validation
 cargo run -p eth_alpha_backtest --bin eth_alpha_backtest_trader
 ```
 

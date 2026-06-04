@@ -27,7 +27,8 @@ adapter.
 - `LiveChainSimExecutionAdapter`: live no-capital trading; `execute()` records
   submission immediately with `receipt_status =
   live_backtest_chain_sim_submitted`. Final live-backtest fills are produced
-  later by `live_trader/execution_lifecycle/ChainSimSettlement`, which
+  later by the `eth_alpha_live_runner` crate's
+  `live_trader/execution_lifecycle/ChainSimSettlement`, which
   asks chain-server to simulate the submitted order against the exact expected
   execution block from the server-owned live-state window.
 

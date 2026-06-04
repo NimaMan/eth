@@ -11,6 +11,7 @@ responsibility while keeping the existing crate names stable:
 | `state/` | `eth_live_state` | Shared live-state snapshot schemas and store traits. |
 | `feed/` | `eth_live_feed` | Confirmed-chain feed contracts and runtime boundary over processed blocks and token updates. |
 | `trading/` | `eth_live_trading` | Live strategy policy that turns token/pool/risk signals into explicit trade actions. |
+| `runner/` | `eth_alpha_live_runner` | Owns the live trading binaries (`eth_alpha_live_trader`, `eth_alpha_live_backtest_trader`) and the `live_trader/` poll-loop runtime; depends on `eth_alpha_engine`. |
 | `readiness/` | docs | Repeatable live-capital readiness gates and strategy-specific checklists. |
 
 `state/` is the shared protocol/read model. `feed/` is the writer/runtime side that can own confirmed live token updates. Token server and mempool runtimes can be hosted in one process now while still depending on these narrower crate boundaries.

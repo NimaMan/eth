@@ -163,9 +163,10 @@ the final prepared transaction.
 - `AlphaEngine` owns portfolio state, active risks, strategies, risk policy, store, and execution adapter.
 - `ChainSimExecutionAdapter` and `LiveChainSimExecutionAdapter` return
   `ExecutionReport`s from EVM simulation against selected chain state.
-- `TxExecutorAdapter` is the real submission boundary. It is crate-private to
-  the engine, delegated only through `src/live_trader/real_execution.rs`, and
-  is not exported for backtest crates.
+- `TxExecutorAdapter` is the real submission boundary. It lives in
+  `execution::real` (`#[doc(hidden)] pub`), reachable only by the
+  `eth_alpha_live_runner` crate's `live_trader/real_execution` wiring, and is not
+  exported for backtest crates.
 - `LiveTradingPlannerBridge` adapts the engine's `LiveTxPlanner` trait to
   `alpha/live/trading::PrioritySellPlanner`; `LiveTxPlanningInputResolver` is
   the runtime hook for loading position, pool, wallet, and observation context.
@@ -178,9 +179,8 @@ Each folder under `src/` has one `README.md` that names its ownership boundary.
 
 | Path | Owns |
 | --- | --- |
-| `src/bin/` | executable wrappers only |
-| `src/execution/` | simulation adapters and crate-private real live adapter |
-| `src/live_trader/` | live polling runner and live-real/live-backtest wiring |
+| `src/bin/` | `eth_alpha_tx_executor_calibrate` wrapper only |
+| `src/execution/` | simulation adapters and the `execution::real` live adapter (used by `eth_alpha_live_runner`) |
 | `src/runtime/` | `AlphaEngine` event handling and execution flow |
 | `src/decision/` | strategy decision records and persistence |
 | `src/valuation/` | position valuation and snapshot helpers |
@@ -197,11 +197,11 @@ Alpha has separate trader entrypoints for each runtime boundary:
 | `eth_alpha_live_trader` | `TxExecutorAdapter` via `LiveTradingPlannerBridge` | ETH tx executor dry-run by default. `broadcast` is only accepted for `alpha11-univ2-lp30-pool-update-block-hold16` with the explicit broadcast validation flag. |
 | `eth_alpha_backtest_trader` | `ChainSimExecutionAdapter` | None; historical replay only. |
 
-The explicit binaries in `src/bin/` are intentionally thin wrappers. Shared
-live runner code lives under `src/live_trader/`; real executor wiring is
-isolated in `src/live_trader/real_execution.rs` under legacy compatibility
-names.
-`eth_alpha_live_trader` calls `run_live_real()` and
+The live binaries (`eth_alpha_live_trader`, `eth_alpha_live_backtest_trader`)
+and the shared live runner code now live in the `eth_alpha_live_runner` crate
+(`alpha/live/runner`), under `src/live_trader/`; real executor wiring is isolated
+in `live_trader/real_execution/`. Those bins are intentionally thin wrappers:
+`eth_alpha_live_trader` calls `eth_alpha_live_runner::run_live_real()` and
 `eth_alpha_live_backtest_trader` calls `run_live_backtest()`, so the binaries do
 not expose a public mode switch.
 
@@ -300,7 +300,7 @@ as `stage=alpha_trader`, `component=token_server_poll`, and
 Default mode only primes current pool/signal watermarks so it does not retroactively trade old state:
 
 ```bash
-cargo run -p eth_alpha_engine --bin eth_alpha_live_backtest_trader -- --once
+cargo run -p eth_alpha_live_runner --bin eth_alpha_live_backtest_trader -- --once
 ```
 
 Use `--replay-current` for a local smoke test that replays the current

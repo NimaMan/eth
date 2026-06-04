@@ -130,10 +130,15 @@ Latest relevant commits:
 - **Alpha structure verdict (architecture review):** mostly-fine, NO real restructure needed —
   the "Alpha Structure State 2026-05-24" oversized-file offenders are already split (that
   snapshot is stale). Crate DAG acyclic; `lab` DB-decoupled and `live/feed` HTTP-decoupled
-  (intentional). One recommended (not urgent) move: create `alpha/live/runner`
+  (intentional). **DONE 2026-06-04:** extracted `alpha/live/runner`
   (`eth_alpha_live_runner`) owning the two live bins + the `live_trader/` subtree so
-  `eth_alpha_engine` becomes a pure backtest-safe library; plus an optional
-  `real_execution/mod.rs` file split. Queued.
+  `eth_alpha_engine` is now a pure backtest-safe library (it builds with no
+  knowledge of the live poll loop / real submission wiring; the runner reaches the
+  engine's `execution::real` boundary, `apply_decisions`, and
+  `strategy_decision_record` through `#[doc(hidden)] pub` re-exports). Live bin
+  names unchanged (`eth_alpha_live_trader`, `eth_alpha_live_backtest_trader`), so
+  systemd `target/release/...` paths are untouched. The optional
+  `real_execution/mod.rs` file split remains queued.
 - **Address-level PnL surface shipped 2026-06-04.** `eth_token_store` → `eth_pnl_store`
   rename DONE (leaf crate, zero external consumers; builds; no DB-schema/config-key change).
   `eth_risk_atlas` `eth_trader_profile` now serves per-address **aggregate PnL** (sum
@@ -660,7 +665,7 @@ Remaining structure bottlenecks:
 
 | Area | Current state | Next action |
 | --- | --- | --- |
-| Live runner crate boundary | Live backtest and real-live service wiring still live under `eth_alpha_engine::live_trader`. | Create `alpha/live/runner` when we are ready to change package ownership of the live binaries. |
+| Live runner crate boundary | **DONE 2026-06-04.** Live backtest and real-live service wiring now live in the `eth_alpha_live_runner` crate (`alpha/live/runner`), which owns the two live bins + the `live_trader/` subtree. `eth_alpha_engine` is now backtest-safe and builds without the runner. | — |
 | Real execution runtime wiring | `live_trader/real_execution/mod.rs` is still `889` lines. | Split resolver, planner, preflight, gas-selection, and adapter-builder modules. |
 | Simulated execution adapters | `execution/simulated/mod.rs` is still `881` lines. | Split historical adapter, live adapter, swap execution wrapper, params, and report helpers. |
 | Receipt reconciliation | `live_trader/receipt_reconciliation.rs` is still `873` lines. | Split receipt provider, vault event decoder, evidence builder, and batch reconciler. |

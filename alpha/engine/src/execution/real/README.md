@@ -26,7 +26,8 @@ confirmation evidence. ETH tx executor broadcast can only move an order to
 emit the `BuyConfirmed`, `SellConfirmed`, `BuyFailed`, or `SellFailed`
 `ExecutionReport`.
 
-The first reconciliation worker lives in `src/live_trader/receipt_reconciliation.rs`.
+The first reconciliation worker lives in the `eth_alpha_live_runner` crate at
+`alpha/live/runner/src/live_trader/receipt_reconciliation/`.
 It waits until the live processed-block watermark reaches at least
 `submitted_block + 1`, then polls `eth_getTransactionReceipt` for submitted tx
 hashes and confirms only when the receipt succeeded and the deployed V2 vault
@@ -62,10 +63,10 @@ report, while the high-level state stays distinct from a mined failed sell.
 
 ## Current Status
 
-This adapter is a tested crate-private boundary used by the guarded real live
-entrypoint. It is intentionally not re-exported from `eth_alpha_engine`, so
-external backtest crates cannot import it through the public engine API.
-`eth_alpha_live_trader` selects `TxExecutorAdapter` through
+This adapter is a tested boundary used by the guarded real live entrypoint. It
+lives behind `eth_alpha_engine::execution::real` (`#[doc(hidden)] pub`), reachable
+only by the `eth_alpha_live_runner` crate; external backtest crates do not import
+it. `eth_alpha_live_trader` selects `TxExecutorAdapter` through
 `LiveTradingPlannerBridge`; `eth_alpha_live_backtest_trader` selects
 `LiveChainSimExecutionAdapter` and has no real-executor path.
 

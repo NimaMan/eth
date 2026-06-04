@@ -1,0 +1,158 @@
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
+
+use alloy_primitives::Address;
+use eth_alpha_core::{ids::TokenPoolId, market::PoolSnapshot};
+use eth_alpha_store::PostgresTradingStore;
+use eyre::{Result, WrapErr};
+
+use eth_alpha_engine::wire::parse_address;
+use eth_alpha_engine::{EngineExecutionAdapter, LiveChainSimExecutionAdapter};
+
+use super::backtest::ChainSimGasPolicyBacktestAdapter;
+use super::cli::RealExecutionArgs;
+use super::execution_lifecycle::ChainSimSettlement;
+use super::gas_policy::LiveRealGasPolicy;
+use super::real_execution::{build_eth_tx_executor_real_adapter, EthTxExecutorRealPreflight};
+use super::receipt_reconciliation::{JsonRpcReceiptProvider, VaultReceiptReconciler};
+use super::support::TraderExecutionMode;
+
+pub(super) struct ExecutionStackInput<'a> {
+    pub(super) execution_mode: TraderExecutionMode,
+    pub(super) real_args: Option<&'a RealExecutionArgs>,
+    pub(super) token_server_url: &'a str,
+    pub(super) reth_http_rpc: &'a str,
+    pub(super) store: PostgresTradingStore,
+    pub(super) run_id: String,
+    pub(super) live_gas_policy: LiveRealGasPolicy,
+    pub(super) live_real_gas_policy: Option<LiveRealGasPolicy>,
+    pub(super) eth_tx_executor_real_preflight: Option<EthTxExecutorRealPreflight>,
+}
+
+pub(super) struct ExecutionStack {
+    pub(super) adapter: Box<dyn EngineExecutionAdapter>,
+    pub(super) adapter_current_block: Arc<AtomicU64>,
+    pub(super) pool_updates: Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+    pub(super) chain_sim_adapter: Option<LiveChainSimExecutionAdapter>,
+    pub(super) manual_close_vault_address: Option<Address>,
+    pub(super) chain_sim_settlement: Option<ChainSimSettlement>,
+    pub(super) receipt_reconciler: Option<VaultReceiptReconciler<JsonRpcReceiptProvider>>,
+    pub(super) next_order_sequence: u64,
+    pub(super) last_frame_block: Arc<AtomicU64>,
+    pub(super) last_frame_hash: Arc<Mutex<Option<String>>>,
+}
+
+pub(super) async fn build_execution_stack(
+    input: ExecutionStackInput<'_>,
+) -> Result<ExecutionStack> {
+    let next_order_sequence = input
+        .store
+        .max_order_sequence_for_prefix(&input.run_id)
+        .await
+        .wrap_err("failed to restore alpha trader order sequence")?;
+    let manual_close_vault_address = match (input.execution_mode, input.real_args) {
+        (TraderExecutionMode::EthTxExecutorReal, Some(real_args)) => {
+            Some(parse_address(&real_args.live_real_vault_address)?)
+        }
+        _ => None,
+    };
+    let receipt_reconciler = match (
+        input.execution_mode,
+        input.real_args,
+        input.eth_tx_executor_real_preflight.as_ref(),
+    ) {
+        (TraderExecutionMode::EthTxExecutorReal, Some(real_args), Some(preflight)) => {
+            let vault = parse_address(&real_args.live_real_vault_address)?;
+            Some(VaultReceiptReconciler::new(
+                JsonRpcReceiptProvider::new(preflight.status.rpc_url.clone()),
+                vault,
+            ))
+        }
+        _ => None,
+    };
+
+    let last_frame_block: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    let last_frame_hash: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    let (adapter, adapter_current_block, pool_updates, chain_sim_adapter, chain_sim_settlement): (
+        Box<dyn EngineExecutionAdapter>,
+        Arc<AtomicU64>,
+        Arc<Mutex<HashMap<TokenPoolId, PoolSnapshot>>>,
+        Option<LiveChainSimExecutionAdapter>,
+        Option<ChainSimSettlement>,
+    ) = match input.execution_mode {
+        TraderExecutionMode::ChainSim => {
+            let chain_sim_adapter =
+                LiveChainSimExecutionAdapter::with_prefix_and_next_order_sequence(
+                    input.token_server_url.to_string(),
+                    input.run_id.clone(),
+                    next_order_sequence,
+                )
+                .wrap_err("failed to initialize chain-sim execution adapter")?;
+            let adapter_current_block = chain_sim_adapter.current_block();
+            let pool_updates = chain_sim_adapter.pools();
+            let chain_sim_settlement = Some(ChainSimSettlement::new(
+                input.store.clone(),
+                chain_sim_adapter.clone(),
+                Some(ChainSimGasPolicyBacktestAdapter::new(
+                    chain_sim_adapter.clone(),
+                    input.token_server_url.to_string(),
+                    input.reth_http_rpc.to_string(),
+                    input.live_gas_policy.clone(),
+                )),
+            ));
+            let adapter = Box::new(ChainSimGasPolicyBacktestAdapter::new(
+                chain_sim_adapter.clone(),
+                input.token_server_url.to_string(),
+                input.reth_http_rpc.to_string(),
+                input.live_gas_policy.clone(),
+            ));
+            (
+                adapter,
+                adapter_current_block,
+                pool_updates,
+                Some(chain_sim_adapter),
+                chain_sim_settlement,
+            )
+        }
+        TraderExecutionMode::EthTxExecutorReal => {
+            let real_args = input
+                .real_args
+                .expect("eth-tx-real execution requires real args");
+            let adapter_current_block = Arc::new(AtomicU64::new(0));
+            let pool_updates = Arc::new(Mutex::new(HashMap::new()));
+            build_eth_tx_executor_real_adapter(
+                real_args,
+                input
+                    .eth_tx_executor_real_preflight
+                    .expect("eth-tx-real preflight must exist"),
+                input.token_server_url.to_string(),
+                input.store.clone(),
+                input.run_id.clone(),
+                pool_updates.clone(),
+                adapter_current_block.clone(),
+                last_frame_block.clone(),
+                last_frame_hash.clone(),
+                input
+                    .live_real_gas_policy
+                    .expect("eth-tx-real gas policy must exist"),
+            )
+            .await
+            .map(|adapter| (adapter, adapter_current_block, pool_updates, None, None))?
+        }
+    };
+
+    Ok(ExecutionStack {
+        adapter,
+        adapter_current_block,
+        pool_updates,
+        chain_sim_adapter,
+        manual_close_vault_address,
+        chain_sim_settlement,
+        receipt_reconciler,
+        next_order_sequence,
+        last_frame_block,
+        last_frame_hash,
+    })
+}

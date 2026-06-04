@@ -1,0 +1,29 @@
+[package]
+name = "eth_alpha_live_runner"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+workspace = "../../.."
+
+[dependencies]
+alloy-primitives = "1.5.7"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4.5", features = ["derive"] }
+eth_alpha_core = { path = "../../core" }
+eth_alpha_engine = { path = "../../engine" }
+eth_alpha_store = { path = "../../store" }
+eth_live_trading = { path = "../trading" }
+eth_ops_events = { path = "../../../eth_ops_events" }
+eth_strategies = { path = "../../strategies" }
+eyre = "0.6"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rust_decimal = "1.36"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+toml.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]

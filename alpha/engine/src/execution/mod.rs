@@ -10,7 +10,12 @@
 //! | `LiveChainSimExecutionAdapter` | Live no-capital submission plus exact-block in-memory chain-sim settlement |
 //! | `TxExecutorAdapter` | Crate-private real live submission via ETH tx executor |
 
-pub(crate) mod real;
+// `real` holds live real-submission adapters. It is `pub` so the live runner
+// crate (`eth_alpha_live_runner`) can build the real execution stack; backtest
+// crates simply never import it. Module-level `#[doc(hidden)]` keeps it out of
+// the engine's public API surface for backtest consumers.
+#[doc(hidden)]
+pub mod real;
 mod sell_economics;
 mod simulated;
 

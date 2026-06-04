@@ -38,7 +38,11 @@ where
         self.apply_pending_execution_reports(pending, None).await
     }
 
-    pub(crate) async fn apply_decisions(
+    // `pub` (hidden) so the live runner's operator manual-close flow can apply
+    // strategy decisions directly; the related `apply_*` helpers stay
+    // crate-internal since live wiring only needs this entrypoint.
+    #[doc(hidden)]
+    pub async fn apply_decisions(
         &mut self,
         decisions: Vec<StrategyDecision>,
         event_source: &str,

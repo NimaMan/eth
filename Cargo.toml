@@ -12,6 +12,7 @@ members = [
     "alpha/live/state",
     "alpha/live/feed",
     "alpha/live/trading",
+    "alpha/live/runner",
     "eth_ops_events",
     "tx_simulator",
     "tx_processor",
