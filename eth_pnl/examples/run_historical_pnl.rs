@@ -30,7 +30,7 @@ const DEFAULT_CHUNK_BLOCKS: u64 = 250;
 const DEFAULT_RETENTION_EVERY_BLOCKS: u64 = DEFAULT_CHUNK_BLOCKS;
 const DEFAULT_READ_CONCURRENCY: usize = 2;
 const DEFAULT_FILL_CONCURRENCY: usize = 4;
-const ALGORITHM_VERSION: &str = "eth_token_pnl_v1_aggregate_terminal_or_idle_50k";
+const ALGORITHM_VERSION: &str = "eth_token_pnl_v1_aggregate_terminal_or_idle_50k_pool_inactive";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -111,6 +111,10 @@ async fn main() -> Result<()> {
         run.metadata = json!({
             "retention_policy": "terminal_or_idle_50k",
             "retention_blocks": 50_000,
+            "terminal_retention_blocks": 50_000,
+            "token_inactivity_retention_blocks": 50_000,
+            "pool_inactivity_retention_blocks": 50_000,
+            "liquidity_removal_pool_retention_blocks": 50_000,
             "history_limit": args.history_limit,
             "chunk_blocks": args.chunk_blocks,
             "retention_every_blocks": args.retention_every_blocks,
@@ -323,6 +327,10 @@ async fn main() -> Result<()> {
         run.metadata = json!({
             "retention_policy": "terminal_or_idle_50k",
             "retention_blocks": 50_000,
+            "terminal_retention_blocks": 50_000,
+            "token_inactivity_retention_blocks": 50_000,
+            "pool_inactivity_retention_blocks": 50_000,
+            "liquidity_removal_pool_retention_blocks": 50_000,
             "history_limit": args.history_limit,
             "chunk_blocks": args.chunk_blocks,
             "trading_simulation": args.with_trading_simulation,

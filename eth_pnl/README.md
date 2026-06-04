@@ -1,6 +1,6 @@
-# ETH Token Store
+# ETH PnL
 
-Crate: `eth_token_store`
+Crate: `eth_pnl`
 
 PostgreSQL persistence for ETH token read models calculated by `eth_token`.
 This crate is the single persistence boundary for:
@@ -72,7 +72,7 @@ file.
 Persist one Uniswap V2 pool replay:
 
 ```bash
-cargo run -p eth_token_store --example persist_uniswap_v2_pool_pnl -- \
+cargo run -p eth_pnl --example persist_uniswap_v2_pool_pnl -- \
   --run-id <run_id> \
   --token <erc20> \
   --pool <uniswap-v2-pair> \
@@ -84,17 +84,19 @@ cargo run -p eth_token_store --example persist_uniswap_v2_pool_pnl -- \
 Inspect persisted address rollups:
 
 ```bash
-cargo run -p eth_token_store --example inspect_pool_pnl_db -- \
+cargo run -p eth_pnl --example inspect_pool_pnl_db -- \
   --run-id <run_id> \
   --pool <pool_id> \
   --config /home/nima/code/crypto/blockchains/eth/config.toml
 ```
 
 Run a historical aggregate sweep with the `terminal_or_idle_50k` retention
-policy. The block count is a runtime parameter; it defaults to 50,000 blocks:
+policy. This retains terminal/liquidity-removal evidence for 50,000 blocks and
+drops observed inactive pools and tokens after 50,000 blocks. The block count is
+a runtime parameter; it defaults to 50,000 blocks:
 
 ```bash
-cargo run -p eth_token_store --example run_historical_pnl -- \
+cargo run -p eth_pnl --example run_historical_pnl -- \
   --run-id <run_id> \
   --blocks 50000 \
   --chunk-blocks 250 \

@@ -22,6 +22,7 @@ pub fn terminal_scam_immediate_retention_policy() -> LiveTokenRetentionPolicy {
 pub fn terminal_or_idle_50k_retention_policy() -> LiveTokenRetentionPolicy {
     LiveTokenRetentionPolicy {
         retain_terminal_scam_tokens_for_blocks: Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS),
+        drop_pools_after_inactivity_blocks: Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS),
         drop_tokens_after_inactivity_blocks: Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS),
         drop_tokens_without_pools_after_blocks: Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS),
         drop_tokens_without_retained_pools_after_blocks: Some(
@@ -46,6 +47,10 @@ mod tests {
         );
         assert_eq!(
             policy.drop_tokens_after_inactivity_blocks,
+            Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS)
+        );
+        assert_eq!(
+            policy.drop_pools_after_inactivity_blocks,
             Some(TERMINAL_OR_IDLE_50K_RETENTION_BLOCKS)
         );
         assert_eq!(

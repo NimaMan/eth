@@ -118,6 +118,7 @@ min WETH-denom reserve:   0.1 WETH
 min stable-denom reserve: 1000 stable units
 min other-denom reserve:  0
 retain terminal scam tokens for blocks:          disabled
+drop pools after inactivity blocks:              disabled
 drop tokens after inactivity blocks:             disabled
 drop tokens without pools after blocks:          disabled
 drop tokens without retained pools after blocks: disabled
@@ -136,6 +137,8 @@ Each pool is evaluated from its `BasePool`:
   liquidity-removal retention window expires.
 - If the pool has no observed liquidity state yet, it is retained. A pool is
   considered observed once it has `latest_block_number` or a reserve snapshot.
+- If pool inactivity retention is configured, an observed pool can be dropped
+  after that many blocks from its latest pool reference block.
 - If the denom threshold is zero or lower, it is retained.
 - If the observed denom reserve is at or above the denom threshold, it is
   retained.
@@ -184,10 +187,10 @@ Token retention is derived from pool retention:
 - If a liquidity-removal retention window expired and no pool remains retained,
   the token can be dropped with `LiquidityRemovalRetentionExpired`.
 
-By default, terminal-scam, inactivity, and the two "drop tokens without ..."
-windows are disabled. That means a live token is not dropped merely because it
-is terminal, idle, has no pools, or has no retained pools unless the configured
-policy explicitly enables that behavior.
+By default, terminal-scam, pool inactivity, token inactivity, and the two
+"drop tokens without ..." windows are disabled. That means a live token or pool
+is not dropped merely because it is terminal, idle, has no pools, or has no
+retained pools unless the configured policy explicitly enables that behavior.
 
 ### Applying Drops
 

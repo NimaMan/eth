@@ -24,6 +24,8 @@ pub struct LiveTokenRetentionPolicy {
     #[serde(default)]
     pub retain_terminal_scam_tokens_for_blocks: Option<u64>,
     #[serde(default)]
+    pub drop_pools_after_inactivity_blocks: Option<u64>,
+    #[serde(default)]
     pub drop_tokens_after_inactivity_blocks: Option<u64>,
     pub drop_tokens_without_pools_after_blocks: Option<u64>,
     pub drop_tokens_without_retained_pools_after_blocks: Option<u64>,
@@ -41,6 +43,7 @@ impl Default for LiveTokenRetentionPolicy {
             stablecoin_denoms: address_set([USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS]),
             drop_scam_tokens_immediately: false,
             retain_terminal_scam_tokens_for_blocks: None,
+            drop_pools_after_inactivity_blocks: None,
             drop_tokens_after_inactivity_blocks: None,
             drop_tokens_without_pools_after_blocks: None,
             drop_tokens_without_retained_pools_after_blocks: None,
@@ -78,11 +81,11 @@ impl LiveTokenRetentionPolicy {
         let reason = if let Some(reason) = self.liquidity_removal_expiry_reason(pool, current_block)
         {
             Some(reason)
-        } else if pool.has_liquidity_removal()
-            || !pool_has_observed_liquidity_state(pool)
-            || threshold <= 0.0
-            || denom_reserve >= threshold
-        {
+        } else if pool.has_liquidity_removal() || !pool_has_observed_liquidity_state(pool) {
+            None
+        } else if let Some(reason) = self.pool_inactivity_expiry_reason(pool, current_block) {
+            Some(reason)
+        } else if threshold <= 0.0 || denom_reserve >= threshold {
             None
         } else {
             Some(PoolDropReason::BelowDenomThreshold {
@@ -295,6 +298,23 @@ impl LiveTokenRetentionPolicy {
         })
     }
 
+    fn pool_inactivity_expiry_reason(
+        &self,
+        pool: &BasePool,
+        current_block: u64,
+    ) -> Option<PoolDropReason> {
+        let retention_blocks = self.drop_pools_after_inactivity_blocks?;
+        let reference_block = pool_reference_block(pool)?;
+        if current_block.saturating_sub(reference_block) < retention_blocks {
+            return None;
+        }
+        Some(PoolDropReason::InactivePastRetentionBlocks {
+            reference_block,
+            current_block,
+            retention_blocks,
+        })
+    }
+
     fn pending_token_drop_reason(
         &self,
         reference_block: Option<u64>,
@@ -407,6 +427,11 @@ pub enum PoolDropReason {
     },
     LiquidityRemovalRetentionExpired {
         removal_block: u64,
+        current_block: u64,
+        retention_blocks: u64,
+    },
+    InactivePastRetentionBlocks {
+        reference_block: u64,
         current_block: u64,
         retention_blocks: u64,
     },
@@ -777,6 +802,34 @@ mod tests {
                 retention_blocks: 10,
             })
         ));
+    }
+
+    #[test]
+    fn pool_can_be_dropped_after_inactivity_window() {
+        let policy = LiveTokenRetentionPolicy {
+            drop_pools_after_inactivity_blocks: Some(10),
+            ..LiveTokenRetentionPolicy::default()
+        };
+        let mut token = token();
+        token.add_uniswap_v2_pool(v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.2));
+
+        let retained = policy.evaluate_token(&token, 109);
+        let dropped = policy.apply_to_token(&mut token, 110);
+
+        assert!(retained.retain);
+        assert_eq!(retained.retained_v2_pools, vec![POOL_ADDRESS]);
+        assert!(dropped.retain);
+        assert!(dropped.retained_v2_pools.is_empty());
+        assert_eq!(dropped.dropped_v2_pools.len(), 1);
+        assert!(matches!(
+            dropped.dropped_v2_pools[0].reason,
+            Some(PoolDropReason::InactivePastRetentionBlocks {
+                reference_block: 100,
+                current_block: 110,
+                retention_blocks: 10,
+            })
+        ));
+        assert!(token.uniswap_v2_pool(POOL_ADDRESS).is_none());
     }
 
     #[test]
